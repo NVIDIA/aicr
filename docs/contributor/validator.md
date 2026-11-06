@@ -85,8 +85,10 @@ in the index (`TestRenderSkippedReasonReachesIndex`); a skipped check gets no
 page section (`TestRenderSkippedExcluded`). A requirement passes only when
 every check on one of its proof paths is present and `passed`
 (`alternativeProofs` lists the requirements with more than one path), a failed
-check fails it, and `other`, `pending` or absent checks leave it not tested.
-`Aggregate.Passed` is scoped by level: every applicable MUST passed, SHOULDs
+check fails it, `other`, `pending` or absent checks leave it not tested, and a
+check that `passed` with the `observationOnly` marker leaves it observed,
+which does not establish a MUST (`StatusObserved`). `Aggregate.Passed` is
+scoped by level: every applicable MUST passed, SHOULDs
 excluded; `NOT APPLICABLE` comes only from
 `spec.validate.evidence.cncf.notApplicable` and only for the conditional
 MUSTs in `conditionalMusts` (`ValidateNotApplicable`). The requirement set it
@@ -262,6 +264,67 @@ the same Slurm node, which must open none. The probe shell only reports facts
 each `/dev/nvidiaN`); `parseSlurmGPUProbe` and the two evaluate functions decide.
 It never lists `/dev/nvidia*` to infer isolation: the cgroup device controller
 leaves the nodes visible and refuses `open()` with EPERM.
+
+After its CNCF subtests pass, `secure-accelerator-access` records one AICR
+hardening extra (#3428): an unprivileged pod on the NVIDIA RuntimeClass the GPU
+Operator installed, with `NVIDIA_VISIBLE_DEVICES=all` and no allocation, pinned
+to the GPU node the test pod ran on, honoring the context tolerations.
+`resolveNVIDIARuntimeClass` takes the class only from the ClusterPolicy
+(`spec.operator.runtimeClass`, or the GPU Operator default `nvidia` when the
+field is unset) and only when that RuntimeClass exists; AICR's default AKS
+profile names `nvidia-container-runtime`. A class present by name alone is not
+probed, because nothing ties it to the NVIDIA toolkit and a same-named class
+with another handler would read as hardened. With the toolkit hardening AICR
+ships (`ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false`) it sees
+no GPU device (`HARDENED`, worded as consistent with that hardening since the
+toolkit configuration is not read); without it the envvar exposes every GPU on
+the node (`EXPOSED`). The upstream `TestSecureAcceleratorAccess` has no such
+probe, so every artifact carries the label "AICR hardening extra (not a CNCF
+item)", an `EXPOSED` outcome is warned about but never fails the check, and a
+cluster where the class cannot be established from the ClusterPolicy records
+`NOT RUN` ("not probed").
+Privileged pods are out of scope: they see every GPU by design.
+
+`robust-controller` prefers the Kubeflow Trainer path when the recipe ships
+`kubeflow-trainer`, because that path reconciles a custom resource to a
+terminal condition: after the deployment, webhook, CRD `Established=True` and
+webhook-rejection steps it creates a valid TrainJob on the default
+`torch-distributed` `ClusterTrainingRuntime` in a per-run namespace (one node,
+no accelerator, `defaults.ProbeImage` with a command that exits 0) and
+requires `Complete=True`, failing on `Failed=True`, on the bound, or on a
+missing runtime. The `TrainJobReconcileTimeout` of 3 min covers the whole
+chain, not only the controller: the JobSet, Job and pod it derives, the pod's
+scheduling and the probe-image pull, so a scheduling delay or an unavailable
+registry can consume the bound after the controller has already created the
+pod. The bound verdict therefore folds in the recorded pod state (phase,
+node, `podStuckReason` or waiting status) so the cause is diagnosable from
+the CTRF message. The TrainJob's pod is created by the operator from the
+runtime, whose scheduling vocabulary the bundler bakes in, so the context
+tolerations do not apply to it. The Dynamo path records the existing
+`DynamoGraphDeployment` conditions as an observation and creates no CR.
+
+`cluster-autoscaling` drives a scale event only on the Karpenter path and
+records that scale-up as an observation (scale-down is not observed). The EKS,
+AKS and GKE paths record autoscaler presence, GPU pool membership, the
+`cluster-autoscaler-status` ConfigMap and recent autoscaler events as
+`OBSERVED`. None of this is behavioral proof, so every passing path ends with
+`validators.EmitExtra(validators.ObservationOnlyExtra())`, publishing
+`observationOnly: "true"` on the `passed` result; a marker that cannot be
+written fails the check rather than letting the pass stand unmarked. The CNCF
+aggregation reads the marker (`CheckResult.ObservationOnly`) and renders the
+requirement `OBSERVED`, which does not establish a MUST — see
+[Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status). The EKS
+path fails when nothing confirmed an autoscaler: GPU nodes
+with no `eks.amazonaws.com/nodegroup` label, no available in-cluster Cluster
+Autoscaler Deployment and no `cluster-autoscaler-status` ConfigMap (and no
+Karpenter) fail `NotFound` when every read answered NotFound, or with the
+read's classified code when the Deployment was unavailable or a read could not
+land; the artifacts still record the unread reads as unread. The remedy for a
+platform without workload-driven autoscaling is a
+`spec.validate.evidence.cncf.notApplicable` justification. A providerID no
+probe recognizes skips as "no autoscaler probe for this provider" (naming the
+scheme, or an unschemed providerID such as OKE's bare OCID), a missing probe
+rather than product nonapplicability, which only that declaration states.
 
 `gang-scheduling` exercises KAI all-or-nothing scheduling with CPU-only
 members, matching the upstream `TestGangScheduling` (#3603). After the KAI
@@ -511,7 +574,7 @@ fails its key's shape (an IP under `nodesTotal`, `305.44` under
 | non-negative integer count | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped`, `workerNodes`, `gpusInvolved`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, `namespacesActive`, `namespacesExpected`, `gpusBenchmarked`, `gpusPerNode` |
 | non-negative decimal, at most one fractional digit | `achievedGbps`, `thresholdGbps`, `tolerancePct`, `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `ttftThresholdMs`, `scaledThreshold` |
 | signed decimal (`+1.8`, `-12.3`) | `passMargin` (percent above or below `thresholdGbps`) |
-| `true` or `false` | `nodeLocal`, `versionSatisfied` |
+| `true` or `false` | `nodeLocal`, `versionSatisfied`, `observationOnly` |
 | `v` plus one to three numeric parts, optional `-alpha`, `-beta`, or `-rc` suffix (`v25.3.0-rc.1`) | `detectedVersion` |
 | closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`) |
 
@@ -546,6 +609,7 @@ page are the contract.
 | `dra-support` | `configuredPolicy` |
 | `gpu-operator-version` | `detectedVersion`, `versionSatisfied` |
 | `check-nvidia-smi` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
+| `cluster-autoscaling`, on every passing path | `observationOnly` |
 | any check, on an in-pod skip | `skipReason` |
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the

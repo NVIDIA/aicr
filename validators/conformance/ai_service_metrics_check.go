@@ -164,7 +164,10 @@ Server(("::" if Server.address_family == socket.AF_INET6 else "", PORT), Handler
 //     a latency histogram and a queue-depth gauge labeled with a per-run id,
 //     its Service, and a ServiceMonitor carrying the recipe's Prometheus
 //     selector label;
-//  2. baseline: wait until Prometheus has collected all three series;
+//  2. baseline: wait until Prometheus has loaded the ServiceMonitor into its
+//     scrape pools, then until it has collected all three series; the
+//     collection clock starts at the load, not at the ServiceMonitor's
+//     creation, so prometheus-operator's reconcile schedule does not consume it;
 //  3. traffic: send exactly defaults.AIServiceMetricsRequestCount requests
 //     through the Service; any failure aborts, since the expected count would
 //     be ambiguous;
@@ -173,8 +176,9 @@ Server(("::" if Server.address_family == socket.AF_INET6 else "", PORT), Handler
 //     traffic, and the collection cannot be attributed.
 //
 // The check does not depend on a model being served; it passes on every
-// recipe that carries kube-prometheus-stack and fails when the ServiceMonitor
-// is not selected within the collection timeout.
+// recipe that carries kube-prometheus-stack and fails when Prometheus does not
+// load the ServiceMonitor within the monitor-load timeout or, once loaded,
+// does not collect its series within the collection timeout.
 func CheckAIServiceMetrics(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
@@ -262,9 +266,9 @@ func checkAIServiceMetricsWithURL(ctx *validators.Context, promBaseURL string) e
 	if err := s.preflight(ctx.Ctx); err != nil {
 		return err
 	}
-	recordRawTextArtifact(ctx, "Prometheus query API preflight",
-		fmt.Sprintf("curl -sf '%s/api/v1/query?query=vector(1)'", promBaseURL),
-		fmt.Sprintf("Endpoint: %s\nResult:   vector(1) = 1", promBaseURL))
+	recordRawTextArtifact(ctx, "Prometheus API preflight",
+		fmt.Sprintf("curl -sf '%s/api/v1/query?query=vector(1)'; curl -sf '%s/api/v1/scrape_pools'", promBaseURL, promBaseURL),
+		fmt.Sprintf("Endpoint: %s\nResult:   vector(1) = 1; scrape pools listed", promBaseURL))
 	return s.runWithCleanup(ctx)
 }
 
@@ -281,14 +285,16 @@ type aiMetricsScenario struct {
 	// buildHPADeployment does.
 	tolerations []corev1.Toleration
 
-	query       func(ctx context.Context, promql string) ([]byte, error)
-	sendRequest func(ctx context.Context) error
+	query           func(ctx context.Context, promql string) ([]byte, error)
+	listScrapePools func(ctx context.Context) ([]byte, error)
+	sendRequest     func(ctx context.Context) error
 
-	pollInterval      time.Duration
-	readyTimeout      time.Duration
-	collectionTimeout time.Duration
-	requestCount      int
-	sent              int // requests answered so far; the verdict reports it against requestCount
+	pollInterval       time.Duration
+	readyTimeout       time.Duration
+	monitorLoadTimeout time.Duration
+	collectionTimeout  time.Duration
+	requestCount       int
+	sent               int // requests answered so far; the verdict reports it against requestCount
 
 	phase   aiMetricsPhase
 	timings map[aiMetricsPhase]time.Duration
@@ -301,21 +307,23 @@ func newAIMetricsScenario(clientset kubernetes.Interface, dynClient dynamic.Inte
 	}
 	run.namespace = aiMetricsTestPrefix + run.token
 	s := &aiMetricsScenario{
-		clientset:         clientset,
-		dynClient:         dynClient,
-		testRun:           run,
-		runID:             run.token[:10],
-		promURL:           promURL,
-		tolerations:       tolerations,
-		pollInterval:      defaults.AIServiceMetricsPollInterval,
-		readyTimeout:      defaults.AIServiceMetricsWorkloadReadyTimeout,
-		collectionTimeout: defaults.AIServiceMetricsCollectionTimeout,
-		requestCount:      defaults.AIServiceMetricsRequestCount,
-		timings:           map[aiMetricsPhase]time.Duration{},
+		clientset:          clientset,
+		dynClient:          dynClient,
+		testRun:            run,
+		runID:              run.token[:10],
+		promURL:            promURL,
+		tolerations:        tolerations,
+		pollInterval:       defaults.AIServiceMetricsPollInterval,
+		readyTimeout:       defaults.AIServiceMetricsWorkloadReadyTimeout,
+		monitorLoadTimeout: defaults.PrometheusMonitorLoadTimeout,
+		collectionTimeout:  defaults.AIServiceMetricsCollectionTimeout,
+		requestCount:       defaults.AIServiceMetricsRequestCount,
+		timings:            map[aiMetricsPhase]time.Duration{},
 	}
 	s.query = func(c context.Context, promql string) ([]byte, error) {
 		return httpGet(c, s.promURL+"/api/v1/query?"+url.Values{"query": {promql}}.Encode())
 	}
+	s.listScrapePools = promScrapePoolLister(promURL)
 	s.sendRequest = func(c context.Context) error {
 		_, err := httpGet(c, fmt.Sprintf("http://%s.%s.svc:%d/v1/infer", aiMetricsWorkloadName, s.testRun.namespace, aiMetricsPort))
 		return err
@@ -323,7 +331,9 @@ func newAIMetricsScenario(clientset kubernetes.Interface, dynClient dynamic.Inte
 	return s, nil
 }
 
-// preflight requires the query API to evaluate vector(1).
+// preflight requires the query API to evaluate vector(1) and the scrape pool
+// API to answer, so a Prometheus that cannot be observed fails before any
+// resource is created.
 func (s *aiMetricsScenario) preflight(ctx context.Context) error {
 	body, err := s.query(ctx, "vector(1)")
 	if err != nil {
@@ -339,7 +349,7 @@ func (s *aiMetricsScenario) preflight(ctx context.Context) error {
 		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
 			"Prometheus query API preflight failed: vector(1) returned found=%t value=%v, want 1", found, v))
 	}
-	return nil
+	return preflightScrapePools(ctx, s.promURL, s.listScrapePools)
 }
 
 // runWithCleanup creates the per-run namespace, runs the cycle, and always
@@ -376,6 +386,9 @@ func (s *aiMetricsScenario) run(ctx *validators.Context) error {
 		return err
 	}
 	s.phase = aiMetricsPhaseBaseline
+	if err := s.waitForMonitorLoaded(ctx); err != nil {
+		return err
+	}
 	baselines, err := s.waitForBaselines(ctx)
 	if err != nil {
 		return err
@@ -451,6 +464,24 @@ func aiMetricExpectations(runID string) []aiMetricExpectation {
 	}
 }
 
+// waitForMonitorLoaded holds the baseline until Prometheus has loaded the
+// ServiceMonitor, so the collection timeout that follows measures scraping
+// rather than prometheus-operator's reconcile schedule (#3671).
+func (s *aiMetricsScenario) waitForMonitorLoaded(ctx *validators.Context) error {
+	start := time.Now()
+	ns := s.testRun.namespace
+	prefix := scrapePoolPrefix(monitorKindService, ns, aiMetricsWorkloadName)
+	slog.Info("waiting for Prometheus to load the ServiceMonitor", "scrapePool", prefix, "timeout", s.monitorLoadTimeout)
+	if err := waitForMonitorLoaded(ctx.Ctx, s.listScrapePools, monitorKindService, ns, aiMetricsWorkloadName,
+		s.monitorLoadTimeout, s.pollInterval); err != nil {
+		return err
+	}
+	recordRawTextArtifact(ctx, "AI service metrics: ServiceMonitor loaded",
+		fmt.Sprintf("curl -sf '%s/api/v1/scrape_pools' | grep '%s'", s.promURL, prefix),
+		fmt.Sprintf("Scrape pool:   %s*\nLoaded after:  %s", prefix, time.Since(start).Round(time.Second)))
+	return nil
+}
+
 func (s *aiMetricsScenario) waitForBaselines(ctx *validators.Context) ([]float64, error) {
 	start := time.Now()
 	slog.Info("waiting for the monitoring system to collect the stub's metrics", "timeout", s.collectionTimeout)
@@ -458,7 +489,7 @@ func (s *aiMetricsScenario) waitForBaselines(ctx *validators.Context) ([]float64
 		return fmt.Sprintf("collected (baseline %v)", v), true, nil
 	})
 	if err != nil {
-		return nil, wrapWithCode(err, errors.ErrCodeNotFound, "workload metrics were not collected")
+		return nil, wrapWithCode(err, errors.ErrCodeNotFound, "Prometheus loaded the ServiceMonitor but the workload metrics were not collected")
 	}
 	s.timings[aiMetricsPhaseBaseline] = time.Since(start)
 	recordRawTextArtifact(ctx, "AI service metrics: baseline collection",
@@ -582,8 +613,8 @@ func (s *aiMetricsScenario) pollMetrics(ctx context.Context, checks []aiMetricEx
 	case wait.Interrupted(err):
 		return nil, status, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf(
 			"not collected within %s:\n  %s\n  If the scrape interval or ingestion delay is long, raise the collection timeout; "+
-				"also check that the ServiceMonitor label %s=%s matches the Prometheus serviceMonitorSelector",
-			s.collectionTimeout, strings.Join(status, "\n  "), prometheusReleaseLabel, prometheusComponentName), err)
+				"also check the stub's target health at %s/api/v1/targets",
+			s.collectionTimeout, strings.Join(status, "\n  "), s.promURL), err)
 	default:
 		return nil, status, wrapWithCode(err, errors.ErrCodeInternal, "failed while waiting for collection")
 	}
@@ -671,7 +702,8 @@ func buildAIMetricsWorkload(ns, runID string, collectionTimeout time.Duration, t
 		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
 	}
 	podLabels := map[string]string{hpaAppLabelKey: aiMetricsWorkloadName}
-	lifetime := defaults.AIServiceMetricsWorkloadReadyTimeout + 2*collectionTimeout + defaults.K8sCleanupTimeout + gpuCheckSkewAndFlushMargin
+	lifetime := defaults.AIServiceMetricsWorkloadReadyTimeout + defaults.PrometheusMonitorLoadTimeout + 2*collectionTimeout +
+		defaults.K8sCleanupTimeout + gpuCheckSkewAndFlushMargin
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: aiMetricsWorkloadName, Namespace: ns, Labels: podLabels},
 		Spec: corev1.PodSpec{

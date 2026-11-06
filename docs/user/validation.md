@@ -985,8 +985,8 @@ reported rather than hidden, but a run that
 withholds a check the recipe declares is narrower than the recipe by
 construction and cannot evidence that recipe. `--skip-check` is for lanes
 that cannot host a check at all; those are not submission lanes, so
-`--skip-check` with `--evidence-dir` (and therefore with `--cncf-submission`,
-which requires it) is rejected up front:
+`--skip-check` with `--evidence-dir` (and therefore with `--cncf-submission`;
+the two flags require each other) is rejected up front:
 
 ```
 [INVALID_REQUEST] --skip-check cannot be combined with --evidence-dir: a
@@ -995,62 +995,76 @@ the recipe by construction and cannot produce conformance evidence for it
 ```
 
 The requirement aggregation, and the `spec.validate.evidence.cncf.notApplicable`
-key it reads, apply to the evidence `--evidence-dir` renders from a validator
-run. They have no effect under `--cncf-submission`, which still runs the bash
-collector until #3602 retires that path.
+key it reads, apply to the evidence a submission run renders from the
+validator run.
 
-## Scoping CNCF submission evidence to specific features
+## CNCF submission evidence
 
-The `--feature` flag scopes which CNCF AI conformance features get behavioral
-evidence collected. It only applies to the CNCF-submission evidence collector
-and is rejected by the CLI unless `--cncf-submission` is also set (which in
-turn requires `--evidence-dir`). It does **not** scope the regular
-`--phase conformance` validator run — that one always evaluates every check
-defined in the recipe.
+`aicr validate --phase conformance` is the only runner for CNCF AI
+Conformance: the recipe declares which conformance checks run, and every run
+executes all of them. `--cncf-submission` adds one thing to that run: after
+the checks finish, the CTRF report is rendered into `--evidence-dir` as one
+evidence page per requirement a non-skipped check evidenced, plus `index.md`;
+only a run in which every check was skipped writes nothing (a check that
+crashed still gets its page). The flag never changes what a
+check does or how it decides; for the same recipe the verdicts are identical
+with and without it. The two flags require each other, `--recipe` is required
+because the checks are selected from it, and `--no-cluster` and `--skip-check`
+are refused: submission evidence comes from checks that ran on a live cluster
+against the whole recipe.
 
 ```bash
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml \
   --phase conformance \
   --cncf-submission \
-  --evidence-dir ./evidence \
-  --feature dra-support --feature gang-scheduling
+  --evidence-dir ./evidence
 ```
 
-Empty `--feature` (the default) collects evidence for every feature.
+The `--feature` flag and `spec.validate.evidence.cncf.features` key scoped the
+bash collector and went with it (#3602): the flag is gone, and a config that
+still sets the key does not load (see
+[Deprecations](deprecations.md#the---feature-flag-and-evidencecncffeatures-key)).
+The same run is available from the Go SDK as `Client.CollectCNCFEvidence`
+(see [Go library](../integrator/go-library.md#cncf-ai-conformance-evidence)).
 
-Valid feature names (from `pkg/evidence/cncf/consts.go`):
+### Exit status of a submission run
 
-| Name | What it checks |
-|------|----------------|
-| `dra-support` | Dynamic Resource Allocation driver and ResourceSlices |
-| `gang-scheduling` | Gang-scheduler presence and PodGroup support |
-| `secure-access` | Cluster authn/authz posture for AI workloads |
-| `accelerator-metrics` | GPU metrics exporter and Prometheus scrape config (collector script section; the `accelerator-metrics` conformance check asserts per-device utilization and memory samples on the DCGM scrape, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
-| `ai-service-metrics` | Inference-service metrics via custom-metrics API (collector script section; the `ai-service-metrics` conformance check asserts Prometheus collects exactly the requests sent to a ServiceMonitor-selected stub, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
-| `inference-gateway` | Gateway API + Inference Extension installation for the recipe's inference gateway: `agentgateway` by default, or the component whose `componentRef` declares `overrides.inferenceGateway` (see [Declaring the inference gateway](../integrator/data-extension.md#declaring-the-inference-gateway)). The evidence collector records the GatewayClass Accepted, the Gateway Programmed and the InferencePool CRD Established for that Gateway; a standalone collector run with no recipe finds the Gateway named `inference-gateway`. Network exposure and the data-plane probe are assessed by the `inference-gateway` conformance check, not by the collector. |
-| `robust-operator` | Operator readiness and leader-election posture |
-| `pod-autoscaling` | HPA-driven pod autoscaling (collector script section; the `pod-autoscaling` conformance check scales accelerator pods 1 to 2 on a per-pod custom metric and needs two allocatable accelerators at once, see [CNCF conformance](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md)) |
-| `cluster-autoscaling` | Karpenter (preferred) or EKS managed node-group autoscaling fallback |
+A submission run adds the requirement aggregation
+(see [Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status))
+on top of the per-check rule every run applies:
 
-### Evidence verdicts and exit status
+- Flag and input refusals, and the readiness pre-flight, exit `2` before any
+  check runs, as for every validate run.
+- A check that `failed` or crashed fails the run under `--fail-on-error`, as
+  it does without the flag. Conformance checks with no requirement mapping
+  (`platform-health`, the Slinky health checks) are invisible to the
+  aggregation, so this rule is what catches them.
+- An applicable MUST requirement that no proof path establishes fails the run
+  with `INTERNAL` after the evidence is written, so the directory still
+  documents what was and was not shown. A path is established when every
+  check on it is present and `passed` as a demonstration; a check that
+  `failed` on any path fails the requirement outright, and a check that was
+  `skipped`, crashed or is absent leaves only its own path incomplete. A
+  check that `passed` but marked its result observation-only (it recorded
+  the cluster's arrangement and drove no behavioral test; today
+  `cluster-autoscaling` on every path that passes) leaves its requirement
+  `OBSERVED`, which is not established either: the exit message names it,
+  e.g. `cluster_autoscaling observed (cluster-autoscaling observed, not
+  demonstrated)`, and the remedy on a platform without a behavioral
+  autoscaling test is a `spec.validate.evidence.cncf.notApplicable`
+  justification, which renders `NOT APPLICABLE` and exits 0. Where a requirement has
+  alternative proofs (`secure_accelerator_access`: `secure-accelerator-access`
+  on ordinary recipes, `slinky-slurm-gpu-access` on Slinky Slurm recipes) a
+  passing alternative establishes it even when the primary check was skipped
+  or did not run. A requirement declared not applicable is not counted. This
+  verdict applies regardless of `--fail-on-error=false`.
+- The aggregation itself never fails the run on a SHOULD, whatever its
+  checks did; its page records the real status. A SHOULD-backed check that
+  `failed` still trips the per-check rule above; exporting it as skipped is
+  #3605's export rule.
 
-Each collected feature records exactly one verdict in its evidence file:
-
-- **PASS** — the capability was exercised and behaved as expected.
-- **SKIP** — an optional prerequisite is absent (e.g. a recipe that declares no
-  inference gateway, or a standalone run on a cluster with no Gateway named
-  `inference-gateway`; no supported operator, an unsupported cluster-autoscaling provider, or an
-  operator that is installed but has no workload to reconcile). A SKIP is not
-  a failure.
-- **FAIL** — a present capability was unhealthy, a required query failed, or
-  the evidence file carried no single valid verdict (fail closed). An
-  inference Gateway the recipe declares is a requirement, not an optional
-  prerequisite: if it is missing, the cluster does not serve the Gateway API,
-  or the Gateway is programmed by another class, the section records FAIL.
-
-A **FAIL** in any feature makes `--cncf-submission` exit non-zero, so a
-submission that records a genuine failure no longer reports overall success.
-Absent optional prerequisites remain successful SKIPs and do not fail the run.
+The full submission directory (PRODUCT.yaml, README, `junit.xml`, `e2e.log`,
+one redaction pass and the pinned upstream validator) is #3605.
 
 ## Emitting recipe evidence
 
@@ -1379,7 +1393,11 @@ aicr validate \
 
 By default `aicr validate` exits non-zero when any phase reports `failed` or
 `other` (set `--fail-on-error=false` to report those results and exit 0 anyway;
-the readiness pre-flight still exits 2 regardless). CTRF JSON is emitted to
+the readiness pre-flight still exits 2 regardless, and a
+`--cncf-submission` run whose applicable MUST requirements are not all
+established exits 8 regardless of `--fail-on-error=false`, see
+[Exit status of a submission run](#exit-status-of-a-submission-run)).
+CTRF JSON is emitted to
 stdout (or to `--output <file>`), so a pipeline can gate promotion on both the
 exit code and the structured report:
 
@@ -1395,10 +1413,10 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 
 | Code | Meaning |
 |------|---------|
-| `0` | All phases reported status `passed` or `skipped` |
+| `0` | All phases reported status `passed` or `skipped`; under `--cncf-submission`, additionally every applicable MUST requirement established (an all-skipped submission run exits `8`), see [Exit status of a submission run](#exit-status-of-a-submission-run) |
 | `2` | Invalid input or request (`ErrCodeInvalidRequest`) — bad CLI flag, malformed argument, a validator rejecting a recipe value (e.g., an inference constraint that uses the wrong comparator direction), or a **readiness pre-flight** constraint not met. The readiness gate always fails closed with this code, even under `--fail-on-error=false` |
 | `5` | A structured `ErrCodeTimeout` reached the top-level CLI — for example while loading the recipe or snapshot, waiting on the snapshot-agent Job, or signing evidence under `--emit-attestation --push` (which runs after the checks). A per-validator wait deadline does **not** reach this code: `runPhase` converts that error into a check result, so it surfaces as exit `8` (see note 2) |
-| `8` | One or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false` |
+| `8` | One or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false`. Under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error` ([Exit status of a submission run](#exit-status-of-a-submission-run)). |
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
@@ -1481,7 +1499,7 @@ Common reasons and their cause:
 | `named in skipChecks` | `message`, and `extra.skipReason` as `named-in-skip-checks` (the channel that survives bundle redaction) | The caller withheld this check with `--skip-check` or `spec.validate.execution.skipChecks` | Drop the name from the skip list to run it again; see [Skipping checks a run cannot satisfy](#skipping-checks-a-run-cannot-satisfy) |
 | `skipped due to previous phase failure` | `message` | `--fail-fast` was set and an earlier phase failed, so subsequent phases were skipped | Fix the earlier phase first, or drop `--fail-fast` to run all phases regardless |
 
-### `ai-service-metrics` fails with "Prometheus unreachable"
+### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus unreachable"
 
 On EKS clusters that split worker and system pods across separate security
 groups (e.g. DGXC EKS with distinct customer/system ENI subnets), the
@@ -1490,6 +1508,16 @@ conformance check `ai-service-metrics` can fail non-deterministically with:
 ```text
 [SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
 ```
+
+`pod-autoscaling`, which dials Prometheus for its PodMonitor load wait when the
+recipe declares `kube-prometheus-stack`, fails the same way at its preflight:
+
+```text
+[SERVICE_UNAVAILABLE] Prometheus at http://kube-prometheus-prometheus.monitoring.svc:9090 did not list its scrape pools (GET /api/v1/scrape_pools needs Prometheus >= v2.42 and network connectivity between the validator pod and the Prometheus service)
+```
+
+Both checks' orchestrator Jobs carry the preferred `dependencyAffinity`
+described below.
 
 The validator orchestrator Job tolerates every taint and sets a *preferred*
 `dependencyAffinity` toward Prometheus, so the scheduler co-locates it with the
@@ -1513,6 +1541,59 @@ orchestrator lands on a node whose SG can reach Prometheus, then leave the
 image cached there so image-locality keeps subsequent runs on the same node.
 This is unreliable and should not be used as the steady-state validation
 strategy.
+
+### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus did not load the ServiceMonitor/PodMonitor"
+
+Both checks create a monitor (a ServiceMonitor or a PodMonitor) and, before
+starting their collection budget, wait up to five minutes for the recipe's
+Prometheus to list it among its scrape pools (`GET /api/v1/scrape_pools`).
+That wait exists because prometheus-operator reconciles monitors on its own
+schedule: gaps of about three minutes between a monitor's creation and
+Prometheus loading it were observed on a healthy AKS cluster, longer than the
+collection budget itself. For `pod-autoscaling` the scrape-pool preflight and
+the wait happen only when the recipe declares `kube-prometheus-stack`; without
+it (the OpenShift overlay serves `prometheus-adapter-ocp` from the platform
+monitoring stack) there is no Prometheus to ask, the check records the wait as
+skipped, and its baseline is bounded by the metric timeout alone.
+
+The baseline then ends in one of three ways, each with its own message.
+
+A failure naming the load, such as:
+
+```text
+[NOT_FOUND] AI service metrics test failed in phase baseline: [NOT_FOUND] Prometheus did not load the ServiceMonitor ai-metrics-test-<id>/ai-metrics-stub within 5m0s: no scrape pool serviceMonitor/ai-metrics-test-<id>/ai-metrics-stub/* among the 12 configured ...
+```
+
+means Prometheus did not load the monitor within the wait. Two things have
+to happen for it to: prometheus-operator must write the monitor into the
+generated configuration, and Prometheus must reload that configuration. Check
+both. For the first, look at the operator's logs for the reconcile of that
+namespace, and confirm the Prometheus resource selects the monitor: the checks
+label it `release=kube-prometheus-stack`, and the recipe's Prometheus opens
+`serviceMonitorSelector`, `podMonitorSelector` and their namespace selectors.
+For the second, a rejected reload leaves Prometheus running on its previous
+configuration with the pool absent even though the operator did its part:
+check `prometheus_config_last_reload_successful` (0 after a failed reload),
+the `PrometheusBadConfig` alert and its runbook, and the Prometheus and
+config-reloader container logs for the reload error.
+
+A failure reading "could not determine whether Prometheus loaded the
+ServiceMonitor/PodMonitor ... the last completed scrape pool listing failed"
+(or "... no scrape pool listing completed") means the scrape pool API stopped
+answering after the preflight, so no verdict on the monitor was reached; the
+underlying listing error (unreachable, HTTP status, malformed response) is
+attached. A listing the wait's deadline interrupts does not change the
+verdict: "did not load" rests on the last listing that completed. Check the Prometheus pod and the network
+path from the validator pod to it, as for "Prometheus unreachable" above.
+
+A failure naming the collection instead ("Prometheus loaded the ServiceMonitor
+but the workload metrics were not collected", or "Prometheus loaded the
+PodMonitor, but the custom metrics pipeline does not serve the workload
+metric") means the configuration was loaded and the scrape or the adapter
+query did not produce a sample: check the target under the active or
+dropped targets at `/api/v1/targets` (a target relabeling dropped is listed
+as dropped, not active) and, for `pod-autoscaling`, the prometheus-adapter
+rule.
 
 ### Benchmark Job stuck or timed out
 

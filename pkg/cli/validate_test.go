@@ -30,10 +30,11 @@ import (
 )
 
 // TestValidateCmd_CNCFSubmissionRecipe covers the recipe source of a
-// --cncf-submission run. Every case fails before the collector starts, so
-// nothing reaches a cluster. An unreadable recipe fails closed, a loadable
-// one proceeds to the facade, which rejects the unknown feature, and a
-// recipe-less run ignores --data because it never reads recipe data.
+// --cncf-submission run. Every case fails before any check runs, so nothing
+// reaches a cluster. A run without a recipe is refused (the single runner
+// selects checks from the recipe), an unreadable recipe fails closed, and a
+// loadable one proceeds past every submission guard to the snapshot load,
+// which fails on the missing file.
 func TestValidateCmd_CNCFSubmissionRecipe(t *testing.T) {
 	validRecipe := filepath.Join(t.TempDir(), "recipe.yaml")
 	recipeYAML := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n" +
@@ -41,21 +42,22 @@ func TestValidateCmd_CNCFSubmissionRecipe(t *testing.T) {
 	if err := os.WriteFile(validRecipe, []byte(recipeYAML), 0o600); err != nil {
 		t.Fatalf("failed to write test recipe file: %v", err)
 	}
+	missingSnapshot := filepath.Join(t.TempDir(), "missing-snapshot.yaml")
 
 	tests := []struct {
 		name       string
 		args       []string
 		errContain string
 	}{
-		{"unreadable recipe fails closed", []string{"--recipe", filepath.Join(t.TempDir(), "does-not-exist.yaml")}, "does-not-exist.yaml"},
-		{"loaded recipe reaches the facade", []string{"--recipe", validRecipe}, "unknown feature"},
-		{"recipe-less run ignores --data", []string{"--data", filepath.Join(t.TempDir(), "missing-data-dir")}, "unknown feature"},
+		{"recipe-less run is refused", []string{"--snapshot", missingSnapshot}, "--recipe is required"},
+		{"unreadable recipe fails closed", []string{"--recipe", filepath.Join(t.TempDir(), "does-not-exist.yaml"), "--snapshot", missingSnapshot}, "does-not-exist.yaml"},
+		{"loaded recipe passes the submission guards", []string{"--recipe", validRecipe, "--snapshot", missingSnapshot}, "missing-snapshot.yaml"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			app := &cli.Command{Name: "aicr", Commands: []*cli.Command{validateCmd()}}
-			args := append([]string{"aicr", "validate", "--cncf-submission",
-				"--evidence-dir", t.TempDir(), "--feature", "nonexistent"}, tt.args...)
+			args := append([]string{"aicr", "validate", "--phase", "conformance", "--cncf-submission",
+				"--evidence-dir", t.TempDir()}, tt.args...)
 			err := app.Run(t.Context(), args)
 			if err == nil || !strings.Contains(err.Error(), tt.errContain) {
 				t.Fatalf("error = %v, want error containing %q", err, tt.errContain)
@@ -122,8 +124,7 @@ func hasFlag(flag interface{ Names() []string }, name string) bool {
 func TestValidateCmd_CNCFSubmissionFlags(t *testing.T) {
 	cmd := validateCmd()
 
-	// Verify --cncf-submission and --feature flags exist
-	evidenceFlags := []string{"cncf-submission", "feature", "evidence-dir"}
+	evidenceFlags := []string{"cncf-submission", "evidence-dir"}
 	for _, flagName := range evidenceFlags {
 		found := false
 		for _, flag := range cmd.Flags {
@@ -137,10 +138,12 @@ func TestValidateCmd_CNCFSubmissionFlags(t *testing.T) {
 		}
 	}
 
-	// Verify --feature has -f alias
+	// --feature was removed outright with the collector script (#3602): the
+	// recipe's conformance check list decides what runs, and --skip-check
+	// already scopes a CI run by name.
 	for _, flag := range cmd.Flags {
-		if hasFlag(flag, "feature") && !hasFlag(flag, "f") {
-			t.Error("--feature flag missing -f alias")
+		if hasFlag(flag, "feature") || hasFlag(flag, "f") {
+			t.Errorf("flag %v: --feature/-f was removed and must not come back under either name", flag.Names())
 		}
 	}
 }
@@ -159,22 +162,28 @@ func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 			errContain: "--cncf-submission requires --evidence-dir",
 		},
 		{
-			name:       "feature without cncf-submission",
-			args:       []string{"aicr", "validate", "--feature", "dra", "--evidence-dir", "/tmp/test"},
+			name:       "evidence-dir without cncf-submission",
+			args:       []string{"aicr", "validate", "--evidence-dir", "/tmp/test"},
 			wantErr:    true,
-			errContain: "--feature requires --cncf-submission",
-		},
-		{
-			name:       "cncf-submission with invalid feature",
-			args:       []string{"aicr", "validate", "--cncf-submission", "--evidence-dir", "/tmp/test", "--feature", "nonexistent"},
-			wantErr:    true,
-			errContain: "unknown feature",
+			errContain: "--evidence-dir requires --cncf-submission",
 		},
 		{
 			name:       "cncf-submission with no-cluster",
 			args:       []string{"aicr", "validate", "--cncf-submission", "--evidence-dir", "/tmp/test", "--no-cluster"},
 			wantErr:    true,
 			errContain: "--cncf-submission cannot be combined with --no-cluster",
+		},
+		{
+			name:       "cncf-submission with skip-check",
+			args:       []string{"aicr", "validate", "--cncf-submission", "--evidence-dir", "/tmp/test", "--skip-check", "gang-scheduling"},
+			wantErr:    true,
+			errContain: "--skip-check cannot be combined with --evidence-dir",
+		},
+		{
+			name:       "cncf-submission without the conformance phase",
+			args:       []string{"aicr", "validate", "--cncf-submission", "--evidence-dir", "/tmp/test", "--phase", "deployment"},
+			wantErr:    true,
+			errContain: "--cncf-submission requires the conformance phase",
 		},
 	}
 
@@ -241,7 +250,7 @@ func TestValidateFlagCombinations_SkipCheckWithEvidenceDir(t *testing.T) {
 			wantSubstrs: []string{"--skip-check", "--evidence-dir", "narrower than the recipe"},
 		},
 		{
-			name:        "evidence-dir alone is accepted",
+			name:        "evidence-dir with a submission is accepted",
 			evidenceDir: "/tmp/evidence",
 		},
 		{
@@ -262,7 +271,7 @@ func TestValidateFlagCombinations_SkipCheckWithEvidenceDir(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateFlagCombinations(false, tt.evidenceDir, nil, false, false, tt.skipChecks)
+			err := validateFlagCombinations(tt.evidenceDir != "", tt.evidenceDir, false, false, tt.skipChecks)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("validateFlagCombinations() error = %v, wantErr %v", err, tt.wantErr)
 			}

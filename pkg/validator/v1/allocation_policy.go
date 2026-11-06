@@ -37,9 +37,6 @@ const (
 	// resolved policy (standalone Go validator inputs without recipe
 	// context, or inputs produced by pre-policy AICR versions): validators
 	// keep their capability-driven automatic selection and verify nothing.
-	// The --cncf-submission shell collector bypasses Go validator dispatch
-	// entirely and is separate work (#1629) — it is NOT covered by this
-	// constant's semantics.
 	GPUAllocationPolicyUnspecified = "unspecified"
 
 	// GPUAllocationPolicyDevicePluginExtendedResource is the production

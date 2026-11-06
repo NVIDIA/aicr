@@ -28,20 +28,36 @@ import (
 type RequirementStatus string
 
 // Requirement verdicts. Only StatusPassed is positive evidence: it needs a
-// complete proof path, every check present and passed. StatusFailed records a
-// disproven capability, StatusNotTested an unmet test prerequisite (a check
-// skipped, crashed, pending or never run), and StatusNotApplicable a
-// justification from configuration, never from a check.
+// complete proof path, every check present and passed as a demonstration.
+// StatusObserved records a path whose checks passed but at least one marked
+// its result observation-only (extraKeyObservationOnly): the check recorded
+// the cluster's arrangement without driving a behavioral test, so the
+// requirement is not demonstrated and a MUST is not established by it.
+// StatusFailed records a disproven capability, StatusNotTested an unmet test
+// prerequisite (a check skipped, crashed, pending or never run), and
+// StatusNotApplicable a justification from configuration, never from a check.
 const (
 	StatusPassed        RequirementStatus = "passed"
+	StatusObserved      RequirementStatus = "observed"
 	StatusFailed        RequirementStatus = "failed"
 	StatusNotTested     RequirementStatus = "not tested"
 	StatusNotApplicable RequirementStatus = "not applicable"
 )
 
-// extraKeySkipReason is the validators' skipReason CTRF extra key, carried
-// as the NOT TESTED reason of a skipped check.
-const extraKeySkipReason = "skipReason"
+// CTRF extra keys the aggregation reads, published by the validators under
+// the ExtraKey* constants of the validators package.
+const (
+	// extraKeySkipReason is the skipReason code, carried as the NOT TESTED
+	// reason of a skipped check.
+	extraKeySkipReason = "skipReason"
+
+	// extraKeyObservationOnly marks a passed result as observation-only
+	// (validators.ExtraKeyObservationOnly); the value is "true".
+	extraKeyObservationOnly = "observationOnly"
+
+	// extraValueTrue is the published form of a true boolean extra.
+	extraValueTrue = "true"
+)
 
 // conditionalMusts are the MUST requirements upstream allows a product to
 // declare not applicable with a justification. Every other requirement is
@@ -76,6 +92,12 @@ type CheckResult struct {
 	// Reason is the skip reason code (extra.skipReason) of a skipped result,
 	// or the message of a failed one; empty otherwise.
 	Reason string
+
+	// ObservationOnly is true when a passed result carries the
+	// observation-only marker (extra.observationOnly): the check recorded
+	// what it saw and drove no behavioral test, so its pass demonstrates
+	// nothing. Always false for a result that did not pass.
+	ObservationOnly bool
 }
 
 // RequirementResult is the aggregate verdict of one requirement with the
@@ -92,7 +114,8 @@ type RequirementResult struct {
 	Status RequirementStatus
 
 	// Reason explains a verdict other than StatusPassed: the N/A
-	// justification, the failing checks, or the unmet prerequisites.
+	// justification, the failing checks, the observation-only checks, or
+	// the unmet prerequisites.
 	Reason string
 
 	// Proof names the checks whose passed results establish StatusPassed,
@@ -143,8 +166,9 @@ func (a *Aggregate) Requirement(id string) *RequirementResult {
 }
 
 // IncompleteMusts returns every applicable MUST whose status is not
-// StatusPassed, in checklist order. A SHOULD never appears here, whatever
-// its status.
+// StatusPassed, in checklist order: failed, observed and not tested alike,
+// since none of them demonstrates the requirement. A SHOULD never appears
+// here, whatever its status.
 func (a *Aggregate) IncompleteMusts() []RequirementResult {
 	var out []RequirementResult
 	for _, r := range a.Requirements {
@@ -160,6 +184,74 @@ func (a *Aggregate) IncompleteMusts() []RequirementResult {
 // the run.
 func (a *Aggregate) Passed() bool {
 	return len(a.IncompleteMusts()) == 0
+}
+
+// Verdict is the requirement half of a submission run's exit status: nil when
+// every applicable MUST passed, else an error naming each MUST that is not
+// established with its status and reason. Outcome adds it to the per-check
+// rule; on its own it never fails on a SHOULD. The evidence has been written
+// when it is consulted, so the directory still documents what was and was
+// not shown.
+//
+// Errors:
+//   - ErrCodeInternal when an applicable MUST requirement is not established.
+func (a *Aggregate) Verdict() error {
+	incomplete := a.IncompleteMusts()
+	if len(incomplete) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, len(incomplete))
+	for _, r := range incomplete {
+		parts = append(parts, fmt.Sprintf("%s %s (%s)", r.ID, r.Status, r.Reason))
+	}
+	return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+		"CNCF submission not established: %d applicable MUST requirement(s) of the %s checklist did not pass: %s",
+		len(incomplete), a.Version, strings.Join(parts, "; ")))
+}
+
+// ChecksFailed reports whether any test in the report carries a failing CTRF
+// status (failed or other). It is the per-check rule every validate run
+// applies, read from the merged report rather than from phase statuses so
+// the SDK and the CLI judge the same document.
+func ChecksFailed(report *ctrf.Report) bool {
+	if report == nil {
+		return false
+	}
+	for _, t := range report.Results.Tests {
+		if ctrf.IsFailingStatus(t.Status) {
+			return true
+		}
+	}
+	return false
+}
+
+// Outcome is the exit rule of a submission run, shared by the CLI and the
+// SDK so the two cannot disagree: a failed or errored check in report fails
+// the run (the per-check rule every run applies, which a flag never changes;
+// checks with no requirement mapping are visible only here), and Verdict is
+// added on top. perCheck false skips the per-check rule, which is what
+// `--fail-on-error=false` means; the verdict applies regardless. A nil
+// receiver contributes no verdict.
+//
+// Errors:
+//   - ErrCodeInternal when a check failed or errored, when an applicable
+//     MUST requirement is not established, or both; the message says which.
+func (a *Aggregate) Outcome(report *ctrf.Report, perCheck bool) error {
+	var verdict error
+	if a != nil {
+		verdict = a.Verdict()
+	}
+	failed := perCheck && ChecksFailed(report)
+	switch {
+	case failed && verdict != nil:
+		return errors.Wrap(errors.ErrCodeInternal,
+			"validation failed: one or more checks did not pass, and the CNCF submission is not established", verdict)
+	case verdict != nil:
+		return verdict
+	case failed:
+		return errors.New(errors.ErrCodeInternal, "validation failed: one or more checks did not pass")
+	}
+	return nil
 }
 
 // ValidateNotApplicable checks the notApplicable map a caller supplies: each
@@ -202,12 +294,15 @@ func ValidateNotApplicable(v Version, notApplicable map[string]string) error {
 // aggregates as if no check ran.
 //
 // A requirement passes only when one of its proof paths is complete: every
-// check on the path present and passed, and no path failed. Any failed check
-// on any path fails the requirement, whatever the other paths did; a skipped,
-// pending, other or absent check leaves its path incomplete. The requirement
-// is not tested when no path failed and none is complete. notApplicable overrides the
-// computed status of the requirements it names with StatusNotApplicable; the
-// results of their checks are kept as observations.
+// check on the path present and passed as a demonstration, and no path
+// failed. Any failed check on any path fails the requirement, whatever the
+// other paths did; a skipped, pending, other or absent check leaves its path
+// incomplete. A path whose checks all passed but one of them marked its
+// result observation-only is observed, not complete: the requirement is
+// observed when no path failed and none is complete, and not tested when no
+// path is observed either. notApplicable overrides the computed status of
+// the requirements it names with StatusNotApplicable; the results of their
+// checks are kept as observations.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when v is unsupported or notApplicable names a
@@ -279,10 +374,10 @@ func aggregateRequirement(id string, level Level, page *evidencePage, results ma
 	}
 	// Every path is judged before the verdict: a failed check on any path is
 	// a disproven capability on this cluster, so it fails the requirement
-	// even when an alternative path passed. An alternative may be absent or
-	// skipped, not failed.
+	// even when an alternative path passed. An alternative may be absent,
+	// skipped or observed, not failed.
 	var proof []string
-	var failed, incomplete []string
+	var failed, observed, incomplete []string
 	for _, path := range proofPaths(id, page.Checks) {
 		status, reason := evaluatePath(path, byName)
 		switch status {
@@ -292,6 +387,8 @@ func aggregateRequirement(id string, level Level, page *evidencePage, results ma
 			}
 		case StatusFailed:
 			failed = append(failed, reason)
+		case StatusObserved:
+			observed = append(observed, reason)
 		case StatusNotTested, StatusNotApplicable:
 			incomplete = append(incomplete, reason)
 		}
@@ -303,6 +400,9 @@ func aggregateRequirement(id string, level Level, page *evidencePage, results ma
 	case proof != nil:
 		r.Status = StatusPassed
 		r.Proof = proof
+	case len(observed) > 0:
+		r.Status = StatusObserved
+		r.Reason = strings.Join(append(observed, incomplete...), "; ")
 	default:
 		r.Status = StatusNotTested
 		r.Reason = strings.Join(incomplete, "; ")
@@ -311,15 +411,18 @@ func aggregateRequirement(id string, level Level, page *evidencePage, results ma
 }
 
 // evaluatePath judges one proof path: failed when any check on it failed,
-// passed when every check is present and passed, not tested otherwise. The
-// reason names the checks that kept it from passing.
+// not tested when any check is absent, skipped, pending or other, observed
+// when every check passed but one of them only as an observation, and
+// passed otherwise. The reason names the checks that kept it from passing.
 func evaluatePath(path []string, byName map[string]CheckResult) (RequirementStatus, string) {
-	var failed, incomplete []string
+	var failed, observed, incomplete []string
 	for _, name := range path {
 		c := byName[name]
 		switch {
 		case !c.Present:
 			incomplete = append(incomplete, name+" not run")
+		case c.Status == ctrf.StatusPassed && c.ObservationOnly:
+			observed = append(observed, name+" observed, not demonstrated")
 		case c.Status == ctrf.StatusPassed:
 		case c.Status == ctrf.StatusFailed:
 			failed = append(failed, name+" failed")
@@ -335,9 +438,11 @@ func evaluatePath(path []string, byName map[string]CheckResult) (RequirementStat
 	}
 	switch {
 	case len(failed) > 0:
-		return StatusFailed, strings.Join(append(failed, incomplete...), ", ")
+		return StatusFailed, strings.Join(append(append(failed, observed...), incomplete...), ", ")
 	case len(incomplete) > 0:
-		return StatusNotTested, strings.Join(incomplete, ", ")
+		return StatusNotTested, strings.Join(append(incomplete, observed...), ", ")
+	case len(observed) > 0:
+		return StatusObserved, strings.Join(observed, ", ")
 	}
 	return StatusPassed, ""
 }
@@ -345,7 +450,9 @@ func evaluatePath(path []string, byName map[string]CheckResult) (RequirementStat
 // checkResult folds every result the report carries for one check into a
 // CheckResult. A check reported more than once (the same check in two merged
 // phases) passes only when every result passed; the worst status wins, in
-// the order failed, then any non-passed status, then passed.
+// the order failed, then any non-passed status, then passed. A passed
+// result marked observation-only marks the fold: one observation among the
+// passes keeps the check from demonstrating anything.
 func checkResult(name string, tests []ctrf.TestResult) CheckResult {
 	if len(tests) == 0 {
 		return CheckResult{Name: name}
@@ -354,6 +461,9 @@ func checkResult(name string, tests []ctrf.TestResult) CheckResult {
 	for _, t := range tests {
 		switch t.Status {
 		case ctrf.StatusPassed:
+			if t.Extra[extraKeyObservationOnly] == extraValueTrue {
+				c.ObservationOnly = true
+			}
 		case ctrf.StatusFailed:
 			c.Status = ctrf.StatusFailed
 			c.Reason = t.Message
@@ -363,6 +473,9 @@ func checkResult(name string, tests []ctrf.TestResult) CheckResult {
 				c.Reason = t.Extra[extraKeySkipReason]
 			}
 		}
+	}
+	if c.Status != ctrf.StatusPassed {
+		c.ObservationOnly = false
 	}
 	return c
 }

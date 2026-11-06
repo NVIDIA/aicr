@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -544,6 +545,16 @@ type fakeHPAControlPlane struct {
 	// holdNewPodPendingFor keeps every pod the HPA adds Pending, with no
 	// Ready condition and no sample, for this long before it becomes Ready.
 	holdNewPodPendingFor time.Duration
+	// poolLoadedAfter delays the PodMonitor's scrape pool from the fake's
+	// creation, standing in for prometheus-operator's reconcile gap, and
+	// poolNever withholds it; the adapter serves no sample before the pool
+	// is loaded, as no scrape can happen before the configuration is.
+	// noPrometheus leaves the scenario without a scrape pool lister, the
+	// shape a recipe without kube-prometheus-stack produces.
+	poolLoadedAfter time.Duration
+	poolNever       bool
+	noPrometheus    bool
+	created         time.Time
 
 	mu           sync.Mutex
 	hpaSeen      time.Time
@@ -563,8 +574,23 @@ type fakeHPAControlPlane struct {
 }
 
 func newFakeHPAControlPlane(c *k8sfake.Clientset, ns string) *fakeHPAControlPlane {
-	return &fakeHPAControlPlane{c: c, ns: ns, stop: make(chan struct{}), stopped: make(chan struct{}),
+	return &fakeHPAControlPlane{c: c, ns: ns, created: time.Now(), stop: make(chan struct{}), stopped: make(chan struct{}),
 		pendingSince: map[string]time.Time{}}
+}
+
+// poolLoaded reports whether Prometheus has the PodMonitor's scrape pool.
+func (f *fakeHPAControlPlane) poolLoaded() bool {
+	return !f.poolNever && time.Since(f.created) >= f.poolLoadedAfter
+}
+
+// listScrapePools answers as Prometheus's scrape_pools API would: an
+// unrelated pool always, the PodMonitor's once loaded.
+func (f *fakeHPAControlPlane) listScrapePools(context.Context) ([]byte, error) {
+	pools := []string{"serviceMonitor/monitoring/kube-prometheus-stack-kubelet/0"}
+	if f.poolLoaded() {
+		pools = append(pools, scrapePoolPrefix(monitorKindPod, f.ns, hpaWorkloadName)+"0")
+	}
+	return promScrapePools(pools...), nil
 }
 
 func (f *fakeHPAControlPlane) start() {
@@ -747,7 +773,7 @@ func (f *fakeHPAControlPlane) reconcilePods(ctx context.Context, deploy *appsv1.
 // pod, as the adapter would once Prometheus has scraped them; a pod that is
 // not Ready has no series yet.
 func (f *fakeHPAControlPlane) readMetrics(ctx context.Context) ([]byte, error) {
-	if f.adapterBroken {
+	if f.adapterBroken || !f.poolLoaded() {
 		return nil, k8serrors.NewNotFound(schema.GroupResource{Group: hpaCustomMetricsGroup, Resource: "pods"}, hpaMetricSeries)
 	}
 	f.mu.Lock()
@@ -778,14 +804,18 @@ func newTestHPAScenario(t *testing.T, cp *fakeHPAControlPlane, c *k8sfake.Client
 	run.namespace = cp.ns
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{podMonitorGVR: "PodMonitorList"})
-	return &hpaScenario{
+	s := &hpaScenario{
 		clientset:             c,
 		dynClient:             dyn,
 		testRun:               run,
 		metricsVersion:        "v1beta1",
 		readMetrics:           cp.readMetrics,
+		promURL:               "http://prometheus.monitoring.svc:9090",
+		listScrapePools:       cp.listScrapePools,
+		newScrapePoolLister:   func(string) func(context.Context) ([]byte, error) { return cp.listScrapePools },
 		pollInterval:          2 * time.Millisecond,
 		workloadReadyTimeout:  2 * time.Second,
+		monitorLoadTimeout:    3 * time.Second,
 		metricTimeout:         time.Second,
 		scaleTimeout:          time.Second,
 		scaleDownTimeout:      time.Second,
@@ -793,6 +823,10 @@ func newTestHPAScenario(t *testing.T, cp *fakeHPAControlPlane, c *k8sfake.Client
 		stabilization:         time.Minute,
 		timings:               map[hpaPhase]time.Duration{},
 	}
+	if cp.noPrometheus {
+		s.promURL, s.listScrapePools = "", nil
+	}
+	return s
 }
 
 // TestHPAScenarioPhases drives the full cycle against the fake control plane
@@ -801,7 +835,10 @@ func newTestHPAScenario(t *testing.T, cp *fakeHPAControlPlane, c *k8sfake.Client
 // down fails in that phase; an adapter that does not serve the metric fails
 // at baseline with a pipeline (not an HPA) error; a baseline pod replaced
 // during the negative control does not fail scale-up; nor does a pod the HPA
-// adds that stays Pending longer than the metric wait allows.
+// adds that stays Pending longer than the metric wait allows. A PodMonitor
+// Prometheus loads only after the metric timeout would have expired still
+// passes (#3671), one never loaded fails at baseline naming the load, and a
+// recipe without a Prometheus to ask skips that wait.
 func TestHPAScenarioPhases(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -825,10 +862,34 @@ func TestHPAScenarioPhases(t *testing.T) {
 			wantPhase: hpaPhaseScaleDown,
 		},
 		{
+			// Longer than the scenario's metricTimeout: judged from the
+			// PodMonitor's creation, the metric wait would expire first.
+			name:      "PodMonitor loaded after the metric timeout still passes",
+			configure: func(f *fakeHPAControlPlane) { f.poolLoadedAfter = 1500 * time.Millisecond },
+			wantPhase: hpaPhaseScaleDown,
+		},
+		{
+			name:      "no Prometheus in the recipe skips the load wait",
+			configure: func(f *fakeHPAControlPlane) { f.noPrometheus = true },
+			wantPhase: hpaPhaseScaleDown,
+		},
+		{
+			name:      "PodMonitor never loaded",
+			configure: func(f *fakeHPAControlPlane) { f.poolNever = true },
+			wantPhase: hpaPhaseBaseline, wantCode: errors.ErrCodeNotFound,
+			wantMsg: "Prometheus did not load the PodMonitor",
+		},
+		{
 			name:      "adapter does not serve the metric",
 			configure: func(f *fakeHPAControlPlane) { f.adapterBroken = true },
 			wantPhase: hpaPhaseBaseline, wantCode: errors.ErrCodeNotFound,
-			wantMsg: "custom metrics pipeline does not serve the workload metric",
+			wantMsg: "Prometheus loaded the PodMonitor, but the custom metrics pipeline does not serve the workload metric",
+		},
+		{
+			name:      "adapter does not serve the metric and no Prometheus in the recipe",
+			configure: func(f *fakeHPAControlPlane) { f.adapterBroken, f.noPrometheus = true, true },
+			wantPhase: hpaPhaseBaseline, wantCode: errors.ErrCodeNotFound,
+			wantMsg: "phase baseline: [NOT_FOUND] custom metrics pipeline does not serve the workload metric",
 		},
 		{
 			name:      "HPA scales while the metric is below target",
@@ -925,6 +986,70 @@ func TestReadyLivePodsExcludesPending(t *testing.T) {
 	}
 	if want := ready.Name + "," + pending.Name; strings.Join(all, ",") != want {
 		t.Errorf("livePods = %v, want [%s]", all, want)
+	}
+}
+
+// TestHPAScenarioAttachPrometheus pins when the baseline waits for the
+// PodMonitor to be loaded: a recipe that declares kube-prometheus-stack
+// (enabled) with a reachable Prometheus Service turns the wait on, pointed
+// at the discovered URL; one declaring it without the Service fails closed;
+// one without it, or with it disabled as the OpenShift overlay does, skips
+// the wait. The first case is what fails if the one line enabling the wait
+// is dropped.
+func TestHPAScenarioAttachPrometheus(t *testing.T) {
+	t.Parallel()
+	declared := []recipe.ComponentRef{{Name: prometheusComponentName, Namespace: "monitoring"}}
+	promSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "kube-prometheus-prometheus", Namespace: "monitoring", Labels: map[string]string{"self-monitor": "true"}},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 9090}}},
+	}
+	tests := []struct {
+		name       string
+		refs       []recipe.ComponentRef
+		objects    []runtime.Object
+		wantCode   errors.ErrorCode
+		wantWait   bool
+		wantURL    string
+		wantPolled bool
+	}{
+		{name: "declared and reachable: wait on", refs: declared, objects: []runtime.Object{promSvc},
+			wantWait: true, wantURL: "http://kube-prometheus-prometheus.monitoring.svc:9090", wantPolled: true},
+		{name: "declared without a Prometheus Service", refs: declared, wantCode: errors.ErrCodeNotFound},
+		{name: "not declared: wait skipped", refs: []recipe.ComponentRef{enabledRef("prometheus-adapter-ocp")}},
+		{name: "declared disabled: wait skipped", refs: []recipe.ComponentRef{disabledRef(prometheusComponentName)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := k8sfake.NewClientset(tt.objects...)
+			cp := newFakeHPAControlPlane(c, hpaTestPrefix+"attach")
+			cp.noPrometheus = true
+			s := newTestHPAScenario(t, cp, c)
+			var gotURL string
+			var polled atomic.Int32
+			s.newScrapePoolLister = func(promURL string) func(context.Context) ([]byte, error) {
+				gotURL = promURL
+				return func(ctx context.Context) ([]byte, error) { polled.Add(1); return cp.listScrapePools(ctx) }
+			}
+			err := s.attachPrometheus(&validators.Context{Ctx: context.Background(), Clientset: c,
+				ValidationInput: &v1.ValidationInput{ComponentRefs: tt.refs}})
+			if tt.wantCode != "" {
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+				return
+			}
+			if err != nil {
+				t.Fatalf("attachPrometheus: %v", err)
+			}
+			if (s.listScrapePools != nil) != tt.wantWait {
+				t.Errorf("listScrapePools set = %t, want %t", s.listScrapePools != nil, tt.wantWait)
+			}
+			if gotURL != tt.wantURL || s.promURL != tt.wantURL {
+				t.Errorf("lister built for %q, scenario promURL %q, want %q", gotURL, s.promURL, tt.wantURL)
+			}
+			if (polled.Load() > 0) != tt.wantPolled {
+				t.Errorf("preflight listed scrape pools %d times, want polled=%t", polled.Load(), tt.wantPolled)
+			}
+		})
 	}
 }
 

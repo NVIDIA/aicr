@@ -340,17 +340,16 @@ type EvidenceSpec struct {
 }
 
 // EvidenceCNCFSpec configures the CNCF AI Conformance evidence path
-// (--evidence-dir / --cncf-submission / --feature).
+// (--evidence-dir / --cncf-submission). Dir and CNCFSubmission require each
+// other: evidence is written only for a submission run, which the CLI
+// enforces when it reads the resolved values.
 type EvidenceCNCFSpec struct {
 	Dir string `yaml:"dir,omitempty" json:"dir,omitempty"`
 
-	// Requires Dir. Pointer so the spec layer can distinguish nil
-	// (absent in YAML/JSON) from &false (explicit opt-out); the
-	// resolved layer flattens to plain bool — see EvidenceCNCFResolved.
+	// Pointer so the spec layer can distinguish nil (absent in YAML/JSON)
+	// from &false (explicit opt-out); the resolved layer flattens to plain
+	// bool — see EvidenceCNCFResolved.
 	CNCFSubmission *bool `yaml:"cncfSubmission,omitempty" json:"cncfSubmission,omitempty"`
-
-	// Empty = all features. Only honored when CNCFSubmission is true.
-	Features []string `yaml:"features,omitempty" json:"features,omitempty"`
 
 	// NotApplicable declares conditional MUST requirements of the CNCF
 	// checklist not applicable, keyed by upstream requirement id with the
