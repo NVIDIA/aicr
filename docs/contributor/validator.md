@@ -357,16 +357,20 @@ profile (agentgateway is `service-endpoints`). In a per-run namespace
 (`gateway-traffic-<token>`, the shared ownership token and UID-guarded
 cleanup) it creates two CPU backends (`model-v1`, `model-v2`: Deployment +
 Service each, `defaults.PythonProbeImage`, answering every request with their
-own name) and one HTTPRoute whose two rules both match the per-run path
-prefix `/ai-conformance-<token>`: the first additionally matches
+own name) and one HTTPRoute with the per-run hostname
+`ai-conformance-<token>.conformance.invalid`, which the probe sends as the
+`Host` header of every request, and two rules that both match the per-run
+path prefix `/ai-conformance-<token>`: the first additionally matches
 `OpenAI-Project: ai-conformance-canary` exactly and routes to `model-v2`, the
-default rule splits 70/30. The path match is what keeps the test route ahead
-of a tenant's route on the same listener: Gateway API ranks routes by
-hostname, then longest path, then method, then header matches, so rules with
-no path (an implicit `/`) would lose every request, header-matched ones
-included, to a pre-existing `/v1` route, while the 48-character per-run path
-outranks any shorter path and can tie only with an older route on the same
-random path. The routes already attached to the Gateway are recorded
+default rule splits 70/30. The hostname and path are what isolate the test
+route from a tenant's route on the same listener: Gateway API ranks routes by
+hostname, then longest path, then method, then header matches, and a route
+with no hostname matches any `Host`, so rules with neither would lose every
+request, header-matched ones included, to a pre-existing `/v1` route; with
+the exact per-run hostname a tenant route carrying another hostname does not
+match the probe's requests at all, a hostname-less one ranks below it, and a
+tenant route can outrank the probe only by matching that exact hostname (and
+path). The routes already attached to the Gateway are recorded
 (`Gateway traffic: routes already attached`, a WARNING when there are any)
 and named in a verdict failure. It waits for the Gateway to report the route
 `Accepted` and `ResolvedRefs` (watch, re-Get on a closed channel; the

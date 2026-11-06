@@ -180,10 +180,19 @@ func TestEvaluateGatewayWeightedRounds(t *testing.T) {
 func TestBuildGatewayTrafficHTTPRoute(t *testing.T) {
 	t.Parallel()
 	profile := agentgatewayProfile()
-	const path = "/ai-conformance-abc"
-	route := buildGatewayTrafficHTTPRoute("gateway-traffic-abc", profile, path, 70, 30)
+	const (
+		hostname = "ai-conformance-abc.conformance.invalid"
+		path     = "/ai-conformance-abc"
+	)
+	route := buildGatewayTrafficHTTPRoute("gateway-traffic-abc", profile, hostname, path, 70, 30)
 	if route.GetName() != gatewayTrafficRouteName || route.GetNamespace() != "gateway-traffic-abc" || route.GetKind() != "HTTPRoute" {
 		t.Fatalf("route identity = %s/%s %s", route.GetNamespace(), route.GetName(), route.GetKind())
+	}
+	// The exact per-run hostname is the first precedence key, so a tenant
+	// route with another hostname does not match the probe's requests.
+	hostnames, _, _ := unstructured.NestedStringSlice(route.Object, "spec", "hostnames")
+	if len(hostnames) != 1 || hostnames[0] != hostname {
+		t.Errorf("hostnames = %v, want [%s]", hostnames, hostname)
 	}
 	parents, _, _ := unstructured.NestedSlice(route.Object, "spec", "parentRefs")
 	if len(parents) != 1 {
@@ -269,8 +278,8 @@ func TestGatewayTrafficPodsHonorTolerations(t *testing.T) {
 			if svc.Spec.Selector[hpaAppLabelKey] != gatewayTrafficPrimary || deploy.Spec.Selector.MatchLabels[hpaAppLabelKey] != gatewayTrafficPrimary {
 				t.Errorf("Service selector %v and Deployment selector %v must both select the backend", svc.Spec.Selector, deploy.Spec.Selector.MatchLabels)
 			}
-			s := &gatewayTrafficScenario{tolerations: tt.in, endpoint: "http://gw/v1/chat/completions", primaryWeight: 70, alternateWeight: 30,
-				probeTimeout: time.Minute, routeReadyWindow: 30 * time.Second}
+			s := &gatewayTrafficScenario{tolerations: tt.in, endpoint: "http://gw/v1/chat/completions", routeHostname: "ai-conformance-x.conformance.invalid",
+				primaryWeight: 70, alternateWeight: 30, probeTimeout: time.Minute, routeReadyWindow: 30 * time.Second}
 			pod := buildGatewayTrafficProbe("ns", s)
 			if got := pod.Spec.Tolerations; fmt.Sprint(got) != fmt.Sprint(tt.want) {
 				t.Errorf("probe tolerations = %v, want %v", got, tt.want)
@@ -282,8 +291,11 @@ func TestGatewayTrafficPodsHonorTolerations(t *testing.T) {
 			for _, e := range pod.Spec.Containers[0].Env {
 				env[e.Name] = e.Value
 			}
-			if env["URL"] != s.endpoint || env["PRIMARY_SHARE"] != "0.7" || env["READY_SECONDS"] != "30" {
+			if env["URL"] != s.endpoint || env["HOST_HEADER"] != s.routeHostname || env["PRIMARY_SHARE"] != "0.7" || env["READY_SECONDS"] != "30" {
 				t.Errorf("probe env = %v", env)
+			}
+			if !strings.Contains(gatewayTrafficProbeScript, `"Host": os.environ["HOST_HEADER"]`) {
+				t.Error("probe script must send HOST_HEADER as the Host header of every request")
 			}
 		})
 	}
@@ -405,6 +417,9 @@ func TestGatewayTrafficResolveEndpoint(t *testing.T) {
 			}
 			if s.routePath != gatewayTrafficPathPrefix+s.testRun.token {
 				t.Errorf("routePath = %s, want the per-run prefix", s.routePath)
+			}
+			if s.routeHostname != gatewayTrafficHostPrefix+s.testRun.token+gatewayTrafficHostSuffix {
+				t.Errorf("routeHostname = %s, want the per-run hostname", s.routeHostname)
 			}
 			if want := tt.wantURL + s.routePath + gatewayTrafficRequestPath; s.endpoint != want || s.listenerPort != tt.wantPort {
 				t.Errorf("endpoint = %s port %d, want %s port %d", s.endpoint, s.listenerPort, want, tt.wantPort)
@@ -635,7 +650,7 @@ func TestWaitForHTTPRouteAccepted_Watch(t *testing.T) {
 	t.Parallel()
 	profile := agentgatewayProfile()
 	dyn := newRouteFakeDynamicClient()
-	route := buildGatewayTrafficHTTPRoute("gateway-traffic-x", profile, "/ai-conformance-x", 70, 30)
+	route := buildGatewayTrafficHTTPRoute("gateway-traffic-x", profile, "ai-conformance-x.conformance.invalid", "/ai-conformance-x", 70, 30)
 	// Accepted by a same-named Gateway in the route's own namespace: not ours.
 	foreign := routeStatus(profile, "True", "Accepted")
 	foreign["parentRef"] = map[string]any{"name": profile.GatewayName}

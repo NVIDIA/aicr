@@ -51,19 +51,25 @@ import (
 // so the data plane under test is the one AICR deployed. The test prefix
 // names the per-run namespace, by which leftovers from interrupted runs are
 // found; the "other" key is the probe's count of requests that failed or were
-// answered by neither test backend; the route path prefix, suffixed with the
-// run token, is the path match on both rules: Gateway API ranks routes on a
+// answered by neither test backend; the hostname prefix and suffix, around
+// the run token, form the route's one hostname, which the probe sends as the
+// Host header of every request, and the path prefix, suffixed with the run
+// token, is the path match on both rules. Gateway API ranks routes on a
 // listener by hostname, then longest path, then method, then header matches,
-// so a rule with no path (an implicit "/") would lose every request,
-// header-matched ones included, to a pre-existing route such as a tenant's
-// "/v1" route on the recipe's Gateway, while a 48-character per-run path
-// outranks any such route and can tie only with an older route on the
-// identical random path; the request path appended to it only makes the
-// traffic look like inference, since the backends answer every path; the
-// sample error bound caps how many probe error samples the verdict carries;
-// the interpreter runs both scripts in defaults.PythonProbeImage.
+// and a route with no hostname matches any Host, so a rule with neither
+// would lose every request, header-matched ones included, to a pre-existing
+// route such as a tenant's "/v1" route on the recipe's Gateway; with the
+// per-run hostname, a tenant route with another hostname does not match the
+// probe's requests at all, a hostname-less one ranks below the exact
+// hostname, and only a route carrying the identical random hostname could
+// tie. The request path appended to the path prefix only makes the traffic
+// look like inference, since the backends answer every path; the sample
+// error bound caps how many probe error samples the verdict carries; the
+// interpreter runs both scripts in defaults.PythonProbeImage.
 const (
 	gatewayTrafficTestPrefix      = "gateway-traffic-"
+	gatewayTrafficHostPrefix      = "ai-conformance-"
+	gatewayTrafficHostSuffix      = ".conformance.invalid"
 	gatewayTrafficPathPrefix      = "/ai-conformance-"
 	gatewayTrafficRouteName       = "ai-conformance-route"
 	gatewayTrafficPrimary         = "model-v1"
@@ -126,9 +132,10 @@ class Server(http.server.ThreadingHTTPServer):
 Server(("::" if Server.address_family == socket.AF_INET6 else "", int(os.environ["PORT"])), H).serve_forever()
 `
 
-// gatewayTrafficProbeScript waits until the route is live (CONSECUTIVE
-// consecutive header and default requests each answered by a test backend,
-// both backends seen), then prints one "HEADER name=n ... other=n" line per
+// gatewayTrafficProbeScript sends every request with the route's hostname as
+// Host, waits until the route is live (CONSECUTIVE consecutive header and
+// default requests each answered by a test backend, both backends seen),
+// then prints one "HEADER name=n ... other=n" line per
 // header round, stopping at the first without errors, and one "WEIGHTED ..."
 // line per weighted round, stopping at the first within tolerance. The Go
 // side re-evaluates every printed line; the early stops only save time.
@@ -138,7 +145,7 @@ URL, PRIMARY, ALTERNATE = os.environ["URL"], os.environ["PRIMARY"], os.environ["
 HEADER = {os.environ["HEADER_NAME"]: os.environ["HEADER_VALUE"]}
 BODY = b'{"model":"ai-conformance","messages":[{"role":"user","content":"hello"}]}'
 def call(extra):
-    req = urllib.request.Request(URL, data=BODY, headers={"Content-Type": "application/json", **extra})
+    req = urllib.request.Request(URL, data=BODY, headers={"Content-Type": "application/json", "Host": os.environ["HOST_HEADER"], **extra})
     err = None
     for _ in range(3):
         try:
@@ -237,14 +244,17 @@ type gatewayTrafficScenario struct {
 
 	// endpoint is the URL the probe posts to, resolved from the profile's
 	// data plane; listenerPort is the Gateway HTTP listener it targets;
-	// routePath is the per-run path prefix both HTTPRoute rules match.
-	endpoint     string
-	listenerPort int64
-	routePath    string
+	// routeHostname is the HTTPRoute's one hostname, sent as the probe's Host
+	// header; routePath is the per-run path prefix both rules match.
+	endpoint      string
+	listenerPort  int64
+	routeHostname string
+	routePath     string
 	// attachedRoutes are the HTTPRoutes already attached to the Gateway when
-	// the phase ran, named in the verdict because a route with a longer path
-	// or an older age on the same listener takes precedence over the test
-	// route; attachedRoutesErr records a listing that could not be read.
+	// the phase ran, named in the verdict because precedence between routes
+	// on the listener is the first thing to rule out when requests reached a
+	// non-test backend; attachedRoutesErr records a listing that could not
+	// be read.
 	attachedRoutes    []string
 	attachedRoutesErr error
 
@@ -286,6 +296,7 @@ func newGatewayTrafficScenario(clientset kubernetes.Interface, dynClient dynamic
 		gw:                  gw,
 		testRun:             run,
 		tolerations:         tolerations,
+		routeHostname:       gatewayTrafficHostPrefix + run.token + gatewayTrafficHostSuffix,
 		routePath:           gatewayTrafficPathPrefix + run.token,
 		backendReadyTimeout: defaults.GatewayTrafficBackendReadyTimeout,
 		routeAcceptTimeout:  defaults.GatewayTrafficRouteAcceptTimeout,
@@ -486,7 +497,7 @@ func (s *gatewayTrafficScenario) attachedRoutesHint() string {
 		return fmt.Sprintf("; the HTTPRoutes already attached to Gateway %s/%s could not be listed (%v)",
 			s.profile.Namespace, s.profile.GatewayName, s.attachedRoutesErr)
 	case len(s.attachedRoutes) > 0:
-		return fmt.Sprintf("; HTTPRoutes already attached to Gateway %s/%s when the probe ran: [%s] (a route with a longer path or an older age on the same listener takes precedence over the test route)",
+		return fmt.Sprintf("; HTTPRoutes already attached to Gateway %s/%s when the probe ran: [%s] (only a route on the test route's exact hostname and path can take precedence over it)",
 			s.profile.Namespace, s.profile.GatewayName, strings.Join(s.attachedRoutes, ", "))
 	}
 	return ""
@@ -502,8 +513,8 @@ func (s *gatewayTrafficScenario) verdictSummary(err error) string {
 	} else {
 		fmt.Fprintf(&sb, "Verdict:            FAIL in step %s\nError:              %v\n", s.phase, err)
 	}
-	fmt.Fprintf(&sb, "Gateway:            %s/%s (listener port %d)\nEndpoint:           %s\nHTTPRoute:          %s/%s (path prefix %s)\n",
-		s.profile.Namespace, s.profile.GatewayName, s.listenerPort, valueOrUnknown(s.endpoint), s.testRun.namespace, gatewayTrafficRouteName, s.routePath)
+	fmt.Fprintf(&sb, "Gateway:            %s/%s (listener port %d)\nEndpoint:           %s\nHTTPRoute:          %s/%s (hostname %s, path prefix %s; the probe sends the hostname as Host)\n",
+		s.profile.Namespace, s.profile.GatewayName, s.listenerPort, valueOrUnknown(s.endpoint), s.testRun.namespace, gatewayTrafficRouteName, s.routeHostname, s.routePath)
 	switch {
 	case s.attachedRoutesErr != nil:
 		fmt.Fprintf(&sb, "Attached routes:    unavailable (%v)\n", s.attachedRoutesErr)
@@ -588,7 +599,7 @@ func (s *gatewayTrafficScenario) attachRoute(ctx *validators.Context) error {
 	start := time.Now()
 	ns := s.testRun.namespace
 	s.recordAttachedRoutes(ctx)
-	route := buildGatewayTrafficHTTPRoute(ns, s.profile, s.routePath, s.primaryWeight, s.alternateWeight)
+	route := buildGatewayTrafficHTTPRoute(ns, s.profile, s.routeHostname, s.routePath, s.primaryWeight, s.alternateWeight)
 	recordObjectYAMLArtifact(ctx, "Gateway traffic: HTTPRoute manifest",
 		fmt.Sprintf("kubectl apply -n %s -f <httproute>", ns), route.Object)
 	if _, err := s.dynClient.Resource(httpRouteGVR).Namespace(ns).Create(ctx.Ctx, route, metav1.CreateOptions{}); err != nil {
@@ -627,8 +638,8 @@ func (s *gatewayTrafficScenario) recordAttachedRoutes(ctx *validators.Context) {
 			"gateway", s.profile.GatewayName, "routes", s.attachedRoutes)
 		recordRawTextArtifact(ctx, "Gateway traffic: routes already attached WARNING", cmd,
 			fmt.Sprintf("WARNING: %d HTTPRoute(s) already attached to Gateway %s/%s: %s\n"+
-				"The test route matches the per-run path %s so it outranks a shorter path; a pre-existing route on the same path, or one the gateway ranks higher, answers the probe's requests and fails the check as a non-test backend.",
-				len(s.attachedRoutes), s.profile.Namespace, s.profile.GatewayName, strings.Join(s.attachedRoutes, ", "), s.routePath))
+				"The test route carries the per-run hostname %s (sent as the probe's Host header) and path %s, so a route with another hostname does not match the probe's requests and a hostname-less one ranks below it; only a pre-existing route on the identical hostname and path could answer the probe's requests, which fails the check as a non-test backend.",
+				len(s.attachedRoutes), s.profile.Namespace, s.profile.GatewayName, strings.Join(s.attachedRoutes, ", "), s.routeHostname, s.routePath))
 	default:
 		recordRawTextArtifact(ctx, "Gateway traffic: routes already attached", cmd,
 			fmt.Sprintf("none: no HTTPRoute was attached to Gateway %s/%s before the test route", s.profile.Namespace, s.profile.GatewayName))
@@ -679,8 +690,8 @@ func (s *gatewayTrafficScenario) probe(ctx *validators.Context) error {
 	}
 	recordRawTextArtifact(ctx, "Gateway traffic: probe",
 		fmt.Sprintf("kubectl get pod %s -n %s", gatewayTrafficProbeName, ns),
-		fmt.Sprintf("Endpoint:         %s\nHeader requests:  %d with %s: %s\nWeighted rounds:  up to %d of %d requests each\nReady window:     %s (%d consecutive routed request pairs)",
-			s.endpoint, s.headerRequests, gatewayTrafficHeaderName, gatewayTrafficHeaderValue, s.rounds, s.requests, s.routeReadyWindow, s.consecutive))
+		fmt.Sprintf("Endpoint:         %s\nHost header:      %s\nHeader requests:  %d with %s: %s\nWeighted rounds:  up to %d of %d requests each\nReady window:     %s (%d consecutive routed request pairs)",
+			s.endpoint, s.routeHostname, s.headerRequests, gatewayTrafficHeaderName, gatewayTrafficHeaderValue, s.rounds, s.requests, s.routeReadyWindow, s.consecutive))
 
 	result, waitErr := waitForTerminalPodWithin(ctx.Ctx, s.clientset, ns, gatewayTrafficProbeName, "traffic probe pod", s.probeTimeout)
 	logs, logErr := s.readProbeLogs(ctx.Ctx)
@@ -902,12 +913,12 @@ func buildGatewayTrafficBackend(ns, name string, tolerations []corev1.Toleration
 
 // buildGatewayTrafficHTTPRoute attaches to the profile's Gateway across
 // namespaces (the parentRef names the Gateway's namespace, which the listener
-// must allow through allowedRoutes). Both rules match the per-run path
-// prefix, so the route outranks any pre-existing route with a shorter path
-// on the same listener; the first rule additionally matches the canary
-// header and sends to the alternate backend, the default rule splits all
-// other requests by weight.
-func buildGatewayTrafficHTTPRoute(ns string, profile *validators.InferenceGatewayProfile, path string, primaryWeight, alternateWeight int) *unstructured.Unstructured {
+// must allow through allowedRoutes). The route carries the per-run hostname
+// and both rules match the per-run path prefix, so a pre-existing route can
+// outrank it only on that exact hostname and path; the first rule
+// additionally matches the canary header and sends to the alternate backend,
+// the default rule splits all other requests by weight.
+func buildGatewayTrafficHTTPRoute(ns string, profile *validators.InferenceGatewayProfile, hostname, path string, primaryWeight, alternateWeight int) *unstructured.Unstructured {
 	ref := func(name string, weight int) map[string]any {
 		r := map[string]any{keyName: name, keyPort: int64(gatewayTrafficBackendPort)}
 		if weight > 0 {
@@ -921,6 +932,7 @@ func buildGatewayTrafficHTTPRoute(ns string, profile *validators.InferenceGatewa
 	route := &unstructured.Unstructured{Object: map[string]any{
 		keySpec: map[string]any{
 			"parentRefs": []any{map[string]any{keyName: profile.GatewayName, keyNamespace: profile.Namespace}},
+			"hostnames":  []any{hostname},
 			"rules": []any{
 				map[string]any{
 					"matches": []any{map[string]any{
@@ -953,6 +965,7 @@ func buildGatewayTrafficProbe(ns string, s *gatewayTrafficScenario) *corev1.Pod 
 		Command: []string{gatewayTrafficInterpreter, "-u", "-c", gatewayTrafficProbeScript},
 		Env: []corev1.EnvVar{
 			{Name: "URL", Value: s.endpoint},
+			{Name: "HOST_HEADER", Value: s.routeHostname},
 			{Name: "PRIMARY", Value: gatewayTrafficPrimary},
 			{Name: "ALTERNATE", Value: gatewayTrafficAlternate},
 			{Name: "HEADER_NAME", Value: gatewayTrafficHeaderName},
