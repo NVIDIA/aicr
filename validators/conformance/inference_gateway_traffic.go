@@ -47,33 +47,29 @@ import (
 // default rule splits the rest by weight, and a probe pod that counts which
 // backend answered. Unlike upstream, which creates its own Gateway, the
 // route attaches to the Gateway the recipe's inference gateway profile names,
-// so the data plane under test is the one AICR deployed.
+// so the data plane under test is the one AICR deployed. The test prefix
+// names the per-run namespace, by which leftovers from interrupted runs are
+// found; the "other" key is the probe's count of requests that failed or were
+// answered by neither test backend; the request path only makes the traffic
+// look like inference, since the backends answer every path; the sample
+// error bound caps how many probe error samples the verdict carries; the
+// interpreter runs both scripts in defaults.PythonProbeImage.
 const (
-	// gatewayTrafficTestPrefix names the per-run test namespace; leftovers
-	// from interrupted runs are found by this prefix.
-	gatewayTrafficTestPrefix = "gateway-traffic-"
-	gatewayTrafficRouteName  = "ai-conformance-route"
-	gatewayTrafficPrimary    = "model-v1"
-	gatewayTrafficAlternate  = "model-v2"
-	gatewayTrafficProbeName  = "gateway-probe"
-	// gatewayTrafficOtherKey is the probe's count of requests that failed or
-	// were answered by neither test backend.
-	gatewayTrafficOtherKey       = "other"
-	gatewayTrafficBackendPort    = 8080
-	gatewayTrafficPortName       = "http"
-	gatewayTrafficServerName     = "server"
-	gatewayTrafficProbeContainer = "probe"
-	gatewayTrafficHeaderName     = "OpenAI-Project"
-	gatewayTrafficHeaderValue    = "ai-conformance-canary"
-	// gatewayTrafficRequestPath is the path the probe posts to; the backends
-	// answer every path, the path only makes the traffic look like inference.
-	gatewayTrafficRequestPath = "/v1/chat/completions"
-	// gatewayTrafficMaxSampleErrors bounds the probe error samples carried
-	// into the verdict message.
+	gatewayTrafficTestPrefix      = "gateway-traffic-"
+	gatewayTrafficRouteName       = "ai-conformance-route"
+	gatewayTrafficPrimary         = "model-v1"
+	gatewayTrafficAlternate       = "model-v2"
+	gatewayTrafficProbeName       = "gateway-probe"
+	gatewayTrafficOtherKey        = "other"
+	gatewayTrafficBackendPort     = 8080
+	gatewayTrafficPortName        = "http"
+	gatewayTrafficServerName      = "server"
+	gatewayTrafficProbeContainer  = "probe"
+	gatewayTrafficHeaderName      = "OpenAI-Project"
+	gatewayTrafficHeaderValue     = "ai-conformance-canary"
+	gatewayTrafficRequestPath     = "/v1/chat/completions"
 	gatewayTrafficMaxSampleErrors = 3
-	// gatewayTrafficInterpreter runs the backend and probe scripts in
-	// defaults.PythonProbeImage.
-	gatewayTrafficInterpreter = "python3"
+	gatewayTrafficInterpreter     = "python3"
 )
 
 // capabilityAll is the Linux capability set the test pods drop entirely.
@@ -647,30 +643,32 @@ func evaluateGatewayWeightedRounds(rounds []gatewayTrafficCounts, wantShare, tol
 	}
 	var reasons []string
 	for i, r := range rounds {
-		err := evaluateGatewayWeightedSplit(r, wantShare, tolerance)
-		if err == nil {
+		finding := gatewayWeightedSplitFinding(r, wantShare, tolerance)
+		if finding == "" {
 			return nil
 		}
-		reasons = append(reasons, fmt.Sprintf("round %d: %v", i+1, err))
+		reasons = append(reasons, fmt.Sprintf("round %d: %s", i+1, finding))
 	}
 	return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
 		"unmatched requests did not split %.0f/%.0f within %.0f points in %d round(s): %s",
 		wantShare*100, (1-wantShare)*100, tolerance*100, len(rounds), strings.Join(reasons, "; ")))
 }
 
-func evaluateGatewayWeightedSplit(r gatewayTrafficCounts, wantShare, tolerance float64) error {
+// gatewayWeightedSplitFinding reports why one round does not satisfy the
+// split, or "" when it does; the round verdict is composed by the caller.
+func gatewayWeightedSplitFinding(r gatewayTrafficCounts, wantShare, tolerance float64) string {
 	if other := r[gatewayTrafficOtherKey]; other > 0 {
-		return fmt.Errorf("%d request(s) failed or reached a non-test backend (%s)", other, r.String())
+		return fmt.Sprintf("%d request(s) failed or reached a non-test backend (%s)", other, r.String())
 	}
 	total := r[gatewayTrafficPrimary] + r[gatewayTrafficAlternate]
 	if total == 0 {
-		return fmt.Errorf("no request reached a test backend")
+		return "no request reached a test backend"
 	}
 	got := float64(r[gatewayTrafficPrimary]) / float64(total)
 	if math.Abs(got-wantShare) > tolerance {
-		return fmt.Errorf("%s got %.1f%%, want %.0f%% (%s)", gatewayTrafficPrimary, got*100, wantShare*100, r.String())
+		return fmt.Sprintf("%s got %.1f%%, want %.0f%% (%s)", gatewayTrafficPrimary, got*100, wantShare*100, r.String())
 	}
-	return nil
+	return ""
 }
 
 // parseGatewayProbeLogs reads the HEADER lines (the last one counts, as the
@@ -1003,7 +1001,12 @@ func waitForHTTPRouteAccepted(ctx context.Context, dyn dynamic.Interface, ns, na
 		if waitCtx.Err() != nil {
 			break
 		}
-		// The channel closed without a verdict: re-Get and watch again.
+		// The channel closed without a verdict: pause, so an apiserver that
+		// closes watches at once cannot turn the loop into a request spin,
+		// then re-Get and watch again.
+		if !retryAfterTransient() {
+			break
+		}
 	}
 	if ctx.Err() != nil {
 		return last, errors.Wrap(errors.ErrCodeTimeout, "waiting for "+what+" canceled", ctx.Err())
