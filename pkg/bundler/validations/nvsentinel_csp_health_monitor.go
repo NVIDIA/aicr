@@ -44,6 +44,7 @@ const (
 	cspMonitorGCPLogFilterPath       = "csp-health-monitor.configToml.gcp.logFilter"
 	cspMonitorAWSDefaultRoleSuffix   = "-nvsentinel-health-monitor-assume-role-policy"
 	cspMonitorAWSRoleNameMaxLen      = 64
+	cspMonitorAWSRolePathMaxLen      = 510
 	cspMonitorMixinPrefix            = "nvsentinel-csp-health-monitor-"
 	cspMonitorAWS                    = "aws"
 	cspMonitorGCP                    = "gcp"
@@ -86,14 +87,17 @@ var cspMonitorProviderServices = map[string]recipe.CriteriaServiceType{
 }
 
 // Shapes of the identity values the chart builds the cloud identity
-// annotation from. awsRoleNamePattern is IAM's RoleName character set behind
-// an optional path, which the chart's role/<iamRoleName> ARN carries; the
-// name's length is checked against cspMonitorAWSRoleNameMaxLen.
+// annotation from. iamRoleName is an optional IAM path and a role name, which
+// the chart's role/<iamRoleName> ARN carries: awsRoleNamePattern is IAM's
+// RoleName (up to cspMonitorAWSRoleNameMaxLen), and awsRolePathPattern IAM's
+// Path with its leading and trailing / dropped (up to
+// cspMonitorAWSRolePathMaxLen), per IAM's CreateRole reference.
 // gcpServiceAccountIDPattern is the part of a service account email before
 // the @, which the chart joins with @<targetProjectId>.iam.gserviceaccount.com.
 var (
 	awsAccountIDPattern        = regexp.MustCompile(`^[0-9]{12}$`)
-	awsRoleNamePattern         = regexp.MustCompile(`^([\w+=,.@-]+/)*[\w+=,.@-]+$`)
+	awsRoleNamePattern         = regexp.MustCompile(`^[\w+=,.@-]+$`)
+	awsRolePathPattern         = regexp.MustCompile(`^[\x21-\x2E\x30-\x7E][\x21-\x7E]*$`)
 	gcpServiceAccountIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
 )
 
@@ -337,12 +341,21 @@ func cspMonitorAWSViolations(values map[string]any, clusterName string, fail fun
 		}
 		roleName, source = clusterName+cspMonitorAWSDefaultRoleSuffix, cspMonitorClusterNamePath
 	}
-	if len(roleName[strings.LastIndex(roleName, "/")+1:]) > cspMonitorAWSRoleNameMaxLen ||
-		!awsRoleNamePattern.MatchString(roleName) {
-
-		fail("the IRSA role name %q, from %s, is not a valid IAM role name (at most %d characters: letters, "+
-			"digits and +=,.@_-, optionally behind a path), so the ServiceAccount's role ARN names no role -- set "+
-			"%s to the name of the role you created, not its ARN: --set nv-sentinel:%s=<value>", roleName, source,
-			cspMonitorAWSRoleNameMaxLen, cspMonitorAWSRoleNamePath, cspMonitorAWSRoleNamePath)
+	name, validPath := roleName, true
+	if i := strings.LastIndex(roleName, "/"); i >= 0 {
+		path := roleName[:i]
+		name = roleName[i+1:]
+		validPath = len(path) <= cspMonitorAWSRolePathMaxLen && awsRolePathPattern.MatchString(path)
+	}
+	validName := len(name) <= cspMonitorAWSRoleNameMaxLen && awsRoleNamePattern.MatchString(name)
+	if strings.HasPrefix(roleName, "arn:") {
+		validPath = false
+	}
+	if !validName || !validPath {
+		fail("the IRSA role name %q, from %s, is not a valid IAM role: its name, after the last /, must be 1 to %d "+
+			"letters, digits and +=,.@_-, and a path before it printable ASCII with no leading /, at most %d "+
+			"characters, so the ServiceAccount's role ARN names no role -- set %s to the role's path and name, "+
+			"not its ARN: --set nv-sentinel:%s=<value>", roleName, source, cspMonitorAWSRoleNameMaxLen,
+			cspMonitorAWSRolePathMaxLen, cspMonitorAWSRoleNamePath, cspMonitorAWSRoleNamePath)
 	}
 }
