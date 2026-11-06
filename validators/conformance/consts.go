@@ -161,6 +161,7 @@ const (
 //	ai-service-metrics:        8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
 //	robust-controller:         6m30s work + 30s cleanup + 60s margin =  8m catalog timeout
 //	inference-gateway:        13m30s work + 30s cleanup + 60s margin = 15m catalog timeout
+//	workload-sandboxing:       8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
 //
 // dra-support can run TWO namespace-creating behavioral subtests in sequence
 // (the MNNVL IMEX channel probe, then the full-GPU DRA probe). The reserve
@@ -216,6 +217,10 @@ const (
 	aiServiceMetricsWorkBudget = 8*time.Minute + 30*time.Second
 	robustControllerWorkBudget = 6*time.Minute + 30*time.Second
 	inferenceGatewayWorkBudget = 13*time.Minute + 30*time.Second
+	// workload-sandboxing runs two CPU-only probe pods in sequence, each
+	// bounded by defaults.DRATestPodTimeout; a sandbox runtime (Kata boots a
+	// guest VM) starts slower than runc, so it gets the GPU checks' budget.
+	workloadSandboxingWorkBudget = 8*time.Minute + 30*time.Second
 )
 
 // gpuCheckWorkBudget derives the work budget for a GPU allocation conformance

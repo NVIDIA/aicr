@@ -336,8 +336,9 @@ source path (`${REGISTRY}/nvidia/aicr-validators/...`), set the variable to
 credentials. Some benchmark checks pin workload images the variable does not
 rewrite, such as the NCCL runtime image (override it with
 `AICR_NCCL_RUNTIME_IMAGE`) and the vanilla `docker.io/library/ubuntu:22.04`
-probe image of the `driver-runtime-management` conformance check (override it
-with `AICR_DRIVER_RUNTIME_IMAGE=<full reference of your copy>`); see
+probe image of the `driver-runtime-management` and `workload-sandboxing`
+conformance checks (override it with `AICR_DRIVER_RUNTIME_IMAGE` and
+`AICR_SANDBOX_PROBE_IMAGE`, each a full reference to your copy); see
 [Validation](validation.md).
 
 The inference performance check also runs the Dynamo runtime images

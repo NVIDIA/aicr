@@ -1576,6 +1576,42 @@ image cached there so image-locality keeps subsequent runs on the same node.
 This is unreliable and should not be used as the steady-state validation
 strategy.
 
+### `workload-sandboxing` fails
+
+The check (CNCF `workload_sandboxing`, SHOULD at v1.37 and MUST at v1.38)
+looks for a sandboxed `RuntimeClass`, runs a CPU-only `ubuntu:22.04` probe pod
+on it and an unsandboxed control pod on the same node, and compares what the
+two observe. No embedded recipe declares it yet: none ships a sandboxed
+`RuntimeClass`, so until the #3615 runtime decision provides one and the
+recipes declare the check, the `workload_sandboxing` evidence row renders
+`NOT TESTED (not run)` at SHOULD. A cluster that already has gVisor or Kata
+can run it today by adding `workload-sandboxing` to
+`spec.validation.conformance.checks` in a recipe copy (and naming the class
+with `AICR_SANDBOX_RUNTIME_CLASS` when detection does not match). Its artifacts (`Sandboxed RuntimeClass`, `Sandboxed probe pod
+logs`, `Unsandboxed control pod logs`, `Workload sandboxing verdict`) name the
+failing step:
+
+| Verdict excerpt | Meaning | Fix |
+|-----------------|---------|-----|
+| `unmet prerequisite: no sandboxed RuntimeClass` | No `RuntimeClass` names or handles gVisor (`gvisor`, `runsc`), Kata (`kata`, including the AKS `kata-mshv-vm-isolation` class), `sandboxed`, `quark` or `krun`; the platform does not implement the requirement. The check never skips or records N/A for this | Provide a sandbox runtime (which one AICR recipes ship, and on which pool, is the pending decision in #3615), or set `AICR_SANDBOX_RUNTIME_CLASS=<name>` when the cluster has one under another name |
+| `AICR_SANDBOX_RUNTIME_CLASS names RuntimeClass "...", which does not exist on this cluster` | The override names a class the cluster does not have | Fix the name (`kubectl get runtimeclass`) or unset the variable to auto-detect |
+| `kernel identity: the sandboxed pod observes the same kernel identity` | Pods on the `RuntimeClass` run on the host kernel: a runc-like handler, or a sandbox handler that is not installed on the node the pod landed on | Check that the handler is installed on the nodes the class schedules to and that the containerd runtime configuration maps the handler to the sandbox binary |
+| `process isolation:`, `kernel and memory isolation:`, `filesystem isolation:` or `network isolation:` | The named probe saw host state inside the sandbox (a host daemon in `/proc`, a readable `/dev/mem`, a host path such as `/var/lib/kubelet`, a bridge such as `cni0`); the probe logs artifact shows what it saw | The sandbox shares that host namespace or mount; correct the runtime configuration |
+| `sandboxed probe pod stuck:` or `unsandboxed control pod stuck:` | The pod could not pull its image or be scheduled (`Unschedulable`); for the sandboxed pod, usually a `RuntimeClass` `scheduling.nodeSelector` that no node satisfies | Inspect the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs; for mirrors see the image note below |
+
+The probe image (`docker.io/library/ubuntu:22.04`) pulls from Docker Hub by
+default and, like the busybox probe image and the NCCL workload image, is not
+rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`. In a mirrored environment set
+`AICR_SANDBOX_PROBE_IMAGE=<image ref>` in the `aicr validate` environment to
+the full reference of your copy or of another vanilla OS image. It must
+provide what the probe script runs on: a POSIX `/bin/sh`, `uname`, `cat`,
+`ls`, `wc`, `head`, `awk` and `tr`. A distroless image cannot run the probe;
+mirroring the Ubuntu image is the simplest choice. The two probe pods carry
+no `imagePullSecrets` (`--image-pull-secret` reaches the validator Job, not
+the per-run namespace, the same as for the other vanilla probe images), so a
+mirror that needs credentials must supply them node-side, through the
+container runtime's registry configuration.
+
 ### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus did not load the ServiceMonitor/PodMonitor"
 
 Both checks create a monitor (a ServiceMonitor or a PodMonitor) and, before

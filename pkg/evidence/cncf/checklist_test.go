@@ -279,9 +279,10 @@ func TestExpectedChecks(t *testing.T) {
 		{Version135, "dra_support", []string{"dra-support"}},
 		{Version136, "dra_support", nil}, // not a requirement at v1.36
 		{Version137, "secure_accelerator_access", []string{"secure-accelerator-access", "slinky-slurm-gpu-access"}},
-		{Version137, "workload_sandboxing", nil}, // no AICR check yet
 		{Version137, "driver_runtime_management", []string{"driver-runtime-management"}},
 		{Version135, "driver_runtime_management", []string{"driver-runtime-management"}},
+		{Version137, "workload_sandboxing", []string{"workload-sandboxing"}},
+		{Version136, "workload_sandboxing", nil}, // not a requirement before v1.37
 		{Version137, "nonexistent", nil},
 	}
 	for _, tt := range tests {

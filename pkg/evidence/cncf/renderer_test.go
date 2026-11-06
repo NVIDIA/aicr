@@ -233,8 +233,10 @@ func TestGetRequirement(t *testing.T) {
 		{"slinky-slurm-gpu-access", Version137, false, "secure-accelerator-access.md", LevelMust, false},
 		{"driver-runtime-management", Version137, false, "driver-runtime-management.md", LevelShould, false}, // MUST only from v1.38 (KAR-0001)
 		{"driver-runtime-management", Version135, false, "driver-runtime-management.md", LevelShould, false},
-		{"gpu-operator-health", Version137, true, "", "", false}, // diagnostic
-		{"platform-health", Version137, true, "", "", false},     // diagnostic
+		{"workload-sandboxing", Version137, false, "workload-sandboxing.md", LevelShould, false}, // MUST only from v1.38 (KAR-0020)
+		{"workload-sandboxing", Version136, false, "workload-sandboxing.md", "", true},           // not a requirement before v1.37: supporting evidence
+		{"gpu-operator-health", Version137, true, "", "", false},                                 // diagnostic
+		{"platform-health", Version137, true, "", "", false},                                     // diagnostic
 		{"nonexistent", Version137, true, "", "", false},
 	}
 
@@ -458,7 +460,9 @@ func TestRenderIndexListsUntestedRequirements(t *testing.T) {
 			"| `disaggregated_inference` | SHOULD | | NOT TESTED (no AICR check) | |",
 		}, []string{"`workload_sandboxing`", "| `gang_scheduling` | MUST | | NOT TESTED"}},
 		{Version137, []string{
-			"| `workload_sandboxing` | SHOULD | | NOT TESTED (no AICR check) | |",
+			// workload_sandboxing has a check from #3615; nothing ran it in
+			// this report, so it is not run rather than uncovered.
+			"| `workload_sandboxing` | SHOULD | | NOT TESTED (not run) | |",
 			"| `disaggregated_inference` | SHOULD | | NOT TESTED (no AICR check) | |",
 		}, []string{"| `gang_scheduling` | MUST | | NOT TESTED"}},
 	}
@@ -498,7 +502,8 @@ func TestRenderIndexListsUntestedRequirements(t *testing.T) {
 	for _, want := range []string{
 		"| `secure_accelerator_access` | MUST | | NOT TESTED (not run) | |",
 		"| `robust_controller` | MUST | | NOT TESTED (not run) | |",
-		"| `workload_sandboxing` | SHOULD | | NOT TESTED (no AICR check) | |",
+		"| `workload_sandboxing` | SHOULD | | NOT TESTED (not run) | |",
+		"| `gpu_sharing` | SHOULD | | NOT TESTED (no AICR check) | |",
 	} {
 		if !strings.Contains(string(index), want) {
 			t.Errorf("index.md missing %q:\n%s", want, index)

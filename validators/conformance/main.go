@@ -48,6 +48,7 @@ func conformanceChecks() map[string]validators.CheckFunc {
 		"slinky-slurm-health":       CheckSlinkySlurmHealth,
 		"slinky-slurm-imex-channel": CheckSlinkySlurmIMEXChannel,
 		"slinky-slurm-gpu-access":   CheckSlinkySlurmGPUAccess,
+		"workload-sandboxing":       CheckWorkloadSandboxing,
 		"gpu-operator-health":       CheckGPUOperatorHealth,
 		"platform-health":           CheckPlatformHealth,
 	}

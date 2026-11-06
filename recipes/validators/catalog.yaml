@@ -331,6 +331,17 @@ validators:
     timeout: 5m
     args: ["slinky-slurm-gpu-access"]
     env: []
+  - name: workload-sandboxing
+    phase: conformance
+    description: "Verify a sandboxed RuntimeClass (gVisor, Kata) isolates a CPU-only pod from the host kernel, processes, filesystem and network; fails when no sandboxed RuntimeClass exists"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    # 8m30s work budget + 30s cleanup + 60s margin (see
+    # workloadSandboxingWorkBudget in validators/conformance/consts.go): one
+    # namespace, two CPU-only probe pod waits each bounded by
+    # DRATestPodTimeout, log collection.
+    timeout: 10m
+    args: ["workload-sandboxing"]
+    env: []
   - name: gpu-operator-health
     phase: conformance
     description: "Verify GPU operator health (conformance diagnostic)"
