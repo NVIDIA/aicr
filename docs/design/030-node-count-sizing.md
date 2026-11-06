@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** — 2026-11-04, revised 2026-11-05 after review. Answers
+**Proposed** — 2026-11-04. Answers
 [#3642](https://github.com/NVIDIA/aicr/issues/3642), under the scalability
 epic [#2427](https://github.com/NVIDIA/aicr/issues/2427). Resolves the
 resource-sizing part of the scale contract asked for in
@@ -10,14 +10,11 @@ resource-sizing part of the scale contract asked for in
 proposed direction in [#3214](https://github.com/NVIDIA/aicr/issues/3214).
 Implemented by [#3643](https://github.com/NVIDIA/aicr/issues/3643)
 (generation time) and [#3644](https://github.com/NVIDIA/aicr/issues/3644)
-(deploy time). Keeps the default limits raised by
-[#3212](https://github.com/NVIDIA/aicr/pull/3212) and
-[#3236](https://github.com/NVIDIA/aicr/pull/3236) as the top tier.
+(deploy time).
 
 ## Decision Summary
 
-Today's defaults stay as they are, and they remain what a cluster gets when
-it states no node count. A user who states a GPU node count, with `aicr
+A cluster that states no node count gets today's defaults. A user who states a GPU node count, with `aicr
 bundle --nodes` at generation time or `sizing.nodeCount` when an
 `argocd-helm` bundle is installed, can get lower memory values for the
 controllers whose memory grows with cluster size. Each component declares
@@ -35,13 +32,12 @@ configuration daemon. The NIC daemon runs on every node, and each copy
 caches every NicDevice in the cluster
 ([#3149](https://github.com/NVIDIA/aicr/issues/3149)).
 
-v1.0.0 shipped small-cluster values, and two GB300 bring-ups at about 1600
-and 2500 GPU nodes OOM-killed all five
-([#3148](https://github.com/NVIDIA/aicr/issues/3148)). v1.1.0 raised the
-limits for every cluster to values that hold at 2500 GPU nodes: 8Gi to 12Gi
-for the four controllers (#3212) and 2Gi for the NIC daemon (#3236). Those
-values are right for the largest clusters and are what this ADR keeps for
-them. For everything else they cost something:
+Today's defaults are sized for the largest clusters: 8Gi to 12Gi limits
+for the four controllers and 2Gi for the NIC daemon, which hold at 2500 GPU
+nodes. Smaller values OOM-killed all five on two GB300 clusters at about
+1600 and 2500 GPU nodes
+([#3148](https://github.com/NVIDIA/aicr/issues/3148)). For every other
+cluster these values cost something:
 
 - **Limits far above what the cluster can use.** With both nodewright
   replicas on one system node, the controllers' limits add up to 56Gi on a
@@ -53,7 +49,8 @@ them. For everything else they cost something:
   nodes and below its p90 working set is under 900Mi, so the scheduler
   reserves memory the controller does not use.
 
-Lowering these values for everyone would bring #3148 back, and changing them
+Lowering these values for everyone would OOM-kill the largest clusters'
+controllers (#3148), and changing them
 for a large cluster re-rolls its controllers, which on a 2000-node cluster
 takes hours. A cluster's size is the input that tells the two cases apart,
 and AICR has no way to turn a node count into a resource value: `aicr
@@ -82,7 +79,7 @@ generated: large clusters install a published OCI bundle through
 ## Non-Goals
 
 - **Raising any value above today's defaults,** including the requests on
-  large clusters, which still sit below usage. Raising them re-rolls the
+  large clusters, which sit below usage. Raising them re-rolls the
   largest clusters; see Open questions.
 - **Deriving a count AICR was not given.** The epic requires that node count
   alone never silently specializes a configuration, so a snapshot-derived
@@ -181,7 +178,7 @@ today's value in every tier.
 
 ### A. Static values sized for the largest cluster
 
-The status quo since v1.1.0. Correct for the largest clusters; every
+Today's defaults. Correct for the largest clusters; every
 smaller cluster carries their limits and, for two controllers, their
 requests.
 
@@ -270,7 +267,7 @@ supports.
 | nodewright manager | `controllerManager.manager.resources` | `values.yaml` | 2000Mi / 12Gi |
 | NIC configuration daemon | `nicConfigurationOperator.configurationDaemon.resources` | `values-generic-gb300.yaml` | 256Mi / 2Gi |
 
-These are the values on `main` today and stay unchanged. A bundle generated
+These are the current defaults. A bundle generated
 without `--nodes`, or with a count above 2000, and an `argocd-helm` bundle
 installed with `sizing.nodeCount` 0 or above 2000, get exactly these.
 
