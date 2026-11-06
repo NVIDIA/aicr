@@ -84,12 +84,13 @@ func TestProviderScheme(t *testing.T) {
 		providerID string
 		want       string
 	}{
-		{"nico://rack1/node-07", "nico"},
-		{"kind://docker/kind/kind-control-plane", "kind"},
-		{"aws://us-east-1a/i-0123456789", "aws"},
+		{"nico://rack1/node-07", `scheme "nico"`},
+		{"kind://docker/kind/kind-control-plane", `scheme "kind"`},
+		{"aws://us-east-1a/i-0123456789", `scheme "aws"`},
+		{"ocid1.instance.oc1.iad.anuwcljtexample", "unschemed"},
 		{"", "none"},
-		{"://missing-scheme", "none"},
-		{"no-scheme-at-all", "none"},
+		{"://missing-scheme", "unschemed"},
+		{"no-scheme-at-all", "unschemed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.providerID, func(t *testing.T) {
@@ -481,7 +482,7 @@ func TestCheckPlatformAutoscalingSkipsUnknown(t *testing.T) {
 	if err == nil || !validators.IsSkip(err) {
 		t.Fatalf("checkPlatformAutoscaling() = %v, want a skip for a provider without a probe", err)
 	}
-	for _, want := range []string{"no autoscaler probe for this provider", `"nico"`, "not product nonapplicability", "notApplicable"} {
+	for _, want := range []string{"no autoscaler probe for this provider", `scheme "nico"`, "not product nonapplicability", "notApplicable"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("skip reason %q should contain %q", err.Error(), want)
 		}
@@ -489,7 +490,7 @@ func TestCheckPlatformAutoscalingSkipsUnknown(t *testing.T) {
 	if strings.Contains(err.Error(), "not recognized") {
 		t.Errorf("skip reason must not read as platform nonapplicability: %q", err.Error())
 	}
-	if !strings.Contains(out, "Cluster Autoscaling Observation") || !strings.Contains(out, "Provider scheme: nico") {
+	if !strings.Contains(out, "Cluster Autoscaling Observation") || !strings.Contains(out, `Provider ID:     scheme "nico"`) {
 		t.Errorf("missing-probe observation artifact not recorded:\n%s", out)
 	}
 }
@@ -904,7 +905,7 @@ func TestRecordClusterAutoscalerStatus_ReadErrorIsNotAbsence(t *testing.T) {
 			vctx := &validators.Context{Ctx: context.Background(), Clientset: client}
 			var found bool
 			var unread string
-			out := captureStdout(t, func() { found, unread = recordClusterAutoscalerStatus(vctx) })
+			out := captureStdout(t, func() { found, unread, _ = recordClusterAutoscalerStatus(vctx) })
 			if found {
 				t.Fatal("recordClusterAutoscalerStatus() = true without a ConfigMap")
 			}
@@ -930,12 +931,16 @@ func TestRecordClusterAutoscalerDeployment_UnavailableIsNotAbsence(t *testing.T)
 	vctx := &validators.Context{Ctx: context.Background(), Clientset: client}
 	var found bool
 	var unread string
-	out := captureStdout(t, func() { found, unread = recordClusterAutoscalerDeployment(vctx) })
+	var unreadErr error
+	out := captureStdout(t, func() { found, unread, unreadErr = recordClusterAutoscalerDeployment(vctx) })
 	if found {
 		t.Fatal("recordClusterAutoscalerDeployment() = true for an unavailable Deployment")
 	}
 	if unread == "" || !strings.Contains(out, "exists but is not available") {
 		t.Errorf("artifact must record the unavailable Deployment (unread=%q):\n%s", unread, out)
+	}
+	if unreadErr == nil || errorstest.ReportedCode(unreadErr) != errors.ErrCodeInternal {
+		t.Errorf("unreadErr = %v, want the helper's Internal not-available error", unreadErr)
 	}
 }
 
@@ -996,13 +1001,11 @@ func TestPlatformSummariesDoNotTurnUnreadIntoAbsence(t *testing.T) {
 }
 
 // TestCheckEKSAutoscaling_NoAutoscalerObserved pins the EKS path when GPU
-// nodes carry no managed node group label: definitive absence of every
-// autoscaler signal (no label, no Cluster Autoscaler, no status ConfigMap,
-// no failed read) fails with NotFound naming what was looked for, because a
-// passed result would render cluster_autoscaling PASSED on observation
-// alone; a present status ConfigMap is an observation that passes, and a
-// failed ConfigMap read is unread, never claimed absent, and passes as an
-// observation too.
+// nodes carry no managed node group label. Nothing confirming an autoscaler
+// fails: definitive absence with NotFound, an unavailable Cluster Autoscaler
+// Deployment with the helper's Internal, a failed Deployment or ConfigMap read
+// with its classified code; the artifacts still record unread as unread. A
+// present status ConfigMap is an observation that passes.
 func TestCheckEKSAutoscaling_NoAutoscalerObserved(t *testing.T) {
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "gpu-1", Labels: map[string]string{"nvidia.com/gpu.present": "true"}},
@@ -1013,48 +1016,67 @@ func TestCheckEKSAutoscaling_NoAutoscalerObserved(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "cluster-autoscaler-status", Namespace: "kube-system"},
 		Data:       map[string]string{"status": "Cluster-autoscaler status: Healthy"},
 	}
+	zeroReplicaCA := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-autoscaler", Namespace: "kube-system"},
+		Spec:       appsv1.DeploymentSpec{Replicas: ptrInt32(1)},
+		Status:     appsv1.DeploymentStatus{AvailableReplicas: 0},
+	}
+	forbidden := func(resource string) error {
+		return k8serrors.NewForbidden(schema.GroupResource{Resource: resource}, "", fmt.Errorf("rbac denied"))
+	}
 	tests := []struct {
 		name           string
 		objects        []runtime.Object
-		statusReadErr  error
-		wantErr        bool
+		configMapErr   error
+		deploymentErr  error
+		wantCode       errors.ErrorCode // "" means the check passes
+		wantInErr      string
 		wantInSummary  string
 		wantNotSummary string
 	}{
-		{"definitive absence fails NotFound", []runtime.Object{node}, nil, true, "no cluster-autoscaler-status ConfigMap", ""},
-		{"status ConfigMap present, no Deployment: observation", []runtime.Object{node, statusCM}, nil, false, "cluster-autoscaler-status ConfigMap present", ""},
-		{"status ConfigMap unread: observation, no absence claimed", []runtime.Object{node}, k8serrors.NewForbidden(schema.GroupResource{Resource: "configmaps"}, "", fmt.Errorf("rbac denied")), false, "cluster-autoscaler-status ConfigMap could not be read", "no cluster-autoscaler-status ConfigMap"},
+		{"definitive absence fails NotFound", []runtime.Object{node}, nil, nil, errors.ErrCodeNotFound, "notApplicable", "no cluster-autoscaler-status ConfigMap", ""},
+		{"status ConfigMap present, no Deployment: observation", []runtime.Object{node, statusCM}, nil, nil, "", "", "cluster-autoscaler-status ConfigMap present", ""},
+		{"Cluster Autoscaler at 0 available replicas fails Internal", []runtime.Object{node, zeroReplicaCA}, nil, nil, errors.ErrCodeInternal, "unavailable or could not be read", "could not be confirmed", "no in-cluster Cluster Autoscaler Deployment;"},
+		{"Deployment read fails: classified code, not absence", []runtime.Object{node}, nil, k8serrors.NewServerTimeout(schema.GroupResource{Resource: "deployments"}, "get", 1), errors.ErrCodeTimeout, "could not be read", "could not be confirmed", "no in-cluster Cluster Autoscaler Deployment;"},
+		{"status ConfigMap unread: fails, no absence claimed", []runtime.Object{node}, forbidden("configmaps"), nil, errors.ErrCodeInternal, "ConfigMap could not be read", "cluster-autoscaler-status ConfigMap could not be read", "no cluster-autoscaler-status ConfigMap"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := k8sfake.NewClientset(tt.objects...)
-			if tt.statusReadErr != nil {
+			if tt.configMapErr != nil {
 				client.PrependReactor("get", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
-					return true, nil, tt.statusReadErr
+					return true, nil, tt.configMapErr
+				})
+			}
+			if tt.deploymentErr != nil {
+				client.PrependReactor("get", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.deploymentErr
 				})
 			}
 			vctx := &validators.Context{Ctx: context.Background(), Clientset: client}
 			var err error
 			out := captureStdout(t, func() { err = checkEKSAutoscaling(vctx) })
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("checkEKSAutoscaling() = nil, want NotFound for definitive absence")
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Fatalf("checkEKSAutoscaling() = %v, want an observation (nil)", err)
 				}
-				errorstest.WantReportedCode(t, err, errors.ErrCodeNotFound)
-				for _, want := range []string{"eks.amazonaws.com/nodegroup", "Cluster Autoscaler Deployment", "cluster-autoscaler-status", "Karpenter", "notApplicable"} {
+			} else {
+				if err == nil {
+					t.Fatalf("checkEKSAutoscaling() = nil, want %s: nothing confirmed an autoscaler", tt.wantCode)
+				}
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+				for _, want := range []string{"eks.amazonaws.com/nodegroup", "Karpenter", "notApplicable", tt.wantInErr} {
 					if !strings.Contains(err.Error(), want) {
 						t.Errorf("error %q should name %q", err.Error(), want)
 					}
 				}
-			} else if err != nil {
-				t.Fatalf("checkEKSAutoscaling() = %v, want an observation (nil)", err)
 			}
 			summary := out[strings.LastIndex(out, "OBSERVED"):]
 			if tt.wantInSummary != "" && !strings.Contains(summary, tt.wantInSummary) {
 				t.Errorf("summary missing %q:\n%s", tt.wantInSummary, summary)
 			}
 			if tt.wantNotSummary != "" && strings.Contains(summary, tt.wantNotSummary) {
-				t.Errorf("summary turns an unread ConfigMap into absence (%q):\n%s", tt.wantNotSummary, summary)
+				t.Errorf("summary turns an unread or unavailable autoscaler into absence (%q):\n%s", tt.wantNotSummary, summary)
 			}
 			if strings.Contains(out, "PASS") {
 				t.Errorf("observation must not read as a pass:\n%s", out)

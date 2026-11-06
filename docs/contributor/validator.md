@@ -254,6 +254,15 @@ Slinky NodeSet reserves every GPU on a node for its `slurmd` pod and Slurm
 GRES/cgroups isolate access, so the check's Kubernetes per-pod probe could
 either never schedule or attest the wrong access path (#2724).
 
+`slinky-slurm-gpu-access` verifies that path instead (#2756). From the login pod
+it runs an `srun --gpus=1` job, which must list exactly one GPU and open exactly
+one GPU minor device, then a job with no GPU request pinned with `--nodelist` to
+the same Slurm node, which must open none. The probe shell only reports facts
+(`KEY=value` lines: node, `nvidia-smi` UUIDs, the errno of a read-only open of
+each `/dev/nvidiaN`); `parseSlurmGPUProbe` and the two evaluate functions decide.
+It never lists `/dev/nvidia*` to infer isolation: the cgroup device controller
+leaves the nodes visible and refuses `open()` with EPERM.
+
 After its CNCF subtests pass, `secure-accelerator-access` records one AICR
 hardening extra (#3428): an unprivileged pod on the NVIDIA RuntimeClass the GPU
 Operator installed, with `NVIDIA_VISIBLE_DEVICES=all` and no allocation, pinned
@@ -297,20 +306,18 @@ records that scale-up as an observation (scale-down is not observed). The EKS,
 AKS and GKE paths record autoscaler presence, GPU pool membership, the
 `cluster-autoscaler-status` ConfigMap and recent autoscaler events as
 `OBSERVED`, which is not behavioral proof even though the completed check
-still reports `passed` (the requirement-level reading is #3612's); a
-providerID no probe recognizes skips as
-"no autoscaler probe for this provider", a missing probe rather than product
-nonapplicability, which only `spec.validate.evidence.cncf.notApplicable`
-declares.
-
-`slinky-slurm-gpu-access` verifies that path instead (#2756). From the login pod
-it runs an `srun --gpus=1` job, which must list exactly one GPU and open exactly
-one GPU minor device, then a job with no GPU request pinned with `--nodelist` to
-the same Slurm node, which must open none. The probe shell only reports facts
-(`KEY=value` lines: node, `nvidia-smi` UUIDs, the errno of a read-only open of
-each `/dev/nvidiaN`); `parseSlurmGPUProbe` and the two evaluate functions decide.
-It never lists `/dev/nvidia*` to infer isolation: the cgroup device controller
-leaves the nodes visible and refuses `open()` with EPERM.
+reports `passed` (the requirement-level reading of a passed observation is a
+follow-up). The EKS path fails when nothing confirmed an autoscaler: GPU nodes
+with no `eks.amazonaws.com/nodegroup` label, no available in-cluster Cluster
+Autoscaler Deployment and no `cluster-autoscaler-status` ConfigMap (and no
+Karpenter) fail `NotFound` when every read answered NotFound, or with the
+read's classified code when the Deployment was unavailable or a read could not
+land; the artifacts still record the unread reads as unread. The remedy for a
+platform without workload-driven autoscaling is a
+`spec.validate.evidence.cncf.notApplicable` justification. A providerID no
+probe recognizes skips as "no autoscaler probe for this provider" (naming the
+scheme, or an unschemed providerID such as OKE's bare OCID), a missing probe
+rather than product nonapplicability, which only that declaration states.
 
 `gang-scheduling` exercises KAI all-or-nothing scheduling with CPU-only
 members, matching the upstream `TestGangScheduling` (#3603). After the KAI

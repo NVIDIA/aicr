@@ -77,7 +77,9 @@ type clusterAutoscalingReport struct {
 // drive no scale test, so a passing result there is not behavioral proof:
 // the cluster_autoscaling claim rests on provider documentation (manual
 // attestation) or a configured not-applicable justification, never on these
-// observations alone (#3428).
+// observations alone (#3428). EKS fails when nothing confirmed an autoscaler
+// (no managed node group label, no available Cluster Autoscaler, no status
+// ConfigMap), since a passed result would render the requirement PASSED.
 //
 // A providerID no probe recognizes (bare metal, Kind, KWOK) is a missing
 // probe, recorded as a skip: it says nothing about whether the platform
@@ -593,14 +595,21 @@ func detectPlatform(ctx *validators.Context) (platform, providerID string, err e
 	return "", pid, nil
 }
 
-// providerScheme returns the scheme of a providerID ("nico" for
-// "nico://..."), or "none" when the node carries no providerID at all.
+// providerScheme describes a node's providerID for the missing-probe
+// evidence: `scheme "nico"` for "nico://...", "unschemed" for a providerID
+// without "://" (OKE nodes carry a bare OCID), and "none" when the node
+// carries no providerID at all. An empty providerID and an unschemed one
+// must not read the same: the latter is a provider the check has no probe
+// for, the former a node that names no provider.
 func providerScheme(providerID string) string {
-	scheme, _, found := strings.Cut(providerID, "://")
-	if !found || scheme == "" {
+	if providerID == "" {
 		return valueNone
 	}
-	return scheme
+	scheme, _, found := strings.Cut(providerID, "://")
+	if !found || scheme == "" {
+		return "unschemed"
+	}
+	return fmt.Sprintf("scheme %q", scheme)
 }
 
 // checkPlatformAutoscaling records the platform's autoscaling arrangement
@@ -628,12 +637,12 @@ func checkPlatformAutoscaling(ctx *validators.Context) error {
 	default:
 		scheme := providerScheme(providerID)
 		reason := fmt.Sprintf(
-			"no autoscaler probe for this provider: Karpenter is not installed and the node providerID scheme %q is not one the check has a probe for (aws, gce, azure). "+
+			"no autoscaler probe for this provider: Karpenter is not installed and the node providerID (%s) is not one the check has a probe for (schemes aws, gce, azure). "+
 				"This is a missing probe, not product nonapplicability: if the platform has no workload-driven cluster autoscaler, declare cluster_autoscaling not applicable with a justification in spec.validate.evidence.cncf.notApplicable; "+
 				"otherwise the cluster_autoscaling claim rests on provider documentation", scheme)
 		recordRawTextArtifact(ctx, "Cluster Autoscaling Observation",
 			"kubectl get nodes -o jsonpath='{.items[0].spec.providerID}'",
-			fmt.Sprintf("Provider scheme: %s\nProbe:           none\n%s", scheme, reason))
+			fmt.Sprintf("Provider ID:     %s\nProbe:           none\n%s", scheme, reason))
 		return validators.SkipWithReason(validators.SkipReasonUnrecognizedPlatform, reason)
 	}
 }
@@ -646,8 +655,11 @@ func checkPlatformAutoscaling(ctx *validators.Context) error {
 // a NotFound establishes absence; a Deployment that exists but is not
 // available, or a read that failed (RBAC, timeout, transport), is recorded
 // as such so the artifact never claims an absence that was not observed;
-// unread carries those notes for the summary line.
-func recordClusterAutoscalerDeployment(ctx *validators.Context) (found bool, unread string) {
+// unread carries those notes for the summary line and unreadErr the first
+// such error with its classified code (Internal for an unavailable
+// Deployment), for callers that must fail when nothing confirmed an
+// autoscaler.
+func recordClusterAutoscalerDeployment(ctx *validators.Context) (found bool, unread string, unreadErr error) {
 	caNamespaces := []string{defaults.KubeSystemNamespace, deploymentClusterAutoscaler, "system"}
 	caDeployNames := []string{deploymentClusterAutoscaler, "cluster-autoscaler-aws-cluster-autoscaler", "cluster-autoscaler-azure-cluster-autoscaler"}
 	var notes []string
@@ -663,12 +675,18 @@ func recordClusterAutoscalerDeployment(ctx *validators.Context) (found bool, unr
 						caDeploy.Status.AvailableReplicas,
 						ptr.Deref(caDeploy.Spec.Replicas, 1),
 						firstContainerImage(caDeploy.Spec.Template.Spec.Containers)))
-				return true, ""
+				return true, "", nil
 			case caDeploy != nil:
 				notes = append(notes, fmt.Sprintf("%s/%s exists but is not available (%d available replicas)",
 					caNS, caName, caDeploy.Status.AvailableReplicas))
+				if unreadErr == nil {
+					unreadErr = caErr
+				}
 			case !stderrors.Is(caErr, errors.New(errors.ErrCodeNotFound, "")):
 				notes = append(notes, fmt.Sprintf("%s/%s could not be read: %v", caNS, caName, caErr))
+				if unreadErr == nil {
+					unreadErr = caErr
+				}
 			}
 		}
 	}
@@ -678,15 +696,16 @@ func recordClusterAutoscalerDeployment(ctx *validators.Context) (found bool, unr
 		text = "No available in-cluster Cluster Autoscaler Deployment; absence is NOT established for every candidate: " + unread
 	}
 	recordRawTextArtifact(ctx, "Cluster Autoscaler", "kubectl get deploy -A | grep cluster-autoscaler", text)
-	return false, unread
+	return false, unread, unreadErr
 }
 
 // recordClusterAutoscalerStatus records the cluster-autoscaler-status
 // ConfigMap the Cluster Autoscaler (self-managed, GKE's and AKS's managed
 // instances alike) writes, and returns whether it was found. A read error
 // other than NotFound is recorded with the absence so it is not mistaken for
-// a disabled autoscaler.
-func recordClusterAutoscalerStatus(ctx *validators.Context) (found bool, unread string) {
+// a disabled autoscaler; unreadErr carries the first one with its classified
+// code.
+func recordClusterAutoscalerStatus(ctx *validators.Context) (found bool, unread string, unreadErr error) {
 	var readErrs []string
 	for _, ns := range []string{defaults.KubeSystemNamespace, deploymentClusterAutoscaler, "system"} {
 		caStatus, caErr := ctx.Clientset.CoreV1().ConfigMaps(ns).Get(
@@ -694,6 +713,9 @@ func recordClusterAutoscalerStatus(ctx *validators.Context) (found bool, unread 
 		if caErr != nil {
 			if k8s.IgnoreNotFound(caErr) != nil {
 				readErrs = append(readErrs, fmt.Sprintf("%s: %v", ns, caErr))
+				if unreadErr == nil {
+					unreadErr = classifyK8sReadError(caErr, fmt.Sprintf("ConfigMap %s/cluster-autoscaler-status", ns))
+				}
 			}
 			continue
 		}
@@ -704,7 +726,7 @@ func recordClusterAutoscalerStatus(ctx *validators.Context) (found bool, unread 
 		recordRawTextArtifact(ctx, "Cluster Autoscaler Status",
 			fmt.Sprintf("kubectl get configmap cluster-autoscaler-status -n %s -o jsonpath='{.data.status}'", ns),
 			statusData)
-		return true, ""
+		return true, "", nil
 	}
 	text := "ConfigMap cluster-autoscaler-status not found (the autoscaler may not be enabled, or does not publish status in-cluster)"
 	if len(readErrs) > 0 {
@@ -713,7 +735,7 @@ func recordClusterAutoscalerStatus(ctx *validators.Context) (found bool, unread 
 	}
 	recordRawTextArtifact(ctx, "Cluster Autoscaler Status",
 		"kubectl get configmap cluster-autoscaler-status -n kube-system", text)
-	return false, unread
+	return false, unread, unreadErr
 }
 
 // statusObservation words the cluster-autoscaler-status ConfigMap finding
@@ -874,20 +896,22 @@ func checkEKSAutoscaling(ctx *validators.Context) error {
 	// Observations: an in-cluster Cluster Autoscaler is optional on EKS
 	// (Karpenter or managed node-group scaling may be used instead), so its
 	// absence is recorded, not failed.
-	caFound, caUnread := recordClusterAutoscalerDeployment(ctx)
-	caStatusFound, statusUnread := recordClusterAutoscalerStatus(ctx)
+	caFound, caUnread, caUnreadErr := recordClusterAutoscalerDeployment(ctx)
+	caStatusFound, statusUnread, statusUnreadErr := recordClusterAutoscalerStatus(ctx)
 	recordAutoscalerEvents(ctx)
 
 	pool := fmt.Sprintf("GPU nodes belong to managed node group %q (ASG-backed)", nodeGroupName)
-	// Definitive absence of every autoscaler signal — no managed node group
-	// label, no in-cluster Cluster Autoscaler, no status ConfigMap, and none
-	// of those reads failed — is a failure, not an observation: a passed
-	// CTRF result renders cluster_autoscaling PASSED, and nothing in the
-	// aggregation marks a result observation-only yet, so a self-managed EKS
-	// cluster with no autoscaler at all must not pass on observation alone.
-	// A failed read of the Deployment or the ConfigMap is unread, not absent,
-	// and stays an observation that claims no absence.
-	definitiveAbsence := nodeGroupName == "" && !caFound && caUnread == "" && !caStatusFound && statusUnread == ""
+	// With no managed node group label, no available in-cluster Cluster
+	// Autoscaler and no status ConfigMap, nothing confirmed an autoscaler:
+	// that is a failure, not an observation, because a passed CTRF result
+	// renders cluster_autoscaling PASSED and nothing in the aggregation marks
+	// a result observation-only yet. Definitive absence (every read answered
+	// NotFound) fails NotFound; an unavailable Deployment or a read that
+	// could not land fails with that error's classified code, and the
+	// artifacts above still record it as unread rather than absent. The
+	// remedy for a platform with no workload-driven autoscaler is a
+	// spec.validate.evidence.cncf.notApplicable declaration.
+	nothingConfirmed := nodeGroupName == "" && !caFound && !caStatusFound
 	if nodeGroupName == "" {
 		pool = "GPU nodes carry no managed node group label (eks.amazonaws.com/nodegroup)"
 	}
@@ -896,14 +920,25 @@ func checkEKSAutoscaling(ctx *validators.Context) error {
 		"cluster-autoscaler-status ConfigMap present", "no cluster-autoscaler-status ConfigMap")
 	recordRawTextArtifact(ctx, "EKS Cluster Autoscaling Observation", "",
 		platformObservationText("EKS", len(gpuNodes.Items), pool, autoscaler))
-	if definitiveAbsence {
+	if !nothingConfirmed {
+		return nil
+	}
+	const remedy = "declare cluster_autoscaling not applicable in spec.validate.evidence.cncf.notApplicable if the platform has no workload-driven autoscaler"
+	switch {
+	case caUnreadErr != nil:
+		return wrapWithCode(caUnreadErr, errors.ErrCodeInternal,
+			"no autoscaler confirmed on this EKS cluster: GPU nodes carry no eks.amazonaws.com/nodegroup label, Karpenter is not installed, "+
+				"no cluster-autoscaler-status ConfigMap was found, and the in-cluster Cluster Autoscaler Deployment is unavailable or could not be read ("+caUnread+"); "+remedy)
+	case statusUnreadErr != nil:
+		return wrapWithCode(statusUnreadErr, errors.ErrCodeInternal,
+			"no autoscaler confirmed on this EKS cluster: GPU nodes carry no eks.amazonaws.com/nodegroup label, Karpenter is not installed, "+
+				"no in-cluster Cluster Autoscaler Deployment was found, and the cluster-autoscaler-status ConfigMap could not be read ("+statusUnread+"); "+remedy)
+	default:
 		return errors.New(errors.ErrCodeNotFound,
 			"no autoscaler found on this EKS cluster: GPU nodes carry no eks.amazonaws.com/nodegroup label (no managed node group), "+
 				"no in-cluster Cluster Autoscaler Deployment exists in kube-system, cluster-autoscaler or system, "+
-				"no cluster-autoscaler-status ConfigMap exists, and Karpenter is not installed; "+
-				"declare cluster_autoscaling not applicable in spec.validate.evidence.cncf.notApplicable if the platform has no workload-driven autoscaler")
+				"no cluster-autoscaler-status ConfigMap exists, and Karpenter is not installed; "+remedy)
 	}
-	return nil
 }
 
 // checkAKSAutoscaling validates AKS VMSS-backed GPU agent-pool autoscaling capability.
@@ -960,8 +995,8 @@ func checkAKSAutoscaling(ctx *validators.Context) error {
 	// Observations: the AKS managed autoscaler runs in the control plane and
 	// is not visible in-cluster; its status ConfigMap and events are, when
 	// it is enabled.
-	caFound, caUnread := recordClusterAutoscalerDeployment(ctx)
-	caStatusFound, statusUnread := recordClusterAutoscalerStatus(ctx)
+	caFound, caUnread, _ := recordClusterAutoscalerDeployment(ctx)
+	caStatusFound, statusUnread, _ := recordClusterAutoscalerStatus(ctx)
 	recordAutoscalerEvents(ctx)
 
 	autoscaler := deploymentObservation(caFound, caUnread,
@@ -1017,7 +1052,7 @@ func checkGKEAutoscaling(ctx *validators.Context) error {
 
 	// Observation: GKE's cluster autoscaler writes its status ConfigMap to
 	// kube-system when enabled for a node pool.
-	caStatusFound, statusUnread := recordClusterAutoscalerStatus(ctx)
+	caStatusFound, statusUnread, _ := recordClusterAutoscalerStatus(ctx)
 
 	// Node pool annotations for autoscaling config.
 	var annotSummary strings.Builder
