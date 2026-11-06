@@ -111,9 +111,19 @@ spec:
       # renovate: datasource=docker depName=ghcr.io/mellanox/nic-configuration-operator-daemon tag=v1.3.1
       version: sha256:35e38f05004116ee3c0489c9da9dc0639d69e0a75e9a5b90a5a44be2cdee72bd
       imagePullSecrets: []
-      # No containerResources: the operator then renders its own 512Mi / 5Gi
-      # for the daemon (manifests/state-nic-configuration-operator/070-config-daemon.yaml),
-      # which is above the 2Gi that OOM-killed it at 2000 GPU nodes (#3698).
+      # Unset by default, so the operator applies its own 512Mi / 5Gi
+      # (manifests/state-nic-configuration-operator/070-config-daemon.yaml).
+      # Each daemon caches every NicDevice in the cluster; 2Gi is OOM-killed
+      # at 2000 GPU nodes (#3698).
+      {{- with (index .Values "network-operator").nicConfigurationOperator }}
+      {{- with .configurationDaemon }}
+      {{- with .resources }}
+      containerResources:
+        - name: nic-configuration-daemon
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
   # Fabric DaemonSets must land on tainted GPU nodes.
   tolerations:
     - key: nvidia.com/gpu
