@@ -68,7 +68,10 @@ generated: large clusters install a published OCI bundle through
 - Lower controller memory requests and limits from a GPU node count the
   user states, at generation time and at deploy time.
 - Change nothing for a cluster that states no count or more than 2000 GPU
-  nodes: its bundle stays byte-identical to today's.
+  nodes: its rendered values and pod specs stay as today's. For every
+  deployer except `argocd-helm` the bundle stays byte-identical; an
+  `argocd-helm` bundle always carries the sizing machinery (see Deploy
+  time), which selects nothing at such a count.
 - Back every lowered value with a measurement recorded next to it, taken at
   or near the top of its tier.
 - Keep outputs reproducible: the same inputs give byte-identical bundles.
@@ -282,10 +285,13 @@ parameter already document, so this ADR changes no frozen v1 surface. GPU
 nodes is also what an operator plans a cluster in, and what the recipe
 endpoint's `nodes` means. CPU nodes cost memory too (see Context). On the
 GB300 clusters measured they are 2 to 9% of the total, well inside the
-1.3 margin, and the ≤ 250 and ≤ 450 nodewright limits already cover a
-cluster with 3.7x as many total nodes as GPU nodes. A cluster whose CPU
-pool is larger than that should state a higher count or override. A separate CPU count is an open question,
-and the sizing file's `basis` field leaves room for it.
+1.3 margin. A tier is only measured up to the total node count its
+covering readings record (each measurement's `nodes`). Nodewright's ≤ 250
+and ≤ 450 limits, for example, come from a reading at 670 total nodes, so
+a ≤ 250 cluster with 925 total nodes is outside what they cover. A cluster
+whose total node count exceeds its tier's measured total should state a
+higher count or override. A separate CPU count is an open question, and the
+sizing file's `basis` field leaves room for it.
 
 `--nodes` keeps feeding `nodeScheduling.nodeCountPaths`. Every input takes a
 non-negative integer; 0 means no count. A negative count is rejected with
@@ -450,7 +456,7 @@ controller.
 | ≤ 250 | 300Mi / 768Mi | 768Mi / 2Gi | 256Mi / 5.5Gi | 1Gi / 3Gi | today's |
 
 network-operator's values apply to the generic GB300 values file as shown.
-The four files that set 2Gi / 2Gi keep the lower of their value and the
+The three files that set 2Gi / 2Gi keep the lower of their value and the
 tier's (see Precedence).
 
 The reading behind each cell, in Mi as p90 / peak, 24h unless marked:
@@ -514,10 +520,13 @@ Sizing never writes:
 
 After every override is applied, the bundler fails closed with
 `ErrCodeInvalidRequest` if a sized path's request is above its limit. On
-`argocd-helm` an install-time root-chart value can still produce one,
-because the template never compares quantities; the API server then rejects
-the pod spec and Argo CD reports the sync error. The documentation states
-this limitation.
+`argocd-helm` it checks every emitted row merged over the component's
+static values, which already carry the generation-time overrides, so a
+`--set` request that a row's limit would undercut fails the bundle rather
+than the sync. Only an install-time root-chart value can still produce
+one, because the template never compares quantities; the API server then
+rejects the pod spec and Argo CD reports the sync error. The documentation
+states this limitation.
 
 ### Generation time (`--nodes`)
 
@@ -552,7 +561,9 @@ Rendering:
 
 - The root-chart values gain `sizing: {nodeCount: N}`, where N is the
   bundle's `--nodes` or 0. `values.schema.json` declares it as an integer
-  of at least 0.
+  of at least 0. An install that does not set `sizing.nodeCount` therefore
+  inherits the bundle's count, so a bundle published for clusters of
+  different sizes should be generated without `--nodes`.
 - The child Application template merges the component's static values
   (`$static`), then the selected row, then the component's root-chart
   values, so user values still win. A count of 0 or above the highest
@@ -578,14 +589,21 @@ they can add it by following this section.
   nvidia.com/gpu.present=true` reports, at the size the cluster will reach
   before its next re-bundle or `sizing.nodeCount` change. A count too high
   only gives back today's values; one too low risks OOM kills.
-- **No count is safe.** Leaving it out keeps today's values.
+- **No count is safe.** A bundle generated without `--nodes` and installed
+  without `sizing.nodeCount` keeps today's values. An `argocd-helm` bundle
+  generated with `--nodes` carries that count as the default for
+  `sizing.nodeCount`: set it at install, or generate without `--nodes`,
+  when the target cluster's size differs.
 - **Changing it.** Moving the count across a tier boundary re-renders the
-  sized controllers and restarts them. Within a tier nothing changes.
+  sized controllers and restarts them. Within a tier the sized values do
+  not change; on `argocd-helm` the `sizing-node-count` annotation does.
 - **Checking it.** The applied values are in each component's
   `values.yaml`; on `argocd-helm` the child Applications' sizing
   annotations show the count and the row.
-- **Large CPU pools.** A cluster with many more CPU nodes than the measured
-  ones (up to 3.7x its GPU nodes) should state a higher count or override.
+- **Large CPU pools.** Each measurement records the cluster's total nodes.
+  A cluster with more total nodes than the readings behind its tier (670
+  for nodewright's ≤ 250 and ≤ 450 limits) should state a higher count or
+  override.
 
 ## Consequences
 
