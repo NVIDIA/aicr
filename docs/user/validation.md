@@ -1481,7 +1481,7 @@ Common reasons and their cause:
 | `named in skipChecks` | `message`, and `extra.skipReason` as `named-in-skip-checks` (the channel that survives bundle redaction) | The caller withheld this check with `--skip-check` or `spec.validate.execution.skipChecks` | Drop the name from the skip list to run it again; see [Skipping checks a run cannot satisfy](#skipping-checks-a-run-cannot-satisfy) |
 | `skipped due to previous phase failure` | `message` | `--fail-fast` was set and an earlier phase failed, so subsequent phases were skipped | Fix the earlier phase first, or drop `--fail-fast` to run all phases regardless |
 
-### `ai-service-metrics` fails with "Prometheus unreachable"
+### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus unreachable"
 
 On EKS clusters that split worker and system pods across separate security
 groups (e.g. DGXC EKS with distinct customer/system ENI subnets), the
@@ -1490,6 +1490,16 @@ conformance check `ai-service-metrics` can fail non-deterministically with:
 ```text
 [SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
 ```
+
+`pod-autoscaling`, which dials Prometheus for its PodMonitor load wait when the
+recipe declares `kube-prometheus-stack`, fails the same way at its preflight:
+
+```text
+[SERVICE_UNAVAILABLE] Prometheus at http://kube-prometheus-prometheus.monitoring.svc:9090 did not list its scrape pools (GET /api/v1/scrape_pools needs Prometheus >= v2.42 and network connectivity between the validator pod and the Prometheus service)
+```
+
+Both checks' orchestrator Jobs carry the preferred `dependencyAffinity`
+described below.
 
 The validator orchestrator Job tolerates every taint and sets a *preferred*
 `dependencyAffinity` toward Prometheus, so the scheduler co-locates it with the
@@ -1513,6 +1523,59 @@ orchestrator lands on a node whose SG can reach Prometheus, then leave the
 image cached there so image-locality keeps subsequent runs on the same node.
 This is unreliable and should not be used as the steady-state validation
 strategy.
+
+### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus did not load the ServiceMonitor/PodMonitor"
+
+Both checks create a monitor (a ServiceMonitor or a PodMonitor) and, before
+starting their collection budget, wait up to five minutes for the recipe's
+Prometheus to list it among its scrape pools (`GET /api/v1/scrape_pools`).
+That wait exists because prometheus-operator reconciles monitors on its own
+schedule: gaps of about three minutes between a monitor's creation and
+Prometheus loading it were observed on a healthy AKS cluster, longer than the
+collection budget itself. For `pod-autoscaling` the scrape-pool preflight and
+the wait happen only when the recipe declares `kube-prometheus-stack`; without
+it (the OpenShift overlay serves `prometheus-adapter-ocp` from the platform
+monitoring stack) there is no Prometheus to ask, the check records the wait as
+skipped, and its baseline is bounded by the metric timeout alone.
+
+The baseline then ends in one of three ways, each with its own message.
+
+A failure naming the load, such as:
+
+```text
+[NOT_FOUND] AI service metrics test failed in phase baseline: Prometheus did not load the ServiceMonitor ai-metrics-test-<id>/ai-metrics-stub within 5m0s: no scrape pool serviceMonitor/ai-metrics-test-<id>/ai-metrics-stub/* among the 12 configured ...
+```
+
+means Prometheus did not load the monitor within the wait. Two things have
+to happen for it to: prometheus-operator must write the monitor into the
+generated configuration, and Prometheus must reload that configuration. Check
+both. For the first, look at the operator's logs for the reconcile of that
+namespace, and confirm the Prometheus resource selects the monitor: the checks
+label it `release=kube-prometheus-stack`, and the recipe's Prometheus opens
+`serviceMonitorSelector`, `podMonitorSelector` and their namespace selectors.
+For the second, a rejected reload leaves Prometheus running on its previous
+configuration with the pool absent even though the operator did its part:
+check `prometheus_config_last_reload_successful` (0 after a failed reload),
+the `PrometheusBadConfig` alert and its runbook, and the Prometheus and
+config-reloader container logs for the reload error.
+
+A failure reading "could not determine whether Prometheus loaded the
+ServiceMonitor/PodMonitor ... the last completed scrape pool listing failed"
+(or "... no scrape pool listing completed") means the scrape pool API stopped
+answering after the preflight, so no verdict on the monitor was reached; the
+underlying listing error (unreachable, HTTP status, malformed response) is
+attached. A listing the wait's deadline interrupts does not change the
+verdict: "did not load" rests on the last listing that completed. Check the Prometheus pod and the network
+path from the validator pod to it, as for "Prometheus unreachable" above.
+
+A failure naming the collection instead ("Prometheus loaded the ServiceMonitor
+but the workload metrics were not collected", or "Prometheus loaded the
+PodMonitor, but the custom metrics pipeline does not serve the workload
+metric") means the configuration was loaded and the scrape or the adapter
+query did not produce a sample: check the target under the active or
+dropped targets at `/api/v1/targets` (a target relabeling dropped is listed
+as dropped, not active) and, for `pod-autoscaling`, the prometheus-adapter
+rule.
 
 ### Benchmark Job stuck or timed out
 

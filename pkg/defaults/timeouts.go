@@ -756,6 +756,19 @@ const (
 	MetricsAPIWarmupTimeout = 60 * time.Second
 )
 
+// Prometheus Operator monitor loading, shared by the conformance checks that
+// create a ServiceMonitor or PodMonitor and wait for the recipe's Prometheus
+// to collect from it (ai_service_metrics, pod_autoscaling).
+const (
+	// PrometheusMonitorLoadTimeout bounds the wait for a monitor the check
+	// created to appear among Prometheus's configured scrape pools.
+	// prometheus-operator reconciles the Prometheus configuration on its own
+	// schedule (gaps of about three minutes were observed, #3671) and
+	// Prometheus then reloads it; the collection waits start only once the
+	// monitor is loaded, so they measure scraping, not reconciliation.
+	PrometheusMonitorLoadTimeout = 5 * time.Minute
+)
+
 // Karpenter behavioral test timeouts for conformance validation.
 const (
 	// KarpenterNodeTimeout is the timeout for Karpenter to provision KWOK nodes.

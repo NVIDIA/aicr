@@ -218,9 +218,9 @@ validators:
     description: "Verify Prometheus discovers a ServiceMonitor-selected CPU stub workload and collects exactly the requests sent to it"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     # 8m30s shared work budget enforced by the check's workCtx, plus 30s
-    # cleanup and 60s margin; the per-wait caps (stub Ready 3m, each
-    # collection wait 3m) are individual bounds under that budget, not a
-    # sum. See validators/conformance/consts.go.
+    # cleanup and 60s margin; the per-wait caps (stub Ready 3m, monitor load
+    # 5m, each collection wait 3m) are individual bounds under that budget,
+    # not a sum. See validators/conformance/consts.go.
     timeout: 10m
     args: ["ai-service-metrics"]
     env: []
@@ -250,14 +250,22 @@ validators:
       control; needs two allocatable accelerators at once
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     # 13m30s shared work budget enforced by the check's workCtx, plus 30s
-    # cleanup and 60s margin; the per-wait caps (baseline Ready 3m, each
-    # metric change 3m, 1m negative control, scale-up 3m, scale-down 4m
-    # incl. 60s stabilization) are individual bounds under that budget, not
-    # a sum; a passing run takes 6-9 minutes. See
+    # cleanup and 60s margin; the per-wait caps (baseline Ready 3m, monitor
+    # load 5m, each metric change 3m, 1m negative control, scale-up 3m,
+    # scale-down 4m incl. 60s stabilization) are individual bounds under
+    # that budget, not a sum; a passing run takes 6-9 minutes. See
     # validators/conformance/consts.go.
     timeout: 15m
     args: ["pod-autoscaling"]
     env: []
+    # The check dials Prometheus for the PodMonitor load wait when the recipe
+    # declares kube-prometheus-stack, so it takes the same best-effort
+    # co-location as ai-service-metrics (see that entry and #933).
+    dependencyAffinity:
+      - componentRef: kube-prometheus-stack
+        podLabelSelector:
+          app.kubernetes.io/name: prometheus
+        requirement: preferred
   - name: cluster-autoscaling
     phase: conformance
     description: "Verify cluster autoscaling with Karpenter"
