@@ -359,7 +359,7 @@ transitions:
       skipping them, so CoreDNS and similar workloads are evicted before an
       interrupt rather than killed by the reboot. Eviction honors any
       PodDisruptionBudget that covers a pod; a workload with no budget can
-      lose every replica on the node at once. A kube-system PodDisruptionBudget that allows no disruptions
+      lose every replica on the nodes drained together. A kube-system PodDisruptionBudget that allows no disruptions
       holds the drain until spec.drainConfig.timeout, which AICR's tuning CRs
       leave unset, and with the default drainConfig an evicted pod's emptyDir
       data is deleted and a pod with no controller is not recreated. The

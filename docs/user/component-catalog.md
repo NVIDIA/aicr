@@ -3791,9 +3791,11 @@ node it did not cordon.
 
 `v0.21.0` drains `kube-system` pods like any other namespace instead of
 skipping them, so CoreDNS and similar workloads are evicted before an
-interrupt rather than killed by the reboot. Eviction honors any
-PodDisruptionBudget that covers a pod; a workload with no budget can lose every
-replica on the node at once. A `kube-system` budget that allows no disruptions holds the drain the same way as
+interrupt rather than killed by the reboot. Pods that tolerate the
+`node.kubernetes.io/unschedulable` taint are still skipped, as in every
+namespace. Eviction honors any PodDisruptionBudget that covers a pod; a
+workload with no budget can lose every replica on the nodes drained together.
+A `kube-system` budget that allows no disruptions holds the drain the same way as
 in any other namespace, without bound unless the CR sets
 `spec.drainConfig.timeout`. With the default `drainConfig`, an evicted pod's
 `emptyDir` data is deleted and a pod with no controller is not recreated.
