@@ -470,6 +470,12 @@ const (
 	// EvidenceRenderTimeout is the timeout for rendering conformance evidence.
 	EvidenceRenderTimeout = 30 * time.Second
 
+	// CNCFSubmissionTimeout bounds writing a CNCF submission directory,
+	// including the pinned upstream validator's run: it fetches the CNCF
+	// landscape and requests every URL the submission cites, each request
+	// bounded by its own 30s timeout and retried on 429 with backoff.
+	CNCFSubmissionTimeout = 10 * time.Minute
+
 	// EvidenceBundleBuildTimeout bounds local bundle assembly. Local I/O
 	// only; 60s is headroom over the typical few-second pipeline.
 	EvidenceBundleBuildTimeout = 60 * time.Second

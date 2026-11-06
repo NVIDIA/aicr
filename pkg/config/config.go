@@ -357,6 +357,45 @@ type EvidenceCNCFSpec struct {
 	// source of a not-applicable requirement status; any other id is
 	// rejected at render time.
 	NotApplicable map[string]string `yaml:"notApplicable,omitempty" json:"notApplicable,omitempty"`
+
+	// Vendor is the product metadata PRODUCT.yaml carries. Required for a
+	// submission run; every field but RepoURL is required by the upstream
+	// validator, and the CLI refuses a missing or malformed field before any
+	// check runs.
+	Vendor *EvidenceCNCFVendorSpec `yaml:"vendor,omitempty" json:"vendor,omitempty"`
+
+	// Documented attests requirements the run only observed (a check that
+	// recorded the cluster's arrangement without a behavioral test) by
+	// public documentation, keyed by upstream requirement id. PRODUCT.yaml
+	// then cites the documentation, not the testcase. An entry for a
+	// requirement in any other status is ignored.
+	Documented map[string]EvidenceCNCFDocumentedSpec `yaml:"documented,omitempty" json:"documented,omitempty"`
+}
+
+// EvidenceCNCFVendorSpec is spec.validate.evidence.cncf.vendor: the
+// PRODUCT.yaml metadata block of a CNCF AI Conformance submission, in the
+// upstream field names. Name must match the vendor's entry under CNCF Members
+// in the CNCF landscape; K8sConformanceURL is the product's entry in
+// cncf/k8s-conformance (https://github.com/cncf/k8s-conformance/tree/master/vX.Y/<product>).
+type EvidenceCNCFVendorSpec struct {
+	Name              string `yaml:"name,omitempty" json:"name,omitempty"`
+	PlatformName      string `yaml:"platformName,omitempty" json:"platformName,omitempty"`
+	PlatformVersion   string `yaml:"platformVersion,omitempty" json:"platformVersion,omitempty"`
+	Description       string `yaml:"description,omitempty" json:"description,omitempty"`
+	ContactEmail      string `yaml:"contactEmail,omitempty" json:"contactEmail,omitempty"`
+	WebsiteURL        string `yaml:"websiteUrl,omitempty" json:"websiteUrl,omitempty"`
+	DocumentationURL  string `yaml:"documentationUrl,omitempty" json:"documentationUrl,omitempty"`
+	RepoURL           string `yaml:"repoUrl,omitempty" json:"repoUrl,omitempty"`
+	ProductLogoURL    string `yaml:"productLogoUrl,omitempty" json:"productLogoUrl,omitempty"`
+	K8sConformanceURL string `yaml:"k8sConformanceUrl,omitempty" json:"k8sConformanceUrl,omitempty"`
+}
+
+// EvidenceCNCFDocumentedSpec is one entry of
+// spec.validate.evidence.cncf.documented: the public documentation URLs
+// PRODUCT.yaml cites for the requirement and the note it carries.
+type EvidenceCNCFDocumentedSpec struct {
+	Evidence []string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+	Notes    string   `yaml:"notes,omitempty" json:"notes,omitempty"`
 }
 
 // EvidenceAttestationSpec configures the recipe-evidence bundle path

@@ -228,10 +228,22 @@ spec:
       noCleanup: false
       timeout: 5m                    # aicr validate: live-capture agent Job only; inert here (input.snapshot is set)
     evidence:
-      cncf:                          # CNCF AI Conformance submission evidence
-        dir: ./evidence
+      cncf:                          # CNCF AI Conformance submission directory
+        dir: ./submission            # must be absent or empty; written only when complete
         cncfSubmission: true         # dir and cncfSubmission require each other
         notApplicable: {}            # conditional MUST id -> justification (only cluster_autoscaling)
+        vendor:                      # PRODUCT.yaml metadata; required for a submission run
+          name: Example Vendor       # exactly as listed under CNCF Members in the landscape
+          platformName: Example Platform
+          platformVersion: 1.0.0
+          description: One sentence describing the offering.
+          contactEmail: maintainers@example.com
+          websiteUrl: https://example.com/platform
+          documentationUrl: https://example.com/platform/docs
+          repoUrl: ""                # optional
+          productLogoUrl: https://example.com/platform/logo.svg
+          k8sConformanceUrl: https://github.com/cncf/k8s-conformance/tree/master/v1.37/example-platform
+        documented: {}               # requirement id -> {evidence: [urls], notes} for a requirement the run only observed
       attestation:                   # recipe-evidence bundle (ADR-007)
         out: ./attestation           # directory; setting this enables the path
         bom: ""
@@ -343,7 +355,9 @@ Inputs to `aicr validate`.
 | `execution.timeout` | duration string | `aicr validate`: timeout for the live snapshot-capture agent Job (`--timeout`, default `5m`); inert when `input.snapshot` is set, and validator Jobs keep their per-check timeouts. Go SDK: `Config.ValidateSettings().Timeout` carries the same value for `WithValidationTimeout`, which caps the whole `ValidateState` run (see [Go library](../integrator/go-library.md#what-validatesettings-does-and-does-not-carry)) |
 | `evidence.cncf.dir` | string | CNCF AI Conformance submission evidence directory (`--evidence-dir`). Requires `cncfSubmission`; `dir` alone is rejected with `INVALID_REQUEST` (recorded on [Deprecations](deprecations.md#--evidence-dir-without---cncf-submission)) |
 | `evidence.cncf.cncfSubmission` | bool (tri-state) | Write the submission evidence from the conformance run (`--cncf-submission`); requires `dir`, the conformance phase and a recipe input, and is rejected with `noCluster` or `skipChecks` |
-| `evidence.cncf.notApplicable` | map[string]string | Conditional MUST requirements of the CNCF checklist declared not applicable, keyed by upstream id with the justification as value. The only source of a `NOT APPLICABLE` status; accepted only for a conditional MUST (today `cluster_autoscaling`), any other id is rejected with `INVALID_REQUEST`. Takes precedence over a check that ran, whose result is kept as an observation. Read by the submission render. See [Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status) |
+| `evidence.cncf.notApplicable` | map[string]string | Conditional MUST requirements of the CNCF checklist declared not applicable, keyed by upstream id with the justification as value. The only source of a `NOT APPLICABLE` status; accepted only for a conditional MUST (today `cluster_autoscaling`), any other id is rejected with `INVALID_REQUEST`. Takes precedence over a check that ran, whose result is kept as an observation; PRODUCT.yaml renders the requirement `N/A` with the justification in `notes`. See [Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status) |
+| `evidence.cncf.vendor` | object | PRODUCT.yaml metadata of the submission, in the upstream field names: `name` (vendorName, exactly as listed under CNCF Members in the [CNCF landscape](https://landscape.cncf.io/members)), `platformName`, `platformVersion`, `description`, `contactEmail`, `websiteUrl`, `documentationUrl`, `productLogoUrl` (SVG, AI or EPS), `k8sConformanceUrl` (`https://github.com/cncf/k8s-conformance/tree/master/vX.Y/<product>`), and the optional `repoUrl`. **Required** for a submission run: a missing field, a bracketed placeholder, a relative URL or a conformance URL outside the k8s-conformance tree is rejected with `INVALID_REQUEST` before any check runs. Whether the URLs answer and whether `name` is a CNCF member is checked by the upstream validator at the end of the run. See [Submission directory](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#submission-directory) |
+| `evidence.cncf.documented` | map[string]object | Manual attestation of requirements the run only **observed** (a check that recorded the cluster's arrangement without a behavioral test, today `cluster-autoscaling`), keyed by upstream id: `evidence` lists public documentation URLs (at least one, absolute http(s)) and `notes` the PRODUCT.yaml note. An observed requirement with an entry renders `Implemented` citing the documentation and the evidence page, never the testcase, and counts as established for the exit status. An entry for a requirement in any other status is ignored: a passed requirement needs none, a failed or untested one is not papered over. An id the checklist lacks, one also in `notApplicable`, a missing URL or note is rejected with `INVALID_REQUEST` |
 | `evidence.attestation.out` | string | Output directory for the recipe-evidence bundle (predicateType v3; same as `--emit-attestation`), which receives `summary-bundle/` and `pointer.yaml` — setting it **enables** the attestation path |
 | `evidence.attestation.bom` / `.push` | string | BOM input; OCI ref for the signed bundle push |
 | `evidence.attestation.plainHTTP` / `.insecureTLS` | bool (tri-state) | Push transport options |

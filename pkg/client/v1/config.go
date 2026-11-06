@@ -864,6 +864,16 @@ type CNCFEvidenceOptions struct {
 	// MUST requirements declared not applicable, keyed by upstream id with
 	// the justification as value. It is RenderCNCFEvidenceOptions.NotApplicable.
 	NotApplicable map[string]string
+
+	// Vendor is spec.validate.evidence.cncf.vendor, the PRODUCT.yaml
+	// metadata of a submission; nil when unset. It is
+	// CNCFSubmissionOptions.Vendor, and a submission run requires it.
+	Vendor *CNCFVendor
+
+	// Documented is spec.validate.evidence.cncf.documented: requirements
+	// the run only observed, attested by public documentation. It is
+	// RenderCNCFEvidenceOptions.Documented.
+	Documented map[string]CNCFDocumentation
 }
 
 // CNCFEvidenceOptions derives spec.validate.evidence.cncf.
@@ -883,11 +893,32 @@ func (c *Config) CNCFEvidenceOptions() (CNCFEvidenceOptions, error) {
 	if resolved.EvidenceCNCF == nil {
 		return CNCFEvidenceOptions{}, nil
 	}
-	return CNCFEvidenceOptions{
+	out := CNCFEvidenceOptions{
 		Dir:            resolved.EvidenceCNCF.Dir,
 		CNCFSubmission: resolved.EvidenceCNCF.CNCFSubmission,
 		NotApplicable:  resolved.EvidenceCNCF.NotApplicable,
-	}, nil
+	}
+	if v := resolved.EvidenceCNCF.Vendor; v != nil {
+		out.Vendor = &CNCFVendor{
+			Name:              v.Name,
+			PlatformName:      v.PlatformName,
+			PlatformVersion:   v.PlatformVersion,
+			Description:       v.Description,
+			ContactEmail:      v.ContactEmail,
+			WebsiteURL:        v.WebsiteURL,
+			DocumentationURL:  v.DocumentationURL,
+			RepoURL:           v.RepoURL,
+			ProductLogoURL:    v.ProductLogoURL,
+			K8sConformanceURL: v.K8sConformanceURL,
+		}
+	}
+	if d := resolved.EvidenceCNCF.Documented; len(d) > 0 {
+		out.Documented = make(map[string]CNCFDocumentation, len(d))
+		for id, entry := range d {
+			out.Documented[id] = CNCFDocumentation{Evidence: append([]string(nil), entry.Evidence...), Notes: entry.Notes}
+		}
+	}
+	return out, nil
 }
 
 // SnapshotAgentConfig derives Client.CollectSnapshot's AgentConfig from

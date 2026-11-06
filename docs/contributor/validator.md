@@ -463,7 +463,10 @@ Karpenter) fail `NotFound` when every read answered NotFound, or with the
 read's classified code when the Deployment was unavailable or a read could not
 land; the artifacts still record the unread reads as unread. The remedy for a
 platform without workload-driven autoscaling is a
-`spec.validate.evidence.cncf.notApplicable` justification. A providerID no
+`spec.validate.evidence.cncf.notApplicable` justification; for a platform
+whose autoscaler the check observed but did not drive (the OBSERVED pass),
+a `spec.validate.evidence.cncf.documented` entry citing the provider's
+autoscaler documentation establishes the requirement in the submission. A providerID no
 probe recognizes skips as "no autoscaler probe for this provider" (naming the
 scheme, or an unschemed providerID such as OKE's bare OCID), a missing probe
 rather than product nonapplicability, which only that declaration states.
