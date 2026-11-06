@@ -82,6 +82,24 @@ Fabric Manager State: Connected`). The multi-node NVLink claim for this
 hardware lives in [`../trainer-nvke-vr200/`](../trainer-nvke-vr200/), which
 measured 996 GB/s across both trays; this profile does not restate it.
 
+## The cluster was not deployed from this recipe
+
+The evidence was **collected against** `vr200-nvke-ubuntu-inference`, not
+produced by deploying it. This tenant cluster was assembled by hand and the
+Gateway installed from the component charts; `aicr validate` then read the
+cluster and rendered the evidence with that recipe as the reference. The two
+diverge in both directions: the cluster carries `kubeflow-trainer` and
+`network-operator`, which this leaf does not declare, and it lacks `nvsentinel`,
+`nodewright-operator`, `nodewright-customizations`, `dra-node-labeler` and
+`k8s-ephemeral-storage-metrics`, which it does.
+
+None of those five feeds any of the nine requirements, so the verdicts above
+stand on their own. But a `--phase conformance` validator run against this
+recipe on this cluster would fail `platform-health`, which expects every
+declared component present, and that is expected rather than a conformance
+result. What this set shows is that the platform meets the requirements; it
+does not show that a cluster built from this recipe alone reproduces it.
+
 ## Tested platform
 
 | Component | Version |
