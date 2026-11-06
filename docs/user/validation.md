@@ -1053,11 +1053,13 @@ on top of the per-check rule every run applies:
   demonstrated)`. Only a cluster with no cluster autoscaler at all (fixed-size
   node pools, no Karpenter) may declare the requirement not applicable through
   a `spec.validate.evidence.cncf.notApplicable` justification, which renders
-  `NOT APPLICABLE`; the run then exits 0 unless a check itself failed (on EKS
-  the `cluster-autoscaling` check fails when no autoscaler is confirmed, and
-  the default `--fail-on-error` still applies). A platform whose autoscaler is present but not
-  behaviorally demonstrated keeps `OBSERVED`, and the submission documents the
-  autoscaler through the vendor-config attestation instead (#3605). Where a requirement has
+  `NOT APPLICABLE` and removes only that requirement from the verdict: the run
+  still exits nonzero when another applicable MUST is not established or when a
+  check itself failed (on EKS the `cluster-autoscaling` check fails when no
+  autoscaler is confirmed, and the default `--fail-on-error` still applies). A
+  platform whose autoscaler is present but not behaviorally demonstrated keeps
+  `OBSERVED`; the submission then documents the autoscaler by hand in its README
+  until the vendor-config attestation planned in #3605 exists. Where a requirement has
   alternative proofs (`secure_accelerator_access`: `secure-accelerator-access`
   on ordinary recipes, `slinky-slurm-gpu-access` on Slinky Slurm recipes) a
   passing alternative establishes it even when the primary check was skipped
