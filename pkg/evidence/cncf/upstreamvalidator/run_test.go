@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -253,6 +254,48 @@ func TestRunCanceled(t *testing.T) {
 	// The background run must release the lock so the next call proceeds.
 	if _, err := Run(context.Background(), product, schemas); err != nil {
 		t.Fatalf("Run() after cancellation: %v", err)
+	}
+}
+
+// While another validation holds the slot, a caller whose context ends
+// returns at once with the context's code and never enters the validator;
+// the slot is released afterwards for the next caller.
+func TestRunWaitsForSlotUnderContext(t *testing.T) {
+	tr := installTransport(t, &fakeTransport{members: []string{"Vendor"}})
+	product, schemas := writeProduct(t, "Vendor", "Implemented")
+
+	slot <- struct{}{} // another run is in progress
+	released := false
+	defer func() {
+		if !released {
+			<-slot
+		}
+	}()
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Run(canceled, product, schemas)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
+
+	deadline, cancelDeadline := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelDeadline()
+	start := time.Now()
+	_, err = Run(deadline, product, schemas)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("Run() waited %s for the slot instead of returning on the deadline", time.Since(start))
+	}
+	tr.mu.Lock()
+	started := len(tr.requests)
+	tr.mu.Unlock()
+	if started != 0 {
+		t.Errorf("validator made %d request(s) for callers that never acquired the slot", started)
+	}
+
+	<-slot // the other run finishes
+	released = true
+	if _, err := Run(context.Background(), product, schemas); err != nil {
+		t.Fatalf("Run() after the slot was released: %v", err)
 	}
 }
 
