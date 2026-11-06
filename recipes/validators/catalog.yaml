@@ -275,9 +275,11 @@ validators:
     env: []
   - name: robust-controller
     phase: conformance
-    description: "Verify AI operator controller and webhooks (Dynamo or Kubeflow Trainer)"
+    description: "Verify AI operator controller, webhooks and CR reconciliation (Kubeflow Trainer reconciles a TrainJob to Complete; Dynamo records observations)"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
-    timeout: 5m
+    # 6m30s work budget (robustControllerWorkBudget: deployment and webhook
+    # reads plus the 3m TrainJobReconcileTimeout) + 30s cleanup + 60s margin.
+    timeout: 8m
     args: ["robust-controller"]
     env: []
   - name: secure-accelerator-access
