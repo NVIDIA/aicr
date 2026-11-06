@@ -3462,8 +3462,8 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   014-nktp/apply-crds.sh: cad6e5470f0193c3715f0a0a3c3ee47f95e38aac506cd3d44aefe0c9b252c81d
   014-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
-  014-nktp/upstream.env: 618af7e3bb229c70c7332a444ce158f70e84c2863946365da97440731cb8c163
-  014-nktp/values.yaml: 027752041ac8d22ff9cabc97218240fae21f97d9f72424b2dfcdc964bdd594cd
+  014-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
+  014-nktp/values.yaml: cd485d9566ebb7ea3965390350753eee763c8ce1f6e47159ba19242d05f9c9eb
   015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   015-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -3477,14 +3477,14 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: ab622a3c66f076b21eaaa5c36aaa4cf6e41b7fb5948afa179e43c52b95a073c6
-  UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
-  bundle-info.yaml: 58fef9f4937403b6a200a3196df994881f7673a8c8d2579474a8f9e737f41ccb
-  checksums.txt: 01b3406470b92a9e0ba0086e45d8a9d7a8239cb7bd57349d41a8e25b10e34cbc
+  README.md: ac61e423139e909be14496ff554a928a85999da81829f42fa806935a0a0b7674
+  UPGRADING.md: 805b29bbe92e37a05f13053f6fa4ccc741402f506dca1fd1449a5085f1afb8c3
+  bundle-info.yaml: 80b3d36d45c9fcc1124670dc37e5d735c24e525786ea6b0fa30077ffab448ed9
+  checksums.txt: a86bfb844b071a1b80cb372e56875a7d81c49040d26f530d956980d7c1a64a15
   data/overlays/stock-render-opt-in.yaml: 28518490ca46ac3ecf1b7cb220cfc55c3c4d3e3f595446b6aab9894f15f80557
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 60bc9db84b4c9ccbacf807ab424ce27099463dbbfbca83aa07db4cf4c69bca0a
-  recipe.yaml: 25fec68aebac0bb10edf18847af2cb4af1b50c7a854395b8eb17b4b3c52b4979
+  recipe.yaml: 301a48ca27bae69c74bbaed704d9750571d33bbf6a6aaedc19b4ec4ee08dc485
 h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
