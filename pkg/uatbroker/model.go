@@ -38,6 +38,13 @@ const (
 	IntentInference = "inference"
 )
 
+// Recognized uat-run.yaml lifecycle values.
+const (
+	LifecycleNightly     = "nightly"
+	LifecycleDaytimeUp   = "daytime-up"
+	LifecycleDaytimeDown = "daytime-down"
+)
+
 // validIntents is the set of accepted intent values (Reservation.DaytimeIntent
 // and, downstream, the pipeline's intent input).
 var validIntents = map[string]bool{IntentTraining: true, IntentInference: true}

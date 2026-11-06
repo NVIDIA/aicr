@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -1089,5 +1090,51 @@ func TestNightlyIntentsOrDefaultCopies(t *testing.T) {
 	got[0] = "mutated"
 	if r.NightlyIntents[0] != IntentTraining {
 		t.Errorf("mutating the returned slice corrupted the reservation: %v", r.NightlyIntents)
+	}
+}
+
+func TestCheckSkipDelete(t *testing.T) {
+	tests := []struct {
+		name       string
+		cloud      string
+		lifecycle  string
+		skipDelete bool
+		// wantErr lists substrings the error must contain. Empty means no error.
+		wantErr []string
+	}{
+		{name: "false on a nightly cloud run", cloud: CloudAWS, lifecycle: LifecycleNightly},
+		{name: "false with an unknown lifecycle", cloud: CloudGCP, lifecycle: "bogus"},
+		{name: "true on the kind lane", cloud: CloudKind, lifecycle: LifecycleNightly, skipDelete: true},
+		{name: "true with daytime-up", cloud: CloudGCP, lifecycle: LifecycleDaytimeUp, skipDelete: true},
+		{name: "true with daytime-down", cloud: CloudAzure, lifecycle: LifecycleDaytimeDown, skipDelete: true},
+		{
+			name: "true on a nightly aws run", cloud: CloudAWS, lifecycle: LifecycleNightly, skipDelete: true,
+			wantErr: []string{"lifecycle=nightly on reservation r1 (cloud aws)", "-f reservation=r1 -f lifecycle=daytime-up"},
+		},
+		{name: "true on a nightly gcp run", cloud: CloudGCP, lifecycle: LifecycleNightly, skipDelete: true, wantErr: []string{"(cloud gcp)"}},
+		{name: "true on a nightly azure run", cloud: CloudAzure, lifecycle: LifecycleNightly, skipDelete: true, wantErr: []string{"(cloud azure)"}},
+		{name: "true with an unknown lifecycle", cloud: CloudAWS, lifecycle: "bogus", skipDelete: true, wantErr: []string{"lifecycle=bogus"}},
+		{name: "true with an empty lifecycle", cloud: CloudAWS, skipDelete: true, wantErr: []string{"lifecycle= on"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := &Reservation{Name: "r1", Cloud: tt.cloud}
+			err := res.CheckSkipDelete(tt.lifecycle, tt.skipDelete)
+			if len(tt.wantErr) == 0 {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("want error containing %q, got nil", tt.wantErr)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+		})
 	}
 }
