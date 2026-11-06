@@ -260,22 +260,37 @@ recipe-evidence bundle out.
   [`.github/workflows/uat-gcp.yaml`](../.github/workflows/uat-gcp.yaml)
   pipeline. It is now invoked through the shared dispatch surface
   [`uat-run.yaml`](../.github/workflows/uat-run.yaml) keyed by reservation
-  (#1274); to bring the cluster up without running the UAT suite or tearing it
-  down:
+  (#1274). `gcp-h100` can host only one cluster, and its single daytime slot
+  is shared with the GCP daytime rotation (`daytime-intent: inference`),
+  which stands up the shared human-access cluster. First check whether a
+  daytime cluster holds `gcp-h100` (an `aicr-uat-day-gh1-0-<run_id>` cluster,
+  or one with the legacy `aicr-uat-day-gcp-h100-` prefix), as described in
+  [Reaching the daytime cluster](../docs/contributor/uat.md#reaching-the-daytime-cluster).
+  If one is held, do not use it, do not tear it down, and do not dispatch
+  `daytime-up` (the pre-batch guard refuses it): run the demo once the
+  reservation is free, after the 02:00 UTC evening teardown or by arrangement
+  with whoever holds it. Only if none is held, bring the cluster up and hold
+  it without running the UAT suite:
 
   ```shell
-  gh workflow run uat-run.yaml -f reservation=gcp-h100 -f skip_delete=true -f skip_tests=true
+  gh workflow run uat-run.yaml -f reservation=gcp-h100 -f lifecycle=daytime-up -f skip_tests=true
   ```
 
-  > Make sure to cleanup after yourself
+  This cluster takes `gcp-h100`'s only daytime slot, so the rotation's
+  inference `daytime-up` is refused until it is gone.
+
+  > Tear it down with `-f lifecycle=daytime-down` as soon as the demo is done;
+  > otherwise the 02:00 UTC evening teardown removes it. `daytime-down` removes
+  > whichever daytime cluster holds `gcp-h100`, so run it only on the cluster
+  > you stood up.
 
   The cluster has 2× `a3-megagpu-8g` (H100, 8 GPUs/node) GPU nodes labeled
   `nodeGroup=gpu-worker` with taint `dedicated=gpu-workload:NoSchedule`, and
   system nodes labeled `nodeGroup=system-worker` (no custom taints — GKE
   managed pods don't tolerate them). Its GPU NIC networks are named
-  `<deployment-id>-gpu-nic-0` through `-7`, where the deployment ID of a
-  `uat-run.yaml` cluster is `aicr-uat-<run_id>`; set `DEPLOYMENT_ID` in the
-  [Config](#config) block to that value.
+  `<deployment-id>-gpu-nic-0` through `-7`, where the deployment ID of this
+  `daytime-up` cluster is its name, `aicr-uat-day-gh1-0-<run_id>`; set
+  `DEPLOYMENT_ID` in the [Config](#config) block to that value.
 * GKE nodes run Container-Optimized OS (COS) with GPU drivers pre-installed.
 * `aicr trust update` has been run once on this machine to bootstrap the
   Sigstore TUF root (prerequisite for `evidence verify`).
@@ -290,7 +305,7 @@ and the evidence emit path. Set the two variables, then drop this into
 `aicr-config.yaml` once and reuse it across the workflow:
 
 ```shell
-DEPLOYMENT_ID=aicr-uat-1234567890   # aicr-uat- plus the uat-run.yaml run ID
+DEPLOYMENT_ID=aicr-uat-day-gh1-0-1234567890   # aicr-uat-day-gh1-0- plus the uat-run.yaml run ID
 GHCR_OWNER=my-github-org            # a ghcr.io owner you can push to
 
 cat > aicr-config.yaml <<EOF
