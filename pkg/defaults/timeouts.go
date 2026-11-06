@@ -1435,22 +1435,11 @@ const (
 	RuntimeClassCheckTimeout = 5 * time.Second
 )
 
-// CNCF conformance submission timeout.
+// Evidence I/O bounds.
 const (
-	// CNCFSubmissionTimeout is the timeout for CNCF submission evidence
-	// collection. CNCF submission deploys GPU workloads and runs HPA tests.
-	CNCFSubmissionTimeout = 20 * time.Minute
-
-	// EvidenceSectionTimeout is the per-section timeout for the bash
-	// subprocess that collects behavioral evidence for a single feature.
-	// A single section may deploy a workload, wait for readiness, and run
-	// kubectl probes; 5 minutes provides headroom while still bounding
-	// runaway shell processes.
-	EvidenceSectionTimeout = 5 * time.Minute
-
-	// EvidenceMaxOutputBytes caps captured stdout/stderr per evidence
-	// section to prevent unbounded memory growth from chatty kubectl
-	// commands or runaway loops in collection scripts.
+	// EvidenceMaxOutputBytes caps a file read while synthesizing a recipe
+	// evidence project (bundle recipe and CTRF report), so an oversized
+	// artifact cannot grow memory unbounded.
 	EvidenceMaxOutputBytes = 10 * 1024 * 1024 // 10 MiB
 )
 

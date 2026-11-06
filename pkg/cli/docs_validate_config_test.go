@@ -137,14 +137,14 @@ func TestDocsValidateConfigExamplesPassOurOwnGuards(t *testing.T) {
 			t.Errorf("AICRConfig block %d: spec.validate.evidence.cncf does not resolve: %v", i, err)
 			continue
 		}
-		if len(opts.SkipChecks) > 0 || cncfOpts.Dir != "" || len(cncfOpts.Features) > 0 {
+		if len(opts.SkipChecks) > 0 || cncfOpts.Dir != "" {
 			withValidateSettings++
 		}
 
 		// explicitAttest is false: a config-only run sets no flag, and
 		// --emit-attestation/--push are read from cmd.IsSet, never from YAML.
 		if err := validateFlagCombinations(
-			cncfOpts.CNCFSubmission, cncfOpts.Dir, cncfOpts.Features,
+			cncfOpts.CNCFSubmission, cncfOpts.Dir,
 			opts.NoCluster, false, opts.SkipChecks,
 		); err != nil {
 			t.Errorf("AICRConfig block %d is documented but `aicr validate --config` refuses it: %v\n%s",
@@ -154,7 +154,7 @@ func TestDocsValidateConfigExamplesPassOurOwnGuards(t *testing.T) {
 
 	if withValidateSettings == 0 {
 		t.Fatalf("no documented AICRConfig reached the guard with any spec.validate setting "+
-			"(skipChecks, evidence.cncf.dir or features); every case above passed vacuously, "+
+			"(skipChecks or evidence.cncf.dir); every case above passed vacuously, "+
 			"so this gate proves nothing about %s", reference)
 	}
 }

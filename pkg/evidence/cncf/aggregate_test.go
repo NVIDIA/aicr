@@ -16,6 +16,7 @@ package cncf
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -411,5 +412,162 @@ func TestFormatResult(t *testing.T) {
 		if got := formatResult(tt.status, tt.reason); got != tt.want {
 			t.Errorf("formatResult(%q, %q) = %q, want %q", tt.status, tt.reason, got, tt.want)
 		}
+	}
+}
+
+// TestAlternativeProofsCoverPageChecks pins alternativeProofs to the
+// evidence pages: every requirement with alternatives has a page, every
+// check on a path is one the page expects, and the paths together cover
+// exactly the page's checks. A check added to a page without a path would
+// otherwise be silently unrequired, because proofPaths replaces the page's
+// single all-checks path with the alternatives.
+func TestAlternativeProofsCoverPageChecks(t *testing.T) {
+	for id, paths := range alternativeProofs {
+		page := pageForRequirement(id)
+		if page == nil {
+			t.Errorf("alternativeProofs[%q]: no evidence page carries that requirement", id)
+			continue
+		}
+		if len(paths) < 2 {
+			t.Errorf("alternativeProofs[%q]: %d path(s); a single path is the default and needs no entry", id, len(paths))
+		}
+		covered := make(map[string]bool)
+		for _, path := range paths {
+			if len(path) == 0 {
+				t.Errorf("alternativeProofs[%q]: empty proof path would pass with no check", id)
+			}
+			for _, check := range path {
+				if !slices.Contains(page.Checks, check) {
+					t.Errorf("alternativeProofs[%q]: path names %q, which page %s does not expect", id, check, page.File)
+				}
+				covered[check] = true
+			}
+		}
+		for _, check := range page.Checks {
+			if !covered[check] {
+				t.Errorf("alternativeProofs[%q]: page %s expects %q but no proof path requires it", id, page.File, check)
+			}
+		}
+	}
+}
+
+// TestAggregateVerdict pins the exit rule of a submission run: the
+// aggregation decides, scoped by level. A SHOULD that did not pass never
+// fails it; an applicable MUST that did always does, and the error names each
+// one with status and reason; a MUST declared not applicable is not counted.
+func TestAggregateVerdict(t *testing.T) {
+	tests := []struct {
+		name    string
+		agg     *Aggregate
+		wantErr []string
+		absent  []string
+	}{
+		{name: "every MUST passed", agg: &Aggregate{Version: LatestVersion, Requirements: []RequirementResult{
+			{ID: "gang_scheduling", Level: LevelMust, Status: StatusPassed},
+			{ID: "workload_sandboxing", Level: LevelShould, Status: StatusNotTested, Reason: untestedNoCheck},
+		}}},
+		{name: "not applicable MUST", agg: &Aggregate{Version: LatestVersion, Requirements: []RequirementResult{
+			{ID: "cluster_autoscaling", Level: LevelMust, Status: StatusNotApplicable, Reason: "fixed-size cluster"},
+		}}},
+		{name: "incomplete MUSTs", agg: &Aggregate{Version: LatestVersion, Requirements: []RequirementResult{
+			{ID: "gang_scheduling", Level: LevelMust, Status: StatusFailed, Reason: "gang-scheduling failed"},
+			{ID: "pod_autoscaling", Level: LevelMust, Status: StatusNotTested, Reason: "pod-autoscaling not run"},
+			{ID: "ai_inference", Level: LevelMust, Status: StatusPassed},
+			{ID: "workload_sandboxing", Level: LevelShould, Status: StatusFailed, Reason: "sandbox failed"},
+		}},
+			wantErr: []string{"2 applicable MUST", "gang_scheduling failed (gang-scheduling failed)", "pod_autoscaling not tested (pod-autoscaling not run)"},
+			absent:  []string{"ai_inference", "workload_sandboxing"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.agg.Verdict()
+			if len(tt.wantErr) == 0 {
+				if err != nil {
+					t.Fatalf("Verdict() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Verdict() = nil, want the incomplete MUSTs to fail")
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %v does not mention %q", err, want)
+				}
+			}
+			for _, bad := range tt.absent {
+				if strings.Contains(err.Error(), bad) {
+					t.Errorf("error %v names %q, which did not fail the run", err, bad)
+				}
+			}
+		})
+	}
+}
+
+// TestAggregateOutcome pins the shared exit rule of a submission run: the
+// per-check rule (any failing CTRF status, mapped to a requirement or not)
+// and the requirement verdict are both applied, the per-check rule can be
+// switched off by the caller (--fail-on-error=false), and the verdict
+// cannot.
+func TestAggregateOutcome(t *testing.T) {
+	passed := &Aggregate{Version: LatestVersion, Requirements: []RequirementResult{
+		{ID: "gang_scheduling", Level: LevelMust, Status: StatusPassed},
+	}}
+	incomplete := &Aggregate{Version: LatestVersion, Requirements: []RequirementResult{
+		{ID: "gang_scheduling", Level: LevelMust, Status: StatusNotTested, Reason: "gang-scheduling not run"},
+	}}
+	clean := reportOf(ctrf.TestResult{Name: "gang-scheduling", Status: ctrf.StatusPassed})
+	crashed := reportOf(
+		ctrf.TestResult{Name: "gang-scheduling", Status: ctrf.StatusPassed},
+		ctrf.TestResult{Name: "platform-health", Status: ctrf.StatusOther, Message: "OOMKilled"})
+	skippedOnly := reportOf(ctrf.TestResult{Name: "gang-scheduling", Status: ctrf.StatusSkipped})
+
+	tests := []struct {
+		name     string
+		agg      *Aggregate
+		report   *ctrf.Report
+		perCheck bool
+		want     []string
+		absent   []string
+	}{
+		{name: "all passed", agg: passed, report: clean, perCheck: true},
+		{name: "unmapped check crashed, every MUST established", agg: passed, report: crashed, perCheck: true,
+			want: []string{"one or more checks did not pass"}, absent: []string{"not established"}},
+		{name: "unmapped crash ignored without the per-check rule", agg: passed, report: crashed},
+		{name: "MUST not tested, nothing failed", agg: incomplete, report: skippedOnly, perCheck: true,
+			want: []string{"not established", "gang_scheduling not tested"}, absent: []string{"checks did not pass"}},
+		{name: "verdict applies without the per-check rule", agg: incomplete, report: skippedOnly,
+			want: []string{"not established"}},
+		{name: "both", agg: incomplete, report: crashed, perCheck: true,
+			want: []string{"one or more checks did not pass", "not established", "gang_scheduling not tested"}},
+		{name: "nil aggregate, failed check", agg: nil, report: crashed, perCheck: true,
+			want: []string{"one or more checks did not pass"}},
+		{name: "nil report", agg: passed, report: nil, perCheck: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.agg.Outcome(tt.report, tt.perCheck)
+			if len(tt.want) == 0 {
+				if err != nil {
+					t.Fatalf("Outcome() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Outcome() = nil, want an error")
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+			for _, want := range tt.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %v does not mention %q", err, want)
+				}
+			}
+			for _, bad := range tt.absent {
+				if strings.Contains(err.Error(), bad) {
+					t.Errorf("error %v mentions %q", err, bad)
+				}
+			}
+		})
 	}
 }

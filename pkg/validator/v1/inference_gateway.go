@@ -48,9 +48,8 @@ const (
 	GatewayProbeGatewayAddress   GatewayDataPlaneProbe = "gateway-address"
 )
 
-// InferenceGatewayProfile is what the inference-gateway conformance check,
-// the performance validator's gateway-epp mode and the CNCF evidence collector
-// read instead of literals. Namespace is the resolved componentRef's
+// InferenceGatewayProfile is what the inference-gateway conformance check
+// and the performance validator's gateway-epp mode read instead of literals. Namespace is the resolved componentRef's
 // namespace, hydrated from the registry at recipe resolution, or the built-in
 // default when the ref carries none.
 type InferenceGatewayProfile struct {
@@ -240,9 +239,11 @@ func inferenceGatewayProfileFromRef(ref *recipe.ComponentRef) (InferenceGatewayP
 		return InferenceGatewayProfile{}, false, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q is an inference gateway but has no resolved namespace; set componentRef.namespace or the registry defaultNamespace", ref.Name))
 	}
-	// The names reach kubectl as bare arguments in the evidence collector, so
-	// a value that is not a Kubernetes object name (a leading dash reads as a
-	// flag) is refused here rather than handed to a subprocess.
+	// The names are rendered into the kubectl reproduction commands the
+	// inference-gateway check records on its evidence page and used as API
+	// object names by both consumers, so a value that is not a Kubernetes
+	// object name (a leading dash reads as a flag) is refused here, at
+	// resolution, rather than inside a validator Job.
 	for _, check := range []struct {
 		field, value string
 		problems     []string
