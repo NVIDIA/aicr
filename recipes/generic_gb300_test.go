@@ -139,119 +139,144 @@ func TestGenericGB300MaintenanceOperatorSizing(t *testing.T) {
 	t.Fatal("network-operator component not found in the resolved generic GB300 recipe")
 }
 
-// TestGenericGB300NicConfigurationDaemonResources renders the generic GB300
-// NicClusterPolicy with the recipe's effective network-operator values and
-// checks that the nic-configuration-daemon resources come from those values,
-// so a networkoperator override reaches the policy.
-func TestGenericGB300NicConfigurationDaemonResources(t *testing.T) {
+// TestNicConfigurationDaemonResources renders each NicClusterPolicy that
+// deploys the nic-configuration-daemon with its leaf's effective values. With
+// no override the policy sets no daemon resources, so the Network Operator's
+// default applies (#3698); a networkoperator override reaches the policy.
+func TestNicConfigurationDaemonResources(t *testing.T) {
 	t.Parallel()
 
-	const policyManifest = "nic-cluster-policy-generic-gb300.yaml"
-
-	tests := []struct {
+	leaves := []struct {
+		name     string
+		criteria *recipe.Criteria
+		manifest string
+	}{
+		{
+			name: "generic gb300",
+			criteria: &recipe.Criteria{
+				Service:     recipe.CriteriaServiceGeneric,
+				Accelerator: recipe.CriteriaAcceleratorGB300,
+				OS:          recipe.CriteriaOSUbuntu,
+				Intent:      recipe.CriteriaIntentTraining,
+			},
+			manifest: "nic-cluster-policy-generic-gb300.yaml",
+		},
+		{
+			name: "nvke vr200",
+			criteria: &recipe.Criteria{
+				Service:     recipe.CriteriaServiceNVKE,
+				Accelerator: recipe.CriteriaAcceleratorVR200,
+				OS:          recipe.CriteriaOSUbuntu,
+				Intent:      recipe.CriteriaIntentTraining,
+			},
+			manifest: "nic-cluster-policy-nvke-vr200.yaml",
+		},
+	}
+	cases := []struct {
 		name           string
 		overrides      map[string]string
 		wantLimitMem   string
 		wantRequestMem string
 	}{
-		{
-			name:           "recipe defaults",
-			wantLimitMem:   "2Gi",
-			wantRequestMem: "256Mi",
-		},
+		{name: "operator default"},
 		{
 			name: "override reaches the policy",
 			overrides: map[string]string{
-				"nicConfigurationOperator.configurationDaemon.resources.limits.memory":   "4Gi",
+				"nicConfigurationOperator.configurationDaemon.resources.limits.memory":   "8Gi",
 				"nicConfigurationOperator.configurationDaemon.resources.requests.memory": "1Gi",
 			},
-			wantLimitMem:   "4Gi",
+			wantLimitMem:   "8Gi",
 			wantRequestMem: "1Gi",
 		},
 	}
 
-	criteria := &recipe.Criteria{
-		Service:     recipe.CriteriaServiceGeneric,
-		Accelerator: recipe.CriteriaAcceleratorGB300,
-		OS:          recipe.CriteriaOSUbuntu,
-		Intent:      recipe.CriteriaIntentTraining,
-	}
-	result, err := recipe.NewBuilder().BuildFromCriteriaWithProfile(t.Context(), criteria, "")
-	if err != nil {
-		t.Fatalf("BuildFromCriteriaWithProfile: %v", err)
-	}
-	var ref *recipe.ComponentRef
-	for i := range result.ComponentRefs {
-		if result.ComponentRefs[i].Name == "network-operator" {
-			ref = &result.ComponentRefs[i]
-			break
-		}
-	}
-	if ref == nil {
-		t.Fatal("network-operator component not found in the resolved generic GB300 recipe")
-	}
-	var manifestPath string
-	for _, p := range ref.ManifestFiles {
-		if strings.HasSuffix(p, policyManifest) {
-			manifestPath = p
-		}
-	}
-	if manifestPath == "" {
-		t.Fatalf("network-operator manifestFiles %v do not include %s", ref.ManifestFiles, policyManifest)
-	}
-	content, err := recipe.GetManifestContentWithContext(t.Context(), nil, manifestPath)
-	if err != nil {
-		t.Fatalf("load %s: %v", manifestPath, err)
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, leaf := range leaves {
+		t.Run(leaf.name, func(t *testing.T) {
 			t.Parallel()
 
-			values, err := recipe.GetComponentValuesWithContext(t.Context(), nil, ref)
+			result, err := recipe.NewBuilder().BuildFromCriteriaWithProfile(t.Context(), leaf.criteria, "")
 			if err != nil {
-				t.Fatalf("resolve effective network-operator values: %v", err)
+				t.Fatalf("BuildFromCriteriaWithProfile: %v", err)
 			}
-			if err = component.ApplyMapOverrides(values, tt.overrides); err != nil {
-				t.Fatalf("apply overrides: %v", err)
+			var ref *recipe.ComponentRef
+			for i := range result.ComponentRefs {
+				if result.ComponentRefs[i].Name == "network-operator" {
+					ref = &result.ComponentRefs[i]
+					break
+				}
 			}
-			rendered, err := manifest.Render(content, manifest.RenderInput{
-				ComponentName: ref.Name,
-				Values:        values,
-			})
+			if ref == nil {
+				t.Fatal("network-operator component not found in the resolved recipe")
+			}
+			var manifestPath string
+			for _, p := range ref.ManifestFiles {
+				if strings.HasSuffix(p, leaf.manifest) {
+					manifestPath = p
+				}
+			}
+			if manifestPath == "" {
+				t.Fatalf("network-operator manifestFiles %v do not include %s", ref.ManifestFiles, leaf.manifest)
+			}
+			content, err := recipe.GetManifestContentWithContext(t.Context(), nil, manifestPath)
 			if err != nil {
-				t.Fatalf("render %s: %v", manifestPath, err)
+				t.Fatalf("load %s: %v", manifestPath, err)
 			}
 
-			var policy struct {
-				Spec struct {
-					NicConfigurationOperator struct {
-						ConfigurationDaemon struct {
-							ContainerResources []struct {
-								Name     string            `yaml:"name"`
-								Requests map[string]string `yaml:"requests"`
-								Limits   map[string]string `yaml:"limits"`
-							} `yaml:"containerResources"`
-						} `yaml:"configurationDaemon"`
-					} `yaml:"nicConfigurationOperator"`
-				} `yaml:"spec"`
-			}
-			if err = yaml.Unmarshal(rendered, &policy); err != nil {
-				t.Fatalf("rendered policy does not parse: %v\n%s", err, rendered)
-			}
-			res := policy.Spec.NicConfigurationOperator.ConfigurationDaemon.ContainerResources
-			if len(res) != 1 || res[0].Name != "nic-configuration-daemon" {
-				t.Fatalf("configurationDaemon.containerResources = %+v, want one nic-configuration-daemon entry", res)
-			}
-			if got := res[0].Limits["memory"]; got != tt.wantLimitMem {
-				t.Errorf("limits.memory = %q, want %q (every daemon caches the cluster-wide "+
-					"NicDevice set, so its memory grows with cluster size)", got, tt.wantLimitMem)
-			}
-			if got := res[0].Requests["memory"]; got != tt.wantRequestMem {
-				t.Errorf("requests.memory = %q, want %q", got, tt.wantRequestMem)
-			}
-			if got := res[0].Requests["cpu"]; got != "100m" {
-				t.Errorf("requests.cpu = %q, want 100m", got)
+			for _, tt := range cases {
+				t.Run(tt.name, func(t *testing.T) {
+					values, err := recipe.GetComponentValuesWithContext(t.Context(), nil, ref)
+					if err != nil {
+						t.Fatalf("resolve effective network-operator values: %v", err)
+					}
+					if err = component.ApplyMapOverrides(values, tt.overrides); err != nil {
+						t.Fatalf("apply overrides: %v", err)
+					}
+					rendered, err := manifest.Render(content, manifest.RenderInput{
+						ComponentName: ref.Name,
+						Values:        values,
+					})
+					if err != nil {
+						t.Fatalf("render %s: %v", manifestPath, err)
+					}
+
+					var policy struct {
+						Spec struct {
+							NicConfigurationOperator struct {
+								ConfigurationDaemon struct {
+									Image              string `yaml:"image"`
+									ContainerResources []struct {
+										Name     string            `yaml:"name"`
+										Requests map[string]string `yaml:"requests"`
+										Limits   map[string]string `yaml:"limits"`
+									} `yaml:"containerResources"`
+								} `yaml:"configurationDaemon"`
+							} `yaml:"nicConfigurationOperator"`
+						} `yaml:"spec"`
+					}
+					if err = yaml.Unmarshal(rendered, &policy); err != nil {
+						t.Fatalf("rendered policy does not parse: %v\n%s", err, rendered)
+					}
+					daemon := policy.Spec.NicConfigurationOperator.ConfigurationDaemon
+					if daemon.Image == "" {
+						t.Fatalf("rendered policy has no configurationDaemon:\n%s", rendered)
+					}
+					res := daemon.ContainerResources
+					if tt.wantLimitMem == "" {
+						if len(res) != 0 {
+							t.Fatalf("configurationDaemon.containerResources = %+v, want none so the operator's default applies", res)
+						}
+						return
+					}
+					if len(res) != 1 || res[0].Name != "nic-configuration-daemon" {
+						t.Fatalf("configurationDaemon.containerResources = %+v, want one nic-configuration-daemon entry", res)
+					}
+					if got := res[0].Limits["memory"]; got != tt.wantLimitMem {
+						t.Errorf("limits.memory = %q, want %q", got, tt.wantLimitMem)
+					}
+					if got := res[0].Requests["memory"]; got != tt.wantRequestMem {
+						t.Errorf("requests.memory = %q, want %q", got, tt.wantRequestMem)
+					}
+				})
 			}
 		})
 	}
