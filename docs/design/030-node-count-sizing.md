@@ -35,7 +35,7 @@ configuration daemon. The NIC daemon runs on every node, and each copy
 caches every NicDevice in the cluster
 ([#3149](https://github.com/NVIDIA/aicr/issues/3149)).
 
-v1.0.0 shipped small-cluster values, and two GB300 bring-ups at about 1700
+v1.0.0 shipped small-cluster values, and two GB300 bring-ups at about 1600
 and 2500 GPU nodes OOM-killed all five
 ([#3148](https://github.com/NVIDIA/aicr/issues/3148)). v1.1.0 raised the
 limits for every cluster to values that hold at 2500 GPU nodes: 8Gi to 12Gi
@@ -49,9 +49,9 @@ them. For everything else they cost something:
   or misbehaves can take memory far past what its cluster size explains
   before the kernel stops it, and the node's other pods pay through
   node-pressure eviction. The NIC daemon's 2Gi is multiplied by every node.
-- **Requests above usage.** network-operator requests 2Gi and nodewright
-  2000Mi per replica. Below about 450 GPU nodes their p90 working set is 1
-  to 1.4Gi, so the scheduler reserves memory the controllers do not use.
+- **Requests above usage.** network-operator requests 2Gi. At 250 GPU
+  nodes and below its p90 working set is under 900Mi, so the scheduler
+  reserves memory the controller does not use.
 
 Lowering these values for everyone would bring #3148 back, and changing them
 for a large cluster re-rolls its controllers, which on a 2000-node cluster
@@ -160,7 +160,8 @@ per-node Skyhook CRs, pods, and the package-execution Jobs it retains for
 `jobTtlSucceeded` (1h default) and `jobTtlFailed` (24h). A cluster with 118
 GPU nodes, 436 nodes in total and 18k pods killed its manager at a 2Gi
 limit, as did a 447-GPU-node cluster with the same pod count. The tiers
-below size nodewright so that both are covered.
+below size nodewright so that both are covered, which keeps its request at
+today's value in every tier.
 
 ### What AICR already has
 
@@ -284,21 +285,23 @@ The count is GPU nodes, the meaning `--nodes` and the REST `nodes`
 parameter already document, so this ADR changes no frozen v1 surface. GPU
 nodes is also what an operator plans a cluster in, and what the recipe
 endpoint's `nodes` means. CPU nodes cost memory too (see Context). On the
-GB300 clusters measured they are 2 to 9% of the total, well inside the
-1.3 margin. A tier is only measured up to the total node count its
-covering readings record (each measurement's `nodes`). Nodewright's ≤ 250
-and ≤ 450 limits, for example, come from a reading at 670 total nodes, so
-a ≤ 250 cluster with 925 total nodes is outside what they cover. A cluster
-whose total node count exceeds its tier's measured total should state a
-higher count or override. A separate CPU count is an open question, and the
-sizing file's `basis` field leaves room for it.
+GB300 clusters with windowed readings they are 2 to 9% of the total, but
+that share does not hold in general: the 118-GPU-node cluster in Context
+has 436 nodes in total. The 1.3 margin is therefore not relied on to cover
+CPU nodes. Instead, a tier's limit covers clusters up to the total node
+count recorded (`nodes`) by the readings it was derived from. Nodewright's
+≤ 250 and ≤ 450 limits, for example, come from a reading at 670 total
+nodes, so a ≤ 250 cluster with 925 total nodes is outside what they cover.
+A cluster whose total node count exceeds that of its tier's limit readings
+should state a higher count or override. A separate CPU count is an open
+question, and the sizing file's `basis` field leaves room for it.
 
 `--nodes` keeps feeding `nodeScheduling.nodeCountPaths`. Every input takes a
 non-negative integer; 0 means no count. A negative count is rejected with
 `ErrCodeInvalidRequest` on the CLI, config-file, REST and SDK paths. On
-`argocd-helm` the schema declares the same minimum, and because schema
-validation can be skipped, the template also fails on a negative
-`sizing.nodeCount`.
+`argocd-helm` the schema declares it an integer of at least 0, and because
+schema validation can be skipped, the template also fails on a negative or
+fractional `sizing.nodeCount` rather than truncating it into a lower tier.
 
 ### The sizing file
 
@@ -314,10 +317,10 @@ resources:
   - path: controllerManager.manager.resources
     tiers:
       - maxNodes: 250
-        requests: {memory: 1Gi}
+        requests: {memory: 2000Mi}
         limits: {memory: 3Gi}
         measurements:
-          - sets: [requests]
+          - sets: []
             kind: windowed
             window: 24h
             gpuNodes: 244
@@ -326,7 +329,7 @@ resources:
             max: 1024Mi
             date: 2026-10-14
             ref: https://github.com/NVIDIA/aicr/issues/3214
-          - sets: []
+          - sets: [requests]
             kind: instantaneous
             gpuNodes: 118
             nodes: 436
@@ -346,7 +349,7 @@ resources:
             date: 2026-11-04
             ref: https://github.com/NVIDIA/aicr/issues/3214
       - maxNodes: 450
-        requests: {memory: 1.5Gi}
+        requests: {memory: 2000Mi}
         limits: {memory: 3Gi}
         measurements: [...]
       - maxNodes: 700
@@ -361,7 +364,10 @@ resources:
 - `apiVersion` and `kind`: the artifact header, as for ADR-021's
   `ComponentUpgrades`.
 - `basis`: the count the table is keyed on. Only `gpuNodes` is defined.
-- `path`: the values path of a resources block, as `--set` writes it. The
+- `path`: the values path of a resources block, as `--set` writes it.
+  Sizing reads and writes the block's `requests.memory` and
+  `limits.memory` as separate fields, and every exclusion below (inline
+  overrides, lock sets, user overrides) applies per field. The
   entry applies to every values file that sets the path and is skipped
   where none does. The maintenance-operator entry therefore reaches only
   the generic GB300 values file today: NVKE GB200 declares
@@ -374,8 +380,8 @@ resources:
 - `measurements`: required on every tier that sets a value. Each entry
   records one reading:
   - `sets`: which of `requests` and `limits` it set, or empty for a reading
-    that only constrained the result (a truncated reading, or one that a
-    higher reading in the tier outweighed);
+    that only constrained the result (one that a higher reading outweighed,
+    or a truncated reading that sent the limit to a reading above);
   - `kind`: `windowed` or `instantaneous`, and `window` for a windowed one;
   - `gpuNodes`, `nodes` and `pods`: the measured cluster at read time;
   - `p90` where the reading kept it, and `max`;
@@ -397,10 +403,11 @@ replace it.
   Windowed readings with a p90 are preferred, then windowed readings with a
   max only, then instantaneous ones. If no reading is that close, the
   nearest reading above the bound covers the tier, which over-sizes it.
-- **Request:** the covering reading's p90, or its max when p90 was not
-  kept. The pod then stays under its request, and out of the kubelet's
-  first eviction group, about 90% of the time. Not the limit, as GKE
-  [recommends](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/vertical-pod-autoscaling):
+- **Request:** the highest p90 among the covering reading and every
+  reading inside the tier, using a reading's max when p90 was not kept and
+  a truncated reading's value as it stands. The pod then stays under its
+  request, and out of the kubelet's first eviction group, about 90% of the
+  time. Not the limit, as GKE [recommends](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/vertical-pod-autoscaling):
   that would reserve the peak on every system node.
 - **Limit:** the highest peak among the covering reading and every reading
   inside the tier, times 1.3. The 30% covers spikes above p90 and some drift
@@ -416,12 +423,13 @@ replace it.
 - **Rounding:** round up to a multiple of 256Mi below 2Gi, and of 512Mi
   from 2Gi.
 - **Caps:** no value is above the same field in the tier above, and no
-  request is above the top tier's. A tier whose derivation lands on the
-  tier above's values is left out of the file.
+  request is above the top tier's. A tier may equal the tier above; every
+  component's file keeps the same bounds, so one count selects the same
+  row in each.
 - **Re-measurement:** the readings are re-read, from the longest window
   kept, before each release that changes the component's pin or values. For
-  a controller that drifts at a constant node count, the limit uses the
-  drifted peak.
+  a controller that drifts at a constant node count, a limit derived from
+  that cluster's readings uses the drifted peak, whichever tier it sets.
 
 **Validation.** The loader fails closed with `ErrCodeInvalidRequest` on:
 
@@ -435,6 +443,12 @@ replace it.
   names it;
 - a measurement missing `kind`, `gpuNodes`, `max`, `date` or `ref`, or a
   windowed one missing `window`.
+
+The loader cannot reject a well-formed path that no values file sets,
+because an entry is skipped by design where a file does not set it. A
+unit test fails instead when a sizing path is set by none of the
+component's values files (registry, overlay or mixin), so a typo or a key
+renamed by a chart bump cannot turn sizing into a silent no-op.
 
 The contributor guide (`docs/contributor/component-sizing.md`, added by the
 implementation PR) holds these rules, the Prometheus queries behind each
@@ -451,25 +465,30 @@ controller.
 |---|---|---|---|---|---|
 | > 2000, or no count | 300Mi / 8Gi | 2Gi / 12Gi | 256Mi / 12Gi | 2000Mi / 12Gi | 256Mi / 2Gi |
 | ≤ 2000 | today's | today's | today's | today's | today's |
-| ≤ 700 | 300Mi / 1Gi | 1.5Gi / 11.5Gi | 256Mi / 5.5Gi | 2000Mi / 3Gi | today's |
-| ≤ 450 | 300Mi / 1Gi | 1Gi / 2.5Gi | 256Mi / 5.5Gi | 1.5Gi / 3Gi | today's |
-| ≤ 250 | 300Mi / 768Mi | 768Mi / 2Gi | 256Mi / 5.5Gi | 1Gi / 3Gi | today's |
+| ≤ 700 | 300Mi / 1Gi | 1.5Gi / 12Gi | 256Mi / 5.5Gi | 2000Mi / 3Gi | today's |
+| ≤ 450 | 300Mi / 1Gi | 1.5Gi / 2.5Gi | 256Mi / 5.5Gi | 2000Mi / 3Gi | today's |
+| ≤ 250 | 300Mi / 768Mi | 1Gi / 2Gi | 256Mi / 5.5Gi | 2000Mi / 3Gi | today's |
 
 network-operator's values apply to the generic GB300 values file as shown.
 The three files that set 2Gi / 2Gi keep the lower of their value and the
 tier's (see Precedence).
 
-The reading behind each cell, in Mi as p90 / peak, 24h unless marked:
+The reading behind each cell, in Mi as p90 / peak, 24h unless marked.
+"Capped" means the derived value was above the tier above's, or a request
+above today's, and the cap applied:
 
 | Tier | gpu-operator | network-operator | maintenance-operator | nodewright |
 |---|---|---|---|---|
-| ≤ 700 | 602 / 744 at 656 | request 1384 at 656; limit 8675, 7d at 2012 † | 2345 instantaneous at 1112 ‡ | 2163 / 2287 at 656 |
-| ≤ 450 | request 410 at 407; limit 635 at 447 | request 955 at 407; limit 1594 at 447 | as ≤ 700 ‡ | request 1377 at 407; limit 2287 at 656 † |
-| ≤ 250 | request 365 at 244; limit 319 instantaneous at 141 | request 728 at 244; limit 846 instantaneous at 159 | as ≤ 700 ‡ | request 1024 at 244; limit 2287 at 656 † |
+| ≤ 700 | request capped; limit 744 at 656 | request 1384 at 656; limit from 10.6Gi drifted peak, 7d at 2012, capped † | 2345 instantaneous at 1112 ‡ | request 2163 at 656, capped; limit 2287 at 656 |
+| ≤ 450 | request capped; limit 635 at 447 | request 1594 at 447, capped; limit 1594 at 447 | as ≤ 700 ‡ | request 1868 truncated at 447, capped; limit 2287 at 656 † |
+| ≤ 250 | request capped; limit 319 instantaneous at 141 | request and limit 846 instantaneous at 159 | as ≤ 700 ‡ | request 1859 truncated at 118, capped; limit 2287 at 656 † |
 
 † A reading inside the tier was truncated: network-operator crash-looped at
 2Gi at 576; nodewright was OOM-killed at 2Gi at 118, 408 and 447. The limit
-comes from the nearest reading above that exceeds 2Gi.
+comes from the nearest reading above that exceeds 2Gi. For
+network-operator that is bare-metal GB300 B, whose peak drifted to 10.6Gi
+at a roughly constant count, so the drift rule applies and ≤ 700 keeps
+today's 12Gi limit.
 
 ‡ No reading within 10% of the bound; sized from the nearest reading above.
 
@@ -489,10 +508,10 @@ Notes on the table:
   maintenance-operator and NIC daemon series to the fleet Prometheus since
   2026-11-05; its first windowed readings are 597 / 602 and 366 / 680 per
   pod. It covers the ≤ 250 tier if it grows to its planned 256-node test.
-- **network-operator's ≤ 250 request, 768Mi,** sits below exmplr's p90 of
-  891Mi, which is Mistral's install of the same chart and an hour-and-a-half
-  window. The request follows the covering reading at 244; the limit
-  already includes exmplr.
+- **Requests follow the highest reading in the tier.** gpu-operator's and
+  nodewright's requests therefore stay at today's values in every tier:
+  nodewright's in-tier readings were taken while it was being OOM-killed
+  at 1.8Gi. network-operator's request is the only one lowered.
 - **Nodewright replicas.** Requests and limits are per replica. AICR does
   not keep the two replicas on separate nodes.
 - **Per-node totals.** In the ≤ 250 tier, the controllers' limits on one
@@ -553,8 +572,10 @@ chart, which the operator sets at install. Sizing is decided per path:
   row, so those values survive. The template only selects a row; it never
   compares quantities.
 - **Paths read by bundle-rendered manifests** cannot see root-chart values,
-  so they are sized at generation time from `--nodes` and left out of the
-  rows. No path in the initial tiers is one; the NIC daemon's would be.
+  so they are sized at generation time from `--nodes`. A component with
+  any such path is sized entirely at generation time and gets no rows, so
+  one count sizes all of it. No path in the initial tiers is one; the NIC
+  daemon's would be.
 - **Local-chart components** are sized at generation time.
 
 Rendering:
@@ -578,10 +599,11 @@ Rendering:
 - A `--dynamic` export of a sized path is rejected at bundle time. Its
   pre-filled root value would otherwise always mask the selected row.
 
-One code path decides each component's sizing: on an `argocd-helm` bundle,
-`--nodes` only sets the default `sizing.nodeCount` and sizes the
-generation-time paths. Other deployers have no install-time sizing yet;
-they can add it by following this section.
+Each component is sized from exactly one count: on an `argocd-helm`
+bundle, `--nodes` sets the default `sizing.nodeCount` and sizes the
+components sized at generation time, and `sizing.nodeCount` sizes the
+rest. Other deployers have no install-time sizing yet; they can add it
+by following this section.
 
 ### For operators
 
@@ -612,7 +634,7 @@ they can add it by following this section.
 - Nothing changes for a cluster that states no count or more than 2000 GPU
   nodes, so no large cluster re-rolls.
 - Small and mid-sized clusters that state a count get limits sized to their
-  measurements, and lower requests for network-operator and nodewright.
+  measurements, and a lower request for network-operator.
 - A published `argocd-helm` bundle is sized with one value instead of a
   hand-copied block per controller.
 - Every lowered value points to its measurements in a structured form, and
