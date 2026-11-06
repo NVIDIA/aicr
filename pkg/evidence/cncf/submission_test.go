@@ -30,6 +30,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/evidence/cncf/upstreamvalidator"
 	"github.com/NVIDIA/aicr/pkg/evidence/redact"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
@@ -292,7 +293,7 @@ func TestWriteSubmissionComplete(t *testing.T) {
 	}
 	readme := readFile(t, filepath.Join(dir, readmeFile))
 	for _, want := range []string{testVendor().K8sConformanceURL, "ipv4: 1 distinct value(s) aliased", "node: 2 distinct value(s) aliased", "**Outcome:** accepted",
-		"`driver-runtime-management` | failed | skipped", "c64e5bc8085da207715df96e458f2c6585c9f53e", "| Kubernetes version | 1.37.2 |", "`gpu-operator` | v26.7.2"} {
+		"`driver-runtime-management` | failed | skipped", upstreamvalidator.UpstreamCommit, "| Kubernetes version | 1.37.2 |", "`gpu-operator` | v26.7.2"} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README lacks %q", want)
 		}
@@ -698,18 +699,34 @@ func TestWriteSubmissionStagingErrors(t *testing.T) {
 	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
 	_, err = newStaging(filepath.Join(blocker, "submission"), Version137)
 	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
-	// A failure after the root exists removes it again: here docs/ is a
-	// file, so the schema directory cannot be created.
-	halfMade := filepath.Join(base, "half")
-	if mkErr := os.MkdirAll(halfMade+IncompleteSuffix, 0o755); mkErr != nil {
+	// A root that already exists is a conflict and is left alone, whatever
+	// it holds.
+	taken := filepath.Join(base, "taken-root")
+	if mkErr := os.MkdirAll(taken+IncompleteSuffix, 0o755); mkErr != nil {
 		t.Fatal(mkErr)
 	}
-	if wrErr := os.WriteFile(filepath.Join(halfMade+IncompleteSuffix, "docs"), []byte("x"), 0o644); wrErr != nil {
+	if wrErr := os.WriteFile(filepath.Join(taken+IncompleteSuffix, "docs"), []byte("x"), 0o644); wrErr != nil {
 		t.Fatal(wrErr)
 	}
-	_, err = newStaging(halfMade, Version137)
-	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
-	if _, statErr := os.Stat(halfMade + IncompleteSuffix); !os.IsNotExist(statErr) {
+	_, err = newStaging(taken, Version137)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeConflict)
+	if _, statErr := os.Stat(filepath.Join(taken+IncompleteSuffix, "docs")); statErr != nil {
+		t.Errorf("a pre-existing staging tree was touched: %v", statErr)
+	}
+	// A failure after this run claimed the root removes it again: the
+	// parent is made read-only so the child directories cannot be created.
+	locked := filepath.Join(base, "locked", "submission")
+	if mkErr := os.MkdirAll(filepath.Dir(locked), 0o755); mkErr != nil {
+		t.Fatal(mkErr)
+	}
+	if err = os.Chmod(filepath.Dir(locked), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Dir(locked), 0o755) })
+	if _, err = newStaging(locked, Version137); err == nil {
+		t.Skip("directory permissions are not enforced here")
+	}
+	if _, statErr := os.Stat(locked + IncompleteSuffix); !os.IsNotExist(statErr) {
 		t.Error("staging tree left behind after an initialization failure")
 	}
 	if _, err := listPages(filepath.Join(base, "missing")); err == nil {

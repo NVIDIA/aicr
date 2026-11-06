@@ -63,6 +63,18 @@ func TestTextScrubberRules(t *testing.T) {
 			want: "Authorization: Bearer jwt-redacted end",
 		},
 		{
+			name:     "a bounded name inside a rejected longer candidate is still aliased",
+			scrubber: TextScrubber{NodeNames: []string{"a-b-c", "b"}},
+			in:       "a-b-cx a-b-c",
+			want:     "a-node-2-cx node-1",
+		},
+		{
+			name:     "the left boundary is read from the input, not from the scan position",
+			scrubber: TextScrubber{NodeNames: []string{"gpu-1"}},
+			in:       "gpu-1gpu-1 gpu-1",
+			want:     "gpu-1gpu-1 node-1",
+		},
+		{
 			name:     "a shorter node name stands whole where the longest match does not",
 			scrubber: TextScrubber{NodeNames: []string{"gpu-1", "gpu-1-b"}},
 			in:       "gpu-1-bx then gpu-1-b and gpu-1",

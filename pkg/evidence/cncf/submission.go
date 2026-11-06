@@ -157,6 +157,9 @@ func ValidateSubmissionDir(dir string) error {
 //   - ErrCodeInvalidRequest when in.Report is nil, in.Vendor is malformed,
 //     in.Options is malformed for the resolved version, in.Version is
 //     unsupported, or dir fails ValidateSubmissionDir.
+//   - ErrCodeConflict when the staging tree <dir>.incomplete appeared
+//     between the pre-flight and the claim (another run, or a tree left
+//     behind); it is never removed by this run.
 //   - ErrCodeUnavailable when the upstream validator could not run (it
 //     needs the CNCF landscape and every cited URL to answer).
 //   - ErrCodeInternal when a file cannot be written or the validator
@@ -248,6 +251,18 @@ func newStaging(abs string, version Version) (*staging, error) {
 	st.schemaDir = filepath.Join(st.root, "docs")
 	st.productDir = filepath.Join(st.root, string(version), filepath.Base(abs))
 	st.evidenceDir = filepath.Join(st.productDir, evidenceDirName)
+	// The root is claimed with a plain Mkdir so a tree another run left or
+	// is writing is a conflict, never something this run removes on failure.
+	if err := os.MkdirAll(filepath.Dir(st.root), 0o755); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "create submission parent directory", err)
+	}
+	if err := os.Mkdir(st.root, 0o755); err != nil {
+		if stderrors.Is(err, fs.ErrExist) {
+			return nil, errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+				"%s exists: an earlier submission run left its incomplete directory, or another run is writing it; inspect and remove it first", st.root))
+		}
+		return nil, errors.Wrap(errors.ErrCodeInternal, "create submission staging directory", err)
+	}
 	for _, d := range []string{st.schemaDir, st.evidenceDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			st.discard()

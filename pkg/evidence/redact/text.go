@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // TextScrubber redacts free text the CNCF submission directory ships, the
@@ -218,36 +219,44 @@ func (s *TextScrubber) aliasNodeNames(in string) string {
 	sort.SliceStable(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
 	re := s.nodeRegexp(names)
 	var sb strings.Builder
-	rest := in
-	for {
-		m := re.FindStringIndex(rest)
+	pos := 0
+	for pos < len(in) {
+		m := re.FindStringIndex(in[pos:])
 		if m == nil {
-			sb.WriteString(rest)
-			return sb.String()
+			break
 		}
-		sb.WriteString(rest[:m[0]])
-		at := rest[m[0]:]
+		start := pos + m[0]
+		sb.WriteString(in[pos:start])
 		// The longest name at this offset may run into a longer token
 		// (gpu-1-b in gpu-1-bx); a shorter name at the same offset can still
-		// stand whole (gpu-1 in gpu-1-bx), so each is tried, longest first.
+		// stand whole (gpu-1 in gpu-1-bx), so each is tried, longest first,
+		// with the boundaries read from the original input.
 		matched := ""
+		leftBounded := start == 0 || !isNameByte(in[start-1])
 		for _, name := range names {
-			if !strings.HasPrefix(at, name) {
+			if !strings.HasPrefix(in[start:], name) {
 				continue
 			}
-			if (m[0] == 0 || !isNameByte(rest[m[0]-1])) && (len(at) == len(name) || !isNameByte(at[len(name)])) {
+			end := start + len(name)
+			if leftBounded && (end == len(in) || !isNameByte(in[end])) {
 				matched = name
 				break
 			}
 		}
 		if matched == "" {
-			sb.WriteString(rest[m[0]:m[1]])
-			rest = rest[m[1]:]
+			// Not a whole node name here: emit one character and look again
+			// from the next, so a bounded name inside the rejected span is
+			// still found.
+			_, size := utf8.DecodeRuneInString(in[start:])
+			sb.WriteString(in[start : start+size])
+			pos = start + size
 			continue
 		}
 		sb.WriteString(s.alias(aliasNode, matched))
-		rest = at[len(matched):]
+		pos = start + len(matched)
 	}
+	sb.WriteString(in[pos:])
+	return sb.String()
 }
 
 // nodeRegexp returns the alternation of names, longest first, compiled once

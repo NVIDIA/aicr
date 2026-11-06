@@ -602,13 +602,18 @@ for _, r := range agg.IncompleteMusts() {
   directory is written under `<dir>.incomplete` and moved to `dir` only when
   every applicable MUST is established and the validator accepts it, so a
   `PRODUCT.yaml` at `dir` is complete by construction (an empty directory
-  that existed before an incomplete run stays empty); otherwise the staged copy
-  is kept and `CNCFSubmissionResult.Dir` names it. A MUST that is not
-  established returns a nil error with `Complete` false: the exit status is
-  the aggregate's `Outcome`, as for the pages render. A write or redaction
-  error, or a validator rejection, is `ErrCodeInternal` with the validator's
-  report in the message; a validator that cannot fetch the landscape is
-  `ErrCodeUnavailable`. The statuses, the export rule for `junit.xml` and
+  that existed before an incomplete run stays empty). Two outcomes are not
+  errors: a complete directory (`Complete` true, `Dir` the requested path),
+  and an applicable MUST that is not established (a nil error, `Complete`
+  false, `Dir` the kept staged copy under `<dir>.incomplete/`, the validator
+  not run); the exit status is then the aggregate's `Outcome`, as for the
+  pages render. Errors return a nil result: a write error before the
+  redaction pass completes removes the staging tree (nothing unredacted is
+  left behind); a write error after it, or a validator rejection, is
+  `ErrCodeInternal` with the validator's report in the message and the
+  redacted staged copy kept; a validator that cannot fetch the landscape is
+  `ErrCodeUnavailable`; a `<dir>.incomplete` that appeared since the
+  pre-flight is `ErrCodeConflict` and is never removed. The statuses, the export rule for `junit.xml` and
   `e2e.log`, and the manual-attestation rule are documented under
   [Submission directory](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#submission-directory).
 - `ValidateCNCFSubmissionOptions(opts, dir)` checks `CNCFSubmissionOptions`
