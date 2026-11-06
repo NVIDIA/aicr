@@ -89,16 +89,16 @@ jobs:
     runs-on: ubuntu-24.04
     # Budget = uncapped non-UAT steps (build, validator image push, GKE
     # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 25
-    # + readiness 65 + validate 40 + the selected CUJ (train 25 OR serve 40) +
-    # verify 5 + faultinject 10 = up to 200; a manual training run with
-    # nvsentinel_remediation=quarantine takes faultinject to 15, for 190, #2625)
+    # + readiness 65 + validate 50 + the selected CUJ (train 25 OR serve 40) +
+    # verify 5 + faultinject 10 = up to 210; a manual training run with
+    # nvsentinel_remediation=quarantine takes faultinject to 15, for 200, #2625)
     # + the always()-run Destroy Cluster
     # teardown (3 retries, ~10m each = up to ~40m). Only one of train/serve runs
     # per intent, so the budget counts the larger (serve). The teardown MUST fit
     # in this budget: a job-level timeout cancels pending always() steps, so an
-    # undersized cap would skip teardown and leak the GPU node. 200 UAT + ~30
+    # undersized cap would skip teardown and leak the GPU node. 210 UAT + ~30
     # setup + ~8 failure-path debug collection (Collect cluster debug bundle) +
-    # ~40 teardown = ~278 base.
+    # ~40 teardown = ~288 base.
     #
     # The Bringup Infra step retries once (#2066) and carries no step-level
     # timeout, so a retried run costs a second provisioning attempt. The pinned
@@ -109,14 +109,14 @@ jobs:
     # and `terraform apply` is idempotent: a second attempt refreshes state,
     # waits out the still-completing pool, and converges.
     #
-    # Worst case is a second apply running near the full 60m: ~278 base already
+    # Worst case is a second apply running near the full 60m: ~288 base already
     # counts one ~60m provisioning attempt inside its ~30m "setup + provisioning"
     # slice PLUS the remaining phases, so a second ~60m attempt (plus the 60s
-    # backoff) adds ~61m on top, for a recomputed worst case of ~339m (278 + 61).
+    # backoff) adds ~61m on top, for a recomputed worst case of ~349m (288 + 61).
     #
     # GitHub-hosted runners (ubuntu-24.04) hard-cap a job at 360m of execution
     # (6h); a larger timeout-minutes is silently clamped to 360, so 360 is the
-    # ceiling here and covers the ~339m worst case with ~21m of margin. If the
+    # ceiling here and covers the ~349m worst case with ~11m of margin. If the
     # budget above grows the lever is trimming worst-case work (or moving off
     # the capped runner), NOT raising this number past 360 — a higher value
     # would not take effect anyway.
@@ -125,7 +125,7 @@ jobs:
     # node and its VPC network group, exactly what #2066/#2067 exist to protect.
     # Sizing for a single attempt would let a *successful* late retry trip that.
     # Do not change this cap without recomputing the whole budget above; the
-    # stated ~339m worst case and this timeout-minutes value must stay in lockstep.
+    # stated ~349m worst case and this timeout-minutes value must stay in lockstep.
     timeout-minutes: 360
     permissions:
       contents: read
@@ -697,11 +697,21 @@ jobs:
       - name: UAT - validate (all phases) + emit signed evidence
         id: conformance
         if: steps.readiness.outcome == 'success' && inputs.lifecycle != 'daytime-up'
-        # Larger budget than conformance-only: the deployment phase waits out
-        # cold-start GPU bring-up (driver install/migration). (The performance
-        # phase's NCCL benchmark skips on single-GPU-node clusters like this
-        # one, so it is not the long pole here.)
-        timeout-minutes: 40
+        # Sized from the nightly runs of 2026-11-04..06 (#3609): the step's
+        # longest observed wall time was 22.8m (gcp-h100 inference, 2026-11-06:
+        # deployment 1.5m + conformance 13.2m with 11 checks + inference-perf
+        # 7.9m). Two checks main now declares had not yet run in a nightly:
+        # driver-runtime-management (catalog timeout 10m) and the
+        # inference-gateway traffic phase (15m). 22.8 + 10 + 15 = 47.8m at their
+        # catalog ceilings, so 50 holds the full check set with the long poles
+        # (pod-autoscaling 6.7-8.7m, ai-service-metrics 1.2-4.2m) at their
+        # observed worst. Conformance checks run serially (pkg/validator
+        # runPhase), so the phase cost is the sum of its checks. The step also
+        # carries the GPU-node census gate that tests/uat/lib/phases.sh runs
+        # before validate (CENSUS_STABILITY_TIMEOUT_SECONDS, 5m cap; seconds
+        # when the census is already settled). A check at its catalog ceiling
+        # is already a failing step, so the budget is sized for a passing run.
+        timeout-minutes: 50
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
