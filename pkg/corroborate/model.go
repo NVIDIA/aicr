@@ -107,6 +107,10 @@ type Source struct {
 type Group struct {
 	Service    string      `json:"service"`
 	Dashboards []Dashboard `json:"dashboards"`
+
+	// DisplayName is presentation-only; Service remains the routing and filter
+	// ID. Older indexes omit it, so renderers fall back to Service.
+	DisplayName string `json:"displayName,omitempty"`
 }
 
 // Dashboard is one accelerator-os pairing within a service.

@@ -142,7 +142,7 @@
   }
   .criteria-bar .cb-title b{color:var(--green);font-weight:700}
   .criteria-bar .cb-cmd{font-family:var(--mono);font-size:9px;color:var(--ink-faint);opacity:.7}
-  .crit{display:flex;flex-direction:column;gap:3px}
+  .crit{display:flex;flex-direction:column;gap:3px;min-width:0;max-width:100%}
   .crit label{font-size:8.5px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.7px;color:var(--ink-faint)}
   .crit select{
     background:var(--panel-2);color:var(--ink-strong);border:1px solid var(--line-hi);border-radius:5px;
@@ -241,10 +241,12 @@
   .tree-node.collapsed .tw{transform:rotate(-90deg)}
   .tree-node .badge-mini{margin-left:auto;font-size:8.5px;color:var(--ink-faint);font-weight:500}
 
-  .tg-group{font-size:12px;font-weight:700;color:var(--ink-strong);letter-spacing:.4px;text-transform:uppercase}
+  .tg-group{font-size:12px;font-weight:700;color:var(--ink-strong);letter-spacing:.4px}
+  .service-heading{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;overflow-wrap:anywhere}
+  .service-id{font-family:var(--mono);font-size:10px;color:var(--ink-faint);overflow-wrap:anywhere}
   .tg-group .tree-disclosure{width:34px}
   .tg-group .tree-destination{padding:7px 14px 7px 0}
-  .tg-group .csp{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;
+  .tg-group .csp{display:inline-flex;align-items:center;justify-content:center;max-width:100%;min-height:18px;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere;
     background:rgba(118,185,0,.1);color:var(--green);font-size:8px;font-weight:800;flex:none}
   .tg-group.empty{color:var(--ink-faint)}
   .tg-group.empty .csp{background:rgba(90,102,120,.12);color:var(--ink-faint)}
@@ -315,6 +317,7 @@
     color:var(--ink-faint);margin:2px 0 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
   }
   .section-title b{color:var(--green);font-weight:700}
+  #cat-group-name{text-transform:none;min-width:0;max-width:100%;overflow-wrap:anywhere}
   .section-sub{font-size:12px;color:var(--ink-soft);margin:-4px 0 14px;max-width:820px;line-height:1.5}
   /* landing: title is value-led, so case it normally instead of the uppercase axis-label style */
   #view-landing .section-title{text-transform:none;letter-spacing:.2px;font-size:18px;color:var(--ink-strong)}
@@ -357,6 +360,7 @@
   /* ============ BREADCRUMB ============ */
   .breadcrumb{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
   .breadcrumb .crumb{
+    max-width:100%;overflow-wrap:anywhere;
     font-family:var(--mono);font-size:12px;color:var(--ink-soft);
     background:var(--panel-2);border:1px solid var(--line);padding:3px 9px;border-radius:6px;
   }
@@ -668,11 +672,11 @@
   .land-card:hover{border-color:var(--green-dim);transform:translateY(-1px)}
   .land-card:focus-visible{outline:2px solid var(--green);outline-offset:3px}
   .land-card.empty{cursor:default;opacity:.7;border-style:dashed}
-  .land-card .lc-top{display:flex;align-items:center;gap:9px;margin-bottom:10px}
-  .land-card .lc-csp{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:6px;
+  .land-card .lc-top{display:flex;flex-direction:column;align-items:flex-start;gap:5px;margin-bottom:10px;min-width:0;overflow-wrap:anywhere}
+  .land-card .lc-csp{display:inline-flex;align-items:center;justify-content:center;max-width:100%;min-height:24px;padding:3px 7px;border-radius:6px;overflow-wrap:anywhere;
     background:rgba(118,185,0,.1);color:var(--green);font-size:10px;font-weight:800;flex:none}
   .land-card.empty .lc-csp{background:rgba(90,102,120,.12);color:var(--ink-faint)}
-  .land-card .lc-name{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--ink-strong);text-transform:uppercase;letter-spacing:.5px}
+  .land-card .lc-name{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--ink-strong);letter-spacing:.5px}
   .land-card .lc-sub{font-family:var(--mono);font-size:9.5px;color:var(--ink-faint);margin-top:2px}
   .land-card .lc-bars{display:flex;flex-direction:column;gap:5px;margin-top:4px}
   .land-card .lc-row{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10.5px;color:var(--ink-soft)}
@@ -708,12 +712,12 @@
   }
   .og-service-link:hover{background:rgba(118,185,0,.07)}
   .og-service-link:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
-  .og-service-inner{display:flex;align-items:baseline;gap:9px;width:100%}
-  .og-service-name{font-size:12px;font-weight:750;color:var(--green);letter-spacing:1px;text-transform:uppercase}
+  .og-service-inner{display:flex;flex-wrap:wrap;align-items:baseline;gap:9px;width:100%;min-width:0;overflow-wrap:anywhere}
+  .og-service-name{font-size:12px;font-weight:750;color:var(--green);letter-spacing:1px}
   .og-service-count{font-size:9px;color:var(--ink-faint)}
   .og-service-open{margin-left:auto;color:var(--single);font-size:16px;line-height:1}
   table.overview-grid tr.og-dashboard td{background:#152033}
-  .og-dashboard .og-service-name{font-size:13px;letter-spacing:1.35px}
+  .og-dashboard .og-service-name{font-size:13px;letter-spacing:1.35px;text-transform:uppercase}
   .og-dashboard-os{color:var(--ink);text-transform:uppercase;letter-spacing:.45px}
   table.overview-grid tr.og-recipe{cursor:pointer;background:var(--row);transition:background .12s}
   table.overview-grid tr.og-recipe:nth-child(odd){background:var(--row-alt)}
@@ -860,6 +864,7 @@
     .zone-controls{gap:10px}
     .zone-title,.zone-help{font-size:11px}
     .crit{flex:1 1 calc(50% - 5px);min-width:138px}
+    .crit:has(#c-service){flex-basis:100%}
     .crit label{font-size:11px;letter-spacing:.55px}
     .crit select{
       width:100%;min-width:0;min-height:46px;padding:9px 34px 9px 12px;
@@ -1133,7 +1138,7 @@
       <details class="howto" id="howto">
         <summary>How to read this dashboard</summary>
         <div class="howto-body">
-          <p>Pick a <b>cloud service</b> (eks/gke/aks/oke/lke), then an
+          <p>Pick a <b>service</b>, then an
             <span class="mono">accelerator-os</span>, then a <b>recipe</b> (<span class="mono">intent[-platform]</span>).
             A recipe opens its cross-source corroboration grid; clicking a source column opens that source's
             builds-over-time history.</p>
@@ -1157,7 +1162,7 @@
     <!-- GROUP CATALOG VIEW -->
     <section class="view hidden" id="view-catalog">
       <div class="breadcrumb" id="catalog-crumb"></div>
-      <div class="section-title"><b id="cat-group-name" tabindex="-1" role="heading" aria-level="1">EKS</b> recipes by validation phase</div>
+      <div class="section-title"><b id="cat-group-name" tabindex="-1" role="heading" aria-level="1"></b> recipes by validation phase</div>
       <div class="section-sub">Compare deployment, performance, and conformance evidence for each recipe.
         Status reflects the most cautious result across sources. Select a recipe to inspect individual runs.</div>
       <div id="catalog-host"></div>
@@ -1343,6 +1348,18 @@ function coordParts(c){
     ao: `${c.accelerator}-${c.os}`,
     ip: c.platform ? `${c.intent}-${c.platform}` : c.intent,
   };
+}
+// Names are supplied by the generator; IDs remain the route and filter keys.
+function serviceDisplayName(id){
+  const group = TREE.find(g => g.name === id);
+  return group && group.displayName || id;
+}
+function serviceLabel(id){
+  const name = serviceDisplayName(id);
+  return name === id ? id : `${name} (${id})`;
+}
+function criteriaLabel(axis, value){
+  return axis === "service" ? serviceLabel(value) : value;
 }
 // §a11y: tiles carry a redundant glyph (not color-only) AND an aria-label so
 // pass/fail are distinguishable without hue and announced to screen readers.
@@ -1583,7 +1600,7 @@ function renderTree(){
     gToggle.dataset.group = g.name;
     gToggle.setAttribute("aria-expanded", String(!collapsedGroups.has(g.name)));
     gToggle.setAttribute("aria-controls", groupChildrenID);
-    gToggle.setAttribute("aria-label", `${collapsedGroups.has(g.name) ? "expand" : "collapse"} ${g.name} dashboards`);
+    gToggle.setAttribute("aria-label", `${collapsedGroups.has(g.name) ? "expand" : "collapse"} ${serviceLabel(g.name)} dashboards`);
     gToggle.innerHTML = `<span class="tw" aria-hidden="true">▾</span>`;
     gToggle.addEventListener("click", () => {
       toggleAndRefocus(collapsedGroups, g.name, renderTree, ".tg-group-toggle", "group");
@@ -1591,11 +1608,11 @@ function renderTree(){
     const gDestination = document.createElement(empty ? "span" : "a");
     gDestination.className = "tree-destination";
     gDestination.innerHTML =
-      `<span class="csp" aria-hidden="true">${esc(g.name.slice(0,3).toUpperCase())}</span>` +
-      `<span>${esc(g.name)}</span><span class="badge-mini">${visTabs} recipe${visTabs===1?"":"s"}</span>`;
+      `<span class="service-heading"><span>${esc(serviceDisplayName(g.name))}</span>` +
+      `<span class="csp">${esc(g.name)}</span></span><span class="badge-mini">${visTabs} recipe${visTabs===1?"":"s"}</span>`;
     if (!empty){
       gDestination.href = hashSegs(g.name);
-      gDestination.setAttribute("aria-label", `open ${g.name} dashboard`);
+      gDestination.setAttribute("aria-label", `open ${serviceLabel(g.name)} dashboard`);
       bindTreeDestination(gDestination, () => showServiceCatalog(g.name));
     }
     gHead.append(gToggle, gDestination);
@@ -1781,7 +1798,7 @@ function renderSummaryRow(){
   const c = (META && META.counts) || {};
   const stats = [
     [c.recipes, "recipes validated"],
-    [c.csps, "cloud services"],
+    [c.csps, "services"],
     [c.sources, "independent sources"],
   ];
   stats.forEach(([v, label]) => {
@@ -1911,7 +1928,7 @@ function renderLanding(){
   if (note){
     const selected = CRIT_AXES
       .filter(axis => criteria[axis])
-      .map(axis => `${axis} ${criteria[axis]}`);
+      .map(axis => `${axis} ${criteriaLabel(axis, criteria[axis])}`);
     note.textContent = selected.length
       ? `Filtered: ${selected.join(" · ")}. ${landingMode === "grid"
           ? "Muted text = selected or grouped criteria."
@@ -1976,9 +1993,9 @@ function renderLandingCards(host){
         `${STATE_META[s].label} <span style="margin-left:auto;color:var(--ink-strong)">${tally[s]}</span></div>`).join("");
     }
     card.innerHTML =
-      `<div class="lc-top"><span class="lc-csp">${esc(g.name.toUpperCase())}</span>` +
-      `<div><div class="lc-name">${esc(g.name)}</div>` +
-      `<div class="lc-sub">${tabCount} recipe${tabCount===1?"":"s"}</div></div></div>` +
+      `<div class="lc-top"><div class="lc-name">${esc(serviceDisplayName(g.name))}</div>` +
+      `<span class="lc-csp">${esc(g.name)}</span>` +
+      `<div class="lc-sub">${tabCount} recipe${tabCount===1?"":"s"}</div></div>` +
       `<div class="lc-bars">${bars}</div>`;
     if (!empty) card.addEventListener("click", () => {
       collapsedGroups.delete(g.name);
@@ -1995,8 +2012,8 @@ function renderLandingCards(host){
   host.appendChild(grid);
   const summary = document.getElementById("landing-view-summary");
   if (summary) summary.textContent =
-    `${grid.children.length} cloud service${grid.children.length === 1 ? "" : "s"} summarized`;
-  announceResults(`${grid.children.length} cloud service${grid.children.length === 1 ? "" : "s"} shown`);
+    `${grid.children.length} service${grid.children.length === 1 ? "" : "s"} summarized`;
+  announceResults(`${grid.children.length} service${grid.children.length === 1 ? "" : "s"} shown`);
 }
 
 function overviewChip(state){
@@ -2124,8 +2141,11 @@ function renderLandingRecipeGrid(host){
     const context = g.kind === "dashboard" && g.os
       ? `<span class="og-dashboard-os">${esc(g.os)}</span> · `
       : "";
+    const heading = g.kind === "service"
+      ? `<span class="og-service-name">${esc(serviceDisplayName(g.name))}</span><span class="service-id">${esc(g.name)}</span>`
+      : `<span class="og-service-name">${esc(g.name)}</span>`;
     const sectionHTML =
-      `<span class="og-service-inner"><span class="og-service-name">${esc(g.name)}</span>` +
+      `<span class="og-service-inner">${heading}` +
       `<span class="og-service-count">${context}${g.rows.length} recipe${g.rows.length === 1 ? "" : "s"}</span>` +
       `<span class="og-service-open" aria-hidden="true">›</span>` +
       `</span>`;
@@ -2134,7 +2154,7 @@ function renderLandingRecipeGrid(host){
     serviceLink.type = "button";
     serviceLink.className = "og-service-link";
     serviceLink.setAttribute("aria-label", g.kind === "service"
-      ? `open ${g.name} dashboard`
+      ? `open ${serviceLabel(g.name)} dashboard`
       : `open ${g.name}-${g.os} dashboard`);
     serviceLink.innerHTML = sectionHTML;
     serviceLink.addEventListener("click", () => {
@@ -2197,10 +2217,10 @@ function renderLandingRecipeGrid(host){
    RENDER: GROUP CATALOG (grouped by dashboard)
    ============================================================ */
 function renderCatalog(){
-  document.getElementById("cat-group-name").textContent = currentGroup.toUpperCase();
+  document.getElementById("cat-group-name").textContent = serviceLabel(currentGroup);
 
   const bc = document.getElementById("catalog-crumb");
-  bc.innerHTML = `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span><span class="crumb cur">${esc(currentGroup)}</span>`;
+  bc.innerHTML = `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span><span class="crumb cur">${esc(serviceLabel(currentGroup))}</span>`;
   bc.querySelectorAll("[data-home]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); showLanding(); }));
 
   const host = document.getElementById("catalog-host");
@@ -2216,12 +2236,12 @@ function renderCatalog(){
     const eg = document.createElement("div");
     eg.className = "empty-group";
     const why = anyCriteria()
-      ? `No <span class="mono">${esc(currentGroup)}</span> recipes match the current criteria selection.`
+      ? `No <span class="mono">${esc(serviceLabel(currentGroup))}</span> recipes match the current criteria selection.`
       : `This dashboard group has no published validation evidence.`;
     eg.innerHTML = `
-      <h3>No matching recipes for <span style="color:var(--green)">${esc(currentGroup)}</span></h3>
+      <h3>No matching recipes for <span style="color:var(--green)">${esc(serviceLabel(currentGroup))}</span></h3>
       <p>${why} Adjust the criteria selector, or once a signer attests an
-         <span class="mono">${esc(currentGroup)}</span> recipe its corroboration matrix will appear here.</p>
+         <span class="mono">${esc(serviceLabel(currentGroup))}</span> recipe its corroboration matrix will appear here.</p>
       <div class="eg-tag">${anyCriteria() ? "filtered by criteria" : "awaiting first attestation"}</div>`;
     host.appendChild(eg);
     return;
@@ -2323,7 +2343,7 @@ function renderCatalog(){
   wrap.appendChild(table);
   host.appendChild(wrap);
   const recipeCount = tbody.querySelectorAll("tr.recipe-row").length;
-  announceResults(`${recipeCount} recipe${recipeCount === 1 ? "" : "s"} shown for ${currentGroup}`);
+  announceResults(`${recipeCount} recipe${recipeCount === 1 ? "" : "s"} shown for ${serviceLabel(currentGroup)}`);
 }
 
 /* ============================================================
@@ -2450,7 +2470,7 @@ function openGrid(idx, focusHeading){
   const bc = document.getElementById("grid-crumb");
   bc.innerHTML =
     `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span>` +
-    `<a href="#" class="crumb" data-service="1">${esc(cp.service)}</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-service="1">${esc(serviceLabel(cp.service))}</a><span class="sep">›</span>` +
     `<a href="#" class="crumb" data-dashboard="1">${esc(cp.ao)}</a><span class="sep">›</span>` +
     `<span class="crumb cur">${esc(routeSegs(recipe)[2])}</span>`;
   bc.querySelector("[data-service]").addEventListener("click", e => {
@@ -2823,7 +2843,7 @@ async function openTimeSeries(recipe, src, focusTest, focusHeading = false){
   const bc = document.getElementById("ts-crumb");
   bc.innerHTML =
     `<a href="#" class="crumb" data-home="1">overview</a><span class="sep">›</span>` +
-    `<a href="#" class="crumb" data-service="1">${esc(cp.service)}</a><span class="sep">›</span>` +
+    `<a href="#" class="crumb" data-service="1">${esc(serviceLabel(cp.service))}</a><span class="sep">›</span>` +
     `<a href="#" class="crumb" data-dashboard="1">${esc(cp.ao)}</a><span class="sep">›</span>` +
     `<a href="#" class="crumb" data-grid="1">${esc(routeSegs(recipe)[2])}</a><span class="sep">›</span>` +
     `<span class="crumb cur" title="${esc(src)}">${esc(meta ? meta.label : src.slice(0, 10) + "…")}</span>`;
@@ -3717,7 +3737,7 @@ function buildModelFromIndex(index){
       tabs: d.tabs.map(tab => ({ tab: coordParts(tab.coord).ip + (tab.profile ? `-${tab.profile}` : ""), idx: RECIPE_BY_NAME[tab.recipe] })),
     }));
     let count = 0; dashboards.forEach(d => count += d.tabs.length);
-    return { name: g.service, dashboards, count };
+    return { name: g.service, displayName: g.displayName || g.service, dashboards, count };
   });
   // Only groups present in index.json (i.e. with real evidence) are shown — no
   // empty "awaiting first attestation" placeholders. Order present groups by the
@@ -3746,7 +3766,7 @@ function buildModelFromIndex(index){
   Object.keys(CRITERIA_VALUES).forEach(axis => {
     const sel = document.getElementById("c-" + axis);
     const all = document.createElement("option"); all.value=""; all.textContent="All"; sel.appendChild(all);
-    CRITERIA_VALUES[axis].forEach(v => { const o=document.createElement("option"); o.value=v; o.textContent=v; sel.appendChild(o); });
+    CRITERIA_VALUES[axis].forEach(v => { const o=document.createElement("option"); o.value=v; o.textContent=criteriaLabel(axis, v); sel.appendChild(o); });
   });
 
   // The dashboard tree is expanded by default. The panel-level control can

@@ -46,6 +46,20 @@ straight deploy: there is no drift-PR for the site. The in-job determinism
 gate runs the generator twice and diffs the output, so a non-reproducible
 build fails loudly instead of shipping.
 
+**Service display names:** `pkg/recipe.CriteriaServiceType.DisplayName` is the
+canonical source beside the service ID constants. The generator adds
+`groups[].displayName` to `data/index.json`; this is presentation metadata within
+`aicr-corroboration/v1`, not a new schema or identity. The renderer falls back to
+`groups[].service` when the field is absent or empty, and HTML-escapes labels.
+Custom IDs are returned unchanged. Keep new built-in constants, the canonical
+name map, and `GetCriteriaServiceTypes` in sync; the declaration-based test
+checks all three. Do not add another name map in JavaScript or documentation.
+The renderer regressions run during `make test` through
+`tools/corroborate-renderer_test.sh`. They require Node.js but no additional
+packages and can also run with
+`node --test pkg/corroborate/testdata/renderer-services.test.cjs`; browser layout
+checks remain separate.
+
 ## Identity and fork safety
 
 Two jobs, neither holding the other's scope:
