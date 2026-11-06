@@ -62,6 +62,8 @@ const (
 
 	ExtraKeyDetectedVersion  = "detectedVersion"
 	ExtraKeyVersionSatisfied = "versionSatisfied"
+
+	ExtraKeyObservationOnly = "observationOnly"
 )
 
 // Skip codes published under ExtraKeySkipReason. Each must also be listed in
@@ -120,6 +122,17 @@ func FormatSignedDecimal(v float64) string {
 
 // FormatBool formats b as "true" or "false".
 func FormatBool(b bool) string { return strconv.FormatBool(b) }
+
+// ObservationOnlyExtra returns the Extra marking a passed result as
+// observation-only: the check recorded the cluster's arrangement and drove no
+// behavioral test, so its pass is not a demonstration. The CNCF requirement
+// aggregation (pkg/evidence/cncf) renders such a result OBSERVED rather than
+// PASSED and does not let it establish a MUST (#3681). Emit it with EmitExtra
+// and fail the check when the write fails: a lost marker would turn the
+// observation into a demonstration.
+func ObservationOnlyExtra() map[string]string {
+	return map[string]string{ExtraKeyObservationOnly: FormatBool(true)}
+}
 
 // GPUAllocationPolicyExtra returns the Extra recording policy as the configured
 // allocation policy. Emit it before verifying policy, so a mismatch still

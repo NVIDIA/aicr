@@ -66,6 +66,7 @@ var extraKeySamples = map[string]string{
 	ExtraKeyNodeLocal:           FormatBool(true),
 	ExtraKeyDetectedVersion:     "v25.3.0",
 	ExtraKeyVersionSatisfied:    FormatBool(false),
+	ExtraKeyObservationOnly:     FormatBool(true),
 }
 
 // constsWithPrefix returns the string value of each constant in extra_keys.go
@@ -213,6 +214,17 @@ func TestFormatSignedDecimal(t *testing.T) {
 		if got := FormatSignedDecimal(tt.in); got != tt.want {
 			t.Errorf("FormatSignedDecimal(%v) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestObservationOnlyExtra(t *testing.T) {
+	want := map[string]string{"observationOnly": "true"}
+	got := ObservationOnlyExtra()
+	if !maps.Equal(got, want) {
+		t.Errorf("ObservationOnlyExtra() = %v, want %v", got, want)
+	}
+	if redacted := redactedExtra(got); !maps.Equal(redacted, want) {
+		t.Errorf("redaction changed the marker: %v", redacted)
 	}
 }
 

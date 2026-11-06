@@ -73,7 +73,9 @@ const (
 	//     operator-version keys, and the in-pod skipReason codes.
 	//   - v6 narrowed the fabric extra's closed set to efa.
 	//   - v7 added the nodesFailed and nodesSkipped coverage counts.
-	PolicyVersion = "v7"
+	//   - v8 added the observationOnly marker of a passed result that
+	//     demonstrates nothing.
+	PolicyVersion = "v8"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -319,6 +321,10 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	// GPU operator version gate.
 	"detectedVersion":  isVersionValue,
 	"versionSatisfied": closedSet("true", "false"),
+
+	// A passed result that recorded observations and drove no behavioral
+	// test; the CNCF aggregation renders its requirement OBSERVED, not PASSED.
+	"observationOnly": closedSet("true", "false"),
 }
 
 // ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.

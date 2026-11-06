@@ -205,6 +205,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=):
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=nvke, accelerator=gb200, intent=training
+            - service=nvke, accelerator=vr200, intent=training
             - service=oke, accelerator=a100, intent=training
             - service=oke, accelerator=gb200, intent=inference
             - service=oke, accelerator=gb200, intent=training
@@ -229,6 +230,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=dynamo):
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=mk8s, accelerator=b300, intent=inference
             - service=nvke, accelerator=gb200, intent=training
+            - service=nvke, accelerator=vr200, intent=training
             - service=oke, accelerator=a100, intent=training
             - service=oke, accelerator=gb200, intent=inference
             - service=oke, accelerator=gb200, intent=training
@@ -261,6 +263,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=kubeflow):
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=nvke, accelerator=gb200, intent=training
+            - service=nvke, accelerator=vr200, intent=training
             - service=oke, accelerator=a100, intent=training
             - service=oke, accelerator=gb200, intent=inference
             - service=oke, accelerator=gb200, intent=training
@@ -299,6 +302,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=kueue):
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=nvke, accelerator=gb200, intent=training
+            - service=nvke, accelerator=vr200, intent=training
             - service=oke, accelerator=a100, intent=training
             - service=oke, accelerator=gb200, intent=inference
             - service=oke, accelerator=gb200, intent=training
@@ -324,6 +328,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=nim):
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=nvke, accelerator=gb200, intent=training
+            - service=nvke, accelerator=vr200, intent=training
             - service=oke, accelerator=a100, intent=training
             - service=oke, accelerator=gb200, intent=inference
             - service=oke, accelerator=gb200, intent=training
@@ -350,6 +355,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=runai):
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=nvke, accelerator=gb200, intent=training
+            - service=nvke, accelerator=vr200, intent=training
             - service=oke, accelerator=a100, intent=training
             - service=oke, accelerator=gb200, intent=inference
             - service=oke, accelerator=gb200, intent=training
@@ -374,6 +380,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=slurm):
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=nvke, accelerator=gb200, intent=training
+            - service=nvke, accelerator=vr200, intent=training
             - service=oke, accelerator=a100, intent=training
             - service=oke, accelerator=gb200, intent=inference
             - service=oke, accelerator=gb200, intent=training
@@ -641,6 +648,7 @@ criteria(service=, accelerator=, intent=training, os=, platform=):
             - service=cks, accelerator=rtx-pro-6000, os=ubuntu
             - service=generic, accelerator=gb300, os=ubuntu
             - service=nvke, accelerator=gb200, os=ubuntu
+            - service=nvke, accelerator=vr200, os=ubuntu
             - service=oke, accelerator=a100, os=ubuntu
             - service=oke, accelerator=gb200, os=ubuntu
 criteria(service=, accelerator=, intent=training, os=, platform=kubeflow):
@@ -664,6 +672,7 @@ criteria(service=, accelerator=, intent=training, os=, platform=kubeflow):
             - service=cks, accelerator=rtx-pro-6000, os=ubuntu
             - service=generic, accelerator=gb300, os=ubuntu
             - service=nvke, accelerator=gb200, os=ubuntu
+            - service=nvke, accelerator=vr200, os=ubuntu
             - service=oke, accelerator=a100, os=ubuntu
             - service=oke, accelerator=gb200, os=ubuntu
         platform:
@@ -709,6 +718,7 @@ criteria(service=, accelerator=, intent=training, os=, platform=kueue):
             - service=cks, accelerator=rtx-pro-6000, os=ubuntu
             - service=generic, accelerator=gb300, os=ubuntu
             - service=nvke, accelerator=gb200, os=ubuntu
+            - service=nvke, accelerator=vr200, os=ubuntu
             - service=oke, accelerator=a100, os=ubuntu
             - service=oke, accelerator=gb200, os=ubuntu
         platform:
@@ -736,6 +746,7 @@ criteria(service=, accelerator=, intent=training, os=, platform=runai):
             - service=cks, accelerator=rtx-pro-6000, os=ubuntu
             - service=generic, accelerator=gb300, os=ubuntu
             - service=nvke, accelerator=gb200, os=ubuntu
+            - service=nvke, accelerator=vr200, os=ubuntu
             - service=oke, accelerator=a100, os=ubuntu
             - service=oke, accelerator=gb200, os=ubuntu
         platform:
@@ -762,6 +773,7 @@ criteria(service=, accelerator=, intent=training, os=, platform=slurm):
             - service=cks, accelerator=rtx-pro-6000, os=ubuntu
             - service=generic, accelerator=gb300, os=ubuntu
             - service=nvke, accelerator=gb200, os=ubuntu
+            - service=nvke, accelerator=vr200, os=ubuntu
             - service=oke, accelerator=a100, os=ubuntu
             - service=oke, accelerator=gb200, os=ubuntu
         platform:
@@ -943,6 +955,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=):
             - service=generic, accelerator=gb300
             - service=kind, accelerator=h100
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
         os:
@@ -955,6 +968,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=):
             - service=k0s, accelerator=h200
             - service=lke, accelerator=rtx-pro-6000
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
             - service=rke2, accelerator=vr200
@@ -978,6 +992,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=kubeflow):
             - service=generic, accelerator=gb300
             - service=kind, accelerator=h100
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
         os:
@@ -990,6 +1005,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=kubeflow):
             - service=k0s, accelerator=h200
             - service=lke, accelerator=rtx-pro-6000
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
             - service=rke2, accelerator=vr200
@@ -1029,6 +1045,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=kueue):
             - service=generic, accelerator=gb300
             - service=kind, accelerator=h100
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
         os:
@@ -1041,6 +1058,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=kueue):
             - service=k0s, accelerator=h200
             - service=lke, accelerator=rtx-pro-6000
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
             - service=rke2, accelerator=vr200
@@ -1067,6 +1085,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=runai):
             - service=generic, accelerator=gb300
             - service=kind, accelerator=h100
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
         os:
@@ -1079,6 +1098,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=runai):
             - service=k0s, accelerator=h200
             - service=lke, accelerator=rtx-pro-6000
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
             - service=rke2, accelerator=vr200
@@ -1104,6 +1124,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=slurm):
             - service=generic, accelerator=gb300
             - service=kind, accelerator=h100
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
         os:
@@ -1116,6 +1137,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=slurm):
             - service=k0s, accelerator=h200
             - service=lke, accelerator=rtx-pro-6000
             - service=nvke, accelerator=gb200
+            - service=nvke, accelerator=vr200
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
             - service=rke2, accelerator=vr200
@@ -3789,6 +3811,7 @@ criteria(service=, accelerator=vr200, intent=, os=, platform=):
         - accelerator
     validCompletions:
         accelerator:
+            - service=nvke, intent=training, os=ubuntu
             - service=rke2, intent=inference, os=ubuntu
             - service=rke2, intent=training, os=ubuntu
 criteria(service=, accelerator=vr200, intent=, os=, platform=dynamo):
@@ -3798,6 +3821,7 @@ criteria(service=, accelerator=vr200, intent=, os=, platform=dynamo):
         - platform
     validCompletions:
         accelerator:
+            - service=nvke, intent=training, os=ubuntu
             - service=rke2, intent=inference, os=ubuntu
             - service=rke2, intent=training, os=ubuntu
         platform:
@@ -3809,6 +3833,7 @@ criteria(service=, accelerator=vr200, intent=, os=, platform=kubeflow):
         - platform
     validCompletions:
         accelerator:
+            - service=nvke, intent=training, os=ubuntu
             - service=rke2, intent=inference, os=ubuntu
             - service=rke2, intent=training, os=ubuntu
         platform:
@@ -3820,11 +3845,13 @@ criteria(service=, accelerator=vr200, intent=, os=ubuntu, platform=):
         - os
     validCompletions:
         accelerator:
+            - service=nvke, intent=training
             - service=rke2, intent=inference
             - service=rke2, intent=training
         os:
             - service=aks
             - service=eks
+            - service=nvke, intent=training
             - service=rke2, intent=inference
             - service=rke2, intent=training
 criteria(service=, accelerator=vr200, intent=, os=ubuntu, platform=dynamo):
@@ -3835,11 +3862,13 @@ criteria(service=, accelerator=vr200, intent=, os=ubuntu, platform=dynamo):
         - platform
     validCompletions:
         accelerator:
+            - service=nvke, intent=training
             - service=rke2, intent=inference
             - service=rke2, intent=training
         os:
             - service=aks
             - service=eks
+            - service=nvke, intent=training
             - service=rke2, intent=inference
             - service=rke2, intent=training
         platform:
@@ -3852,11 +3881,13 @@ criteria(service=, accelerator=vr200, intent=, os=ubuntu, platform=kubeflow):
         - platform
     validCompletions:
         accelerator:
+            - service=nvke, intent=training
             - service=rke2, intent=inference
             - service=rke2, intent=training
         os:
             - service=aks
             - service=eks
+            - service=nvke, intent=training
             - service=rke2, intent=inference
             - service=rke2, intent=training
         platform:
@@ -3956,6 +3987,7 @@ criteria(service=, accelerator=vr200, intent=training, os=, platform=):
         - intent
     validCompletions:
         accelerator:
+            - service=nvke, os=ubuntu
             - service=rke2, os=ubuntu
         intent:
             - service=aks
@@ -3966,6 +3998,7 @@ criteria(service=, accelerator=vr200, intent=training, os=, platform=):
             - service=ocp
             - service=rke2
             - service=gke, os=cos
+            - service=nvke, os=ubuntu
             - service=oke, os=ol
 criteria(service=, accelerator=vr200, intent=training, os=, platform=kubeflow):
     outcome: error
@@ -3975,6 +4008,7 @@ criteria(service=, accelerator=vr200, intent=training, os=, platform=kubeflow):
         - platform
     validCompletions:
         accelerator:
+            - service=nvke, os=ubuntu
             - service=rke2, os=ubuntu
         intent:
             - service=aks
@@ -3985,6 +4019,7 @@ criteria(service=, accelerator=vr200, intent=training, os=, platform=kubeflow):
             - service=ocp
             - service=rke2
             - service=gke, os=cos
+            - service=nvke, os=ubuntu
             - service=oke, os=ol
         platform:
             - service=rke2, os=ubuntu
@@ -3996,6 +4031,7 @@ criteria(service=, accelerator=vr200, intent=training, os=ubuntu, platform=):
         - os
     validCompletions:
         accelerator:
+            - service=nvke
             - service=rke2
         intent:
             - service=aks
@@ -4003,11 +4039,13 @@ criteria(service=, accelerator=vr200, intent=training, os=ubuntu, platform=):
             - service=eks
             - service=k0s
             - service=lke
+            - service=nvke
             - service=ocp
             - service=rke2
         os:
             - service=aks
             - service=eks
+            - service=nvke
             - service=rke2
 criteria(service=, accelerator=vr200, intent=training, os=ubuntu, platform=kubeflow):
     outcome: error
@@ -4018,6 +4056,7 @@ criteria(service=, accelerator=vr200, intent=training, os=ubuntu, platform=kubef
         - platform
     validCompletions:
         accelerator:
+            - service=nvke
             - service=rke2
         intent:
             - service=aks
@@ -4025,11 +4064,13 @@ criteria(service=, accelerator=vr200, intent=training, os=ubuntu, platform=kubef
             - service=eks
             - service=k0s
             - service=lke
+            - service=nvke
             - service=ocp
             - service=rke2
         os:
             - service=aks
             - service=eks
+            - service=nvke
             - service=rke2
         platform:
             - service=rke2
@@ -6407,6 +6448,7 @@ criteria(service=nvke, accelerator=, intent=, os=ubuntu, platform=):
     validCompletions:
         os:
             - accelerator=gb200, intent=training
+            - accelerator=vr200, intent=training
 criteria(service=nvke, accelerator=, intent=, os=ubuntu, platform=kubeflow):
     outcome: error
     uncovered:
@@ -6415,6 +6457,7 @@ criteria(service=nvke, accelerator=, intent=, os=ubuntu, platform=kubeflow):
     validCompletions:
         os:
             - accelerator=gb200, intent=training
+            - accelerator=vr200, intent=training
         platform:
             - accelerator=gb200, intent=training
 criteria(service=nvke, accelerator=, intent=training, os=, platform=):
@@ -6424,6 +6467,7 @@ criteria(service=nvke, accelerator=, intent=training, os=, platform=):
     validCompletions:
         intent:
             - accelerator=gb200, os=ubuntu
+            - accelerator=vr200, os=ubuntu
 criteria(service=nvke, accelerator=, intent=training, os=, platform=kubeflow):
     outcome: error
     uncovered:
@@ -6432,6 +6476,7 @@ criteria(service=nvke, accelerator=, intent=training, os=, platform=kubeflow):
     validCompletions:
         intent:
             - accelerator=gb200, os=ubuntu
+            - accelerator=vr200, os=ubuntu
         platform:
             - accelerator=gb200, os=ubuntu
 criteria(service=nvke, accelerator=, intent=training, os=ubuntu, platform=):
@@ -6442,8 +6487,10 @@ criteria(service=nvke, accelerator=, intent=training, os=ubuntu, platform=):
     validCompletions:
         intent:
             - accelerator=gb200
+            - accelerator=vr200
         os:
             - accelerator=gb200
+            - accelerator=vr200
 criteria(service=nvke, accelerator=, intent=training, os=ubuntu, platform=kubeflow):
     outcome: error
     uncovered:
@@ -6453,8 +6500,10 @@ criteria(service=nvke, accelerator=, intent=training, os=ubuntu, platform=kubefl
     validCompletions:
         intent:
             - accelerator=gb200
+            - accelerator=vr200
         os:
             - accelerator=gb200
+            - accelerator=vr200
         platform:
             - accelerator=gb200
 criteria(service=nvke, accelerator=gb200, intent=, os=, platform=):
@@ -6503,6 +6552,35 @@ criteria(service=nvke, accelerator=gb200, intent=training, os=, platform=kubeflo
 criteria(service=nvke, accelerator=gb200, intent=training, os=ubuntu, platform=):
     outcome: success
 criteria(service=nvke, accelerator=gb200, intent=training, os=ubuntu, platform=kubeflow):
+    outcome: success
+criteria(service=nvke, accelerator=vr200, intent=, os=, platform=):
+    outcome: error
+    uncovered:
+        - accelerator
+    validCompletions:
+        accelerator:
+            - intent=training, os=ubuntu
+criteria(service=nvke, accelerator=vr200, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - accelerator
+        - os
+    validCompletions:
+        accelerator:
+            - intent=training
+        os:
+            - intent=training
+criteria(service=nvke, accelerator=vr200, intent=training, os=, platform=):
+    outcome: error
+    uncovered:
+        - accelerator
+        - intent
+    validCompletions:
+        accelerator:
+            - os=ubuntu
+        intent:
+            - os=ubuntu
+criteria(service=nvke, accelerator=vr200, intent=training, os=ubuntu, platform=):
     outcome: success
 criteria(service=ocp, accelerator=, intent=, os=, platform=):
     outcome: success

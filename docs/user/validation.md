@@ -84,8 +84,8 @@ is installed on the cluster.
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE (GPUDirect TCPXO), H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE and NVKE) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, and GB300 + EKS. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE, the per-rail SR-IOV VFs (`nvidia.com/sriov_resource_rail_<n>`) on NVKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, generic), and VR200 + RKE2. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE and NVKE), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE and NVKE) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB300 + EKS, and VR200 + NVKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE, the per-rail SR-IOV VFs (`nvidia.com/sriov_resource_rail_<n>`) on NVKE, over InfiniBand for GB200 and RoCE v2 for VR200 — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the Grace Blackwell combinations — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, generic), VR200 + RKE2, and VR200 + NVKE. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE and NVKE), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -335,7 +335,7 @@ is passed it replaces the automatic filters rather than narrowing them.
 
 Valid profiles are the pairs in the applicability table above: `b200/any`,
 `gb200/any`, `gb200/eks`, `gb200/gke`, `gb200/nvke`, `gb200/oke`, `gb300/eks`, `gb300/generic`,
-`h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/rke2`. A
+`h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/nvke`, `vr200/rke2`. A
 malformed or unknown value **fails** the check rather than silently skipping
 it. A valid profile that doesn't implement a requested variant (e.g.
 `gb200/eks` with the auto-detect `nccl-all-reduce-bw` check) skips just that
@@ -1042,9 +1042,17 @@ on top of the per-check rule every run applies:
 - An applicable MUST requirement that no proof path establishes fails the run
   with `INTERNAL` after the evidence is written, so the directory still
   documents what was and was not shown. A path is established when every
-  check on it is present and `passed`; a check that `failed` on any path
-  fails the requirement outright, and a check that was `skipped`, crashed or
-  is absent leaves only its own path incomplete. Where a requirement has
+  check on it is present and `passed` as a demonstration; a check that
+  `failed` on any path fails the requirement outright, and a check that was
+  `skipped`, crashed or is absent leaves only its own path incomplete. A
+  check that `passed` but marked its result observation-only (it recorded
+  the cluster's arrangement and drove no behavioral test; today
+  `cluster-autoscaling` on every path that passes) leaves its requirement
+  `OBSERVED`, which is not established either: the exit message names it,
+  e.g. `cluster_autoscaling observed (cluster-autoscaling observed, not
+  demonstrated)`, and the remedy on a platform without a behavioral
+  autoscaling test is a `spec.validate.evidence.cncf.notApplicable`
+  justification, which renders `NOT APPLICABLE` and exits 0. Where a requirement has
   alternative proofs (`secure_accelerator_access`: `secure-accelerator-access`
   on ordinary recipes, `slinky-slurm-gpu-access` on Slinky Slurm recipes) a
   passing alternative establishes it even when the primary check was skipped

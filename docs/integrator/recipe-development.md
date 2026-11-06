@@ -488,6 +488,7 @@ land later; none is implied by Preview alone.
 | `k0s / h200 / ubuntu / training` | [k0s H200 Setup](k0s-h200-setup.md) | [validation.aicr.run/#/k0s/h200-ubuntu/training](https://validation.aicr.run/#/k0s/h200-ubuntu/training) |
 | `nvke / gb200 / ubuntu / training` | [NVKE GB200 Setup](nvke-gb200-setup.md) | pending: published after merge from the `main` validator images ([#3295](https://github.com/NVIDIA/aicr/pull/3295)) |
 | `nvke / gb200 / ubuntu / training / kubeflow` | [NVKE GB200 Setup](nvke-gb200-setup.md) | pending: published after merge from the `main` validator images ([#3295](https://github.com/NVIDIA/aicr/pull/3295)) |
+| `nvke / vr200 / ubuntu / training` | [NVKE VR200 Setup](nvke-vr200-setup.md) | pending: MNNVL measured within one NVLink domain; NIC RDMA east-west unqualified |
 | `eks / h100 / ubuntu / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 | `gke / h100 / cos / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 
