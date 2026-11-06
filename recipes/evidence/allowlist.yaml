@@ -95,6 +95,9 @@ community:
   - issuer: https://github.com/login/oauth
     source: 1d70c50bfd60eaaf472544f2a3cf2b8b
     label: mchmarny
+  - issuer: https://github.com/login/oauth
+    source: 5d6e87bc9b4d9e087f23e38b3a530458
+    label: mlsorensen
 
 # Partner: vetted partner organizations. None onboarded yet.
 partner: []
