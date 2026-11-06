@@ -184,8 +184,8 @@ is unaffected by `tuningEnabled: false`: its `tuning` CR still renders with the
 Workload-gate taint key: operator v0.18.0 changed the chart default
 `runtimeRequiredTaint` from `skyhook.nvidia.com=runtime-required:NoSchedule`
 to `nodewright.nvidia.com=runtime-required:NoSchedule`. The operator recognizes
-both through v0.20.x (tolerates, removes on completion, never double-taints)
-and drops the legacy key in v0.21.0, but auto-taints newly joined nodes with
+both through v0.21.x (tolerates, removes on completion, never double-taints)
+and drops the legacy key in v0.22.0, but auto-taints newly joined nodes with
 the configured key only. The key must have no DNS prefix and be at most 53
 characters, since it names the `nodewright.nvidia.com/autoTaint_<key>` node
 annotation; `aicr bundle` rejects any other key, which operator v0.20.0 refuses

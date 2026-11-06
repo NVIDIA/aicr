@@ -359,13 +359,14 @@ transitions:
       skipping them, so CoreDNS and similar workloads are evicted before an
       interrupt rather than killed by the reboot. Eviction honors any
       PodDisruptionBudget that covers a pod; a workload with no budget can
-      lose every replica on the nodes drained together. A kube-system PodDisruptionBudget that allows no disruptions
-      holds the drain until spec.drainConfig.timeout, which AICR's tuning CRs
-      leave unset, and with the default drainConfig an evicted pod's emptyDir
-      data is deleted and a pod with no controller is not recreated. The
-      operator also stops writing the last-logs Job annotation. Nothing to
-      change on upgrade; if a drain stalls, check the kube-system budgets on
-      that node.
+      lose every replica on the nodes drained together. A kube-system
+      PodDisruptionBudget that allows no disruptions holds the drain until
+      spec.drainConfig.timeout, which AICR's tuning CRs leave unset, and with
+      the default drainConfig an evicted pod's emptyDir data is deleted and a
+      pod with no controller is not recreated. The operator also stops
+      writing the last-logs Job annotation. Nothing to change on upgrade;
+      before upgrading, confirm kubectl get pdb -n kube-system shows ALLOWED
+      DISRUPTIONS of at least 1 for workloads on nodes NodeWright interrupts.
     references:
       - https://github.com/NVIDIA/nodewright/releases/tag/operator%2Fv0.21.0
       - https://github.com/NVIDIA/nodewright/releases/tag/chart%2Fv0.21.0

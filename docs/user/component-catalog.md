@@ -3799,6 +3799,9 @@ A `kube-system` budget that allows no disruptions holds the drain the same way a
 in any other namespace, without bound unless the CR sets
 `spec.drainConfig.timeout`. With the default `drainConfig`, an evicted pod's
 `emptyDir` data is deleted and a pod with no controller is not recreated.
+Before upgrading, check that `kubectl get pdb -n kube-system` shows
+`ALLOWED DISRUPTIONS` of at least 1 for workloads on nodes NodeWright
+interrupts.
 
 The legacy `Skyhook` group, its `runtime-required` taint key and the
 `skyhook_*` metrics are served through `v0.21.x` and removed upstream in
