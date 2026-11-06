@@ -20,7 +20,7 @@ metadata:
 spec:
   description: |
     End-to-end test for --vendor-charts: bundle a real eks-inference recipe
-    with the flag set (inference pulls in agentgateway-crds, a vendored mixed
+    with the flag set (inference pulls in agentgateway, a vendored mixed
     component), confirm every Helm component is emitted as a wrapped local-chart
     folder (Chart.yaml with `dependencies:`, adjacent charts/<chart>-<version>.tgz,
     values nested under the subchart name, no upstream.env), that mixed
@@ -172,23 +172,23 @@ spec:
               [ "$missing" -eq 0 ] || exit 1
 
               # Presence check for the #1835 layout: eks-inference vendors
-              # agentgateway-crds (mixed), which must emit a tracked -post
+              # agentgateway (mixed), which must emit a tracked -post
               # folder with templates. Absence-only grep above would still
               # pass if -post injection silently stopped emitting manifests.
-              post_templates="$(ls -d "${WORK}"/out/[0-9][0-9][0-9]-agentgateway-crds-post/templates 2>/dev/null || true)"
+              post_templates="$(ls -d "${WORK}"/out/[0-9][0-9][0-9]-agentgateway-post/templates 2>/dev/null || true)"
               if [ -z "${post_templates}" ]; then
-                echo "expected NNN-agentgateway-crds-post/templates/ for vendored mixed component" >&2
+                echo "expected NNN-agentgateway-post/templates/ for vendored mixed component" >&2
                 exit 1
               fi
               if ! ls "${post_templates}"/*.yaml >/dev/null 2>&1; then
-                echo "NNN-agentgateway-crds-post/templates/ is empty" >&2
+                echo "NNN-agentgateway-post/templates/ is empty" >&2
                 exit 1
               fi
               # Vendored primary must wrap the tarball and must not embed
               # recipe manifests (those live in -post).
-              primary="$(ls -d "${WORK}"/out/[0-9][0-9][0-9]-agentgateway-crds 2>/dev/null | head -1 || true)"
+              primary="$(ls -d "${WORK}"/out/[0-9][0-9][0-9]-agentgateway 2>/dev/null | head -1 || true)"
               if [ -z "${primary}" ]; then
-                echo "expected NNN-agentgateway-crds/ vendored primary" >&2
+                echo "expected NNN-agentgateway/ vendored primary" >&2
                 exit 1
               fi
               if [ -d "${primary}/templates" ]; then

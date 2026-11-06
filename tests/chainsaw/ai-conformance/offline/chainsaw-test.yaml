@@ -93,7 +93,7 @@ spec:
                 aws-efa cert-manager \
                 dynamo-platform grove gpu-operator \
                 k8s-ephemeral-storage-metrics kai-scheduler \
-                agentgateway agentgateway-crds \
+                agentgateway agentgateway-crds gateway-api-crds \
                 prometheus-operator-crds kube-prometheus-stack \
                 nvidia-dra-driver-gpu nvsentinel prometheus-adapter \
                 nodewright-customizations nodewright-operator; do
