@@ -94,6 +94,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		slinky    measurement.Subtype
 		mariaDB   measurement.Subtype
 		okeLegacy measurement.Subtype
+		okeGPU    measurement.Subtype
 		storage   measurement.Subtype
 		percona   measurement.Subtype
 	)
@@ -166,6 +167,14 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	})
 
 	g.Go(func() error {
+		okeGPU = k.collectOKEGPUPlugin(gctx)
+		if err := cancellationErr(gctx, ctx, callerCtx); err != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "OKE GPU plugin collection cancelled", err)
+		}
+		return nil
+	})
+
+	g.Go(func() error {
 		storage = k.collectDefaultStorageClass(gctx)
 		if err := cancellationErr(gctx, ctx, callerCtx); err != nil {
 			return errors.Wrap(errors.ErrCodeTimeout, "default StorageClass collection cancelled", err)
@@ -199,6 +208,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		WithSubtype(slinky).
 		WithSubtype(mariaDB).
 		WithSubtype(okeLegacy).
+		WithSubtype(okeGPU).
 		WithSubtype(storage).
 		WithSubtype(percona).
 		Build()
@@ -271,6 +281,7 @@ func emptyK8sMeasurement() *measurement.Measurement {
 		WithSubtype(unknownSlinkySubtype()).
 		WithSubtype(unknownMariaDBSubtype()).
 		WithSubtype(unknownOKELegacyPluginSubtype()).
+		WithSubtype(unknownOKEGPUPluginSubtype()).
 		WithSubtype(unknownDefaultStorageClassSubtype()).
 		WithSubtype(unknownPerconaSubtype()).
 		Build()

@@ -152,7 +152,7 @@ var snapshotAllowlist = map[measurement.Type]map[string]subtypePolicy{
 			"VERSION_ID",
 			"VERSION_CODENAME",
 		),
-		// grub, sysctl, kmod intentionally absent → dropped (tuning/hardening posture)
+		// grub, sysctl, kmod, kmod-param intentionally absent → dropped (tuning/hardening posture)
 	},
 	measurement.TypeNodeTopology: {
 		"summary": keep("node-count", "taint-count", "label-count"), // counts, not identifiers
