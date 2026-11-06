@@ -72,6 +72,7 @@ const (
 	keyMetadata   = "metadata"
 	keyName       = "name"
 	keyNamespace  = "namespace"
+	keyPort       = "port"
 	keySpec       = "spec"
 )
 
@@ -127,8 +128,9 @@ const (
 
 // Per-check WORK budgets for the conformance checks that create cluster
 // resources needing reconciliation (the two GPU allocation checks, the HPA
-// autoscaling cycle, the AI service metrics stub and the robust-controller
-// TrainJob reconciliation on the Kubeflow path). Each
+// autoscaling cycle, the AI service metrics stub, the robust-controller
+// TrainJob reconciliation on the Kubeflow path and the inference-gateway
+// traffic phase). Each
 // check bounds all of its resource-creating work — allocation-mode discovery,
 // namespace/claim/pod creation, pod waits, log collection, and validation —
 // to a budget, so that inside the catalog timeout (which becomes the check
@@ -156,6 +158,7 @@ const (
 //	pod-autoscaling:          13m30s work + 30s cleanup + 60s margin = 15m catalog timeout
 //	ai-service-metrics:        8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
 //	robust-controller:         6m30s work + 30s cleanup + 60s margin =  8m catalog timeout
+//	inference-gateway:        13m30s work + 30s cleanup + 60s margin = 15m catalog timeout
 //
 // dra-support can run TWO namespace-creating behavioral subtests in sequence
 // (the MNNVL IMEX channel probe, then the full-GPU DRA probe). The reserve
@@ -207,6 +210,10 @@ const (
 	podAutoscalingWorkBudget   = 13*time.Minute + 30*time.Second
 	aiServiceMetricsWorkBudget = 8*time.Minute + 30*time.Second
 	robustControllerWorkBudget = 6*time.Minute + 30*time.Second
+	// inferenceGatewayWorkBudget covers the traffic phase that follows the
+	// status checks: backends available (3m), HTTPRoute accepted (2m) and
+	// the probe pod's run (6m) are individual caps under it, not a sum.
+	inferenceGatewayWorkBudget = 13*time.Minute + 30*time.Second
 )
 
 // gpuCheckWorkBudget derives the work budget for a GPU allocation conformance

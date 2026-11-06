@@ -879,7 +879,13 @@ func waitForGPUTestPod(ctx context.Context, clientset kubernetes.Interface, run 
 // to re-Get + re-watch instead of failing — see the repo anti-pattern list.
 // what names the pod in error messages.
 func waitForTerminalPod(ctx context.Context, clientset kubernetes.Interface, namespace, name, what string) (*corev1.Pod, error) {
-	waitCtx, cancel := context.WithTimeout(ctx, defaults.DRATestPodTimeout)
+	return waitForTerminalPodWithin(ctx, clientset, namespace, name, what, defaults.DRATestPodTimeout)
+}
+
+// waitForTerminalPodWithin is waitForTerminalPod under a caller-chosen bound,
+// for probes whose run is longer or shorter than a GPU test pod's.
+func waitForTerminalPodWithin(ctx context.Context, clientset kubernetes.Interface, namespace, name, what string, timeout time.Duration) (*corev1.Pod, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	var lastPhase corev1.PodPhase

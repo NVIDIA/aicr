@@ -237,9 +237,17 @@ validators:
         requirement: preferred
   - name: inference-gateway
     phase: conformance
-    description: "Verify the recipe's inference gateway (Gateway API + Inference Extension) is operational"
+    description: >-
+      Verify the recipe's inference gateway (Gateway API + Inference Extension)
+      is operational and routes traffic: an HTTPRoute on its Gateway sends
+      header-matched requests to a canary backend and splits the rest 70/30
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
-    timeout: 5m
+    # 13m30s work budget enforced by the check's workCtx, plus 30s cleanup
+    # and 60s margin; the traffic phase's per-wait caps (backends available
+    # 3m, HTTPRoute accepted 2m, probe pod 6m) are individual bounds under
+    # that budget, not a sum; a passing run takes 1-3 minutes. See
+    # validators/conformance/consts.go.
+    timeout: 15m
     args: ["inference-gateway"]
     env: []
   - name: pod-autoscaling
