@@ -16,9 +16,10 @@
 // ADR-007, AICR ships two kinds of validation evidence, each in its
 // own subpackage:
 //
-//   - cncf — CNCF AI Conformance behavioral evidence (markdown
-//     rendering + behavioral collector for submission to the CNCF
-//     conformance program).
+//   - cncf — CNCF AI Conformance evidence: the versioned requirement
+//     checklists, the fail-closed requirement aggregation of a
+//     conformance run's CTRF report, and the markdown pages rendered
+//     from it for submission to the CNCF conformance program.
 //   - attestation — recipe-test attestation pipeline (signed in-toto
 //     Statement plus supporting bundle).
 //   - verifier — offline verification for recipe-evidence bundles

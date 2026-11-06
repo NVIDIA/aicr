@@ -87,11 +87,13 @@ const (
 	// Differing from the chart's namespace is load-bearing, not accidental drift to
 	// be tidied away later (issue #2223). Two things depend on it:
 	//
-	//   - The CNCF evidence collector distinguishes "the bundle deployed Kubeflow
-	//     Trainer" from "the validator self-installed one to run the NCCL
-	//     benchmark" solely by namespace. Sharing one namespace would let this
-	//     temporary install be collected as recipe-deployed, so signed conformance
-	//     evidence would claim an operator the bundle never shipped.
+	//   - The robust-controller conformance check discovers the recipe-deployed
+	//     Kubeflow Trainer in the chart's namespace (kubeflow), so it tells "the
+	//     bundle deployed Kubeflow Trainer" from "the validator self-installed one
+	//     to run the NCCL benchmark" solely by namespace. Sharing one namespace
+	//     would let this temporary install be credited as recipe-deployed, so the
+	//     CNCF conformance evidence would claim an operator the bundle never
+	//     shipped.
 	//   - The conflict guard in ensureTrainerInstalled compares the discovered
 	//     installation's namespace against this one to refuse installing over a
 	//     Trainer this validator does not own. Sharing a namespace makes that

@@ -283,9 +283,9 @@ with only pre-manifests is rejected as having no deployable primary.
 
 ## Declaring the inference gateway
 
-The `inference-gateway` conformance check, the performance validator's
-`gateway-epp` routing mode and the CNCF evidence collector validate whichever
-component the recipe declares as its inference gateway. `agentgateway` is the
+The `inference-gateway` conformance check and the performance validator's
+`gateway-epp` routing mode validate whichever component the recipe declares
+as its inference gateway. `agentgateway` is the
 built-in default and needs no declaration. Any other Gateway API implementation
 declares itself on its `componentRef` through the reserved
 `overrides.inferenceGateway` key:
@@ -351,20 +351,12 @@ shipped agentgateway Gateway does. A listener that keeps the Gateway API
 default (`Same`) rejects the route, and the run fails at once with the
 listener's `Accepted` reason rather than as a readiness timeout.
 
-`aicr validate --cncf-submission` hands the declared Gateway's name, namespace
-and class to the evidence collector; a recipe that declares no inference
-gateway makes the section report the prerequisite absent, as the conformance
-check skips the same recipe, rather than certify a Gateway the recipe does not
-ship. Only a standalone collector run with no recipe discovers the Gateway
-named `inference-gateway`, across every namespace. The section's verdicts
-follow from that. With a recipe, a declared Gateway that is missing or a
-cluster that does not serve the Gateway API is `FAIL` (standalone, both are
-`SKIP`), a lookup the cluster denies is `FAIL` in either mode, and a Gateway
-programmed by a class other than the declared one is `FAIL`;
-`--cncf-submission` then exits non-zero. Standalone, a cluster with no Gateway
-of that name is `SKIP`, and more than one Gateway of that name is `FAIL`.
-`PASS` requires the GatewayClass `Accepted`, the Gateway `Programmed` and the
-InferencePool CRD `Established`.
+`aicr validate --cncf-submission` runs the same `inference-gateway`
+conformance check and renders its result as the `ai_inference` evidence page,
+so a recipe that declares no inference gateway leaves that requirement not
+tested rather than certifying a Gateway the recipe does not ship. `PASS`
+requires the GatewayClass `Accepted`, the Gateway `Programmed` and the
+InferencePool CRD `Established` for the declared Gateway.
 
 ## Precedence rules
 

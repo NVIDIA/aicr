@@ -36,18 +36,17 @@ inputs:
     required: false
     default: ''
   upload_validation_artifacts:
-    description: 'Upload validation result and evidence artifacts before cleanup'
+    description: 'Upload the validation result artifact before cleanup'
     required: false
     default: 'false'
   validation_artifact_name:
-    description: 'Name for uploaded validation artifacts'
+    description: 'Name for the uploaded validation artifact'
     required: false
-    default: 'conformance-evidence'
+    default: 'validation-result'
   validation_artifact_paths:
     description: 'Newline-separated validation artifact paths'
     required: false
     default: |
-      conformance-evidence/
       validation-result.yaml
 
 runs:

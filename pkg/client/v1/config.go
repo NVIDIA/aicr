@@ -589,8 +589,8 @@ type ValidateSettings struct {
 //     EvidenceAttestationOptions derives it; it is not folded in here because
 //     it targets Client.EmitRecipeEvidence rather than ValidateState.
 //   - EvidenceCNCF configures CNCF AI Conformance evidence.
-//     CNCFEvidenceOptions derives it for Client.RenderCNCFEvidence and
-//     Client.CollectCNCFEvidence rather than ValidateState.
+//     CNCFEvidenceOptions derives it for Client.RenderCNCFEvidenceWithResult
+//     after ValidateState, rather than for ValidateState itself.
 //
 // # Two mappings that are not pass-throughs
 //
@@ -786,8 +786,7 @@ func (c *Config) ValidateInputOptions() (ValidateInputOptions, error) {
 // CNCFEvidenceOptions covers the other — it is a separate method, not folded
 // in here, because the two target different consumers: this one feeds
 // Client.EmitRecipeEvidence, while CNCF AI Conformance evidence goes through
-// Client.RenderCNCFEvidence and Client.CollectCNCFEvidence, after the caller
-// decides which of the two a run takes.
+// Client.RenderCNCFEvidenceWithResult after the run.
 //
 // Returns (zero, false, nil) for a nil Config, an absent spec.validate, or an
 // absent evidence.attestation. An empty out also returns ok=false, but unlike
@@ -837,26 +836,28 @@ func (c *Config) EvidenceAttestationOptions() (EvidenceOptions, bool, error) {
 }
 
 // CNCFEvidenceOptions carries spec.validate.evidence.cncf, the CNCF AI
-// Conformance evidence settings (--evidence-dir / --cncf-submission /
-// --feature). The CALLER reads it, applies its own flag precedence, and then
-// picks a Client method. CNCFSubmission true means Client.CollectCNCFEvidence
-// with Dir and Features in CNCFCollectOptions. Otherwise a non-empty Dir
-// means Client.RenderCNCFEvidenceWithOptions after ValidateState, with
-// KubernetesVersion from the snapshot, which is what aicr validate does;
-// Client.RenderCNCFEvidence renders the latest carried checklist instead.
+// Conformance evidence settings (--evidence-dir / --cncf-submission). The
+// CALLER reads it and applies its own flag precedence. Dir and CNCFSubmission
+// require each other: a submission run executes ValidateState for the
+// conformance phase and then renders the evidence into Dir with
+// Client.RenderCNCFEvidenceWithResult, KubernetesVersion from the snapshot
+// and NotApplicable carried into RenderCNCFEvidenceOptions, which is what
+// aicr validate does. Dir without CNCFSubmission, or the reverse, is refused
+// by the CLI; the Go caller applies the same rule.
 type CNCFEvidenceOptions struct {
 	// Dir is spec.validate.evidence.cncf.dir, the directory CNCF AI
-	// Conformance evidence markdown is written to.
+	// Conformance evidence is written to.
 	Dir string
 
-	// CNCFSubmission is spec.validate.evidence.cncf.cncfSubmission: whether to
-	// collect detailed behavioral evidence for a CNCF AI Conformance
-	// submission rather than the lighter default evidence.
+	// CNCFSubmission is spec.validate.evidence.cncf.cncfSubmission: whether
+	// the run writes CNCF AI Conformance submission evidence into Dir.
 	CNCFSubmission bool
 
-	// Features is spec.validate.evidence.cncf.features, restricting collection
-	// to specific evidence features. Empty means "all features" — only
-	// honored when CNCFSubmission is true.
+	// Features is always nil.
+	//
+	// Deprecated: spec.validate.evidence.cncf.features was removed with the
+	// evidence collector script (#3602); a document that still sets it fails
+	// to load. The field remains so the type keeps its shape.
 	Features []string
 
 	// NotApplicable is spec.validate.evidence.cncf.notApplicable: conditional
@@ -885,7 +886,6 @@ func (c *Config) CNCFEvidenceOptions() (CNCFEvidenceOptions, error) {
 	return CNCFEvidenceOptions{
 		Dir:            resolved.EvidenceCNCF.Dir,
 		CNCFSubmission: resolved.EvidenceCNCF.CNCFSubmission,
-		Features:       resolved.EvidenceCNCF.Features,
 		NotApplicable:  resolved.EvidenceCNCF.NotApplicable,
 	}, nil
 }
