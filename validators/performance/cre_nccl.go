@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -112,23 +113,53 @@ func validateCRENcclAllReduceBw(
 	if err != nil {
 		return "", false, err
 	}
-	bw, err := listMaxBusBandwidth(ctx.Ctx, dyn, ctx.Namespace, workflowName, run.GetCreationTimestamp())
+	reading, err := readCREBandwidth(ctx.Ctx, dyn, ctx.Namespace, workflowName, run.GetCreationTimestamp())
 	if err != nil {
 		return "", false, err
 	}
+	bw := reading.MaxBusGBps
 
 	emitCREBandwidthExtras(bw, threshold)
 
 	logs, logErr := creLauncherLogs(ctx, workflowName, run.GetCreationTimestamp())
-	if logErr != nil {
-		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "CRE launcher logs required for transport assertion", logErr)
-	}
-	if err := verifyTransportFromLogs(logs, variantNET); err != nil {
+	if err := verifyCRETransport(logs, logErr, reading.Transports); err != nil {
 		return "", false, err
 	}
 
 	actual, passed = creNCCLVerdict(bw, threshold)
 	return actual, passed, nil
+}
+
+// verifyCRETransport asserts that a network transport, not Socket, carried the
+// run. The launcher log's "Using network" banner is the authority when it is
+// there. It is printed once at initialization, so a long launcher log that
+// kubelet rotates, as the TCPXO teardown output does on GKE, can lose it from
+// the one segment the logs API returns. In that case, and when the log cannot
+// be read at all, the assertion falls back to the transport CRE recorded on the
+// BandwidthMeasurement from the same banner. Neither source present is a
+// failure, and a recorded Socket is a failure, so the fallback never passes a
+// run the log would have failed.
+func verifyCRETransport(logs string, logErr error, recorded []string) error {
+	if logErr == nil && ncclUsingNetRe.MatchString(logs) {
+		return verifyTransportFromLogs(logs, variantNET)
+	}
+	if len(recorded) == 0 {
+		if logErr != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+				"CRE launcher logs required for transport assertion", logErr)
+		}
+		return verifyTransportFromLogs(logs, variantNET)
+	}
+	for _, name := range recorded {
+		if name == "Socket" {
+			return aicrErrors.New(aicrErrors.ErrCodeInternal,
+				"NET variant selected but CRE recorded 'Using network Socket' — "+
+					"provider plugin (e.g. AWS Libfabric) did not load")
+		}
+	}
+	slog.Info("transport asserted from BandwidthMeasurement status; launcher log has no network banner",
+		"transport", recorded)
+	return nil
 }
 
 // creNCCLVerdict judges bw with the verdict the TrainJob check uses, so one
