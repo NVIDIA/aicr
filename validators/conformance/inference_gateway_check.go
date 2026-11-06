@@ -512,28 +512,9 @@ func validateGatewayDataPlane(ctx *validators.Context, profile *validators.Infer
 	if listErr == nil {
 		report.TotalHTTPRoutes = len(httpRouteList.Items)
 		var attached int
-		for _, route := range httpRouteList.Items {
-			parentRefs, found, _ := unstructured.NestedSlice(route.Object, "spec", "parentRefs")
-			if !found {
-				continue
-			}
-			for _, ref := range parentRefs {
-				refMap, ok := ref.(map[string]any)
-				if !ok {
-					continue
-				}
-				// A parentRef names its Gateway's namespace only when it
-				// differs from the route's own, so a same-named Gateway in
-				// another namespace must not count.
-				name, _, _ := unstructured.NestedString(refMap, "name")
-				namespace, _, _ := unstructured.NestedString(refMap, "namespace")
-				if namespace == "" {
-					namespace = route.GetNamespace()
-				}
-				if name == profile.GatewayName && namespace == profile.Namespace {
-					attached++
-					break
-				}
+		for i := range httpRouteList.Items {
+			if httpRouteTargetsGateway(&httpRouteList.Items[i], profile) {
+				attached++
 			}
 		}
 		report.AttachedHTTPRoutes = attached

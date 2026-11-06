@@ -347,7 +347,12 @@ recipe's Gateway across namespaces instead of a Gateway the test creates, so
 the data plane under test is the one AICR deployed. Before creating anything
 it resolves the endpoint the probe posts to from the Gateway's first
 hostname-free HTTP listener (a hostname-bound or missing HTTP listener fails
-with `ErrCodeInvalidRequest`, as the performance validator does): the proxy
+with `ErrCodeInvalidRequest`, as the performance validator does; the per-run
+`.conformance.invalid` hostname never intersects a listener hostname, so a
+hostname-bound listener would never accept the route), and the HTTPRoute's
+parentRef names that listener as its `sectionName`, so the `Accepted` wait
+judges the listener the probe's requests arrive on and an acceptance through
+another listener on the Gateway does not count: the proxy
 Service's in-cluster name for a `service-endpoints` data plane, the first
 `IPAddress` or `Hostname` status address for `gateway-address`. With a
 declared `gateway-address` profile the probe connects to that status address

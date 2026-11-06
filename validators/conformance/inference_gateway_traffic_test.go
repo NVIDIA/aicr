@@ -15,6 +15,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -185,7 +186,7 @@ func TestBuildGatewayTrafficHTTPRoute(t *testing.T) {
 		hostname = "ai-conformance-abc.conformance.invalid"
 		path     = "/ai-conformance-abc"
 	)
-	route := buildGatewayTrafficHTTPRoute("gateway-traffic-abc", profile, hostname, path, 70, 30)
+	route := buildGatewayTrafficHTTPRoute("gateway-traffic-abc", profile, "http", hostname, path, 70, 30)
 	if route.GetName() != gatewayTrafficRouteName || route.GetNamespace() != "gateway-traffic-abc" || route.GetKind() != "HTTPRoute" {
 		t.Fatalf("route identity = %s/%s %s", route.GetNamespace(), route.GetName(), route.GetKind())
 	}
@@ -202,6 +203,11 @@ func TestBuildGatewayTrafficHTTPRoute(t *testing.T) {
 	parent := parents[0].(map[string]any)
 	if parent["name"] != profile.GatewayName || parent["namespace"] != profile.Namespace {
 		t.Errorf("parentRef = %v, want %s/%s", parent, profile.Namespace, profile.GatewayName)
+	}
+	// The parentRef pins the listener the probe targets, so Accepted cannot
+	// come from another listener on the Gateway.
+	if parent["sectionName"] != "http" {
+		t.Errorf("parentRef sectionName = %v, want http", parent["sectionName"])
 	}
 	rules, _, _ := unstructured.NestedSlice(route.Object, "spec", "rules")
 	if len(rules) != 2 {
@@ -298,6 +304,13 @@ func TestGatewayTrafficPodsHonorTolerations(t *testing.T) {
 			if !strings.Contains(gatewayTrafficProbeScript, `"Host": os.environ["HOST_HEADER"]`) {
 				t.Error("probe script must send HOST_HEADER as the Host header of every request")
 			}
+			// Readiness is the documented rule, each request answered by a
+			// test backend; which backend answered the header request is
+			// the verdict's question, so a Gateway that ignores the header
+			// match fails deterministically there, never as not routed.
+			if !strings.Contains(gatewayTrafficProbeScript, "ok = ok + 1 if h in (PRIMARY, ALTERNATE) and w in (PRIMARY, ALTERNATE) else 0") {
+				t.Error("probe script readiness must count a pair when a test backend answered both requests, not only when the header request reached the alternate")
+			}
 		})
 	}
 }
@@ -311,7 +324,11 @@ func trafficTestGateway(profile *validators.InferenceGatewayProfile, specListene
 }
 
 func httpListener(port int64, hostname string) map[string]any {
-	l := map[string]any{"name": "http", "protocol": "HTTP", "port": port}
+	return namedHTTPListener("http", port, hostname)
+}
+
+func namedHTTPListener(name string, port int64, hostname string) map[string]any {
+	l := map[string]any{"name": name, "protocol": "HTTP", "port": port}
 	if hostname != "" {
 		l["hostname"] = hostname
 	}
@@ -338,8 +355,10 @@ func TestGatewayTrafficResolveEndpoint(t *testing.T) {
 		services  []runtime.Object
 		wantURL   string
 		wantPort  int64
-		wantErr   string
-		wantCode  errors.ErrorCode
+		// wantListener is the listener the route pins; "http" when unset.
+		wantListener string
+		wantErr      string
+		wantCode     errors.ErrorCode
 	}{
 		{
 			name: "proxy Service named after the Gateway on the listener port", profile: svcProfile,
@@ -361,6 +380,14 @@ func TestGatewayTrafficResolveEndpoint(t *testing.T) {
 			listeners: []any{map[string]any{"name": "https", "protocol": "HTTPS", "port": int64(443)}, httpListener(8080, "")},
 			services:  []runtime.Object{clusterIPService(svcProfile.Namespace, "inference-gateway", 8080)},
 			wantURL:   "http://inference-gateway.agentgateway-system.svc:8080", wantPort: 8080,
+		},
+		{
+			// The pinned listener is the one the probe's port comes from, not
+			// the hostname-bound HTTP listener before it.
+			name: "first hostname-free HTTP listener is the pinned one", profile: addrProfile,
+			listeners: []any{namedHTTPListener("tenant", 80, "models.example.com"), namedHTTPListener("public", 8080, "")},
+			addresses: []any{gatewayAddress("IPAddress", "10.0.0.1")},
+			wantURL:   "http://10.0.0.1:8080", wantPort: 8080, wantListener: "public",
 		},
 		{
 			name: "proxy Service not found", profile: svcProfile,
@@ -389,7 +416,7 @@ func TestGatewayTrafficResolveEndpoint(t *testing.T) {
 		{
 			name: "hostname-bound HTTP listener is refused", profile: svcProfile,
 			listeners: []any{httpListener(80, "models.example.com")},
-			wantErr:   `HTTP listener(s) set a hostname (http=models.example.com)`, wantCode: errors.ErrCodeInvalidRequest,
+			wantErr:   `HTTP listener(s) set a hostname (http=models.example.com); the traffic route uses a per-run .conformance.invalid hostname`, wantCode: errors.ErrCodeInvalidRequest,
 		},
 		{
 			name: "no HTTP listener is refused", profile: svcProfile,
@@ -424,6 +451,9 @@ func TestGatewayTrafficResolveEndpoint(t *testing.T) {
 			}
 			if want := tt.wantURL + s.routePath + gatewayTrafficRequestPath; s.endpoint != want || s.listenerPort != tt.wantPort {
 				t.Errorf("endpoint = %s port %d, want %s port %d", s.endpoint, s.listenerPort, want, tt.wantPort)
+			}
+			if wantListener := cmp.Or(tt.wantListener, "http"); s.listenerName != wantListener {
+				t.Errorf("listenerName = %q, want %q", s.listenerName, wantListener)
 			}
 		})
 	}
@@ -475,9 +505,19 @@ func probePhaseOnCreate(c *k8sfake.Clientset, phase corev1.PodPhase) {
 }
 
 // routeStatus is a status.parents entry for the given Gateway.
+// routeStatus is a status.parents entry the Gateway wrote for the pinned
+// "http" listener; routeStatusOnListener names another.
 func routeStatus(profile *validators.InferenceGatewayProfile, accepted, reason string) map[string]any {
+	return routeStatusOnListener(profile, "http", accepted, reason)
+}
+
+func routeStatusOnListener(profile *validators.InferenceGatewayProfile, listener, accepted, reason string) map[string]any {
+	ref := map[string]any{"name": profile.GatewayName, "namespace": profile.Namespace}
+	if listener != "" {
+		ref["sectionName"] = listener
+	}
 	return map[string]any{
-		"parentRef":      map[string]any{"name": profile.GatewayName, "namespace": profile.Namespace},
+		"parentRef":      ref,
 		"controllerName": "example.com/edge",
 		"conditions": []any{
 			map[string]any{"type": "Accepted", "status": accepted, "reason": reason},
@@ -516,7 +556,10 @@ func TestGatewayTrafficScenarioRun(t *testing.T) {
 		probePhase corev1.PodPhase
 		noAccept   bool
 		rejected   bool
-		noBackend  bool
+		// otherListener accepts the route through a listener other than
+		// the one the probe targets; the pinned wait must not credit it.
+		otherListener bool
+		noBackend     bool
 		// foreignRoute seeds a tenant HTTPRoute already attached to the
 		// Gateway; a verdict failure must name it.
 		foreignRoute bool
@@ -541,6 +584,8 @@ func TestGatewayTrafficScenarioRun(t *testing.T) {
 			wantCode: errors.ErrCodeTimeout, wantMsg: "has not reported status on the route"},
 		{name: "route rejected by the listener fails at route", logs: probeLogsRouted, probePhase: corev1.PodSucceeded, rejected: true, wantPhase: gatewayTrafficPhaseRoute,
 			wantCode: errors.ErrCodeTimeout, wantMsg: "reason=NotAllowedByListeners"},
+		{name: "route accepted only through another listener fails at route", logs: probeLogsRouted, probePhase: corev1.PodSucceeded, otherListener: true, wantPhase: gatewayTrafficPhaseRoute,
+			wantCode: errors.ErrCodeTimeout, wantMsg: "on listener http within"},
 		// waitForDeploymentAvailable's own verdict code is kept (not
 		// double-wrapped): the bound elapsing on a 0/1 Deployment is Internal.
 		{name: "backend never available fails at deploy", logs: probeLogsRouted, probePhase: corev1.PodSucceeded, noBackend: true, wantPhase: gatewayTrafficPhaseDeploy,
@@ -559,6 +604,9 @@ func TestGatewayTrafficScenarioRun(t *testing.T) {
 			case tt.noAccept:
 			case tt.rejected:
 				acceptRouteOnCreate(dyn, routeStatus(profile, "False", "NotAllowedByListeners"))
+			case tt.otherListener:
+				acceptRouteOnCreate(dyn, routeStatusOnListener(profile, "https", "True", "Accepted"),
+					routeStatus(profile, "False", "NotAllowedByListeners"))
 			default:
 				acceptRouteOnCreate(dyn, routeStatus(profile, "True", "Accepted"))
 			}
@@ -598,6 +646,9 @@ func TestGatewayTrafficScenarioRun(t *testing.T) {
 				if !strings.Contains(err.Error(), tt.wantMsg) || !strings.Contains(err.Error(), "step "+string(tt.wantPhase)) {
 					t.Errorf("error %q lacks %q or the step name", err.Error(), tt.wantMsg)
 				}
+				if tt.otherListener && (!strings.Contains(err.Error(), "listener https") || !strings.Contains(err.Error(), "listener http (")) {
+					t.Errorf("error %q must report the status of every listener the Gateway wrote for", err.Error())
+				}
 			}
 			if _, getErr := c.CoreV1().Namespaces().Get(context.Background(), s.testRun.namespace, metav1.GetOptions{}); !k8serrors.IsNotFound(getErr) {
 				t.Errorf("namespace %s not deleted after the run: %v", s.testRun.namespace, getErr)
@@ -618,7 +669,7 @@ func TestGatewayTrafficVerdictSummaryCarriesCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGatewayTrafficScenario: %v", err)
 	}
-	s.endpoint, s.listenerPort = "http://inference-gateway.agentgateway-system.svc:80/v1/chat/completions", 80
+	s.endpoint, s.listenerName, s.listenerPort = "http://inference-gateway.agentgateway-system.svc:80/v1/chat/completions", "http", 80
 	s.header, s.weighted, _, err = parseGatewayProbeLogs(probeLogsForeignBackend)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -632,6 +683,7 @@ func TestGatewayTrafficVerdictSummaryCarriesCounts(t *testing.T) {
 		"Weighted round 1    model-v1=300 model-v2=120 other=80 (model-v1 share 71.4%, want 70%)",
 		"Sample error:       hello from some-other-service",
 		"Default rule:       model-v1 70 / model-v2 30 (tolerance 5 points)",
+		"Gateway:            agentgateway-system/inference-gateway (listener http, port 80)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("verdict summary lacks %q:\n%s", want, out)
@@ -651,7 +703,7 @@ func TestWaitForHTTPRouteAccepted_Watch(t *testing.T) {
 	t.Parallel()
 	profile := agentgatewayProfile()
 	dyn := newRouteFakeDynamicClient()
-	route := buildGatewayTrafficHTTPRoute("gateway-traffic-x", profile, "ai-conformance-x.conformance.invalid", "/ai-conformance-x", 70, 30)
+	route := buildGatewayTrafficHTTPRoute("gateway-traffic-x", profile, "http", "ai-conformance-x.conformance.invalid", "/ai-conformance-x", 70, 30)
 	// Accepted by a same-named Gateway in the route's own namespace: not ours.
 	foreign := routeStatus(profile, "True", "Accepted")
 	foreign["parentRef"] = map[string]any{"name": profile.GatewayName}
@@ -667,12 +719,12 @@ func TestWaitForHTTPRouteAccepted_Watch(t *testing.T) {
 			t.Errorf("update route: %v", err)
 		}
 	}()
-	got, err := waitForHTTPRouteAccepted(context.Background(), dyn, "gateway-traffic-x", gatewayTrafficRouteName, profile, 5*time.Second)
+	got, err := waitForHTTPRouteAccepted(context.Background(), dyn, "gateway-traffic-x", profile, "http", 5*time.Second)
 	if err != nil {
 		t.Fatalf("waitForHTTPRouteAccepted: %v", err)
 	}
-	if len(httpRouteParentsFor(got, profile)) != 1 {
-		t.Errorf("parents for the profile's Gateway = %d, want 1", len(httpRouteParentsFor(got, profile)))
+	if len(httpRouteParentsFor(got, profile, "http")) != 1 {
+		t.Errorf("parents for the profile's Gateway = %d, want 1", len(httpRouteParentsFor(got, profile, "http")))
 	}
 	text := httpRouteParentStatusText(got, profile)
 	if !strings.Contains(text, "Accepted      True") || !strings.Contains(text, "ResolvedRefs  True") {
@@ -688,9 +740,127 @@ func TestWaitForHTTPRouteAccepted_ReadDenied(t *testing.T) {
 	dyn.PrependReactor("get", "httproutes", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, k8serrors.NewForbidden(schema.GroupResource{Resource: "httproutes"}, "", fmt.Errorf("denied"))
 	})
-	_, err := waitForHTTPRouteAccepted(context.Background(), dyn, "ns", gatewayTrafficRouteName, agentgatewayProfile(), time.Second)
+	_, err := waitForHTTPRouteAccepted(context.Background(), dyn, "ns", agentgatewayProfile(), "http", time.Second)
 	if err == nil || strings.Contains(err.Error(), "not Accepted") {
 		t.Fatalf("error = %v, want the denied read, not a timeout", err)
+	}
+}
+
+// TestWaitForHTTPRouteAccepted_DeadParentContext pins the code a dead parent
+// context reports: a cancellation (Ctrl-C) is Canceled, so nothing retries
+// it, and a parent deadline is Timeout; the wait's own bound stays Timeout.
+func TestWaitForHTTPRouteAccepted_DeadParentContext(t *testing.T) {
+	t.Parallel()
+	profile := agentgatewayProfile()
+	tests := []struct {
+		name     string
+		ctx      func() (context.Context, context.CancelFunc)
+		wantCode errors.ErrorCode
+		wantMsg  string
+	}{
+		{name: "canceled parent", ctx: func() (context.Context, context.CancelFunc) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx, cancel
+		}, wantCode: errors.ErrCodeCanceled, wantMsg: "canceled"},
+		{name: "parent deadline exceeded", ctx: func() (context.Context, context.CancelFunc) {
+			return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		}, wantCode: errors.ErrCodeTimeout, wantMsg: "canceled"},
+		{name: "own bound elapsed", ctx: func() (context.Context, context.CancelFunc) {
+			return context.WithCancel(context.Background())
+		}, wantCode: errors.ErrCodeTimeout, wantMsg: "was not Accepted with ResolvedRefs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dyn := newRouteFakeDynamicClient()
+			route := buildGatewayTrafficHTTPRoute("ns", profile, "http", "ai-conformance-x.conformance.invalid", "/ai-conformance-x", 70, 30)
+			if _, err := dyn.Resource(httpRouteGVR).Namespace("ns").Create(context.Background(), route, metav1.CreateOptions{}); err != nil {
+				t.Fatalf("seed route: %v", err)
+			}
+			ctx, cancel := tt.ctx()
+			defer cancel()
+			_, err := waitForHTTPRouteAccepted(ctx, dyn, "ns", profile, "http", 50*time.Millisecond)
+			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Fatalf("error = %v, want containing %q", err, tt.wantMsg)
+			}
+			errorstest.WantReportedCode(t, err, tt.wantCode)
+		})
+	}
+}
+
+// TestHTTPRouteAcceptedByGateway pins the listener pin: only the status
+// parent whose parentRef names the pinned listener on the profile's Gateway
+// can credit the route, so an acceptance through another listener (one the
+// probe's requests never reach) does not pass the route step.
+func TestHTTPRouteAcceptedByGateway(t *testing.T) {
+	t.Parallel()
+	profile := agentgatewayProfile()
+	otherNamespace := routeStatus(profile, "True", "Accepted")
+	otherNamespace["parentRef"] = map[string]any{"name": profile.GatewayName, "namespace": "tenant", "sectionName": "http"}
+	tests := []struct {
+		name     string
+		parents  []any
+		listener string
+		want     bool
+	}{
+		{name: "accepted on the pinned listener", parents: []any{routeStatus(profile, "True", "Accepted")}, listener: "http", want: true},
+		{name: "accepted on another listener only", parents: []any{routeStatusOnListener(profile, "https", "True", "Accepted")}, listener: "http", want: false},
+		{name: "accepted on another listener, rejected on the pinned one",
+			parents: []any{routeStatusOnListener(profile, "https", "True", "Accepted"), routeStatus(profile, "False", "NotAllowedByListeners")}, listener: "http", want: false},
+		{name: "accepted with no sectionName while pinned", parents: []any{routeStatusOnListener(profile, "", "True", "Accepted")}, listener: "http", want: false},
+		{name: "unpinned wait credits any listener", parents: []any{routeStatusOnListener(profile, "https", "True", "Accepted")}, listener: "", want: true},
+		{name: "same-named Gateway in another namespace", parents: []any{otherNamespace}, listener: "http", want: false},
+		{name: "rejected on the pinned listener", parents: []any{routeStatus(profile, "False", "NotAllowedByListeners")}, listener: "http", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			route := buildGatewayTrafficHTTPRoute("gateway-traffic-x", profile, "http", "ai-conformance-x.conformance.invalid", "/ai-conformance-x", 70, 30)
+			route.Object["status"] = map[string]any{"parents": tt.parents}
+			if got := httpRouteAcceptedByGateway(route, profile, tt.listener); got != tt.want {
+				t.Errorf("httpRouteAcceptedByGateway = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHTTPRouteTargetsGateway pins the parentRef test the attached-route
+// listing and its published kubectl/jq equivalent share: a parentRef with no
+// namespace is in the route's own, so a same-named Gateway elsewhere does
+// not count, and the recorded command filters on the namespace too.
+func TestHTTPRouteTargetsGateway(t *testing.T) {
+	t.Parallel()
+	profile := agentgatewayProfile()
+	tests := []struct {
+		name            string
+		routeNamespace  string
+		parentNamespace string
+		want            bool
+	}{
+		{name: "explicit namespace names the Gateway's", routeNamespace: "tenant", parentNamespace: profile.Namespace, want: true},
+		{name: "no namespace from the Gateway's own namespace", routeNamespace: profile.Namespace, parentNamespace: "", want: true},
+		{name: "no namespace from another namespace", routeNamespace: "tenant", parentNamespace: "", want: false},
+		{name: "explicit other namespace", routeNamespace: "tenant", parentNamespace: "tenant", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			route := httpRouteTo(tt.routeNamespace, "models", tt.parentNamespace)
+			if got := httpRouteTargetsGateway(route, profile); got != tt.want {
+				t.Errorf("httpRouteTargetsGateway = %t, want %t", got, tt.want)
+			}
+		})
+	}
+	cmd := attachedHTTPRoutesCommand(profile)
+	for _, want := range []string{
+		`.name == "` + profile.GatewayName + `"`,
+		`(.namespace // $ns) == "` + profile.Namespace + `"`,
+		`.metadata.namespace as $ns`,
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("attached-routes command %q lacks %q", cmd, want)
+		}
 	}
 }
 

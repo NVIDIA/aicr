@@ -72,6 +72,7 @@ const (
 	keyMetadata   = "metadata"
 	keyName       = "name"
 	keyNamespace  = "namespace"
+	keySection    = "sectionName"
 	keyPath       = "path"
 	keyPort       = "port"
 	keySpec       = "spec"
@@ -204,16 +205,16 @@ const (
 	gpuCheckMinWorkBudget = 30 * time.Second
 
 	// Fixed FALLBACK work budgets, used only when the parent context has no
-	// deadline (standalone/library use — LoadContext always sets one).
+	// deadline (standalone/library use — LoadContext always sets one). The
+	// inference gateway budget covers the traffic phase that follows the
+	// status checks: backends available (3m), HTTPRoute accepted (2m) and
+	// the probe pod's run (6m) are individual caps under it, not a sum.
 	draSupportWorkBudget       = 3*time.Minute + 30*time.Second
 	secureAccessWorkBudget     = 8*time.Minute + 30*time.Second
 	driverRuntimeWorkBudget    = 8*time.Minute + 30*time.Second
 	podAutoscalingWorkBudget   = 13*time.Minute + 30*time.Second
 	aiServiceMetricsWorkBudget = 8*time.Minute + 30*time.Second
 	robustControllerWorkBudget = 6*time.Minute + 30*time.Second
-	// inferenceGatewayWorkBudget covers the traffic phase that follows the
-	// status checks: backends available (3m), HTTPRoute accepted (2m) and
-	// the probe pod's run (6m) are individual caps under it, not a sum.
 	inferenceGatewayWorkBudget = 13*time.Minute + 30*time.Second
 )
 

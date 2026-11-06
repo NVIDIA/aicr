@@ -361,8 +361,12 @@ listener reported, such as `NotAllowedByListeners`.
 conformance check and renders its result as the `ai_inference` evidence page,
 so a recipe that declares no inference gateway leaves that requirement not
 tested rather than certifying a Gateway the recipe does not ship. `PASS`
-requires the GatewayClass `Accepted`, the Gateway `Programmed` and the
-InferencePool CRD `Established` for the declared Gateway.
+requires, for the declared Gateway, the GatewayClass `Accepted`, the Gateway
+`Programmed`, the InferencePool CRD `Established`, the gateway's network
+exposure and data-plane readiness checks, and the traffic phase: the test HTTPRoute
+`Accepted` with `ResolvedRefs` on the listener the probe targets, every
+header-matched request reaching the canary backend, and one weighted round
+splitting the rest within tolerance of the declared weights.
 
 ## Precedence rules
 

@@ -135,8 +135,11 @@ Server(("::" if Server.address_family == socket.AF_INET6 else "", int(os.environ
 
 // gatewayTrafficProbeScript sends every request with the route's hostname as
 // Host, waits until the route is live (CONSECUTIVE consecutive header and
-// default requests each answered by a test backend, both backends seen),
-// then prints one "HEADER name=n ... other=n" line per
+// default requests each answered by a test backend, both backends seen;
+// which backend answered the header request is the verdict's question, not
+// readiness's, so a Gateway that ignores the header match fails at the
+// verdict with the header rule named rather than here as not routed), then
+// prints one "HEADER name=n ... other=n" line per
 // header round, stopping at the first without errors, and one "WEIGHTED ..."
 // line per weighted round, stopping at the first within tolerance. The Go
 // side re-evaluates every printed line; the early stops only save time.
@@ -171,7 +174,7 @@ seen, ok = set(), 0
 while True:
     h, w = call(HEADER), call({})
     seen.add(w)
-    ok = ok + 1 if h == ALTERNATE and w in (PRIMARY, ALTERNATE) else 0
+    ok = ok + 1 if h in (PRIMARY, ALTERNATE) and w in (PRIMARY, ALTERNATE) else 0
     if ok >= int(os.environ["CONSECUTIVE"]) and {PRIMARY, ALTERNATE} <= seen:
         break
     if time.time() > deadline:
@@ -244,10 +247,14 @@ type gatewayTrafficScenario struct {
 	tolerations []corev1.Toleration
 
 	// endpoint is the URL the probe posts to, resolved from the profile's
-	// data plane; listenerPort is the Gateway HTTP listener it targets;
-	// routeHostname is the HTTPRoute's one hostname, sent as the probe's Host
-	// header; routePath is the per-run path prefix both rules match.
+	// data plane; listenerName and listenerPort are the Gateway HTTP listener
+	// it targets, which the HTTPRoute's parentRef pins as its sectionName so
+	// the Accepted wait judges that listener and not another the Gateway may
+	// also attach the route to; routeHostname is the HTTPRoute's one
+	// hostname, sent as the probe's Host header; routePath is the per-run
+	// path prefix both rules match.
 	endpoint      string
+	listenerName  string
 	listenerPort  int64
 	routeHostname string
 	routePath     string
@@ -340,13 +347,14 @@ func (s *gatewayTrafficScenario) primaryShare() float64 {
 // in-cluster name on the port that serves the listener, for an address-backed
 // one the Gateway's first IP or hostname status address on the listener port.
 // A hostname-bound listener is refused, as the performance validator refuses
-// it: the probe sends the address as Host and the route would never match.
+// it: the route's per-run .conformance.invalid hostname never intersects a
+// listener hostname, so such a listener would never accept the route.
 func (s *gatewayTrafficScenario) resolveEndpoint(ctx context.Context) error {
-	port, err := gatewayHTTPListenerPort(s.gw, s.profile)
+	name, port, err := gatewayHTTPListener(s.gw, s.profile)
 	if err != nil {
 		return err
 	}
-	s.listenerPort = port
+	s.listenerName, s.listenerPort = name, port
 	if s.profile.Probe == validators.GatewayProbeGatewayAddress {
 		host := firstReachableGatewayAddress(s.gw)
 		if host == "" {
@@ -391,10 +399,11 @@ func (s *gatewayTrafficScenario) resolveEndpoint(ctx context.Context) error {
 	return nil
 }
 
-// gatewayHTTPListenerPort returns the port of the Gateway's first HTTP
-// listener without a hostname. The route the phase creates carries no
-// hostnames, so a listener bound to one would not accept it.
-func gatewayHTTPListenerPort(gw *unstructured.Unstructured, profile *validators.InferenceGatewayProfile) (int64, error) {
+// gatewayHTTPListener returns the name and port of the Gateway's first HTTP
+// listener without a hostname. The route the phase creates carries a per-run
+// hostname under .conformance.invalid, which no listener hostname can
+// intersect, so a listener bound to one would never accept it.
+func gatewayHTTPListener(gw *unstructured.Unstructured, profile *validators.InferenceGatewayProfile) (string, int64, error) {
 	listeners, _, _ := unstructured.NestedSlice(gw.Object, "spec", "listeners")
 	var (
 		protocols     []string
@@ -416,17 +425,17 @@ func gatewayHTTPListenerPort(gw *unstructured.Unstructured, profile *validators.
 			continue
 		}
 		port, found, _ := unstructured.NestedInt64(lMap, "port")
-		if !found || port <= 0 {
+		if !found || port <= 0 || name == "" {
 			continue
 		}
-		return port, nil
+		return name, port, nil
 	}
 	if len(hostnameBound) > 0 {
-		return 0, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-			"Gateway %s/%s HTTP listener(s) set a hostname (%s); the traffic probe sends the address as Host and needs a hostname-free HTTP listener",
+		return "", 0, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"Gateway %s/%s HTTP listener(s) set a hostname (%s); the traffic route uses a per-run .conformance.invalid hostname that a hostname-bound listener never matches, so it needs a hostname-free HTTP listener",
 			profile.Namespace, profile.GatewayName, strings.Join(hostnameBound, ", ")))
 	}
-	return 0, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+	return "", 0, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 		"Gateway %s/%s has no HTTP listener (listeners: %s); the traffic probe speaks plain HTTP",
 		profile.Namespace, profile.GatewayName, valueOrUnknown(strings.Join(protocols, ", "))))
 }
@@ -520,8 +529,8 @@ func (s *gatewayTrafficScenario) verdictSummary(err error) string {
 	} else {
 		fmt.Fprintf(&sb, "Verdict:            FAIL in step %s\nError:              %v\n", s.phase, err)
 	}
-	fmt.Fprintf(&sb, "Gateway:            %s/%s (listener port %d)\nEndpoint:           %s\nHTTPRoute:          %s/%s (hostname %s, path prefix %s; the probe sends the hostname as Host)\n",
-		s.profile.Namespace, s.profile.GatewayName, s.listenerPort, valueOrUnknown(s.endpoint), s.testRun.namespace, gatewayTrafficRouteName, s.routeHostname, s.routePath)
+	fmt.Fprintf(&sb, "Gateway:            %s/%s (listener %s, port %d)\nEndpoint:           %s\nHTTPRoute:          %s/%s (hostname %s, path prefix %s, sectionName %s; the probe sends the hostname as Host)\n",
+		s.profile.Namespace, s.profile.GatewayName, valueOrUnknown(s.listenerName), s.listenerPort, valueOrUnknown(s.endpoint), s.testRun.namespace, gatewayTrafficRouteName, s.routeHostname, s.routePath, valueOrUnknown(s.listenerName))
 	switch {
 	case s.attachedRoutesErr != nil:
 		fmt.Fprintf(&sb, "Attached routes:    unavailable (%v)\n", s.attachedRoutesErr)
@@ -600,20 +609,21 @@ func (s *gatewayTrafficScenario) deploy(ctx *validators.Context) error {
 	return nil
 }
 
-// attachRoute creates the HTTPRoute on the profile's Gateway and waits until
-// that Gateway reports it Accepted with ResolvedRefs.
+// attachRoute creates the HTTPRoute on the profile's Gateway, pinned to the
+// listener the probe targets, and waits until that Gateway reports it
+// Accepted with ResolvedRefs on that listener.
 func (s *gatewayTrafficScenario) attachRoute(ctx *validators.Context) error {
 	start := time.Now()
 	ns := s.testRun.namespace
 	s.recordAttachedRoutes(ctx)
-	route := buildGatewayTrafficHTTPRoute(ns, s.profile, s.routeHostname, s.routePath, s.primaryWeight, s.alternateWeight)
+	route := buildGatewayTrafficHTTPRoute(ns, s.profile, s.listenerName, s.routeHostname, s.routePath, s.primaryWeight, s.alternateWeight)
 	recordObjectYAMLArtifact(ctx, "Gateway traffic: HTTPRoute manifest",
 		fmt.Sprintf("kubectl apply -n %s -f <httproute>", ns), route.Object)
 	if _, err := s.dynClient.Resource(httpRouteGVR).Namespace(ns).Create(ctx.Ctx, route, metav1.CreateOptions{}); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
 			"failed to create HTTPRoute %s/%s on Gateway %s/%s", ns, gatewayTrafficRouteName, s.profile.Namespace, s.profile.GatewayName), err)
 	}
-	observed, err := waitForHTTPRouteAccepted(ctx.Ctx, s.dynClient, ns, gatewayTrafficRouteName, s.profile, s.routeAcceptTimeout)
+	observed, err := waitForHTTPRouteAccepted(ctx.Ctx, s.dynClient, ns, s.profile, s.listenerName, s.routeAcceptTimeout)
 	status := "HTTPRoute status not observed"
 	if observed != nil {
 		status = httpRouteParentStatusText(observed, s.profile)
@@ -634,7 +644,7 @@ func (s *gatewayTrafficScenario) attachRoute(ctx *validators.Context) error {
 // requests competed with. A listing that fails is recorded as unavailable,
 // not as no routes.
 func (s *gatewayTrafficScenario) recordAttachedRoutes(ctx *validators.Context) {
-	cmd := fmt.Sprintf("kubectl get httproute -A -o json | jq '.items[] | select(.spec.parentRefs[]? | .name == %q)'", s.profile.GatewayName)
+	cmd := attachedHTTPRoutesCommand(s.profile)
 	s.attachedRoutes, s.attachedRoutesErr = attachedHTTPRouteNames(ctx.Ctx, s.dynClient, s.profile)
 	switch {
 	case s.attachedRoutesErr != nil:
@@ -653,10 +663,16 @@ func (s *gatewayTrafficScenario) recordAttachedRoutes(ctx *validators.Context) {
 	}
 }
 
+// attachedHTTPRoutesCommand is the kubectl/jq equivalent of
+// attachedHTTPRouteNames, recorded beside its result: the same parentRef
+// test, a parentRef that names no namespace defaulting to the route's own.
+func attachedHTTPRoutesCommand(profile *validators.InferenceGatewayProfile) string {
+	return fmt.Sprintf("kubectl get httproute -A -o json | jq '.items[] | select(.metadata.namespace as $ns | any(.spec.parentRefs[]?; .name == %q and (.namespace // $ns) == %q))'",
+		profile.GatewayName, profile.Namespace)
+}
+
 // attachedHTTPRouteNames lists every HTTPRoute whose parentRefs name the
-// profile's Gateway, as namespace/name, sorted. A parentRef that names no
-// namespace is in the route's own, so a same-named Gateway elsewhere does
-// not count.
+// profile's Gateway (httpRouteTargetsGateway), as namespace/name, sorted.
 func attachedHTTPRouteNames(ctx context.Context, dyn dynamic.Interface, profile *validators.InferenceGatewayProfile) ([]string, error) {
 	list, err := dyn.Resource(httpRouteGVR).Namespace("").List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -665,25 +681,36 @@ func attachedHTTPRouteNames(ctx context.Context, dyn dynamic.Interface, profile 
 	var names []string
 	for i := range list.Items {
 		route := &list.Items[i]
-		parentRefs, _, _ := unstructured.NestedSlice(route.Object, keySpec, "parentRefs")
-		for _, ref := range parentRefs {
-			refMap, ok := ref.(map[string]any)
-			if !ok {
-				continue
-			}
-			name, _, _ := unstructured.NestedString(refMap, keyName)
-			namespace, _, _ := unstructured.NestedString(refMap, keyNamespace)
-			if namespace == "" {
-				namespace = route.GetNamespace()
-			}
-			if name == profile.GatewayName && namespace == profile.Namespace {
-				names = append(names, route.GetNamespace()+"/"+route.GetName())
-				break
-			}
+		if httpRouteTargetsGateway(route, profile) {
+			names = append(names, route.GetNamespace()+"/"+route.GetName())
 		}
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// httpRouteTargetsGateway reports whether any of the route's parentRefs
+// names the profile's Gateway. A parentRef names its Gateway's namespace
+// only when it differs from the route's own, so one without a namespace is
+// resolved in the route's namespace and a same-named Gateway elsewhere does
+// not count.
+func httpRouteTargetsGateway(route *unstructured.Unstructured, profile *validators.InferenceGatewayProfile) bool {
+	parentRefs, _, _ := unstructured.NestedSlice(route.Object, keySpec, "parentRefs")
+	for _, ref := range parentRefs {
+		refMap, ok := ref.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _, _ := unstructured.NestedString(refMap, keyName)
+		namespace, _, _ := unstructured.NestedString(refMap, keyNamespace)
+		if namespace == "" {
+			namespace = route.GetNamespace()
+		}
+		if name == profile.GatewayName && namespace == profile.Namespace {
+			return true
+		}
+	}
+	return false
 }
 
 // probe runs the probe pod to completion and parses its counts. The logs are
@@ -920,12 +947,15 @@ func buildGatewayTrafficBackend(ns, name string, tolerations []corev1.Toleration
 
 // buildGatewayTrafficHTTPRoute attaches to the profile's Gateway across
 // namespaces (the parentRef names the Gateway's namespace, which the listener
-// must allow through allowedRoutes). The route carries the per-run hostname
+// must allow through allowedRoutes) and pins the parentRef to the listener
+// the probe targets through sectionName, so the Gateway cannot accept the
+// route through another listener while the probe's requests arrive on this
+// one. The route carries the per-run hostname
 // and both rules match the per-run path prefix, so a pre-existing route can
 // outrank it only on that exact hostname and path; the first rule
 // additionally matches the canary header and sends to the alternate backend,
 // the default rule splits all other requests by weight.
-func buildGatewayTrafficHTTPRoute(ns string, profile *validators.InferenceGatewayProfile, hostname, path string, primaryWeight, alternateWeight int) *unstructured.Unstructured {
+func buildGatewayTrafficHTTPRoute(ns string, profile *validators.InferenceGatewayProfile, listener, hostname, path string, primaryWeight, alternateWeight int) *unstructured.Unstructured {
 	ref := func(name string, weight int) map[string]any {
 		r := map[string]any{keyName: name, keyPort: int64(gatewayTrafficBackendPort)}
 		if weight > 0 {
@@ -938,7 +968,7 @@ func buildGatewayTrafficHTTPRoute(ns string, profile *validators.InferenceGatewa
 	}
 	route := &unstructured.Unstructured{Object: map[string]any{
 		keySpec: map[string]any{
-			"parentRefs": []any{map[string]any{keyName: profile.GatewayName, keyNamespace: profile.Namespace}},
+			"parentRefs": []any{map[string]any{keyName: profile.GatewayName, keyNamespace: profile.Namespace, keySection: listener}},
 			"hostnames":  []any{hostname},
 			"rules": []any{
 				map[string]any{
@@ -996,11 +1026,13 @@ func buildGatewayTrafficProbe(ns string, s *gatewayTrafficScenario) *corev1.Pod 
 }
 
 // httpRouteAcceptedByGateway reports whether the route's status carries a
-// parent entry for the profile's Gateway with Accepted=True and
-// ResolvedRefs=True. A parentRef that names no namespace is the route's own,
-// which is never the Gateway's here, so it is not matched.
-func httpRouteAcceptedByGateway(route *unstructured.Unstructured, profile *validators.InferenceGatewayProfile) bool {
-	for _, p := range httpRouteParentsFor(route, profile) {
+// parent entry for the profile's Gateway on the given listener with
+// Accepted=True and ResolvedRefs=True. A parentRef that names no namespace
+// is the route's own, which is never the Gateway's here, so it is not
+// matched; a parent entry for another listener, or for none, is not the
+// pinned one and does not count.
+func httpRouteAcceptedByGateway(route *unstructured.Unstructured, profile *validators.InferenceGatewayProfile, listener string) bool {
+	for _, p := range httpRouteParentsFor(route, profile, listener) {
 		if conditionStatus(p, "Accepted") == conditionStatusTrue && conditionStatus(p, "ResolvedRefs") == conditionStatusTrue {
 			return true
 		}
@@ -1009,8 +1041,10 @@ func httpRouteAcceptedByGateway(route *unstructured.Unstructured, profile *valid
 }
 
 // httpRouteParentsFor returns the status.parents entries whose parentRef is
-// the profile's Gateway.
-func httpRouteParentsFor(route *unstructured.Unstructured, profile *validators.InferenceGatewayProfile) []map[string]any {
+// the profile's Gateway; with a listener, only the entry whose parentRef
+// names it as sectionName (an empty listener returns every entry for the
+// Gateway, for the status artifact).
+func httpRouteParentsFor(route *unstructured.Unstructured, profile *validators.InferenceGatewayProfile, listener string) []map[string]any {
 	parents, _, _ := unstructured.NestedSlice(route.Object, "status", "parents")
 	var out []map[string]any
 	for _, p := range parents {
@@ -1023,9 +1057,13 @@ func httpRouteParentsFor(route *unstructured.Unstructured, profile *validators.I
 		if namespace == "" {
 			namespace = route.GetNamespace()
 		}
-		if name == profile.GatewayName && namespace == profile.Namespace {
-			out = append(out, pMap)
+		if name != profile.GatewayName || namespace != profile.Namespace {
+			continue
 		}
+		if section, _, _ := unstructured.NestedString(pMap, "parentRef", keySection); listener != "" && section != listener {
+			continue
+		}
+		out = append(out, pMap)
 	}
 	return out
 }
@@ -1048,17 +1086,18 @@ func conditionStatus(parent map[string]any, condType string) string {
 }
 
 // httpRouteParentStatusText renders the Accepted and ResolvedRefs conditions
-// the profile's Gateway reported on the route, for the evidence artifact and
-// the timeout message.
+// the profile's Gateway reported on the route, on every listener it reported
+// for, for the evidence artifact and the timeout message.
 func httpRouteParentStatusText(route *unstructured.Unstructured, profile *validators.InferenceGatewayProfile) string {
-	parents := httpRouteParentsFor(route, profile)
+	parents := httpRouteParentsFor(route, profile, "")
 	if len(parents) == 0 {
 		return fmt.Sprintf("Gateway %s/%s has not reported status on the route (no matching status.parents entry)", profile.Namespace, profile.GatewayName)
 	}
 	var sb strings.Builder
 	for _, p := range parents {
 		controller, _, _ := unstructured.NestedString(p, "controllerName")
-		fmt.Fprintf(&sb, "Parent %s/%s (controller %s):\n", profile.Namespace, profile.GatewayName, valueOrUnknown(controller))
+		section, _, _ := unstructured.NestedString(p, "parentRef", keySection)
+		fmt.Fprintf(&sb, "Parent %s/%s listener %s (controller %s):\n", profile.Namespace, profile.GatewayName, valueOrUnknown(section), valueOrUnknown(controller))
 		conds, _, _ := unstructured.NestedSlice(p, "conditions")
 		for _, c := range conds {
 			cMap, ok := c.(map[string]any)
@@ -1075,8 +1114,9 @@ func httpRouteParentStatusText(route *unstructured.Unstructured, profile *valida
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// waitForHTTPRouteAccepted watches the route until the profile's Gateway
-// reports it Accepted with ResolvedRefs, or the timeout elapses. A watch
+// waitForHTTPRouteAccepted watches the test route in ns until the profile's
+// Gateway reports it Accepted with ResolvedRefs on the pinned listener, or
+// the timeout elapses. A watch
 // channel the apiserver closes is followed by a re-Get before the watch is
 // re-established, so a closed channel is never a verdict; a transient read or
 // watch error is retried after defaults.PodPollInterval within the timeout;
@@ -1085,11 +1125,12 @@ func httpRouteParentStatusText(route *unstructured.Unstructured, profile *valida
 // record the conditions the Gateway did report (NotAllowedByListeners when
 // the listener's allowedRoutes excludes the test namespace, BackendNotFound
 // when the Services are not visible yet).
-func waitForHTTPRouteAccepted(ctx context.Context, dyn dynamic.Interface, ns, name string,
-	profile *validators.InferenceGatewayProfile, timeout time.Duration) (*unstructured.Unstructured, error) {
+func waitForHTTPRouteAccepted(ctx context.Context, dyn dynamic.Interface, ns string,
+	profile *validators.InferenceGatewayProfile, listener string, timeout time.Duration) (*unstructured.Unstructured, error) {
 
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	const name = gatewayTrafficRouteName
 	what := fmt.Sprintf("HTTPRoute %s/%s", ns, name)
 	var last *unstructured.Unstructured
 	retryAfterTransient := func() bool {
@@ -1112,7 +1153,7 @@ func waitForHTTPRouteAccepted(ctx context.Context, dyn dynamic.Interface, ns, na
 			break
 		}
 		last = route
-		if httpRouteAcceptedByGateway(route, profile) {
+		if httpRouteAcceptedByGateway(route, profile, listener) {
 			return route, nil
 		}
 		watcher, err := dyn.Resource(httpRouteGVR).Namespace(ns).Watch(waitCtx, metav1.ListOptions{
@@ -1127,7 +1168,7 @@ func waitForHTTPRouteAccepted(ctx context.Context, dyn dynamic.Interface, ns, na
 			}
 			break
 		}
-		route, done, err := consumeHTTPRouteEvents(waitCtx, watcher, name, profile)
+		route, done, err := consumeHTTPRouteEvents(waitCtx, watcher, profile, listener)
 		watcher.Stop()
 		if route != nil {
 			last = route
@@ -1146,23 +1187,24 @@ func waitForHTTPRouteAccepted(ctx context.Context, dyn dynamic.Interface, ns, na
 		}
 	}
 	if ctx.Err() != nil {
-		return last, errors.Wrap(errors.ErrCodeTimeout, "waiting for "+what+" canceled", ctx.Err())
+		return last, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "waiting for "+what+" canceled")
 	}
 	detail := "route not observed"
 	if last != nil {
 		detail = httpRouteParentStatusText(last, profile)
 	}
 	return last, errors.New(errors.ErrCodeTimeout, fmt.Sprintf(
-		"%s was not Accepted with ResolvedRefs by Gateway %s/%s within %s; %s. "+
-			"The Gateway's HTTP listener must allow routes from other namespaces (allowedRoutes.namespaces) and resolve Services in the test namespace",
-		what, profile.Namespace, profile.GatewayName, timeout, detail))
+		"%s was not Accepted with ResolvedRefs by Gateway %s/%s on listener %s within %s; %s. "+
+			"That HTTP listener must allow routes from other namespaces (allowedRoutes.namespaces) and resolve Services in the test namespace",
+		what, profile.Namespace, profile.GatewayName, valueOrUnknown(listener), timeout, detail))
 }
 
-// consumeHTTPRouteEvents reads watch events until the route is accepted, the
-// context ends, or the channel closes (done=false, err=nil). Events for other
-// routes are skipped: the fake watch used in tests ignores field selectors.
-func consumeHTTPRouteEvents(ctx context.Context, watcher watch.Interface, name string,
-	profile *validators.InferenceGatewayProfile) (*unstructured.Unstructured, bool, error) {
+// consumeHTTPRouteEvents reads watch events until the test route is
+// accepted, the context ends, or the channel closes (done=false, err=nil).
+// Events for other routes are skipped: the fake watch used in tests ignores
+// field selectors.
+func consumeHTTPRouteEvents(ctx context.Context, watcher watch.Interface,
+	profile *validators.InferenceGatewayProfile, listener string) (*unstructured.Unstructured, bool, error) {
 
 	var last *unstructured.Unstructured
 	for {
@@ -1174,15 +1216,15 @@ func consumeHTTPRouteEvents(ctx context.Context, watcher watch.Interface, name s
 				return last, false, nil
 			}
 			route, isRoute := event.Object.(*unstructured.Unstructured)
-			if !isRoute || route.GetName() != name {
+			if !isRoute || route.GetName() != gatewayTrafficRouteName {
 				continue
 			}
 			last = route
 			if event.Type == watch.Deleted {
 				return route, true, errors.New(errors.ErrCodeNotFound, fmt.Sprintf(
-					"HTTPRoute %s/%s was deleted while waiting for the Gateway to accept it", route.GetNamespace(), name))
+					"HTTPRoute %s/%s was deleted while waiting for the Gateway to accept it", route.GetNamespace(), gatewayTrafficRouteName))
 			}
-			if httpRouteAcceptedByGateway(route, profile) {
+			if httpRouteAcceptedByGateway(route, profile, listener) {
 				return route, true, nil
 			}
 		}
