@@ -3761,8 +3761,8 @@ const (
 )
 
 var (
-	gpuOperatorComponentNames = []string{gpuOperatorComponentName, gpuOperatorOCPComponentName}
-	draComponentNames         = []string{draComponentName, "nvidia-dra-driver-gpu-ocp"}
+	gpuOperatorComponentNames = config.GPUOperatorDriverOwnership.ComponentNames
+	draComponentNames         = config.DRADriverOwnership.ComponentNames
 )
 
 func isDRAComponent(name string) bool {
