@@ -198,6 +198,7 @@ func TestKnownBenchmarkProfiles(t *testing.T) {
 		"h100/eks",
 		"h100/gke",
 		"h200/eks",
+		"vr200/nvke",
 		"vr200/rke2",
 	}
 	if got := knownBenchmarkProfiles(); !reflect.DeepEqual(got, want) {

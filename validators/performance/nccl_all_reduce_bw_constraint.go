@@ -301,16 +301,21 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		// rdmaSharedDevicePlugin's nvidia.com/mlnxnics shared HCAs —
 		// see testdata/gb200/oke/runtime-net.yaml.
 		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
-		// NVKE GB200: IB east-west over per-rail SR-IOV VFs attached through
-		// SriovIBNetworks — see testdata/gb200/nvke/runtime-net.yaml.
-		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200},
+		// NVKE carries both NVL72 generations with different link layers:
+		// GB200 is IB east-west over per-rail SR-IOV VFs attached through
+		// SriovIBNetworks, VR200 is RoCE v2 over the same SR-IOV shape with
+		// SriovNetworks, since every mlx5 port on a VR tray reports
+		// link_layer Ethernet — see testdata/{gb200,vr200}/nvke/runtime-net.yaml.
+		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorVR200},
 	},
 	variantNVLS: {
 		// GB300 EKS shares GB200's NVL72 MNNVL/IMEX topology — see
 		// testdata/gb300/eks/runtime-nvls.yaml.
-		recipe.CriteriaServiceEKS:  {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
-		recipe.CriteriaServiceOKE:  {recipe.CriteriaAcceleratorGB200},
-		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200},
+		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
+		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
+		// NVKE carries both NVL72 generations, each with its own runtime —
+		// see testdata/{gb200,vr200}/nvke/runtime-nvls.yaml.
+		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorVR200},
 		recipe.CriteriaServiceGKE:  {recipe.CriteriaAcceleratorGB200},
 		// VR200 NVL72 on bare-metal RKE2: MNNVL across the IMEX domain, same
 		// shape as GB200 but with its own runtime (NGC pytorch image, distinct

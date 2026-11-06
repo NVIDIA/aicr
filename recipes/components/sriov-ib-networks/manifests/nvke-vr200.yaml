@@ -1,0 +1,671 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# SR-IOV RoCE rails for VR200 NVKE: per rail one nv-ipam IPPool, one
+# SriovNetworkNodePolicy and one SriovNetwork. Modelled on nvke-gb200.yaml in
+# this directory, which is the only east-west shape NVKE can carry -- SR-IOV
+# on the host's inbox mlx5_core. vr200-rke2's DraNet is not an option here: it
+# relies on host DOCA-OFED, which docs/integrator/nvke-gb200-setup.md forbids
+# on NVKE nodes because the DOCA container unloads mlx5_core and takes the
+# node's primary address with it.
+#
+# DEPLOYED AND ATTACHED, BUT NO TRAFFIC HAS CROSSED THEM. Exercised on the
+# reference cluster: the SR-IOV operator created one VF per port on both
+# workers and advertised all eight as allocatable, nv-ipam assigned an address
+# per rail from the pools below, multus attached net1..net8 to a pod, and every
+# VF came up with its own RDMA device and a RoCE v2 GID. What has NOT been
+# shown is a packet between nodes -- the spare ConnectX-9 ports have no path
+# between workers (address one on each and ping: ARP FAILED), because the
+# BlueField DPU bridges only the port carrying the node address. Bridging the
+# rest is DPU-side work outside the tenant cluster.
+#
+# Differences from the GB200 file, all forced by the hardware:
+#
+#   SriovNetwork, not SriovIBNetwork. Measured on both workers, all twelve
+#   mlx5 ports report link_layer Ethernet with RoCE v2 GIDs and not one
+#   reports InfiniBand, so linkType IB and the SriovIBNetwork kind do not
+#   apply.
+#
+#   numVfs 1, not 16. The ConnectX-9 firmware on these trays reports
+#   sriov_totalvfs 1 per port; 16 is the CX-7 ceiling on GB200 trays. This is
+#   a firmware limit, not a tuning choice: eight ports give eight VFs in
+#   total, one per rail, so a second pod per node cannot take a rail.
+#
+#   No ib_ipoib, and no rdma-modules dependency. GB200's VF netdevs are IPoIB
+#   children; RoCE VF netdevs are plain Ethernet.
+#
+#   NO VF attributes at all -- no linkState, no trust, no spoofChk. GB200 sets
+#   linkState: enable; it cannot be used here. Measured: the PF driver refuses
+#   every one of them, and sriov-cni fails the attachment with "operation not
+#   permitted" on whichever is set first (spoofchk, then trust, then link
+#   state). The PF is owned by the BlueField DPU, so the host cannot
+#   administer VF attributes even though it can create the VFs. With all three
+#   removed the attachment succeeds.
+#
+# Shared with the GB200 file, and load-bearing:
+#
+#   The IPPool subnets sit in 10.255.0.0/16, NOT the k8s-launch-kit default
+#   192.168.<4n>.0/22. NVKE's OVN-Kubernetes pod network is 192.168.0.0/16,
+#   and a pool inside it installs a more specific route than the pod network's
+#   in every attached pod, sending other nodes' pod traffic out the VF.
+#
+#   Node selection is rdma.available, not pci-15b3.present: NVKE control
+#   planes carry a BlueField without any ConnectX-9, and a selected node with
+#   no root devices gets a device-plugin pod that waits forever.
+#
+#   Pools and node policies live in the Network Operator namespace; the
+#   networks render their NetworkAttachmentDefinitions into `default`, where
+#   workloads reference them as default/roce-network-rail-<n>.
+#
+# This file lives under sriov-ib-networks because that component is the
+# SR-IOV network bundle -- its health check asserts the IPPool CRD is
+# Established and every SriovNetworkNodeState syncs, neither of which is
+# link-type specific. The directory name predates RoCE support.
+#
+# Spelled out per rail: the manifest renderer has no range/list functions.
+{{- $sriov := index .Values "sriov-ib-networks" }}
+{{- if ne (toString (index $sriov "enabled")) "false" }}
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-0
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.0.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.0.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: roce-sriov-rail-0
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  # 9000 is the usual RoCE jumbo frame. Unverified on this fabric: nothing has
+  # carried a packet across these rails, and an MTU above what the switch
+  # accepts fails as silent packet loss rather than a config error.
+  mtu: 9000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "0001:03:00.0"
+  linkType: eth
+  isRdma: true
+  # sriov_totalvfs on these ConnectX-9 ports. Raising it is rejected by the
+  # firmware, not by the operator.
+  numVfs: 1
+  priority: 90
+  resourceName: sriov_resource_rail_0
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetwork
+metadata:
+  name: roce-network-rail-0
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-0"
+    }
+  resourceName: sriov_resource_rail_0
+  networkNamespace: default
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-1
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.4.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.4.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: roce-sriov-rail-1
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  # 9000 is the usual RoCE jumbo frame. Unverified on this fabric: nothing has
+  # carried a packet across these rails, and an MTU above what the switch
+  # accepts fails as silent packet loss rather than a config error.
+  mtu: 9000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "0003:01:00.0"
+  linkType: eth
+  isRdma: true
+  # sriov_totalvfs on these ConnectX-9 ports. Raising it is rejected by the
+  # firmware, not by the operator.
+  numVfs: 1
+  priority: 90
+  resourceName: sriov_resource_rail_1
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetwork
+metadata:
+  name: roce-network-rail-1
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-1"
+    }
+  resourceName: sriov_resource_rail_1
+  networkNamespace: default
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-2
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.8.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.8.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: roce-sriov-rail-2
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  # 9000 is the usual RoCE jumbo frame. Unverified on this fabric: nothing has
+  # carried a packet across these rails, and an MTU above what the switch
+  # accepts fails as silent packet loss rather than a config error.
+  mtu: 9000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "0004:03:00.0"
+  linkType: eth
+  isRdma: true
+  # sriov_totalvfs on these ConnectX-9 ports. Raising it is rejected by the
+  # firmware, not by the operator.
+  numVfs: 1
+  priority: 90
+  resourceName: sriov_resource_rail_2
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetwork
+metadata:
+  name: roce-network-rail-2
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-2"
+    }
+  resourceName: sriov_resource_rail_2
+  networkNamespace: default
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-3
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.12.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.12.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: roce-sriov-rail-3
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  # 9000 is the usual RoCE jumbo frame. Unverified on this fabric: nothing has
+  # carried a packet across these rails, and an MTU above what the switch
+  # accepts fails as silent packet loss rather than a config error.
+  mtu: 9000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "0006:01:00.0"
+  linkType: eth
+  isRdma: true
+  # sriov_totalvfs on these ConnectX-9 ports. Raising it is rejected by the
+  # firmware, not by the operator.
+  numVfs: 1
+  priority: 90
+  resourceName: sriov_resource_rail_3
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetwork
+metadata:
+  name: roce-network-rail-3
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-3"
+    }
+  resourceName: sriov_resource_rail_3
+  networkNamespace: default
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-4
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.16.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.16.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: roce-sriov-rail-4
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  # 9000 is the usual RoCE jumbo frame. Unverified on this fabric: nothing has
+  # carried a packet across these rails, and an MTU above what the switch
+  # accepts fails as silent packet loss rather than a config error.
+  mtu: 9000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "0009:03:00.0"
+  linkType: eth
+  isRdma: true
+  # sriov_totalvfs on these ConnectX-9 ports. Raising it is rejected by the
+  # firmware, not by the operator.
+  numVfs: 1
+  priority: 90
+  resourceName: sriov_resource_rail_4
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetwork
+metadata:
+  name: roce-network-rail-4
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-4"
+    }
+  resourceName: sriov_resource_rail_4
+  networkNamespace: default
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-5
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.20.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.20.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: roce-sriov-rail-5
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  # 9000 is the usual RoCE jumbo frame. Unverified on this fabric: nothing has
+  # carried a packet across these rails, and an MTU above what the switch
+  # accepts fails as silent packet loss rather than a config error.
+  mtu: 9000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "000b:01:00.0"
+  linkType: eth
+  isRdma: true
+  # sriov_totalvfs on these ConnectX-9 ports. Raising it is rejected by the
+  # firmware, not by the operator.
+  numVfs: 1
+  priority: 90
+  resourceName: sriov_resource_rail_5
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetwork
+metadata:
+  name: roce-network-rail-5
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-5"
+    }
+  resourceName: sriov_resource_rail_5
+  networkNamespace: default
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-6
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.24.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.24.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: roce-sriov-rail-6
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  # 9000 is the usual RoCE jumbo frame. Unverified on this fabric: nothing has
+  # carried a packet across these rails, and an MTU above what the switch
+  # accepts fails as silent packet loss rather than a config error.
+  mtu: 9000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "000c:03:00.0"
+  linkType: eth
+  isRdma: true
+  # sriov_totalvfs on these ConnectX-9 ports. Raising it is rejected by the
+  # firmware, not by the operator.
+  numVfs: 1
+  priority: 90
+  resourceName: sriov_resource_rail_6
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetwork
+metadata:
+  name: roce-network-rail-6
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-6"
+    }
+  resourceName: sriov_resource_rail_6
+  networkNamespace: default
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: nv-ipam-pool-rail-7
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  subnet: 10.255.28.0/22
+  perNodeBlockSize: 10
+  gateway: 10.255.28.1
+  nodeSelector:
+    nodeSelectorTerms:
+      - matchExpressions:
+          - key: feature.node.kubernetes.io/rdma.available
+            operator: In
+            values:
+              - "true"
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: roce-sriov-rail-7
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  deviceType: netdevice
+  # 9000 is the usual RoCE jumbo frame. Unverified on this fabric: nothing has
+  # carried a packet across these rails, and an MTU above what the switch
+  # accepts fails as silent packet loss rather than a config error.
+  mtu: 9000
+  nodeSelector:
+    feature.node.kubernetes.io/rdma.available: "true"
+  nicSelector:
+    vendor: "15b3"
+    rootDevices:
+      - "000e:01:00.0"
+  linkType: eth
+  isRdma: true
+  # sriov_totalvfs on these ConnectX-9 ports. Raising it is rejected by the
+  # firmware, not by the operator.
+  numVfs: 1
+  priority: 90
+  resourceName: sriov_resource_rail_7
+---
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetwork
+metadata:
+  name: roce-network-rail-7
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  ipam: |
+    {
+      "type": "nv-ipam",
+      "poolName": "nv-ipam-pool-rail-7"
+    }
+  resourceName: sriov_resource_rail_7
+  networkNamespace: default
+{{- end }}
