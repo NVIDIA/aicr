@@ -1053,7 +1053,9 @@ on top of the per-check rule every run applies:
   demonstrated)`. Only a cluster with no cluster autoscaler at all (fixed-size
   node pools, no Karpenter) may declare the requirement not applicable through
   a `spec.validate.evidence.cncf.notApplicable` justification, which renders
-  `NOT APPLICABLE` and exits 0; a platform whose autoscaler is present but not
+  `NOT APPLICABLE`; the run then exits 0 unless a check itself failed (on EKS
+  the `cluster-autoscaling` check fails when no autoscaler is confirmed, and
+  the default `--fail-on-error` still applies). A platform whose autoscaler is present but not
   behaviorally demonstrated keeps `OBSERVED`, and the submission documents the
   autoscaler through the vendor-config attestation instead (#3605). Where a requirement has
   alternative proofs (`secure_accelerator_access`: `secure-accelerator-access`
