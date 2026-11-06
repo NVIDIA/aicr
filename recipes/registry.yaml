@@ -400,8 +400,8 @@ components:
       # (#3101). v0.20.0 refuses to start on a runtime-required taint key with a
       # DNS prefix or over 53 characters, and stops releasing cordons it did not
       # place (#3207). v0.21.0 drains kube-system pods like any other
-      # namespace, under their PodDisruptionBudgets, rather than leaving them
-      # to be killed by the reboot (#3694). Every boundary here carries a
+      # namespace, honoring any PodDisruptionBudget that covers them, rather
+      # than leaving them to be killed by the reboot (#3694). Every boundary here carries a
       # transition record. The legacy skyhook.nvidia.com group, taint key, and
       # metrics remain served through v0.21.x and are removed in v0.22.0, which
       # is not reachable until the remaining skyhook.nvidia.com references in
