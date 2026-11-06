@@ -84,7 +84,7 @@ var evidencePages = []evidencePage{
 	{
 		RequirementID: "cluster_autoscaling",
 		Title:         "Cluster Autoscaling",
-		Description:   "Records the cluster's GPU autoscaling arrangement: a Karpenter scale-up when Karpenter is present, otherwise the managed autoscaler, GPU pool membership, autoscaler status and events observed on EKS, AKS or GKE. The platform observations drive no scale event; the claim rests on provider documentation or a declared not-applicable justification.",
+		Description:   "Records the cluster's GPU autoscaling arrangement: a Karpenter scale-up when Karpenter is present, otherwise the managed autoscaler, GPU pool membership, autoscaler status and events observed on EKS, AKS or GKE. The platform observations drive no scale event and the Karpenter path does not observe the scale-down, so a passing check is marked observation-only and the requirement renders OBSERVED, not PASSED; the claim rests on provider documentation or a declared not-applicable justification.",
 		File:          "cluster-autoscaling.md",
 		Checks:        []string{checkClusterAutoscaling},
 	},

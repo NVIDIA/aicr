@@ -151,6 +151,158 @@ func TestAggregateReportRequirementStatus(t *testing.T) {
 	}
 }
 
+// observationOnly marks a passed result observation-only, the marker a check
+// publishes through validators.ObservationOnlyExtra.
+var observationOnly = map[string]string{"observationOnly": "true"}
+
+// TestAggregateReportObservationOnly pins #3681: a passed result carrying
+// the observation-only marker renders its requirement OBSERVED, which is
+// not PASSED. A MUST so observed is not established (the verdict names it)
+// unless notApplicable covers it; a SHOULD so observed never fails the run;
+// a behavioral check's pass is untouched.
+func TestAggregateReportObservationOnly(t *testing.T) {
+	observed := &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: observationOnly}
+	tests := []struct {
+		name          string
+		tests         []ctrf.TestResult
+		notApplicable map[string]string
+		requirement   string
+		wantStatus    RequirementStatus
+		wantReason    string
+		wantProof     []string
+		wantPassed    bool
+		wantObserved  bool // CheckResult.ObservationOnly of the requirement's first check
+		wantInVerdict []string
+	}{
+		{
+			name:          "an observation-only pass on a MUST is observed, not passed, and fails the run",
+			tests:         withResult(allMustsPassed, "cluster-autoscaling", observed),
+			requirement:   "cluster_autoscaling",
+			wantStatus:    StatusObserved,
+			wantReason:    "cluster-autoscaling observed, not demonstrated",
+			wantObserved:  true,
+			wantInVerdict: []string{"1 applicable MUST", "cluster_autoscaling observed (cluster-autoscaling observed, not demonstrated)"},
+		},
+		{
+			name:          "notApplicable covers the observed MUST",
+			tests:         withResult(allMustsPassed, "cluster-autoscaling", observed),
+			notApplicable: map[string]string{"cluster_autoscaling": "fixed-size cluster"},
+			requirement:   "cluster_autoscaling",
+			wantStatus:    StatusNotApplicable,
+			wantReason:    "fixed-size cluster",
+			wantPassed:    true,
+			wantObserved:  true,
+		},
+		{
+			name:        "a behavioral pass without the marker is unaffected",
+			tests:       allMustsPassed,
+			requirement: "cluster_autoscaling",
+			wantStatus:  StatusPassed,
+			wantProof:   []string{"cluster-autoscaling"},
+			wantPassed:  true,
+		},
+		{
+			name:        "the marker set to false is no marker",
+			tests:       withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: map[string]string{"observationOnly": "false"}}),
+			requirement: "cluster_autoscaling",
+			wantStatus:  StatusPassed,
+			wantProof:   []string{"cluster-autoscaling"},
+			wantPassed:  true,
+		},
+		{
+			name: "the same check reported as a demonstration and as an observation is observed",
+			tests: append(slices.Clone(allMustsPassed),
+				ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: observationOnly}),
+			requirement:  "cluster_autoscaling",
+			wantStatus:   StatusObserved,
+			wantReason:   "cluster-autoscaling observed, not demonstrated",
+			wantObserved: true,
+		},
+		{
+			name:        "the marker on a failed result changes nothing: failed wins",
+			tests:       withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "failed", Message: "no node group", Extra: observationOnly}),
+			requirement: "cluster_autoscaling",
+			wantStatus:  StatusFailed,
+			wantReason:  "cluster-autoscaling failed",
+		},
+		{
+			name:        "the marker on a skipped result changes nothing: not tested",
+			tests:       withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "skipped", Extra: map[string]string{"observationOnly": "true", "skipReason": "unrecognized-platform"}}),
+			requirement: "cluster_autoscaling",
+			wantStatus:  StatusNotTested,
+			wantReason:  "cluster-autoscaling skipped: unrecognized-platform",
+		},
+		{
+			name:         "an observed alternative does not establish a requirement whose primary was skipped",
+			tests:        withResult(withResult(allMustsPassed, "secure-accelerator-access", &ctrf.TestResult{Name: "secure-accelerator-access", Status: "skipped", Extra: map[string]string{"skipReason": "slurm-managed-gpus"}}), "slinky-slurm-gpu-access", &ctrf.TestResult{Name: "slinky-slurm-gpu-access", Status: "passed", Extra: observationOnly}),
+			requirement:  "secure_accelerator_access",
+			wantStatus:   StatusObserved,
+			wantReason:   "slinky-slurm-gpu-access observed, not demonstrated; secure-accelerator-access skipped: slurm-managed-gpus",
+			wantObserved: false,
+		},
+		{
+			name:        "a demonstrated alternative establishes the requirement beside an observed one",
+			tests:       append(slices.Clone(allMustsPassed), ctrf.TestResult{Name: "slinky-slurm-gpu-access", Status: "passed", Extra: observationOnly}),
+			requirement: "secure_accelerator_access",
+			wantStatus:  StatusPassed,
+			wantProof:   []string{"secure-accelerator-access"},
+			wantPassed:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agg, err := AggregateReport(Version137, reportOf(tt.tests...), tt.notApplicable)
+			if err != nil {
+				t.Fatalf("AggregateReport: %v", err)
+			}
+			r := agg.Requirement(tt.requirement)
+			if r == nil {
+				t.Fatalf("requirement %q missing from aggregate", tt.requirement)
+			}
+			if r.Status != tt.wantStatus {
+				t.Errorf("Status = %q, want %q", r.Status, tt.wantStatus)
+			}
+			if r.Reason != tt.wantReason {
+				t.Errorf("Reason = %q, want %q", r.Reason, tt.wantReason)
+			}
+			if !slices.Equal(r.Proof, tt.wantProof) {
+				t.Errorf("Proof = %v, want %v", r.Proof, tt.wantProof)
+			}
+			if r.Checks[0].ObservationOnly != tt.wantObserved {
+				t.Errorf("Checks[0].ObservationOnly = %v, want %v", r.Checks[0].ObservationOnly, tt.wantObserved)
+			}
+			if agg.Passed() != tt.wantPassed {
+				t.Errorf("Passed() = %v, want %v (incomplete MUSTs: %v)", agg.Passed(), tt.wantPassed, incompleteIDs(agg))
+			}
+			verdict := agg.Verdict()
+			if tt.wantPassed != (verdict == nil) {
+				t.Errorf("Verdict() = %v, want nil: %v", verdict, tt.wantPassed)
+			}
+			for _, want := range tt.wantInVerdict {
+				if verdict == nil || !strings.Contains(verdict.Error(), want) {
+					t.Errorf("Verdict() = %v does not mention %q", verdict, want)
+				}
+			}
+		})
+	}
+
+	t.Run("an observed SHOULD renders observed and never fails the run", func(t *testing.T) {
+		// dra_support is a MUST at v1.35; the SHOULDs of later checklists
+		// have no AICR check, so an observed SHOULD is exercised through a
+		// synthetic aggregate rather than a report.
+		agg := &Aggregate{Version: LatestVersion, Requirements: []RequirementResult{
+			{ID: "gang_scheduling", Level: LevelMust, Status: StatusPassed},
+			{ID: "workload_sandboxing", Level: LevelShould, Status: StatusObserved, Reason: "sandbox observed, not demonstrated"},
+		}}
+		if !agg.Passed() || agg.Verdict() != nil || len(agg.IncompleteMusts()) != 0 {
+			t.Errorf("an observed SHOULD failed the run: Passed=%v Verdict=%v incomplete=%v", agg.Passed(), agg.Verdict(), incompleteIDs(agg))
+		}
+		if err := agg.Outcome(reportOf(ctrf.TestResult{Name: "gang-scheduling", Status: "passed"}), true); err != nil {
+			t.Errorf("Outcome() = %v, want nil", err)
+		}
+	})
+}
+
 func incompleteIDs(agg *Aggregate) []string {
 	incomplete := agg.IncompleteMusts()
 	ids := make([]string, 0, len(incomplete))
@@ -472,11 +624,13 @@ func TestAggregateVerdict(t *testing.T) {
 		{name: "incomplete MUSTs", agg: &Aggregate{Version: LatestVersion, Requirements: []RequirementResult{
 			{ID: "gang_scheduling", Level: LevelMust, Status: StatusFailed, Reason: "gang-scheduling failed"},
 			{ID: "pod_autoscaling", Level: LevelMust, Status: StatusNotTested, Reason: "pod-autoscaling not run"},
+			{ID: "cluster_autoscaling", Level: LevelMust, Status: StatusObserved, Reason: "cluster-autoscaling observed, not demonstrated"},
 			{ID: "ai_inference", Level: LevelMust, Status: StatusPassed},
 			{ID: "workload_sandboxing", Level: LevelShould, Status: StatusFailed, Reason: "sandbox failed"},
 		}},
-			wantErr: []string{"2 applicable MUST", "gang_scheduling failed (gang-scheduling failed)", "pod_autoscaling not tested (pod-autoscaling not run)"},
-			absent:  []string{"ai_inference", "workload_sandboxing"}},
+			wantErr: []string{"3 applicable MUST", "gang_scheduling failed (gang-scheduling failed)", "pod_autoscaling not tested (pod-autoscaling not run)",
+				"cluster_autoscaling observed (cluster-autoscaling observed, not demonstrated)"},
+			absent: []string{"ai_inference", "workload_sandboxing"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
