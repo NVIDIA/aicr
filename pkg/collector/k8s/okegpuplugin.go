@@ -36,7 +36,7 @@ const (
 
 	okeGPUPluginKeyStrategy = "device-list-strategy"
 
-	okeGPUPluginStrategyFlag = "--device-list-strategy"
+	okeGPUPluginStrategyFlag = "device-list-strategy"
 	okeGPUPluginStrategyEnv  = "DEVICE_LIST_STRATEGY"
 
 	// okeGPUPluginDefaultStrategy is the device plugin's own default when
@@ -82,16 +82,22 @@ func (k *Collector) collectOKEGPUPlugin(ctx context.Context) measurement.Subtype
 }
 
 // deviceListStrategy returns the strategy the device plugin container runs
-// with. The flag, in either --flag=value or --flag value form, wins over the
-// env var, as in the plugin's own flag parsing.
+// with. The flag, with one or two leading dashes and its value after "=" or
+// as the next argument, wins over the env var, as in the plugin's own flag
+// parsing.
 func deviceListStrategy(containers []corev1.Container) string {
 	for _, c := range containers {
 		argv := append(append([]string{}, c.Command...), c.Args...)
 		for i, arg := range argv {
-			if v, ok := strings.CutPrefix(arg, okeGPUPluginStrategyFlag+"="); ok && v != "" {
+			name, ok := strings.CutPrefix(arg, "-")
+			if !ok {
+				continue
+			}
+			name = strings.TrimPrefix(name, "-")
+			if v, ok := strings.CutPrefix(name, okeGPUPluginStrategyFlag+"="); ok && v != "" {
 				return v
 			}
-			if arg == okeGPUPluginStrategyFlag && i+1 < len(argv) && argv[i+1] != "" {
+			if name == okeGPUPluginStrategyFlag && i+1 < len(argv) && argv[i+1] != "" {
 				return argv[i+1]
 			}
 		}

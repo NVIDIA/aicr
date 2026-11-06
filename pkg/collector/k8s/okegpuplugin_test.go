@@ -74,6 +74,22 @@ func TestCollectOKEGPUPlugin_Strategy(t *testing.T) {
 			want: "volume-mounts",
 		},
 		{
+			name: "single-dash flag",
+			objects: []runtime.Object{gpuPluginDS(corev1.Container{
+				Name: "plugin",
+				Args: []string{"-device-list-strategy=volume-mounts"},
+			})},
+			want: "volume-mounts",
+		},
+		{
+			name: "single-dash flag value as the next arg",
+			objects: []runtime.Object{gpuPluginDS(corev1.Container{
+				Name: "plugin",
+				Args: []string{"-device-list-strategy", "volume-mounts"},
+			})},
+			want: "volume-mounts",
+		},
+		{
 			name: "env var when no flag",
 			objects: []runtime.Object{gpuPluginDS(corev1.Container{
 				Name: "plugin",

@@ -19,9 +19,9 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/collector/file"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
@@ -49,9 +49,10 @@ func (c *Collector) collectKModParam(ctx context.Context) (*measurement.Subtype,
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "kmod-param collection cancelled", err)
 	}
 
+	parser := file.NewParser()
 	readings := make(map[string]measurement.Reading, len(kmodParamPaths))
 	for _, path := range kmodParamPaths {
-		data, err := readHostFile(ctx, path, os.ReadFile)
+		lines, err := readHostFile(ctx, path, parser.GetLines)
 		if err != nil {
 			if stderrors.Is(err, fs.ErrNotExist) {
 				continue
@@ -62,7 +63,7 @@ func (c *Collector) collectKModParam(ctx context.Context) (*measurement.Subtype,
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to read module parameter %s", path), err)
 		}
-		readings[path] = measurement.Str(strings.TrimSpace(string(data)))
+		readings[path] = measurement.Str(strings.Join(lines, "\n"))
 	}
 
 	return &measurement.Subtype{Name: SubtypeKModParam, Data: readings}, nil

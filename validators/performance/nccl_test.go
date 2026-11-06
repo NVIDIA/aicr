@@ -1080,6 +1080,12 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		},
 		{
+			name:    "NET OKE GB200 and GB300",
+			variant: variantNET,
+			service: recipe.CriteriaServiceOKE,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
+		},
+		{
 			name:    "NVLS OKE GB200 and GB300",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceOKE,
