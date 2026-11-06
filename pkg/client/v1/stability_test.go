@@ -497,10 +497,12 @@ func TestStability_HealthAndEvidence(t *testing.T) {
 	}
 
 	_ = aicr.CNCFCollectOptions{
-		Dir:        "",
-		Features:   []string(nil),
-		Kubeconfig: "",
-		NoCluster:  false,
+		Dir:           "",
+		Features:      []string(nil),
+		Kubeconfig:    "",
+		Namespace:     "",
+		NotApplicable: map[string]string(nil),
+		NoCluster:     false,
 	}
 }
 

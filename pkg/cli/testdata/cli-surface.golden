@@ -255,7 +255,6 @@ flag    aicr validate  --emit-attestation  type=string default= required=false h
 flag    aicr validate  --evidence-dir  type=string default= required=false hidden=false env=
 flag    aicr validate  --fail-fast  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --fail-on-error  type=bool default=true required=false hidden=false env=
-flag    aicr validate  --feature,-f  type=string default= required=false hidden=false env=
 flag    aicr validate  --fulcio-url  type=string default= required=false hidden=false env=
 flag    aicr validate  --full  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --gke-gpu-pools  type=string default= required=false hidden=false env=AICR_GKE_GPU_POOLS_PATH

@@ -434,13 +434,15 @@ constrained:
       reading Passed() and IncompleteMusts() on the value
       RenderCNCFEvidenceWithResult returned is reading the facade's own
       declared return type, not reaching around it -- the same pattern as
-      pkg/upgrade below. The CLI logs the aggregate after rendering; the
-      level-scoped rule (every applicable MUST passed, SHOULDs excluded) lives
-      in the aggregate so the SDK and a future submission exit code cannot
-      disagree about it.
+      pkg/upgrade below. The CLI logs the aggregate after rendering and takes
+      the submission run's exit status from Outcome(), which applies the
+      per-check rule to the merged report and adds Verdict() on top; both
+      live in the aggregate so the SDK (Client.CollectCNCFEvidence) and the
+      CLI cannot disagree about them.
     permanent: true
     symbols:
       Aggregate.IncompleteMusts: behavioral
+      Aggregate.Outcome: behavioral
       Aggregate.Passed: behavioral
   pkg/validator:
     reason: >-
@@ -457,10 +459,14 @@ constrained:
     reason: >-
       IsFailingStatus classifies a CTRF (ctrf.io) test-report status string
       for the CLI's --output ctrf report writer -- output-format-specific
-      rendering, not validation logic.
+      rendering, not validation logic. StatusSkipped is the CTRF status the
+      CNCF renderer drops before writing; the CLI reads it off the aggregate
+      RenderCNCFEvidenceWithResult returned only to decide whether to log
+      "conformance evidence written" -- a log-line decision, not a verdict.
     permanent: true
     symbols:
       IsFailingStatus: behavioral
+      StatusSkipped: const
   pkg/validator/labels:
     reason: >-
       RunID is a Kubernetes label key used only to compose a
