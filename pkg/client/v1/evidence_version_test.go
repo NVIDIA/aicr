@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -77,7 +78,7 @@ func TestRenderCNCFEvidenceWithOptions(t *testing.T) {
 		dir := t.TempDir()
 		err := (&Client{}).RenderCNCFEvidenceWithOptions(context.Background(), report, dir,
 			RenderCNCFEvidenceOptions{ConformanceVersion: "v1.38"})
-		requireCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
 		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 			t.Errorf("evidence dir not left empty: %v", entries)
 		}
@@ -187,7 +188,7 @@ func TestRenderCNCFEvidenceWithResult(t *testing.T) {
 		agg, err := (&Client{}).RenderCNCFEvidenceWithResult(context.Background(), report, dir, RenderCNCFEvidenceOptions{
 			NotApplicable: map[string]string{"gang_scheduling": "we do not gang"},
 		})
-		requireCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
 		if agg != nil {
 			t.Errorf("aggregate = %+v, want nil on error", agg)
 		}
@@ -211,11 +212,11 @@ func TestRenderCNCFEvidenceWithResult(t *testing.T) {
 			"unsupported version": {ConformanceVersion: "v1.38"},
 		} {
 			t.Run(name, func(t *testing.T) {
-				requireCode(t, c.ValidateCNCFEvidenceOptions(opts), aicrerrors.ErrCodeInvalidRequest)
+				errorstest.WantReportedCode(t, c.ValidateCNCFEvidenceOptions(opts), aicrerrors.ErrCodeInvalidRequest)
 			})
 		}
 		var nilClient *Client
-		requireCode(t, nilClient.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{}), aicrerrors.ErrCodeInvalidRequest)
+		errorstest.WantReportedCode(t, nilClient.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{}), aicrerrors.ErrCodeInvalidRequest)
 	})
 
 	t.Run("WithOptions still refuses the same way", func(t *testing.T) {
@@ -223,6 +224,6 @@ func TestRenderCNCFEvidenceWithResult(t *testing.T) {
 		err := (&Client{}).RenderCNCFEvidenceWithOptions(context.Background(), report, t.TempDir(), RenderCNCFEvidenceOptions{
 			NotApplicable: map[string]string{"workload_sandboxing": "no sandbox runtime"},
 		})
-		requireCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
 	})
 }

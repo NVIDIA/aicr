@@ -17,38 +17,27 @@ package aicr
 import (
 	"context"
 	stderrors "errors"
+	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
-// requireCode asserts the outermost structured code, which is what callers
-// branch on. errors.Is would also match a code buried deeper in the chain.
-func requireCode(t *testing.T, err error, code aicrerrors.ErrorCode) {
-	t.Helper()
-	var se *aicrerrors.StructuredError
-	if !stderrors.As(err, &se) || se.Code != code {
-		t.Fatalf("error = %v, want outermost code %s", err, code)
-	}
-}
-
-func TestCNCFEvidenceFeatures_ReturnsCopy(t *testing.T) {
+// TestCNCFEvidenceFeatures_Empty pins the removed --feature interface: the
+// deprecated lister returns an empty, non-nil, unshared slice.
+func TestCNCFEvidenceFeatures_Empty(t *testing.T) {
 	t.Parallel()
 	got := CNCFEvidenceFeatures()
-	if !slices.Contains(got, "dra-support") {
-		t.Fatalf("CNCFEvidenceFeatures() = %v, want it to contain dra-support", got)
-	}
-	got[0] = "mutated"
-	if CNCFEvidenceFeatures()[0] == "mutated" {
-		t.Error("CNCFEvidenceFeatures() returned a shared slice")
+	if got == nil || len(got) != 0 {
+		t.Fatalf("CNCFEvidenceFeatures() = %#v, want an empty non-nil slice", got)
 	}
 }
 
@@ -86,7 +75,7 @@ func TestRenderCNCFEvidence(t *testing.T) {
 				Extra: map[string]string{"skipReason": validator.SkipCheckReasonCode}},
 		}
 		dir := t.TempDir()
-		requireCode(t, (&Client{}).RenderCNCFEvidence(context.Background(), withheld, dir), aicrerrors.ErrCodeInvalidRequest)
+		errorstest.WantReportedCode(t, (&Client{}).RenderCNCFEvidence(context.Background(), withheld, dir), aicrerrors.ErrCodeInvalidRequest)
 		if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
 			t.Errorf("evidence dir = %v (err %v), want it left empty", entries, err)
 		}
@@ -105,14 +94,15 @@ func TestRenderCNCFEvidence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			requireCode(t, tt.client.RenderCNCFEvidence(tt.ctx, report, tt.dir), aicrerrors.ErrCodeInvalidRequest)
+			errorstest.WantReportedCode(t, tt.client.RenderCNCFEvidence(tt.ctx, report, tt.dir), aicrerrors.ErrCodeInvalidRequest)
 		})
 	}
 }
 
-// TestCollectCNCFEvidence runs every case in NoCluster mode, so the collector
-// short-circuits and nothing reaches a cluster. Policy resolution and input
-// validation still run first.
+// TestCollectCNCFEvidence covers the argument contract of the run-plus-render
+// wrapper. Every case is refused before the snapshot agent is deployed, so
+// nothing reaches a cluster; the run itself is exercised by the CLI's
+// --cncf-submission path on a live cluster.
 func TestCollectCNCFEvidence(t *testing.T) {
 	t.Parallel()
 
@@ -133,235 +123,54 @@ func TestCollectCNCFEvidence(t *testing.T) {
 		t.Fatalf("LoadRecipe: %v", err)
 	}
 
-	badAdvertiser, err := client.LoadRecipe(context.Background(), recipePath, "")
+	closed, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	closedRec, err := closed.LoadRecipe(context.Background(), recipePath, "")
 	if err != nil {
 		t.Fatalf("LoadRecipe: %v", err)
 	}
-	badAdvertiser.internal.Metadata.SelectedProfile = &recipe.SelectedProfile{Advertiser: "csp"}
-
-	// Two enabled inference gateways is a declaration the gateway section
-	// cannot act on; other sections never read it.
-	twoGateways, err := client.LoadRecipe(context.Background(), recipePath, "")
-	if err != nil {
-		t.Fatalf("LoadRecipe: %v", err)
-	}
-	twoGateways.internal.ComponentRefs = append(twoGateways.internal.ComponentRefs,
-		recipe.ComponentRef{Name: "agentgateway", Namespace: "agentgateway-system"},
-		recipe.ComponentRef{Name: "edge-gateway", Namespace: "edge-system", Overrides: map[string]any{
-			recipe.InferenceGatewayOverrideKey: map[string]any{"gatewayClass": "edge-class"},
-		}})
-
-	closed := newClientForBundleTest(t)
 	if err = closed.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
-	expired, cancelExpired := context.WithTimeout(context.Background(), 0)
-	t.Cleanup(cancelExpired)
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	valid := CNCFCollectOptions{Dir: t.TempDir(), NoCluster: true}
-	withFeatures := func(f ...string) CNCFCollectOptions {
-		o := valid
-		o.Features = f
-		return o
-	}
+	valid := CNCFCollectOptions{Dir: t.TempDir()}
+	withFeatures := valid
+	withFeatures.Features = []string{"gang-scheduling"}
+	noCluster := valid
+	noCluster.NoCluster = true
 	withoutDir := valid
 	withoutDir.Dir = ""
+	badNotApplicable := valid
+	badNotApplicable.NotApplicable = map[string]string{"gang_scheduling": "we do not gang"}
 
 	tests := []struct {
-		name     string
-		client   *Client
-		ctx      context.Context
-		rec      *RecipeResult
-		opts     CNCFCollectOptions
-		wantCode aicrerrors.ErrorCode
+		name        string
+		client      *Client
+		ctx         context.Context
+		rec         *RecipeResult
+		opts        CNCFCollectOptions
+		wantMessage string
 	}{
-		{name: "standalone run", client: client, ctx: context.Background(), opts: valid},
-		{name: "recipe-backed run", client: client, ctx: context.Background(), rec: rec, opts: valid},
-		{name: "feature aliases and all", client: client, ctx: context.Background(), opts: withFeatures("dra", "all")},
-		{name: "unknown feature", client: client, ctx: context.Background(), opts: withFeatures("nonexistent"), wantCode: aicrerrors.ErrCodeInvalidRequest},
-		{name: "unresolvable allocation policy fails closed", client: client, ctx: context.Background(), rec: badAdvertiser, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
-		{name: "unresolvable gateway fails a full run", client: client, ctx: context.Background(), rec: twoGateways, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
-		{name: "unresolvable gateway fails a gateway-scoped run", client: client, ctx: context.Background(), rec: twoGateways, opts: withFeatures("gateway"), wantCode: aicrerrors.ErrCodeInvalidRequest},
-		{name: "unresolvable gateway does not abort a run scoped to other features", client: client, ctx: context.Background(), rec: twoGateways, opts: withFeatures("dra", "gang")},
-		{name: "policy resolution past deadline is a timeout", client: client, ctx: expired, rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeTimeout},
-		{name: "policy resolution after cancel is canceled", client: client, ctx: canceled, rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeCanceled},
-		{name: "recipe missing internal", client: client, ctx: context.Background(), rec: &RecipeResult{Name: "x"}, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
-		{name: "recipe from another client", client: newClientForBundleTest(t), ctx: context.Background(), rec: rec, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
-		{name: "empty dir", client: client, ctx: context.Background(), opts: withoutDir, wantCode: aicrerrors.ErrCodeInvalidRequest},
-		{name: "nil client", ctx: context.Background(), opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
-		{name: "nil context", client: client, opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
-		{name: "closed client", client: closed, ctx: context.Background(), opts: valid, wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "nil recipe", client: client, ctx: context.Background(), opts: valid, wantMessage: "recipe is required"},
+		{name: "features removed", client: client, ctx: context.Background(), rec: rec, opts: withFeatures, wantMessage: "--feature interface was removed"},
+		{name: "no-cluster removed", client: client, ctx: context.Background(), rec: rec, opts: noCluster, wantMessage: "needs a live cluster"},
+		{name: "recipe missing internal", client: client, ctx: context.Background(), rec: &RecipeResult{Name: "x"}, opts: valid, wantMessage: "no internal recipe state"},
+		{name: "recipe from another client", client: newClientForBundleTest(t), ctx: context.Background(), rec: rec, opts: valid, wantMessage: "Client"},
+		{name: "empty dir", client: client, ctx: context.Background(), rec: rec, opts: withoutDir, wantMessage: "directory is required"},
+		{name: "non-conditional notApplicable", client: client, ctx: context.Background(), rec: rec, opts: badNotApplicable, wantMessage: `"gang_scheduling" is not a conditional MUST`},
+		{name: "nil client", ctx: context.Background(), rec: rec, opts: valid, wantMessage: "not initialized"},
+		{name: "nil context", client: client, rec: rec, opts: valid, wantMessage: "context is required"},
+		{name: "closed client", client: closed, ctx: context.Background(), rec: closedRec, opts: valid, wantMessage: "already closed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			err := tt.client.CollectCNCFEvidence(tt.ctx, tt.rec, tt.opts)
-			if tt.wantCode == "" {
-				if err != nil {
-					t.Fatalf("CollectCNCFEvidence: %v", err)
-				}
-				return
-			}
-			requireCode(t, err, tt.wantCode)
-		})
-	}
-}
-
-// TestCollectCNCFEvidence_RelativePaths runs the real collector script against
-// a stub kubectl that reports no cluster resources, so the
-// cluster-autoscaling section records a skip into its evidence file.
-func TestCollectCNCFEvidence_RelativePaths(t *testing.T) {
-	if _, err := exec.LookPath("bash"); err != nil {
-		t.Skip("bash not on PATH")
-	}
-
-	stubDir := t.TempDir()
-	kubeconfigLog := filepath.Join(stubDir, "kubeconfig.log")
-	stub := "#!/bin/sh\nprintf '%s\\n' \"$KUBECONFIG\" >> '" + kubeconfigLog + "'\n"
-	if err := os.WriteFile(filepath.Join(stubDir, "kubectl"), []byte(stub), 0o700); err != nil { //nolint:gosec // stub must be executable
-		t.Fatalf("write kubectl stub: %v", err)
-	}
-	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Chdir(t.TempDir())
-
-	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-	t.Cleanup(func() { _ = client.Close() })
-
-	err = client.CollectCNCFEvidence(context.Background(), nil, CNCFCollectOptions{
-		Dir:        "evidence",
-		Kubeconfig: "kubeconfig",
-		Features:   []string{"cluster-autoscaling"},
-	})
-	if err != nil {
-		t.Fatalf("CollectCNCFEvidence: %v", err)
-	}
-
-	if _, err = os.Stat(filepath.Join("evidence", "cluster-autoscaling.md")); err != nil {
-		t.Errorf("evidence not written under the caller's working directory: %v", err)
-	}
-	wantKubeconfig, err := filepath.Abs("kubeconfig")
-	if err != nil {
-		t.Fatalf("Abs: %v", err)
-	}
-	logged, err := os.ReadFile(kubeconfigLog)
-	if err != nil {
-		t.Fatalf("read kubeconfig log: %v", err)
-	}
-	seen := strings.Fields(string(logged))
-	if len(seen) == 0 {
-		t.Fatal("kubectl stub was never invoked")
-	}
-	for _, got := range seen {
-		if got != wantKubeconfig {
-			t.Fatalf("kubectl saw KUBECONFIG=%q, want %q", got, wantKubeconfig)
-		}
-	}
-}
-
-// TestCollectCNCFEvidence_ThreadsInferenceGateway runs the real collector
-// script with a stub kubectl and reads the gateway section's verdict to prove
-// which gateway option CollectCNCFEvidence passed: the declared Gateway's
-// name, namespace and class for a recipe that declares one, the no-gateway
-// marker for a recipe that declares none, and neither for a standalone run.
-func TestCollectCNCFEvidence_ThreadsInferenceGateway(t *testing.T) {
-	if _, err := exec.LookPath("bash"); err != nil {
-		t.Skip("bash not on PATH")
-	}
-
-	// The stub logs every invocation, answers a declared-Gateway lookup with
-	// a class other than the declared one (which fails the section with a
-	// verdict naming the declared name and class; the namespace in that
-	// verdict is the stub's own echo, so the threaded namespace is asserted
-	// from the log instead), finds nothing on cluster-wide discovery, and
-	// succeeds with no output otherwise.
-	stubDir := t.TempDir()
-	callLog := filepath.Join(stubDir, "kubectl.log")
-	stub := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + callLog + "'\n" +
-		"case \" $* \" in\n  *' gateways -A '*) ;;\n  *gatewayClassName*) echo 'edge-system other-class' ;;\nesac\nexit 0\n"
-	if err := os.WriteFile(filepath.Join(stubDir, "kubectl"), []byte(stub), 0o700); err != nil { //nolint:gosec // stub must be executable
-		t.Fatalf("write kubectl stub: %v", err)
-	}
-	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-	t.Cleanup(func() { _ = client.Close() })
-
-	recipePath := filepath.Join(t.TempDir(), "recipe.yaml")
-	recipeYAML := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n" +
-		"    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n"
-	if err = os.WriteFile(recipePath, []byte(recipeYAML), 0o600); err != nil {
-		t.Fatalf("write recipe: %v", err)
-	}
-	noGateway, err := client.LoadRecipe(context.Background(), recipePath, "")
-	if err != nil {
-		t.Fatalf("LoadRecipe: %v", err)
-	}
-	declared, err := client.LoadRecipe(context.Background(), recipePath, "")
-	if err != nil {
-		t.Fatalf("LoadRecipe: %v", err)
-	}
-	declared.internal.ComponentRefs = append(declared.internal.ComponentRefs,
-		recipe.ComponentRef{Name: "edge-gateway", Namespace: "edge-system", Overrides: map[string]any{
-			recipe.InferenceGatewayOverrideKey: map[string]any{"gatewayClass": "edge-class", "gateway": "pool-vip"},
-		}})
-
-	tests := []struct {
-		name        string
-		rec         *RecipeResult
-		wantVerdict string
-		// wantCall is a kubectl invocation the stub must have logged.
-		wantCall string
-		wantErr  bool
-	}{
-		{
-			name: "declared gateway reaches the section", rec: declared,
-			wantVerdict: "**Result: FAIL** — Gateway `edge-system/pool-vip` has class `other-class`; the recipe declares `edge-class`.",
-			wantCall:    "get gateway pool-vip -n edge-system ",
-			wantErr:     true,
-		},
-		{
-			name: "recipe without a gateway skips without discovery", rec: noGateway,
-			wantVerdict: "**Result: SKIP (prerequisite absent)** — the recipe declares no inference gateway component.",
-		},
-		{
-			name: "standalone run discovers by name", rec: nil,
-			wantVerdict: "**Result: SKIP (prerequisite absent)** — no Gateway named `inference-gateway` is installed.",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			err := client.CollectCNCFEvidence(context.Background(), tt.rec, CNCFCollectOptions{Dir: dir, Features: []string{"gateway"}})
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("CollectCNCFEvidence: error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if tt.wantErr {
-				requireCode(t, err, aicrerrors.ErrCodeInternal)
-			}
-			evidence, readErr := os.ReadFile(filepath.Join(dir, "inference-gateway.md"))
-			if readErr != nil {
-				t.Fatalf("read gateway evidence: %v", readErr)
-			}
-			if !strings.Contains(string(evidence), tt.wantVerdict) {
-				t.Errorf("gateway evidence lacks %q:\n%s", tt.wantVerdict, evidence)
-			}
-			if tt.wantCall != "" {
-				calls, logErr := os.ReadFile(callLog)
-				if logErr != nil {
-					t.Fatalf("read kubectl call log: %v", logErr)
-				}
-				if !strings.Contains(string(calls), tt.wantCall) {
-					t.Errorf("kubectl was never called with %q:\n%s", tt.wantCall, calls)
-				}
+			errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+			if !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.wantMessage)
 			}
 		})
 	}
@@ -482,5 +291,183 @@ func TestEmitRecipeEvidence_RejectsClosedClient(t *testing.T) {
 	var se *aicrerrors.StructuredError
 	if !stderrors.As(err, &se) || se.Code != aicrerrors.ErrCodeInvalidRequest {
 		t.Errorf("expected ErrCodeInvalidRequest, got %v", err)
+	}
+}
+
+// TestCollectCNCFEvidence_ReachesSnapshot passes every argument check and
+// fails at the first cluster stage: the kubeconfig names a file that does not
+// exist, so CollectSnapshot cannot build a client. It pins that the resolved
+// inputs (absolute paths, default namespace) reach the run without a cluster.
+func TestCollectCNCFEvidence_ReachesSnapshot(t *testing.T) {
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	recipePath := filepath.Join(t.TempDir(), "recipe.yaml")
+	recipeYAML := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n" +
+		"    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n"
+	if err = os.WriteFile(recipePath, []byte(recipeYAML), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	rec, err := client.LoadRecipe(context.Background(), recipePath, "")
+	if err != nil {
+		t.Fatalf("LoadRecipe: %v", err)
+	}
+	t.Chdir(t.TempDir())
+
+	err = client.CollectCNCFEvidence(context.Background(), rec, CNCFCollectOptions{
+		Dir:        "evidence",
+		Kubeconfig: "kubeconfig-that-does-not-exist",
+	})
+	if err == nil {
+		t.Fatal("CollectCNCFEvidence succeeded with a kubeconfig that does not exist")
+	}
+	if errorstest.ReportedCode(err) == aicrerrors.ErrCodeInvalidRequest && strings.Contains(err.Error(), "CNCFCollectOptions") {
+		t.Fatalf("refused on an option instead of reaching the snapshot stage: %v", err)
+	}
+	if _, statErr := os.Stat("evidence"); statErr == nil {
+		t.Error("evidence directory was created before any check ran")
+	}
+}
+
+// fakeSubmissionRunner stands in for the Client in runCNCFSubmission so the
+// composition (snapshot, conformance run, merge, render, verdict) and its
+// error propagation are exercised without a cluster.
+type fakeSubmissionRunner struct {
+	agentCfg     *AgentConfig
+	validateOpts []ValidateOption
+	renderOpts   RenderCNCFEvidenceOptions
+	renderDir    string
+
+	snapshotErr error
+	validateErr error
+	renderErr   error
+	report      *ctrf.Report
+	agg         *CNCFRequirementAggregate
+}
+
+func (f *fakeSubmissionRunner) CollectSnapshot(_ context.Context, cfg *AgentConfig) (*Snapshot, error) {
+	f.agentCfg = cfg
+	if f.snapshotErr != nil {
+		return nil, f.snapshotErr
+	}
+	return &Snapshot{}, nil
+}
+
+func (f *fakeSubmissionRunner) ValidateState(_ context.Context, _ *RecipeResult, _ *Snapshot, opts ...ValidateOption) ([]*PhaseResult, error) {
+	f.validateOpts = opts
+	if f.validateErr != nil {
+		return nil, f.validateErr
+	}
+	report := f.report
+	if report == nil {
+		report = &ctrf.Report{}
+	}
+	return []*PhaseResult{{Phase: PhaseConformance, Status: "passed", Report: report}}, nil
+}
+
+func (f *fakeSubmissionRunner) MergeReports(results []*PhaseResult) *ctrf.Report {
+	return results[0].Report
+}
+
+func (f *fakeSubmissionRunner) RenderCNCFEvidenceWithResult(_ context.Context, _ *ctrf.Report, dir string, opts RenderCNCFEvidenceOptions) (*CNCFRequirementAggregate, error) {
+	f.renderDir = dir
+	f.renderOpts = opts
+	if f.renderErr != nil {
+		return nil, f.renderErr
+	}
+	return f.agg, nil
+}
+
+// TestRunCNCFSubmission drives the submission run through a fake runner:
+// the agent is deployed privileged in the resolved namespace, the
+// conformance phase alone runs in that namespace, NotApplicable reaches the
+// renderer, every stage's error propagates with its own code, and the shared
+// Outcome rule (per-check failure plus the aggregate's verdict) decides.
+func TestRunCNCFSubmission(t *testing.T) {
+	t.Parallel()
+
+	passed := &CNCFRequirementAggregate{Version: cncf.LatestVersion, Requirements: []cncf.RequirementResult{
+		{ID: "gang_scheduling", Level: cncf.LevelMust, Status: cncf.StatusPassed},
+		{ID: "cluster_autoscaling", Level: cncf.LevelMust, Status: cncf.StatusNotApplicable, Reason: "fixed-size cluster"},
+	}}
+	incomplete := &CNCFRequirementAggregate{Version: cncf.LatestVersion, Requirements: []cncf.RequirementResult{
+		{ID: "gang_scheduling", Level: cncf.LevelMust, Status: cncf.StatusNotTested, Reason: "gang-scheduling not run"},
+	}}
+	in := cncfSubmissionInputs{
+		dir:           "/abs/evidence",
+		kubeconfig:    "/abs/kubeconfig",
+		namespace:     "submission-ns",
+		notApplicable: map[string]string{"cluster_autoscaling": "fixed-size cluster"},
+	}
+
+	tests := []struct {
+		name     string
+		runner   *fakeSubmissionRunner
+		wantCode aicrerrors.ErrorCode
+		wantMsg  string
+	}{
+		{name: "every MUST established", runner: &fakeSubmissionRunner{agg: passed}},
+		{name: "snapshot error propagates", runner: &fakeSubmissionRunner{snapshotErr: aicrerrors.New(aicrerrors.ErrCodeUnavailable, "agent did not start")},
+			wantCode: aicrerrors.ErrCodeUnavailable, wantMsg: "agent did not start"},
+		{name: "validate error propagates", runner: &fakeSubmissionRunner{validateErr: aicrerrors.New(aicrerrors.ErrCodeTimeout, "phase timed out")},
+			wantCode: aicrerrors.ErrCodeTimeout, wantMsg: "phase timed out"},
+		{name: "render error propagates", runner: &fakeSubmissionRunner{renderErr: aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "bad notApplicable")},
+			wantCode: aicrerrors.ErrCodeInvalidRequest, wantMsg: "bad notApplicable"},
+		{name: "unestablished MUST fails the run", runner: &fakeSubmissionRunner{agg: incomplete},
+			wantCode: aicrerrors.ErrCodeInternal, wantMsg: "gang_scheduling not tested (gang-scheduling not run)"},
+		{name: "unmapped check crashed with every MUST established fails the run", runner: &fakeSubmissionRunner{agg: passed,
+			report: &ctrf.Report{Results: ctrf.Results{Tests: []ctrf.TestResult{{Name: "platform-health", Status: ctrf.StatusOther}}}}},
+			wantCode: aicrerrors.ErrCodeInternal, wantMsg: "one or more checks did not pass"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := runCNCFSubmission(context.Background(), tt.runner, &RecipeResult{Name: "r"}, in)
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Fatalf("runCNCFSubmission: %v", err)
+				}
+			} else {
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+				if !strings.Contains(err.Error(), tt.wantMsg) {
+					t.Errorf("error = %v, want it to mention %q", err, tt.wantMsg)
+				}
+			}
+
+			cfg := tt.runner.agentCfg
+			if cfg == nil {
+				t.Fatal("CollectSnapshot was not called")
+			}
+			if cfg.Namespace != in.namespace || cfg.Kubeconfig != in.kubeconfig || !cfg.Privileged || !cfg.Cleanup {
+				t.Errorf("AgentConfig = %+v, want namespace %q, kubeconfig %q, privileged, cleanup", *cfg, in.namespace, in.kubeconfig)
+			}
+			if tt.runner.snapshotErr != nil {
+				if tt.runner.validateOpts != nil {
+					t.Error("ValidateState ran after the snapshot failed")
+				}
+				return
+			}
+			vc := &validateConfig{}
+			for _, opt := range tt.runner.validateOpts {
+				opt(vc)
+			}
+			if vc.namespace == nil || *vc.namespace != in.namespace || vc.kubeconfig != in.kubeconfig {
+				t.Errorf("validate options: namespace %v kubeconfig %q, want %q and %q", vc.namespace, vc.kubeconfig, in.namespace, in.kubeconfig)
+			}
+			if len(vc.phases) != 1 || vc.phases[0] != PhaseConformance {
+				t.Errorf("validate phases = %v, want only %s", vc.phases, PhaseConformance)
+			}
+			if tt.runner.validateErr != nil {
+				if tt.runner.renderDir != "" {
+					t.Error("render ran after the conformance phase failed")
+				}
+				return
+			}
+			if tt.runner.renderDir != in.dir || !maps.Equal(tt.runner.renderOpts.NotApplicable, in.notApplicable) {
+				t.Errorf("render: dir %q notApplicable %v, want %q and %v", tt.runner.renderDir, tt.runner.renderOpts.NotApplicable, in.dir, in.notApplicable)
+			}
+		})
 	}
 }

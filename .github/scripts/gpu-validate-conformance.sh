@@ -16,6 +16,10 @@
 set -euo pipefail
 
 # bundle/recipe.yaml is the deployed set generate-bundle.sh wrote (#2848).
+# This lane is CI pass/fail on a single-GPU kind cluster, not a submission:
+# the kind recipes omit pod-autoscaling (it needs two accelerators, #3647),
+# so a --cncf-submission run would fail on that MUST by construction, and
+# --evidence-dir requires it (#3602). The CTRF report is the artifact.
 AICR_VALIDATOR_IMAGE_REGISTRY=ko.local \
 ./aicr validate \
   --recipe bundle/recipe.yaml \
@@ -27,5 +31,4 @@ AICR_VALIDATOR_IMAGE_REGISTRY=ko.local \
   --image=ko.local:smoke-test \
   --timeout=10m \
   --toleration '*' \
-  --output=validation-result.yaml \
-  --evidence-dir=conformance-evidence
+  --output=validation-result.yaml

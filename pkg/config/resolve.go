@@ -491,7 +491,6 @@ type ValidateResolved struct {
 type EvidenceCNCFResolved struct {
 	Dir            string
 	CNCFSubmission bool
-	Features       []string
 	NotApplicable  map[string]string
 }
 
@@ -615,7 +614,6 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 			out.EvidenceCNCF = &EvidenceCNCFResolved{
 				Dir:            c.Dir,
 				CNCFSubmission: boolPtrOrFalse(c.CNCFSubmission),
-				Features:       slices.Clone(c.Features),
 				NotApplicable:  maps.Clone(c.NotApplicable),
 			}
 		}

@@ -40,7 +40,6 @@ func TestValidateImageRefsUse(t *testing.T) {
 	tests := []struct {
 		name        string
 		path        string
-		cncf        bool
 		noCluster   bool
 		evidence    *recipeEvidenceConfig
 		wantMessage string
@@ -50,12 +49,11 @@ func TestValidateImageRefsUse(t *testing.T) {
 		{name: "no evidence", path: "refs.txt", wantMessage: "requires --push"},
 		{name: "evidence without push", path: "refs.txt", evidence: &recipeEvidenceConfig{OutDir: "out"},
 			wantMessage: "requires --push"},
-		{name: "cncf submission", path: "refs.txt", cncf: true, evidence: pushing, wantMessage: "--cncf-submission"},
 		{name: "no-cluster", path: "refs.txt", noCluster: true, wantMessage: "--no-cluster"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateImageRefsUse(tt.path, tt.cncf, tt.noCluster, tt.evidence)
+			err := validateImageRefsUse(tt.path, tt.noCluster, tt.evidence)
 			if tt.wantMessage == "" {
 				if err != nil {
 					t.Fatalf("validateImageRefsUse() error = %v, want nil", err)
