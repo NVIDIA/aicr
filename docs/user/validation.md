@@ -1551,7 +1551,7 @@ The baseline then ends in one of three ways, each with its own message.
 A failure naming the load, such as:
 
 ```text
-[NOT_FOUND] AI service metrics test failed in phase baseline: Prometheus did not load the ServiceMonitor ai-metrics-test-<id>/ai-metrics-stub within 5m0s: no scrape pool serviceMonitor/ai-metrics-test-<id>/ai-metrics-stub/* among the 12 configured ...
+[NOT_FOUND] AI service metrics test failed in phase baseline: [NOT_FOUND] Prometheus did not load the ServiceMonitor ai-metrics-test-<id>/ai-metrics-stub within 5m0s: no scrape pool serviceMonitor/ai-metrics-test-<id>/ai-metrics-stub/* among the 12 configured ...
 ```
 
 means Prometheus did not load the monitor within the wait. Two things have
