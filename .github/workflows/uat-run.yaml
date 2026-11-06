@@ -105,7 +105,11 @@ on:
         type: string
         default: '0'
       skip_delete:
-        description: 'Skip cluster teardown (manual debugging only; ignored for daytime lifecycles). A retained cluster becomes eligible for janitor reclamation ~24h after the run finishes.'
+        description: >-
+          Skip cluster teardown (manual debugging only). Refused for lifecycle=nightly on aws, gcp and azure
+          reservations: for a held cluster use lifecycle=daytime-up, which lifecycle=daytime-down or the
+          evening teardown removes. Ignored for daytime lifecycles. On the kind lane it keeps the nvkind
+          cluster on its runner until the next same-intent kind run deletes it at setup; no janitor reclaims it.
         type: boolean
         default: false
       skip_tests:
@@ -307,6 +311,7 @@ jobs:
           LIFECYCLE: ${{ inputs.lifecycle }}
           DEPLOYER: ${{ inputs.deployer }}
           AICR_VERSION: ${{ inputs.aicr_version }}
+          SKIP_DELETE: ${{ inputs.skip_delete }}
         run: |
           set -euo pipefail
           # Only slot 0 is provisioned today (ADR-017). Reject any other value at
@@ -321,7 +326,10 @@ jobs:
           # GITHUB_OUTPUT: the platform gate below needs the resolved cloud,
           # which does not exist until the broker has run, and the row must not
           # be published until the gate has passed (see below).
-          ROW="$(./bin/uat-broker reservations --name "$RESERVATION")"
+          # The broker refuses skip_delete=true on a nightly cloud run (#3670)
+          # and prints no row, so a refusal publishes no cloud.
+          ROW="$(./bin/uat-broker reservations --name "$RESERVATION" \
+            --lifecycle "$LIFECYCLE" --skip-delete "$SKIP_DELETE")"
 
           # Fail closed on a platform the resolved lane cannot serve. Only
           # run-kind forwards `platform` to its reusable pipeline; the other

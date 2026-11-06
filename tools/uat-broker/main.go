@@ -21,9 +21,12 @@
 //
 // Subcommands:
 //
-//	uat-broker reservations --name <name> [--file <registry>]
+//	uat-broker reservations --name <name> [--file <registry>] \
+//	    [--lifecycle <lifecycle> --skip-delete <true|false>]
 //	    Resolve one reservation row and print its fields as
 //	    GITHUB_OUTPUT-style key=value lines (redirect to "$GITHUB_OUTPUT").
+//	    With --lifecycle and --skip-delete, first refuse a skip_delete the
+//	    row cannot honor (#3670), printing nothing.
 //
 //	uat-broker reservations --list [--file <registry>]
 //	    Print every reservation name, one per line.
@@ -99,6 +102,7 @@ const usage = `uat-broker — UAT reservation registry + nightly schedule helper
 
 Usage:
   uat-broker reservations --name <name> [--file <registry>]   resolve one row as key=value lines
+                         [--lifecycle <l> --skip-delete <true|false>]  refusing a skip_delete the row cannot honor
   uat-broker reservations --list [--file <registry>]          list reservation names
   uat-broker reservations --daytime [--file <registry>]       print the daytime rotation as JSON [{reservation,intent}]
   uat-broker reservations --daytime-down [--file <registry>]  print the evening teardown set as JSON [{reservation,intent}]
@@ -174,6 +178,8 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 		daytime     bool
 		daytimeDown bool
 		janitorAWS  bool
+		lifecycle   string
+		skipDelete  string
 	)
 	fs.StringVar(&file, "file", defaultRegistryPath, "path to the reservation registry")
 	fs.StringVar(&name, "name", "", "reservation name to resolve")
@@ -181,6 +187,8 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 	fs.BoolVar(&daytime, "daytime", false, "print the daytime human-access rotation as JSON: [{\"reservation\",\"intent\"}]")
 	fs.BoolVar(&daytimeDown, "daytime-down", false, "print the evening daytime-down set as JSON: [{\"reservation\",\"intent\"}]")
 	fs.BoolVar(&janitorAWS, "janitor-aws", false, "print the janitor's AWS targets as JSON: [{\"tenancy\",\"location\",\"config\"}]")
+	fs.StringVar(&lifecycle, "lifecycle", "", "with --name and --skip-delete: the dispatch's lifecycle")
+	fs.StringVar(&skipDelete, "skip-delete", "", "with --name and --lifecycle: refuse a skip_delete the row cannot honor (true|false)")
 	if err := fs.Parse(args); err != nil {
 		return flagParseErr(err, "reservations")
 	}
@@ -191,6 +199,16 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 	if selected := boolCount(list, daytime, daytimeDown, janitorAWS, name != ""); selected > 1 {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"reservations: --name, --list, --daytime, --daytime-down, and --janitor-aws are mutually exclusive")
+	}
+	if (lifecycle != "") != (skipDelete != "") {
+		return errors.New(errors.ErrCodeInvalidRequest, "reservations: --lifecycle and --skip-delete go together")
+	}
+	if skipDelete != "" && name == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "reservations: --skip-delete needs --name")
+	}
+	skip, err := parseSkipDelete(skipDelete)
+	if err != nil {
+		return err
 	}
 
 	reg, err := uatbroker.LoadRegistryFile(file)
@@ -233,6 +251,11 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 		res, lookupErr := reg.Lookup(name)
 		if lookupErr != nil {
 			return lookupErr
+		}
+		if skipDelete != "" {
+			if checkErr := res.CheckSkipDelete(lifecycle, skip); checkErr != nil {
+				return checkErr
+			}
 		}
 		// GITHUB_OUTPUT-style key=value lines; every value is single-line.
 		// slug is surfaced so uat-run.yaml's resolve step exposes
@@ -606,6 +629,18 @@ func boolCount(flags ...bool) int {
 		}
 	}
 	return n
+}
+
+// parseSkipDelete parses a --skip-delete value, which must be exactly true or
+// false; empty (the flag unset) is false.
+func parseSkipDelete(v string) (bool, error) {
+	switch v {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	}
+	return false, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("reservations: --skip-delete must be true or false; got %q", v))
 }
 
 // writeJSON writes v to w as indented JSON; what names v in the error.

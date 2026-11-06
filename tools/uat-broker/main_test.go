@@ -316,6 +316,55 @@ reservations:
 	}
 }
 
+func TestReservationsSkipDelete(t *testing.T) {
+	reg := writeRegistry(t)
+	tests := []struct {
+		name      string
+		extra     []string
+		wantCode  int
+		wantRow   bool
+		wantInErr string
+	}{
+		{name: "false on a nightly aws run resolves", extra: []string{"--name", "aws-h100", "--lifecycle", "nightly", "--skip-delete", "false"}, wantRow: true},
+		{name: "true with daytime-up resolves", extra: []string{"--name", "gcp-h100", "--lifecycle", "daytime-up", "--skip-delete", "true"}, wantRow: true},
+		{
+			name:     "true on a nightly aws run is refused",
+			extra:    []string{"--name", "aws-h100", "--lifecycle", "nightly", "--skip-delete", "true"},
+			wantCode: errors.ExitInvalidInput, wantInErr: "-f reservation=aws-h100 -f lifecycle=daytime-up",
+		},
+		{
+			name:     "a value other than true or false is refused",
+			extra:    []string{"--name", "aws-h100", "--lifecycle", "nightly", "--skip-delete", "yes"},
+			wantCode: errors.ExitInvalidInput, wantInErr: `--skip-delete must be true or false; got "yes"`,
+		},
+		{
+			name:     "skip-delete without lifecycle is refused",
+			extra:    []string{"--name", "aws-h100", "--skip-delete", "false"},
+			wantCode: errors.ExitInvalidInput, wantInErr: "--lifecycle and --skip-delete go together",
+		},
+		{
+			name:     "skip-delete without name is refused",
+			extra:    []string{"--list", "--lifecycle", "nightly", "--skip-delete", "false"},
+			wantCode: errors.ExitInvalidInput, wantInErr: "--skip-delete needs --name",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"reservations", "--file", reg}, tt.extra...)
+			code, stdout, stderr := invoke("", args...)
+			if code != tt.wantCode {
+				t.Fatalf("exit code = %d, want %d (stderr: %s)", code, tt.wantCode, stderr)
+			}
+			if got := strings.Contains(stdout, "cloud="); got != tt.wantRow {
+				t.Errorf("row printed = %v, want %v (stdout: %q)", got, tt.wantRow, stdout)
+			}
+			if tt.wantInErr != "" && !strings.Contains(stderr, tt.wantInErr) {
+				t.Errorf("stderr %q does not contain %q", stderr, tt.wantInErr)
+			}
+		})
+	}
+}
+
 func TestReservationsExitCodes(t *testing.T) {
 	reg := writeRegistry(t)
 	tests := []struct {
