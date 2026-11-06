@@ -321,6 +321,8 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 
 `metadata.defaultStorageClassState` and `metadata.perconaOperatorState` are optional and appear when a snapshot supplies the matching evidence during resolution of a recipe containing the `nvsentinel-mongodb` component (added by the NVSentinel remediation step mixins). `defaultStorageClassState` records `present`, `multiple`, `absent`, or `unknown` for the StorageClass annotated as the cluster default, which the component's class-less volumes bind through. `perconaOperatorState` records `absent`, `api-detected`, `aicr-owned` (only AICR's own `nvsentinel/nvsentinel-mongodb` cluster exists), `operator-detected` (a Percona operator AICR did not install runs outside the `nvsentinel` namespace, or inside it under another Helm release), `crs-detected` (another PerconaServerMongoDB exists), or `unknown`. Query-generated recipes and older snapshots omit both fields. Recipe generation remains observational and only warns.
 
+`metadata.rdmaNamespaceMode` is optional and appears when the snapshot records the RDMA subsystem's network namespace mode (`OS.kmod-param./sys/module/ib_core/parameters/netns_mode`): `exclusive` (`N`), `shared` (`Y`), or `unknown` for any other value. Snapshots from nodes without the RDMA core module, query-generated recipes, and older snapshots omit it. Recipe generation records it without judging it; `aicr bundle` warns when it disagrees with the recipe's RDMA attachment (see [OKE GB300 fabric](../integrator/oke-gpu-setup.md#fabric)).
+
 ---
 
 ### GET /v1/query

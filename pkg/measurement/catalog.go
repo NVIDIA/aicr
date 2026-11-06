@@ -145,6 +145,9 @@ var catalog = map[Type]typeSpec{
 			// qualifies operator-managed); daemonset carries the uncollapsed
 			// detail (absent/unlabeled/disabled/active/unknown).
 			"oke-legacy-plugin": {scalar: closedKeys("nvidia-gpu-device-plugin", "daemonset")},
+			// oke-gpu-plugin is the device-list strategy of the
+			// NvidiaGpuPlugin add-on's DaemonSet, which list-addons omits.
+			"oke-gpu-plugin": {scalar: closedKeys("device-list-strategy")},
 			// Keys are container image names (pkg/collector/k8s/image.go).
 			"image": {scalar: openKeys()},
 			// Keys are discovered cluster policies (pkg/collector/k8s/policy.go).
@@ -191,6 +194,8 @@ var catalog = map[Type]typeSpec{
 			"grub": {scalar: openKeys()},
 			// Kernel modules (pkg/collector/os/kmod.go).
 			"kmod": {scalar: openKeys()},
+			// Allowlisted module parameters (pkg/collector/os/kmodparam.go).
+			"kmod-param": {scalar: closedKeys("/sys/module/ib_core/parameters/netns_mode")},
 			// Talos system extensions (pkg/collector/talos/os.go).
 			"extensions": {scalar: openKeys()},
 		},
