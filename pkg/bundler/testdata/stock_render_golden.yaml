@@ -2405,7 +2405,7 @@ gb300-generic-ubuntu-training:
   011-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   011-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  011-network-operator-post/templates/nic-cluster-policy-generic-gb300.yaml: 80e6b1a802bd84ff48a5e952e58557a14d869bada73f7014716c5a77f0e26a1b
+  011-network-operator-post/templates/nic-cluster-policy-generic-gb300.yaml: aab684e336266643758db254fed7b96fd082b301ac58fbf39598c8e33cff5811
   011-network-operator-post/values.yaml: 428a7355c5a8ff6434451cd23c5d67b545f3581139cbcc971428218c7a2df8fe
   012-nktp/apply-crds.sh: cad6e5470f0193c3715f0a0a3c3ee47f95e38aac506cd3d44aefe0c9b252c81d
   012-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -2428,7 +2428,7 @@ gb300-generic-ubuntu-training:
   README.md: e9dc8dae62b1d46d0e18600ff8088cc7999b37b34d3bb3a9c2fb31ce41cf53f0
   UPGRADING.md: cc943e2350d0e2bded082ee1d39dae4d19f04b89b435723c742016c24f0ce5db
   bundle-info.yaml: 9725fdf760a42f8f6d99a2c372613aabac34d77b4a5ed6a66fc818b5a4d91180
-  checksums.txt: 6971c3b34c5beb571a8e485a43da180d820ed2946452e17241f81b522b86a137
+  checksums.txt: 5c3e22238fcf9d00938c0dea1899b551d3a4720c459364f7f1fe8fd2b681fe19
   deploy.sh: cdb2976448c025a56309667c662b1725a86306b6d406e33f781b833710f79891
   recipe.yaml: 1678855ac621a1c34d5a5f7366812783fc52083796e455e951b1410bcdbda84f
 gb300-gke-cos-inference-dynamo:
@@ -6760,7 +6760,7 @@ vr200-nvke-ubuntu-training-kubeflow:
   012-network-operator-post/Chart.yaml: e5a71c6d0ba97bef989a82cd6a0fc9d9904c4eec8706c16278737ae8140a83e4
   012-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  012-network-operator-post/templates/nic-cluster-policy-nvke-vr200.yaml: d5ea0ab375baf67b9b04129b0748e214dc03ccf926c4891b4e558c27fa49da5e
+  012-network-operator-post/templates/nic-cluster-policy-nvke-vr200.yaml: 5062e58d5406fc1cc021667b52866aa0c4dca5a8a78bf0b9e8f426a17746a19c
   012-network-operator-post/values.yaml: e9d6f1481a61bac0626eecd824ba302bde4ea1258648b8bfd0fd8ca6a96330fc
   013-nktp/apply-crds.sh: cad6e5470f0193c3715f0a0a3c3ee47f95e38aac506cd3d44aefe0c9b252c81d
   013-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -6788,7 +6788,7 @@ vr200-nvke-ubuntu-training-kubeflow:
   README.md: 3b112d3da9c8262e8db148e5988dd731dd2483602400d62117324fa0ed9033e2
   UPGRADING.md: 198c18313cc2aa243b65149d358b95c6c4ffc6d1a912ee014dc0981c706deef2
   bundle-info.yaml: b70be3e019cb180518837db4ea62f1a754597f129da973d18e6c46fa336e4d48
-  checksums.txt: 3198dbdff7fddf87d22b0fcca2a07f8af98367672eb59e657044b92e9b0ccfd6
+  checksums.txt: 4e254594207a38cbf26a1fcfdd510bcd7eb8b6cd7f2194474a184859a028c67d
   deploy.sh: f9f65eddc05ea45b69327deeec27e66301258d3a36b79038604b7c1c30203b5b
   recipe.yaml: 4aa84dd0bd04d4a1f241971e4cd84faff81d3985c574333666d71b1f4019a937
 vr200-rke2-ubuntu-inference-dynamo:
