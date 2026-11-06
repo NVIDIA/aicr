@@ -2167,12 +2167,12 @@ gb300-generic-ubuntu-training:
   010-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
   010-network-operator/upstream.env: e9c035cedf63d826906a2931686fb7cbd88a57aee7588a9f2d9aaeff7bada0d9
-  010-network-operator/values.yaml: de3ebf448a35136a59892435b6e243fb8790d2f52134e3e0f09a63baf3e1706c
+  010-network-operator/values.yaml: 428a7355c5a8ff6434451cd23c5d67b545f3581139cbcc971428218c7a2df8fe
   011-network-operator-post/Chart.yaml: 3d8d8a7edf771f558d0d41bbac12ad8fa27dec581cf044fe688eef4f7a03f3d9
   011-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  011-network-operator-post/templates/nic-cluster-policy-generic-gb300.yaml: 90cb5d73048581aa0afe7fc2829dbd3a0bb148ec04c2e09333eeac883118def8
-  011-network-operator-post/values.yaml: de3ebf448a35136a59892435b6e243fb8790d2f52134e3e0f09a63baf3e1706c
+  011-network-operator-post/templates/nic-cluster-policy-generic-gb300.yaml: 80e6b1a802bd84ff48a5e952e58557a14d869bada73f7014716c5a77f0e26a1b
+  011-network-operator-post/values.yaml: 428a7355c5a8ff6434451cd23c5d67b545f3581139cbcc971428218c7a2df8fe
   012-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   012-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -2189,7 +2189,7 @@ gb300-generic-ubuntu-training:
   README.md: 726ddf5493203ba35872f5227e485ba6625d9a4e77a98480c3c4791c34eca617
   UPGRADING.md: 013543becddb1d7b02e6e46fbc3bcc014df34ec4c319612e63de3922e4e4e60c
   bundle-info.yaml: cf3b673bee578d64e35030c9ac25a904e0d49e82720853e631f253bd5cfe8435
-  checksums.txt: 1a919d1a524af5810c09d6f7889c2bad9d03c1e3b16a775f37e68f460c114ef7
+  checksums.txt: 9549177904e00c7994c1b4495bbfb6bfd6b6f82ff70b5b22cefb8146129be8fb
   deploy.sh: 4196d34c287d2bdc2086c77410c18acfc254f60a86d60cc8d6ba400e4837f3b0
   recipe.yaml: 2a1eb3d77d7356d68301057c3b4c261d1f1a9ad6a28ee5ab1dbfb0d5f00fef91
 gb300-gke-cos-inference-dynamo:
