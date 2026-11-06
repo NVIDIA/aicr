@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -50,12 +51,20 @@ import (
 // so the data plane under test is the one AICR deployed. The test prefix
 // names the per-run namespace, by which leftovers from interrupted runs are
 // found; the "other" key is the probe's count of requests that failed or were
-// answered by neither test backend; the request path only makes the traffic
-// look like inference, since the backends answer every path; the sample
-// error bound caps how many probe error samples the verdict carries; the
-// interpreter runs both scripts in defaults.PythonProbeImage.
+// answered by neither test backend; the route path prefix, suffixed with the
+// run token, is the path match on both rules: Gateway API ranks routes on a
+// listener by hostname, then longest path, then method, then header matches,
+// so a rule with no path (an implicit "/") would lose every request,
+// header-matched ones included, to a pre-existing route such as a tenant's
+// "/v1" route on the recipe's Gateway, while a 48-character per-run path
+// outranks any such route and can tie only with an older route on the
+// identical random path; the request path appended to it only makes the
+// traffic look like inference, since the backends answer every path; the
+// sample error bound caps how many probe error samples the verdict carries;
+// the interpreter runs both scripts in defaults.PythonProbeImage.
 const (
 	gatewayTrafficTestPrefix      = "gateway-traffic-"
+	gatewayTrafficPathPrefix      = "/ai-conformance-"
 	gatewayTrafficRouteName       = "ai-conformance-route"
 	gatewayTrafficPrimary         = "model-v1"
 	gatewayTrafficAlternate       = "model-v2"
@@ -227,9 +236,17 @@ type gatewayTrafficScenario struct {
 	tolerations []corev1.Toleration
 
 	// endpoint is the URL the probe posts to, resolved from the profile's
-	// data plane; listenerPort is the Gateway HTTP listener it targets.
+	// data plane; listenerPort is the Gateway HTTP listener it targets;
+	// routePath is the per-run path prefix both HTTPRoute rules match.
 	endpoint     string
 	listenerPort int64
+	routePath    string
+	// attachedRoutes are the HTTPRoutes already attached to the Gateway when
+	// the phase ran, named in the verdict because a route with a longer path
+	// or an older age on the same listener takes precedence over the test
+	// route; attachedRoutesErr records a listing that could not be read.
+	attachedRoutes    []string
+	attachedRoutesErr error
 
 	readProbeLogs func(ctx context.Context) (string, error)
 
@@ -269,6 +286,7 @@ func newGatewayTrafficScenario(clientset kubernetes.Interface, dynClient dynamic
 		gw:                  gw,
 		testRun:             run,
 		tolerations:         tolerations,
+		routePath:           gatewayTrafficPathPrefix + run.token,
 		backendReadyTimeout: defaults.GatewayTrafficBackendReadyTimeout,
 		routeAcceptTimeout:  defaults.GatewayTrafficRouteAcceptTimeout,
 		routeReadyWindow:    defaults.GatewayTrafficRouteReadyWindow,
@@ -318,7 +336,7 @@ func (s *gatewayTrafficScenario) resolveEndpoint(ctx context.Context) error {
 				"Gateway %s/%s reports no IPAddress or Hostname status address for the traffic probe to reach",
 				s.profile.Namespace, s.profile.GatewayName))
 		}
-		s.endpoint = "http://" + net.JoinHostPort(host, strconv.FormatInt(port, 10)) + gatewayTrafficRequestPath
+		s.endpoint = "http://" + net.JoinHostPort(host, strconv.FormatInt(port, 10)) + s.routePath + gatewayTrafficRequestPath
 		return nil
 	}
 	svcs, err := s.clientset.CoreV1().Services(s.profile.Namespace).List(ctx, metav1.ListOptions{})
@@ -351,7 +369,7 @@ func (s *gatewayTrafficScenario) resolveEndpoint(ctx context.Context) error {
 			}
 		}
 	}
-	s.endpoint = fmt.Sprintf("http://%s.%s.svc:%d%s", selected.Name, selected.Namespace, svcPort, gatewayTrafficRequestPath)
+	s.endpoint = fmt.Sprintf("http://%s.%s.svc:%d%s%s", selected.Name, selected.Namespace, svcPort, s.routePath, gatewayTrafficRequestPath)
 	return nil
 }
 
@@ -460,6 +478,20 @@ func (s *gatewayTrafficScenario) run(ctx *validators.Context) error {
 	return s.judge()
 }
 
+// attachedRoutesHint names the routes that shared the Gateway when the probe
+// ran, the first thing to look at when requests reached a non-test backend.
+func (s *gatewayTrafficScenario) attachedRoutesHint() string {
+	switch {
+	case s.attachedRoutesErr != nil:
+		return fmt.Sprintf("; the HTTPRoutes already attached to Gateway %s/%s could not be listed (%v)",
+			s.profile.Namespace, s.profile.GatewayName, s.attachedRoutesErr)
+	case len(s.attachedRoutes) > 0:
+		return fmt.Sprintf("; HTTPRoutes already attached to Gateway %s/%s when the probe ran: [%s] (a route with a longer path or an older age on the same listener takes precedence over the test route)",
+			s.profile.Namespace, s.profile.GatewayName, strings.Join(s.attachedRoutes, ", "))
+	}
+	return ""
+}
+
 // verdictSummary renders the counts the evidence page and the CTRF detail
 // carry: the header round, every weighted round with the primary share, and
 // the step that decided.
@@ -470,8 +502,16 @@ func (s *gatewayTrafficScenario) verdictSummary(err error) string {
 	} else {
 		fmt.Fprintf(&sb, "Verdict:            FAIL in step %s\nError:              %v\n", s.phase, err)
 	}
-	fmt.Fprintf(&sb, "Gateway:            %s/%s (listener port %d)\nEndpoint:           %s\nHTTPRoute:          %s/%s\n",
-		s.profile.Namespace, s.profile.GatewayName, s.listenerPort, valueOrUnknown(s.endpoint), s.testRun.namespace, gatewayTrafficRouteName)
+	fmt.Fprintf(&sb, "Gateway:            %s/%s (listener port %d)\nEndpoint:           %s\nHTTPRoute:          %s/%s (path prefix %s)\n",
+		s.profile.Namespace, s.profile.GatewayName, s.listenerPort, valueOrUnknown(s.endpoint), s.testRun.namespace, gatewayTrafficRouteName, s.routePath)
+	switch {
+	case s.attachedRoutesErr != nil:
+		fmt.Fprintf(&sb, "Attached routes:    unavailable (%v)\n", s.attachedRoutesErr)
+	case len(s.attachedRoutes) > 0:
+		fmt.Fprintf(&sb, "Attached routes:    %s (already on the Gateway before the test route)\n", strings.Join(s.attachedRoutes, ", "))
+	default:
+		sb.WriteString("Attached routes:    none before the test route\n")
+	}
 	fmt.Fprintf(&sb, "Header rule:        %s: %s -> %s\nDefault rule:       %s %d / %s %d (tolerance %.0f points)\n",
 		gatewayTrafficHeaderName, gatewayTrafficHeaderValue, gatewayTrafficAlternate,
 		gatewayTrafficPrimary, s.primaryWeight, gatewayTrafficAlternate, s.alternateWeight, s.tolerance*100)
@@ -547,7 +587,8 @@ func (s *gatewayTrafficScenario) deploy(ctx *validators.Context) error {
 func (s *gatewayTrafficScenario) attachRoute(ctx *validators.Context) error {
 	start := time.Now()
 	ns := s.testRun.namespace
-	route := buildGatewayTrafficHTTPRoute(ns, s.profile, s.primaryWeight, s.alternateWeight)
+	s.recordAttachedRoutes(ctx)
+	route := buildGatewayTrafficHTTPRoute(ns, s.profile, s.routePath, s.primaryWeight, s.alternateWeight)
 	recordObjectYAMLArtifact(ctx, "Gateway traffic: HTTPRoute manifest",
 		fmt.Sprintf("kubectl apply -n %s -f <httproute>", ns), route.Object)
 	if _, err := s.dynClient.Resource(httpRouteGVR).Namespace(ns).Create(ctx.Ctx, route, metav1.CreateOptions{}); err != nil {
@@ -567,6 +608,64 @@ func (s *gatewayTrafficScenario) attachRoute(ctx *validators.Context) error {
 	}
 	s.timings[gatewayTrafficPhaseRoute] = time.Since(start)
 	return nil
+}
+
+// recordAttachedRoutes lists the HTTPRoutes already attached to the Gateway
+// and records them, as a warning when there are any: they share the listener
+// with the test route, and the evidence page must show what the probe's
+// requests competed with. A listing that fails is recorded as unavailable,
+// not as no routes.
+func (s *gatewayTrafficScenario) recordAttachedRoutes(ctx *validators.Context) {
+	cmd := fmt.Sprintf("kubectl get httproute -A -o json | jq '.items[] | select(.spec.parentRefs[]? | .name == %q)'", s.profile.GatewayName)
+	s.attachedRoutes, s.attachedRoutesErr = attachedHTTPRouteNames(ctx.Ctx, s.dynClient, s.profile)
+	switch {
+	case s.attachedRoutesErr != nil:
+		recordRawTextArtifact(ctx, "Gateway traffic: routes already attached", cmd,
+			fmt.Sprintf("unavailable: %v", s.attachedRoutesErr))
+	case len(s.attachedRoutes) > 0:
+		slog.Warn("HTTPRoutes already attached to the inference gateway share the listener with the traffic test route",
+			"gateway", s.profile.GatewayName, "routes", s.attachedRoutes)
+		recordRawTextArtifact(ctx, "Gateway traffic: routes already attached WARNING", cmd,
+			fmt.Sprintf("WARNING: %d HTTPRoute(s) already attached to Gateway %s/%s: %s\n"+
+				"The test route matches the per-run path %s so it outranks a shorter path; a pre-existing route on the same path, or one the gateway ranks higher, answers the probe's requests and fails the check as a non-test backend.",
+				len(s.attachedRoutes), s.profile.Namespace, s.profile.GatewayName, strings.Join(s.attachedRoutes, ", "), s.routePath))
+	default:
+		recordRawTextArtifact(ctx, "Gateway traffic: routes already attached", cmd,
+			fmt.Sprintf("none: no HTTPRoute was attached to Gateway %s/%s before the test route", s.profile.Namespace, s.profile.GatewayName))
+	}
+}
+
+// attachedHTTPRouteNames lists every HTTPRoute whose parentRefs name the
+// profile's Gateway, as namespace/name, sorted. A parentRef that names no
+// namespace is in the route's own, so a same-named Gateway elsewhere does
+// not count.
+func attachedHTTPRouteNames(ctx context.Context, dyn dynamic.Interface, profile *validators.InferenceGatewayProfile) ([]string, error) {
+	list, err := dyn.Resource(httpRouteGVR).Namespace("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, classifyK8sReadError(err, "HTTPRoutes")
+	}
+	var names []string
+	for i := range list.Items {
+		route := &list.Items[i]
+		parentRefs, _, _ := unstructured.NestedSlice(route.Object, keySpec, "parentRefs")
+		for _, ref := range parentRefs {
+			refMap, ok := ref.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, _, _ := unstructured.NestedString(refMap, keyName)
+			namespace, _, _ := unstructured.NestedString(refMap, keyNamespace)
+			if namespace == "" {
+				namespace = route.GetNamespace()
+			}
+			if name == profile.GatewayName && namespace == profile.Namespace {
+				names = append(names, route.GetNamespace()+"/"+route.GetName())
+				break
+			}
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // probe runs the probe pod to completion and parses its counts. The logs are
@@ -610,12 +709,21 @@ func (s *gatewayTrafficScenario) probe(ctx *validators.Context) error {
 	return nil
 }
 
-// judge applies the two assertions to the parsed counts.
+// judge applies the two assertions to the parsed counts; a failure names the
+// routes that shared the Gateway, since precedence between them is the first
+// thing to rule out.
 func (s *gatewayTrafficScenario) judge() error {
-	if err := evaluateGatewayHeaderRouting(s.header, s.headerRequests); err != nil {
-		return err
+	err := evaluateGatewayHeaderRouting(s.header, s.headerRequests)
+	if err == nil {
+		err = evaluateGatewayWeightedRounds(s.weighted, s.primaryShare(), s.tolerance)
 	}
-	return evaluateGatewayWeightedRounds(s.weighted, s.primaryShare(), s.tolerance)
+	if err == nil {
+		return nil
+	}
+	if hint := s.attachedRoutesHint(); hint != "" {
+		return errors.New(errors.ErrCodeInternal, err.Error()+hint)
+	}
+	return err
 }
 
 // evaluateGatewayHeaderRouting requires every header-matched request to have
@@ -794,10 +902,12 @@ func buildGatewayTrafficBackend(ns, name string, tolerations []corev1.Toleration
 
 // buildGatewayTrafficHTTPRoute attaches to the profile's Gateway across
 // namespaces (the parentRef names the Gateway's namespace, which the listener
-// must allow through allowedRoutes). The first rule sends requests carrying
-// the canary header to the alternate backend; the default rule splits all
+// must allow through allowedRoutes). Both rules match the per-run path
+// prefix, so the route outranks any pre-existing route with a shorter path
+// on the same listener; the first rule additionally matches the canary
+// header and sends to the alternate backend, the default rule splits all
 // other requests by weight.
-func buildGatewayTrafficHTTPRoute(ns string, profile *validators.InferenceGatewayProfile, primaryWeight, alternateWeight int) *unstructured.Unstructured {
+func buildGatewayTrafficHTTPRoute(ns string, profile *validators.InferenceGatewayProfile, path string, primaryWeight, alternateWeight int) *unstructured.Unstructured {
 	ref := func(name string, weight int) map[string]any {
 		r := map[string]any{keyName: name, keyPort: int64(gatewayTrafficBackendPort)}
 		if weight > 0 {
@@ -805,17 +915,24 @@ func buildGatewayTrafficHTTPRoute(ns string, profile *validators.InferenceGatewa
 		}
 		return r
 	}
+	pathMatch := func() map[string]any {
+		return map[string]any{"type": "PathPrefix", "value": path}
+	}
 	route := &unstructured.Unstructured{Object: map[string]any{
 		keySpec: map[string]any{
 			"parentRefs": []any{map[string]any{keyName: profile.GatewayName, keyNamespace: profile.Namespace}},
 			"rules": []any{
 				map[string]any{
-					"matches": []any{map[string]any{"headers": []any{map[string]any{
-						"type": "Exact", keyName: gatewayTrafficHeaderName, "value": gatewayTrafficHeaderValue,
-					}}}},
+					"matches": []any{map[string]any{
+						keyPath: pathMatch(),
+						"headers": []any{map[string]any{
+							"type": "Exact", keyName: gatewayTrafficHeaderName, "value": gatewayTrafficHeaderValue,
+						}},
+					}},
 					"backendRefs": []any{ref(gatewayTrafficAlternate, 0)},
 				},
 				map[string]any{
+					"matches":     []any{map[string]any{keyPath: pathMatch()}},
 					"backendRefs": []any{ref(gatewayTrafficPrimary, primaryWeight), ref(gatewayTrafficAlternate, alternateWeight)},
 				},
 			},

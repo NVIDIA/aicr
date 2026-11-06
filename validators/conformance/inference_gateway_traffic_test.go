@@ -180,7 +180,8 @@ func TestEvaluateGatewayWeightedRounds(t *testing.T) {
 func TestBuildGatewayTrafficHTTPRoute(t *testing.T) {
 	t.Parallel()
 	profile := agentgatewayProfile()
-	route := buildGatewayTrafficHTTPRoute("gateway-traffic-abc", profile, 70, 30)
+	const path = "/ai-conformance-abc"
+	route := buildGatewayTrafficHTTPRoute("gateway-traffic-abc", profile, path, 70, 30)
 	if route.GetName() != gatewayTrafficRouteName || route.GetNamespace() != "gateway-traffic-abc" || route.GetKind() != "HTTPRoute" {
 		t.Fatalf("route identity = %s/%s %s", route.GetNamespace(), route.GetName(), route.GetKind())
 	}
@@ -195,6 +196,18 @@ func TestBuildGatewayTrafficHTTPRoute(t *testing.T) {
 	rules, _, _ := unstructured.NestedSlice(route.Object, "spec", "rules")
 	if len(rules) != 2 {
 		t.Fatalf("rules = %d, want 2", len(rules))
+	}
+	// Both rules match the per-run path, so a pre-existing route with a
+	// shorter path on the same listener never outranks them.
+	for i, r := range rules {
+		matches, _, _ := unstructured.NestedSlice(r.(map[string]any), "matches")
+		if len(matches) != 1 {
+			t.Fatalf("rule %d matches = %v, want one", i, matches)
+		}
+		pathMatch, _, _ := unstructured.NestedMap(matches[0].(map[string]any), "path")
+		if pathMatch["type"] != "PathPrefix" || pathMatch["value"] != path {
+			t.Errorf("rule %d path match = %v, want PathPrefix %s", i, pathMatch, path)
+		}
 	}
 	headerRule := rules[0].(map[string]any)
 	matches, _, _ := unstructured.NestedSlice(headerRule, "matches")
@@ -211,8 +224,9 @@ func TestBuildGatewayTrafficHTTPRoute(t *testing.T) {
 		t.Errorf("header rule backendRef carries a weight: %v", refs[0])
 	}
 	defaultRule := rules[1].(map[string]any)
-	if _, hasMatches := defaultRule["matches"]; hasMatches {
-		t.Errorf("default rule carries matches: %v", defaultRule)
+	defaultMatches, _, _ := unstructured.NestedSlice(defaultRule, "matches")
+	if _, hasHeaders := defaultMatches[0].(map[string]any)["headers"]; hasHeaders {
+		t.Errorf("default rule carries a header match: %v", defaultRule)
 	}
 	refs, _, _ = unstructured.NestedSlice(defaultRule, "backendRefs")
 	if len(refs) != 2 {
@@ -318,7 +332,7 @@ func TestGatewayTrafficResolveEndpoint(t *testing.T) {
 			name: "proxy Service named after the Gateway on the listener port", profile: svcProfile,
 			listeners: []any{httpListener(80, "")},
 			services:  []runtime.Object{clusterIPService(svcProfile.Namespace, "inference-gateway", 443, 80)},
-			wantURL:   "http://inference-gateway.agentgateway-system.svc:80/v1/chat/completions", wantPort: 80,
+			wantURL:   "http://inference-gateway.agentgateway-system.svc:80", wantPort: 80,
 		},
 		{
 			name: "proxy Service with a suffix, first port when none matches the listener", profile: svcProfile,
@@ -327,13 +341,13 @@ func TestGatewayTrafficResolveEndpoint(t *testing.T) {
 				clusterIPService(svcProfile.Namespace, "inference-gateway-controller-manager", 9443),
 				clusterIPService(svcProfile.Namespace, "inference-gateway-proxy", 8080),
 			},
-			wantURL: "http://inference-gateway-proxy.agentgateway-system.svc:8080/v1/chat/completions", wantPort: 80,
+			wantURL: "http://inference-gateway-proxy.agentgateway-system.svc:8080", wantPort: 80,
 		},
 		{
 			name: "HTTPS listener skipped for the HTTP one", profile: svcProfile,
 			listeners: []any{map[string]any{"name": "https", "protocol": "HTTPS", "port": int64(443)}, httpListener(8080, "")},
 			services:  []runtime.Object{clusterIPService(svcProfile.Namespace, "inference-gateway", 8080)},
-			wantURL:   "http://inference-gateway.agentgateway-system.svc:8080/v1/chat/completions", wantPort: 8080,
+			wantURL:   "http://inference-gateway.agentgateway-system.svc:8080", wantPort: 8080,
 		},
 		{
 			name: "proxy Service not found", profile: svcProfile,
@@ -345,13 +359,13 @@ func TestGatewayTrafficResolveEndpoint(t *testing.T) {
 			name: "address-backed data plane uses the status address", profile: addrProfile,
 			listeners: []any{httpListener(80, "")},
 			addresses: []any{gatewayAddress("Hostname", "gw.example.internal")},
-			wantURL:   "http://gw.example.internal:80/v1/chat/completions", wantPort: 80,
+			wantURL:   "http://gw.example.internal:80", wantPort: 80,
 		},
 		{
 			name: "IPv6 address is bracketed", profile: addrProfile,
 			listeners: []any{httpListener(80, "")},
 			addresses: []any{gatewayAddress("IPAddress", "fd00::10")},
-			wantURL:   "http://[fd00::10]:80/v1/chat/completions", wantPort: 80,
+			wantURL:   "http://[fd00::10]:80", wantPort: 80,
 		},
 		{
 			name: "address-backed data plane with no reachable address", profile: addrProfile,
@@ -389,8 +403,11 @@ func TestGatewayTrafficResolveEndpoint(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if s.endpoint != tt.wantURL || s.listenerPort != tt.wantPort {
-				t.Errorf("endpoint = %s port %d, want %s port %d", s.endpoint, s.listenerPort, tt.wantURL, tt.wantPort)
+			if s.routePath != gatewayTrafficPathPrefix+s.testRun.token {
+				t.Errorf("routePath = %s, want the per-run prefix", s.routePath)
+			}
+			if want := tt.wantURL + s.routePath + gatewayTrafficRequestPath; s.endpoint != want || s.listenerPort != tt.wantPort {
+				t.Errorf("endpoint = %s port %d, want %s port %d", s.endpoint, s.listenerPort, want, tt.wantPort)
 			}
 		})
 	}
@@ -484,9 +501,12 @@ func TestGatewayTrafficScenarioRun(t *testing.T) {
 		noAccept   bool
 		rejected   bool
 		noBackend  bool
-		wantPhase  gatewayTrafficPhase
-		wantCode   errors.ErrorCode
-		wantMsg    string
+		// foreignRoute seeds a tenant HTTPRoute already attached to the
+		// Gateway; a verdict failure must name it.
+		foreignRoute bool
+		wantPhase    gatewayTrafficPhase
+		wantCode     errors.ErrorCode
+		wantMsg      string
 	}{
 		{name: "routed traffic passes", logs: probeLogsRouted, probePhase: corev1.PodSucceeded, wantPhase: gatewayTrafficPhaseVerdict},
 		{name: "header rule removed fails", logs: probeLogsHeaderRuleRemoved, probePhase: corev1.PodSucceeded, wantPhase: gatewayTrafficPhaseVerdict,
@@ -495,6 +515,8 @@ func TestGatewayTrafficScenarioRun(t *testing.T) {
 			wantCode: errors.ErrCodeInternal, wantMsg: "did not split 70/30 within 5 points in 2 round(s)"},
 		{name: "non-test backend answered fails", logs: probeLogsForeignBackend, probePhase: corev1.PodSucceeded, wantPhase: gatewayTrafficPhaseVerdict,
 			wantCode: errors.ErrCodeInternal, wantMsg: "80 request(s) failed or reached a non-test backend"},
+		{name: "non-test backend answered names the attached routes", logs: probeLogsForeignBackend, probePhase: corev1.PodSucceeded, foreignRoute: true, wantPhase: gatewayTrafficPhaseVerdict,
+			wantCode: errors.ErrCodeInternal, wantMsg: "HTTPRoutes already attached to Gateway edge-system/inference-gateway when the probe ran: [tenant/models]"},
 		{name: "probe never saw the route live fails at probe", logs: probeLogsNotReady, probePhase: corev1.PodFailed, wantPhase: gatewayTrafficPhaseProbe,
 			wantCode: errors.ErrCodeUnavailable, wantMsg: "did not reach the test backends as routed"},
 		{name: "probe finished without counting fails at probe", logs: "", probePhase: corev1.PodSucceeded, wantPhase: gatewayTrafficPhaseProbe,
@@ -523,6 +545,12 @@ func TestGatewayTrafficScenarioRun(t *testing.T) {
 				acceptRouteOnCreate(dyn, routeStatus(profile, "False", "NotAllowedByListeners"))
 			default:
 				acceptRouteOnCreate(dyn, routeStatus(profile, "True", "Accepted"))
+			}
+			if tt.foreignRoute {
+				if _, seedErr := dyn.Resource(httpRouteGVR).Namespace("tenant").Create(context.Background(),
+					httpRouteTo("tenant", "models", profile.Namespace), metav1.CreateOptions{}); seedErr != nil {
+					t.Fatalf("seed tenant route: %v", seedErr)
+				}
 			}
 			gw := trafficTestGateway(profile, []any{httpListener(80, "")}, []any{gatewayAddress("IPAddress", "172.16.100.12")})
 			s, err := newGatewayTrafficScenario(c, dyn, profile, gw, nil)
@@ -607,7 +635,7 @@ func TestWaitForHTTPRouteAccepted_Watch(t *testing.T) {
 	t.Parallel()
 	profile := agentgatewayProfile()
 	dyn := newRouteFakeDynamicClient()
-	route := buildGatewayTrafficHTTPRoute("gateway-traffic-x", profile, 70, 30)
+	route := buildGatewayTrafficHTTPRoute("gateway-traffic-x", profile, "/ai-conformance-x", 70, 30)
 	// Accepted by a same-named Gateway in the route's own namespace: not ours.
 	foreign := routeStatus(profile, "True", "Accepted")
 	foreign["parentRef"] = map[string]any{"name": profile.GatewayName}

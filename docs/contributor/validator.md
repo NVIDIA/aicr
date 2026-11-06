@@ -349,13 +349,26 @@ it resolves the endpoint the probe posts to from the Gateway's first
 hostname-free HTTP listener (a hostname-bound or missing HTTP listener fails
 with `ErrCodeInvalidRequest`, as the performance validator does): the proxy
 Service's in-cluster name for a `service-endpoints` data plane, the first
-`IPAddress` or `Hostname` status address for `gateway-address`. In a per-run
-namespace (`gateway-traffic-<token>`, the shared ownership token and
-UID-guarded cleanup) it creates two CPU backends (`model-v1`, `model-v2`:
-Deployment + Service each, `defaults.PythonProbeImage`, answering every
-request with their own name) and one HTTPRoute whose first rule matches
-`OpenAI-Project: ai-conformance-canary` exactly and routes to `model-v2`, and
-whose default rule splits 70/30. It waits for the Gateway to report the route
+`IPAddress` or `Hostname` status address for `gateway-address`. With a
+declared `gateway-address` profile the probe connects to that status address
+from inside the cluster, so the address's `loadBalancerSourceRanges` and the
+load balancer's hairpin behavior apply to it; no shipped recipe declares that
+profile (agentgateway is `service-endpoints`). In a per-run namespace
+(`gateway-traffic-<token>`, the shared ownership token and UID-guarded
+cleanup) it creates two CPU backends (`model-v1`, `model-v2`: Deployment +
+Service each, `defaults.PythonProbeImage`, answering every request with their
+own name) and one HTTPRoute whose two rules both match the per-run path
+prefix `/ai-conformance-<token>`: the first additionally matches
+`OpenAI-Project: ai-conformance-canary` exactly and routes to `model-v2`, the
+default rule splits 70/30. The path match is what keeps the test route ahead
+of a tenant's route on the same listener: Gateway API ranks routes by
+hostname, then longest path, then method, then header matches, so rules with
+no path (an implicit `/`) would lose every request, header-matched ones
+included, to a pre-existing `/v1` route, while the 48-character per-run path
+outranks any shorter path and can tie only with an older route on the same
+random path. The routes already attached to the Gateway are recorded
+(`Gateway traffic: routes already attached`, a WARNING when there are any)
+and named in a verdict failure. It waits for the Gateway to report the route
 `Accepted` and `ResolvedRefs` (watch, re-Get on a closed channel; the
 `Gateway traffic: HTTPRoute status` artifact records what the Gateway did
 report, such as `NotAllowedByListeners`), then runs a probe pod that waits

@@ -72,6 +72,7 @@ const (
 	keyMetadata   = "metadata"
 	keyName       = "name"
 	keyNamespace  = "namespace"
+	keyPath       = "path"
 	keyPort       = "port"
 	keySpec       = "spec"
 )
