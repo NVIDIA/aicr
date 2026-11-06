@@ -95,9 +95,10 @@ development:
   skipDiscovery: false                # development builds only: declared criteria, no node gates or snapshot
 ```
 
-The chart fails to render when `aicr.version` is outside `>=1.0.0, <2.0.0`,
-or is a prerelease without `aicr.allowPrerelease: true`. The operator exits at
-startup on a prerelease `--aicr-version` without `--allow-prerelease-aicr`.
+The chart fails to render when `aicr.version` is not `vX.Y.Z` with an optional
+prerelease, is outside `>=1.0.0, <2.0.0`, or is a prerelease without
+`aicr.allowPrerelease: true`. The operator exits at startup on a malformed
+`--aicr-version`, or on a prerelease without `--allow-prerelease-aicr`.
 
 A prerelease, such as a release candidate or a build from a commit, counts as
 the release it precedes: `v1.1.0-rc.1` gets the v1.1.0 behavior and is in range

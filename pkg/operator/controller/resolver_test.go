@@ -359,7 +359,7 @@ func TestResolverVersionGate(t *testing.T) {
 			}
 			rt := getRuntime(t, ctx)
 			if c := cond(rt, v1alpha1.ConditionResolved); c.Status != metav1.ConditionFalse || c.Reason != tt.wantReason || rt.Status.CandidatePlanDigest != "" {
-				t.Fatalf("Resolved = %+v, candidate %q; want False/%s and no plan", c, rt.Status.CandidatePlanDigest, tt.wantReason)
+				t.Fatalf("Resolved = %+v, candidate %q, want False/%s and no plan", c, rt.Status.CandidatePlanDigest, tt.wantReason)
 			}
 			if got := len(liveJobs(t, ctx, "render")) > 0; got != tt.wantRender {
 				t.Fatalf("render Job started = %t, want %t", got, tt.wantRender)
@@ -736,7 +736,7 @@ func TestReasonOf(t *testing.T) {
 	t.Parallel()
 	tests := map[string]error{
 		"Internal":            context.Canceled,
-		"AICRVersionMismatch": aicrjob.CheckSupportedVersion("v3.0.0", false),
+		"AICRVersionMismatch": aicrjob.CheckSupportedVersion("v3.0.0"),
 		"AICRInvalidRequest":  aicrjob.ErrorFromExitCode(aicrjob.StageRecipe, 2, "x"),
 		"Conflict":            operrors.New(operrors.ErrCodeConflict, "x"),
 	}

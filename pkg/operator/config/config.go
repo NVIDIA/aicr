@@ -230,6 +230,9 @@ func (c *Config) Validate(development bool) error {
 	if err := c.validateValidation(); err != nil {
 		return err
 	}
+	if err := aicrjob.CheckDeclaredVersion(c.AICRVersion); err != nil {
+		return err
+	}
 	if err := aicrjob.CheckPrereleaseAllowed(c.AICRVersion, c.AllowPrereleaseAICR); err != nil {
 		return err
 	}

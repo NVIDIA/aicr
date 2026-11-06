@@ -66,7 +66,7 @@ func TestAICRVersionRange(t *testing.T) {
 	for _, allow := range []bool{false, true} {
 		for _, v := range versions {
 			_, out, renderErr := render(ctx, "aicr.version="+v, fmt.Sprintf("aicr.allowPrerelease=%t", allow))
-			supported := aicrjob.CheckSupportedVersion(v, allow) == nil
+			supported := aicrjob.CheckSupportedVersion(v) == nil && aicrjob.CheckPrereleaseAllowed(v, allow) == nil
 			switch {
 			case supported && renderErr != nil:
 				t.Errorf("%s, allowPrerelease %t: the operator supports it, the chart fails: %s", v, allow, out)

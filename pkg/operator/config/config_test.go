@@ -41,13 +41,15 @@ func TestFlagsOverrideDefaults(t *testing.T) {
 		"--aicr-version=v1.0.0", "--aicr-image=" + image, "--registry-repository=oci://r.example.com/x",
 		"--registry-plain-http", "--development-bypass-approvals", "--jobs-namespace=jobs", "--engine=ArgoCD",
 		"--engine-namespace=gitops", "--engine-project=p", "--development-skip-discovery", "--snapshot-agent-requests=cpu=250m",
+		"--allow-prerelease-aicr",
 	})
 	if err != nil {
 		t.Fatalf("Parse() = %v", err)
 	}
 	if c.JobsNamespace != "jobs" || !c.RegistryPlainHTTP || !c.BypassApprovals || c.Engine != plan.EngineArgoCD ||
 		c.EngineNamespace != "gitops" || c.EngineProject != "p" || c.OperatorNamespace != "aicr-system" ||
-		!c.SkipDiscovery || c.SnapshotAgentRequests != "cpu=250m" || c.SnapshotAgentServiceAccount != "aicr-snapshot-agent" {
+		!c.SkipDiscovery || c.SnapshotAgentRequests != "cpu=250m" || c.SnapshotAgentServiceAccount != "aicr-snapshot-agent" ||
+		!c.AllowPrereleaseAICR {
 
 		t.Fatalf("config = %+v", c)
 	}
@@ -84,6 +86,7 @@ func TestValidate(t *testing.T) {
 	}{
 		"prerelease without opt-in":  {wantErr: true, mutate: func(c *Config) { c.AICRVersion = "v1.3.0-rc.1" }},
 		"prerelease with opt-in":     {wantErr: false, mutate: func(c *Config) { c.AICRVersion, c.AllowPrereleaseAICR = "v1.3.0-rc.1", true }},
+		"unprefixed version":         {wantErr: true, mutate: func(c *Config) { c.AICRVersion = "1.0.0" }},
 		"out-of-range version":       {wantErr: false, mutate: func(c *Config) { c.AICRVersion = "v2.0.0" }},
 		"bypass without development": {wantErr: true, mutate: func(c *Config) { c.BypassApprovals = true }},
 		"skip without development":   {wantErr: true, mutate: func(c *Config) { c.SkipDiscovery = true }},
