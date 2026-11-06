@@ -475,8 +475,8 @@ b200-gke-cos-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   003-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -557,7 +557,7 @@ b200-gke-cos-inference-dynamo:
   README.md: 1067cac0852cd920c6029cae727307489003fe31a4f270f3545ed0b58b41baa0
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 7f34102ee75bd04073dd5c50916d29b25241c7c2d400e952f2224ec81b1603d1
-  checksums.txt: c838c56a99133a8e3a4a9f7844c463f445a0d6de84d741620946b8d8cdc217e1
+  checksums.txt: 830ed0ccb0b9fd6b13a9e8d236ed59b0cdb8b85f04719a4dd5e0a10eeca227c1
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: 829f6669f55bae04bb8bd1b7d0d077318397c4b664779fbc32d4921b0fe8a4c3
 b200-gke-cos-training-kubeflow:
@@ -683,8 +683,8 @@ bcm-inference:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -748,7 +748,7 @@ bcm-inference:
   README.md: 488a89784d508d8bbf8ef44465db3789514acfa1a075c924104d0dbba1849e6c
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 9f2a5e27f2c0d8d25b8f907bac0ac72d8c74bea3f5efe9033227d9bc2b3c6563
-  checksums.txt: 0fa355df3d2e5d333a31c540ea2e795f88087c7e2afd34600b35d4780085440d
+  checksums.txt: 6343ec50869f03797e0c5218df540d04888f7fd59908d16df370db5ce9174d92
   deploy.sh: 1ccc85228bcbafaf6345c9da5753ab24dac14c7edec7f22e99c53c2535b4653b
   recipe.yaml: 75d5e3c6df872e5a0f39595a56573d5710cd7349a6314476445e0721dafccf95
 eks-ubuntu:
@@ -871,8 +871,8 @@ gb200-eks-amazonlinux-inference:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -944,7 +944,7 @@ gb200-eks-amazonlinux-inference:
   README.md: a614e5f974f47af1e048a76d534749ce9e94ee8757514f51c79114f84fc2ba7f
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: d6bddadd9571daefe39386c85efee81acdd75537631fab8050d52784abb4ab7b
-  checksums.txt: df1f0cc44b80962c195060466893c38eeb601c018e5e05dd55b097a29248b2c4
+  checksums.txt: 50b2126cbb36dd33b426573fdcdd08751eaf3f34f3dbe00a75bae3c8e5906c97
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: 7b10d6cf178de355a1c8d6102b13edd1b41b869a184c54317dfc0434b5682e61
 gb200-eks-ubuntu-inference-dynamo:
@@ -955,8 +955,8 @@ gb200-eks-ubuntu-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -1041,7 +1041,7 @@ gb200-eks-ubuntu-inference-dynamo:
   README.md: b9e1ed436b58e6d71edd17424fa408e7fa758b4151765e88d495d2a2b40b43a1
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 3f65fdd9f08050774f50e7ead15fb206dc5a1cf57279db4e999db87102b196ec
-  checksums.txt: 88741e005f72fb8b12164e15b47e08a42f17749efc7ade44e539e264ce0b4ef6
+  checksums.txt: 4ab7c2d96e34d5a0b6b84ce4e779757bcaa889a10e462e1b65dc1dbe542b72ad
   deploy.sh: 5463ca8ed80e72d789bfb987637d85e2d3da5e4212a6a20e52b3640465c24da1
   recipe.yaml: eb84f2f8e84f5784936574206813747f8fc039e32e46e4ae7ef3b1848948726e
 gb200-eks-ubuntu-training-kubeflow:
@@ -1219,8 +1219,8 @@ gb200-gke-cos-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   003-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -1312,7 +1312,7 @@ gb200-gke-cos-inference-dynamo:
   README.md: d1fa14f3eae05ed17abc132e470786833ee554ae7d583283918e3572a2bace6f
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: b3fd2bcb2b89463a8853ee59530574354f5bb2d21b953f3c01dc44d788808300
-  checksums.txt: 3c1f15972cc571a0ceee23ea0aaedbb6509c57f742267ef98e8329d16594d044
+  checksums.txt: 9c61e7e1eede1ae0ed81c3fcacea414671d753d8900d2e11866f46200fa165e5
   deploy.sh: 169ebed142cd9adf4392755b843629729d2d26e0cfd613dfce97b816b1069827
   recipe.yaml: 56ec3feb42aaa4f6210ddf69f3920f90d384462f3f3e8917691c745a06cb75b2
 gb200-gke-cos-training-kubeflow:
@@ -1580,8 +1580,8 @@ gb200-oke-ubuntu-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -1648,7 +1648,7 @@ gb200-oke-ubuntu-inference-dynamo:
   README.md: 4151b1dd1fccd0cabe64025a22e8533487af57e4660556b1355bf1569480d838
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 3bfc88caab58209436009efd8031d35aba0b35d52dd36b83a2581ac422a92578
-  checksums.txt: a83c4b55300050ffb867ae0c6890cc711f55394b51b21ed086d4e0882ad18998
+  checksums.txt: 0380937fda66de5488f0bfe7df378c5f79d6dfbd6851bdc29e4aa3d101e79751
   deploy.sh: 1e42e0e0bc9c9ddc7f45c00104c12763d0ebf6ace12098813023d30512df1fdc
   recipe.yaml: d4d41c6706d572e9b15e029106e0083ac235de9512f7568ac1a3e772e3c9663e
 gb200-oke-ubuntu-training-kubeflow:
@@ -1786,8 +1786,8 @@ gb300-eks-amazonlinux-inference:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -1859,7 +1859,7 @@ gb300-eks-amazonlinux-inference:
   README.md: d5b995e71b544a16569da49ebe5d876febaa06091708cfba97f07f697fff538a
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 9791948ed678cb75cbef06018f53a4729145be4ccf3560b6a71c3cfd9d71860b
-  checksums.txt: 97e48b4e8d281a3747ffbe7f006cad5c89370dc5f4192f6c6dd8403b564cb7de
+  checksums.txt: 3fc77fe5d39c4070874d0ca64b70a118e19ee5fe6568d3210833636b65a0d1b9
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: 05dee8de03469da45ce73809462fc3e9133215b4a9c370781a1fb5e3de888a41
 gb300-eks-ubuntu-inference-dynamo:
@@ -1870,8 +1870,8 @@ gb300-eks-ubuntu-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -1956,7 +1956,7 @@ gb300-eks-ubuntu-inference-dynamo:
   README.md: 877f1326a0fa2a308f86c6ffd0de3dc14bb09c04a88bdf92da95b2242042103c
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 6cb867433d2f2f8a5fd6df6a599b6b6e0e43dc77c6dffdb0fa7f9545a4638097
-  checksums.txt: 6155311f90afd66d9ec48e0bccffd660dce41c6af84d18708589799ba1957a28
+  checksums.txt: 61a0496300fcdbaa0b54cacbcc0dd8fbd5133236b02cbcc866e84d3c6b32ce10
   deploy.sh: 5463ca8ed80e72d789bfb987637d85e2d3da5e4212a6a20e52b3640465c24da1
   recipe.yaml: 5ce9d5720a8a038fedeacfdf1fb6c740a32e9202edebe0097b7b9fe03e912d86
 gb300-eks-ubuntu-training-kubeflow:
@@ -2200,8 +2200,8 @@ gb300-gke-cos-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   003-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -2282,7 +2282,7 @@ gb300-gke-cos-inference-dynamo:
   README.md: c0054751bd1699a020ef11c813c7def14e1f027df1fe87c21518d6abb07e7ba4
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 9b567b82bdc445e3222131436b511f851d6fdba14d5b5ea0ec1964332f99bcce
-  checksums.txt: b92383185c2dfe999a83457413ba24bed4f9848d71373af9dd3da92aec5a5048
+  checksums.txt: 2dd012680506cebb164ab79d683431d2c9a0dd3787a10b5717746a59688e9a7c
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: 57d8655f6048b0e076773ddb40776096833c1b7ac83a076851d5986a449bc33b
 gb300-gke-cos-training-kubeflow:
@@ -2368,8 +2368,8 @@ h100-aks-ubuntu-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -2453,7 +2453,7 @@ h100-aks-ubuntu-inference-dynamo:
   README.md: 24bdea0063f60d897177f122e7b150398178ec1123cfe673572660612ed64506
   UPGRADING.md: 6cb67acfd9eb81979395397faf676cb48343ed293f73b7354d23a6b540a75a84
   bundle-info.yaml: b8fc0ae34f85969e73c293dbd739a74cb00262487249d210874c471aa97a04e6
-  checksums.txt: f3a81c7ece2a687334586b1fe4ef59277e170f6862f2001f03aa3cc086bf6fd3
+  checksums.txt: 2ae355ac77195fe753cca8fe9d1d96950666c610560d6949ed88f22e010efba5
   deploy.sh: 1a78677ffdf4ba1f861de19dbb30bffaab64b77aa62b48a87bd929a564bce55a
   recipe.yaml: d33785305722e37b8f1898d2dadd855d51baff16d278018c2415573c1d16ccc8
 h100-aks-ubuntu-training-kubeflow:
@@ -2777,8 +2777,8 @@ h100-eks-amazonlinux-inference:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -2845,7 +2845,7 @@ h100-eks-amazonlinux-inference:
   README.md: 43df2972b0048b2a70b4b68b4b0b1355aa5faa2acb8982cdef9642470e8cc97d
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: d2ee5006472a811d9b8ddfab720a85abb563149bd1e239339b78fd0f08ebb14d
-  checksums.txt: 4b246722b36263e47a48b5bdbf993c2fcf91a1f9b1249727d4efdf455a9a070a
+  checksums.txt: faf715765a0fe2e082ff88cefeb749086966596bc9557a077b6f824114da216e
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: ee0e9387298cd07045c65a49f8477136fe8d88a330a18868860327f6fcf980e9
 h100-eks-ubuntu-inference-dynamo:
@@ -2856,8 +2856,8 @@ h100-eks-ubuntu-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -2937,7 +2937,7 @@ h100-eks-ubuntu-inference-dynamo:
   README.md: d182b99487d6e2fd227255b4a75355c3214b99ec63dc59568c0d96126ca43c0d
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: e264578948ba7b940ee2f5366a3d6393534a74695561bc8a8febcc8d9d54b602
-  checksums.txt: 9066cca902608ef0aa3de1d99d6ab24c2da79f5f3f993f1b100a71a927a10c61
+  checksums.txt: f0cc773cbbf09ed97be82bf2d7ca1604ff0211f5a7f94c03ebd3c941b1698664
   deploy.sh: 5463ca8ed80e72d789bfb987637d85e2d3da5e4212a6a20e52b3640465c24da1
   recipe.yaml: dde192d46e5b5735c9eb9dac328b94b83b581ccd59bff2366669682a4c6c8c9c
 h100-eks-ubuntu-inference-nim:
@@ -2948,8 +2948,8 @@ h100-eks-ubuntu-inference-nim:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -3025,7 +3025,7 @@ h100-eks-ubuntu-inference-nim:
   README.md: e33f3146916fd5537468e1a2cf823406a479b8ca05b6f2693f00b8ea5adb405e
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: b48ca68146f754d2811d2928d69af17f66caf8372837abd4ad42bf0b04dff165
-  checksums.txt: 70a8291a6750a927c6267c090442b76025487244829ed113ca8e65ac929651c8
+  checksums.txt: c8b371abc77ef279ed388ba886d5bd8d6c708e0acc47290099c1e66174b0e252
   deploy.sh: 93abef48d4cfd33ed295b33a924b01bb02e810595d7dd63575ae58c29c0122be
   recipe.yaml: a29983bf8b56aeb73e546f6d4ac5e164d081d02ff858beb64922c00106a14354
 h100-eks-ubuntu-training-kubeflow:
@@ -3792,8 +3792,8 @@ h100-gke-cos-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   003-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -3879,7 +3879,7 @@ h100-gke-cos-inference-dynamo:
   README.md: 89892754948bff1af7caddf6bd60567666b99d42868b3538baab1ca7ba1ca9ae
   UPGRADING.md: 9193061614a8c7bc80b525a060dc92f0e873335853f7dcda37973d3c37b2381c
   bundle-info.yaml: c77a7d8923c72126b854a20db9b7072cbec5a5f813d0d5b9144b8f4c8141aa54
-  checksums.txt: ca8ea2002d457dccb4285f6d889f219c8c3447a06e60cbae026df60a568f902f
+  checksums.txt: 4e6e622e7b58b1fdff32dc21407c043d7e6884e72b2ace61ff7b8850ffe0a001
   deploy.sh: 34d9d6c33e26fe690cb388ba01ea383b3444fa18c63e525c83f143f5c41f613e
   recipe.yaml: d05bd3e522c74d37a6ac8bbfdc7a270bc3be77f60c9b65ba31330d969ec4f0dc
 h100-gke-cos-training-kubeflow:
@@ -4225,8 +4225,8 @@ h100-kind-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -4297,7 +4297,7 @@ h100-kind-inference-dynamo:
   README.md: 6e215d87eb4500940cda672c886e8f293e7351572016d7f50719192dfe64f6ed
   UPGRADING.md: 6cb67acfd9eb81979395397faf676cb48343ed293f73b7354d23a6b540a75a84
   bundle-info.yaml: 2b71173f3115daf106aedf3b1551675c91f9c215a4a6717d55162ce3fa9d1985
-  checksums.txt: 8ad48921fbc4b368529882a7ab7ee1d7426c9061a0b6d3202b681b40b625de60
+  checksums.txt: a455a65fae5a31bcdd20756b402b798fa2851812899a6505807af6d4f8be196f
   deploy.sh: fc332287efdf91cc0ea399c6b5227ed2bb2fac9577a14311a44f24646cd09ad2
   recipe.yaml: 69e3b529e7ea06a2d61a3bbea76359a0ce9770b54aba7f7180e77b86789ef6bb
 h100-kind-training-kubeflow:
@@ -4574,8 +4574,8 @@ h200-eks-inference:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -4647,7 +4647,7 @@ h200-eks-inference:
   README.md: 169a77b405864ec008ba272f67a3a03ac1355462bb02fd9368a9e3ebf7bc9538
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 560a8c303b8eb29635737a4bb8ea26afa333156fa0c6b8467f11ed11fb5d1e5c
-  checksums.txt: 727f760854c6eaf51b5438964981e20f3d5fa4a529e32ab8b508f680e4898ba4
+  checksums.txt: 5081c2964371ee96481a5b01f929b8d858a7b9d8fa4e0c7da547c65c778c7a95
   deploy.sh: 4dc09cb6d1d5fe7cc484477ddc854ac7156a258c39f5885eac02c2fe8b1afe54
   recipe.yaml: 41780e41d7fe8756041c036a8fb8207657b506083fb0a4a47530397674e318af
 h200-eks-training-kubeflow:
@@ -4888,8 +4888,8 @@ l40s-oke-inference:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -4948,7 +4948,7 @@ l40s-oke-inference:
   README.md: 15261689f41fc0c4f9042f1026872cc578371eb1bebdfda131c37ce7789427b4
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 3d84be01a6f9a63ef685a5aa71f73e59118e35fd8bcef3aeb159ee20ef995da9
-  checksums.txt: 2bfc74e4972874e1ca5c7e543dc480ae7387a8b6a2bd5bc0efe3f68b70f4df73
+  checksums.txt: c6bff67e4ad1ebb7b991a030139f2a3cd68cf95008b3841c777dcfbadaf4810e
   deploy.sh: e576ddc4b52f43843cee5b8b516961df9e34b6566cb6df72f34d01a5f09173fe
   recipe.yaml: 6c1406f0aa638313fc516bced179f8375e52a047260bfd2b60a7301421a22204
 l40s-oke-training-kubeflow:
@@ -5380,8 +5380,8 @@ rtx-pro-6000-eks-amazonlinux-inference:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -5448,7 +5448,7 @@ rtx-pro-6000-eks-amazonlinux-inference:
   README.md: d39c066205a61f7c37688d6fe6f5e78117627ca1e924f5a142be0ddb9ab6f5b0
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: a93daec33ac5f281df55c6031ab4a86966e80679573cd5ea4032926bc48e00d3
-  checksums.txt: 2f3180200a3bfea69cd005668e290ff1276222461b30b0c2615e4d493c3ed115
+  checksums.txt: 14ed4bff602ec616fc14419883e68d1d223a1420bb9a44704bcc62f50dda71ca
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: a8237239fef969d8c496a15685528c4bbe31c98298df15781709a2605ca1a189
 rtx-pro-6000-eks-ubuntu-inference-dynamo:
@@ -5459,8 +5459,8 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -5540,7 +5540,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   README.md: 01fc3edc0efbfdb0c10c6ffb7002665daa0dfde7af49890ec8d7872eb11d79f6
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: 62f117d2b2bdcce586dd31119f333d8f03b46494b942d8bfca65b37394652156
-  checksums.txt: 2d2be79e8db59957b0ff6862cea9d264d37884f0e0ef8ba679f3a3a7efe4f825
+  checksums.txt: 1ef7f24c3bf609e7be03893d78b461d63784c7fafb69a90bdcb425faa3b57d49
   deploy.sh: 5463ca8ed80e72d789bfb987637d85e2d3da5e4212a6a20e52b3640465c24da1
   recipe.yaml: 5881b58270ee3675ac029e0c7eb7904d101423ea02854b2b2cc25d8213a9e38c
 rtx-pro-6000-eks-ubuntu-inference-nim:
@@ -5551,8 +5551,8 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -5628,7 +5628,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   README.md: b481ee07e08e9b84ce9df7aef5ac47fb40a1b6eda3c025eaf09649e4f0342273
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: d223e69619a28881dc5b1ee64356863998ca591a5eb2be218d5a44e407a10e9b
-  checksums.txt: 48460dfd3b159fd72f0b18b7a905e0821df2b58e3a5b5f7281d9791c42c1c1e6
+  checksums.txt: b71f0b29b56aa6a0081e51c04d79e4b4b3bff1dd3c8b3029834875c01af6510c
   deploy.sh: 93abef48d4cfd33ed295b33a924b01bb02e810595d7dd63575ae58c29c0122be
   recipe.yaml: 4c62fabc6a89c658bdff58eb68ef997f802c3c442e0fa6da12edd14d7dc45342
 rtx-pro-6000-eks-ubuntu-training-kubeflow:
@@ -5713,8 +5713,8 @@ rtx-pro-6000-lke-ubuntu-inference:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -5773,7 +5773,7 @@ rtx-pro-6000-lke-ubuntu-inference:
   README.md: e9cd92834f6077f292761999b7380293f3c6f7415318357988c4fb53b13ee9fa
   UPGRADING.md: 9bf8206721a50931dcd2cd2d82f6440d0ce9e592ef4c78048e041ac6c11ce796
   bundle-info.yaml: 7ba9c6be212941ca9e2cf7c262296d3d440e0e143b9a188d1279f84a9f448dfd
-  checksums.txt: e458bcc4f28894cb7fd9a0e2f92b47801906182233eb33e265871660a2efd9cb
+  checksums.txt: 45239b4c5cf4fae30d64f401fd5b66760d0760ee59699e9deae629dd913cb7c0
   deploy.sh: 68dbbe44b809aaa9dd14281f7b43cf6c55a7006e3931b03dff27b5bcb6744ca3
   recipe.yaml: ede527ac58af6474ecddacbe2ab9dcc3fdcdd945b2d686dedd59e664ef7368fb
 rtx-pro-6000-lke-ubuntu-training-kubeflow:
@@ -5845,9 +5845,9 @@ vr200-rke2-ubuntu-inference-dynamo:
   002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
   002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
-  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: ac3e54df1bd16aef4e232de7e3bdf242d599e2ac48f3fc8a083493cf4a2682f1
-  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: fe4e17829ea3063f1bdee527119743bb8ce65baf47fae877624a01943bd52287
-  002-agentgateway-crds-post/templates/tlsroute-crd.yaml: 75289d79ce786d9c7c57cebdaef280d8b1cb72943050d3742b536dce8e849a7c
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
+  002-agentgateway-crds-post/templates/tlsroute-crd.yaml: 4b6a385fb81697ab6e11e05199542b6ca9ebe8d88afd6296e9b4f35d94b090b9
   002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   003-dranet/Chart.yaml: afeb8fc7d2d11ad349641c63cb13d55d7528027571c2061f0754bd96fcef0e16
   003-dranet/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -5924,7 +5924,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   README.md: 05eeebd41994f3317531a5c375105a0c511ead72b2472d45f704df2962f618ce
   UPGRADING.md: c13181818215d70ba0546fcd97b33316362bbd728bedc1cebb5c720afa4fb1e5
   bundle-info.yaml: b65e97caf3d720b87ac5b5568afb7e66f051f63a3f7e15b1d2620f78b4748839
-  checksums.txt: f5909dd7eeb65896682de74a6249bc2c572bc0195321a0276f587d5c48fe8370
+  checksums.txt: 14454ec0af4e36dbc781d4cf600704251719f25417e6017d2cd8fd7aaaa9f942
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: 26378b033e4af3b759d6e6a004dbe7dacc5d4bdd1c49c188482573c972bcfa6d
 vr200-rke2-ubuntu-training-kubeflow:

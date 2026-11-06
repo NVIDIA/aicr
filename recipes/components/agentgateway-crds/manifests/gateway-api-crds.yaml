@@ -27,8 +27,10 @@
 # Helm reads keep from the release's stored manifest when it uninstalls a
 # release, so the guards protect a cluster once a bundle carrying them has
 # been applied: from then on, uninstalling, pruning or moving the release that
-# owns these CRDs leaves them in place, together with every resource of their
-# kinds. Neither guard stops an explicit kubectl delete.
+# owns these CRDs leaves the CRDs in place, so the resources of their kinds are
+# not garbage-collected with them. The guards cover the CRDs only: a Gateway or
+# route that a removed release or Application owns itself is still deleted.
+# Neither guard stops an explicit kubectl delete.
 
 #
 # Gateway API Standard channel install
