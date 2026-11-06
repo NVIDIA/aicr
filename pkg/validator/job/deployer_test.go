@@ -817,10 +817,8 @@ func TestWaitForCompletionTimeout(t *testing.T) {
 	}
 }
 
-// TestWaitForPodTerminationPropagatesNonNotFound verifies that WaitForPodTermination
-// only swallows NotFound errors from getPodForJob. Other failures (e.g. RBAC
-// Forbidden) must propagate so the validator can decide retry/escalation
-// instead of silently skipping the termination wait.
+// TestWaitForPodTerminationPropagatesNonNotFound verifies that an API failure
+// cannot be mistaken for an empty list of pods during the termination wait.
 func TestWaitForPodTerminationPropagatesNonNotFound(t *testing.T) {
 	t.Parallel()
 

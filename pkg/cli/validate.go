@@ -478,6 +478,48 @@ type validationConfig struct {
 	imageRefs *imageRefsTarget
 }
 
+// validationCancellationBudget covers the shared phase cleanup window and the
+// separate privileged RBAC/data teardown window. Partial output cannot renew it.
+const validationCancellationBudget = 2 * defaults.K8sCleanupTimeout
+
+type validationCancellation struct {
+	deadline time.Time
+	done     chan struct{}
+	stop     func() bool
+}
+
+func observeValidationCancellation(ctx context.Context, now func() time.Time) *validationCancellation {
+	c := &validationCancellation{done: make(chan struct{})}
+	c.stop = context.AfterFunc(ctx, func() {
+		c.deadline = now().Add(validationCancellationBudget)
+		close(c.done)
+	})
+	return c
+}
+
+// release stops a pending callback or joins one already started. Closing done
+// on the stopped path also makes repeated release safe.
+func (c *validationCancellation) release() {
+	if c.stop() {
+		close(c.done)
+	} else {
+		<-c.done
+	}
+}
+
+func (c *validationCancellation) outputContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline := time.Now().Add(defaults.K8sCleanupTimeout)
+	if ctx.Err() != nil {
+		// Cancellation can precede callback startup; join before reading its
+		// deadline rather than granting output a new cleanup window.
+		<-c.done
+		if c.deadline.Before(deadline) {
+			deadline = c.deadline
+		}
+	}
+	return context.WithDeadline(context.WithoutCancel(ctx), deadline)
+}
+
 // runValidation runs validation using the container-per-validator engine.
 //
 // The validator run is driven through the aicr.Client facade (ValidateState),
@@ -492,6 +534,9 @@ func runValidation(
 	snap *aicr.Snapshot,
 	cfg validationConfig,
 ) error {
+
+	cancellation := observeValidationCancellation(ctx, time.Now)
+	defer cancellation.release()
 
 	slog.Info("running validation", "phases", cfg.phases)
 
@@ -550,9 +595,34 @@ func runValidation(
 		opts = append(opts, aicr.WithValidationSkipChecks(cfg.skipChecks...))
 	}
 
-	results, err := client.ValidateState(ctx, rec, snap, opts...)
-	if err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "validation failed")
+	results, validationErr := client.ValidateState(ctx, rec, snap, opts...)
+	return finishValidation(ctx, cancellation, client, rec, snap, cfg, results, validationErr)
+}
+
+func finishValidation(
+	ctx context.Context,
+	cancellation *validationCancellation,
+	client *aicr.Client,
+	rec *aicr.RecipeResult,
+	snap *aicr.Snapshot,
+	cfg validationConfig,
+	results []*aicr.PhaseResult,
+	validationErr error,
+) error {
+
+	if validationErr != nil && len(results) == 0 {
+		return errors.PropagateOrWrap(validationErr, errors.ErrCodeInternal, "validation interrupted")
+	}
+	if validationErr != nil {
+		// Persist partial output, but never continue signing/pushing evidence
+		// after cancellation or replace the interruption with an output error.
+		outputCtx, cancel := cancellation.outputContext(ctx)
+		defer cancel()
+		ctx = outputCtx
+		if ctx.Err() != nil {
+			slog.Warn("partial CTRF output budget exhausted", "error", ctx.Err())
+			return validationErr
+		}
 	}
 
 	// Merge the per-phase CTRF reports into a single combined report via the
@@ -564,6 +634,10 @@ func runValidation(
 	// target the same cluster used for snapshot/recipe reads.
 	ser, serErr := serializer.NewFileWriterOrStdoutWithKubeconfig(cfg.outFormat, cfg.output, cfg.kubeconfig)
 	if serErr != nil {
+		if validationErr != nil {
+			slog.Warn("failed to create partial CTRF writer", "error", serErr)
+			return validationErr
+		}
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", serErr)
 	}
 	defer func() {
@@ -574,7 +648,15 @@ func runValidation(
 		}
 	}()
 
+	if validationErr != nil && ctx.Err() != nil {
+		slog.Warn("partial CTRF output budget exhausted", "error", ctx.Err())
+		return validationErr
+	}
 	if writeErr := ser.Serialize(ctx, combined); writeErr != nil {
+		if validationErr != nil {
+			slog.Warn("failed to serialize partial CTRF report", "error", writeErr)
+			return validationErr
+		}
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize CTRF report", writeErr)
 	}
 
@@ -606,10 +688,14 @@ func runValidation(
 		}
 		slog.Info("cleanup disabled - validator "+kept+" kept for debugging",
 			"namespace", cfg.validationNamespace,
-			"runID", runID)
-		slog.Info("to inspect Job logs: kubectl logs -l " + labels.RunID + "=" + runID + " -n " + cfg.validationNamespace)
+			"runID", cfg.runID)
+		slog.Info("to inspect Job logs: kubectl logs -l " + labels.RunID + "=" + cfg.runID + " -n " + cfg.validationNamespace)
 		slog.Info("to list Jobs: kubectl get jobs -n " + cfg.validationNamespace)
 		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
+	}
+
+	if validationErr != nil {
+		return validationErr
 	}
 
 	// Generate conformance evidence if requested. The checklist version

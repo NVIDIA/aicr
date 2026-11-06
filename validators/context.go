@@ -17,9 +17,13 @@ package validators
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -36,10 +40,14 @@ import (
 
 // Context holds all dependencies for a validator check function.
 type Context struct {
-	// Ctx is the parent context with timeout.
+	// Ctx is the parent context with timeout. It is also canceled when the
+	// container receives SIGTERM (Job deadline, eviction, or node drain), so a
+	// check that honors it runs its deferred cleanup inside the termination
+	// grace period. Cleanup must therefore use a fresh context, never Ctx.
 	Ctx context.Context
 
-	// Cancel releases resources. Must be called when done.
+	// Cancel releases resources, including the SIGTERM subscription. Must be
+	// called when done.
 	Cancel context.CancelFunc
 
 	// Clientset is the Kubernetes typed client.
@@ -91,13 +99,81 @@ func checkTimeoutFromEnv() time.Duration {
 	return d
 }
 
+// errTerminated is the context cause recorded when the container receives
+// SIGTERM. The runner reads it with context.Cause to tell an interrupted check
+// from one that merely ran out of its own timeout.
+var errTerminated = stderrors.New("terminated by SIGTERM")
+
+// subscribeSIGTERM registers for SIGTERM and returns the delivery channel and
+// the function that unregisters it. It is a variable only so tests can drive
+// termination without signaling the test binary.
+var subscribeSIGTERM = func() (<-chan os.Signal, func()) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGTERM)
+	return ch, func() { signal.Stop(ch) }
+}
+
+// withSIGTERMCancel derives a context from parent that is canceled with cause
+// errTerminated when SIGTERM is delivered. The returned release function
+// unregisters the signal and waits for the watcher goroutine to exit.
+func withSIGTERMCancel(parent context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(parent)
+	events, stop := subscribeSIGTERM()
+	done := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	go func() {
+		defer close(done)
+		select {
+		case <-events:
+			cancel(errTerminated)
+		case <-ctx.Done():
+		case <-release:
+			// signal.Stop has finished delivery; consume a queued signal
+			// before normal release can win the cancellation cause.
+			select {
+			case <-events:
+				cancel(errTerminated)
+			default:
+			}
+		}
+	}()
+	return ctx, func() {
+		once.Do(func() {
+			stop()
+			close(release)
+		})
+		<-done
+		cancel(context.Canceled)
+	}
+}
+
+// checkContext retains the signal cause independently: a timeout may fire
+// before SIGTERM, and context.Cause on the timed child cannot change afterward.
+type checkContext struct {
+	context.Context
+	signalCtx context.Context
+}
+
+// newCheckContext returns the context a check runs under: bounded by timeout
+// and canceled with cause errTerminated on SIGTERM. The returned cancel func
+// releases both and is safe to call more than once.
+func newCheckContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	termCtx, releaseSIGTERM := withSIGTERMCancel(context.Background())
+	ctx, cancelTimeout := context.WithTimeout(termCtx, timeout)
+	return &checkContext{Context: ctx, signalCtx: termCtx}, func() {
+		cancelTimeout()
+		releaseSIGTERM()
+	}
+}
+
 // LoadContext creates a Context from the v2 container environment.
 // Reads snapshot and recipe from mounted ConfigMap paths.
 // Builds a K8s client from in-cluster config or KUBECONFIG.
 //
 // The caller MUST call ctx.Cancel() when done.
 func LoadContext() (*Context, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), checkTimeoutFromEnv())
+	ctx, cancel := newCheckContext(checkTimeoutFromEnv())
 
 	// Build the REST config (the typed client it also returns is rebuilt below
 	// after raising the rate limits, so it is intentionally discarded here).
