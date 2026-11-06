@@ -27,9 +27,10 @@ across security groups.** AICR's own supported paths often don't:
 
 If your deployment co-locates every Dynamo component on one node group (one
 security group), you can skip the Frontend↔Worker rules below — there is no
-cross-SG traffic between them to allow. The separate Prometheus/`ai-service-metrics`
-requirement further down still applies regardless of Frontend/Worker
-co-location; see that section. The Frontend↔Worker rules below apply only
+cross-SG traffic between them to allow. The separate Prometheus requirement
+for the `ai-service-metrics` and `pod-autoscaling` conformance checks further
+down still applies regardless of Frontend/Worker co-location; see that
+section. The Frontend↔Worker rules below apply only
 when Frontend and Worker sit in different security groups, described by
 role rather than by fixed node-group name:
 
@@ -122,12 +123,15 @@ through the deployment — checking immediately after the Pod reaches
 `Running` will show nothing yet and does not by itself indicate a
 networking failure. Then probe that specific port from the other side.
 
-The conformance validator's `ai-service-metrics` check adds a third requirement:
-it dials Prometheus over the cluster Service (typically
-`kube-prometheus-prometheus.monitoring.svc:9090`). The orchestrator Job that
-runs the check tolerates every taint and now sets a *preferred*
-`dependencyAffinity` toward Prometheus, so the scheduler co-locates it with the
-Prometheus pod when possible. The preference is best-effort, not required, so it
+The conformance validator's `ai-service-metrics` check, and `pod-autoscaling`
+when the recipe declares `kube-prometheus-stack`, add a third requirement: they
+dial Prometheus over the cluster Service (typically
+`kube-prometheus-prometheus.monitoring.svc:9090`), `ai-service-metrics` for its
+queries and both for the scrape-pool API that tells them when Prometheus has
+loaded the monitor they created. The orchestrator Job that runs either check
+tolerates every taint and sets a *preferred* `dependencyAffinity` toward
+Prometheus, so the scheduler co-locates it with the Prometheus pod when
+possible. The preference is best-effort, not required, so it
 can still fall back to any worker node (e.g. if the Prometheus node is
 unschedulable) — including one whose ENI is in a security group that cannot
 reach the Prometheus pod.
@@ -136,6 +140,13 @@ When that happens, the dial times out at 5 s and the check is marked `failed`:
 
 ```text
 [SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
+```
+
+`pod-autoscaling` fails the same way at its preflight, before creating any
+resource:
+
+```text
+[SERVICE_UNAVAILABLE] Prometheus at http://kube-prometheus-prometheus.monitoring.svc:9090 did not list its scrape pools (GET /api/v1/scrape_pools needs Prometheus >= v2.42 and network connectivity between the validator pod and the Prometheus service)
 ```
 
 On a fallback placement the outcome can be **non-deterministic from run to
@@ -179,7 +190,8 @@ group), so this rule is needed **even when Frontend and Worker are
 co-located** — it is not part of the Frontend↔Worker relationship above.
 
 Allow ingress on TCP `9090` (Prometheus, required for the `ai-service-metrics`
-conformance check) from **every security group that can host the
+conformance check, and for `pod-autoscaling` when the recipe declares
+`kube-prometheus-stack`) from **every security group that can host the
 conformance orchestrator Job** into the **Prometheus/system security
 group**. The orchestrator Job tolerates every taint (can schedule on any
 node group) and only *prefers* — via best-effort `dependencyAffinity` — to

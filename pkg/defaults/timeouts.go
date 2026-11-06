@@ -666,6 +666,16 @@ const (
 	// The pod runs a simple CUDA device check but may need time for image pull.
 	DRATestPodTimeout = 5 * time.Minute
 
+	// TrainJobReconcileTimeout bounds the robust-controller reconciliation
+	// case: a valid TrainJob on the default ClusterTrainingRuntime must reach
+	// Complete=True within it, matching the 3-minute reconcile bound of the
+	// upstream TestRobustCRDControllerOperation.
+	TrainJobReconcileTimeout = 3 * time.Minute
+
+	// TrainJobReconcilePollInterval is the interval between TrainJob status
+	// reads while waiting for the reconciliation verdict.
+	TrainJobReconcilePollInterval = 5 * time.Second
+
 	// GangPositiveCompletionTimeout bounds the gang-scheduling positive case:
 	// a fitting CPU-only PodGroup must have every member Succeeded within it,
 	// matching the 2-minute Complete bound of the upstream TestGangScheduling.
@@ -754,6 +764,19 @@ const (
 	// before it is available, so a single-shot discovery right after the
 	// deployment phase can race that window.
 	MetricsAPIWarmupTimeout = 60 * time.Second
+)
+
+// Prometheus Operator monitor loading, shared by the conformance checks that
+// create a ServiceMonitor or PodMonitor and wait for the recipe's Prometheus
+// to collect from it (ai_service_metrics, pod_autoscaling).
+const (
+	// PrometheusMonitorLoadTimeout bounds the wait for a monitor the check
+	// created to appear among Prometheus's configured scrape pools.
+	// prometheus-operator reconciles the Prometheus configuration on its own
+	// schedule (gaps of about three minutes were observed, #3671) and
+	// Prometheus then reloads it; the collection waits start only once the
+	// monitor is loaded, so they measure scraping, not reconciliation.
+	PrometheusMonitorLoadTimeout = 5 * time.Minute
 )
 
 // Karpenter behavioral test timeouts for conformance validation.

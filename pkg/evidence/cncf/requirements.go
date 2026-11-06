@@ -85,7 +85,7 @@ var evidencePages = []evidencePage{
 	{
 		RequirementID: "cluster_autoscaling",
 		Title:         "Cluster Autoscaling",
-		Description:   "Demonstrates that the cluster supports GPU-aware autoscaling with node groups configured for GPU instances.",
+		Description:   "Records the cluster's GPU autoscaling arrangement: a Karpenter scale-up when Karpenter is present, otherwise the managed autoscaler, GPU pool membership, autoscaler status and events observed on EKS, AKS or GKE. The platform observations drive no scale event; the claim rests on provider documentation or a declared not-applicable justification.",
 		File:          "cluster-autoscaling.md",
 		Checks:        []string{checkClusterAutoscaling},
 	},
@@ -120,7 +120,7 @@ var evidencePages = []evidencePage{
 	{
 		RequirementID: "robust_controller",
 		Title:         "Robust AI Operator",
-		Description:   "Demonstrates that a complex AI operator with a CRD can be installed and functions reliably, including operator pods, webhooks, and custom resource reconciliation. The operator observed is recorded in the check output.",
+		Description:   "Demonstrates that a complex AI operator with a CRD can be installed and functions reliably: operator pods, an Established CRD, and a webhook that rejects an invalid custom resource. On the Kubeflow Trainer path a valid TrainJob is also reconciled to Complete; the Dynamo path records the existing resources' conditions as an observation only. The operator observed is recorded in the check output.",
 		File:          "robust-operator.md",
 		Checks:        []string{checkRobustController},
 	},

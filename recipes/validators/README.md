@@ -80,7 +80,7 @@ Neither constraint applies to `nccl-cre-all-reduce-bw` or
 | `inference-gateway` | Verify the recipe's inference gateway (Gateway API + Inference Extension) is operational | 5m |
 | `pod-autoscaling` | Verify HPA-driven pod autoscaling with GPU metrics | 10m |
 | `cluster-autoscaling` | Verify cluster autoscaling with Karpenter | 10m |
-| `robust-controller` | Verify Dynamo operator controller and webhooks | 5m |
+| `robust-controller` | Verify AI operator controller, webhooks and CR reconciliation (Kubeflow Trainer reconciles a TrainJob to Complete; Dynamo records observations) | 8m |
 | `secure-accelerator-access` | Verify secure GPU access via DRA or device plugin (no host device mounts); skips on Slinky Slurm recipes, where on GPU-backed leaves slinky-slurm-gpu-access verifies the Slurm path | 10m |
 | `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, job submission, GPU execution, and enabled accounting health | 8m |
 | `slinky-slurm-imex-channel` | Verify fixed IMEX resources and distinct channels for concurrent Slinky Slurm jobs | 5m |

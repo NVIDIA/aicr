@@ -47,6 +47,7 @@ func TestGPUCheckWorkBudgetsFitCatalogTimeouts(t *testing.T) {
 		"secure-accelerator-access": secureAccessWorkBudget,
 		"pod-autoscaling":           podAutoscalingWorkBudget,
 		"ai-service-metrics":        aiServiceMetricsWorkBudget,
+		"robust-controller":         robustControllerWorkBudget,
 	}
 	seen := map[string]bool{}
 	for _, v := range cat.Validators {
