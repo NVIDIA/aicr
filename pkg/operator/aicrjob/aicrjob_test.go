@@ -456,7 +456,9 @@ func TestCheckArtifactVersion(t *testing.T) {
 	for name, tt := range tests {
 		err := CheckArtifactVersion(tt.declared, tt.reported)
 		var se *operrors.StructuredError
-		if (err != nil) != tt.wantErr || (err != nil && (!errors.As(err, &se) || se.Context["reason"] != ReasonVersionMismatch)) {
+		if (err != nil) != tt.wantErr || (err != nil && (operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest ||
+			!errors.As(err, &se) || se.Context["reason"] != ReasonVersionMismatch)) {
+
 			t.Errorf("%s: CheckArtifactVersion(%q, %q) = %v, wantErr %t", name, tt.declared, tt.reported, err, tt.wantErr)
 		}
 	}
