@@ -3763,18 +3763,18 @@ kubectl get skyhooks.skyhook.nvidia.com \
 `aicr upgrade-check` reports every boundary. The transition record at
 `recipes/components/nodewright-operator/upgrades.yaml` describes `v0.18.0` (the
 rename, the prerequisite above, and per-deployer steps), then `v0.19.0`,
-`v0.19.1` and `v0.20.0` separately, each `safe`. Crossing the rename is
+`v0.19.1`, `v0.20.0` and `v0.21.0` separately, each `safe`. Crossing the rename is
 `manual` whatever you land on, and you do **not** have to stop at `v0.18.0` to
 get past it:
 
 ```console
 $ aicr upgrade-check --from older.yaml --to new.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.16.0  v0.20.0  manual   4 minors, 5 steps
+nodewright-operator  v0.16.0  v0.21.0  manual   5 minors, 5 steps
 
 $ aicr upgrade-check --from cur.yaml --to new.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.18.0  v0.20.0  safe     2 minors, verified
+nodewright-operator  v0.18.0  v0.21.0  safe     3 minors, verified
 ```
 
 `v0.19.0` also changes drain timing: an interrupt now begins roughly the
@@ -3789,8 +3789,22 @@ longer than 53 characters, and `aicr bundle` rejects such a `--workload-gate`
 key, so a bundle that builds carries a valid one. It also no longer uncordons a
 node it did not cordon.
 
+`v0.21.0` drains `kube-system` pods like any other namespace instead of
+skipping them, so CoreDNS and similar workloads are evicted before an
+interrupt rather than killed by the reboot. Pods that tolerate the
+`node.kubernetes.io/unschedulable` taint are still skipped, as in every
+namespace. Eviction honors any PodDisruptionBudget that covers a pod; a
+workload with no budget can lose every replica on the nodes drained together.
+A `kube-system` budget that allows no disruptions holds the drain the same way as
+in any other namespace, without bound unless the CR sets
+`spec.drainConfig.timeout`. With the default `drainConfig`, an evicted pod's
+`emptyDir` data is deleted and a pod with no controller is not recreated.
+Before upgrading, check that `kubectl get pdb -n kube-system` shows
+`ALLOWED DISRUPTIONS` of at least 1 for workloads on nodes NodeWright
+interrupts.
+
 The legacy `Skyhook` group, its `runtime-required` taint key and the
-`skyhook_*` metrics are served through `v0.20.x` and removed upstream in
-`v0.21.0`. A pin at or above that is not reachable until the remaining
+`skyhook_*` metrics are served through `v0.21.x` and removed upstream in
+`v0.22.0`. A pin at or above that is not reachable until the remaining
 `skyhook.nvidia.com` references in the `nodewright-operator` health check and
 the `vr200-rke2-ubuntu-*` overlays are migrated.
