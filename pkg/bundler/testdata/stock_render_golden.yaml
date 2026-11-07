@@ -5837,7 +5837,7 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   checksums.txt: de3a53997b4fa5dba4eca1956cfe66cfb64ef00373a34451b375b101e7998fa6
   deploy.sh: 79df4a5d6ddf25879ec925d7ba35a33815b9c929451c4cb88ed85fbe42e09b6d
   recipe.yaml: af9de4628bb6e1140536741fad3e06eee4fb442e47df3b3e5a6b08b5b514050e
-vr200-nvke-ubuntu-inference:
+vr200-nvke-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
   001-agentgateway-crds/upstream.env: 54471a3a9e2d5807a7096c8305eac6faa6d2b3745724e558673d36911830664a
@@ -5869,46 +5869,54 @@ vr200-nvke-ubuntu-inference:
   007-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
   007-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
   007-agentgateway-post/values.yaml: 293e887f0ae9f0d6c753a38f4ecca41046042f1d121c9eee3c17850d24dfccf4
-  008-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  008-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
-  008-kube-prometheus-stack/upstream.env: 4cb3f21994a62e8c6f073fca04e2fa0361f9e2841932205321375af4c8ee638a
-  008-kube-prometheus-stack/values.yaml: aeee738b3859d56bef93f04c1949ee3413da6b6cdaad73ea0a7a14306d2b86f5
-  009-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  009-k8s-ephemeral-storage-metrics/install.sh: 727160f359e5476c7211551f781f1a857aedd834922ed255197f7059d78ea816
-  009-k8s-ephemeral-storage-metrics/upstream.env: dbb5b7f8b156e8f1ad3ace176d3d1bef38280a533242107e49e0b76b24fbf435
-  009-k8s-ephemeral-storage-metrics/values.yaml: bd965e10e0f6eca07d732ea00d66e8327c176acfdc52d998809f7d4d53e056e8
-  010-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  010-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
-  010-nfd/upstream.env: d32e82295f07818de16529268751b4274b225110ad6b0ae02948a8084ccc311e
-  010-nfd/values.yaml: 9e7e4dc523d42b316d37e2901f8b09849018fcb7f70cc2e887fdf7ae198864f2
-  011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
-  011-gpu-operator/upstream.env: 7ffe32c2e799396b13d0fefc870cdab28e82e363681d0d5301c09d3d98c3ffdd
-  011-gpu-operator/values.yaml: 784a31a312b95aef8130becdafb59403354470bee775d92f5b9b2c8fc4e8172e
-  012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
-  012-kai-scheduler/upstream.env: 28796b9c560ab50439fa444585d161dfdb838c82420680a85a0e6eeef3fb7af0
-  012-kai-scheduler/values.yaml: 478f75baf393a9f6c9425b543f8ea2b3103b090e75dea49284805e0ddd625265
-  013-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  013-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
-  013-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
-  013-nvidia-dra-driver-gpu/values.yaml: 13baa7381abbc06291f63a7e94b790ad95c7f205d30e91528198c9f11ef25420
-  014-nvsentinel/apply-crds.sh: fb49c9bf7cadd9719c047c71db55af605156b4ff53d5728566ebd6d6d0cae706
-  014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
-  014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  014-nvsentinel/values.yaml: 0af63c5f93656b55dd0d0c8725169dccdc0ffe02dfe9d9b70a46466017368d7d
-  015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
-  015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
-  015-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 91b41fd86d89f3c7177c31b6a0070acb307f92dd285a5127074a5d226cc2b419
-  UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
-  bundle-info.yaml: 2cbaef198d36a9cbaaeaa5dc43411545c242dd81b6a2f5d6c076d142cda3fe62
-  checksums.txt: a61c5ac5eb440a0273bfe41f50cb262c9973e0f47035f37bbc996001d37059d5
-  deploy.sh: 68dbbe44b809aaa9dd14281f7b43cf6c55a7006e3931b03dff27b5bcb6744ca3
-  recipe.yaml: 5c56ad18551775f318f6c742e8dd07acbbef914fde028e06abb98b4c0d20ea86
-vr200-nvke-ubuntu-training:
+  008-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  008-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
+  008-grove/upstream.env: cf5effebfecdead639bae89cb7a4d502d4f5a6c27e4e2a4a0748b48ab6458fc9
+  008-grove/values.yaml: dc3c2ab7b1a4842d14e268319bf9daefac0100b3eb03ebd7a951aae5ce90b5c4
+  009-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  009-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
+  009-kube-prometheus-stack/upstream.env: 4cb3f21994a62e8c6f073fca04e2fa0361f9e2841932205321375af4c8ee638a
+  009-kube-prometheus-stack/values.yaml: aeee738b3859d56bef93f04c1949ee3413da6b6cdaad73ea0a7a14306d2b86f5
+  010-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  010-k8s-ephemeral-storage-metrics/install.sh: 727160f359e5476c7211551f781f1a857aedd834922ed255197f7059d78ea816
+  010-k8s-ephemeral-storage-metrics/upstream.env: dbb5b7f8b156e8f1ad3ace176d3d1bef38280a533242107e49e0b76b24fbf435
+  010-k8s-ephemeral-storage-metrics/values.yaml: bd965e10e0f6eca07d732ea00d66e8327c176acfdc52d998809f7d4d53e056e8
+  011-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  011-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
+  011-nfd/upstream.env: d32e82295f07818de16529268751b4274b225110ad6b0ae02948a8084ccc311e
+  011-nfd/values.yaml: 9e7e4dc523d42b316d37e2901f8b09849018fcb7f70cc2e887fdf7ae198864f2
+  012-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  012-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
+  012-gpu-operator/upstream.env: 7ffe32c2e799396b13d0fefc870cdab28e82e363681d0d5301c09d3d98c3ffdd
+  012-gpu-operator/values.yaml: 784a31a312b95aef8130becdafb59403354470bee775d92f5b9b2c8fc4e8172e
+  013-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  013-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
+  013-kai-scheduler/upstream.env: 28796b9c560ab50439fa444585d161dfdb838c82420680a85a0e6eeef3fb7af0
+  013-kai-scheduler/values.yaml: 478f75baf393a9f6c9425b543f8ea2b3103b090e75dea49284805e0ddd625265
+  014-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  014-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
+  014-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
+  014-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
+  015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  015-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
+  015-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
+  015-nvidia-dra-driver-gpu/values.yaml: 13baa7381abbc06291f63a7e94b790ad95c7f205d30e91528198c9f11ef25420
+  016-nvsentinel/apply-crds.sh: fb49c9bf7cadd9719c047c71db55af605156b4ff53d5728566ebd6d6d0cae706
+  016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
+  016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
+  016-nvsentinel/values.yaml: 0af63c5f93656b55dd0d0c8725169dccdc0ffe02dfe9d9b70a46466017368d7d
+  017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
+  017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
+  017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
+  README.md: 69441478be77dcd9158adc3556ce82fec5bb7eceddcd25210d1e310fbc6beceb
+  UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
+  bundle-info.yaml: 3f7413cbd32cd73c63514525af38438abdc5db182971cf0f55195753e644074d
+  checksums.txt: 64742aca0ac7ea65bef7655e7996d57e500c87f0fbc32bad09e1c8ec2fa24f9c
+  deploy.sh: 898303589e7793051e18c44dc565fb38be890a8fd6ccf36b9abf7203141b1ba3
+  recipe.yaml: 2305ec7ebba8abe28b409615c521e80610c5eafdd5faa38595b5a7a146306c9e
+vr200-nvke-ubuntu-training-kubeflow:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
   001-nodewright-operator/upstream.env: 8e4f7653a969c4147e83f356f7eac24d08e37f9f9786e8ebf5855e150fdb4125
@@ -5941,39 +5949,48 @@ vr200-nvke-ubuntu-training:
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 28796b9c560ab50439fa444585d161dfdb838c82420680a85a0e6eeef3fb7af0
   008-kai-scheduler/values.yaml: 478f75baf393a9f6c9425b543f8ea2b3103b090e75dea49284805e0ddd625265
-  009-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  009-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
-  009-network-operator/upstream.env: 9902e458d052e294c1e3d81d3082b5a5474e29e09b6e896c2d95309cdfc3bfbd
-  009-network-operator/values.yaml: e9d6f1481a61bac0626eecd824ba302bde4ea1258648b8bfd0fd8ca6a96330fc
-  010-network-operator-post/Chart.yaml: e5a71c6d0ba97bef989a82cd6a0fc9d9904c4eec8706c16278737ae8140a83e4
-  010-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  010-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  010-network-operator-post/templates/nic-cluster-policy-nvke-vr200.yaml: c48d43b1bfa0bd91142e7d823959050efcf1c1f140f13a9d5b1c8e2f6c64bcc0
-  010-network-operator-post/values.yaml: e9d6f1481a61bac0626eecd824ba302bde4ea1258648b8bfd0fd8ca6a96330fc
-  011-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  011-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
-  011-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
-  011-nvidia-dra-driver-gpu/values.yaml: 13baa7381abbc06291f63a7e94b790ad95c7f205d30e91528198c9f11ef25420
-  012-nvsentinel/apply-crds.sh: fb49c9bf7cadd9719c047c71db55af605156b4ff53d5728566ebd6d6d0cae706
-  012-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  012-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
-  012-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
-  012-nvsentinel/values.yaml: 0af63c5f93656b55dd0d0c8725169dccdc0ffe02dfe9d9b70a46466017368d7d
-  013-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  013-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
-  013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
-  013-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  014-sriov-ib-networks/Chart.yaml: cf11fef32f24b6aefc8716a9431095cfb684127211b920f22faa6070114dd946
-  014-sriov-ib-networks/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  014-sriov-ib-networks/install.sh: 8f4bff183a9169f137fd0c47dc059b67b1fa6121531af7d3000b093de7c277fc
-  014-sriov-ib-networks/templates/nvke-vr200.yaml: f1f98e74ff094c8a3ff6a5a501bfef10207ff92694ee9698f23a1b5f2088aba3
-  014-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  README.md: 5c6efffe34c335ecc73a899d1341deb98aad49e10b9aa2edb682718227cf0c2a
+  009-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  009-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
+  009-kubeflow-trainer/upstream.env: 831c63a5c44c5409ba654b6418348fc21fa12d6b9858467ee2708be57ab14a82
+  009-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
+  010-kubeflow-trainer-post/Chart.yaml: 8ba0727bed5ba88a0f473601d41b617e03e0052a20781f81488985b8a78a83a8
+  010-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  010-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
+  010-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
+  010-kubeflow-trainer-post/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
+  011-network-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  011-network-operator/install.sh: d8c04188166a4bf1c0ca00ce34d701183037b90961d9e17604e7a8a3cf5ef877
+  011-network-operator/upstream.env: 9902e458d052e294c1e3d81d3082b5a5474e29e09b6e896c2d95309cdfc3bfbd
+  011-network-operator/values.yaml: e9d6f1481a61bac0626eecd824ba302bde4ea1258648b8bfd0fd8ca6a96330fc
+  012-network-operator-post/Chart.yaml: e5a71c6d0ba97bef989a82cd6a0fc9d9904c4eec8706c16278737ae8140a83e4
+  012-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  012-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
+  012-network-operator-post/templates/nic-cluster-policy-nvke-vr200.yaml: c48d43b1bfa0bd91142e7d823959050efcf1c1f140f13a9d5b1c8e2f6c64bcc0
+  012-network-operator-post/values.yaml: e9d6f1481a61bac0626eecd824ba302bde4ea1258648b8bfd0fd8ca6a96330fc
+  013-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  013-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
+  013-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
+  013-nvidia-dra-driver-gpu/values.yaml: 13baa7381abbc06291f63a7e94b790ad95c7f205d30e91528198c9f11ef25420
+  014-nvsentinel/apply-crds.sh: fb49c9bf7cadd9719c047c71db55af605156b4ff53d5728566ebd6d6d0cae706
+  014-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  014-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
+  014-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
+  014-nvsentinel/values.yaml: 0af63c5f93656b55dd0d0c8725169dccdc0ffe02dfe9d9b70a46466017368d7d
+  015-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
+  015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
+  015-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
+  016-sriov-ib-networks/Chart.yaml: cf11fef32f24b6aefc8716a9431095cfb684127211b920f22faa6070114dd946
+  016-sriov-ib-networks/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  016-sriov-ib-networks/install.sh: 8f4bff183a9169f137fd0c47dc059b67b1fa6121531af7d3000b093de7c277fc
+  016-sriov-ib-networks/templates/nvke-vr200.yaml: f1f98e74ff094c8a3ff6a5a501bfef10207ff92694ee9698f23a1b5f2088aba3
+  016-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  README.md: 4f662ada37bc4a32893e6f66887ba8d722e3d2d09d1865a2ff145876679d529a
   UPGRADING.md: 5b326bcf1ffc5558122e69eff1925bb3e42bae2d09b0ed79bbf25a2764c0cc88
-  bundle-info.yaml: f00ebb36346a508a8ccf2d8b1b20bd0a0c08e3a5577ae4ae8eaee21650e52401
-  checksums.txt: 785991d653d4df001de47c4bcb124dca11c7278825d948667f051d664721315d
-  deploy.sh: 5e2fb5a51617144b08ca5f6b2b0f5417827a9f72f39ce455412830226ddfbb57
-  recipe.yaml: 2eece745cbdfdcb22dcc92d44afffc418da08ceef47ccb7414eff9d747e8c56c
+  bundle-info.yaml: 76b533a96fa9889f264fef93e8f7cdc2948b26ece9625c13e78d6d15c047335b
+  checksums.txt: 7a76962e0def753c2c5dd72b9ab4ff919085d2cb0c2e9c07985c7d77574b1f96
+  deploy.sh: 5a842759e05308dfd2ca478a1c0d7ed57ee92ea40c865682718f907acab44acf
+  recipe.yaml: b2928e7bbf6c902e9d0cd7c6e9e252c9e27b69728aea87dae0a4888411ace722
 vr200-rke2-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
