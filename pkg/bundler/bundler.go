@@ -1355,6 +1355,10 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 				"failed to collect component readiness gates")
 		}
+		sizingRows, err := b.installSizing(ctx, recipeResult, componentValues)
+		if err != nil {
+			return nil, err
+		}
 		return &argocdhelm.Generator{
 			RecipeResult:           recipeResult,
 			ComponentValues:        componentValues,
@@ -1367,6 +1371,8 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
 			ComponentReadiness:     componentReadiness,
+			SizingRows:             sizingRows,
+			SizingNodeCount:        b.Config.EstimatedNodeCount(),
 			VendorCharts:           b.Config.VendorCharts(),
 			UpgradeNotice:          upgradeNotice,
 			Serial:                 b.Config.Serial(),
@@ -1878,7 +1884,7 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 				fmt.Sprintf("failed to resolve values for component %q", ref.Name))
 		}
 
-		sizing, sizingNodes, err := b.sizeComponent(ctx, recipeResult, &ref, values)
+		sizing, err := b.planSizing(ctx, recipeResult, &ref, values)
 		if err != nil {
 			return nil, err
 		}
@@ -1946,6 +1952,9 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 			if err := b.rejectDynamicRequiredNodeSelectorPaths(ref.Name, provider, dynPaths); err != nil {
 				return nil, err
 			}
+			if err := sizing.rejectDynamic(ref.Name, dynPaths); err != nil {
+				return nil, err
+			}
 			for path := range dynPaths {
 				policy.optOut[path] = struct{}{}
 			}
@@ -2004,10 +2013,8 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 			}
 		}
 
-		if err := checkSizedRequestsWithinLimits(values, sizing, sizingNodes); err != nil {
-			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
-				"sized memory request exceeds its limit", err,
-				map[string]any{errCtxKeyComponent: ref.Name})
+		if err := b.finishSizing(sizing, &ref, values, provider); err != nil {
+			return nil, err
 		}
 
 		// Requires every override, including --set-json/--set-file, to have

@@ -24,6 +24,14 @@
 #                                chart, so only children render and the two
 #                                roots do not fight over the same apps.
 #
+#   sizing.nodeCount   GPU nodes in the target cluster. Lowers the memory
+#                      of controllers that publish a sizing table to the
+#                      tier for that count (ADR-030); 0, or a count above
+#                      every tier, keeps the bundle's values. Defaults to
+#                      the bundle's --nodes. Root-chart values for a
+#                      component still win, and a request set here above
+#                      the selected limit fails at sync, not at install.
+#
 #   deployer.cascadeDelete is intentionally NOT an install-time value —
 #   it is bundle-time only (aicr bundle --argocd-cascade-delete);
 #   helm --set deployer.cascadeDelete=... fails the values schema. Child
@@ -38,4 +46,6 @@ deployer:
   namePrefix: ""
   project: default
 repoURL: ""
+sizing:
+  nodeCount: 0
 targetRevision: ""
