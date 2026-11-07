@@ -1397,6 +1397,11 @@ const (
 
 // Log scanner buffer sizes.
 const (
+	// LogReadChunkSize is the read size pod.GetPodLogs drains a completed
+	// pod's log stream with; it bounds one Read, not a line, so no line length
+	// fails the read.
+	LogReadChunkSize = 64 << 10 // 64KiB
+
 	// LogScannerBufferSize is the maximum line size for reading pod logs.
 	// Larger than the default 64KB to handle container runtime line splitting
 	// and long go test -json output events.

@@ -28,6 +28,8 @@ import (
 	"strings"
 	"testing"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/evidence/redact"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
@@ -185,6 +187,26 @@ func TestSkipWithReason(t *testing.T) {
 	}
 	if got[ExtraKeySkipReason] != SkipReasonNoConstraint || len(got) != 1 {
 		t.Errorf("extra = %v, want only skipReason=%s", got, SkipReasonNoConstraint)
+	}
+}
+
+// TestSkipWithReasonFailsClosed pins #3703: a skip reason that cannot be
+// written is a failure, not a skip, since the aggregation would otherwise
+// record an unexplained NOT TESTED.
+func TestSkipWithReasonFailsClosed(t *testing.T) {
+	orig := extrasOut
+	extrasOut = errWriter{}
+	defer func() { extrasOut = orig }()
+
+	err := SkipWithReason(SkipReasonNoConstraint, "no foo constraint in recipe")
+	if IsSkip(err) {
+		t.Fatalf("SkipWithReason() = %v, want a failure when the reason cannot be written", err)
+	}
+	errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInternal)
+	for _, want := range []string{SkipReasonNoConstraint, "no foo constraint in recipe"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lost %q", err, want)
+		}
 	}
 }
 

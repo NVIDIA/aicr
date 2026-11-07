@@ -119,7 +119,8 @@
 # validation.conformance.checks list is inherited from kind.yaml and base, so it
 # names checks about the GPU stack this lane does not deploy and about real
 # accelerator hardware this lane does not have. Measured before the narrowing:
-# rc=8 after 184s, 10 validators, 2 passed, 7 failed, 1 skipped.
+# rc=8 after 184s, 10 validators, 2 passed, 7 failed, 1 skipped (the inherited
+# list has since grown by driver-runtime-management, the eighth skip below).
 #
 # The skips are NOT a way of ignoring a failing check. Every one of them is
 # REPORTED as skipped in the CTRF report the signed evidence bundle is rendered
@@ -303,8 +304,10 @@ spec:
         # DCGM exporter. Observed logging "DCGM_FI_DEV_GPU_UTIL not yet
         # available, retrying" until it gave up.
         - ai-service-metrics
-        # Needs the external metric dcgm_gpu_power_usage to drive its HPA
-        # behavioral test. Same exporter again.
+        # Scales a GPU-requesting Deployment 1 to 2 on a custom metric served
+        # by prometheus-adapter from the recipe's Prometheus, so it needs two
+        # allocatable accelerators and the metrics stack the excluded
+        # components feed; the simulated devices have neither.
         - pod-autoscaling
         # Runs a CUDA container that must see /dev/nvidia* device nodes and
         # count exactly one usable GPU. The mocked NVML tree supplies
@@ -316,7 +319,10 @@ spec:
         # container runtime to inject nvidia-smi and the driver library, then
         # compares the driver version it reports with the node's. Same gap as
         # above: no nvidia container runtime and no real driver on a
-        # simulated device, so there is nothing to inject or to report.
+        # simulated device, so there is nothing to inject or to report. On
+        # this Slurm recipe the check would self-skip (the NodeSet holds every
+        # GPU) before reaching that gap; naming it here records the lane's
+        # reason beside the other seven instead of an in-pod skip.
         - driver-runtime-management
         # Walks every componentRef in the recipe and asserts its namespace and
         # expected resources are healthy. The recipe still declares the two
