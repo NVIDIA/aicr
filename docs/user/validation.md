@@ -1621,9 +1621,10 @@ Secret the flag names but the validator namespace lacks fails the check with
 
 A probe pod whose `RuntimeClass` names a handler the node's container runtime
 does not serve stays `Pending` with `ContainerCreating` and no status change;
-the checks read the kubelet's `FailedCreatePodSandBox` event (`no runtime for
-"<handler>" is configured`, a missing runtime handler, or a shim binary not
-found) and fail within seconds with `stuck: FailedCreatePodSandBox: ...`
+the checks read the kubelet's `FailedCreatePodSandBox` event (the containerd
+message `no runtime for "..." is configured` naming the handler, a missing
+runtime handler, or a shim binary not found) and fail within seconds with
+`stuck: FailedCreatePodSandBox: ...`
 instead of waiting out the pod timeout. A sandbox failure from network setup
 is transient and is not treated this way.
 
