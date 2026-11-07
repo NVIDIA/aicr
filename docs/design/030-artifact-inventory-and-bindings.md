@@ -48,7 +48,7 @@ The following behavior was checked against origin `main` at
 [`fe2618f4696b181a4936e8dcf1d0f013512c16e0`](https://github.com/NVIDIA/aicr/tree/fe2618f4696b181a4936e8dcf1d0f013512c16e0).
 It describes the implementation this proposal extends. The cited code is
 unchanged on origin `main` at
-[`97e9c289a47429da5153eea185c25b0d0ce78c4e`](https://github.com/NVIDIA/aicr/tree/97e9c289a47429da5153eea185c25b0d0ce78c4e).
+[`5e65afd5b9d80e2e580f4f15836d38da2351ff3b`](https://github.com/NVIDIA/aicr/tree/5e65afd5b9d80e2e580f4f15836d38da2351ff3b).
 
 | Current behavior | Consequence for this design |
 |---|---|
@@ -132,10 +132,11 @@ binding set. Each inventory entry then fails ordinary accounting with
    leaves its target fields at catalog pins. Reads and later bundle capture
    must use the same snapshot.
 2. Load the ordinary layered catalog. Validate targets only for active bindings:
-   component existence, values-file participation, JSON Pointer existence and
-   platform agreement. Inactive bindings receive schema/shape validation only;
-   a stale target in an unused embedded binding must not break loading. Clone
-   effective entries and update only active chart fields and image values.
+   component and values-file existence, JSON Pointer existence and platform
+   agreement. Defer values-file participation to recipe selection below.
+   Inactive bindings receive schema/shape validation only; a stale target in an
+   unused embedded binding must not break loading. Clone effective entries and
+   update only active chart fields and image values.
    Preserve class, namespace, dependencies, scheduling, checks, manifests and
    other integration policy. Do not mutate shared caches.
 3. For each bound chart, split its OCI reference at the final path component
@@ -145,6 +146,10 @@ binding set. Each inventory entry then fails ordinary accounting with
    never survive a coordinate change. Record `manifestDigest` as provenance
    only. No `helm.defaultManifestDigest` is introduced.
 4. Resolve the recipe normally. Bindings neither add nor enable components.
+   For active targets of selected components, check that the target values file
+   participates in the resolved component ref's values composition. Unselected
+   components need no selected ref or participation check. Inactive bindings
+   still receive schema/shape validation only.
    A selected Helm component is covered only when its chart binding and every
    image binding targeting it have inventory matches. Missing or partial
    coverage fails unless the user lists it in `allowCatalogPins`. Unselected
@@ -171,7 +176,14 @@ completed solely during provider loading.
 A binding does not renew version-specific integration evidence. A changed
 chart must not inherit an `ownsCRDs` audit for different chart coordinates or
 archive bytes; the reviewed catalog must first name the incoming identity.
-Health checks and upgrade guidance remain the catalog author's responsibility.
+When a bound chart changes the effective CRD set, catalog review must revalidate
+all affected owners against the full effective chart set, including changed
+charts that do not declare `ownsCRDs`. An unchanged owner's audit cannot vouch
+for exclusive ownership if another chart now ships the same CRD. Keep audit
+evidence tied to the reviewed incoming identities and drop `ownsCRDs` where
+its guarantees no longer hold. This follows the existing
+[CRD ownership audit procedure][crd-audit]. Health checks and upgrade guidance
+remain the catalog author's responsibility.
 
 ## Proposal
 
@@ -256,13 +268,15 @@ The target requirements below apply only to active bindings. Inactive entries
 must have valid schema and field shapes, but do not require target existence,
 values-file participation, JSON Pointer existence or a platform match. The
 merged set still obeys disjointness and one-chart-per-component rules.
+Values-file participation is checked after recipe selection, only for active
+targets of selected components.
 
 | Field | Contract |
 |---|---|
 | `charts.<artifact>.component` | Existing Helm component. Artifact must be a chart. At most one chart per component and one component per chart binding. |
 | `images.<artifact>.targets` | Nonempty list of targets for an image artifact. Duplicate or overlapping writes fail. |
 | `targets[].component` | Existing Helm component; does not enable it. |
-| `targets[].valuesFile` | Catalog-relative `.yaml`, `.yml` or `.json` regular file that participates in the component's values composition. Reject absolute paths, `..`, symlinks and catalog escapes. |
+| `targets[].valuesFile` | Catalog-relative `.yaml`, `.yml` or `.json` regular file. For selected components, it must participate in the resolved ref's values composition. Reject absolute paths, `..`, symlinks and catalog escapes. |
 | `targets[].platform` | Optional assertion with the inventory platform shape. Must match exactly, including variant presence. Do not infer it from the machine running AICR. |
 | `targets[].write` | Exactly one of `{reference}` or `{repository, digest, clearTag?}`. Values are JSON Pointers to existing string leaves. |
 | `ignoredArtifacts.<artifact>.reason` | Nonempty reason for not binding the artifact. Does not exempt a component from recipe coverage. |
@@ -356,11 +370,15 @@ formatting or a shadowed entry does not change this digest. When neither layer
 has bindings, hash the canonical empty document with empty `charts`, `images`
 and `ignoredArtifacts` maps and the normal kind/version header.
 
-For `baseCatalogDigest`, enumerate external base files excluding the
-`artifacts/` directory, whose effective inputs have separate digests. Sort
-relative paths and encode each entry as `[path, size, sha256]`. Hash a documented
-canonical encoding of that list and the embedded catalog identity. The definition must
-exclude mtimes and absolute paths and include every base file consumed.
+For `baseCatalogDigest`, enumerate external base files, including those under
+`artifacts/`. Exclude only files used exclusively as inventory or binding
+documents, whose effective inputs have separate digests. Any file also consumed
+as catalog data must remain in the base file inventory. For example, a component
+can use `artifacts/values.yaml`; changing it must change `baseCatalogDigest`
+and fail the reload comparison. [Provider reads][provider-reads], [values][values].
+Sort relative paths and encode each entry as `[path, size, sha256]`. Hash a
+documented canonical encoding of that list and the embedded catalog identity.
+Exclude mtimes and absolute paths and include every base file consumed.
 Record the AICR version/build identity alongside this record using recipe
 metadata conventions.
 
@@ -484,3 +502,5 @@ relocation evidence remain separate from metadata composition.
 [verify]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/bundler/deployer/localformat/vendor.go#L124
 [render]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/helm/render.go#L31
 [discovery]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/mirror/discover.go#L212
+[crd-audit]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/recipe/ownscrds_audit_test.go#L26
+[provider-reads]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/recipe/provider.go#L439
