@@ -27,7 +27,7 @@
 # while testing nothing it was built to test, and the generic guard would not
 # notice, because gang-scheduling and cluster-autoscaling would still be there
 # to keep the phase non-empty. Verified rather than assumed: with the shipped
-# seven skips PLUS slinky-slurm-health, `aicr validate` returns 0.
+# eight skips PLUS slinky-slurm-health, `aicr validate` returns 0.
 #
 # Hermetic: reads the two committed YAML files, resolves both SCRIPT_DIR-relative
 # so it exercises THIS worktree. No cluster, no binary.
@@ -85,10 +85,10 @@ leaf_checks="$(yq -r '.spec.validation.conformance.checks[]?' "${LEAF_OVERLAY}")
 check "the leaf declares slinky-slurm-health, so it is in the run to begin with" "1" \
     "$(printf '%s\n' "${leaf_checks}" | grep -cx -- "slinky-slurm-health" | tr -d ' ')"
 
-# The lane's header calls this out as SEVEN skipped checks and lists what each
+# The lane's header calls this out as EIGHT skipped checks and lists what each
 # costs. A count that drifts from the prose leaves a reader trusting a number
 # that is no longer true, which is the failure this branch exists to remove.
-check "the skip list still holds the seven the header describes" "7" \
+check "the skip list still holds the eight the header describes" "8" \
     "$(printf '%s\n' "${skip_list}" | grep -c '[^[:space:]]' | tr -d ' ')"
 
 if [[ "${fail}" -ne 0 ]]; then

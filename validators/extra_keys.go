@@ -17,20 +17,25 @@ package validators
 import (
 	"log/slog"
 	"math"
+	"os"
 	"strconv"
+	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 // Extra keys a check may publish with EmitExtra. Each must have a value
 // validator in pkg/evidence/redact's ctrfExtraAllowlist, or minimal redaction
-// drops it.
+// drops it. The keys the evidence readers consume by name are declared in
+// pkg/validator/ctrf and re-exported here, so the publisher and the readers
+// share one definition.
 const (
 	ExtraKeyNodesValidated = "nodesValidated"
 	ExtraKeyNodesTotal     = "nodesTotal"
 	ExtraKeyNodesFailed    = "nodesFailed"
 	ExtraKeyNodesSkipped   = "nodesSkipped"
-	ExtraKeySkipReason     = "skipReason"
+	ExtraKeySkipReason     = ctrf.ExtraKeySkipReason
 	ExtraKeyRuntimeSource  = "runtimeSource"
 
 	ExtraKeyAchievedGbps  = "achievedGbps"
@@ -63,8 +68,16 @@ const (
 	ExtraKeyDetectedVersion  = "detectedVersion"
 	ExtraKeyVersionSatisfied = "versionSatisfied"
 
-	ExtraKeyObservationOnly = "observationOnly"
+	ExtraKeyObservationOnly = ctrf.ExtraKeyObservationOnly
+	ExtraKeyResultSchema    = ctrf.ExtraKeyResultSchema
 )
+
+// ImagePullSecretsEnv carries the names of the --image-pull-secret Secrets
+// the orchestrator attached to the validator Job, comma-separated, so a check
+// that creates a per-run namespace can copy them there and let its probe pods
+// pull with the same credentials (pkg/validator/v1 forwards it; keep the
+// literal in sync with imagePullSecretsEnv there).
+const ImagePullSecretsEnv = "AICR_IMAGE_PULL_SECRETS" //nolint:gosec // G101: env var name, not a credential
 
 // Skip codes published under ExtraKeySkipReason. Each must also be listed in
 // pkg/evidence/redact's ctrfSkipReasons.
@@ -132,6 +145,36 @@ func FormatBool(b bool) string { return strconv.FormatBool(b) }
 // observation into a demonstration.
 func ObservationOnlyExtra() map[string]string {
 	return map[string]string{ExtraKeyObservationOnly: FormatBool(true)}
+}
+
+// ResultSchemaExtra returns the Extra stamping the result-contract version
+// this image speaks (ctrf.ResultSchemaVersion). The runner publishes it before
+// the check runs, so every result the orchestrator reads carries it and the
+// CNCF aggregation can tell an image that never marked observations from one
+// that chose not to (#3703). Emit it with EmitExtra and fail the check when
+// the write fails.
+func ResultSchemaExtra() map[string]string {
+	return map[string]string{ExtraKeyResultSchema: ctrf.ResultSchemaVersion}
+}
+
+// ImagePullSecretNames returns the Secret names ImagePullSecretsEnv carries,
+// trimmed, with empty entries dropped; nil when the variable is unset or
+// names nothing.
+func ImagePullSecretNames() []string {
+	var names []string
+	for entry := range strings.SplitSeq(os.Getenv(ImagePullSecretsEnv), ",") {
+		if name := strings.TrimSpace(entry); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// ValidatorNamespace returns the namespace the validator pod runs in: the
+// mounted ServiceAccount namespace, else AICR_NAMESPACE, else "default". It is
+// the namespace --image-pull-secret Secrets live in.
+func ValidatorNamespace() string {
+	return resolveNamespace()
 }
 
 // GPUAllocationPolicyExtra returns the Extra recording policy as the configured

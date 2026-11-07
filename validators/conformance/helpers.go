@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -393,6 +394,48 @@ func podStuckReason(pod *corev1.Pod) string {
 		}
 	}
 	return ""
+}
+
+// sandboxRuntimeMissingMarkers are the substrings of a FailedCreatePodSandBox
+// event message that mean the pod's RuntimeClass handler is not served on the
+// node it landed on, a state no retry repairs: containerd's "no runtime for
+// \"<handler>\" is configured" (wrapped as "failed to get sandbox runtime"),
+// CRI-O's "runtime handler" lookup failure, and a shim binary the handler
+// names but the node lacks. Network-setup failures of the same event reason
+// are transient and deliberately absent, so a CNI that is still starting
+// does not fail the probe.
+var sandboxRuntimeMissingMarkers = []string{
+	"no runtime for",
+	"failed to get sandbox runtime",
+	"runtime handler",
+	"executable file not found",
+}
+
+// sandboxCreateFailure returns the reason a pod is stuck when ev records a
+// terminal sandbox-creation failure (eventReasonFailedCreatePodSandBox with
+// a sandboxRuntimeMissingMarkers message), else "". The pod spends the whole
+// pod timeout Pending otherwise, because the kubelet retries with backoff
+// and never changes the pod's status (#3703).
+func sandboxCreateFailure(ev *corev1.Event) string {
+	if ev == nil || ev.Reason != eventReasonFailedCreatePodSandBox {
+		return ""
+	}
+	message := strings.ToLower(ev.Message)
+	for _, marker := range sandboxRuntimeMissingMarkers {
+		if strings.Contains(message, marker) {
+			return fmt.Sprintf("%s: %s", ev.Reason, strings.TrimSpace(ev.Message))
+		}
+	}
+	return ""
+}
+
+// podSandboxEventSelector selects the FailedCreatePodSandBox events of one pod.
+func podSandboxEventSelector(podName string) string {
+	return fields.SelectorFromSet(fields.Set{
+		"involvedObject.kind": involvedObjectKindPod,
+		"involvedObject.name": podName,
+		"reason":              eventReasonFailedCreatePodSandBox,
+	}).String()
 }
 
 // podWaitingStatus returns the first container's waiting reason and message, or "none"
