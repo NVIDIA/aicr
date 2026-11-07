@@ -68,17 +68,38 @@ the other five have no AICR check.
 
 ## How this was collected
 
-- **Command** — `aicr validate --phase conformance --cncf-submission`, run
-  2026-11-06 against the tenant cluster.
-- **Recipe** — `vr200-nvke-ubuntu-inference` as it stood on the
-  [#3679](https://github.com/NVIDIA/aicr/pull/3679) branch.
+**Command**, run 2026-11-06 against the tenant cluster:
+
+```
+aicr validate -k <tenant.kubeconfig> \
+  --recipe <resolved vr200-nvke-ubuntu-inference> \
+  --snapshot <cluster snapshot> \
+  --data <recipes/ from the #3679 branch> \
+  --phase conformance --cncf-submission \
+  --evidence-dir <dir> --timeout 30m -o <ctrf.json>
+```
+
+- **Recipe** — `vr200-nvke-ubuntu-inference`, from the branch that became
+  [#3679](https://github.com/NVIDIA/aicr/pull/3679), passed as a resolved file
+  with `--data` pointing at that branch's `recipes/` tree (497 files).
 - **Binary** — built from source at `f12ed731d`. It reports
   `aicr version dev (commit: unknown, date: unknown)`, so the files carry no
   version string of their own; this README is the record of which build made
   them.
-- **Outcome** — every section listed above completed and none reported FAIL.
-  `platform-health` was not among them, for the reason in
-  [The cluster was not deployed from this recipe](#the-cluster-was-not-deployed-from-this-recipe).
+- **Features** — no `--feature`, so all nine were collected: `dra-support`,
+  `gang-scheduling`, `secure-access`, `accelerator-metrics`,
+  `ai-service-metrics`, `inference-gateway`, `robust-operator`,
+  `pod-autoscaling`, `cluster-autoscaling`.
+- **Outcome** — exit status 0. Every section completed and none reported FAIL.
+
+**`--phase conformance` had no effect on this run.** At `f12ed731d` the
+`validate` action short-circuits on `--cncf-submission` and calls
+`runCNCFSubmission` before it parses the phase selection, so no validator phase
+executed and no check ran. The recipe was loaded for exactly one purpose, which
+the run log states: *"loading recipe to resolve the GPU allocation policy for
+CNCF evidence collection"*, resolving
+`gpuAllocationPolicy=device-plugin-extended-resource`. The flag is recorded
+above because it was typed, not because it did anything.
 
 `f12ed731d` predates [#3666](https://github.com/NVIDIA/aicr/pull/3666)
 (`bd08bec25`), which replaced the shell collector at
@@ -176,7 +197,9 @@ None of those five feeds any of the requirements above, so the observations
 stand on their own. But a `--phase conformance` validator run against this
 recipe on this cluster would fail `platform-health`, which expects every
 declared component present, and that is expected rather than a conformance
-result. It is also why no `platform-health` section appears here.
+result. That is **not** why no `platform-health` section appears here, though:
+the shell collector has no such section, and as noted above no validator check
+ran at all on this path.
 
 The versions diverge too. The cluster runs the **NVIDIA DRA driver 25.8.1**,
 while the recipe pins the upstream `dra-driver-nvidia-gpu` chart at **0.5.1**
