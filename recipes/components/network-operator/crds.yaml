@@ -100,7 +100,7 @@ charts:
           - sriovoperatorconfigs.sriovnetwork.openshift.io
           - sriovresourcepolicies.sriovnetwork.k8snetworkplumbingwg.io
         recipes:
-          - vr200-nvke-ubuntu-training
+          - vr200-nvke-ubuntu-training-kubeflow
   - chart: network-operator
     image: cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/network-operator:v25.1.0
     repository: oci://cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/chart
