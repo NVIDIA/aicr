@@ -153,8 +153,14 @@ type gangPhaseOutcome struct {
 	Detail string
 }
 
+// newGangTestRun names the run's namespace, PodGroups and pods from one
+// 128-bit random token, as newGPUTestRun does: a 32-bit suffix made same-name
+// collisions across runs plausible, and the unconditional cleanup would then
+// have deleted a namespace another run owned. Every prefix plus the 32 hex
+// characters plus a member index stays within the 63-character DNS-1123
+// limit.
 func newGangTestRun() (*gangTestRun, error) {
-	b := make([]byte, 4)
+	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
 	}
@@ -196,7 +202,7 @@ func (run *gangTestRun) setNegativeShape(shape gangNegativeShape) {
 // GPU access and DRA isolation are validated separately by the DRA and secure
 // accelerator access checks; keeping both phases CPU-only lets one-GPU CI
 // clusters run the full conformance phase.
-func CheckGangScheduling(ctx *validators.Context) error {
+func CheckGangScheduling(ctx *validators.Context) (err error) {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
@@ -208,14 +214,14 @@ func CheckGangScheduling(ctx *validators.Context) error {
 	// does NOT declare kai-scheduler skips (the cluster uses another scheduler).
 	_, kaiCheckErr := ctx.Clientset.AppsV1().Deployments(kaiSchedulerName).Get(
 		ctx.Ctx, "kai-scheduler-default", metav1.GetOptions{})
-	if err := (validators.Capability{
+	if capErr := (validators.Capability{
 		Component: kaiSchedulerName,
 		Subject:   "KAI scheduler Deployment kai-scheduler/kai-scheduler-default",
 		AbsentMsg: "recipe declares kai-scheduler but its Deployment kai-scheduler/kai-scheduler-default is absent — apply the bundle or check RBAC",
 		InapplicableMsg: "KAI scheduler not found and kai-scheduler not declared in recipe — " +
 			"cluster may use a different scheduler",
-	}).Require(ctx, kaiCheckErr, kaiCheckErr == nil); err != nil {
-		return err
+	}).Require(ctx, kaiCheckErr, kaiCheckErr == nil); capErr != nil {
+		return capErr
 	}
 
 	// 1. All KAI scheduler deployments available. Wait (bounded) for each to
@@ -225,12 +231,12 @@ func CheckGangScheduling(ctx *validators.Context) error {
 	// phase. A genuinely-down deployment still fails after the bound.
 	var deploymentsSummary strings.Builder
 	for _, name := range kaiSchedulerDeployments {
-		deploy, err := waitForDeploymentAvailable(ctx, kaiSchedulerName, name, defaults.K8sPodReadyTimeout)
-		if err != nil {
+		deploy, waitErr := waitForDeploymentAvailable(ctx, kaiSchedulerName, name, defaults.K8sPodReadyTimeout)
+		if waitErr != nil {
 			// Preserve the helper's code (NotFound for missing, Internal for
 			// not-available/API failure, Timeout for cancellation) instead of
 			// flattening every failure to NotFound.
-			return errors.PropagateOrWrap(err, errors.ErrCodeNotFound,
+			return errors.PropagateOrWrap(waitErr, errors.ErrCodeNotFound,
 				fmt.Sprintf("KAI scheduler component %s check failed", name))
 		}
 		expected := int32(1)
@@ -308,6 +314,7 @@ func CheckGangScheduling(ctx *validators.Context) error {
 		}
 		recordRawTextArtifact(ctx, "Delete test namespace",
 			fmt.Sprintf("kubectl delete namespace %s --ignore-not-found", run.namespace), result)
+		err = failOnGangCleanup(err, nsErr)
 	}()
 
 	if err = createGangTestNamespace(ctx.Ctx, ctx.Clientset, run); err != nil {
@@ -351,15 +358,36 @@ func recordGangVerdict(ctx *validators.Context, run *gangTestRun, outcomes map[s
 		fmt.Sprintf("kubectl get pods,podgroups -n %s -o wide", run.namespace), b.String())
 }
 
-// createGangTestNamespace creates the per-run namespace (idempotent).
+// createGangTestNamespace creates the per-run namespace (idempotent), stamped
+// with the shared ownership label (gpuTestRunLabel=token) so an external
+// sweeper can tell a leaked gang namespace from a foreign one, as it can for
+// the GPU test namespaces.
 func createGangTestNamespace(ctx context.Context, clientset kubernetes.Interface, run *gangTestRun) error {
 	ns := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{Name: run.namespace},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   run.namespace,
+			Labels: map[string]string{gpuTestRunLabel: run.suffix},
+		},
 	}
 	if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); k8s.IgnoreAlreadyExists(err) != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
 	}
 	return nil
+}
+
+// failOnGangCleanup is the check's final verdict once cleanup ran: a run that
+// passed but could not delete its namespace fails, as every other per-run
+// namespace check does (cleanupGPUTestNamespace), so a PASS never stands over
+// a leaked namespace and its pods; a run that already failed keeps its own
+// error, and the cleanup failure stays in the artifact.
+//
+// Errors:
+//   - ErrCodeInternal wrapping nsErr when err is nil and nsErr is not.
+func failOnGangCleanup(err, nsErr error) error {
+	if err != nil || nsErr == nil {
+		return err
+	}
+	return errors.Wrap(errors.ErrCodeInternal, "gang scheduling test namespace cleanup failed after a passing run", nsErr)
 }
 
 // wrapGangPhase names the failed phase in the CTRF message while keeping the
