@@ -1,0 +1,153 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Nodewright Ubuntu GPU Customization (EKS and AKS)
+# Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support
+#
+# This customization configures GPU nodes on Ubuntu with:
+# - GRUB parameters for hugepages and nokaslr
+# - Containerd service limits
+# - Sysctl kernel tuning parameters
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
+metadata:
+  annotations:
+    # No Helm hooks: this NodeWright CR is release-managed so that disabling
+    # tuning (tuningEnabled=false) actually retracts it. As a hook it would be
+    # orphaned under Flux on a true->false flip (before-hook-creation never
+    # fires once the CR leaves the render). Ordering after the NodeWright CRD
+    # is handled by the component dependency on nodewright-operator, not an
+    # intra-release hook; helm/argo already strip these hooks at bundle time.
+    aicr/skip-hook-validation: "true"
+  labels:
+    app.kubernetes.io/part-of: skyhook-operator
+    app.kubernetes.io/created-by: aicr
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: nodewright-customizations-0.1.0
+  name: tuning
+  namespace: nodewright
+spec:
+  runtimeRequired: true
+  # Serialize this CR's reboots to one node at a time. nvidia-tuned,
+  # nvidia-setup-full and, on EKS, nvidia-setup-kernel carry `interrupt: reboot`.
+  # An omitted budget is not "unset": createLegacyDefaultCompartment
+  # substitutes percent: 100, so every matched node reboots together.
+  #
+  # BRINGUP ESCAPE HATCH: on an initial cluster build, before any workload has
+  # landed, serializing buys nothing and costs N x (reboot time). Delete this
+  # block or set `percent: 100` — its exact equivalent — to converge in one
+  # batch. count and percent are mutually exclusive.
+  interruptionBudget:
+    count: 1
+  # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
+  autoTaintNewNodes: true
+  # Dynamic: Supports --accelerated-node-toleration CLI flag
+  additionalTolerations:
+    - operator: Exists
+  # Dynamic: Supports --accelerated-node-selector CLI flag.
+  # No nvidia.com/gpu.present fallback here, unlike tuning-rke2.yaml: that label
+  # is emitted by GFD, which ships inside gpu-operator, and gpu-operator lists
+  # nodewright-customizations in its dependencyRefs — so this CR is applied
+  # BEFORE the label can exist on a greenfield cluster. Selecting on it would
+  # match zero nodes at bringup and only start matching after the GPU driver
+  # stack is already up, inverting the tune-then-driver ordering that
+  # runtimeRequired and the provisioner's runtime-required pre-taint exist to
+  # enforce. tuning-rke2.yaml is safe because VR200 is a deliberate day-2 flow
+  # on an already-labeled cluster (docs/integrator/rke2-vr200-setup.md).
+  # Dynamic: Supports --workload-selector CLI flag
+  # Tuning
+  packages:
+    # Install the kernel the nvidia-setup defaults pin (7.0.0-1014-aws on EKS,
+    # the -64k flavor on arm64) unless the node already runs it.
+    # On AKS this package is a designed no-op: the aks defaults omit KERNEL
+    # (AKS manages its own Ubuntu kernel) and ensure_kernel exits early.
+    nvidia-setup-kernel:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
+      version: "0.9.0"
+      containerSHA: sha256:4e7311133fd8746b2701b34c4de2c73f12ee208cace4f95bd5a5e74d454ba028
+      # On an existing EKS node this package does disruptive work: a version bump
+      # runs its upgrade step, which upgrades EFA (an efa module too old for the
+      # new kernel would fail its DKMS build there) and installs the new kernel.
+      # Its own reboot is what makes the operator cordon and drain the node before
+      # that work, and boot the new kernel before nvidia-setup-full, whose exact
+      # kernel check needs it running. Not on AKS, where this package is a no-op:
+      # its post-interrupt check there is the memlock check, which would fail
+      # because only nvidia-setup-full's apply writes the memlock limits.
+      interrupt:
+        type: reboot
+      configMap:
+        service: eks
+        accelerator: h100
+      env:
+        - name: NVIDIA_SETUP_INSTALL_KERNEL
+          value: "true"
+        - name: NVIDIA_SETUP_KERNEL_ALLOW_NEWER
+          value: "false"
+      resources:
+        # Sized like nvidia-setup-full: on an existing EKS node this package now
+        # builds EFA with DKMS. At 4 CPU / 8Gi on GB300 the memory cgroup
+        # OOM-killed efa's kernel-feature probes and the build failed.
+        cpuLimit: 8
+        cpuRequest: 4
+        memoryLimit: 16Gi
+        memoryRequest: 8Gi
+    nvidia-tuned:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.11.1"
+      containerSHA: sha256:d70ce00c80181d8fdeab29941a8370aced758aa6a9db9afdc5c095b6a142032a
+      interrupt:
+        type: reboot
+      env:
+        - name: INTERRUPT
+          value: "true"
+      configMap:
+        intent: multiNodeTraining
+        accelerator: h100
+        service: eks
+      # Runs after nvidia-setup-kernel rather than alongside it. nodewright hands a
+      # node's merged reboot to the first runnable package in name order and fires
+      # it as soon as no package Job is running (NVIDIA/nodewright#934), so with
+      # both runnable in one pass the kernel package's reboot could land between
+      # this package's apply and config Jobs. The chain is kernel, tuned, full,
+      # each with its own reboot, so a fresh EKS node reboots three times.
+      dependsOn:
+        nvidia-setup-kernel: "0.9.0"
+    # Full setup after kernel is in place
+    nvidia-setup-full:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
+      version: "0.9.0"
+      containerSHA: sha256:4e7311133fd8746b2701b34c4de2c73f12ee208cace4f95bd5a5e74d454ba028
+      interrupt:
+        type: reboot
+      resources:
+        # Elevated from 4 CPU / 8Gi for the EFA DKMS build. efa_installer.sh's
+        # "Inspecting kernel" autoconf is a highly parallel kernel-module build;
+        # inside the skyhook chroot nproc reports the host core count, so make -j
+        # oversubscribes. Under the prior 4 CPU / 8Gi cgroup it was CFS-throttled
+        # and its feature probes were starved/OOM-killed, so efa misdetected the
+        # kernel and emitted compat shims that fail to compile on 6.17. More CPU
+        # and memory headroom lets the probes complete and detect correctly.
+        cpuLimit: 8
+        cpuRequest: 4
+        memoryLimit: 16Gi
+        memoryRequest: 8Gi
+      configMap:
+        service: eks
+        accelerator: h100
+      env:
+        - name: NVIDIA_SETUP_INSTALL_KERNEL
+          value: "false"
+      dependsOn:
+        nvidia-setup-kernel: "0.9.0"
+        nvidia-tuned: "0.11.1"

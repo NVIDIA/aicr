@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicr.run/schemas/v1/Snapshot.schema.json",
+  "title": "Snapshot",
+  "description": "Captured cluster state: the measurements collected from a live cluster, plus an advisory fingerprint. Consumers that bear trust must recompute the fingerprint from measurements rather than read the embedded value.",
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "type": "string"
+    },
+    "fingerprint": {
+      "type": "object",
+      "properties": {
+        "accelerator": {
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        },
+        "gpuModel": {
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        },
+        "gpuNodeCount": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "value": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        },
+        "k8sVersion": {
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        },
+        "nodeCount": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "value": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        },
+        "os": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        },
+        "region": {
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "value"
+          ]
+        }
+      },
+      "required": [
+        "accelerator",
+        "gpuModel",
+        "gpuNodeCount",
+        "k8sVersion",
+        "nodeCount",
+        "os",
+        "region",
+        "service"
+      ]
+    },
+    "kind": {
+      "type": "string"
+    },
+    "measurements": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "subtypes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  }
+                },
+                "data": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  }
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "context": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        }
+                      },
+                      "data": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "subtype": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "measurements"
+  ]
+}
