@@ -313,9 +313,12 @@ one the validator reads (`docs/AIConformance-X.Y.yaml` beside
 `vX.Y/<name>/PRODUCT.yaml`):
 
 ```bash
-cd <evidence-dir>.incomplete
-go run -tags validate <cncf/k8s-ai-conformance checkout at the pinned commit>/scripts/validate.go vX.Y/<name>/PRODUCT.yaml
-mv vX.Y/<name> <evidence-dir> && cd .. && rm -r <evidence-dir>.incomplete
+EVIDENCE_DIR="submission"                # the --evidence-dir you passed
+VALIDATOR_SRC="$HOME/src/k8s-ai-conformance"  # cncf/k8s-ai-conformance at the pinned commit
+PRODUCT="v1.35/nvidia-aicr"             # the vX.Y/<name> directory under the staging root
+cd "${EVIDENCE_DIR}.incomplete"
+go run -tags validate "${VALIDATOR_SRC}/scripts/validate.go" "${PRODUCT}/PRODUCT.yaml"
+mv "${PRODUCT}" "../${EVIDENCE_DIR}" && cd .. && rm -r "${EVIDENCE_DIR}.incomplete"
 ```
 
 The README's Validation section still records the interrupted outcome; say
