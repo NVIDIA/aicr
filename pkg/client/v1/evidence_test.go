@@ -20,13 +20,16 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
+	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
@@ -337,10 +340,18 @@ func TestCollectCNCFEvidence_ReachesSnapshot(t *testing.T) {
 type fakeSubmissionRunner struct {
 	agentCfg     *AgentConfig
 	validateOpts []ValidateOption
-	renderOpts   RenderCNCFEvidenceOptions
-	renderDir    string
-	submitOpts   *CNCFSubmissionOptions
-	submitDir    string
+	// preflightOpts records the ValidateCNCFSubmissionOptions call; stages
+	// lists the methods in call order so a test can assert the pre-flight
+	// ran before ValidateState.
+	preflightOpts *CNCFSubmissionOptions
+	preflightErr  error
+	stages        []string
+	// snapshotVersion is the Kubernetes version the fake snapshot reports.
+	snapshotVersion string
+	renderOpts      RenderCNCFEvidenceOptions
+	renderDir       string
+	submitOpts      *CNCFSubmissionOptions
+	submitDir       string
 
 	snapshotErr error
 	validateErr error
@@ -350,14 +361,29 @@ type fakeSubmissionRunner struct {
 }
 
 func (f *fakeSubmissionRunner) CollectSnapshot(_ context.Context, cfg *AgentConfig) (*Snapshot, error) {
+	f.stages = append(f.stages, "CollectSnapshot")
 	f.agentCfg = cfg
 	if f.snapshotErr != nil {
 		return nil, f.snapshotErr
 	}
-	return &Snapshot{}, nil
+	if f.snapshotVersion == "" {
+		return &Snapshot{}, nil
+	}
+	return WrapSnapshot(&snapshotter.Snapshot{Measurements: []*measurement.Measurement{
+		measurement.NewMeasurement(measurement.TypeK8s).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("server").SetString("version", f.snapshotVersion)).
+			Build(),
+	}}), nil
+}
+
+func (f *fakeSubmissionRunner) ValidateCNCFSubmissionOptions(opts CNCFSubmissionOptions, _ string) error {
+	f.stages = append(f.stages, "ValidateCNCFSubmissionOptions")
+	f.preflightOpts = &opts
+	return f.preflightErr
 }
 
 func (f *fakeSubmissionRunner) ValidateState(_ context.Context, _ *RecipeResult, _ *Snapshot, opts ...ValidateOption) ([]*PhaseResult, error) {
+	f.stages = append(f.stages, "ValidateState")
 	f.validateOpts = opts
 	if f.validateErr != nil {
 		return nil, f.validateErr
@@ -389,6 +415,60 @@ func (f *fakeSubmissionRunner) WriteCNCFSubmission(_ context.Context, _ *ctrf.Re
 		return nil, f.renderErr
 	}
 	return &CNCFSubmissionResult{Aggregate: f.agg, Complete: f.agg != nil && f.agg.Passed(), Dir: dir}, nil
+}
+
+// TestRunCNCFSubmissionExactMinorPreflight pins the #3703 pre-flight in the
+// Go submission run: with a vendor, the snapshot's Kubernetes version is
+// checked against the carried checklists before ValidateState, so an
+// uncarried minor never costs a validator run; ConformanceVersion is carried
+// into that check and into the write.
+func TestRunCNCFSubmissionExactMinorPreflight(t *testing.T) {
+	vendor := CNCFVendor{Name: "Test Vendor", PlatformName: "P", PlatformVersion: "1", Description: "d", ContactEmail: "o@v.example",
+		WebsiteURL: "https://v.example", DocumentationURL: "https://v.example/docs", ProductLogoURL: "https://v.example/l.svg",
+		K8sConformanceURL: "https://github.com/cncf/k8s-conformance/tree/master/v1.37/p"}
+	passed := &CNCFRequirementAggregate{Version: cncf.LatestVersion}
+
+	t.Run("an uncarried minor fails before ValidateState", func(t *testing.T) {
+		runner := &fakeSubmissionRunner{agg: passed, snapshotVersion: "1.34.0",
+			preflightErr: aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "no carried CNCF AI Conformance checklist certifies Kubernetes \"1.34.0\"")}
+		err := runCNCFSubmission(context.Background(), runner, &RecipeResult{}, cncfSubmissionInputs{dir: "/tmp/out", vendor: &vendor})
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+		want := []string{"CollectSnapshot", "ValidateCNCFSubmissionOptions"}
+		if !slices.Equal(runner.stages, want) {
+			t.Errorf("stages = %v, want %v: the refusal must land before any validator Job", runner.stages, want)
+		}
+		if runner.preflightOpts == nil || runner.preflightOpts.KubernetesVersion != "1.34.0" || runner.preflightOpts.Vendor != vendor {
+			t.Errorf("pre-flight options = %+v, want the snapshot's version and the vendor", runner.preflightOpts)
+		}
+	})
+
+	t.Run("ConformanceVersion reaches the pre-flight and the write", func(t *testing.T) {
+		runner := &fakeSubmissionRunner{agg: passed, snapshotVersion: "1.34.0"}
+		err := runCNCFSubmission(context.Background(), runner, &RecipeResult{}, cncfSubmissionInputs{dir: "/tmp/out", vendor: &vendor, conformanceVersion: "v1.37"})
+		if err != nil {
+			t.Fatalf("runCNCFSubmission() error = %v", err)
+		}
+		want := []string{"CollectSnapshot", "ValidateCNCFSubmissionOptions", "ValidateState"}
+		if len(runner.stages) < 3 || !slices.Equal(runner.stages[:3], want) {
+			t.Errorf("stages = %v, want prefix %v", runner.stages, want)
+		}
+		if runner.preflightOpts.ConformanceVersion != "v1.37" || runner.submitOpts == nil || runner.submitOpts.ConformanceVersion != "v1.37" {
+			t.Errorf("ConformanceVersion not carried: pre-flight %+v, write %+v", runner.preflightOpts, runner.submitOpts)
+		}
+	})
+
+	t.Run("the pages render runs no submission pre-flight", func(t *testing.T) {
+		runner := &fakeSubmissionRunner{agg: passed, snapshotVersion: "1.34.0"}
+		if err := runCNCFSubmission(context.Background(), runner, &RecipeResult{}, cncfSubmissionInputs{dir: "/tmp/out", conformanceVersion: "v1.36"}); err != nil {
+			t.Fatalf("runCNCFSubmission() error = %v", err)
+		}
+		if slices.Contains(runner.stages, "ValidateCNCFSubmissionOptions") {
+			t.Errorf("stages = %v: the pages render keeps its nearest-checklist fallback", runner.stages)
+		}
+		if runner.renderOpts.ConformanceVersion != "v1.36" {
+			t.Errorf("render ConformanceVersion = %q, want v1.36", runner.renderOpts.ConformanceVersion)
+		}
+	})
 }
 
 // With a vendor, runCNCFSubmission writes the submission directory instead
