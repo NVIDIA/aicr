@@ -173,6 +173,8 @@ navigation:
         path: contributor/component.md
       - page: Upgrade Transition Records
         path: contributor/upgrade-records.md
+      - page: Component Memory Sizing
+        path: contributor/component-sizing.md
       - page: Collectors
         path: contributor/collector.md
       - page: Validators

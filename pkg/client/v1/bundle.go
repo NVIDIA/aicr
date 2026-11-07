@@ -471,8 +471,8 @@ func (c *Client) AdoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*Re
 // Errors:
 //   - ErrCodeInvalidRequest when the Client, ctx, or recipe is nil, when
 //     recipe lacks internal state (constructed outside Resolve/Load), when
-//     the recipe was produced by a different Client, or when the Client
-//     has been Closed.
+//     the recipe was produced by a different Client, when opts.Nodes is
+//     negative, or when the Client has been Closed.
 //   - Allowlist and bundler errors propagate with their structured codes.
 func (c *Client) MakeBundle(ctx context.Context, recipe *RecipeResult, opts BundleOptions) (BundleArtifact, error) {
 	if c == nil {
@@ -490,6 +490,10 @@ func (c *Client) MakeBundle(ctx context.Context, recipe *RecipeResult, opts Bund
 	}
 	if err := c.assertOwns(recipe); err != nil {
 		return nil, err
+	}
+	if opts.Nodes < 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("BundleOptions.Nodes must be zero or positive, got %d", opts.Nodes))
 	}
 
 	// Snapshot Client state under the read lock — same pattern as

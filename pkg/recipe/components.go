@@ -142,6 +142,9 @@ type ComponentConfig struct {
 	// Upgrades references this component's transition records (ADR-021).
 	Upgrades UpgradesConfig `yaml:"upgrades,omitempty"`
 
+	// Sizing references this component's node-count sizing tiers (ADR-030).
+	Sizing SizingConfig `yaml:"sizing,omitempty"`
+
 	// ManifestFiles lists manifest files (relative to the recipes data
 	// root, e.g. "components/kueue/manifests/cluster-queue.yaml") bundled
 	// with the component whenever a recipe references it and the

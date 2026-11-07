@@ -112,6 +112,7 @@ intent; the linked page has the walkthrough.
 |--------------|-------|-------|
 | Make an existing Helm or Kustomize chart available to recipes | `recipes/registry.yaml` entry | [component.md](component.md) |
 | Bump a pinned chart version, and record whether the upgrade is safe | `recipes/components/<name>/upgrades.yaml` | [upgrade-records.md](upgrade-records.md) |
+| Lower a controller's memory for smaller clusters, or refine a tier from new readings | `recipes/components/<name>/sizing.yaml` | [component-sizing.md](component-sizing.md) |
 | Pin a chart version | `helm.defaultVersion` (or `kustomize.defaultTag`) in `recipes/registry.yaml`; an overlay pin only as a declared Helm `version` divergence in `versionPinExemptions` (Kustomize `tag` exemptions are rejected today) | [recipe.md](recipe.md#version-pinning-is-single-source) |
 | Set values or define scheduling for a specific cluster shape | Recipe overlay in `recipes/overlays/` | [recipe.md](recipe.md) |
 | Share OS or platform fragments across overlays | Recipe mixin in `recipes/mixins/` | [recipe.md](recipe.md#mixin-composition) |
@@ -336,6 +337,7 @@ By contributor task:
 - **Adding recipes, overlays, mixins, components** → [recipe.md](recipe.md)
 - **Adding a registry entry (Helm or Kustomize chart)** → [component.md](component.md)
 - **Bumping a pinned version (and writing its transition record)** → [upgrade-records.md](upgrade-records.md)
+- **Sizing controller memory by GPU node count** → [component-sizing.md](component-sizing.md)
 - **Adding a CLI command** → [cli.md](cli.md)
 - **Adding an HTTP endpoint** → [api-server.md](api-server.md)
 - **Adding a snapshot collector** → [collector.md](collector.md)
