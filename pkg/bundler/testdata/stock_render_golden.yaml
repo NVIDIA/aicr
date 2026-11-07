@@ -5904,10 +5904,10 @@ vr200-nvke-ubuntu-inference:
   015-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 91b41fd86d89f3c7177c31b6a0070acb307f92dd285a5127074a5d226cc2b419
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
-  bundle-info.yaml: 65cf5340834df68486e0d7fecee55512eea4acc9c0f95928477979f18ae3c276
-  checksums.txt: 9e6b495fc19f266e36da4f1fd922f4c9ca6a07f66ec7354336779269706e1bc2
+  bundle-info.yaml: 2cbaef198d36a9cbaaeaa5dc43411545c242dd81b6a2f5d6c076d142cda3fe62
+  checksums.txt: a61c5ac5eb440a0273bfe41f50cb262c9973e0f47035f37bbc996001d37059d5
   deploy.sh: 68dbbe44b809aaa9dd14281f7b43cf6c55a7006e3931b03dff27b5bcb6744ca3
-  recipe.yaml: 55c9db022252be319f2c62d1e466e193e5943fac030f0b05056cf7e508ce603c
+  recipe.yaml: 5c56ad18551775f318f6c742e8dd07acbbef914fde028e06abb98b4c0d20ea86
 vr200-nvke-ubuntu-training:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -5970,10 +5970,10 @@ vr200-nvke-ubuntu-training:
   014-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: 5c6efffe34c335ecc73a899d1341deb98aad49e10b9aa2edb682718227cf0c2a
   UPGRADING.md: 5b326bcf1ffc5558122e69eff1925bb3e42bae2d09b0ed79bbf25a2764c0cc88
-  bundle-info.yaml: a086576f903fe6c75f286ff333f7aa0b9b2188917e2dcb48c85cbc1774ec7c8d
-  checksums.txt: b533a437adfc223d6006c379e9c7dba3d1e9ee4a4d013b4b31a3614fb552d982
+  bundle-info.yaml: f00ebb36346a508a8ccf2d8b1b20bd0a0c08e3a5577ae4ae8eaee21650e52401
+  checksums.txt: 785991d653d4df001de47c4bcb124dca11c7278825d948667f051d664721315d
   deploy.sh: 5e2fb5a51617144b08ca5f6b2b0f5417827a9f72f39ce455412830226ddfbb57
-  recipe.yaml: 4a36ad96cb214ffa80fcf24c56dceb56c2c14d7cb59af37cde4192caa6c952eb
+  recipe.yaml: 2eece745cbdfdcb22dcc92d44afffc418da08ceef47ccb7414eff9d747e8c56c
 vr200-rke2-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
