@@ -86,6 +86,7 @@ Neither constraint applies to `nccl-cre-all-reduce-bw` or
 | `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, job submission, GPU execution, and enabled accounting health | 8m |
 | `slinky-slurm-imex-channel` | Verify fixed IMEX resources and distinct channels for concurrent Slinky Slurm jobs | 5m |
 | `slinky-slurm-gpu-access` | Verify a Slinky Slurm job allocated one GPU can use exactly that GPU, and a job with no GPU allocation on the same node cannot open any GPU device | 5m |
+| `workload-sandboxing` | Verify a sandboxed `RuntimeClass` (gVisor, Kata; or the one `AICR_SANDBOX_RUNTIME_CLASS` names) isolates a CPU-only `ubuntu:22.04` probe pod from the host: no host daemon in `/proc`, no readable `/dev/mem` or `/dev/kmem`, no `/etc/kubernetes`, `/var/lib/kubelet` or `/var/log/pods`, no host bridge interface, and a kernel identity distinct from an unsandboxed control pod on the same node; fails with `unmet prerequisite: no sandboxed RuntimeClass` when none exists (never skips) | 10m |
 | `gpu-operator-health` | Verify GPU operator health (conformance diagnostic) | 2m |
 | `platform-health` | Verify platform component health (conformance diagnostic) | 5m |
 

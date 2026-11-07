@@ -397,6 +397,54 @@ drains. The bounds (`defaults.GatewayTraffic*`) sit under the
 `inferenceGatewayWorkBudget` the 15m catalog timeout covers; a recipe that
 declares no gateway still skips before the phase.
 
+`workload-sandboxing` (#3615, CNCF `workload_sandboxing`: SHOULD at v1.37,
+MUST at v1.38 per KAR-0020) mirrors the upstream `TestWorkloadSandboxing`.
+`resolveSandboxedRuntimeClass` picks the RuntimeClass under test: the one
+`AICR_SANDBOX_RUNTIME_CLASS` names (accepted as given, as upstream accepts its
+flag; a name that matches no class is `ErrCodeInvalidRequest`), else the
+first by name whose name or handler contains one of the upstream keywords
+(`gvisor`, `runsc`, `kata`, `sandboxed`, `quark`, `krun`). None is
+`ErrCodeUnavailable` with the message `unmet prerequisite: no sandboxed
+RuntimeClass`: a failure, where upstream skips, because the requirement
+counts a platform without a sandbox runtime as Not Implemented and never
+not-applicable. Both outcomes record every RuntimeClass consulted. The check
+then runs the upstream probe script (`sandboxProbeScript`, exiting 0 so the
+pod reaches a terminal phase and the logs are complete, where upstream sleeps
+and polls) in two CPU-only pods from a vanilla image,
+`docker.io/library/ubuntu:22.04` by default: the sandboxed pod on the chosen
+RuntimeClass, left to the scheduler so the class's own `scheduling`
+constraints apply, with the context tolerations (the package's tolerate-all
+default when none are set, which upstream does not grant its sandboxed pod: a
+deliberate choice so a sandbox runtime on a tainted GPU pool is reachable, at
+the cost that a cordoned or NotReady node inside the class's node set can
+absorb the pod until the pod timeout); then an unsandboxed control
+pod pinned by `spec.nodeName` to the node the sandboxed pod landed on, with
+tolerate-all so a dedicated sandbox pool's taints do not evict it.
+`parseSandboxProbeLogs` reads the `SANDBOX_INFO` and `SANDBOX_PROBE` lines and
+`verifyWorkloadSandboxing` decides: both scripts printed their completion
+marker, the sandboxed pod passed the four probes (no host daemon in `/proc`,
+`/dev/mem` and `/dev/kmem` unreadable, no `/etc/kubernetes`,
+`/var/lib/kubelet` or `/var/log/pods`, no host bridge, CNI or bond
+interface), and `kernelIdentitiesDiffer` finds its `uname -r`,
+`/proc/version` or `boot_id` different from the control pod's (a field either
+side could not read is not compared). Every failing probe is named in one
+`ErrCodeInternal` error, the code the other probe checks use for a failed
+subtest; incomplete output is a failure, not a pass on what was seen. A check
+deadline too short for cleanup fails with `ErrCodeTimeout` before anything is
+created, and a cleanup or apiserver read failure carries its own classified
+code. The probe image is configurable for mirrors through
+`AICR_SANDBOX_PROBE_IMAGE` (forwarded from the orchestrator's shell to this
+check only), which replaces the full reference; `AICR_VALIDATOR_IMAGE_REGISTRY`
+deliberately does not rewrite it, for the reason given for the busybox probe
+and the NCCL workload image. The check does not skip on Slinky Slurm recipes:
+the probe requests no GPU, so the NodeSet holding every GPU is no obstacle.
+Which sandbox runtime AICR recipes provide, and on which pool, is the pending
+product decision of #3615; until it lands no embedded recipe declares the
+check, so the `workload_sandboxing` row renders `NOT TESTED (not run)` at
+SHOULD, and an operator whose cluster already has gVisor or Kata can declare
+it on a recipe copy today (naming the class with `AICR_SANDBOX_RUNTIME_CLASS`
+when detection does not match).
+
 `cluster-autoscaling` drives a scale event only on the Karpenter path and
 records that scale-up as an observation (scale-down is not observed). The EKS,
 AKS and GKE paths record autoscaler presence, GPU pool membership, the
@@ -864,6 +912,8 @@ be set from the catalog or a `--data` overlay:
 | Variable | Forwarded to | Purpose |
 |----------|--------------|---------|
 | `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
+| `AICR_SANDBOX_RUNTIME_CLASS` | `workload-sandboxing` | Names the sandboxed `RuntimeClass` to test instead of auto-detecting one by the gVisor/Kata keywords (the upstream `-sandbox-runtime-class` flag); a name the cluster has no class for fails the check with `ErrCodeInvalidRequest`. |
+| `AICR_SANDBOX_PROBE_IMAGE` | `workload-sandboxing` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must provide a POSIX `/bin/sh`, `uname`, `cat`, `ls`, `wc`, `head`, `awk` and `tr` for the probe script; the probe pods carry no `imagePullSecrets`, as the other vanilla probes in this package do not, so a mirror that needs credentials must supply them node-side. |
 | `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
 | `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway is open to the internet. What is assessed follows the declared `dataPlane`, not whether the controller runs a Service: with `service-endpoints` (the default), the proxy `LoadBalancer`'s `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`); with `gateway-address`, Service source ranges are not read at all, and the check fails when a Gateway status address is public, or is a `Hostname` or an unspecified address (`0.0.0.0`, `::`) the check cannot classify (a Gateway with no `status.addresses` at all fails the data-plane step in every mode, before exposure is assessed). Default (unset): the open exposure is recorded and warned but the check still passes. Which gateway is assessed, and how, comes from the recipe's inference gateway profile (`pkg/validator/v1.ResolveInferenceGatewayProfile`; see [Declaring the inference gateway](../integrator/data-extension.md#declaring-the-inference-gateway)). |
 | `AICR_NCCL_RUNTIME_IMAGE` | `nccl-all-reduce-bw`, `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls` | Overrides the NCCL launcher/worker image baked into the per-platform TrainingRuntime templates; a malformed reference fails closed in the pod. |

@@ -101,6 +101,22 @@ const (
 	// validators/conformance/driver_runtime_management_check.go.
 	driverRuntimeImageEnv = "AICR_DRIVER_RUNTIME_IMAGE"
 
+	// WorkloadSandboxingCheckName is the catalog name of the conformance check
+	// that proves a sandboxed RuntimeClass isolates a pod from the host;
+	// sandboxRuntimeClassEnv and sandboxProbeImageEnv forwarding is scoped
+	// to it.
+	WorkloadSandboxingCheckName = "workload-sandboxing"
+
+	// sandboxRuntimeClassEnv names the RuntimeClass workload-sandboxing tests
+	// instead of auto-detecting a gVisor or Kata class (the upstream
+	// -sandbox-runtime-class flag); sandboxProbeImageEnv replaces its vanilla
+	// probe image (docker.io/library/ubuntu:22.04) with a full reference for
+	// mirrors, which AICR_VALIDATOR_IMAGE_REGISTRY does not rewrite. Both are
+	// forwarded verbatim to that check's pod only; the pod-side consts of the
+	// same literals live in validators/conformance/workload_sandboxing_check.go.
+	sandboxRuntimeClassEnv = "AICR_SANDBOX_RUNTIME_CLASS"
+	sandboxProbeImageEnv   = "AICR_SANDBOX_PROBE_IMAGE"
+
 	// inferencePerfNoCleanupEnv, when truthy, makes the inference-perf validator
 	// leave its namespace/DGD/workers/frontend/AIPerf Job in place after the run
 	// for post-mortem inspection. Forwarded only to the inference-perf pod.
@@ -236,6 +252,16 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: inferencePerfNoCleanupEnv, Value: "1"})
 	}
 
+	// Forward the workload-sandboxing RuntimeClass and probe image overrides
+	// to that check only; the pod resolves the defaults itself.
+	if entry.Name == WorkloadSandboxingCheckName {
+		for _, name := range []string{sandboxRuntimeClassEnv, sandboxProbeImageEnv} {
+			if v := os.Getenv(name); v != "" {
+				env = append(env, corev1.EnvVar{Name: name, Value: v})
+			}
+		}
+	}
+
 	// Add catalog entry's custom env vars. Orchestrator-controlled env vars are
 	// deliberately skipped here: they must come only from the process
 	// environment (forwarded above), never from the in-repo catalog. Appending
@@ -244,6 +270,9 @@ func buildEnv(
 	// boundary.
 	for _, e := range entry.Env {
 		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclRuntimeImageEnv || e.Name == driverRuntimeImageEnv {
+			continue
+		}
+		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})

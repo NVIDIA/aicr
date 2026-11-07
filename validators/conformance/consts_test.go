@@ -50,6 +50,7 @@ func TestGPUCheckWorkBudgetsFitCatalogTimeouts(t *testing.T) {
 		"ai-service-metrics":        aiServiceMetricsWorkBudget,
 		"robust-controller":         robustControllerWorkBudget,
 		"inference-gateway":         inferenceGatewayWorkBudget,
+		"workload-sandboxing":       workloadSandboxingWorkBudget,
 	}
 	seen := map[string]bool{}
 	for _, v := range cat.Validators {

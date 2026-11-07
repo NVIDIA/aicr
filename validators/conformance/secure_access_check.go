@@ -204,6 +204,10 @@ type gpuTestRun struct {
 	computeDomainName string
 	claimTemplateName string
 	imexPodName       string
+	// workload-sandboxing probe pods: the one on the sandboxed RuntimeClass
+	// and the unsandboxed control pinned to the same node.
+	sandboxProbePodName   string
+	sandboxControlPodName string
 
 	// namespaceLabels are stamped on the namespace beside the ownership
 	// label; a check sets them when something outside the run selects the
@@ -264,6 +268,9 @@ func newGPUTestRun() (*gpuTestRun, error) {
 		computeDomainName: imexComputeDomainPrefix + token,
 		claimTemplateName: imexClaimTemplatePrefix + token,
 		imexPodName:       imexTestPodPrefix + token,
+
+		sandboxProbePodName:   sandboxProbePodPrefix + token,
+		sandboxControlPodName: sandboxControlPodPrefix + token,
 	}, nil
 }
 
