@@ -2894,6 +2894,16 @@ func agentgatewayServiceType(values map[string]any) (string, error) {
 	return s, nil
 }
 
+// agentgatewayNonLBReach describes who can reach the inference-gateway for a
+// non-LoadBalancer Service type, since no source-range filter applies there.
+func agentgatewayNonLBReach(serviceType string) string {
+	if serviceType == "NodePort" {
+		return "A NodePort is reachable by every client that can reach a node, so restrict access " +
+			"with network policy or a firewall."
+	}
+	return "The gateway is reachable only from inside the cluster."
+}
+
 // noteAgentgatewayNonLBService records that allowedSourceRanges does not apply
 // when serviceType is not LoadBalancer: loadBalancerSourceRanges is a
 // LoadBalancer-only Service field, so the manifest renders no ranges and the
@@ -2918,8 +2928,9 @@ func (b *DefaultBundler) noteAgentgatewayNonLBService(values map[string]any, ser
 	case exposureUnset:
 		b.appendWarning(fmt.Sprintf(
 			"%s: %s is %s, so the inference-gateway Service is not a LoadBalancer and %s does not apply; "+
-				"the private-by-default source ranges are not injected",
-			agentgatewayComponentName, agentgatewayServiceTypePath, serviceType, agentgatewaySourceRangesPath))
+				"the private-by-default source ranges are not injected. %s",
+			agentgatewayComponentName, agentgatewayServiceTypePath, serviceType, agentgatewaySourceRangesPath,
+			agentgatewayNonLBReach(serviceType)))
 		slog.Info("agentgateway inference-gateway Service is not a LoadBalancer; skipping source-range default",
 			"component", agentgatewayComponentName,
 			"serviceType", serviceType,
