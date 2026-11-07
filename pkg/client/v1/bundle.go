@@ -240,7 +240,8 @@ type BundleOptions struct {
 	BinaryAttestation []byte
 
 	// OutputDir is the directory bundle files are written to. Empty
-	// means the current directory ("."), matching Make's default.
+	// means the current directory ("."), matching Make's default. An
+	// existing OutputDir must be empty.
 	OutputDir string
 
 	// Timeout optionally caps the bundle run. When > 0, MakeBundle wraps

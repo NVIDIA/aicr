@@ -505,15 +505,7 @@ func (a *overlayAddition) dataProvider(t *testing.T, leaf recipe.CatalogEntry) r
 		recipe.RegistryFileName:                  []byte(providertest.EmptyRegistryYAML),
 		"overlays/" + optInOverlayName + ".yaml": overlayYAML,
 	})
-	provider, err := recipe.NewLayeredDataProvider(
-		recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""),
-		recipe.LayeredProviderConfig{ExternalDir: dir},
-	)
-	if err != nil {
-		t.Fatalf("layer opt-in overlay: %v", err)
-	}
-	t.Cleanup(func() { recipe.EvictCachedRegistry(provider) })
-	return provider
+	return dataDirProvider(t, dir)
 }
 
 // unrenderedRegistryComponents returns the registry components that render in

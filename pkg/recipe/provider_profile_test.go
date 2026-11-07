@@ -254,20 +254,16 @@ func TestExternalOverlayContributesProfileValue(t *testing.T) {
 func TestSourceFollowsTheLatestExternalRead(t *testing.T) {
 	ctx := t.Context()
 	const path = "overlays/gke-cos.yaml"
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(providertest.EmptyRegistryYAML), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	dir := providertest.WriteDir(t, map[string][]byte{
+		RegistryFileName: []byte(providertest.EmptyRegistryYAML),
+		path:             []byte(withPatch(t, "gke-cos.yaml", "spec: {profile: {values: {custom: {}}}}")),
+	})
 	write := func(content string) {
 		t.Helper()
 		if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write(withPatch(t, "gke-cos.yaml", "spec: {profile: {values: {custom: {}}}}"))
 	layered, err := NewLayeredDataProvider(
 		NewEmbeddedDataProvider(GetEmbeddedFS(), "."), LayeredProviderConfig{ExternalDir: dir})
 	if err != nil {

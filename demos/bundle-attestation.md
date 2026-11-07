@@ -69,7 +69,7 @@ aicr recipe \
 **Default (no attestation):**
 
 ```shell
-aicr bundle --recipe recipe.yaml --output ./my-bundle
+aicr bundle --recipe recipe.yaml --output ./my-unsigned-bundle
 ```
 
 Produces a bundle whose maximum reachable trust level is `unverified` —

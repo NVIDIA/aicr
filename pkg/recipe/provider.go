@@ -431,6 +431,24 @@ func (p *LayeredDataProvider) ExternalDir() string {
 	return p.externalDir
 }
 
+// ReadExternalFile returns the unmerged content of relPath, one of
+// ExternalFiles, from the external data directory. It reads under the same
+// size limit and symlink policy as ReadFile.
+func (p *LayeredDataProvider) ReadExternalFile(ctx context.Context, relPath string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, fmt.Sprintf("context canceled before reading %q", relPath), err)
+	}
+	lookupPath := filepath.ToSlash(relPath)
+	if !p.externalFiles[lookupPath] {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeNotFound, fmt.Sprintf("external data file %q not found", relPath))
+	}
+	data, err := readExternalFile(p.externalDir, lookupPath, p.maxFileSize, p.allowSymlinks)
+	if err != nil {
+		return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read external file %s", relPath))
+	}
+	return data, nil
+}
+
 // ReadFile reads a file, checking external directory first.
 // For registryFileName, returns merged content.
 // For an overlay that carries only a profile declaration, returns the embedded overlay

@@ -140,14 +140,7 @@ components:
 		"components/" + upgradeNotesFixtureComponent + "/upgrades.yaml": []byte(record),
 	})
 
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
-	if err != nil {
-		t.Fatalf("NewLayeredDataProvider: %v", err)
-	}
-	recipe.EvictCachedRegistry(layered)
-	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
-	return layered
+	return dataDirProvider(t, tmpData)
 }
 
 // upgradeNotesFixtureRecipe returns a one-component recipe pinning the Helm

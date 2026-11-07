@@ -384,33 +384,24 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// default. The inner app-of-apps.yaml is discarded, so the only
 		// observable effect is a correct collision baseline.
 		AppName: cmp.Or(g.AppName, DefaultAppName),
-		// Forward CascadeDelete and SyncRetry too: child finalizers and
-		// syncPolicy.retry survive the YAML round-trip in
-		// transformApplication untouched. NamePrefix /
-		// DestinationServer / Project are NOT forwarded — those fields
-		// are rewritten into `.Values.deployer.*` template expressions
-		// during transform, so forwarding would bake values the rewrite
-		// then discards.
+		// The inner generator checks the baked NamePrefix default composed
+		// into every child name against AppName. The transform rewrites
+		// metadata.name into a `.Values.deployer.namePrefix` expression, so
+		// the baked prefix does not reach the chart. The rendered template
+		// guard covers install-time deployer.namePrefix overrides.
+		NamePrefix: g.NamePrefix,
+		// Child finalizers and syncPolicy.retry survive the YAML round-trip
+		// in transformApplication untouched. DestinationServer and Project
+		// are left unset because the transform rewrites them into
+		// `.Values.deployer.*` expressions.
 		CascadeDelete: g.CascadeDelete,
 		SyncRetry:     g.SyncRetry,
 	}
 
-	baseOut, genErr := argocdGen.Generate(ctx, tmpDir)
-	if genErr != nil {
+	if _, genErr := argocdGen.Generate(ctx, tmpDir); genErr != nil {
 		// PropagateOrWrap keeps the delegate's code, so a chart digest
 		// mismatch reports CONFLICT here as it does under the argocd deployer.
 		return nil, errors.PropagateOrWrap(genErr, errors.ErrCodeInternal, "failed to generate base Argo CD output")
-	}
-
-	// The baked NamePrefix default composes into every child template, so
-	// validate it against the emitted releases before outputDir exists. The
-	// rendered template guard covers install-time deployer.namePrefix overrides.
-	releases := make([]string, 0, len(baseOut.Releases))
-	for _, r := range baseOut.Releases {
-		releases = append(releases, r.Name)
-	}
-	if nameErr := argocd.ValidateChildAppNames(g.NamePrefix, cmp.Or(g.AppName, DefaultAppName), releases); nameErr != nil {
-		return nil, nameErr
 	}
 
 	// Step 2: Create Helm chart output structure
@@ -865,10 +856,8 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		totalSize += staticSize
 	}
 
-	// Generation writes directly into --output and the directory is not
-	// cleared between runs, so a failed pre-fix run leaves its empty static/
-	// behind. Without this, retrying into that same directory reproduces the
-	// original failure even though nothing new is created.
+	// A Generator called directly can write into a reused output directory,
+	// where an empty static/ from an earlier run fails validateExactTree.
 	if !staticDirReady {
 		if err := removeStaleStaticDir(staticDir); err != nil {
 			return nil, 0, nil, err
@@ -879,31 +868,19 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 }
 
 // checkStaticPath rejects anything occupying the static path that is not a
-// plain directory. Both the create and the remove path call it, so a
-// pre-existing file or symlink produces the same ErrCodeInvalidRequest
-// regardless of whether the recipe happens to contribute static values —
-// otherwise the identical user error would surface as INVALID_REQUEST for an
-// all-local recipe and INTERNAL (from MkdirAll's ENOTDIR) for any recipe with
-// an upstream chart.
+// plain directory, using Lstat so a symlink is rejected too. The create and
+// the remove path both call it, so a file or symlink there reports
+// ErrCodeInvalidRequest whether or not the recipe has an upstream chart. The
+// remove path needs it most, since os.Remove unlinks a regular file as
+// readily as an empty directory.
 //
-// The check matters most before removal, since os.Remove unlinks regular files
-// as readily as it removes empty directories. A pre-existing regular file at
-// this path reaches generation on every route: checksum.ValidateOutputRoot
-// runs first on the DefaultBundler path but permits regular files, rejecting
-// only symlinks and special objects.
+// Only a Generator called directly can find anything at this path.
+// DefaultBundler generates into a new staging directory.
 //
-// Lstat rather than Stat additionally rejects a symlink here. On the
-// DefaultBundler path that is redundant, since ValidateOutputRoot already
-// rejects a symlink anywhere under the output root before any deployer runs;
-// it still holds for a caller that constructs this Generator directly and
-// bypasses that check.
-//
-// The guarantee stops there. This is a check-then-act on a path, so a symlink
-// planted between this call and the MkdirAll or Remove that follows is not
-// caught. Closing that would require openat-based operations throughout, and
-// it buys nothing in a supported configuration: it takes a local process with
-// write access to --output, and anything with that access can already rewrite
-// the finished bundle and its checksums.
+// This is a check-then-act on a path, so a symlink planted between this call
+// and the MkdirAll or Remove that follows is not caught. Planting one takes a
+// local process with write access to the output directory, which can already
+// rewrite the finished bundle and its checksums.
 func checkStaticPath(staticDir string) error {
 	info, statErr := os.Lstat(staticDir)
 	switch {
@@ -922,22 +899,17 @@ func checkStaticPath(staticDir string) error {
 	return nil
 }
 
-// removeStaleStaticDir clears a static/ left behind by an earlier run when the
-// current generation contributed no files to it.
+// removeStaleStaticDir removes an empty static/ that an earlier run into the
+// same directory left behind, when the current generation contributed no
+// files to it. Emptiness is checked explicitly, not inferred from a
+// platform-specific os.Remove errno.
 //
-// Emptiness is checked explicitly rather than inferred from an os.Remove
-// errno, which keeps the intent readable and avoids platform-specific error
-// values. A populated static/ is kept: its contents are reported by
-// validateExactTree as unexpected output, though only when checksums are
-// enabled, since that validator runs inside the IncludeChecksums path. With
-// checksums off a stale static/ survives into the bundle, which is unchanged
-// from before this fix — a reused --output was never cleared, so stale files
-// of any kind already persisted.
+// A populated static/ is kept with a warning. With checksums enabled,
+// validateExactTree reports its contents as unexpected output. With them
+// disabled, it survives into the bundle.
 //
-// Anything that blocks removal of an empty directory fails generation rather
-// than being logged and ignored: leaving it behind either trips that same
-// validator or, when checksums are disabled, ships the bundle this fix exists
-// to prevent.
+// A failure to remove an empty static/ fails generation, since leaving it
+// ships a bundle with an empty directory.
 func removeStaleStaticDir(staticDir string) error {
 	if err := checkStaticPath(staticDir); err != nil {
 		return err

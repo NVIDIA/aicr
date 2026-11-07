@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
@@ -37,6 +38,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd/argocdtest"
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -740,16 +742,9 @@ func TestGenerate_RejectsInvalidBundleChartVersion(t *testing.T) {
 	}
 }
 
-// TestGenerate_PreManifestParentResolution exercises the synthetic
-// `-pre` folder path that recipes with ComponentPreManifests emit
-// (e.g. the gke-cos OS overlay, which injects a Talos-style driver
-// prerequisite Namespace ahead of gpu-operator). The folder is named
-// `NNN-gpu-operator-pre`; the bundler must strip the `-pre` suffix
-// when resolving the override key, otherwise resolveOverrideKey is
-// called with "gpu-operator-pre" and fails `component %q not found
-// in registry` at bundle time. Caught in the KWOK gke-cos-training
-// CI lane after the pre-fix; before this commit the bug only
-// surfaced for recipes that combined Helm + pre-manifest overlays.
+// TestGenerate_PreManifestParentResolution verifies that a component's
+// NNN-<name>-pre folder resolves its override key from the parent component,
+// and that the folder and its wrapper template reach the bundle.
 func TestGenerate_PreManifestParentResolution(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
@@ -794,16 +789,10 @@ func TestGenerate_PreManifestParentResolution(t *testing.T) {
 	}
 }
 
-// TestGenerate_PreAndPostManifestParentResolution covers the actual
-// gke-cos OS overlay shape: a single registered component (`gpu-operator`)
-// with BOTH preManifestFiles (cos-namespace prep) and postManifestFiles
-// (dcgm-exporter). The argocdhelm processFolders loop sees 3 entries
-// (`<NNN>-gpu-operator-pre`, `<NNN>-gpu-operator`, `<NNN>-gpu-operator-post`)
-// and runs the suffix-strip logic twice across two distinct folders.
-// Both wrapper templates must resolve back to the same parent override
-// key so the values applied to the chart and the manifest hooks stay
-// consistent. Earlier revisions handled only `-post`; this test guards
-// against re-introducing that asymmetry.
+// TestGenerate_PreAndPostManifestParentResolution verifies that a component
+// with both pre- and post-manifests resolves both folders' override keys from
+// the parent, and that both folders and their wrapper templates reach the
+// bundle.
 func TestGenerate_PreAndPostManifestParentResolution(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
@@ -1063,9 +1052,8 @@ func TestGenerate_StaticDirCreatedOnlyWhenPopulated(t *testing.T) {
 			wantStaticDir: false,
 		},
 		{
-			// A pre-fix failed run leaves an empty static/ in --output, and
-			// generation does not clear the directory between runs, so the
-			// retry must remove it rather than fail the same way again.
+			// A Generator called directly can write into a directory where an
+			// earlier run left an empty static/, which fails validateExactTree.
 			name:           "stale empty static dir from a prior run is removed",
 			refs:           localOnlyRefs,
 			values:         localOnlyValues,
@@ -1197,26 +1185,18 @@ func TestGenerate_StaleStaticPathIsNotDestroyed(t *testing.T) {
 			RepoURL:                "https://github.com/example/repo.git",
 			TargetRevision:         "main",
 			ComponentPostManifests: map[string]map[string][]byte{"nfd-ocp": localManifest},
-			// Reaches finalizeOutput -> checksum.WriteChecksums ->
-			// validateExactTree, the check that rejected the empty directory
-			// in #1942.
+			// Reaches finalizeOutput, checksum.WriteChecksums and
+			// validateExactTree, which rejects unexpected output.
 			//
-			// This only affects the "populated static dir is preserved"
-			// subtest, the one that runs far enough to reach the validator.
-			// The file and symlink subtests fail earlier inside
-			// checkStaticPath and return before finalizeOutput, so they assert
-			// checkStaticPath's own message and DO pin the error code in both
-			// directions -- including the no-ErrCodeInternal check that keeps
+			// Only the "populated static dir is preserved" subtest runs far
+			// enough to reach the validator, and it asserts the validator's
+			// message, not an error code. The file and symlink subtests fail
+			// earlier inside checkStaticPath and pin its error code in both
+			// directions, including the no-ErrCodeInternal check that keeps
 			// the CLI exit code at 2. Do not relax those.
 			//
-			// For the validator subtest only: production builds this Generator
-			// with IncludeChecksums false (the argocdhelm.Generator literal in
-			// DefaultBundler.buildDeployer) and reaches the same validator from
-			// DefaultBundler.runDeployer instead, so the wrapper around that
-			// failure differs from the shipped CLI. Its assertion is on
-			// validateExactTree's message, identical on both routes; its
-			// surrounding error code is not pinned. End-to-end coverage of the
-			// production path lives in tests/chainsaw/cli/bundle-ocp.
+			// DefaultBundler generates into a new staging directory, so only
+			// a Generator called directly can meet a stale static/.
 			IncludeChecksums: true,
 		}
 	}
@@ -3419,44 +3399,45 @@ func TestHelmTemplate_IncludeRootAppToggle(t *testing.T) {
 // output is written. The install-time equivalents are covered by
 // TestHelmTemplate_ChildNameGuards below.
 func TestGenerate_ChildNameLimits(t *testing.T) {
-	tests := []struct {
-		name      string
-		mutate    func(*Generator)
-		errSubstr string
-	}{
-		{
-			name:      "composed name exceeds Helm release-name cap",
-			mutate:    func(g *Generator) { g.NamePrefix = strings.Repeat("a", 49) + "-" },
-			errSubstr: "53",
-		},
-		{
-			name: "child name collides with parent app name",
-			mutate: func(g *Generator) {
-				g.AppName = "tenant-gpu-operator"
-				g.NamePrefix = "tenant-"
-			},
-			errSubstr: "collides",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, tt := range argocdtest.ChildNameCases() {
+		t.Run(tt.Name, func(t *testing.T) {
 			g := newTestHelmGenerator(t)
-			tt.mutate(g)
+			g.AppName, g.NamePrefix = tt.AppName, tt.NamePrefix
+			g.ComponentPreManifests, g.ComponentPostManifests, g.ComponentReadiness = tt.PreManifests, tt.PostManifests, tt.Readiness
 			outputDir := filepath.Join(t.TempDir(), "bundle")
-			_, err := g.Generate(context.Background(), outputDir)
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
+			_, genErr := g.Generate(context.Background(), outputDir)
 			if _, statErr := os.Stat(outputDir); !os.IsNotExist(statErr) {
 				t.Errorf("rejected bundle left output behind: stat error = %v", statErr)
 			}
-			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
-				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
-			}
-			if !strings.Contains(err.Error(), tt.errSubstr) {
-				t.Errorf("error %q does not mention %q", err.Error(), tt.errSubstr)
-			}
+			argocdtest.WantRejected(t, "Generate", genErr, tt.ErrSubstr)
 		})
+	}
+}
+
+// TestGenerate_PrefixedChildMatchesAppNameUnprefixed covers an app name equal
+// to a component name, which collides only when the prefix is dropped.
+func TestGenerate_PrefixedChildMatchesAppNameUnprefixed(t *testing.T) {
+	g := newTestHelmGenerator(t)
+	g.AppName, g.NamePrefix = "gpu-operator", "t1-"
+	outputDir := t.TempDir()
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	walkErr := filepath.WalkDir(outputDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if strings.Contains(string(data), "t1-gpu-operator") {
+			t.Errorf("%s bakes the prefixed child name", path)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk output: %v", walkErr)
 	}
 }
 

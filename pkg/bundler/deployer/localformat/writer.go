@@ -350,11 +350,9 @@ func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injection
 
 // Write emits the numbered folder layout. Deterministic and idempotent.
 //
-// Removes any pre-existing NNN-* folders under OutputDir before writing, so
-// reusing the same --output across recipe regenerations does not leave stale
-// component folders that the deployer's loop would later install. Top-level
-// orchestration files (deploy.sh, README.md, attestation/) are left intact;
-// only files under [0-9][0-9][0-9]-* are removed.
+// Runs PruneStaleOutput on OutputDir before writing, so a reused output
+// directory keeps none of an earlier run's component folders or
+// provenance.yaml.
 //
 // Returns the list of emitted folders plus, when opts.VendorCharts is set,
 // one VendorRecord per pulled upstream chart for inclusion in the bundle's
@@ -386,7 +384,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return WriteResult{}, errors.Wrap(errors.ErrCodeInternal, "create output dir", err)
 	}
-	if err := pruneStaleFolders(opts.OutputDir); err != nil {
+	if err := PruneStaleOutput(opts.OutputDir); err != nil {
 		return WriteResult{}, err
 	}
 
@@ -742,12 +740,21 @@ func renderTemplateToFile(tmpl *template.Template, data any,
 	return writeFile(outPath, buf.Bytes(), mode)
 }
 
-// pruneStaleFolders removes pre-existing NNN-<name>/ directories under
-// outputDir so a reused output directory cannot accumulate components from
-// a previous recipe generation. Only directories matching the strict
-// `[0-9][0-9][0-9]-*` pattern are removed; top-level orchestration files
-// (deploy.sh, README.md, etc.) and any other directories are left alone.
-func pruneStaleFolders(outputDir string) error {
+// PruneStaleOutput removes the output an earlier run into outputDir left
+// behind that the current run would not overwrite: every NNN-<name>/
+// directory, which a deploy.sh loop would otherwise install, and
+// provenance.yaml, which a run writes only for a vendored bundle. Only
+// directories matching the strict `[0-9][0-9][0-9]-*` pattern are removed.
+// Other top-level files (deploy.sh, README.md, etc.) and directories are
+// left alone. A missing outputDir is not an error.
+func PruneStaleOutput(outputDir string) error {
+	provenance, err := deployer.SafeJoin(outputDir, ProvenanceFileName)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "provenance.yaml path unsafe", err)
+	}
+	if rmErr := os.Remove(provenance); rmErr != nil && !os.IsNotExist(rmErr) {
+		return errors.Wrap(errors.ErrCodeInternal, "remove stale provenance.yaml", rmErr)
+	}
 	entries, err := os.ReadDir(outputDir)
 	if err != nil {
 		if os.IsNotExist(err) {

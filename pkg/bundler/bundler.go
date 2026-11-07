@@ -283,9 +283,6 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 			"invalid bundler configuration")
 	}
-	// Before any output exists: os.CopyFS will not overwrite the data files a
-	// rejected attempt leaves behind, so a corrected rerun into the same
-	// directory would fail.
 	if err := b.validateDeployerConfig(); err != nil {
 		return nil, err
 	}
@@ -420,39 +417,287 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return b.makeSplit(ctx, profileBaseline.ComponentRefs, recipeResult, componentValues, dir, upgradeNotes, start)
 	}
 
+	// The deployer tracks the --data files in checksums and attestation
+	// records them, so list them before building it.
+	dataFiles, err := listDataFiles(recipeResult.DataProvider())
+	if err != nil {
+		return nil, err
+	}
+	d, err := b.buildDeployer(ctx, recipeResult, componentValues, dataFiles, upgradeNotice)
+	if err != nil {
+		return nil, err
+	}
+
 	// No filesystem output is created until the final candidate has passed the
 	// profile state and mutability invariant above.
 	if dir == "" {
 		dir = "."
 	}
-	if dir != "." {
-		if mkdirErr := os.MkdirAll(dir, 0755); mkdirErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to create output directory", mkdirErr)
-		}
-	}
-	if rootErr := checksum.ValidateOutputRoot(ctx, dir); rootErr != nil {
-		return nil, rootErr
-	}
-
-	// Copy external data files before deployer construction so the file list
-	// is available for both the deployer (checksum tracking) and post-generation
-	// attestation. This is a no-op when --data is not set.
-	dataFiles, err := b.copyDataFiles(dir, recipeResult.DataProvider())
-	if err != nil {
-		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
-			return nil, err
-		}
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to copy external data files", err)
-	}
-
-	// Build the deployer and run it
-	d, err := b.buildDeployer(ctx, recipeResult, componentValues, dataFiles, upgradeNotice)
+	// A trailing separator would make the stage's parent the destination itself.
+	dir = filepath.Clean(dir)
+	stage, err := stageBundle(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
-	return b.runDeployer(ctx, d, recipeResult, dir, dataFiles, upgradeNotes, start)
+	published := false
+	defer func() {
+		if !published {
+			stage.discard()
+		}
+	}()
+
+	// The copy precedes Generate, which stats each data file to track it in
+	// the bundle checksums.
+	if copyErr := copyDataFiles(ctx, stage.path, recipeResult.DataProvider(), dataFiles); copyErr != nil {
+		return nil, copyErr
+	}
+	out, err := b.runDeployer(ctx, d, recipeResult, stage.path, dir, dataFiles, upgradeNotes, start)
+	if err != nil {
+		return nil, err
+	}
+	if pubErr := stage.publish(); pubErr != nil {
+		return nil, pubErr
+	}
+	published = true
+	return out, nil
+}
+
+// bundleStagePrefix names the private directory a single bundle is built in,
+// beside the output directory or inside it.
+const bundleStagePrefix = ".aicr-stage-"
+
+var errStageLockUnsupported = stderrors.New("stage locking is not supported on this platform")
+
+// bundleStage is the private directory a single bundle is built in.
+//
+// When dir is absent the stage sits beside it and one rename publishes it.
+// When dir exists it must be empty, and the stage sits inside it and its
+// entries move in one at a time, so the working directory and a caller
+// holding dir open keep the same directory.
+//
+// The run holds a lock on the stage until it publishes or discards it, so a
+// later run can tell a live stage from one a killed run left behind. A stage
+// the filesystem cannot lock is built unlocked, and a later run that cannot
+// check its lock reports a conflict and keeps it.
+type bundleStage struct {
+	dir     string
+	path    string
+	inPlace bool
+	lock    *os.File
+}
+
+// stageBundle creates the private directory a bundle for dir is built in. An
+// existing dir must be empty, apart from stages that killed runs left there,
+// which it removes. Publishing never deletes or mixes with other content.
+func stageBundle(ctx context.Context, dir string) (*bundleStage, error) {
+	s := &bundleStage{dir: dir}
+	info, err := os.Lstat(dir)
+	switch {
+	case stderrors.Is(err, os.ErrNotExist):
+	case err != nil:
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("failed to inspect output directory %s", dir), err)
+	case !info.IsDir():
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("output path %s is not a directory", dir))
+	default:
+		entries, readErr := os.ReadDir(dir)
+		if readErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("failed to read output directory %s", dir), readErr)
+		}
+		if staleErr := removeStaleStages(ctx, dir, entries); staleErr != nil {
+			return nil, staleErr
+		}
+		s.inPlace = true
+	}
+
+	where := dir
+	if !s.inPlace {
+		where = filepath.Dir(dir)
+		if mkErr := os.MkdirAll(where, 0755); mkErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create output parent directory", mkErr)
+		}
+	}
+	stage, err := os.MkdirTemp(where, bundleStagePrefix)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create bundle staging directory", err)
+	}
+	s.path = stage
+	lock, held, lockErr := lockStage(stage)
+	switch {
+	case lockErr != nil:
+		if !stderrors.Is(lockErr, errStageLockUnsupported) {
+			slog.Warn("failed to lock bundle staging directory, continuing without the lock",
+				"path", stage, "error", lockErr)
+		}
+	case !held:
+		s.discard()
+		return nil, errors.New(errors.ErrCodeInternal, "bundle staging directory is locked by another process")
+	}
+	s.lock = lock
+	if chmodErr := os.Chmod(stage, 0755); chmodErr != nil {
+		s.discard()
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to set bundle staging directory mode", chmodErr)
+	}
+	return s, nil
+}
+
+// removeStaleStages validates dir as an output root and removes the stages
+// killed runs left among its entries. It returns ErrCodeConflict, and removes
+// nothing, when dir holds anything else or a stage a run still holds.
+func removeStaleStages(ctx context.Context, dir string, entries []os.DirEntry) error {
+	stages := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), bundleStagePrefix) {
+			return errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+				"output directory %s is not empty, bundle into a new or empty directory", dir))
+		}
+		stages = append(stages, filepath.Join(dir, e.Name()))
+	}
+	if rootErr := checksum.ValidateOutputRoot(ctx, dir); rootErr != nil {
+		return rootErr
+	}
+	locks := make([]*os.File, 0, len(stages))
+	defer func() {
+		for _, lock := range locks {
+			_ = lock.Close()
+		}
+	}()
+	for _, stage := range stages {
+		lock, held, err := lockStage(stage)
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeConflict, fmt.Sprintf(
+				"output directory %s holds the bundle stage %s, which could not be checked, "+
+					"remove it if no bundle run is in progress", dir, filepath.Base(stage)), err)
+		}
+		if !held {
+			return errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+				"output directory %s holds the stage of a bundle run still in progress", dir))
+		}
+		locks = append(locks, lock)
+	}
+	for _, stage := range stages {
+		if err := os.RemoveAll(stage); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
+				"failed to remove the stage %s a killed bundle run left behind", stage), err)
+		}
+		slog.Info("removed the stage a killed bundle run left behind", "path", stage)
+	}
+	return nil
+}
+
+// unlock releases the stage lock.
+func (s *bundleStage) unlock() {
+	if s.lock == nil {
+		return
+	}
+	if err := s.lock.Close(); err != nil {
+		slog.Warn("failed to release bundle staging directory lock", "path", s.path, "error", err)
+	}
+	s.lock = nil
+}
+
+// publish puts the staged bundle at dir.
+func (s *bundleStage) publish() error {
+	if s.inPlace {
+		return s.publishInPlace()
+	}
+	if err := renameNoReplace(s.path, s.dir); err != nil {
+		code := errors.ErrCodeInternal
+		if destinationTaken(err) {
+			code = errors.ErrCodeConflict
+		}
+		return errors.Wrap(code, fmt.Sprintf("failed to publish bundle to %s", s.dir), err)
+	}
+	s.unlock()
+	s.path = ""
+	return nil
+}
+
+// publishInPlace moves every entry of the stage into dir, then removes the
+// stage. A failed move puts the moved entries back in the stage.
+func (s *bundleStage) publishInPlace() error {
+	entries, err := os.ReadDir(s.path)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to read bundle staging directory", err)
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	if mvErr := moveEntries(names, s.path, s.dir); mvErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to publish into %s", s.dir), mvErr)
+	}
+	if rmErr := os.Remove(s.path); rmErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to remove bundle staging directory", rmErr)
+	}
+	s.unlock()
+	s.path = ""
+	return nil
+}
+
+// moveEntries moves each named entry from src to dst without replacing an
+// existing one. On failure it moves the entries it already moved back to src.
+func moveEntries(names []string, src, dst string) error {
+	for i, name := range names {
+		if err := renameNoReplace(filepath.Join(src, name), filepath.Join(dst, name)); err != nil {
+			for _, moved := range names[:i] {
+				if backErr := renameNoReplace(filepath.Join(dst, moved), filepath.Join(src, moved)); backErr != nil {
+					err = stderrors.Join(err, backErr)
+				}
+			}
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to move %s", name), err)
+		}
+	}
+	return nil
+}
+
+// discard removes the stage of a bundle that was not published.
+func (s *bundleStage) discard() {
+	if s.path == "" {
+		return
+	}
+	defer s.unlock()
+	if err := os.RemoveAll(s.path); err != nil {
+		slog.Warn("failed to remove bundle staging directory", "path", s.path, "error", err)
+	}
+}
+
+// publishedPath maps a path under stage to the same path under dir, keeping
+// it absolute when it was absolute. Paths outside stage are returned as is.
+func publishedPath(stage, dir, p string) string {
+	base, target := stage, dir
+	if filepath.IsAbs(p) {
+		absStage, err := filepath.Abs(stage)
+		if err != nil {
+			return p
+		}
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			return p
+		}
+		base, target = absStage, absDir
+	}
+	rel, err := filepath.Rel(base, p)
+	if err != nil || !filepath.IsLocal(rel) && rel != "." {
+		return p
+	}
+	return filepath.Join(target, rel)
+}
+
+// publishedText rewrites stage to dir in deployer-reported steps and notes.
+func publishedText(stage, dir string, lines []string) []string {
+	absStage, stageErr := filepath.Abs(stage)
+	absDir, dirErr := filepath.Abs(dir)
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		if stageErr == nil && dirErr == nil {
+			l = strings.ReplaceAll(l, absStage, absDir)
+		}
+		out[i] = strings.ReplaceAll(l, stage, dir)
+	}
+	return out
 }
 
 // ValidateAccountingValues verifies that resolved component values preserve
@@ -1159,9 +1404,10 @@ func (b *DefaultBundler) resolveArgoDeployerOptions() (*config.ArgoDeployerOptio
 // notice despite the process-wide once-per-subject deduplication.
 var warnDeprecated = deprecation.Warn
 
-// runDeployer executes a deployer and builds the result output.
+// runDeployer executes a deployer into dir and builds the result output as
+// it reads once dir is published at publishedDir.
 // dataFiles is the list of external data file paths already copied by Make().
-func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir string, dataFiles []string, upgradeNotes []upgrade.BundleNote, start time.Time) (*result.Output, error) {
+func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir, publishedDir string, dataFiles []string, upgradeNotes []upgrade.BundleNote, start time.Time) (*result.Output, error) {
 	output, err := d.Generate(ctx, dir)
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
@@ -1213,7 +1459,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	}
 
 	// Attest bundle (skips internally when not configured)
-	attestFiles, err := b.attestBundle(ctx, dir, dataFiles, recipeResult)
+	attestFiles, err := b.attestBundleAt(ctx, dir, publishedDir, dataFiles, recipeResult)
 	if err != nil {
 		return nil, err
 	}
@@ -1232,6 +1478,10 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 		}
 	}
 
+	for i, f := range output.Files {
+		output.Files[i] = publishedPath(dir, publishedDir, f)
+	}
+
 	// Map deployer type to result and deployment names
 	resultType, deploymentType := deployerResultNames(b.Config.Deployer(), b.Config.TerraformChildModule())
 
@@ -1242,7 +1492,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 		TotalDuration: time.Since(start),
 		TotalSize:     output.TotalSize,
 		TotalFiles:    len(output.Files),
-		OutputDir:     dir,
+		OutputDir:     publishedDir,
 	}
 
 	bundleResult := &result.Result{
@@ -1257,14 +1507,14 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	// Deployment info
 	notes := upgrade.NoteLines(upgradeNotes)
 	if len(output.DeploymentNotes) > 0 {
-		notes = append(notes, output.DeploymentNotes...)
+		notes = append(notes, publishedText(dir, publishedDir, output.DeploymentNotes)...)
 	}
 	if len(b.warnings) > 0 {
 		notes = append(notes, b.warnings...)
 	}
 	resultOutput.Deployment = &result.DeploymentInfo{
 		Type:  deploymentType,
-		Steps: output.DeploymentSteps,
+		Steps: publishedText(dir, publishedDir, output.DeploymentSteps),
 		Notes: notes,
 	}
 
@@ -2970,59 +3220,78 @@ func componentValidationError(err error) error {
 		"component validation failed")
 }
 
-// copyDataFiles copies external data files from the --data directory into the bundle.
-// Returns a list of relative paths to the copied files (e.g., "data/overrides.yaml").
-// The provider argument supplies the LayeredDataProvider whose external directory is
-// the source of truth; a nil provider falls back to the package-global provider so
-// pre-WithDataProvider callers (legacy CLI path) still emit the same bundles.
-func (b *DefaultBundler) copyDataFiles(dir string, provider recipe.DataProvider) ([]string, error) {
-	// Check if the bound provider is a LayeredDataProvider with external
-	// files. A nil-interface receiver returns (nil, false) from the type
-	// assertion without panicking — equivalent to no external data.
+// listDataFiles returns the bundle-relative paths the external --data files
+// are copied to (e.g., "data/overrides.yaml"), and writes nothing. It is empty
+// when the provider carries no external files. The provider is the
+// LayeredDataProvider whose external directory is the source of truth. Any
+// other provider, including nil, carries no external data.
+func listDataFiles(provider recipe.DataProvider) ([]string, error) {
 	layered, ok := provider.(*recipe.LayeredDataProvider)
 	if !ok {
-		return nil, nil // No external data
+		return nil, nil
 	}
-
 	externalFiles := layered.ExternalFiles()
 	if len(externalFiles) == 0 {
 		return nil, nil
 	}
-
-	// Copy the entire external directory into bundle/data/ using os.CopyFS
-	dataDir, joinErr := deployer.SafeJoin(dir, "data")
-	if joinErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe data directory path", joinErr)
-	}
-	externalFS := os.DirFS(layered.ExternalDir())
-	if err := os.CopyFS(dataDir, externalFS); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to copy external data files", err)
-	}
-
-	// Build the list of copied files (relative to bundle dir)
-	copiedFiles := make([]string, 0, len(externalFiles))
+	files := make([]string, 0, len(externalFiles))
 	for _, relPath := range externalFiles {
-		if _, pathErr := deployer.SafeJoin(dataDir, relPath); pathErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "unsafe external data path", pathErr)
+		if !filepath.IsLocal(relPath) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("unsafe external data path %q", relPath))
 		}
-		copiedFiles = append(copiedFiles, filepath.Join("data", relPath))
+		files = append(files, filepath.Join(deployer.DataDir, relPath))
 	}
-
-	slog.Info("external data files copied into bundle", "count", len(copiedFiles))
-	return copiedFiles, nil
+	return files, nil
 }
 
-// attestBundle signs the bundle checksums and copies the binary attestation into the bundle.
+// copyDataFiles copies each external data file in dataFiles into dir,
+// reading it through the provider's size limit. Only tracked files are
+// copied, so a directory under --data with no files never reaches the bundle.
+// A copied file keeps its execute bits.
+func copyDataFiles(ctx context.Context, dir string, provider recipe.DataProvider, dataFiles []string) error {
+	if len(dataFiles) == 0 {
+		return nil
+	}
+	layered, ok := provider.(*recipe.LayeredDataProvider)
+	if !ok {
+		return errors.New(errors.ErrCodeInternal, "external data files listed without a layered data provider")
+	}
+	for _, bundlePath := range dataFiles {
+		rel, relErr := filepath.Rel(deployer.DataDir, bundlePath)
+		if relErr != nil || !filepath.IsLocal(rel) {
+			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("unsafe external data path %q", bundlePath))
+		}
+		data, readErr := layered.ReadExternalFile(ctx, filepath.ToSlash(rel))
+		if readErr != nil {
+			return errors.PropagateOrWrap(readErr, errors.ErrCodeInternal, "failed to read external data file")
+		}
+		info, statErr := os.Stat(filepath.Join(layered.ExternalDir(), rel))
+		if statErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to inspect external data file %s", rel), statErr)
+		}
+		dst, joinErr := deployer.SafeJoin(dir, bundlePath)
+		if joinErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "unsafe data file path", joinErr)
+		}
+		if mkErr := os.MkdirAll(filepath.Dir(dst), 0755); mkErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to create data directory", mkErr)
+		}
+		if writeErr := os.WriteFile(dst, data, 0666|info.Mode().Perm()&0111); writeErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to copy external data file %s", rel), writeErr)
+		}
+	}
+	slog.Info("external data files copied into bundle", "dataDir", filepath.Join(dir, deployer.DataDir), "files", len(dataFiles))
+	return nil
+}
+
+// attestBundleAt signs the bundle checksums under dir and copies the binary
+// attestation into the bundle, recording publishedDir as the statement's
+// output directory. A bundle or bundle set is attested in its staging
+// directory before it moves to publishedDir, and the signed provenance must
+// name the path the bundle lives at, not the transient stage.
 // dataFiles is the list of external data file paths (relative to bundle dir) to include
 // in resolvedDependencies. Returns the list of attestation files added, or nil if skipped.
-func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles []string, recipeResult *recipe.RecipeResult) ([]string, error) {
-	return b.attestBundleAt(ctx, dir, dir, dataFiles, recipeResult)
-}
-
-// attestBundleAt attests the bundle under dir while recording publishedDir
-// as the statement's output directory. A bundle set is attested in its
-// staging directory before one atomic move to publishedDir, and the signed
-// provenance must name the path the set lives at, not the transient stage.
 func (b *DefaultBundler) attestBundleAt(ctx context.Context, dir, publishedDir string, dataFiles []string, recipeResult *recipe.RecipeResult) ([]string, error) {
 	dir = filepath.Clean(dir)
 	publishedDir = filepath.Clean(publishedDir)

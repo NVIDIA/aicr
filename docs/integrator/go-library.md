@@ -1257,6 +1257,11 @@ caller-supplied regardless of `Config`, which is why the REST `/v1/bundle`
 handler can set `Config` and `OutputDir`/`Timeout` in the same struct
 literal and have all three take effect.
 
+An existing `OutputDir` must be empty. Anything in it fails with
+`ErrCodeConflict` before anything is written, apart from a `.aicr-stage-*`
+directory a killed run left behind, which is removed. See
+[Output directory](../user/bundling.md#output-directory).
+
 To generate a class-partitioned bundle set ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)),
 set `Split` and give `OutputDir` a path that does not exist yet; the set is
 published there atomically, and the helm deployer is the only one supported:

@@ -327,6 +327,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if err != nil {
 		return nil, err
 	}
+	if err := localformat.PruneStaleOutput(outputDir); err != nil {
+		return nil, err
+	}
 
 	// Collect and deduplicate sources. When vendoring, skip HelmRepository
 	// sources for components that will reference vendored local charts.
@@ -685,10 +688,8 @@ func (g *Generator) writeSources(helmSources map[string]*HelmRepoSourceData,
 		}
 	}
 
-	// Generation writes directly into --output and the directory is not
-	// cleared between runs, so a failed pre-fix run leaves its empty sources/
-	// behind. Without this, retrying into that same directory reproduces the
-	// original failure even though nothing new is created.
+	// A Generator called directly can write into a reused output directory,
+	// where an empty sources/ from an earlier run fails validateExactTree.
 	if !sourcesDirReady {
 		return removeStaleSourcesDir(sourcesDir)
 	}
@@ -697,31 +698,19 @@ func (g *Generator) writeSources(helmSources map[string]*HelmRepoSourceData,
 }
 
 // checkSourcesPath rejects anything occupying the sources path that is not a
-// plain directory. Both the create and the remove path call it, so a
-// pre-existing file or symlink produces the same ErrCodeInvalidRequest
-// regardless of whether the recipe happens to contribute source CRs —
-// otherwise the identical user error would surface as INVALID_REQUEST for an
-// all-local OCI bundle and INTERNAL (from MkdirAll's ENOTDIR) for any bundle
-// carrying a source.
+// plain directory, using Lstat so a symlink is rejected too. The create and
+// the remove path both call it, so a file or symlink there reports
+// ErrCodeInvalidRequest whether or not the bundle carries a source CR. The
+// remove path needs it most, since os.Remove unlinks a regular file as
+// readily as an empty directory.
 //
-// The check matters most before removal, since os.Remove unlinks regular files
-// as readily as it removes empty directories. A pre-existing regular file at
-// this path reaches generation on every route: checksum.ValidateOutputRoot
-// runs first on the DefaultBundler path but permits regular files, rejecting
-// only symlinks and special objects.
+// Only a Generator called directly can find anything at this path.
+// DefaultBundler generates into a new staging directory.
 //
-// Lstat rather than Stat additionally rejects a symlink here. On the
-// DefaultBundler path that is redundant, since ValidateOutputRoot already
-// rejects a symlink anywhere under the output root before any deployer runs;
-// it still holds for a caller that constructs this Generator directly and
-// bypasses that check.
-//
-// The guarantee stops there. This is a check-then-act on a path, so a symlink
-// planted between this call and the MkdirAll or Remove that follows is not
-// caught. Closing that would require openat-based operations throughout, and
-// it buys nothing in a supported configuration: it takes a local process with
-// write access to --output, and anything with that access can already rewrite
-// the finished bundle and its checksums.
+// This is a check-then-act on a path, so a symlink planted between this call
+// and the MkdirAll or Remove that follows is not caught. Planting one takes a
+// local process with write access to the output directory, which can already
+// rewrite the finished bundle and its checksums.
 func checkSourcesPath(sourcesDir string) error {
 	info, statErr := os.Lstat(sourcesDir)
 	switch {
@@ -740,22 +729,17 @@ func checkSourcesPath(sourcesDir string) error {
 	return nil
 }
 
-// removeStaleSourcesDir clears a sources/ left behind by an earlier run when
-// the current generation contributed no source CRs to it.
+// removeStaleSourcesDir removes an empty sources/ that an earlier run into the
+// same directory left behind, when the current generation contributed no
+// source CRs. Emptiness is checked explicitly, not inferred from a
+// platform-specific os.Remove errno.
 //
-// Emptiness is checked explicitly rather than inferred from an os.Remove
-// errno, which keeps the intent readable and avoids platform-specific error
-// values. A populated sources/ is kept: its contents are reported by
-// validateExactTree as unexpected output, though only when checksums are
-// enabled, since that validator runs inside the IncludeChecksums path. With
-// checksums off a stale sources/ survives into the bundle, which is unchanged
-// from before this fix — a reused --output was never cleared, so stale files
-// of any kind already persisted.
+// A populated sources/ is kept with a warning. With checksums enabled,
+// validateExactTree reports its contents as unexpected output. With them
+// disabled, it survives into the bundle.
 //
-// Anything that blocks removal of an empty directory fails generation rather
-// than being logged and ignored: leaving it behind either trips that same
-// validator or, when checksums are disabled, ships the bundle this fix exists
-// to prevent.
+// A failure to remove an empty sources/ fails generation, since leaving it
+// ships a bundle with an empty directory.
 func removeStaleSourcesDir(sourcesDir string) error {
 	if err := checkSourcesPath(sourcesDir); err != nil {
 		return err
