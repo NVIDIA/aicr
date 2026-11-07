@@ -22,15 +22,16 @@
 # scheduled and the requirement renders as "not tested". Follows
 # vr200-rke2-ubuntu-inference-dynamo and gb300-eks-ubuntu-inference-dynamo.
 #
-# CAVEAT on what this establishes. The dynamo-platform branch of the check
-# records CR reconciliation as an observation only -- a DynamoGraphDeployment
-# cannot reach a terminal condition without a model and GPU workers -- and per
-# #3689 an observation-only result is StatusObserved, which does not establish
-# a MUST. So this leaf schedules the check and demonstrates the operator runs,
-# but a submission from it needs a spec.validate.evidence.cncf.documented entry
-# for robust_controller, or the kubeflow-trainer path, to establish the
-# requirement. The kubeflow path drives a TrainJob to Complete and establishes
-# it outright; that is the training leaf's job.
+# WHAT IT ESTABLISHES, measured 2026-11-07 on a VR200 NVKE tenant cluster
+# deployed from this leaf's own bundle: robust_controller is Implemented, from
+# the Dynamo path, with no documented entry needed. The check logs
+# "validating Dynamo operator (dynamo-platform in recipe)" and establishes the
+# requirement on operator pods, an Established CRD and a webhook that rejects
+# an invalid custom resource. Only the CR-reconciliation extra is
+# observation-only, because a DynamoGraphDeployment cannot reach a terminal
+# condition without a model and GPU workers; the Kubeflow path adds a TrainJob
+# reconciled to Complete on top of that same base. Both paths establish the
+# MUST.
 #
 # NO performance block. The gb300-eks and gb200 Dynamo leaves gate
 # inference-perf on measured throughput and TTFT floors; nothing has been
