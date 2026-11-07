@@ -130,6 +130,8 @@ components:
       assertFile: checks/gpu-operator/health-check.yaml
     upgrades:
       file: components/gpu-operator/upgrades.yaml
+    sizing:
+      file: components/gpu-operator/sizing.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator
@@ -202,9 +204,13 @@ components:
       assertFile: checks/network-operator/health-check.yaml
     upgrades:
       file: components/network-operator/upgrades.yaml
+    sizing:
+      file: components/network-operator/sizing.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/network-operator
+      # Moving to 26.10.0 or later: measure operator.resources for
+      # components/network-operator/sizing.yaml (see its header).
       # renovate: datasource=helm depName=network-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
       defaultVersion: "26.7.0"
       defaultNamespace: nvidia-network-operator
@@ -391,6 +397,8 @@ components:
       assertFile: checks/nodewright-operator/health-check.yaml
     upgrades:
       file: components/nodewright-operator/upgrades.yaml
+    sizing:
+      file: components/nodewright-operator/sizing.yaml
     helm:
       defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
       defaultChart: nodewright
