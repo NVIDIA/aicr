@@ -88,7 +88,11 @@ every check on one of its proof paths is present and `passed`
 check fails it, `other`, `pending` or absent checks leave it not tested, and a
 check that `passed` with the `observationOnly` marker leaves it observed,
 which does not establish a MUST (`StatusObserved`) unless
-`spec.validate.evidence.cncf.documented` attests it. `Aggregate.Passed` is
+`spec.validate.evidence.cncf.documented` attests it. A check the aggregation
+knows to be observation-only (`v1.IsObservationOnlyCheck`, today
+`cluster-autoscaling`) is observed too when its `passed` result carries no
+`resultSchema` stamp: the image predates the marker, so its silence is not a
+demonstration, and `CheckResult.Reason` records the mismatch. `Aggregate.Passed` is
 scoped by level: every applicable MUST established (passed, or observed and
 documented), SHOULDs excluded; `NOT APPLICABLE` comes only from
 `spec.validate.evidence.cncf.notApplicable` and only for the conditional
@@ -575,6 +579,15 @@ validators.Run(map[string]validators.CheckFunc{
 | `/dev/termination-log` | Failure reason (≤ 4096 bytes), written on `return error` |
 | **stdout sentinel lines** | Structured/side-channel data — see [Stdout sentinels](#stdout-sentinels) |
 
+The orchestrator credits a check only from output it actually read. Every
+structured marker rides stdout, so when the pod logs of an exit-`0` result
+cannot be read (`pkg/validator/job.ExtractResult` and `HandleTimeout`, after
+one retry of the read) the result is reported as `other` with the message
+`result output unavailable: ...`, never as `passed`; a `skipped` or `failed`
+exit keeps its verdict, since it does not rest on the output. Before #3703 the
+pass stood with an empty `extra`, and an observation-only check whose logs
+were lost rendered `PASSED`.
+
 ### Capability applicability contract
 
 A capability-gated conformance/performance check probes a live prerequisite
@@ -651,6 +664,14 @@ Three sentinels exist today, with deliberately different lifecycles:
 | `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseExtraSentinels` (`pkg/validator/job/result.go`) | one JSON object → `TestResult.Extra` (counts / enum codes) | **no** — stripped as transport, not evidence | **yes** — allowlisted keys are published (see below) |
 | `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseExtraSentinels` (same pass) | one JSON object → `TestResult.RuntimeProvenance` (template digests + key paths) | **no** — stripped as transport | **yes** — bounded by `redact.boundRuntimeProvenance` (see "NCCL benchmark runtime provenance") |
 
+The runner (`validators.Run`) emits one `##AICR-EXTRA##` line before the check
+starts, `resultSchema: "1"` (`ctrf.ResultSchemaVersion`): the result-contract
+version this image speaks. Every result the image produces carries it, a skip,
+a failure or a context-load failure included, and a stamp that cannot be
+written fails the check. `pkg/evidence/cncf` reads it to tell an image that
+could not have marked an observation from one that chose not to (see
+[Structured evidence that survives redaction](#structured-evidence-that-survives-redaction)).
+
 All are parsed with `strings.CutPrefix` and the parsers are pure, unit-tested
 functions. They are separate channels on purpose: `RESULT:` surfaces live
 metrics to a human watching a run, so it carries unbounded free-form text and is
@@ -706,7 +727,11 @@ code and termination log. Provenance travels the same way as
 Keep the human-readable stdout lines too, for `--full` and live output.
 
 Keys, skip codes, and value formatters live in `validators/extra_keys.go`. A
-test there fails when a key has no redaction allowlist entry.
+test there fails when a key has no redaction allowlist entry. The keys the
+evidence readers consume by name (`skipReason`, `observationOnly`,
+`resultSchema`) are declared once in `pkg/validator/ctrf/extra_keys.go` and
+re-exported by `validators`, so `pkg/evidence/cncf` and the validator images
+cannot drift apart; `TestExtraKeysPinned` freezes the strings.
 
 **Low-cardinality + allowlist contract.** `extra` values MUST be low-cardinality
 (`"2"`, `"305.4"`, `"true"`, `"v25.10.1"`, `"no-schedulable-gpu-nodes"`), never
@@ -722,7 +747,7 @@ fails its key's shape (an IP under `nodesTotal`, `305.44` under
 | signed decimal (`+1.8`, `-12.3`) | `passMargin` (percent above or below `thresholdGbps`) |
 | `true` or `false` | `nodeLocal`, `versionSatisfied`, `observationOnly` |
 | `v` plus one to three numeric parts, optional `-alpha`, `-beta`, or `-rc` suffix (`v25.3.0-rc.1`) | `detectedVersion` |
-| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`) |
+| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`), `resultSchema` (the versions a reader knows, today `1`) |
 
 Codes are closed sets rather than a shape regex, because a kebab-case regex
 would still pass an identifier like `customer-prod-cluster`. The `skipReason`
@@ -757,6 +782,7 @@ page are the contract.
 | `check-nvidia-smi` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
 | `cluster-autoscaling`, on every passing path | `observationOnly` |
 | any check, on an in-pod skip | `skipReason` |
+| any check, on every result | `resultSchema`, stamped by the runner before the check starts |
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the
   benchmark runs, so a failed run still records its scope. `fabric` appears
@@ -917,7 +943,7 @@ be set from the catalog or a `--data` overlay:
 |----------|--------------|---------|
 | `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
 | `AICR_SANDBOX_RUNTIME_CLASS` | `workload-sandboxing` | Names the sandboxed `RuntimeClass` to test instead of auto-detecting one by the gVisor/Kata keywords (the upstream `-sandbox-runtime-class` flag); a name the cluster has no class for fails the check with `ErrCodeInvalidRequest`. |
-| `AICR_SANDBOX_PROBE_IMAGE` | `workload-sandboxing` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must provide a POSIX `/bin/sh`, `uname`, `cat`, `ls`, `wc`, `head`, `awk` and `tr` for the probe script; the probe pods carry no `imagePullSecrets`, as the other vanilla probes in this package do not, so a mirror that needs credentials must supply them node-side. |
+| `AICR_SANDBOX_PROBE_IMAGE` | `workload-sandboxing` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must provide a POSIX `/bin/sh`, `uname`, `cat`, `ls`, `wc`, `head`, `awk` and `tr` for the probe script; the probe pods carry the `--image-pull-secret` Secrets copied into the per-run namespace, as every probe pod in this package does. |
 | `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
 | `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway is open to the internet. What is assessed follows the declared `dataPlane`, not whether the controller runs a Service: with `service-endpoints` (the default), the proxy `LoadBalancer`'s `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`); with `gateway-address`, Service source ranges are not read at all, and the check fails when a Gateway status address is public, or is a `Hostname` or an unspecified address (`0.0.0.0`, `::`) the check cannot classify (a Gateway with no `status.addresses` at all fails the data-plane step in every mode, before exposure is assessed). Default (unset): the open exposure is recorded and warned but the check still passes. Which gateway is assessed, and how, comes from the recipe's inference gateway profile (`pkg/validator/v1.ResolveInferenceGatewayProfile`; see [Declaring the inference gateway](../integrator/data-extension.md#declaring-the-inference-gateway)). |
 | `AICR_NCCL_RUNTIME_IMAGE` | `nccl-all-reduce-bw`, `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls` | Overrides the NCCL launcher/worker image baked into the per-platform TrainingRuntime templates; a malformed reference fails closed in the pod. |

@@ -78,7 +78,9 @@ const (
 	//   - v9 added the text scrub (TextScrubber) the CNCF submission
 	//     directory is passed through: IP, MAC and UUID aliases, container
 	//     ID and AWS account aliases, node-name aliases, JWT removal.
-	PolicyVersion = "v9"
+	//   - v10 added the resultSchema stamp naming the result contract the
+	//     validator image spoke.
+	PolicyVersion = "v10"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -327,7 +329,12 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 
 	// A passed result that recorded observations and drove no behavioral
 	// test; the CNCF aggregation renders its requirement OBSERVED, not PASSED.
-	"observationOnly": closedSet("true", "false"),
+	ctrf.ExtraKeyObservationOnly: closedSet("true", "false"),
+
+	// The result contract the validator image spoke, stamped on every result;
+	// the CNCF aggregation refuses to credit an observation-only check whose
+	// result lacks it. Only the versions a reader knows are publishable.
+	ctrf.ExtraKeyResultSchema: closedSet(ctrf.ResultSchemaVersion),
 }
 
 // ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.

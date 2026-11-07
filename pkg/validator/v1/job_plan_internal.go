@@ -116,6 +116,12 @@ const (
 	// same literals live in validators/conformance/workload_sandboxing_check.go.
 	sandboxRuntimeClassEnv = "AICR_SANDBOX_RUNTIME_CLASS"
 	sandboxProbeImageEnv   = "AICR_SANDBOX_PROBE_IMAGE"
+	// imagePullSecretsEnv carries the --image-pull-secret names, comma-separated,
+	// to every validator pod, so a check that creates a per-run namespace can
+	// copy the Secrets there and attach them to its probe pods; the names are
+	// the only thing forwarded, the Secrets stay in the validator namespace.
+	// The pod-side const of the same literal is validators.ImagePullSecretsEnv.
+	imagePullSecretsEnv = "AICR_IMAGE_PULL_SECRETS" //nolint:gosec // G101: env var name, not a credential
 
 	// inferencePerfNoCleanupEnv, when truthy, makes the inference-perf validator
 	// leave its namespace/DGD/workers/frontend/AIPerf Job in place after the run
@@ -138,6 +144,7 @@ func buildEnv(
 	tolerations []corev1.Toleration,
 	imageRegistryOverride string,
 	imageTagOverride string,
+	imagePullSecrets []string,
 ) []corev1.EnvVar {
 
 	env := []corev1.EnvVar{
@@ -169,6 +176,9 @@ func buildEnv(
 			Name:  "AICR_TOLERATIONS",
 			Value: serializeTolerations(tolerations),
 		})
+	}
+	if names := nonEmptyNames(imagePullSecrets); len(names) > 0 {
+		env = append(env, corev1.EnvVar{Name: imagePullSecretsEnv, Value: strings.Join(names, ",")})
 	}
 
 	// Add CLI version and commit
@@ -272,13 +282,25 @@ func buildEnv(
 		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclRuntimeImageEnv || e.Name == driverRuntimeImageEnv {
 			continue
 		}
-		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv {
+		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv || e.Name == imagePullSecretsEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})
 	}
 
 	return env
+}
+
+// nonEmptyNames returns names with blank entries dropped, so a flag given an
+// empty value does not forward a dangling separator.
+func nonEmptyNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n = strings.TrimSpace(n); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // buildVolumes creates volumes for snapshot and validation ConfigMaps

@@ -1650,3 +1650,19 @@ func TestIsImmutableRefRejectsUnpublishedShortSHAResolution(t *testing.T) {
 		t.Errorf("IsImmutableRef(%q) = true; a short-SHA tag is never published and must not vouch for provenance", resolved)
 	}
 }
+
+func TestEmbeddedCatalog_ClusterAutoscalingEntryExists(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for _, v := range cat.Validators {
+		if v.Name == v1.ClusterAutoscalingCheckName {
+			if v.Phase != "conformance" {
+				t.Errorf("%q phase = %q, want conformance", v1.ClusterAutoscalingCheckName, v.Phase)
+			}
+			return
+		}
+	}
+	t.Errorf("no embedded catalog entry named %q: the observation-only set in pkg/validator/v1 names a check that does not exist", v1.ClusterAutoscalingCheckName)
+}

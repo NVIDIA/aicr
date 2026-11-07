@@ -15,14 +15,20 @@
 package validators
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
 func TestSkip(t *testing.T) {
@@ -125,6 +131,43 @@ func withTempTerminationLog(t *testing.T) string {
 	terminationLogPath = tmp
 	t.Cleanup(func() { terminationLogPath = orig })
 	return tmp
+}
+
+// TestPublishResultSchema verifies the stamp every result carries: one extra
+// sentinel line with the current contract version, and a failed write
+// surfaces as an error rather than a warning, since the runner fails the
+// check on it.
+func TestPublishResultSchema(t *testing.T) {
+	t.Run("writes the stamp", func(t *testing.T) {
+		var buf bytes.Buffer
+		orig := extrasOut
+		extrasOut = &buf
+		t.Cleanup(func() { extrasOut = orig })
+
+		if err := publishResultSchema(); err != nil {
+			t.Fatalf("publishResultSchema() error = %v", err)
+		}
+		payload, ok := strings.CutPrefix(strings.TrimSuffix(buf.String(), "\n"), ctrf.ExtraLinePrefix)
+		if !ok {
+			t.Fatalf("output %q missing extra sentinel", buf.String())
+		}
+		var got map[string]string
+		if err := json.Unmarshal([]byte(payload), &got); err != nil {
+			t.Fatalf("payload %q: %v", payload, err)
+		}
+		want := map[string]string{ctrf.ExtraKeyResultSchema: ctrf.ResultSchemaVersion}
+		if !maps.Equal(got, want) {
+			t.Errorf("stamp = %v, want %v", got, want)
+		}
+	})
+	t.Run("a failed write is an error", func(t *testing.T) {
+		orig := extrasOut
+		extrasOut = errWriter{}
+		t.Cleanup(func() { extrasOut = orig })
+
+		err := publishResultSchema()
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInternal)
+	})
 }
 
 func TestHandleCheckResult(t *testing.T) {

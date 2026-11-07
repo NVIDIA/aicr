@@ -36,7 +36,10 @@ var allMustsPassed = []ctrf.TestResult{
 	{Name: "ai-service-metrics", Status: "passed"},
 	{Name: "inference-gateway", Status: "passed"},
 	{Name: "pod-autoscaling", Status: "passed"},
-	{Name: "cluster-autoscaling", Status: "passed"},
+	// cluster-autoscaling is observation-only, so its baseline pass carries
+	// the result-contract stamp and no marker: a modern image that chose
+	// not to mark it, which is the only pass of it the aggregation credits.
+	{Name: "cluster-autoscaling", Status: "passed", Extra: stamped},
 	{Name: "robust-controller", Status: "passed"},
 	{Name: "secure-accelerator-access", Status: "passed"},
 }
@@ -221,6 +224,13 @@ func TestAggregateReportRequirementStatus(t *testing.T) {
 // publishes through validators.ObservationOnlyExtra.
 var observationOnly = map[string]string{"observationOnly": "true"}
 
+// stamped is the result-contract stamp alone: an image that speaks the
+// contract and marked nothing.
+var stamped = map[string]string{"resultSchema": "1"}
+
+// unstamped is a pass from an image that predates the contract.
+var unstamped = &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed"}
+
 // TestAggregateReportObservationOnly pins #3681: a passed result carrying
 // the observation-only marker renders its requirement OBSERVED, which is
 // not PASSED. A MUST so observed is not established (the verdict names it)
@@ -260,7 +270,7 @@ func TestAggregateReportObservationOnly(t *testing.T) {
 			wantObserved:  true,
 		},
 		{
-			name:        "a behavioral pass without the marker is unaffected",
+			name:        "a stamped pass without the marker is a demonstration",
 			tests:       allMustsPassed,
 			requirement: "cluster_autoscaling",
 			wantStatus:  StatusPassed,
@@ -268,12 +278,56 @@ func TestAggregateReportObservationOnly(t *testing.T) {
 			wantPassed:  true,
 		},
 		{
-			name:        "the marker set to false is no marker",
-			tests:       withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: map[string]string{"observationOnly": "false"}}),
+			name:        "the marker set to false on a stamped pass is no marker",
+			tests:       withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: map[string]string{"observationOnly": "false", "resultSchema": "1"}}),
 			requirement: "cluster_autoscaling",
 			wantStatus:  StatusPassed,
 			wantProof:   []string{"cluster-autoscaling"},
 			wantPassed:  true,
+		},
+		{
+			// #3703: an image that predates the marker cannot have set it,
+			// so its pass of an observation-only check is not a demonstration.
+			name:          "an unstamped pass of an observation-only check is observed with the mismatch recorded",
+			tests:         withResult(allMustsPassed, "cluster-autoscaling", unstamped),
+			requirement:   "cluster_autoscaling",
+			wantStatus:    StatusObserved,
+			wantReason:    "cluster-autoscaling observed, not demonstrated: " + reasonResultSchemaAbsent,
+			wantObserved:  true,
+			wantInVerdict: []string{"cluster_autoscaling observed", reasonResultSchemaAbsent},
+		},
+		{
+			name:          "notApplicable covers the unstamped observation-only pass",
+			tests:         withResult(allMustsPassed, "cluster-autoscaling", unstamped),
+			notApplicable: map[string]string{"cluster_autoscaling": "fixed-size cluster"},
+			requirement:   "cluster_autoscaling",
+			wantStatus:    StatusNotApplicable,
+			wantReason:    "fixed-size cluster",
+			wantPassed:    true,
+			wantObserved:  true,
+		},
+		{
+			name:        "an unstamped pass of a behavioral check is credited",
+			tests:       withResult(allMustsPassed, "gang-scheduling", &ctrf.TestResult{Name: "gang-scheduling", Status: "passed"}),
+			requirement: "gang_scheduling",
+			wantStatus:  StatusPassed,
+			wantProof:   []string{"gang-scheduling"},
+			wantPassed:  true,
+		},
+		{
+			name:         "an unstamped pass folded with a stamped pass is observed",
+			tests:        append(slices.Clone(allMustsPassed), *unstamped),
+			requirement:  "cluster_autoscaling",
+			wantStatus:   StatusObserved,
+			wantReason:   "cluster-autoscaling observed, not demonstrated: " + reasonResultSchemaAbsent,
+			wantObserved: true,
+		},
+		{
+			name:        "an unstamped failed result of an observation-only check stays failed",
+			tests:       withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "failed", Message: "no node group"}),
+			requirement: "cluster_autoscaling",
+			wantStatus:  StatusFailed,
+			wantReason:  "cluster-autoscaling failed",
 		},
 		{
 			name: "the same check reported as a demonstration and as an observation is observed",
