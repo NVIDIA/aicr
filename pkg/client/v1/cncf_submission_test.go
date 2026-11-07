@@ -154,6 +154,10 @@ func TestValidateCNCFSubmissionOptions(t *testing.T) {
 			o.Documented = map[string]CNCFDocumentation{"cluster_autoscaling": {Notes: "x"}}
 		}, wantErr: "documentation URL"},
 		{name: "unsupported version", client: client, dir: dir, mutate: func(o *CNCFSubmissionOptions) { o.ConformanceVersion = "v1.30" }, wantErr: "unsupported"},
+		{name: "uncarried kubernetes minor", client: client, dir: dir, mutate: func(o *CNCFSubmissionOptions) { o.KubernetesVersion = "1.34.3" }, wantErr: "no carried CNCF AI Conformance checklist certifies Kubernetes"},
+		{name: "unparseable kubernetes version", client: client, dir: dir, mutate: func(o *CNCFSubmissionOptions) { o.KubernetesVersion = "latest" }, wantErr: "no carried CNCF AI Conformance checklist"},
+		{name: "explicit version overrides an uncarried minor", client: client, dir: dir, mutate: func(o *CNCFSubmissionOptions) { o.KubernetesVersion, o.ConformanceVersion = "1.38.0", "v1.37" }},
+		{name: "carried minor", client: client, dir: dir, mutate: func(o *CNCFSubmissionOptions) { o.KubernetesVersion = "v1.36.2-eks-abc" }},
 		{name: "empty dir", client: client, dir: "", wantErr: "directory is required"},
 	}
 	for _, tt := range tests {
@@ -209,6 +213,12 @@ func TestWriteCNCFSubmissionGuards(t *testing.T) {
 		{"empty dir", func() (*CNCFSubmissionResult, error) {
 			return client.WriteCNCFSubmission(context.Background(), report, "", snap, rec, opts)
 		}, "directory is required"},
+		{"no kubernetes version", func() (*CNCFSubmissionResult, error) {
+			return client.WriteCNCFSubmission(context.Background(), report, dir, snap, rec, CNCFSubmissionOptions{Vendor: testCNCFVendor()})
+		}, "needs the cluster's Kubernetes version"},
+		{"uncarried minor", func() (*CNCFSubmissionResult, error) {
+			return client.WriteCNCFSubmission(context.Background(), report, dir, snap, rec, CNCFSubmissionOptions{Vendor: testCNCFVendor(), KubernetesVersion: "1.34.0"})
+		}, "no carried CNCF AI Conformance checklist"},
 		{"withheld check", func() (*CNCFSubmissionResult, error) {
 			withheld := &ctrf.Report{Results: ctrf.Results{Tests: []ctrf.TestResult{{Name: "gang-scheduling", Status: ctrf.StatusSkipped, Extra: map[string]string{"skipReason": validator.SkipCheckReasonCode}}}}}
 			return client.WriteCNCFSubmission(context.Background(), withheld, dir, snap, rec, opts)
@@ -301,6 +311,36 @@ func TestWriteCNCFSubmission(t *testing.T) {
 	errorstest.WantReportedCode(t, res.Aggregate.Outcome(report, true), aicrerrors.ErrCodeInternal)
 }
 
+// An explicit ConformanceVersion certifies a cluster whose minor has no
+// carried checklist, and the README records the checklist used.
+func TestWriteCNCFSubmissionExplicitVersion(t *testing.T) {
+	installLandscape(t, "Test Vendor")
+	client, err := NewClient(WithRecipeSource(EmbeddedSource()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	report := &ctrf.Report{Results: ctrf.Results{Tests: []ctrf.TestResult{
+		{Name: "gang-scheduling", Status: "passed"}, {Name: "accelerator-metrics", Status: "passed"}, {Name: "ai-service-metrics", Status: "passed"},
+		{Name: "inference-gateway", Status: "passed"}, {Name: "pod-autoscaling", Status: "passed"}, {Name: "robust-controller", Status: "passed"},
+		{Name: "secure-accelerator-access", Status: "passed"},
+	}}}
+	dir := filepath.Join(t.TempDir(), "submission")
+	res, err := client.WriteCNCFSubmission(context.Background(), report, dir, testSubmissionSnapshot(), &RecipeResult{Name: "r"},
+		CNCFSubmissionOptions{Vendor: testCNCFVendor(), KubernetesVersion: "1.38.0", ConformanceVersion: "v1.37",
+			NotApplicable: map[string]string{"cluster_autoscaling": "fixed-size pools"}})
+	if err != nil || !res.Complete || res.Aggregate.Version != "v1.37" {
+		t.Fatalf("WriteCNCFSubmission() = %v %+v", err, res)
+	}
+	readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(readme), "**Checklist:** v1.37") {
+		t.Errorf("README does not record the explicit checklist:\n%s", readme)
+	}
+}
+
 // A validator that cannot start surfaces as unavailable through the facade.
 func TestWriteCNCFSubmissionValidatorUnavailable(t *testing.T) {
 	prev := http.DefaultTransport
@@ -320,7 +360,7 @@ func TestWriteCNCFSubmissionValidatorUnavailable(t *testing.T) {
 		{Name: "secure-accelerator-access", Status: "passed"},
 	}}}
 	_, err = client.WriteCNCFSubmission(context.Background(), report, filepath.Join(t.TempDir(), "out"), testSubmissionSnapshot(), &RecipeResult{Name: "r"},
-		CNCFSubmissionOptions{Vendor: testCNCFVendor(), NotApplicable: map[string]string{"cluster_autoscaling": "fixed-size pools"}})
+		CNCFSubmissionOptions{Vendor: testCNCFVendor(), KubernetesVersion: "1.37.2", NotApplicable: map[string]string{"cluster_autoscaling": "fixed-size pools"}})
 	errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeUnavailable)
 }
 

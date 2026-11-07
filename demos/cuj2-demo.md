@@ -299,13 +299,37 @@ http://127.0.0.1:9090/chat.html
 
 ### CNCF AI Conformance Evidence Collection
 ```
- aicr validate -r bundle/recipe.yaml --phase conformance --cncf-submission --evidence-dir ./cncf-evidence
+ aicr validate -r bundle/recipe.yaml --phase conformance --config cncf-config.yaml --cncf-submission --evidence-dir ./cncf-submission
 
   One runner: the conformance phase runs every check the recipe declares, with
   the same verdicts as a run without the flag, and --cncf-submission renders
-  the CTRF report into ./cncf-evidence as one evidence page per requirement a
-  non-skipped check evidenced, plus index.md. bundle/recipe.yaml is the deployed set, as in the validation
-  example above; without -s the run captures the cluster snapshot itself.
+  the CTRF report into ./cncf-submission as the directory a vendor files with
+  CNCF: PRODUCT.yaml (statuses from the run, metadata from the config),
+  README.md (the index with the platform facts), junit.xml, e2e.log and one
+  evidence page per requirement under evidence/, redacted and checked by the
+  pinned upstream validator. bundle/recipe.yaml is the deployed set, as in the
+  validation example above; without -s the run captures the cluster snapshot
+  itself. cncf-config.yaml carries the vendor block the run requires and, on a
+  fixed-size demo cluster, the cluster_autoscaling justification:
+
+  kind: AICRConfig
+  apiVersion: aicr.run/v1beta1
+  spec:
+    validate:
+      evidence:
+        cncf:
+          vendor:
+            name: Example Vendor
+            platformName: Example Platform
+            platformVersion: 1.0.0
+            description: One sentence describing the offering.
+            contactEmail: maintainers@example.com
+            websiteUrl: https://example.com/platform
+            documentationUrl: https://example.com/platform/docs
+            productLogoUrl: https://example.com/platform/logo.svg
+            k8sConformanceUrl: https://github.com/cncf/k8s-conformance/tree/master/v1.37/example-platform
+          notApplicable:
+            cluster_autoscaling: "Fixed-size demo cluster; no cluster autoscaler is deployed."
 
     Check                        Requirement
     ──────────────────────────── ─────────────────────────────

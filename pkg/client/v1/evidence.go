@@ -399,8 +399,9 @@ func (c *Client) RenderCNCFEvidenceWithOptions(ctx context.Context, report *ctrf
 // Errors:
 //   - ErrCodeInvalidRequest when the Client or ctx is nil, dir is empty,
 //     opts.ConformanceVersion is unsupported, opts.NotApplicable names a
-//     requirement that may not be declared not applicable, or the report
-//     contains a check withheld by WithValidationSkipChecks.
+//     requirement that may not be declared not applicable, opts.Documented
+//     is malformed, or the report contains a check withheld by
+//     WithValidationSkipChecks.
 //   - ErrCodeTimeout when rendering exceeds defaults.EvidenceRenderTimeout.
 //   - ErrCodeInternal when a file cannot be written.
 func (c *Client) RenderCNCFEvidenceWithResult(ctx context.Context, report *ctrf.Report, dir string, opts RenderCNCFEvidenceOptions) (*CNCFRequirementAggregate, error) {
@@ -518,8 +519,8 @@ func resolveConformanceVersion(opts RenderCNCFEvidenceOptions) (cncf.Version, er
 //   - ErrCodeInvalidRequest when the Client or ctx is nil, the Client is
 //     closed, opts.Dir is empty, opts.Features is non-empty, opts.NoCluster
 //     is true, opts.NotApplicable names a requirement that may not be
-//     declared not applicable, or rec is nil, unresolved or owned by another
-//     Client.
+//     declared not applicable, opts.Documented is malformed, or rec is nil,
+//     unresolved or owned by another Client.
 //   - The snapshot, validator and render errors propagate with their own
 //     codes (ErrCodeTimeout when a stage's deadline expires).
 //   - ErrCodeInternal when a check failed or errored, or an applicable MUST

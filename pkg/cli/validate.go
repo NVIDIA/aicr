@@ -496,6 +496,9 @@ type validationConfig struct {
 	// cncfVendor is spec.validate.evidence.cncf.vendor, the PRODUCT.yaml
 	// metadata; required for a submission run and refused up front otherwise.
 	cncfVendor *aicr.CNCFVendor
+	// cncfConformanceVersion is spec.validate.evidence.cncf.conformanceVersion,
+	// the explicit checklist; empty follows the cluster's minor exactly.
+	cncfConformanceVersion string
 
 	// Recipe-evidence bundle config; nil disables --emit-attestation work.
 	evidence *recipeEvidenceConfig
@@ -666,10 +669,11 @@ func runValidation(
 	var decided bool
 	if cfg.cncfSubmission {
 		opts := aicr.CNCFSubmissionOptions{
-			KubernetesVersion: snap.KubernetesVersion(),
-			NotApplicable:     cfg.cncfNotApplicable,
-			Documented:        cfg.cncfDocumented,
-			Commit:            commit,
+			ConformanceVersion: cfg.cncfConformanceVersion,
+			KubernetesVersion:  snap.KubernetesVersion(),
+			NotApplicable:      cfg.cncfNotApplicable,
+			Documented:         cfg.cncfDocumented,
+			Commit:             commit,
 		}
 		if cfg.cncfVendor != nil {
 			opts.Vendor = *cfg.cncfVendor
@@ -1399,6 +1403,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				cncfNotApplicable:           cncfOpts.NotApplicable,
 				cncfDocumented:              cncfOpts.Documented,
 				cncfVendor:                  cncfOpts.Vendor,
+				cncfConformanceVersion:      cncfOpts.ConformanceVersion,
 				evidence:                    evidenceCfg,
 				imageRefs:                   imageRefs,
 			})
@@ -1434,9 +1439,10 @@ func validateClient(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, evi
 				"(name, platformName, platformVersion, description, contactEmail, websiteUrl, documentationUrl, productLogoUrl, k8sConformanceUrl; repoUrl optional)")
 	}
 	if err := client.ValidateCNCFSubmissionOptions(aicr.CNCFSubmissionOptions{
-		NotApplicable: cncfOpts.NotApplicable,
-		Documented:    cncfOpts.Documented,
-		Vendor:        *cncfOpts.Vendor,
+		ConformanceVersion: cncfOpts.ConformanceVersion,
+		NotApplicable:      cncfOpts.NotApplicable,
+		Documented:         cncfOpts.Documented,
+		Vendor:             *cncfOpts.Vendor,
 	}, evidenceDir); err != nil {
 		_ = client.Close()
 		return nil, err
@@ -1445,8 +1451,8 @@ func validateClient(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, evi
 }
 
 // logRequirementAggregate reports the CNCF requirement aggregation of a
-// submission run: the checklist, whether every applicable MUST passed, and
-// each MUST that is not established with its reason. When no conformance
+// submission run: the checklist, whether every applicable MUST is
+// established, and each MUST that is not with its reason. When no conformance
 // check produced a result at all (a recipe that declares none), one warning
 // says so instead of one per MUST, since every MUST would read not run for
 // the same reason. The exit status is CNCFRequirementAggregate.Outcome.
@@ -1457,7 +1463,7 @@ func logRequirementAggregate(agg *aicr.CNCFRequirementAggregate) {
 	incomplete := agg.IncompleteMusts()
 	slog.Info("CNCF requirement aggregation",
 		"checklist", agg.Version,
-		"applicableMustsPassed", agg.Passed(),
+		"applicableMustsEstablished", agg.Passed(),
 		"incompleteMusts", len(incomplete))
 	switch {
 	case len(incomplete) == 0:

@@ -865,6 +865,11 @@ type CNCFEvidenceOptions struct {
 	// the justification as value. It is RenderCNCFEvidenceOptions.NotApplicable.
 	NotApplicable map[string]string
 
+	// ConformanceVersion is spec.validate.evidence.cncf.conformanceVersion,
+	// the checklist a submission certifies against instead of the cluster's
+	// minor. It is CNCFSubmissionOptions.ConformanceVersion.
+	ConformanceVersion string
+
 	// Vendor is spec.validate.evidence.cncf.vendor, the PRODUCT.yaml
 	// metadata of a submission; nil when unset. It is
 	// CNCFSubmissionOptions.Vendor, and a submission run requires it.
@@ -894,9 +899,10 @@ func (c *Config) CNCFEvidenceOptions() (CNCFEvidenceOptions, error) {
 		return CNCFEvidenceOptions{}, nil
 	}
 	out := CNCFEvidenceOptions{
-		Dir:            resolved.EvidenceCNCF.Dir,
-		CNCFSubmission: resolved.EvidenceCNCF.CNCFSubmission,
-		NotApplicable:  resolved.EvidenceCNCF.NotApplicable,
+		Dir:                resolved.EvidenceCNCF.Dir,
+		CNCFSubmission:     resolved.EvidenceCNCF.CNCFSubmission,
+		NotApplicable:      resolved.EvidenceCNCF.NotApplicable,
+		ConformanceVersion: resolved.EvidenceCNCF.ConformanceVersion,
 	}
 	if v := resolved.EvidenceCNCF.Vendor; v != nil {
 		out.Vendor = &CNCFVendor{

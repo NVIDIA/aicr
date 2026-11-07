@@ -360,6 +360,12 @@ type EvidenceCNCFSpec struct {
 	// rejected at render time.
 	NotApplicable map[string]string `yaml:"notApplicable,omitempty" json:"notApplicable,omitempty"`
 
+	// ConformanceVersion names the CNCF checklist a submission run certifies
+	// against ("v1.37") instead of the one the cluster's Kubernetes minor
+	// selects. A submission run otherwise refuses a cluster whose minor has
+	// no carried checklist; this is the deliberate override.
+	ConformanceVersion string `yaml:"conformanceVersion,omitempty" json:"conformanceVersion,omitempty"`
+
 	// Vendor is the product metadata PRODUCT.yaml carries. Required for a
 	// submission run; every field but RepoURL is required by the upstream
 	// validator, and the CLI refuses a missing or malformed field before any

@@ -1450,6 +1450,7 @@ spec:
           repoUrl: https://github.com/vendor/platform
           productLogoUrl: https://vendor.example/logo.svg
           k8sConformanceUrl: https://github.com/cncf/k8s-conformance/tree/master/v1.37/test-platform
+        conformanceVersion: v1.37
         documented:
           driver_runtime_management:
             evidence:
@@ -1507,6 +1508,9 @@ func TestConfig_CNCFEvidenceOptions(t *testing.T) {
 	}
 	if got.Vendor == nil || *got.Vendor != *wantVendor {
 		t.Errorf("Vendor = %+v, want %+v", got.Vendor, wantVendor)
+	}
+	if got.ConformanceVersion != "v1.37" {
+		t.Errorf("ConformanceVersion = %q, want v1.37", got.ConformanceVersion)
 	}
 	doc, ok := got.Documented["driver_runtime_management"]
 	if !ok || doc.Notes != "Drivers are reconciled by the GPU Operator." || len(doc.Evidence) != 1 || doc.Evidence[0] != "https://vendor.example/docs/drivers" {

@@ -16,6 +16,7 @@ package aicr
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -69,8 +70,10 @@ type CNCFDocumentation struct {
 
 // CNCFSubmissionOptions configures Client.WriteCNCFSubmission.
 type CNCFSubmissionOptions struct {
-	// ConformanceVersion and KubernetesVersion select the checklist exactly
-	// as RenderCNCFEvidenceOptions does.
+	// ConformanceVersion names the checklist explicitly; otherwise
+	// KubernetesVersion's minor selects it and must be a carried version
+	// exactly: unlike the evidence-pages render, a submission never falls
+	// back to a neighboring checklist, since it certifies one minor.
 	ConformanceVersion string
 	KubernetesVersion  string
 
@@ -144,7 +147,37 @@ func (c *Client) ValidateCNCFSubmissionOptions(opts CNCFSubmissionOptions, dir s
 	if err := vendor.Validate(); err != nil {
 		return err
 	}
+	if opts.KubernetesVersion != "" {
+		if err := requireExactConformanceVersion(opts); err != nil {
+			return err
+		}
+	}
 	return cncf.ValidateSubmissionDir(dir)
+}
+
+// requireExactConformanceVersion refuses a submission for a cluster whose
+// Kubernetes minor has no carried checklist unless ConformanceVersion names
+// one explicitly. The evidence-pages render falls back to the nearest
+// carried checklist with a warning, which is fine for pages; a submission
+// certifies the exact minor and must not be filed against a neighbor.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when ConformanceVersion is empty and
+//     KubernetesVersion is empty, unparseable, or an uncarried minor.
+func requireExactConformanceVersion(opts CNCFSubmissionOptions) error {
+	if opts.ConformanceVersion != "" {
+		return nil
+	}
+	if opts.KubernetesVersion == "" {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"a submission needs the cluster's Kubernetes version (CNCFSubmissionOptions.KubernetesVersion) or an explicit ConformanceVersion: the checklist certifies one minor")
+	}
+	if _, ok := cncf.VersionForKubernetes(opts.KubernetesVersion); !ok {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"no carried CNCF AI Conformance checklist certifies Kubernetes %q (carried: %v); a submission is filed for the cluster's exact minor, so this cluster cannot be submitted with this build, or pass ConformanceVersion to choose a checklist deliberately",
+			opts.KubernetesVersion, cncf.SupportedVersions()))
+	}
+	return nil
 }
 
 // WriteCNCFSubmission writes the complete CNCF AI Conformance submission
@@ -175,8 +208,10 @@ func (c *Client) ValidateCNCFSubmissionOptions(opts CNCFSubmissionOptions, dir s
 // Errors:
 //   - ErrCodeInvalidRequest when the Client, ctx, report, snap or rec is
 //     nil, dir is empty or fails ValidateCNCFSubmissionOptions, an option
-//     is malformed, or the report carries a check withheld by
-//     WithValidationSkipChecks (as RenderCNCFEvidenceWithResult refuses).
+//     is malformed, the cluster's Kubernetes minor has no carried checklist
+//     and no ConformanceVersion was given, or the report carries a check
+//     withheld by WithValidationSkipChecks (as RenderCNCFEvidenceWithResult
+//     refuses).
 //   - ErrCodeConflict when <dir>.incomplete appeared between the pre-flight
 //     and the claim (another run, or a tree left behind); it is never
 //     removed by this run.
@@ -208,6 +243,9 @@ func (c *Client) WriteCNCFSubmission(ctx context.Context, report *ctrf.Report, d
 		return nil, err
 	}
 	if err := c.ValidateCNCFSubmissionOptions(opts, dir); err != nil {
+		return nil, err
+	}
+	if err := requireExactConformanceVersion(opts); err != nil {
 		return nil, err
 	}
 	version, err := resolveConformanceVersion(RenderCNCFEvidenceOptions{

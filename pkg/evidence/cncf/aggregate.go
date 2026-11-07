@@ -195,16 +195,17 @@ func (a *Aggregate) IncompleteMusts() []RequirementResult {
 	return out
 }
 
-// Passed reports whether every applicable MUST passed. SHOULDs do not
-// participate: a SHOULD with no claim renders Not Implemented without failing
-// the run.
+// Passed reports whether every applicable MUST is established: demonstrated
+// by a complete proof path, or observed and attested by vendor documentation
+// (RequirementResult.Established). SHOULDs do not participate: a SHOULD with
+// no claim renders Not Implemented without failing the run.
 func (a *Aggregate) Passed() bool {
 	return len(a.IncompleteMusts()) == 0
 }
 
 // Verdict is the requirement half of a submission run's exit status: nil when
-// every applicable MUST passed, else an error naming each MUST that is not
-// established with its status and reason. Outcome adds it to the per-check
+// every applicable MUST is established, else an error naming each MUST that
+// is not, with its status and reason. Outcome adds it to the per-check
 // rule; on its own it never fails on a SHOULD. The evidence has been written
 // when it is consulted, so the directory still documents what was and was
 // not shown.
@@ -221,7 +222,7 @@ func (a *Aggregate) Verdict() error {
 		parts = append(parts, fmt.Sprintf("%s %s (%s)", r.ID, r.Status, r.Reason))
 	}
 	return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
-		"CNCF submission not established: %d applicable MUST requirement(s) of the %s checklist did not pass: %s",
+		"CNCF submission not established: %d applicable MUST requirement(s) of the %s checklist are not established: %s",
 		len(incomplete), a.Version, strings.Join(parts, "; ")))
 }
 

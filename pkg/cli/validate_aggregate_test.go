@@ -158,7 +158,7 @@ func TestLogRequirementAggregate(t *testing.T) {
 			name: "incomplete MUSTs are named with status and reason",
 			agg:  agg,
 			want: []string{
-				"CNCF requirement aggregation", "checklist=v1.37", "applicableMustsPassed=false",
+				"CNCF requirement aggregation", "checklist=v1.37", "applicableMustsEstablished=false",
 				"requirement=gang_scheduling", "status=failed", `reason="gang-scheduling failed"`,
 				"requirement=pod_autoscaling", `status="not tested"`, "pod-autoscaling skipped: no-metrics-api",
 				"requirement=robust_controller", `reason="not run"`,
@@ -352,6 +352,9 @@ func TestRunValidationSubmissionVerdict(t *testing.T) {
 				cfg.cncfSubmission = true
 				cfg.evidenceDir = evidenceDir
 				cfg.cncfVendor = testCNCFVendor()
+				// The fixture snapshot runs Kubernetes 1.34, which no carried
+				// checklist certifies; the explicit version is the override.
+				cfg.cncfConformanceVersion = "v1.37"
 			}
 			logs := captureJSONLogs(t)
 			err := runValidation(t.Context(), client, rec, snap, cfg)

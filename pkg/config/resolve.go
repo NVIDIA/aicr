@@ -493,6 +493,9 @@ type EvidenceCNCFResolved struct {
 	CNCFSubmission bool
 	NotApplicable  map[string]string
 
+	// ConformanceVersion is spec.validate.evidence.cncf.conformanceVersion.
+	ConformanceVersion string
+
 	// Vendor is nil when spec.validate.evidence.cncf.vendor is unset.
 	Vendor *EvidenceCNCFVendorSpec
 
@@ -618,10 +621,11 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 		if v.Evidence.CNCF != nil {
 			c := v.Evidence.CNCF
 			out.EvidenceCNCF = &EvidenceCNCFResolved{
-				Dir:            c.Dir,
-				CNCFSubmission: boolPtrOrFalse(c.CNCFSubmission),
-				NotApplicable:  maps.Clone(c.NotApplicable),
-				Documented:     cloneDocumented(c.Documented),
+				Dir:                c.Dir,
+				CNCFSubmission:     boolPtrOrFalse(c.CNCFSubmission),
+				NotApplicable:      maps.Clone(c.NotApplicable),
+				Documented:         cloneDocumented(c.Documented),
+				ConformanceVersion: c.ConformanceVersion,
 			}
 			if c.Vendor != nil {
 				v := *c.Vendor

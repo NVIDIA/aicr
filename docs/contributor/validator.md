@@ -87,9 +87,10 @@ every check on one of its proof paths is present and `passed`
 (`alternativeProofs` lists the requirements with more than one path), a failed
 check fails it, `other`, `pending` or absent checks leave it not tested, and a
 check that `passed` with the `observationOnly` marker leaves it observed,
-which does not establish a MUST (`StatusObserved`). `Aggregate.Passed` is
-scoped by level: every applicable MUST passed, SHOULDs
-excluded; `NOT APPLICABLE` comes only from
+which does not establish a MUST (`StatusObserved`) unless
+`spec.validate.evidence.cncf.documented` attests it. `Aggregate.Passed` is
+scoped by level: every applicable MUST established (passed, or observed and
+documented), SHOULDs excluded; `NOT APPLICABLE` comes only from
 `spec.validate.evidence.cncf.notApplicable` and only for the conditional
 MUSTs in `conditionalMusts` (`ValidateNotApplicable`). The requirement set it
 aggregates is the upstream checklist for the selected version

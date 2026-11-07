@@ -20,9 +20,14 @@ v1.37. Evidence rendering selects the version from the validated cluster's
 Kubernetes minor. A minor this build carries no checklist for renders against
 the nearest carried one with a warning: below v1.35 against v1.35, above v1.37
 against v1.37 (upstream also publishes v1.33 and v1.34, which AICR does not
-carry). The Go SDK accepts an explicit version
-(`RenderCNCFEvidenceOptions.ConformanceVersion`). A CLI flag for the explicit
-version is a follow-up to #3606.
+carry). That fallback is for the evidence pages only: a submission run
+(`--cncf-submission`, `WriteCNCFSubmission`) certifies the cluster's exact
+minor and is refused with `INVALID_REQUEST` when no carried checklist matches
+it, unless a checklist is named explicitly
+(`spec.validate.evidence.cncf.conformanceVersion` in the validate config, or
+`CNCFSubmissionOptions.ConformanceVersion` in the Go SDK), which the README
+records. The Go SDK accepts an explicit version for the pages too
+(`RenderCNCFEvidenceOptions.ConformanceVersion`).
 
 What changed between versions, as it affects AICR evidence:
 
@@ -297,7 +302,26 @@ path with a `vX.Y/` parent segment is refused because the validator would
 read that segment as the checklist version. The whole write, including the
 validator's run, is bounded by `defaults.CNCFSubmissionTimeout` (10 minutes);
 exceeding it exits `TIMEOUT` (5) with the staged tree kept, as for a
-rejection. The validator
+rejection.
+
+**Recovering from a transient validator failure.** A staged tree whose
+README.md Validation section reads "not run; the validator could not start"
+or "interrupted" is a complete, redacted directory lacking only the
+validator's acceptance; every check has run. Rather than re-running the
+checks, validate it by hand from the staging root, where the layout is the
+one the validator reads (`docs/AIConformance-X.Y.yaml` beside
+`vX.Y/<name>/PRODUCT.yaml`):
+
+```bash
+cd <evidence-dir>.incomplete
+go run -tags validate <cncf/k8s-ai-conformance checkout at the pinned commit>/scripts/validate.go vX.Y/<name>/PRODUCT.yaml
+mv vX.Y/<name> <evidence-dir> && cd .. && rm -r <evidence-dir>.incomplete
+```
+
+The README's Validation section still records the interrupted outcome; say
+so beside it, or re-run `aicr validate` once the validator is reachable. A
+tree whose README reads "rejected" needs a config or cluster fix and a new
+run, never an edit. The validator
 needs network access: it fetches the landscape to check the vendor name and
 requests every URL the submission cites. A refresh of the pinned revision
 re-checks the assumptions this design relies on (fragments on every artifact

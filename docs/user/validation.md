@@ -1020,7 +1020,11 @@ recipe. `--evidence-dir` must be absent or empty, with no parent path
 segment of the form `vX.Y/` (the upstream validator would read it as the
 checklist version); the directory reaches it only when the run is complete,
 and an incomplete run leaves its staged copy at `<evidence-dir>.incomplete/`
-instead, which the next run refuses with exit 2 until it is removed (see
+instead, which the next run refuses with exit 2 until it is removed. The
+checklist version is the cluster's Kubernetes minor and must be one this
+build carries (v1.35 to v1.37); a cluster on another minor is refused with
+exit 2 rather than certified against a neighboring checklist, unless
+`spec.validate.evidence.cncf.conformanceVersion` names one deliberately (see
 [Submission directory](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#submission-directory)
 for the status, export and manual-attestation rules).
 
