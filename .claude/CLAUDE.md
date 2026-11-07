@@ -252,6 +252,7 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 | New Helm component | `recipes/registry.yaml` | Add entry with name, displayName, class, helm settings, nodeScheduling; add its row to `docs/user/component-catalog.md` |
 | New Kustomize component | `recipes/registry.yaml` | Add entry with name, displayName, class, kustomize settings; add its row to `docs/user/component-catalog.md` |
 | Component values | `recipes/components/<name>/` | Create values.yaml with Helm chart configuration |
+| Node-count memory tiers | `recipes/components/<name>/sizing.yaml` | Registry `sizing.file`; derivation rules and refining a tier in `docs/contributor/component-sizing.md`; never assert real tier values in Go tests |
 | New collector | `pkg/collector/<type>/` | Implement `Collector` interface, add to factory |
 | New API endpoint | `pkg/server/` | Handler (thin adapter over `pkg/client/v1`) + middleware chain + OpenAPI spec update |
 | Fix test failures | Run `make test` | Check race conditions (`-race`), verify context handling |
