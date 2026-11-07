@@ -1747,6 +1747,16 @@ aicr bundle -r recipe.yaml \
 
 This setting filters by source IP only; it does not add TLS or authentication to the gateway listener.
 
+### Clusters without a LoadBalancer provider
+
+On a cluster that provisions no LoadBalancer (a bare-metal NVKE or RKE2 tenant without MetalLB or kube-vip), set `agentgateway.serviceType` to `ClusterIP` so the controller programs the Gateway onto a ClusterIP Service instead:
+
+```shell
+aicr bundle -r recipe.yaml --set agentgateway:serviceType=ClusterIP
+```
+
+The deployment health check requires the recipe's Gateway to be `Accepted` and `Programmed` ([#3714](https://github.com/NVIDIA/aicr/issues/3714)), and this is the supported way to satisfy it without a load balancer. With `ClusterIP` the rendered Service carries no `loadBalancerSourceRanges`, because Kubernetes accepts that field only on a LoadBalancer Service; the gateway is then reachable only from inside the cluster, and the conformance check records "No LoadBalancer Service" rather than a source-range finding. Leave `serviceType` unset everywhere a load balancer exists.
+
 ### Exposure guardrails
 
 AICR enforces and surfaces inference-gateway exposure in two places:

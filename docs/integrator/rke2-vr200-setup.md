@@ -70,11 +70,11 @@ the `< 1.36.0` Kubernetes cap and the Gateway API / LoadBalancer prerequisites
   `Accepted=True` and `Programmed=True`, so a bundle deployed without its
   `agentgateway-post` step fails `aicr validate --phase deployment`
   ([#3714](https://github.com/NVIDIA/aicr/issues/3714)). Without an LB,
-  deploy the Gateway with a ClusterIP Service instead. The recipe values
-  expose no setting for the Service type: add `type: ClusterIP` under
-  `spec.service.spec` of the `system-proxy` `AgentgatewayParameters` in
-  `templates/inference-gateway.yaml` of the bundle's `agentgateway-post`
-  chart before applying it; that block is merged onto the generated Service.
+  generate the bundle with `--set agentgateway:serviceType=ClusterIP`
+  instead: the controller then programs the Gateway onto a ClusterIP
+  Service and the conformance check records "No LoadBalancer Service".
+  Never edit the generated bundle to get there; `aicr verify` checksums
+  every file in it.
 - **Mask the host `nvidia-imex` service on every GPU node.** The Vera Rubin
   reference image installs the host-managed 615 driver stack, which enables
   an `nvidia-imex` systemd service by default. All four shipped coordinates
