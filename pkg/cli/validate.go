@@ -525,6 +525,13 @@ func runValidation(
 
 	slog.Info("running validation", "phases", cfg.phases)
 
+	// A submission run that cannot establish an applicable MUST from the
+	// checks the recipe declares is refused here, before any validator Job
+	// runs, rather than on the verdict after every check has run.
+	if err := cncfRecipeCoveragePreflight(client, rec, snap, cfg); err != nil {
+		return err
+	}
+
 	// Generated once CLI-side, before either snapshot source ran (see
 	// validateCmd's Action), rather than letting the validator auto-generate
 	// it internally: the no-cleanup debug log below needs to surface the
@@ -1448,6 +1455,50 @@ func validateClient(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, evi
 		return nil, err
 	}
 	return client, nil
+}
+
+// cncfRecipeCoveragePreflight compares the recipe's conformance checks with
+// the proof paths the selected checklist expects for every applicable MUST.
+// A submission run that cannot establish a MUST is refused here, before any
+// validator Job, rather than failing on the verdict after every check ran;
+// a plain run that includes the conformance phase only logs the gaps, since
+// its result is not a submission. A plain run whose checklist cannot be
+// resolved (a cluster newer than the latest carried checklist with no
+// explicit version) has nothing to compare against and logs that instead.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when cfg.cncfSubmission is set and the recipe
+//     cannot establish one or more applicable MUSTs.
+func cncfRecipeCoveragePreflight(client *aicr.Client, rec *aicr.RecipeResult, snap *aicr.Snapshot, cfg validationConfig) error {
+	runsConformance := cfg.phases == nil || slices.Contains(facadePhases(cfg.phases), aicr.PhaseConformance)
+	if !cfg.cncfSubmission && !runsConformance {
+		return nil
+	}
+	err := client.ValidateCNCFRecipeCoverage(rec, cfg.renderCNCFOptions(snap))
+	switch {
+	case err == nil:
+		return nil
+	case cfg.cncfSubmission:
+		return err
+	default:
+		slog.Warn("the recipe's conformance checks would not establish every applicable MUST of the CNCF checklist; "+
+			"this run is not a submission, so it proceeds", "error", err)
+		return nil
+	}
+}
+
+// renderCNCFOptions are the render inputs of a submission run: the
+// snapshot's Kubernetes version selects the checklist unless the config's
+// conformanceVersion does, and notApplicable carries through.
+func (cfg validationConfig) renderCNCFOptions(snap *aicr.Snapshot) aicr.RenderCNCFEvidenceOptions {
+	opts := aicr.RenderCNCFEvidenceOptions{
+		ConformanceVersion: cfg.cncfConformanceVersion,
+		NotApplicable:      cfg.cncfNotApplicable,
+	}
+	if snap != nil {
+		opts.KubernetesVersion = snap.KubernetesVersion()
+	}
+	return opts
 }
 
 // logRequirementAggregate reports the CNCF requirement aggregation of a
