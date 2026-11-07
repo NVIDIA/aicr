@@ -16,8 +16,12 @@ package recipe
 
 import (
 	"context"
+	"io/fs"
+	"path"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
@@ -215,4 +219,62 @@ func TestRegistrySizingFilesLoad(t *testing.T) {
 			t.Errorf("component %q: %v", c.Name, err)
 		}
 	}
+}
+
+// TestRegistrySizingPathsAreSet fails when a sizing path is set by none of
+// its component's values files, so a typo or a key renamed by a chart bump
+// cannot turn sizing into a silent no-op.
+func TestRegistrySizingPathsAreSet(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fsys := GetEmbeddedFS()
+	for _, c := range registry.Components {
+		if c.Sizing.File == "" {
+			continue
+		}
+		sz, err := LoadComponentSizing(context.Background(), nil, c.Name, c.Sizing.File)
+		if err != nil {
+			t.Fatalf("component %q: %v", c.Name, err)
+		}
+		files, err := fs.Glob(fsys, path.Join("components", c.Name, "values*.yaml"))
+		if err != nil || len(files) == 0 {
+			t.Fatalf("component %q: no values files (%v)", c.Name, err)
+		}
+		for _, r := range sz.Resources {
+			found := false
+			for _, f := range files {
+				data, readErr := fs.ReadFile(fsys, f)
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				var values map[string]any
+				if yamlErr := yaml.Unmarshal(data, &values); yamlErr != nil {
+					t.Fatalf("%s: %v", f, yamlErr)
+				}
+				if hasPath(values, r.Path+".requests.memory") || hasPath(values, r.Path+".limits.memory") {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("component %q: sizing path %q sets no memory in any of %v", c.Name, r.Path, files)
+			}
+		}
+	}
+}
+
+func hasPath(m map[string]any, dotted string) bool {
+	var cur any = m
+	for _, k := range strings.Split(dotted, ".") {
+		next, ok := cur.(map[string]any)
+		if !ok {
+			return false
+		}
+		if cur, ok = next[k]; !ok {
+			return false
+		}
+	}
+	return true
 }

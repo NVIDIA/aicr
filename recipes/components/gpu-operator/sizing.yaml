@@ -1,0 +1,87 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Node-count memory tiers (ADR-030). Derivation rules and how to refine a
+# tier: docs/contributor/component-sizing.md.
+apiVersion: aicr.run/v1beta1
+kind: ComponentSizing
+basis: gpuNodes
+resources:
+  - path: operator.resources
+    tiers:
+      - maxNodes: 250
+        requests: {memory: 300Mi}
+        limits: {memory: 768Mi}
+        measurements:
+          - sets: [requests]
+            kind: windowed
+            window: 24h
+            gpuNodes: 244
+            nodes: 249
+            pods: 11029
+            max: 365Mi
+            date: 2026-10-14
+            ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6172508390
+          - sets: [limits]
+            kind: instantaneous
+            gpuNodes: 141
+            pods: 5500
+            max: 319Mi
+            date: 2026-10-14
+            ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6172508390
+      - maxNodes: 450
+        requests: {memory: 300Mi}
+        limits: {memory: 1Gi}
+        measurements:
+          - sets: []
+            kind: windowed
+            window: 24h
+            gpuNodes: 407
+            nodes: 417
+            pods: 13800
+            p90: 410Mi
+            max: 496Mi
+            date: 2026-11-04
+            ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6645492766
+          - sets: [requests, limits]
+            kind: windowed
+            window: 24h
+            gpuNodes: 447
+            nodes: 453
+            pods: 18245
+            max: 635Mi
+            date: 2026-10-14
+            ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6172508390
+      - maxNodes: 700
+        requests: {memory: 300Mi}
+        limits: {memory: 1Gi}
+        measurements:
+          - sets: [requests, limits]
+            kind: windowed
+            window: 24h
+            gpuNodes: 656
+            nodes: 670
+            pods: 21700
+            p90: 602Mi
+            max: 744Mi
+            date: 2026-11-04
+            ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6645492766
+          - sets: []
+            kind: windowed
+            window: 7d
+            gpuNodes: 656
+            p90: 599Mi
+            max: 747Mi
+            date: 2026-11-06
+      - maxNodes: 2000
