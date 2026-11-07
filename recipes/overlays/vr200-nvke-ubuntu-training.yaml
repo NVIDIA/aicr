@@ -274,7 +274,11 @@ spec:
         - name: Deployment.gpu-operator.version
           value: ">= v26.7.0"
     conformance:
+      # gang-scheduling is a v1.36 MUST and KAI comes from the nvke base. An
+      # undeclared check renders as "not tested", which never establishes a
+      # requirement. vr200-rke2-ubuntu-training declares it too.
       checks:
         - platform-health
         - gpu-operator-health
         - dra-support
+        - gang-scheduling

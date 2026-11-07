@@ -1,11 +1,25 @@
 # NVKE VR200 Setup
 
-The `vr200-nvke-ubuntu-training` and `vr200-nvke-ubuntu-inference` recipes
-target NVKE (NVIDIA Kubernetes Engine, formerly NKE): bare-metal Vera Rubin
-(VR200) NVL72 trays provisioned by Forge/NICo, running Ubuntu 26.04 on an arm64
-`-nvidia-bos-64k` kernel. Both are Preview coordinates. Everything below applies
-to both unless a section says otherwise; see **The inference coordinate** for
-what the inference leaf adds and leaves out.
+The `vr200-nvke-ubuntu-*` recipes target NVKE (NVIDIA Kubernetes Engine,
+formerly NKE): bare-metal Vera Rubin (VR200) NVL72 trays provisioned by
+Forge/NICo, running Ubuntu 26.04 on an arm64 `-nvidia-bos-64k` kernel. Four
+Preview coordinates:
+
+- `vr200-nvke-ubuntu-training`
+- `vr200-nvke-ubuntu-training-kubeflow` — adds Kubeflow Trainer to the training
+  leaf
+- `vr200-nvke-ubuntu-inference` — platform-neutral inference base, which
+  resolves when `--platform` is omitted
+- `vr200-nvke-ubuntu-inference-dynamo` — adds `dynamo-platform` and `grove` to
+  the inference leaf
+
+All four declare `gang-scheduling`, a v1.36 MUST: the KAI Scheduler the check
+exercises comes from the NVKE base, and a check the recipe does not name
+renders as "not tested", which never establishes the requirement.
+
+Everything below applies to all four unless a section says otherwise. See
+**The inference coordinate** for what the inference leaf adds and leaves out,
+and **The workload leaves** for what the other two add.
 
 It pairs the NVKE platform handling of `gb200-nvke-ubuntu-training` with the
 VR200 node facts of `vr200-rke2-ubuntu-training`, and differs from both on the
@@ -45,8 +59,8 @@ A kernel-flavour measurement, so the recipe can require this, is a follow-up.
 
 `vr200-nvke-ubuntu-inference` is the same node facts at `intent: inference`. It
 adds `agentgateway-crds` and `agentgateway` — the Gateway API surface — and
-nothing that serves a model; actual serving is the `-inference-dynamo` family,
-which has no NVKE leaf.
+nothing that serves a model; actual serving is
+`vr200-nvke-ubuntu-inference-dynamo`, described under **The workload leaves**.
 
 It declares the gateway rather than expecting one on the cluster because AICR
 gates `ai_inference` on the recipe: a leaf that ships no gateway records
@@ -61,6 +75,8 @@ Three things it deliberately leaves out, each matching
 - **No AI operator.** `robust_controller_check.go` takes its subject from the
   recipe — `kubeflow-trainer`, else `dynamo-platform`, else skip — so the check
   skips for this leaf, which is why the conformance list does not schedule it.
+  `vr200-nvke-ubuntu-inference-dynamo` is the leaf that establishes
+  `robust_controller` for this coordinate.
 - **No east-west NIC stack.** Serving through the Gateway API needs no RoCE
   rails, so neither `network-operator` nor `sriov-ib-networks` is declared.
 
@@ -79,6 +95,24 @@ endpoints rather than an external address — its LoadBalancer handling inspects
 `spec.loadBalancerSourceRanges` for internet exposure and records
 "No LoadBalancer Service" as an observation.
 
+**The Gateway is a separate bundle step.** `agentgateway` renders as two
+releases: the Helm chart, which installs the controller and the GatewayClass,
+and `agentgateway-post`, which applies
+`recipes/components/agentgateway/manifests/inference-gateway.yaml` and is what
+creates `agentgateway-system/inference-gateway`. The chart alone creates no
+Gateway, so an install or upgrade that runs only the `helm upgrade` leaves the
+`inference-gateway` check with nothing to read. `aicr validate --phase
+deployment` does not catch this today — the agentgateway health check asserts
+the controller Deployment and pod health, never the Gateway CR
+([#3714](https://github.com/NVIDIA/aicr/issues/3714)).
+
+On an LB-less tenant, keep the step rather than skipping it: deploy the Gateway
+with a ClusterIP Service. The chart has no knob for this — the manifest's
+`AgentgatewayParameters.spec.service` block sets only
+`loadBalancerSourceRanges` and is itself gated on `allowedSourceRanges` — so
+until one exists this means applying the Gateway and its
+`AgentgatewayParameters` by hand with `service.spec.type: ClusterIP`.
+
 ### Evidence
 
 Collected on a two-worker VR200 tenant cluster with no LoadBalancer present,
@@ -90,6 +124,36 @@ results — `robust_controller` was credited to an operator this recipe does not
 declare, which the collector it ran under allowed and the current one does not,
 and `dra_support` passed without its MNNVL behavioral subtest because no pod
 held the ComputeDomain channel at collection time.
+
+## The workload leaves
+
+`vr200-nvke-ubuntu-training-kubeflow` and `vr200-nvke-ubuntu-inference-dynamo`
+exist so this coordinate can establish `robust_controller`, a v1.36 MUST. The
+check takes its subject from the recipe — `kubeflow-trainer`, else
+`dynamo-platform`, else skip — and the two plain leaves declare no AI operator,
+so a submission from either stops short of the full MUST set. Each workload
+leaf adds the operator and declares the check, following
+`gb200-nvke-ubuntu-training-kubeflow` and
+`vr200-rke2-ubuntu-inference-dynamo`.
+
+- **`-training-kubeflow`** takes the `platform-kubeflow` mixin, which brings
+  Kubeflow Trainer and the torch-distributed `ClusterTrainingRuntime` the check
+  reconciles a `TrainJob` against. It adds no `componentRefs` of its own.
+- **`-inference-dynamo`** adds `dynamo-platform` and `grove` to the inference
+  leaf — the serving platform the base deliberately leaves out.
+
+Both establish the requirement. Measured on 2026-11-07 against a VR200 NVKE
+tenant cluster deployed from the `-inference-dynamo` bundle, the Dynamo path
+reports `robust_controller: Implemented` with no documented entry configured,
+on operator pods, an Established CRD and a webhook that rejects an invalid
+custom resource. Only the CR-reconciliation extra is observation-only there,
+because a `DynamoGraphDeployment` cannot reach a terminal condition without a
+model and GPU workers; the Kubeflow path adds a `TrainJob` reconciled to
+`Complete` on top of the same base.
+
+Neither carries a performance block. Nothing has been measured on VR200 under
+Dynamo, and a throughput or TTFT floor copied from another accelerator would be
+a claim about hardware these leaves have never run on.
 
 ## What has been measured, and what has not
 
