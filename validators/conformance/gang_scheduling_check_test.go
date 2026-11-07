@@ -110,6 +110,7 @@ func TestFailOnGangCleanup(t *testing.T) {
 // newGPUTestRun, the width that makes a same-name collision across runs
 // implausible.
 func TestGangTestRunTokenAndLabel(t *testing.T) {
+	t.Setenv(validators.ImagePullSecretsEnv, "") // an inherited value must not shape the run
 	run, err := newGangTestRun()
 	if err != nil {
 		t.Fatal(err)

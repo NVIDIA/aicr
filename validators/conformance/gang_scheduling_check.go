@@ -1195,7 +1195,11 @@ func confirmGangNamespaceGone(ctx context.Context, clientset kubernetes.Interfac
 		case apierrors.IsNotFound(err):
 			return true, nil
 		case err != nil:
-			lastErr = err
+			// A Get cut off by the poll deadline is not a read failure of the
+			// namespace; keep the last real observation for the verdict.
+			if c.Err() == nil {
+				lastErr = err
+			}
 			return false, nil
 		}
 		last, lastErr = ns, nil
