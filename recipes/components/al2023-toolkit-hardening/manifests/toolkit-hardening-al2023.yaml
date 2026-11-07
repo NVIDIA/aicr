@@ -1,0 +1,101 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVIDIA container toolkit device-isolation hardening for EKS AL2023 GPU nodes
+# (h100/gb200/gb300/rtx-pro-6000-eks-amazonlinux-inference, issue #3272).
+#
+# nodewright-customizations is disabled wholesale on these leaves (nvidia-setup
+# is Debian/Ubuntu-only: it pins an Ubuntu kernel package and DKMS-builds EFA),
+# so this is a separate manifest-only component, not a toolkit-hardening-aks.yaml
+# manifestFiles addition to nodewright-customizations — manifestFiles merge
+# additively and the inherited tuning.yaml cannot be cleared.
+#
+# Uses the generic skyhook shellscript package (no OS-specific logic, unlike
+# nvidia-setup) to set the same two keys as toolkit-hardening-aks.yaml in
+# /etc/nvidia-container-runtime/config.toml:
+#   accept-nvidia-visible-devices-envvar-when-unprivileged = false
+#   accept-nvidia-visible-devices-as-volume-mounts         = true
+# No interrupt: the toolkit re-reads config.toml at every container start.
+{{- $cust := index .Values "al2023-toolkit-hardening" }}
+{{- if ne (toString (index $cust "enabled")) "false" }}
+---
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
+metadata:
+  annotations:
+    aicr/skip-hook-validation: "true"
+  labels:
+    app.kubernetes.io/part-of: skyhook-operator
+    app.kubernetes.io/created-by: aicr
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+  name: toolkit-hardening-al2023
+  namespace: {{ .Release.Namespace }}
+spec:
+  priority: 100
+  runtimeRequired: true
+  autoTaintNewNodes: {{ ne (toString (index $cust "autoTaintNewNodes")) "false" }}
+  additionalTolerations:
+    {{- if $cust.acceleratedTolerations }}
+    {{- toYaml $cust.acceleratedTolerations | nindent 4 }}
+    {{- else }}
+    - operator: Exists
+    {{- end }}
+  {{- if $cust.acceleratedNodeSelector }}
+  nodeSelectors:
+    matchLabels:
+      {{- toYaml $cust.acceleratedNodeSelector | nindent 6 }}
+  {{- end }}
+  packages:
+    toolkit-hardening-al2023:
+      image: ghcr.io/nvidia/skyhook-packages/shellscript
+      version: "1.1.1"
+      containerSHA: sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf
+      configMap:
+        apply.sh: |
+          #!/bin/bash
+          set -euo pipefail
+          CONFIG=/etc/nvidia-container-runtime/config.toml
+          if [ ! -f "$CONFIG" ]; then
+            echo "no $CONFIG on this node, skipping"
+            exit 0
+          fi
+          if ! grep -q '^\[nvidia-container-runtime\]' "$CONFIG"; then
+            printf '\n[nvidia-container-runtime]\n' >> "$CONFIG"
+          fi
+          set_key() {
+            local key="$1" val="$2"
+            awk -v key="$key" -v val="$val" '
+              BEGIN { in_sec=0; done=0 }
+              /^\[nvidia-container-runtime\]/ { in_sec=1; print; next }
+              /^\[/ {
+                if (in_sec && !done) { print key " = " val; done=1 }
+                in_sec=0; print; next
+              }
+              in_sec && $0 ~ "^[#[:space:]]*" key "[[:space:]]*=" {
+                print key " = " val; done=1; next
+              }
+              { print }
+              END { if (in_sec && !done) print key " = " val }
+            ' "$CONFIG" > "${CONFIG}.aicr-tmp" && mv "${CONFIG}.aicr-tmp" "$CONFIG"
+          }
+          set_key "accept-nvidia-visible-devices-envvar-when-unprivileged" "false"
+          set_key "accept-nvidia-visible-devices-as-volume-mounts" "true"
+          echo "nvidia-container-runtime hardened"
+      resources:
+        cpuLimit: 1
+        cpuRequest: 100m
+        memoryLimit: 1Gi
+        memoryRequest: 256Mi
+{{- end }}
