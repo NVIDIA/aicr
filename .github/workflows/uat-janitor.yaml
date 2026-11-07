@@ -17,26 +17,26 @@ name: UAT Janitor
 # Backstop teardown for orphaned UAT clusters + resource groups across all three
 # clouds. The in-run "Destroy Cluster" step (uat-{gcp,aws,azure}.yaml) is the
 # first line; it cannot cover every case (a runner hard-killed mid-cancel, a
-# daytime held cluster whose evening daytime-down never fired, an abandoned
-# skip_delete run). This reaps whatever the in-run teardown missed, reconciling
-# each aicr-uat-<run_id> deployment against its owning GitHub run. See
+# daytime held cluster whose evening daytime-down never fired, a skip_delete run
+# from before uat-run.yaml refused nightly skip_delete on cloud reservations).
+# This reaps whatever the in-run teardown missed, reconciling each
+# aicr-uat-<run_id> deployment against its owning GitHub run. See
 # .github/scripts/uat-janitor.sh for the full safety model.
 #
-# ROLLOUT: dry-run-first. The scheduled run always reports only (DRY_RUN=true) —
-# it never deletes. To actually reap, dispatch this workflow with enforce=true
-# (a deliberate human action). Once the scheduled dry-run logs have been trusted
-# over a few cycles, flip the schedule to enforce by changing the DRY_RUN env
-# expression below to default false for the schedule event.
+# ENFORCEMENT: scheduled runs enforce (DRY_RUN=false) and reap every candidate
+# the safety model clears. A workflow_dispatch reports only unless enforce=true;
+# any other event reports only. A failed reap fails the job once every
+# candidate has been attempted.
 #
-# PREREQUISITE (verify before enforce): each cloud's OIDC/WIF trust must permit
-# this workflow. The federated identities are subject-pinned to NVIDIA/aicr refs
+# PREREQUISITE: each cloud's OIDC/WIF trust must permit this workflow. The
+# federated identities are subject-pinned to NVIDIA/aicr refs
 # (main + test/uat). Every job is additionally gated on
 # github.ref == 'refs/heads/main', so a workflow_dispatch that selects another
 # branch (the GCP/Azure trusts also admit test/uat) cannot run that branch's copy
 # of the janitor with delete authority — scheduled + dispatch runs only ever
 # execute main's version. A ref-scoped trust already covers this; if any trust is
-# workflow-file-scoped, add uat-janitor.yaml. The first scheduled dry-run surfaces
-# any auth gap harmlessly.
+# workflow-file-scoped, add uat-janitor.yaml. An auth gap fails that job at its
+# authentication step, before any discovery or reap.
 
 on:
   schedule:
@@ -80,22 +80,22 @@ permissions:
 #     (SKIP:lifecycle-active) to the next hourly cycle. This is a liveness PROBE,
 #     not a mutex: it collapses the common race (a down already running) to near
 #     zero but leaves a residual TOCTOU window — a down that STARTS in the ~1h
-#     between the check and the reap. The daytime>=24h floor and the DRY_RUN
-#     default backstop that window (break_state_lock is best-effort and idempotent;
-#     an AWS destroy has no lock but the actuator destroy is itself idempotent).
-# For a hard "never races" guarantee a shared cross-workflow lease would be
-# required; that is the tracked follow-up (#2132) to revisit before scheduled
-# enforcement is enabled. With DRY_RUN defaulting true, the liveness probe, and the
-# age floors, the residual window does not justify that coupling for this backstop
-# today.
+#     between the check and the reap. The daytime>=24h floor backstops that
+#     window (break_state_lock is best-effort and idempotent; an AWS destroy has
+#     no lock but the actuator destroy is itself idempotent).
+# Scheduled runs enforce with that residual window accepted (#3669): the
+# liveness probe and the age floors keep it small enough that it does not
+# justify a cross-workflow lease for this backstop; a shared cross-workflow
+# lease (#2132) is the path to a hard "never races" guarantee.
 concurrency:
   group: uat-janitor
   cancel-in-progress: false
 
 env:
-  # Scheduled runs are always dry-run; only an explicit enforce=true dispatch
-  # deletes. inputs.enforce is null for the schedule event, so this is 'true' there.
-  DRY_RUN: ${{ inputs.enforce == true && 'false' || 'true' }}
+  # 'false' (enforce) for the schedule event and for a dispatch with
+  # enforce=true; 'true' for any other dispatch or event. inputs.enforce is null
+  # on schedule, so the event_name test is what enforces there.
+  DRY_RUN: ${{ (github.event_name == 'schedule' || inputs.enforce == true) && 'false' || 'true' }}
 
 jobs:
   gcp:
@@ -178,15 +178,15 @@ jobs:
   #
   # GB300 keeps its Terraform state bucket in us-east-1 while it provisions in
   # us-east-2. That split needs no janitor code: reap() stages the committed
-  # config and changes only the deployment id, destroy flag and instance-type
-  # placeholder, so .deployment.stateLocation reaches the actuator exactly as in
-  # uat-aws.yaml's Destroy Cluster, and AWS_REGION comes from
-  # .deployment.location as it does there. The instance-type placeholder does
-  # need code: reap() fills it from GPU_INSTANCE_TYPE below.
+  # config and changes only the deployment id, destroy flag, admin roles and
+  # instance-type placeholder, so .deployment.stateLocation reaches the
+  # actuator exactly as in uat-aws.yaml's Destroy Cluster, and AWS_REGION
+  # comes from .deployment.location as it does there. The instance-type
+  # placeholder does need code: reap() fills it from GPU_INSTANCE_TYPE below.
   #
   # PREREQUISITE for a new tenancy: infra/uat-aws-account applied there (GitHub
   # OIDC provider + github-actions-role-aicr whose trust permits this workflow's
-  # ref). Until then that leg's auth step fails and the dry-run surfaces the gap.
+  # ref). Until then that leg fails at its auth step, before any discovery.
   aws:
     name: aws (${{ matrix.tenancy }} ${{ matrix.location }})
     needs: aws-targets

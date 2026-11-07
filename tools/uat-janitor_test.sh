@@ -548,6 +548,185 @@ STUB
     check "guard: ct system instanceType unchanged" \
         "$(committed "${CT_CFG}" '.compute.eks.nodeGroups.system.instanceType')" \
         "$(staged '.compute.eks.nodeGroups.system.instanceType')"
+
+    echo "aws reap staging (admin roles):"
+    # The actuator's pre-destroy refresh reads every adminRoles name with
+    # iam:GetRole, which the janitor's role may not hold, so every AWS destroy
+    # is staged with none. The CT config commits nvsentinel-e2e-runner-role.
+    # admin_roles_case <label> <gpu-worker type> <location> <stateLocation> <aws_reap args...>
+    admin_roles_case() {
+        local label="$1" itype="$2" loc="$3" sloc="$4"
+        shift 4
+        aws_reap "$@"
+        check "${label}: reap succeeds"            "0" "${REAP_RC}"
+        check "${label}: staged adminRoles empty"  "[]" "$(staged '.cluster.eks.adminRoles')"
+        check "${label}: gpu-worker instanceType"  "${itype}" \
+            "$(staged '.compute.eks.nodeGroups.workers[] | select(.name == "gpu-worker") | .instanceType')"
+        check "${label}: staged id"                "aicr-uat-7" "$(staged '.deployment.id')"
+        check "${label}: staged destroy"           "true" "$(staged '.deployment.destroy')"
+        check "${label}: location unchanged"       "${loc}" "$(staged '.deployment.location')"
+        check "${label}: stateLocation unchanged"  "${sloc}" "$(staged '.deployment.stateLocation')"
+    }
+    admin_roles_case "gb300 admin roles" gb300-test.type \
+        "$(committed "${GB300_CFG}" '.deployment.location')" "$(committed "${GB300_CFG}" '.deployment.stateLocation')" \
+        "${GB300_CFG}" false gb300-test.type
+    # CT commits no stateLocation, so the staged one stays null.
+    admin_roles_case "ct admin roles" \
+        "$(committed "${CT_CFG}" '.compute.eks.nodeGroups.workers[] | select(.name == "gpu-worker") | .instanceType')" \
+        "$(committed "${CT_CFG}" '.deployment.location')" null "${CT_CFG}" false ""
+
+    echo "gcp/azure reap staging:"
+    # Guard (passes before and after by design): only AWS staging touches
+    # .cluster.eks. The AWS stubs' docker captures the staged config.
+    printf '{}\n' >"${AWS_STUBS}/gcp-key.json"
+    # stage_reap <cloud>: reap aicr-uat-7 in enforce mode with that cloud's committed config.
+    stage_reap() {
+        rm -f "${AWS_STAGED}"
+        (
+            PATH="${AWS_STUBS}:${PATH}"
+            export CLOUD="$1" DRY_RUN=false JANITOR_CONFIG="${REPO_ROOT}/tests/uat/$1/cluster-config.yaml"
+            export JANITOR_ACTUATOR_IMAGE=stub GCP_PROJECT_ID=eidosx GOOGLE_GHA_CREDS_PATH="${AWS_STUBS}/gcp-key.json"
+            export AZURE_SUBSCRIPTION_ID=sub HOME="${STUB_DIR}/home"
+            # shellcheck disable=SC2329  # invoked by the sourced reap()
+            az_federated_relogin() { return 0; }
+            reap aicr-uat-7 >"${AWS_LOG}" 2>&1
+        )
+    }
+    for cloud in gcp azure; do
+        stage_reap "${cloud}"
+        check "guard: ${cloud} staged id"                 "aicr-uat-7" "$(staged '.deployment.id')"
+        check "guard: ${cloud} staged with no .cluster.eks" "false" "$(staged '.cluster | has("eks")')"
+    done
+
+    echo "azure_sweep_aks:"
+    # Azure sweep-and-retry stubs, in their own directory and prepended only
+    # inside the helpers' subshells. az logs its argv to AZR_ARGV; `aks show`
+    # exits AZ_SHOW_RC and `aks delete` succeeds, each appending to AZR_TRACE;
+    # any other az call fails. docker appends "destroy" to AZR_TRACE when its
+    # az config mount exists (else "destroy-without-az-config"), records the
+    # staged deployment id in AZR_IDS, and exits 1 for DOCKER_FAIL_ID when set,
+    # otherwise the next code in DOCKER_RCS (0 past the end).
+    AZR_STUBS="${STUB_DIR}/azure-retry-stubs"
+    export AZR_TRACE="${AZR_STUBS}/trace" AZR_ARGV="${AZR_STUBS}/az-argv" AZR_IDS="${AZR_STUBS}/actuator-ids"
+    AZR_LOG="${AZR_STUBS}/out.log"
+    mkdir -p "${AZR_STUBS}"
+    cat >"${AZR_STUBS}/az" <<'STUB'
+#!/usr/bin/env bash
+echo "az $*" >>"${AZR_ARGV}"
+case "${1:-} ${2:-}" in
+    "aks show")   echo show >>"${AZR_TRACE}"; exit "${AZ_SHOW_RC:-0}" ;;
+    "aks delete") echo delete >>"${AZR_TRACE}"; exit 0 ;;
+esac
+exit 1
+STUB
+    cat >"${AZR_STUBS}/docker" <<'STUB'
+#!/usr/bin/env bash
+id="" mount=""
+for a in "$@"; do
+    case "${a}" in
+        CONFIG_CONTENT=*) id="$(printf '%s' "${a#CONFIG_CONTENT=}" | base64 -d | yq -r '.deployment.id')" ;;
+        *:/home/builder/.azure) mount="${a%:/home/builder/.azure}" ;;
+    esac
+done
+if [ -n "${mount}" ] && [ -d "${mount}" ]; then echo destroy; else echo destroy-without-az-config; fi >>"${AZR_TRACE}"
+echo "${id}" >>"${AZR_IDS}"
+if [ -n "${DOCKER_FAIL_ID:-}" ]; then
+    [ "${id}" = "${DOCKER_FAIL_ID}" ] && exit 1
+    exit 0
+fi
+read -r -a rcs <<<"${DOCKER_RCS:-0}"
+n="$(grep -c . "${AZR_IDS}")"
+exit "${rcs[n - 1]:-0}"
+STUB
+    chmod +x "${AZR_STUBS}/az" "${AZR_STUBS}/docker"
+
+    # azure_sweep <id> [show-rc]: echoes "rc=<n> az=<argv lines, ;-terminated>".
+    azure_sweep() {
+        : >"${AZR_TRACE}"
+        : >"${AZR_ARGV}"
+        (
+            PATH="${AZR_STUBS}:${PATH}"
+            export AZURE_SUBSCRIPTION_ID=sub AZ_SHOW_RC="${2:-0}"
+            azure_sweep_aks "$1" >/dev/null 2>&1
+        )
+        echo "rc=$? az=$(tr '\n' ';' <"${AZR_ARGV}")"
+    }
+    SHOW7="az aks show --resource-group aicr-uat-7-rg --name aicr-uat-7 --subscription sub"
+    DELETE7="az aks delete --resource-group aicr-uat-7-rg --name aicr-uat-7 --subscription sub --yes"
+    check "deletes the deployment's own AKS cluster" "rc=0 az=${SHOW7};${DELETE7};" "$(azure_sweep aicr-uat-7)"
+    check "no delete when show fails"                "rc=0 az=${SHOW7};"            "$(azure_sweep aicr-uat-7 1)"
+    check "deletes a daytime deployment's AKS cluster" "1" \
+        "$(azure_sweep aicr-uat-day-gh1-0-7 | grep -c 'az aks delete --resource-group aicr-uat-day-gh1-0-7-rg --name aicr-uat-day-gh1-0-7 ')"
+    for n in '' aicr-uat-identity aicr-uat-7-rg 'aicr-uat-7 x' 'aicr-uat-*'; do
+        check "no az call for '${n}'" "rc=0 az=" "$(azure_sweep "${n}")"
+    done
+
+    echo "azure reap sweep and retry:"
+    # azure_retry_reap <docker-rcs> <relogin-rcs>: reap aicr-uat-7 on azure in
+    # enforce mode, docker and az_federated_relogin returning the listed codes
+    # call by call (0 past the end). Echoes "rc=<n> trace=<calls>".
+    azure_retry_reap() {
+        : >"${AZR_TRACE}"
+        : >"${AZR_ARGV}"
+        : >"${AZR_IDS}"
+        (
+            PATH="${AZR_STUBS}:${PATH}"
+            export CLOUD=azure DRY_RUN=false HOME="${STUB_DIR}/home" DOCKER_RCS="$1"
+            export JANITOR_CONFIG="${AZ_CFG}" JANITOR_ACTUATOR_IMAGE=stub AZURE_SUBSCRIPTION_ID=sub
+            read -r -a relogin_rcs <<<"$2"
+            # shellcheck disable=SC2329  # invoked by the sourced reap()
+            az_federated_relogin() {
+                echo relogin >>"${AZR_TRACE}"
+                return "${relogin_rcs[$(grep -c '^relogin$' "${AZR_TRACE}") - 1]:-0}"
+            }
+            reap aicr-uat-7 >"${AZR_LOG}" 2>&1
+        )
+        echo "rc=$? trace=$(tr '\n' ',' <"${AZR_TRACE}")"
+    }
+    check "retry after a failed destroy succeeds" \
+        "rc=0 trace=relogin,destroy,relogin,show,delete,relogin,destroy," "$(azure_retry_reap '1 0' '0')"
+    check "both destroys fail: the retry's rc is the result" \
+        "rc=3 trace=relogin,destroy,relogin,show,delete,relogin,destroy," "$(azure_retry_reap '1 3' '0')"
+    check "relogin fails after the first failure: no sweep, no retry" \
+        "rc=1 trace=relogin,destroy,relogin,"                             "$(azure_retry_reap '1' '0 1')"
+    check "relogin fails after the sweep: no retry" \
+        "rc=1 trace=relogin,destroy,relogin,show,delete,relogin,"         "$(azure_retry_reap '1' '0 0 1')"
+    # Guard (passes before and after by design): a first destroy that succeeds sweeps nothing.
+    check "guard: a successful destroy sweeps nothing" "rc=0 trace=relogin,destroy," "$(azure_retry_reap '0' '0')"
+
+    echo "main (failed reap):"
+    # main_run <dry-run>: main() over three allowlisted azure candidates whose
+    # runs finished long ago, the actuator failing only for aicr-uat-8. In a
+    # subshell, because main() installs its own EXIT trap.
+    main_run() {
+        : >"${AZR_TRACE}"
+        : >"${AZR_ARGV}"
+        : >"${AZR_IDS}"
+        (
+            PATH="${AZR_STUBS}:${PATH}"
+            export CLOUD=azure DRY_RUN="$1" HOME="${STUB_DIR}/home" DOCKER_FAIL_ID=aicr-uat-8
+            export JANITOR_CONFIG="${AZ_CFG}" JANITOR_ACTUATOR_IMAGE=stub AZURE_SUBSCRIPTION_ID=sub
+            GH_STUB="ok:completed:$(ago 99)"   # exported at the top
+            unset ACTIONS_ID_TOKEN_REQUEST_URL GITHUB_STEP_SUMMARY
+            # shellcheck disable=SC2329  # invoked by the sourced main()
+            discover_azure() { printf '%s\n' aicr-uat-7 aicr-uat-8 aicr-uat-9; }
+            # shellcheck disable=SC2329  # invoked by the sourced reap()
+            az_federated_relogin() { return 0; }
+            main >"${AZR_LOG}" 2>&1
+        )
+        MAIN_RC=$?
+    }
+    main_run false
+    check "enforce: a failed reap fails the run"         "nonzero" "$(nonzero "${MAIN_RC}")"
+    check "enforce: actuator reached for every candidate" "aicr-uat-7,aicr-uat-8,aicr-uat-9," \
+        "$(sort -u "${AZR_IDS}" | tr '\n' ',')"
+    check "enforce: ::error:: names the failed id"       "1" \
+        "$(grep -c '^::error::janitor reap failed for aicr-uat-8 ' "${AZR_LOG}")"
+    check "enforce: no retry promise"                    "0" "$(grep -c 'will retry next run' "${AZR_LOG}")"
+    main_run true
+    check "guard: dry-run returns 0"                     "0" "${MAIN_RC}"
+    check "guard: dry-run reaches no actuator"           "0" "$(grep -c . "${AZR_IDS}")"
+    check "guard: dry-run makes no az aks call"          "0" "$(grep -c '^az aks ' "${AZR_ARGV}")"
 fi
 
 if [[ "${FAILED}" -eq 0 ]]; then
