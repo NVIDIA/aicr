@@ -18,10 +18,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -48,40 +51,180 @@ func sizingFileFor(provider recipe.DataProvider, componentName string) (string, 
 	return comp.Sizing.File, nil
 }
 
-// sizeComponent sizes ref's resolved values at the bundle's node count. It
-// returns the sizing document and count so the request-within-limit check can
-// run once every override is applied.
-func (b *DefaultBundler) sizeComponent(ctx context.Context, rr *recipe.RecipeResult, ref *recipe.ComponentRef,
-	values map[string]any) (*recipe.ComponentSizing, int, error) {
+// sizingPlan is how one component is sized in this bundle. A nil sz means
+// it is not sized.
+type sizingPlan struct {
+	sz         *recipe.ComponentSizing
+	atInstall  bool
+	recipeSets func(string) bool
+}
 
+// planSizing loads ref's sizing document and, unless ref is sized at install,
+// sizes values at the bundle's node count. It loads nothing when no count is
+// stated and ref is not sized at install.
+func (b *DefaultBundler) planSizing(ctx context.Context, rr *recipe.RecipeResult, ref *recipe.ComponentRef,
+	values map[string]any) (sizingPlan, error) {
+
+	atInstall := b.sizedAtInstall(ref)
 	n := b.Config.EstimatedNodeCount()
-	if n <= 0 {
-		return nil, 0, nil
+	if n <= 0 && !atInstall {
+		return sizingPlan{}, nil
 	}
 	file, err := sizingFileFor(rr.DataProvider(), ref.Name)
 	if err != nil || file == "" {
-		return nil, 0, err
+		return sizingPlan{}, err
 	}
 	sz, err := recipe.LoadComponentSizing(ctx, rr.DataProvider(), ref.Name, file)
 	if err != nil {
-		return nil, 0, err
+		return sizingPlan{}, err
 	}
-	applied, err := applySizing(values, ref.Overrides, rr.EffectiveLockSet()[ref.Name], sz, n)
+	p := sizingPlan{sz: sz, atInstall: atInstall, recipeSets: recipeSetsPath(rr, ref)}
+	if !atInstall {
+		if err := sizeComponent(ref, values, p.recipeSets, sz, n); err != nil {
+			return sizingPlan{}, err
+		}
+	}
+	return p, nil
+}
+
+// rejectDynamic applies rejectDynamicSizedPaths to a component sized at
+// install.
+func (p sizingPlan) rejectDynamic(componentName string, dynPaths map[string]struct{}) error {
+	if p.sz == nil || !p.atInstall {
+		return nil
+	}
+	return rejectDynamicSizedPaths(componentName, dynPaths, p.sz)
+}
+
+// finishSizing runs once every override is applied. A component sized at
+// install gets its rows, leaving out every path an override reaches; any
+// other sized component must keep each request within its limit.
+func (b *DefaultBundler) finishSizing(p sizingPlan, ref *recipe.ComponentRef, values map[string]any,
+	setOverrides map[string]string, provider recipe.DataProvider) error {
+
+	if p.sz == nil {
+		return nil
+	}
+	if !p.atInstall {
+		if err := checkSizedRequestsWithinLimits(values, p.sz, b.Config.EstimatedNodeCount()); err != nil {
+			return errors.WrapWithContext(errors.ErrCodeInvalidRequest, "sized memory request exceeds its limit", err,
+				map[string]any{errCtxKeyComponent: ref.Name})
+		}
+		return nil
+	}
+	typed := b.getTypedValueOverridesForComponent(ref.Name, provider)
+	skip := func(path string) bool {
+		return p.recipeSets(path) || overrideReaches(setOverrides, path) || overrideReaches(typed, path)
+	}
+	rows, err := installSizingRows(ref, values, skip, p.sz)
 	if err != nil {
-		return nil, 0, errors.WrapWithContext(errors.ErrCodeInvalidRequest, "failed to size component memory", err,
+		return err
+	}
+	if len(rows) > 0 {
+		b.installSizing[ref.Name] = rows
+	}
+	return nil
+}
+
+// sizedAtInstall reports whether ref is sized from the argocd-helm root value
+// sizing.nodeCount instead of --nodes. Only an upstream chart that is not
+// vendored reads its values from static/ at install; every other component
+// bakes them at generation time.
+func (b *DefaultBundler) sizedAtInstall(ref *recipe.ComponentRef) bool {
+	return b.Config.Deployer() == config.DeployerArgoCDHelm && !b.Config.VendorCharts() && ref.HasExternalChart()
+}
+
+// sizeComponent sizes ref's resolved values at the bundle's node count.
+func sizeComponent(ref *recipe.ComponentRef, values map[string]any, skip func(string) bool,
+	sz *recipe.ComponentSizing, n int) error {
+
+	applied, err := applySizing(values, skip, sz, n)
+	if err != nil {
+		return errors.WrapWithContext(errors.ErrCodeInvalidRequest, "failed to size component memory", err,
 			map[string]any{errCtxKeyComponent: ref.Name})
 	}
 	for _, a := range applied {
 		slog.Info("sized memory from node count",
 			"component", ref.Name, "path", a.Path, "from", a.From, "to", a.To, "gpuNodes", n)
 	}
-	return sz, n, nil
+	return nil
+}
+
+// recipeSetsPath reports whether ref's inline overrides or its profile lock
+// set reach path; sizing never writes such a path.
+func recipeSetsPath(rr *recipe.RecipeResult, ref *recipe.ComponentRef) func(string) bool {
+	locked := rr.EffectiveLockSet()[ref.Name]
+	return func(path string) bool {
+		return setsPathOrAncestor(ref.Overrides, path) || lockReaches(locked, path)
+	}
+}
+
+// installSizingRows builds one row per tier bound for an argocd-helm
+// component sized at install: each row holds the fields that tier lowers
+// from the final values, skipping every path skip reaches. A row merged
+// over values must keep each request within its limit. Rows above the
+// highest one that lowers something are dropped.
+func installSizingRows(ref *recipe.ComponentRef, values map[string]any, skip func(string) bool,
+	sz *recipe.ComponentSizing) ([]argocdhelm.SizingRow, error) {
+
+	var bounds []int
+	for i := range sz.Resources {
+		for j := range sz.Resources[i].Tiers {
+			bounds = append(bounds, sz.Resources[i].Tiers[j].MaxNodes)
+		}
+	}
+	slices.Sort(bounds)
+	bounds = slices.Compact(bounds)
+
+	rows := make([]argocdhelm.SizingRow, 0, len(bounds))
+	last := -1
+	for _, bound := range bounds {
+		merged := component.DeepCopyMap(values)
+		applied, err := applySizing(merged, skip, sz, bound)
+		if err != nil {
+			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest, "failed to size component memory", err,
+				map[string]any{errCtxKeyComponent: ref.Name})
+		}
+		if err := checkSizedRequestsWithinLimits(merged, sz, bound); err != nil {
+			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("sized memory request exceeds its limit at sizing.nodeCount %d", bound), err,
+				map[string]any{errCtxKeyComponent: ref.Name})
+		}
+		row := argocdhelm.SizingRow{MaxNodes: bound, Values: map[string]any{}}
+		for _, a := range applied {
+			component.SetValueByPath(row.Values, a.Path, a.To)
+		}
+		if len(applied) > 0 {
+			last = len(rows)
+		}
+		rows = append(rows, row)
+	}
+	return rows[:last+1], nil
+}
+
+// rejectDynamicSizedPaths fails when a --dynamic path overlaps a path sizing
+// writes: its pre-filled root value would always mask the selected row.
+func rejectDynamicSizedPaths(componentName string, dynPaths map[string]struct{}, sz *recipe.ComponentSizing) error {
+	for i := range sz.Resources {
+		for _, field := range []string{recipe.SizingFieldRequests, recipe.SizingFieldLimits} {
+			sized := sz.Resources[i].Path + "." + field + ".memory"
+			for dyn := range dynPaths {
+				if recipe.PathsIntersect(dyn, sized) {
+					return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+						"component %q: --dynamic path %q overlaps %q, which sizing.nodeCount sets at install; "+
+							"override it at install time as a root-chart value instead",
+						componentName, dyn, sized))
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // applySizing lowers each memory request and limit the sizing document names
 // to the tier covering n, writing min(resolved, tier). A field the values do
-// not set is skipped, as is one that inlineOverrides or locked reach.
-func applySizing(values, inlineOverrides map[string]any, locked []string, sz *recipe.ComponentSizing, n int) ([]sizedField, error) {
+// not set is skipped, as is one skip reports.
+func applySizing(values map[string]any, skip func(string) bool, sz *recipe.ComponentSizing, n int) ([]sizedField, error) {
 	if sz == nil {
 		return nil, nil
 	}
@@ -100,8 +243,8 @@ func applySizing(values, inlineOverrides map[string]any, locked []string, sz *re
 				continue
 			}
 			path := r.Path + "." + f.name + ".memory"
-			if setsPathOrAncestor(inlineOverrides, path) || lockReaches(locked, path) {
-				slog.Debug("sizing skipped a path set by the recipe", "path", path)
+			if skip != nil && skip(path) {
+				slog.Debug("sizing skipped a path set by the recipe or an override", "path", path)
 				continue
 			}
 			existing, found := component.GetValueByPath(values, path)
@@ -195,9 +338,21 @@ func setsPathOrAncestor(m map[string]any, path string) bool {
 	return ok
 }
 
+// lockReaches reports whether a lock-set path intersects path.
 func lockReaches(locked []string, path string) bool {
 	for _, l := range locked {
 		if recipe.PathsIntersect(l, path) {
+			return true
+		}
+	}
+	return false
+}
+
+// overrideReaches reports whether any override path in m is path, an
+// ancestor of it, or a descendant of it.
+func overrideReaches[V any](m map[string]V, path string) bool {
+	for p := range m {
+		if recipe.PathsIntersect(p, path) {
 			return true
 		}
 	}

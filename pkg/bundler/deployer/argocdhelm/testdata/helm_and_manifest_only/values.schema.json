@@ -23,6 +23,16 @@
           "type": "boolean"
         }
       }
+    },
+    "sizing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nodeCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
   }
 }

@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
@@ -137,7 +138,10 @@ func TestApplySizing(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			applied, err := applySizing(tt.values, tt.inline, tt.locked, sz, tt.n)
+			skip := func(path string) bool {
+				return setsPathOrAncestor(tt.inline, path) || lockReaches(tt.locked, path)
+			}
+			applied, err := applySizing(tt.values, skip, sz, tt.n)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected an error")
@@ -236,6 +240,88 @@ func TestExtractComponentValuesSizing(t *testing.T) {
 			}
 			if cpu, _ := component.GetValueByPath(v, "operator.resources.requests.cpu"); cpu != "100m" {
 				t.Errorf("cpu request = %v, want it untouched", cpu)
+			}
+		})
+	}
+}
+
+func TestExtractComponentValuesInstallSizing(t *testing.T) {
+	provider := sizingFixtureProvider(t)
+	inline := map[string]any{"operator": map[string]any{"resources": map[string]any{"requests": map[string]any{"memory": "300Mi"}}}}
+	tests := []struct {
+		name     string
+		vendor   bool
+		local    bool
+		nodes    int
+		set      map[string]string
+		dynamic  []string
+		inline   map[string]any
+		wantRows []argocdhelm.SizingRow
+		wantLim  string
+		wantCode errors.ErrorCode
+	}{
+		{
+			name: "rows from the unsized values; --nodes does not size", nodes: 200, wantLim: "8Gi",
+			wantRows: []argocdhelm.SizingRow{
+				{MaxNodes: 250, Values: resourcesValues("256Mi", "768Mi")},
+				{MaxNodes: 450, Values: resourcesValues("256Mi", "1Gi")},
+			},
+		},
+		{
+			name: "--set path left out of every row", set: map[string]string{"operator.resources.limits.memory": "4Gi"}, wantLim: "4Gi",
+			wantRows: []argocdhelm.SizingRow{
+				{MaxNodes: 250, Values: resourcesValues("256Mi", nil)},
+				{MaxNodes: 450, Values: resourcesValues("256Mi", nil)},
+			},
+		},
+		{
+			name: "inline override left out of every row", inline: inline, wantLim: "8Gi",
+			wantRows: []argocdhelm.SizingRow{
+				{MaxNodes: 250, Values: resourcesValues(nil, "768Mi")},
+				{MaxNodes: 450, Values: resourcesValues(nil, "1Gi")},
+			},
+		},
+		{
+			name: "--set request above a row's limit fails", set: map[string]string{"operator.resources.requests.memory": "900Mi"},
+			wantCode: errors.ErrCodeInvalidRequest,
+		},
+		{name: "--dynamic sized path rejected", dynamic: []string{"operator.resources"}, wantCode: errors.ErrCodeInvalidRequest},
+		{name: "vendored charts size at generation time", vendor: true, nodes: 200, wantLim: "768Mi"},
+		{name: "local chart sizes at generation time", local: true, nodes: 200, wantLim: "768Mi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(
+				config.WithDeployer(config.DeployerArgoCDHelm),
+				config.WithVendorCharts(tt.vendor),
+				config.WithEstimatedNodeCount(tt.nodes),
+				config.WithValueOverrides(map[string]map[string]string{sizingFixtureComponent: tt.set}),
+				config.WithDynamicValues(map[string][]string{sizingFixtureComponent: tt.dynamic}),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref := recipe.ComponentRef{Name: sizingFixtureComponent, Type: "helm", ValuesFile: sizingFixtureValues,
+				Source: "https://charts.example.com", Overrides: tt.inline}
+			if tt.local {
+				ref.Source = ""
+			}
+			rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{ref}}
+			rr.BindDataProvider(provider)
+			values, err := b.extractComponentValues(context.Background(), rr)
+			if tt.wantCode != "" {
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if gotLim, _ := component.GetValueByPath(values[sizingFixtureComponent], "operator.resources.limits.memory"); gotLim != tt.wantLim {
+				t.Errorf("static limit = %v, want %s", gotLim, tt.wantLim)
+			}
+			if got := b.installSizing[sizingFixtureComponent]; !reflect.DeepEqual(got, tt.wantRows) {
+				t.Errorf("rows = %+v, want %+v", got, tt.wantRows)
 			}
 		})
 	}

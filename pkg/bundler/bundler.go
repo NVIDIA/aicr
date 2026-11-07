@@ -130,6 +130,10 @@ type DefaultBundler struct {
 
 	// warnings stores warning messages to be added to deployment notes.
 	warnings []string
+
+	// installSizing holds, per component sized at install time, the
+	// argocd-helm rows extractComponentValues built.
+	installSizing map[string][]argocdhelm.SizingRow
 }
 
 // Option defines a functional option for configuring DefaultBundler.
@@ -880,6 +884,8 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
 			ComponentReadiness:     componentReadiness,
+			SizingRows:             b.installSizing,
+			SizingNodeCount:        b.Config.EstimatedNodeCount(),
 			VendorCharts:           b.Config.VendorCharts(),
 			UpgradeNotice:          upgradeNotice,
 			Serial:                 b.Config.Serial(),
@@ -1355,6 +1361,7 @@ func deployerResultNames(dt config.DeployerType, terraformChildModule bool) (typ
 func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string]map[string]any, error) {
 	componentValues := make(map[string]map[string]any)
 	provider := recipeResult.DataProvider()
+	b.installSizing = make(map[string][]argocdhelm.SizingRow)
 
 	for _, ref := range recipeResult.ComponentRefs {
 		if err := ctx.Err(); err != nil {
@@ -1368,7 +1375,7 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 				fmt.Sprintf("failed to resolve values for component %q", ref.Name))
 		}
 
-		sizing, sizingNodes, err := b.sizeComponent(ctx, recipeResult, &ref, values)
+		sizing, err := b.planSizing(ctx, recipeResult, &ref, values)
 		if err != nil {
 			return nil, err
 		}
@@ -1436,6 +1443,9 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 			if err := b.rejectDynamicRequiredNodeSelectorPaths(ref.Name, provider, dynPaths); err != nil {
 				return nil, err
 			}
+			if err := sizing.rejectDynamic(ref.Name, dynPaths); err != nil {
+				return nil, err
+			}
 			for path := range dynPaths {
 				policy.optOut[path] = struct{}{}
 			}
@@ -1494,10 +1504,8 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 			}
 		}
 
-		if err := checkSizedRequestsWithinLimits(values, sizing, sizingNodes); err != nil {
-			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
-				"sized memory request exceeds its limit", err,
-				map[string]any{errCtxKeyComponent: ref.Name})
+		if err := b.finishSizing(sizing, &ref, values, setOverrides, provider); err != nil {
+			return nil, err
 		}
 
 		// Requires every override, including --set-json/--set-file, to have
