@@ -2919,8 +2919,9 @@ func (b *DefaultBundler) noteAgentgatewayNonLBService(values map[string]any, ser
 	case exposureScoped, exposureOpen:
 		b.appendWarning(fmt.Sprintf(
 			"%s: %s is set but %s is %s; loadBalancerSourceRanges applies only to a LoadBalancer "+
-				"Service, so the ranges are not rendered and the inference-gateway is reachable only as a %s Service",
-			agentgatewayComponentName, agentgatewaySourceRangesPath, agentgatewayServiceTypePath, serviceType, serviceType))
+				"Service, so the inference-gateway renders without them. %s",
+			agentgatewayComponentName, agentgatewaySourceRangesPath, agentgatewayServiceTypePath, serviceType,
+			agentgatewayNonLBReach(serviceType)))
 		slog.Warn("agentgateway allowedSourceRanges ignored for a non-LoadBalancer inference-gateway Service",
 			"component", agentgatewayComponentName,
 			"serviceType", serviceType,

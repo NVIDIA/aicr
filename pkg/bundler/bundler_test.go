@@ -4468,8 +4468,9 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 		present     bool
 		wantErr     bool
 		wantWarning bool
-		wantDefault bool // expects allowedSourceRanges defaulted to the RFC1918 set
-		wantNoRange bool // expects allowedSourceRanges left absent (non-LoadBalancer serviceType)
+		wantDefault bool   // expects allowedSourceRanges defaulted to the RFC1918 set
+		wantNoRange bool   // expects allowedSourceRanges left absent (non-LoadBalancer serviceType)
+		wantReach   string // substring of the reach guidance expected in the warning
 	}{
 		{
 			name:        "ClusterIP serviceType skips the private default and notes that ranges do not apply",
@@ -4477,12 +4478,14 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 			present:     true,
 			wantWarning: true,
 			wantNoRange: true,
+			wantReach:   "only from inside the cluster",
 		},
 		{
 			name:        "NodePort serviceType with explicit ranges warns that they are not rendered",
 			values:      map[string]any{"serviceType": "NodePort", "allowedSourceRanges": []any{"10.0.0.0/8"}},
 			present:     true,
 			wantWarning: true,
+			wantReach:   "every client that can reach a node",
 		},
 		{
 			name:    "ClusterIP serviceType still rejects an invalid allowedSourceRanges value",
@@ -4632,6 +4635,10 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 						t.Errorf("warning = %q, want substring %q", warning, want)
 					}
 				}
+			}
+
+			if tt.wantReach != "" && !strings.Contains(b.warnings[0], tt.wantReach) {
+				t.Errorf("warning = %q, want reach guidance %q", b.warnings[0], tt.wantReach)
 			}
 
 			if tt.wantNoRange {

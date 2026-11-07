@@ -102,11 +102,12 @@ and `agentgateway-post`, which applies
 creates `agentgateway-system/inference-gateway`. The chart alone creates no
 Gateway, so an install or upgrade that runs only the `helm upgrade` leaves the
 `inference-gateway` check with nothing to read. `aicr validate --phase
-deployment` catches this: the agentgateway health check asserts that
+deployment` catches the result: the agentgateway health check asserts that
 `agentgateway-system/inference-gateway` exists with `Accepted=True` and
-`Programmed=True`, so a deploy that held back `agentgateway-post` fails the
-deployment phase instead of passing it
-([#3714](https://github.com/NVIDIA/aicr/issues/3714)).
+`Programmed=True`, so a cluster with no Gateway, or an unprogrammed one, fails
+the deployment phase ([#3714](https://github.com/NVIDIA/aicr/issues/3714)).
+The check detects a missing or unprogrammed Gateway, not which deployment
+created it; a healthy Gateway left by an earlier deployment satisfies it.
 
 On an LB-less tenant, keep the step rather than skipping it, and generate the
 bundle with `--set agentgateway:serviceType=ClusterIP`. The controller then
