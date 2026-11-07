@@ -87,9 +87,10 @@ every check on one of its proof paths is present and `passed`
 (`alternativeProofs` lists the requirements with more than one path), a failed
 check fails it, `other`, `pending` or absent checks leave it not tested, and a
 check that `passed` with the `observationOnly` marker leaves it observed,
-which does not establish a MUST (`StatusObserved`). `Aggregate.Passed` is
-scoped by level: every applicable MUST passed, SHOULDs
-excluded; `NOT APPLICABLE` comes only from
+which does not establish a MUST (`StatusObserved`) unless
+`spec.validate.evidence.cncf.documented` attests it. `Aggregate.Passed` is
+scoped by level: every applicable MUST established (passed, or observed and
+documented), SHOULDs excluded; `NOT APPLICABLE` comes only from
 `spec.validate.evidence.cncf.notApplicable` and only for the conditional
 MUSTs in `conditionalMusts` (`ValidateNotApplicable`). The requirement set it
 aggregates is the upstream checklist for the selected version
@@ -463,7 +464,10 @@ Karpenter) fail `NotFound` when every read answered NotFound, or with the
 read's classified code when the Deployment was unavailable or a read could not
 land; the artifacts still record the unread reads as unread. The remedy for a
 platform without workload-driven autoscaling is a
-`spec.validate.evidence.cncf.notApplicable` justification. A providerID no
+`spec.validate.evidence.cncf.notApplicable` justification; for a platform
+whose autoscaler the check observed but did not drive (the OBSERVED pass),
+a `spec.validate.evidence.cncf.documented` entry citing the provider's
+autoscaler documentation establishes the requirement in the submission. A providerID no
 probe recognizes skips as "no autoscaler probe for this provider" (naming the
 scheme, or an unschemed providerID such as OKE's bare OCID), a missing probe
 rather than product nonapplicability, which only that declaration states.

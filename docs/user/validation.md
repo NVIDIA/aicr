@@ -1003,21 +1003,77 @@ validator run.
 `aicr validate --phase conformance` is the only runner for CNCF AI
 Conformance: the recipe declares which conformance checks run, and every run
 executes all of them. `--cncf-submission` adds one thing to that run: after
-the checks finish, the CTRF report is rendered into `--evidence-dir` as one
-evidence page per requirement a non-skipped check evidenced, plus `index.md`;
-only a run in which every check was skipped writes nothing (a check that
-crashed still gets its page). The flag never changes what a
+the checks finish, the CTRF report is rendered into the submission directory
+a vendor files as `vX.Y/<product>/` in cncf/k8s-ai-conformance, under
+`--evidence-dir`: `PRODUCT.yaml` (statuses from the run, metadata from
+`spec.validate.evidence.cncf.vendor`), `README.md` (the index, with the
+platform facts the notes cite), `junit.xml` and `e2e.log` (one testcase per
+check, named by check) and one evidence page per requirement a non-skipped
+check evidenced under `evidence/`, redacted in one pass and checked by the
+pinned upstream validator as the last step. The flag never changes what a
 check does or how it decides; for the same recipe the verdicts are identical
 with and without it. The two flags require each other, `--recipe` is required
-because the checks are selected from it, and `--no-cluster` and `--skip-check`
-are refused: submission evidence comes from checks that ran on a live cluster
-against the whole recipe.
+because the checks are selected from it, the vendor block is required in
+`--config`, and `--no-cluster` and `--skip-check` are refused: submission
+evidence comes from checks that ran on a live cluster against the whole
+recipe. `--evidence-dir` must be absent or empty, with no parent path
+segment of the form `vX.Y/` (the upstream validator would read it as the
+checklist version); the directory reaches it only when the run is complete,
+and an incomplete run leaves its staged copy at `<evidence-dir>.incomplete/`
+instead, which the next run refuses with exit 2 until it is removed. The
+checklist version is the cluster's Kubernetes minor and must be one this
+build carries (v1.35 to v1.37); a cluster on another minor is refused with
+exit 2 rather than certified against a neighboring checklist, unless
+`spec.validate.evidence.cncf.conformanceVersion` names one deliberately (see
+[Submission directory](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#submission-directory)
+for the status, export and manual-attestation rules).
 
 ```bash
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml \
+  --config aicr-config.yaml \
   --phase conformance \
   --cncf-submission \
-  --evidence-dir ./evidence
+  --evidence-dir ./submission
+```
+
+The config carries the vendor metadata and, for `cluster_autoscaling`, either
+the conditional justification when the cluster has no autoscaler
+(`notApplicable`, shown) or the documentation that attests a requirement the
+run only observed (`documented`, below); see
+[`evidence.cncf`](cli-config.md#specvalidate):
+
+```yaml
+kind: AICRConfig
+apiVersion: aicr.run/v1beta1
+spec:
+  validate:
+    evidence:
+      cncf:
+        vendor:
+          name: Example Vendor            # exactly as listed under CNCF Members in the landscape
+          platformName: Example Platform
+          platformVersion: 1.0.0
+          description: One sentence describing the offering.
+          contactEmail: maintainers@example.com
+          websiteUrl: https://example.com/platform
+          documentationUrl: https://example.com/platform/docs
+          productLogoUrl: https://example.com/platform/logo.svg
+          k8sConformanceUrl: https://github.com/cncf/k8s-conformance/tree/master/v1.37/example-platform
+        notApplicable:
+          cluster_autoscaling: "Fixed-size node pools; no cluster autoscaler or Karpenter is deployed."
+```
+
+On a cluster whose autoscaler the `cluster-autoscaling` check observed but
+did not drive, replace `notApplicable` with a `documented` entry; the run's
+`OBSERVED` result is then established by the documentation, which
+`PRODUCT.yaml` cites instead of the testcase:
+
+```yaml
+        documented:
+          cluster_autoscaling:
+            evidence:
+              - https://example.com/platform/docs/cluster-autoscaler
+            notes: "The managed cluster autoscaler scales the GPU node pool on pending accelerator pods."
 ```
 
 The `--feature` flag and `spec.validate.evidence.cncf.features` key scoped the
@@ -1058,8 +1114,9 @@ on top of the per-check rule every run applies:
   check itself failed (on EKS the `cluster-autoscaling` check fails when no
   autoscaler is confirmed, and the default `--fail-on-error` still applies). A
   platform whose autoscaler is present but not behaviorally demonstrated keeps
-  `OBSERVED`; the submission then documents the autoscaler by hand in its README
-  until the vendor-config attestation planned in #3605 exists. Where a requirement has
+  `OBSERVED` and is established only by a `spec.validate.evidence.cncf.documented`
+  entry naming public documentation, which PRODUCT.yaml then cites instead of
+  the testcase. Where a requirement has
   alternative proofs (`secure_accelerator_access`: `secure-accelerator-access`
   on ordinary recipes, `slinky-slurm-gpu-access` on Slinky Slurm recipes) a
   passing alternative establishes it even when the primary check was skipped
@@ -1067,11 +1124,20 @@ on top of the per-check rule every run applies:
   verdict applies regardless of `--fail-on-error=false`.
 - The aggregation itself never fails the run on a SHOULD, whatever its
   checks did; its page records the real status. A SHOULD-backed check that
-  `failed` still trips the per-check rule above; exporting it as skipped is
-  #3605's export rule.
+  `failed` still trips the per-check rule above (pass `--fail-on-error=false`
+  to accept it), while the submission artifacts export its testcase as
+  skipped so the directory stays submittable.
+- A write or redaction error, or the pinned upstream validator rejecting the
+  directory, fails the run with `INTERNAL` after the recipe-evidence
+  attestation (if any) was emitted; a validator that cannot start because the
+  CNCF landscape is unreachable fails it with `SERVICE_UNAVAILABLE`. Flag and
+  config refusals, including a missing or malformed vendor field and a
+  non-empty `--evidence-dir`, exit `2` before any check runs.
 
-The full submission directory (PRODUCT.yaml, README, `junit.xml`, `e2e.log`,
-one redaction pass and the pinned upstream validator) is #3605.
+A complete submission directory exists at `--evidence-dir` only when the run's
+requirement verdict is clean and the validator accepted it; otherwise the
+staged copy at `<evidence-dir>.incomplete/` documents what was and was not
+shown.
 
 ## Emitting recipe evidence
 
@@ -1423,7 +1489,8 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 | `0` | All phases reported status `passed` or `skipped`; under `--cncf-submission`, additionally every applicable MUST requirement established (an all-skipped submission run exits `8`), see [Exit status of a submission run](#exit-status-of-a-submission-run) |
 | `2` | Invalid input or request (`ErrCodeInvalidRequest`) — bad CLI flag, malformed argument, a validator rejecting a recipe value (e.g., an inference constraint that uses the wrong comparator direction), or a **readiness pre-flight** constraint not met. The readiness gate always fails closed with this code, even under `--fail-on-error=false` |
 | `5` | A structured `ErrCodeTimeout` reached the top-level CLI — for example while loading the recipe or snapshot, waiting on the snapshot-agent Job, or signing evidence under `--emit-attestation --push` (which runs after the checks). A per-validator wait deadline does **not** reach this code: `runPhase` converts that error into a check result, so it surfaces as exit `8` (see note 2) |
-| `8` | One or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false`. Under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error` ([Exit status of a submission run](#exit-status-of-a-submission-run)). |
+| `6` | A structured `ErrCodeUnavailable` reached the top-level CLI; under `--cncf-submission`, the pinned upstream validator could not start because the CNCF landscape was unreachable ([Exit status of a submission run](#exit-status-of-a-submission-run)) |
+| `8` | One or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false`. Under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error`, and a submission write, redaction or upstream-validator failure ([Exit status of a submission run](#exit-status-of-a-submission-run)). |
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
@@ -1510,7 +1577,10 @@ Common reasons and their cause:
 
 The check (CNCF `driver_runtime_management`, SHOULD at v1.37 and MUST at v1.38)
 runs a pod from a vanilla `ubuntu:22.04` image that requests one GPU, and reads
-the driver from inside it. Its artifacts (`Driver runtime probe pod logs`,
+the driver from inside it. The probe pod carries no `imagePullSecrets`
+(`--image-pull-secret` reaches the validator Job, not the per-run namespace),
+so a mirror of the probe image that needs credentials must supply them
+node-side, through the container runtime's registry configuration. Its artifacts (`Driver runtime probe pod logs`,
 `Advertised driver version`, `Driver runtime compatibility`) name the failing
 step:
 

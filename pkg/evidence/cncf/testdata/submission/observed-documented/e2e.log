@@ -1,0 +1,26 @@
+# AICR conformance checks, 2026-11-06T12:00:00Z; exported from the CTRF report of this run
+=== RUN   gang-scheduling
+--- PASS: gang-scheduling (1.000s)
+=== RUN   accelerator-metrics
+--- PASS: accelerator-metrics (2.000s)
+=== RUN   ai-service-metrics
+--- PASS: ai-service-metrics (3.000s)
+=== RUN   inference-gateway
+--- PASS: inference-gateway (4.000s)
+=== RUN   pod-autoscaling
+--- PASS: pod-autoscaling (5.000s)
+=== RUN   robust-controller
+--- PASS: robust-controller (7.000s)
+=== RUN   secure-accelerator-access
+--- PASS: secure-accelerator-access (8.000s)
+=== RUN   driver-runtime-management
+--- SKIP: driver-runtime-management (9.000s)
+    not implemented: driver_runtime_management is a SHOULD at v1.37 and is not claimed; original verdict failed: driver version mismatch on node-3: probe 580.65.06, advertised 580.82.07
+=== RUN   dra-support
+--- PASS: dra-support (0.500s)
+=== RUN   platform-health
+--- PASS: platform-health (0.250s)
+=== RUN   cluster-autoscaling
+--- PASS: cluster-autoscaling (2.000s)
+PASS
+ok  	aicr/conformance	41.750s

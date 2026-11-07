@@ -75,7 +75,10 @@ const (
 	//   - v7 added the nodesFailed and nodesSkipped coverage counts.
 	//   - v8 added the observationOnly marker of a passed result that
 	//     demonstrates nothing.
-	PolicyVersion = "v8"
+	//   - v9 added the text scrub (TextScrubber) the CNCF submission
+	//     directory is passed through: IP, MAC and UUID aliases, container
+	//     ID and AWS account aliases, node-name aliases, JWT removal.
+	PolicyVersion = "v9"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata

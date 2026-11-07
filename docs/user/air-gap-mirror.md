@@ -312,6 +312,14 @@ the images AICR itself runs in the cluster, so mirror these separately:
   `performance`, `conformance`, and `aiperf-bench` for inference performance
   checks), run by `aicr validate`.
 
+A CNCF submission run (`aicr validate --cncf-submission`) cannot complete
+offline: its last step runs the upstream submission validator on the machine
+`aicr` runs on, which fetches the CNCF landscape from
+`raw.githubusercontent.com` and requests every vendor and documentation URL
+the submission cites. Without that egress the run exits 6
+(`SERVICE_UNAVAILABLE`); see
+[Exit status of a submission run](validation.md#exit-status-of-a-submission-run).
+
 Release builds use each image at the CLI's own version tag. Copy them into your
 registry, then point AICR at the copies:
 

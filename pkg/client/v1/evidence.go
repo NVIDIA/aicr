@@ -255,6 +255,19 @@ type CNCFCollectOptions struct {
 	// cluster_autoscaling). It is checked before the cluster is touched.
 	NotApplicable map[string]string
 
+	// Documented attests requirements the run only observed by public
+	// documentation, as RenderCNCFEvidenceOptions.Documented. It is checked
+	// before the cluster is touched.
+	Documented map[string]CNCFDocumentation
+
+	// Vendor, when set, makes the run write the complete submission
+	// directory (WriteCNCFSubmission) into Dir instead of the evidence pages
+	// and index: PRODUCT.yaml, README.md, junit.xml, e2e.log and the pages
+	// under evidence/, redacted and checked by the pinned upstream
+	// validator. It is checked before the cluster is touched. Nil keeps the
+	// evidence-pages render.
+	Vendor *CNCFVendor
+
 	// NoCluster must be false; true is rejected with ErrCodeInvalidRequest.
 	//
 	// Deprecated: submission evidence comes from checks that ran on a live
@@ -301,6 +314,17 @@ type RenderCNCFEvidenceOptions struct {
 	// precedence over a check that ran, whose result is kept as an
 	// observation. Any other id is refused with ErrCodeInvalidRequest.
 	NotApplicable map[string]string
+
+	// Documented attests requirements the run only observed by public
+	// documentation, keyed by upstream id: the config key
+	// spec.validate.evidence.cncf.documented (CNCFEvidenceOptions). An
+	// observed requirement with an entry is established by it and renders
+	// Implemented in a submission, citing the documentation rather than the
+	// testcase; an entry for a requirement in any other status is ignored.
+	// A malformed entry (an id the checklist lacks, one also in
+	// NotApplicable, no URL, a non-http(s) URL, no notes) is refused with
+	// ErrCodeInvalidRequest.
+	Documented map[string]CNCFDocumentation
 }
 
 // CNCFRequirementAggregate is the requirement status aggregation
@@ -312,15 +336,18 @@ type CNCFRequirementAggregate = cncf.Aggregate
 
 // ValidateCNCFEvidenceOptions checks RenderCNCFEvidenceOptions the way
 // RenderCNCFEvidenceWithResult will, without rendering: the checklist version
-// resolves (an unsupported ConformanceVersion is refused) and every
+// resolves (an unsupported ConformanceVersion is refused), every
 // NotApplicable id is a conditional MUST of that version with a non-blank
-// justification. It exists so a caller can refuse a bad notApplicable key
-// before the validation run, rather than after every check has run.
+// justification, and every Documented entry names a requirement of that
+// version not also in NotApplicable, with at least one absolute http(s) URL
+// and a note. It exists so a caller can refuse a bad key before the
+// validation run, rather than after every check has run.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client is nil, opts.ConformanceVersion
-//     is unsupported, or opts.NotApplicable names a requirement that may not
-//     be declared not applicable or lacks a justification.
+//     is unsupported, opts.NotApplicable names a requirement that may not
+//     be declared not applicable or lacks a justification, or opts.Documented
+//     is malformed.
 func (c *Client) ValidateCNCFEvidenceOptions(opts RenderCNCFEvidenceOptions) error {
 	if c == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
@@ -329,7 +356,10 @@ func (c *Client) ValidateCNCFEvidenceOptions(opts RenderCNCFEvidenceOptions) err
 	if err != nil {
 		return err
 	}
-	return cncf.ValidateNotApplicable(version, opts.NotApplicable)
+	if err := cncf.ValidateNotApplicable(version, opts.NotApplicable); err != nil {
+		return err
+	}
+	return cncf.ValidateDocumented(version, toInternalDocumented(opts.Documented), opts.NotApplicable)
 }
 
 // RenderCNCFEvidence writes CNCF AI Conformance evidence markdown (one file
@@ -369,8 +399,9 @@ func (c *Client) RenderCNCFEvidenceWithOptions(ctx context.Context, report *ctrf
 // Errors:
 //   - ErrCodeInvalidRequest when the Client or ctx is nil, dir is empty,
 //     opts.ConformanceVersion is unsupported, opts.NotApplicable names a
-//     requirement that may not be declared not applicable, or the report
-//     contains a check withheld by WithValidationSkipChecks.
+//     requirement that may not be declared not applicable, opts.Documented
+//     is malformed, or the report contains a check withheld by
+//     WithValidationSkipChecks.
 //   - ErrCodeTimeout when rendering exceeds defaults.EvidenceRenderTimeout.
 //   - ErrCodeInternal when a file cannot be written.
 func (c *Client) RenderCNCFEvidenceWithResult(ctx context.Context, report *ctrf.Report, dir string, opts RenderCNCFEvidenceOptions) (*CNCFRequirementAggregate, error) {
@@ -383,14 +414,8 @@ func (c *Client) RenderCNCFEvidenceWithResult(ctx context.Context, report *ctrf.
 	if dir == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "CNCF evidence directory is required")
 	}
-	if report != nil {
-		for _, t := range report.Results.Tests {
-			if t.Status == ctrf.StatusSkipped && t.Extra["skipReason"] == validator.SkipCheckReasonCode {
-				return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-					"check %q was withheld by WithValidationSkipChecks: a run with withheld checks is narrower than "+
-						"the recipe by construction, so its CNCF evidence cannot stand for the recipe", t.Name))
-			}
-		}
+	if err := rejectWithheldChecks(report); err != nil {
+		return nil, err
 	}
 
 	version, err := resolveConformanceVersion(opts)
@@ -401,12 +426,33 @@ func (c *Client) RenderCNCFEvidenceWithResult(ctx context.Context, report *ctrf.
 	ctx, cancel := context.WithTimeout(ctx, defaults.EvidenceRenderTimeout)
 	defer cancel()
 
-	r := cncf.New(cncf.WithOutputDir(dir), cncf.WithConformanceVersion(version), cncf.WithNotApplicable(opts.NotApplicable))
+	r := cncf.New(cncf.WithOutputDir(dir), cncf.WithConformanceVersion(version),
+		cncf.WithNotApplicable(opts.NotApplicable), cncf.WithDocumented(toInternalDocumented(opts.Documented)))
 	agg, err := r.RenderWithResult(ctx, report)
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "CNCF evidence rendering failed")
 	}
 	return agg, nil
+}
+
+// rejectWithheldChecks refuses a report from a run that used
+// WithValidationSkipChecks: a run with withheld checks is narrower than the
+// recipe by construction, so its CNCF evidence cannot stand for the recipe.
+//
+// Errors:
+//   - ErrCodeInvalidRequest naming the first withheld check.
+func rejectWithheldChecks(report *ctrf.Report) error {
+	if report == nil {
+		return nil
+	}
+	for _, t := range report.Results.Tests {
+		if t.Status == ctrf.StatusSkipped && t.Extra["skipReason"] == validator.SkipCheckReasonCode {
+			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"check %q was withheld by WithValidationSkipChecks: a run with withheld checks is narrower than "+
+					"the recipe by construction, so its CNCF evidence cannot stand for the recipe", t.Name))
+		}
+	}
+	return nil
 }
 
 // resolveConformanceVersion applies RenderCNCFEvidenceOptions' precedence:
@@ -473,8 +519,8 @@ func resolveConformanceVersion(opts RenderCNCFEvidenceOptions) (cncf.Version, er
 //   - ErrCodeInvalidRequest when the Client or ctx is nil, the Client is
 //     closed, opts.Dir is empty, opts.Features is non-empty, opts.NoCluster
 //     is true, opts.NotApplicable names a requirement that may not be
-//     declared not applicable, or rec is nil, unresolved or owned by another
-//     Client.
+//     declared not applicable, opts.Documented is malformed, or rec is nil,
+//     unresolved or owned by another Client.
 //   - The snapshot, validator and render errors propagate with their own
 //     codes (ErrCodeTimeout when a stage's deadline expires).
 //   - ErrCodeInternal when a check failed or errored, or an applicable MUST
@@ -513,8 +559,13 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 	// Pre-flight against the latest carried checklist, as the CLI does, so a
 	// bad key fails here rather than after every validator Job; the render
 	// repeats the check against the selected version.
-	if err := c.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{NotApplicable: opts.NotApplicable}); err != nil {
+	if err := c.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{NotApplicable: opts.NotApplicable, Documented: opts.Documented}); err != nil {
 		return err
+	}
+	if opts.Vendor != nil {
+		if err := c.ValidateCNCFSubmissionOptions(CNCFSubmissionOptions{Vendor: *opts.Vendor, NotApplicable: opts.NotApplicable, Documented: opts.Documented}, opts.Dir); err != nil {
+			return err
+		}
 	}
 
 	c.mu.RLock()
@@ -547,6 +598,8 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 		kubeconfig:    kubeconfig,
 		namespace:     namespace,
 		notApplicable: opts.NotApplicable,
+		documented:    opts.Documented,
+		vendor:        opts.Vendor,
 	})
 }
 
@@ -557,6 +610,8 @@ type cncfSubmissionInputs struct {
 	kubeconfig    string
 	namespace     string
 	notApplicable map[string]string
+	documented    map[string]CNCFDocumentation
+	vendor        *CNCFVendor
 }
 
 // cncfSubmissionRunner is the slice of Client that runCNCFSubmission
@@ -567,6 +622,7 @@ type cncfSubmissionRunner interface {
 	ValidateState(ctx context.Context, recipe *RecipeResult, snap *Snapshot, opts ...ValidateOption) ([]*PhaseResult, error)
 	MergeReports(results []*PhaseResult) *ctrf.Report
 	RenderCNCFEvidenceWithResult(ctx context.Context, report *ctrf.Report, dir string, opts RenderCNCFEvidenceOptions) (*CNCFRequirementAggregate, error)
+	WriteCNCFSubmission(ctx context.Context, report *ctrf.Report, dir string, snap *Snapshot, rec *RecipeResult, opts CNCFSubmissionOptions) (*CNCFSubmissionResult, error)
 }
 
 var _ cncfSubmissionRunner = (*Client)(nil)
@@ -594,12 +650,28 @@ func runCNCFSubmission(ctx context.Context, r cncfSubmissionRunner, rec *RecipeR
 		return err
 	}
 	report := r.MergeReports(results)
-	agg, err := r.RenderCNCFEvidenceWithResult(ctx, report, in.dir, RenderCNCFEvidenceOptions{
-		KubernetesVersion: snap.KubernetesVersion(),
-		NotApplicable:     in.notApplicable,
-	})
-	if err != nil {
-		return err
+	var agg *CNCFRequirementAggregate
+	if in.vendor != nil {
+		res, err := r.WriteCNCFSubmission(ctx, report, in.dir, snap, rec, CNCFSubmissionOptions{
+			KubernetesVersion: snap.KubernetesVersion(),
+			NotApplicable:     in.notApplicable,
+			Documented:        in.documented,
+			Vendor:            *in.vendor,
+		})
+		if err != nil {
+			return err
+		}
+		agg = res.Aggregate
+	} else {
+		var err error
+		agg, err = r.RenderCNCFEvidenceWithResult(ctx, report, in.dir, RenderCNCFEvidenceOptions{
+			KubernetesVersion: snap.KubernetesVersion(),
+			NotApplicable:     in.notApplicable,
+			Documented:        in.documented,
+		})
+		if err != nil {
+			return err
+		}
 	}
 	// The same rule as `aicr validate --cncf-submission` with --fail-on-error
 	// (the default): a failed or errored check fails the run, and the
