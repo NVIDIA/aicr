@@ -23,6 +23,8 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -309,8 +311,12 @@ func TestImagePullSecretNames(t *testing.T) {
 }
 
 func TestValidatorNamespace(t *testing.T) {
-	// No ServiceAccount namespace file is mounted in a unit test, so the env
-	// var decides, then the default.
+	// Point the ServiceAccount namespace source at a file that does not
+	// exist, so the test holds whether or not it runs inside a pod with the
+	// real file mounted; the env var then decides, then the default.
+	orig := serviceAccountNamespaceFile
+	serviceAccountNamespaceFile = filepath.Join(t.TempDir(), "namespace")
+	t.Cleanup(func() { serviceAccountNamespaceFile = orig })
 	t.Setenv("AICR_NAMESPACE", "aicr-validation")
 	if got := ValidatorNamespace(); got != "aicr-validation" {
 		t.Errorf("ValidatorNamespace() = %q, want aicr-validation", got)
@@ -318,6 +324,14 @@ func TestValidatorNamespace(t *testing.T) {
 	t.Setenv("AICR_NAMESPACE", "")
 	if got := ValidatorNamespace(); got != "default" {
 		t.Errorf("ValidatorNamespace() = %q, want default", got)
+	}
+	// The mounted file wins over the env var when it exists.
+	if err := os.WriteFile(serviceAccountNamespaceFile, []byte("from-the-pod\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AICR_NAMESPACE", "aicr-validation")
+	if got := ValidatorNamespace(); got != "from-the-pod" {
+		t.Errorf("ValidatorNamespace() = %q, want the mounted namespace to take precedence", got)
 	}
 }
 

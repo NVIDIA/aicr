@@ -1024,15 +1024,17 @@ func waitForTerminalPodWithin(ctx context.Context, clientset kubernetes.Interfac
 			"%s did not complete in time (last phase=%s, status=%s)",
 			what, lastPhase, lastContainerStatus), cause)
 	}
-	stuckErr := func(reason string) error {
-		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("%s stuck: %s", what, reason))
-	}
+	// lastPod is the pod as last observed; the sandbox-event judge consults
+	// it so a stale FailedCreatePodSandBox event (a handler configured after
+	// the first failure) cannot fail a pod that has since started.
+	var lastPod *corev1.Pod
 	evalPod := func(pod *corev1.Pod) (*corev1.Pod, bool, error) {
+		lastPod = pod
 		lastPhase = pod.Status.Phase
 		lastContainerStatus = podWaitingStatus(pod)
 		// Fail fast if pod is stuck in a non-recoverable state (e.g. ImagePullBackOff).
 		if reason := podStuckReason(pod); reason != "" {
-			return nil, true, stuckErr(reason)
+			return nil, true, podStuckErr(what, reason)
 		}
 		switch pod.Status.Phase { //nolint:exhaustive // only terminal states matter
 		case corev1.PodSucceeded, corev1.PodFailed:
@@ -1041,7 +1043,7 @@ func waitForTerminalPodWithin(ctx context.Context, clientset kubernetes.Interfac
 			return nil, false, nil
 		}
 	}
-	evalEvent := sandboxEventEvaluator(name, stuckErr)
+	evalEvent := sandboxEventEvaluator(name, what, func() bool { return podAwaitingSandbox(lastPod) })
 
 	// Backoff between watch-restart iterations: an apiserver (or LB) that
 	// accepts watches and closes them immediately must not turn the restart
@@ -1151,20 +1153,53 @@ func waitForTerminalPodWithin(ctx context.Context, clientset kubernetes.Interfac
 // sandboxEventEvaluator returns the judge of the pod's FailedCreatePodSandBox
 // events for waitForTerminalPodWithin: a missing RuntimeClass handler never
 // changes the pod's status, so the pod watch alone would wait out the whole
-// timeout and the kubelet's event is the signal (#3703). stuckErr renders the
-// reason as the wait's stuck error.
-func sandboxEventEvaluator(name string, stuckErr func(reason string) error) func(*corev1.Event) error {
+// timeout and the kubelet's event is the signal (#3703). what names the pod
+// in the stuck error. awaitingSandbox reports whether the pod,
+// as last observed, is still blocked before sandbox creation: an event the
+// per-iteration List re-reads after the handler was configured and the pod
+// started is history, not a verdict, so it is ignored once the pod has
+// progressed.
+func sandboxEventEvaluator(name, what string, awaitingSandbox func() bool) func(*corev1.Event) error {
 	return func(ev *corev1.Event) error {
 		// The field selector already scopes the List and Watch to this pod;
 		// checking again costs nothing and keeps a sibling's failure out.
-		if ev == nil || ev.InvolvedObject.Name != name {
+		if ev == nil || ev.InvolvedObject.Name != name || !awaitingSandbox() {
 			return nil
 		}
 		if reason := sandboxCreateFailure(ev); reason != "" {
-			return stuckErr(reason)
+			return podStuckErr(what, reason)
 		}
 		return nil
 	}
+}
+
+// podStuckErr is the wait's verdict for a pod in a state no retry repairs.
+func podStuckErr(what, reason string) error {
+	return errors.New(errors.ErrCodeInternal, fmt.Sprintf("%s stuck: %s", what, reason))
+}
+
+// podAwaitingSandbox reports whether pod has not progressed past sandbox
+// creation: it is Pending (or not yet observed) and no container has started
+// or finished. A pod with a Running or Terminated container got its sandbox,
+// whatever the events say.
+func podAwaitingSandbox(pod *corev1.Pod) bool {
+	if pod == nil {
+		return true
+	}
+	if pod.Status.Phase != corev1.PodPending && pod.Status.Phase != "" {
+		return false
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Running != nil || cs.State.Terminated != nil {
+			return false
+		}
+	}
+	for _, cs := range pod.Status.InitContainerStatuses {
+		if cs.State.Running != nil || cs.State.Terminated != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // listedSandboxFailure lists the pod's FailedCreatePodSandBox events and

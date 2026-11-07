@@ -76,9 +76,9 @@ const (
 // ImagePullSecretsEnv carries the names of the --image-pull-secret Secrets
 // the orchestrator attached to the validator Job, comma-separated, so a check
 // that creates a per-run namespace can copy them there and let its probe pods
-// pull with the same credentials (pkg/validator/v1 forwards it; keep the
-// literal in sync with imagePullSecretsEnv there).
-const ImagePullSecretsEnv = "AICR_IMAGE_PULL_SECRETS" //nolint:gosec // G101: env var name, not a credential
+// pull with the same credentials. It is pkg/validator/v1's constant, which
+// forwards it, so the two ends cannot drift.
+const ImagePullSecretsEnv = v1.ImagePullSecretsEnv
 
 // Skip codes published under ExtraKeySkipReason. Each must also be listed in
 // pkg/evidence/redact's ctrfSkipReasons.

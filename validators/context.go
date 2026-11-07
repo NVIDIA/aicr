@@ -205,8 +205,14 @@ func (c *Context) Timeout(d time.Duration) (context.Context, context.CancelFunc)
 	return context.WithTimeout(c.Ctx, d) //nolint:gosec // G118: cancel is returned to caller
 }
 
+// serviceAccountNamespaceFile is the mounted ServiceAccount namespace of the
+// validator pod, the first source of resolveNamespace. A var only so a unit
+// test can point it at a file that does not exist; production never
+// reassigns it.
+var serviceAccountNamespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
 func resolveNamespace() string {
-	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+	if data, err := os.ReadFile(serviceAccountNamespaceFile); err == nil { //nolint:gosec // fixed in-pod path, not user-controlled
 		if ns := strings.TrimSpace(string(data)); ns != "" {
 			return ns
 		}

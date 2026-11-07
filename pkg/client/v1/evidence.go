@@ -608,11 +608,15 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 	// Pre-flight against the latest carried checklist, as the CLI does, so a
 	// bad key fails here rather than after every validator Job; the render
 	// repeats the check against the selected version.
-	if err := c.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{NotApplicable: opts.NotApplicable, Documented: opts.Documented}); err != nil {
+	if err := c.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{
+		ConformanceVersion: opts.ConformanceVersion, NotApplicable: opts.NotApplicable, Documented: opts.Documented,
+	}); err != nil {
 		return err
 	}
 	if opts.Vendor != nil {
-		if err := c.ValidateCNCFSubmissionOptions(CNCFSubmissionOptions{Vendor: *opts.Vendor, NotApplicable: opts.NotApplicable, Documented: opts.Documented}, opts.Dir); err != nil {
+		if err := c.ValidateCNCFSubmissionOptions(CNCFSubmissionOptions{
+			ConformanceVersion: opts.ConformanceVersion, Vendor: *opts.Vendor, NotApplicable: opts.NotApplicable, Documented: opts.Documented,
+		}, opts.Dir); err != nil {
 			return err
 		}
 	}
@@ -688,18 +692,21 @@ type cncfSubmissionRunner interface {
 	RenderCNCFEvidenceWithResult(ctx context.Context, report *ctrf.Report, dir string, opts RenderCNCFEvidenceOptions) (*CNCFRequirementAggregate, error)
 	WriteCNCFSubmission(ctx context.Context, report *ctrf.Report, dir string, snap *Snapshot, rec *RecipeResult, opts CNCFSubmissionOptions) (*CNCFSubmissionResult, error)
 	ValidateCNCFSubmissionOptions(opts CNCFSubmissionOptions, dir string) error
+	ValidateCNCFRecipeCoverage(rec *RecipeResult, opts RenderCNCFEvidenceOptions) error
 }
 
 var _ cncfSubmissionRunner = (*Client)(nil)
 
-// runCNCFSubmission is the submission run: snapshot, pre-flight, conformance
+// runCNCFSubmission is the submission run: snapshot, pre-flights, conformance
 // phase, merge, render, verdict. Every stage's error propagates as that stage
-// reports it. With a vendor, the snapshot's Kubernetes version is checked
-// against the carried checklists (ValidateCNCFSubmissionOptions) before any
-// validator Job runs: a submission certifies the cluster's exact minor, so a
-// minor no carried checklist matches is refused here, not after the run,
-// unless in.conformanceVersion names a checklist (#3703). The write repeats
-// the check as the fail-closed backstop.
+// reports it. With a vendor, two pre-flights run between the snapshot and the
+// validator Jobs, exactly as `aicr validate --cncf-submission` runs them: the
+// snapshot's Kubernetes version must match a carried checklist
+// (ValidateCNCFSubmissionOptions; a submission certifies the cluster's exact
+// minor, so an uncarried one is refused here unless in.conformanceVersion
+// names a checklist), and the recipe must be able to establish every
+// applicable MUST (ValidateCNCFRecipeCoverage). The write repeats the version
+// check as the fail-closed backstop (#3703).
 func runCNCFSubmission(ctx context.Context, r cncfSubmissionRunner, rec *RecipeResult, in cncfSubmissionInputs) error {
 	// Privileged as `aicr validate` deploys it: the GPU, SystemD and OS
 	// collectors the conformance snapshot needs do not run restricted.
@@ -716,6 +723,19 @@ func runCNCFSubmission(ctx context.Context, r cncfSubmissionRunner, rec *RecipeR
 		if preflightErr := r.ValidateCNCFSubmissionOptions(in.submissionOptions(snap), in.dir); preflightErr != nil {
 			return preflightErr
 		}
+	}
+	// The recipe must be able to establish every applicable MUST of the
+	// selected checklist, as the CLI requires: a submission (vendor set) that
+	// cannot is refused here, before any validator Job; the pages render
+	// only logs the gaps, since its result is not a submission.
+	if coverageErr := r.ValidateCNCFRecipeCoverage(rec, RenderCNCFEvidenceOptions{
+		ConformanceVersion: in.conformanceVersion, KubernetesVersion: snap.KubernetesVersion(), NotApplicable: in.notApplicable,
+	}); coverageErr != nil {
+		if in.vendor != nil {
+			return coverageErr
+		}
+		slog.Warn("the recipe's conformance checks would not establish every applicable MUST of the CNCF checklist; "+
+			"this run renders evidence pages, not a submission, so it proceeds", "error", coverageErr)
 	}
 	results, err := r.ValidateState(ctx, rec, snap,
 		WithValidationKubeconfig(in.kubeconfig),

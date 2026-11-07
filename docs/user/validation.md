@@ -1591,10 +1591,9 @@ Common reasons and their cause:
 
 The check (CNCF `driver_runtime_management`, SHOULD at v1.37 and MUST at v1.38)
 runs a pod from a vanilla `ubuntu:22.04` image that requests one GPU, and reads
-the driver from inside it. The probe pod carries no `imagePullSecrets`
-(`--image-pull-secret` reaches the validator Job, not the per-run namespace),
-so a mirror of the probe image that needs credentials must supply them
-node-side, through the container runtime's registry configuration. Its artifacts (`Driver runtime probe pod logs`,
+the driver from inside it. The probe pod carries the
+`--image-pull-secret` Secrets, copied into its per-run namespace (see the
+image note below). Its artifacts (`Driver runtime probe pod logs`,
 `Advertised driver version`, `Driver runtime compatibility`) name the failing
 step:
 

@@ -1497,9 +1497,10 @@ func cncfSubmissionPreflight(client *aicr.Client, snap *aicr.Snapshot, cfg valid
 // A submission run that cannot establish a MUST is refused here, before any
 // validator Job, rather than failing on the verdict after every check ran;
 // a plain run that includes the conformance phase only logs the gaps, since
-// its result is not a submission. A plain run whose checklist cannot be
-// resolved (a cluster newer than the latest carried checklist with no
-// explicit version) has nothing to compare against and logs that instead.
+// its result is not a submission; on such a run an uncarried cluster minor
+// falls back to the nearest carried checklist with a warning and the gaps
+// are judged against it. Only an explicit conformanceVersion that does not
+// parse leaves nothing to compare against, and that is logged instead.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when cfg.cncfSubmission is set and the recipe

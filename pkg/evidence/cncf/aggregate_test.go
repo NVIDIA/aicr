@@ -36,10 +36,10 @@ var allMustsPassed = []ctrf.TestResult{
 	{Name: "ai-service-metrics", Status: "passed"},
 	{Name: "inference-gateway", Status: "passed"},
 	{Name: "pod-autoscaling", Status: "passed"},
-	// cluster-autoscaling is observation-only, so its baseline pass carries
-	// the result-contract stamp and no marker: a modern image that chose
-	// not to mark it, which is the only pass of it the aggregation credits.
-	{Name: "cluster-autoscaling", Status: "passed", Extra: stamped},
+	// cluster-autoscaling is observation-only, so no pass of it is ever a
+	// demonstration; the baseline declares it not applicable where a passing
+	// run is needed and passes it as an observation otherwise.
+	{Name: "cluster-autoscaling", Status: "passed", Extra: observationOnly},
 	{Name: "robust-controller", Status: "passed"},
 	{Name: "secure-accelerator-access", Status: "passed"},
 }
@@ -196,7 +196,11 @@ func TestAggregateReportRequirementStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			agg, err := AggregateReport(Version137, reportOf(tt.tests...), nil)
+			agg, err := AggregateReport(Version137, reportOf(tt.tests...),
+				// cluster-autoscaling is observation-only, so a passing baseline
+				// declares the conditional MUST not applicable, as a fixed-size
+				// cluster's submission does.
+				map[string]string{"cluster_autoscaling": "fixed-size cluster"})
 			if err != nil {
 				t.Fatalf("AggregateReport: %v", err)
 			}
@@ -270,20 +274,43 @@ func TestAggregateReportObservationOnly(t *testing.T) {
 			wantObserved:  true,
 		},
 		{
-			name:        "a stamped pass without the marker is a demonstration",
-			tests:       allMustsPassed,
-			requirement: "cluster_autoscaling",
-			wantStatus:  StatusPassed,
-			wantProof:   []string{"cluster-autoscaling"},
-			wantPassed:  true,
+			// A stamped pass with no marker from a check every image marks on
+			// every passing path means the marker line was lost in transit;
+			// it is not read as a demonstration.
+			name:          "a stamped pass without the marker is observed, naming the dropped marker",
+			tests:         withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: stamped}),
+			requirement:   "cluster_autoscaling",
+			wantStatus:    StatusObserved,
+			wantReason:    "cluster-autoscaling observed, not demonstrated: " + reasonMarkerDroppedPrefix + "1",
+			wantObserved:  true,
+			wantInVerdict: []string{"cluster_autoscaling observed"},
 		},
 		{
-			name:        "the marker set to false on a stamped pass is no marker",
-			tests:       withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: map[string]string{"observationOnly": "false", "resultSchema": "1"}}),
+			name:         "the marker set to false on a stamped pass is no marker, so the pass is observed",
+			tests:        withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: map[string]string{"observationOnly": "false", "resultSchema": "1"}}),
+			requirement:  "cluster_autoscaling",
+			wantStatus:   StatusObserved,
+			wantReason:   "cluster-autoscaling observed, not demonstrated: " + reasonMarkerDroppedPrefix + "1",
+			wantObserved: true,
+		},
+		{
+			// Fail closed on a contract version this reader does not know:
+			// its markers may differ, so its pass is not a demonstration.
+			name:         "a pass stamped with an unknown contract version is observed",
+			tests:        withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: map[string]string{"resultSchema": "2"}}),
+			requirement:  "cluster_autoscaling",
+			wantStatus:   StatusObserved,
+			wantReason:   "cluster-autoscaling observed, not demonstrated: " + reasonSchemaUnknownPrefix + "2",
+			wantObserved: true,
+		},
+		{
+			// An earlier skipped result sets the fold's status and reason; a
+			// later unstamped pass must not overwrite the skip reason.
+			name:        "an unstamped pass after a skipped result keeps the skip reason",
+			tests:       append(withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "skipped", Extra: map[string]string{"skipReason": "unrecognized-platform"}}), *unstamped),
 			requirement: "cluster_autoscaling",
-			wantStatus:  StatusPassed,
-			wantProof:   []string{"cluster-autoscaling"},
-			wantPassed:  true,
+			wantStatus:  StatusNotTested,
+			wantReason:  "cluster-autoscaling skipped: unrecognized-platform",
 		},
 		{
 			// #3703: an image that predates the marker cannot have set it,
@@ -307,12 +334,13 @@ func TestAggregateReportObservationOnly(t *testing.T) {
 			wantObserved:  true,
 		},
 		{
-			name:        "an unstamped pass of a behavioral check is credited",
-			tests:       withResult(allMustsPassed, "gang-scheduling", &ctrf.TestResult{Name: "gang-scheduling", Status: "passed"}),
-			requirement: "gang_scheduling",
-			wantStatus:  StatusPassed,
-			wantProof:   []string{"gang-scheduling"},
-			wantPassed:  true,
+			name:          "an unstamped pass of a behavioral check is credited",
+			tests:         withResult(allMustsPassed, "gang-scheduling", &ctrf.TestResult{Name: "gang-scheduling", Status: "passed"}),
+			notApplicable: map[string]string{"cluster_autoscaling": "fixed-size cluster"},
+			requirement:   "gang_scheduling",
+			wantStatus:    StatusPassed,
+			wantProof:     []string{"gang-scheduling"},
+			wantPassed:    true,
 		},
 		{
 			name:         "an unstamped pass folded with a stamped pass is observed",
@@ -361,12 +389,13 @@ func TestAggregateReportObservationOnly(t *testing.T) {
 			wantObserved: false,
 		},
 		{
-			name:        "a demonstrated alternative establishes the requirement beside an observed one",
-			tests:       append(slices.Clone(allMustsPassed), ctrf.TestResult{Name: "slinky-slurm-gpu-access", Status: "passed", Extra: observationOnly}),
-			requirement: "secure_accelerator_access",
-			wantStatus:  StatusPassed,
-			wantProof:   []string{"secure-accelerator-access"},
-			wantPassed:  true,
+			name:          "a demonstrated alternative establishes the requirement beside an observed one",
+			tests:         append(slices.Clone(allMustsPassed), ctrf.TestResult{Name: "slinky-slurm-gpu-access", Status: "passed", Extra: observationOnly}),
+			notApplicable: map[string]string{"cluster_autoscaling": "fixed-size cluster"},
+			requirement:   "secure_accelerator_access",
+			wantStatus:    StatusPassed,
+			wantProof:     []string{"secure-accelerator-access"},
+			wantPassed:    true,
 		},
 	}
 	for _, tt := range tests {

@@ -116,12 +116,13 @@ const (
 	// same literals live in validators/conformance/workload_sandboxing_check.go.
 	sandboxRuntimeClassEnv = "AICR_SANDBOX_RUNTIME_CLASS"
 	sandboxProbeImageEnv   = "AICR_SANDBOX_PROBE_IMAGE"
-	// imagePullSecretsEnv carries the --image-pull-secret names, comma-separated,
+	// ImagePullSecretsEnv carries the --image-pull-secret names, comma-separated,
 	// to every validator pod, so a check that creates a per-run namespace can
 	// copy the Secrets there and attach them to its probe pods; the names are
 	// the only thing forwarded, the Secrets stay in the validator namespace.
-	// The pod-side const of the same literal is validators.ImagePullSecretsEnv.
-	imagePullSecretsEnv = "AICR_IMAGE_PULL_SECRETS" //nolint:gosec // G101: env var name, not a credential
+	// Exported so the pod side (validators.ImagePullSecretsEnv) reads the same
+	// constant instead of a mirrored literal.
+	ImagePullSecretsEnv = "AICR_IMAGE_PULL_SECRETS" //nolint:gosec // G101: env var name, not a credential
 
 	// inferencePerfNoCleanupEnv, when truthy, makes the inference-perf validator
 	// leave its namespace/DGD/workers/frontend/AIPerf Job in place after the run
@@ -178,7 +179,7 @@ func buildEnv(
 		})
 	}
 	if names := nonEmptyNames(imagePullSecrets); len(names) > 0 {
-		env = append(env, corev1.EnvVar{Name: imagePullSecretsEnv, Value: strings.Join(names, ",")})
+		env = append(env, corev1.EnvVar{Name: ImagePullSecretsEnv, Value: strings.Join(names, ",")})
 	}
 
 	// Add CLI version and commit
@@ -282,7 +283,7 @@ func buildEnv(
 		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclRuntimeImageEnv || e.Name == driverRuntimeImageEnv {
 			continue
 		}
-		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv || e.Name == imagePullSecretsEnv {
+		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv || e.Name == ImagePullSecretsEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})
