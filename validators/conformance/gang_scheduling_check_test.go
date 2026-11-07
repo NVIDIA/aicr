@@ -73,6 +73,70 @@ func TestCleanupGangTestResourcesDeletesNamespace(t *testing.T) {
 	}
 }
 
+// TestFailOnGangCleanup pins that a passing run fails when its namespace
+// could not be deleted, and that a failed run keeps its own error.
+func TestFailOnGangCleanup(t *testing.T) {
+	nsErr := errors.New(errors.ErrCodeInternal, "failed to delete gang test namespace")
+	phaseErr := errors.New(errors.ErrCodeNotFound, "positive phase failed")
+	tests := []struct {
+		name     string
+		err      error
+		nsErr    error
+		wantNil  bool
+		wantCode errors.ErrorCode
+		wantSub  string
+	}{
+		{"passing run with clean cleanup stays nil", nil, nil, true, "", ""},
+		{"passing run with failed cleanup fails", nil, nsErr, false, errors.ErrCodeInternal, "cleanup failed after a passing run"},
+		{"failed run keeps its error", phaseErr, nsErr, false, errors.ErrCodeNotFound, "positive phase failed"},
+		{"failed run with clean cleanup keeps its error", phaseErr, nil, false, errors.ErrCodeNotFound, "positive phase failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := failOnGangCleanup(tt.err, tt.nsErr)
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("failOnGangCleanup() = %v, want nil", got)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, got, tt.wantCode)
+			if got == nil || !strings.Contains(got.Error(), tt.wantSub) {
+				t.Errorf("failOnGangCleanup() = %v, want substring %q", got, tt.wantSub)
+			}
+		})
+	}
+}
+
+// TestGangTestRunTokenAndLabel pins the shared run model: a 128-bit token
+// names every resource within the DNS-1123 limit, and the namespace carries
+// the ownership label the GPU test namespaces carry.
+func TestGangTestRunTokenAndLabel(t *testing.T) {
+	run, err := newGangTestRun()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.suffix) != 32 {
+		t.Errorf("token %q has %d hex characters, want 32 (128 bits)", run.suffix, len(run.suffix))
+	}
+	for _, name := range append([]string{run.namespace, run.groupName, run.negGroupName}, run.pods[:]...) {
+		if len(name) > 63 {
+			t.Errorf("name %q is %d characters, over the DNS-1123 limit", name, len(name))
+		}
+	}
+	clientset := k8sfake.NewClientset()
+	if createErr := createGangTestNamespace(context.Background(), clientset, run); createErr != nil {
+		t.Fatalf("createGangTestNamespace: %v", createErr)
+	}
+	ns, err := clientset.CoreV1().Namespaces().Get(context.Background(), run.namespace, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ns.Labels[gpuTestRunLabel] != run.suffix {
+		t.Errorf("namespace label %s = %q, want the run token", gpuTestRunLabel, ns.Labels[gpuTestRunLabel])
+	}
+}
+
 // TestGangTestRunNamespaceIsPerRun verifies two concurrent invocations derive
 // distinct namespaces. A shared namespace is what made the cleanup below
 // destructive: names are randomized per run, but the namespace was not.
