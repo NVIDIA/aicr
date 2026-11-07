@@ -21,6 +21,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 // RequirementStatus is the aggregate verdict of one checklist requirement,
@@ -44,20 +45,47 @@ const (
 	StatusNotApplicable RequirementStatus = "not applicable"
 )
 
-// CTRF extra keys the aggregation reads, published by the validators under
-// the ExtraKey* constants of the validators package.
+// CTRF extra keys the aggregation reads, the shared definitions of
+// pkg/validator/ctrf that the validators publish under the same names.
 const (
 	// extraKeySkipReason is the skipReason code, carried as the NOT TESTED
 	// reason of a skipped check.
-	extraKeySkipReason = "skipReason"
+	extraKeySkipReason = ctrf.ExtraKeySkipReason
 
-	// extraKeyObservationOnly marks a passed result as observation-only
-	// (validators.ExtraKeyObservationOnly); the value is "true".
-	extraKeyObservationOnly = "observationOnly"
+	// extraKeyObservationOnly marks a passed result as observation-only; the
+	// value is extraValueTrue.
+	extraKeyObservationOnly = ctrf.ExtraKeyObservationOnly
+
+	// extraKeyResultSchema is the result-contract version the validator
+	// image stamped on the result; it tells the Reason of an unmarked pass
+	// of a check known to be observation-only (v1.IsObservationOnlyCheck).
+	extraKeyResultSchema = ctrf.ExtraKeyResultSchema
 
 	// extraValueTrue is the published form of a true boolean extra.
-	extraValueTrue = "true"
+	extraValueTrue = ctrf.ExtraValueTrue
+
+	// CheckResult.Reason of an observation-only check whose pass carries no
+	// observationOnly marker, by what the result-contract stamp says.
+	reasonResultSchemaAbsent  = "result contract marker absent, so the pass is read as an observation"
+	reasonMarkerDroppedPrefix = "observation-only marker absent from a result stamped with contract version "
+	reasonSchemaUnknownPrefix = "result contract version unknown to this reader: "
 )
+
+// observationOnlyReason explains why an unmarked pass of a check known to be
+// observation-only is read as an observation rather than a demonstration,
+// from the result-contract stamp it carries: none (the image predates the
+// marker), the known version (the marker line was dropped in transit) or a
+// version this reader does not know (its markers may differ).
+func observationOnlyReason(stamp string) string {
+	switch stamp {
+	case "":
+		return reasonResultSchemaAbsent
+	case ctrf.ResultSchemaVersion:
+		return reasonMarkerDroppedPrefix + stamp
+	default:
+		return reasonSchemaUnknownPrefix + stamp
+	}
+}
 
 // conditionalMusts are the MUST requirements upstream allows a product to
 // declare not applicable with a justification. Every other requirement is
@@ -90,13 +118,19 @@ type CheckResult struct {
 	Status string
 
 	// Reason is the skip reason code (extra.skipReason) of a skipped result,
-	// or the message of a failed one; empty otherwise.
+	// the message of a failed one, or the contract mismatch of a passed
+	// result the aggregation read as an observation (see ObservationOnly);
+	// empty otherwise.
 	Reason string
 
 	// ObservationOnly is true when a passed result carries the
 	// observation-only marker (extra.observationOnly): the check recorded
 	// what it saw and drove no behavioral test, so its pass demonstrates
-	// nothing. Always false for a result that did not pass.
+	// nothing. It is also true, with Reason saying so, when a check known to
+	// be observation-only (v1.IsObservationOnlyCheck) passed without the
+	// result-contract stamp (extra.resultSchema): the image predates the
+	// marker, so its silence is not a demonstration. Always false for a
+	// result that did not pass.
 	ObservationOnly bool
 }
 
@@ -476,7 +510,11 @@ func evaluatePath(path []string, byName map[string]CheckResult) (RequirementStat
 		case !c.Present:
 			incomplete = append(incomplete, name+" not run")
 		case c.Status == ctrf.StatusPassed && c.ObservationOnly:
-			observed = append(observed, name+" observed, not demonstrated")
+			reason := name + " observed, not demonstrated"
+			if c.Reason != "" {
+				reason += ": " + c.Reason
+			}
+			observed = append(observed, reason)
 		case c.Status == ctrf.StatusPassed:
 		case c.Status == ctrf.StatusFailed:
 			failed = append(failed, name+" failed")
@@ -506,7 +544,13 @@ func evaluatePath(path []string, byName map[string]CheckResult) (RequirementStat
 // phases) passes only when every result passed; the worst status wins, in
 // the order failed, then any non-passed status, then passed. A passed
 // result marked observation-only marks the fold: one observation among the
-// passes keeps the check from demonstrating anything.
+// passes keeps the check from demonstrating anything. So does any passed
+// result of a check known to be observation-only (v1.IsObservationOnlyCheck)
+// that lacks the marker: whether the image predates the marker, dropped the
+// marker line, or speaks a contract version this reader does not know, its
+// pass is never read as a demonstration, and the Reason says which (#3703).
+// A reason set by an earlier skipped or failed result of the same check is
+// kept, since the fold's status is that result's.
 func checkResult(name string, tests []ctrf.TestResult) CheckResult {
 	if len(tests) == 0 {
 		return CheckResult{Name: name}
@@ -515,8 +559,14 @@ func checkResult(name string, tests []ctrf.TestResult) CheckResult {
 	for _, t := range tests {
 		switch t.Status {
 		case ctrf.StatusPassed:
-			if t.Extra[extraKeyObservationOnly] == extraValueTrue {
+			switch {
+			case t.Extra[extraKeyObservationOnly] == extraValueTrue:
 				c.ObservationOnly = true
+			case v1.IsObservationOnlyCheck(name):
+				c.ObservationOnly = true
+				if c.Status == ctrf.StatusPassed {
+					c.Reason = observationOnlyReason(t.Extra[extraKeyResultSchema])
+				}
 			}
 		case ctrf.StatusFailed:
 			c.Status = ctrf.StatusFailed

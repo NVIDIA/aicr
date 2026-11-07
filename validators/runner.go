@@ -89,9 +89,20 @@ func Run(checks map[string]CheckFunc) {
 	os.Exit(exitCode)
 }
 
-// runCheck loads context, runs the check, and returns the exit code.
-// Separated from Run so defer works correctly before os.Exit.
+// runCheck publishes the result-contract stamp, loads context, runs the
+// check, and returns the exit code. Separated from Run so defer works
+// correctly before os.Exit.
+//
+// The stamp goes out first, before anything that can fail or exit, so every
+// result the orchestrator reads from this image carries it: a pass, a skip, a
+// failure, and a context-load failure alike. A stamp that cannot be written
+// fails the check, because a result the orchestrator would otherwise credit
+// without the contract marker is the gap #3703 closes.
 func runCheck(checkFn CheckFunc) int {
+	if err := publishResultSchema(); err != nil {
+		writeTerminationLog("failed to publish result schema: %v", err)
+		return 1
+	}
 	ctx, err := LoadContext()
 	if err != nil {
 		writeTerminationLog("failed to load context: %v", err)
@@ -99,6 +110,14 @@ func runCheck(checkFn CheckFunc) int {
 	}
 	defer ctx.Cancel()
 	return handleCheckResult(checkFn(ctx))
+}
+
+// publishResultSchema stamps ctrf.ExtraKeyResultSchema on the result.
+//
+// Errors:
+//   - ErrCodeInternal when the sentinel line could not be written to stdout.
+func publishResultSchema() error {
+	return EmitExtra(ResultSchemaExtra())
 }
 
 // handleCheckResult maps a CheckFunc return value to an exit code and
