@@ -525,9 +525,17 @@ func runValidation(
 
 	slog.Info("running validation", "phases", cfg.phases)
 
-	// A submission run that cannot establish an applicable MUST from the
-	// checks the recipe declares is refused here, before any validator Job
-	// runs, rather than on the verdict after every check has run.
+	// Two submission pre-flights run here, with the snapshot loaded or
+	// captured and before any validator Job: the cluster's Kubernetes minor
+	// must match a carried checklist exactly unless
+	// spec.validate.evidence.cncf.conformanceVersion names one (a submission
+	// certifies one minor; the write repeats the check as the backstop), and
+	// the recipe's conformance checks must be able to establish every
+	// applicable MUST. Both fail in seconds where the verdict after the run
+	// would fail in minutes.
+	if err := cncfSubmissionPreflight(client, snap, cfg); err != nil {
+		return err
+	}
 	if err := cncfRecipeCoveragePreflight(client, rec, snap, cfg); err != nil {
 		return err
 	}
@@ -650,11 +658,11 @@ func runValidation(
 	}
 
 	// Write the submission directory when requested. The checklist version
-	// follows the validated cluster's Kubernetes minor. A minor this build
-	// carries no checklist for renders against the nearest carried one and the
-	// facade warns: below v1.35 against v1.35, above the newest against the
-	// latest (cncf.NearestVersion). An explicit version flag is a follow-up
-	// to #3606.
+	// is the cluster's exact Kubernetes minor, which the pre-flight above
+	// already required a carried checklist for, or the one
+	// spec.validate.evidence.cncf.conformanceVersion names; the write refuses
+	// an uncarried minor again as the backstop, and the README records the
+	// checklist used and whether it was named explicitly.
 	//
 	// The exit rule of a submission run is CNCFRequirementAggregate.Outcome,
 	// shared with the SDK: a failed or crashed check fails the run as it does
@@ -1455,6 +1463,33 @@ func validateClient(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, evi
 		return nil, err
 	}
 	return client, nil
+}
+
+// cncfSubmissionPreflight is the submission's version pre-flight once the
+// snapshot is in hand: the cluster's Kubernetes minor must match a carried
+// checklist exactly unless spec.validate.evidence.cncf.conformanceVersion
+// names one (ValidateCNCFSubmissionOptions, which also re-checks the
+// declarations, the vendor and the directory). A plain run is not checked.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when cfg.cncfSubmission is set and the vendor is
+//     missing, the minor has no carried checklist and no explicit version is
+//     set, or the options fail ValidateCNCFSubmissionOptions.
+func cncfSubmissionPreflight(client *aicr.Client, snap *aicr.Snapshot, cfg validationConfig) error {
+	if !cfg.cncfSubmission {
+		return nil
+	}
+	if cfg.cncfVendor == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--cncf-submission requires spec.validate.evidence.cncf.vendor in --config (PRODUCT.yaml carries its fields)")
+	}
+	return client.ValidateCNCFSubmissionOptions(aicr.CNCFSubmissionOptions{
+		ConformanceVersion: cfg.cncfConformanceVersion,
+		KubernetesVersion:  snap.KubernetesVersion(),
+		NotApplicable:      cfg.cncfNotApplicable,
+		Documented:         cfg.cncfDocumented,
+		Vendor:             *cfg.cncfVendor,
+	}, cfg.evidenceDir)
 }
 
 // cncfRecipeCoveragePreflight compares the recipe's conformance checks with

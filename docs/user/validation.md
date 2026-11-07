@@ -19,9 +19,12 @@ For the architectural view of how snapshot + recipe flow into the validator, see
 
 Readiness pre-flight constraints (K8s version, OS, kernel) run implicitly before
 any phase. If pre-flight fails, no validator Jobs are deployed. A submission run
-(`--cncf-submission`) adds two pre-flights of its own before any validator Job:
-the cluster's Kubernetes minor must select a carried checklist (or
-`spec.validate.evidence.cncf.checklistVersion` must name one), and the recipe's
+(`--cncf-submission`) adds two pre-flights of its own once the snapshot is
+loaded or captured and before any validator Job: the cluster's Kubernetes minor
+must match a carried checklist exactly (1.34 and 1.38 are refused alike, since
+a submission certifies one minor) unless
+`spec.validate.evidence.cncf.conformanceVersion` names one, which the
+submission README then records as selected explicitly; and the recipe's
 `validation.conformance.checks` must declare a complete proof path for every
 applicable MUST of that checklist (`secure-accelerator-access` or the Slinky
 Slurm alternative `slinky-slurm-gpu-access`; a conditional MUST declared under
