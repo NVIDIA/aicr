@@ -2737,7 +2737,14 @@ func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, rec
 const (
 	agentgatewayComponentName    = "agentgateway"
 	agentgatewaySourceRangesPath = "allowedSourceRanges"
+	agentgatewayServiceTypePath  = "serviceType"
+	agentgatewayServiceTypeLB    = "LoadBalancer"
 )
+
+// agentgatewayServiceTypes are the Service types the inference-gateway
+// manifest accepts in serviceType; the comparison is case-sensitive, as the
+// apiserver's is.
+var agentgatewayServiceTypes = []string{agentgatewayServiceTypeLB, "ClusterIP", "NodePort"}
 
 // agentgatewayDefaultSourceRanges is the private-by-default scope applied to the
 // inference-gateway LoadBalancer when the operator supplies no allowedSourceRanges
@@ -2793,6 +2800,14 @@ func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]
 	values := componentValues[agentgatewayComponentName]
 	if values == nil {
 		return nil
+	}
+
+	serviceType, err := agentgatewayServiceType(values)
+	if err != nil {
+		return err
+	}
+	if serviceType != "" && serviceType != agentgatewayServiceTypeLB {
+		return b.noteAgentgatewayNonLBService(values, serviceType)
 	}
 
 	state, detail := classifyAgentgatewaySourceRanges(values, agentgatewaySourceRangesPath)
@@ -2852,6 +2867,68 @@ func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]
 		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
 			"unhandled agentgateway exposure state %d", state))
 	}
+}
+
+// agentgatewayServiceType returns the validated serviceType value, or "" when
+// it is unset or empty. Anything but a string naming one of
+// agentgatewayServiceTypes is rejected, so a typo such as "clusterip" fails
+// bundle generation instead of rendering a Service the apiserver refuses.
+func agentgatewayServiceType(values map[string]any) (string, error) {
+	v, ok := component.GetValueByPath(values, agentgatewayServiceTypePath)
+	if !ok || v == nil {
+		return "", nil
+	}
+	s, isString := v.(string)
+	if !isString {
+		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: %s must be a string, got %T", agentgatewayComponentName, agentgatewayServiceTypePath, v))
+	}
+	if s == "" {
+		return "", nil
+	}
+	if !slices.Contains(agentgatewayServiceTypes, s) {
+		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: %s %q is not one of %s (case-sensitive)",
+			agentgatewayComponentName, agentgatewayServiceTypePath, s, strings.Join(agentgatewayServiceTypes, ", ")))
+	}
+	return s, nil
+}
+
+// noteAgentgatewayNonLBService records that allowedSourceRanges does not apply
+// when serviceType is not LoadBalancer: loadBalancerSourceRanges is a
+// LoadBalancer-only Service field, so the manifest renders no ranges and the
+// private-by-default injection is skipped. Ranges the operator passed
+// explicitly are reported as a warning because they will not take effect.
+func (b *DefaultBundler) noteAgentgatewayNonLBService(values map[string]any, serviceType string) error {
+	state, detail := classifyAgentgatewaySourceRanges(values, agentgatewaySourceRangesPath)
+	switch state {
+	case exposureInvalid:
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: %s must be a list of CIDR strings (%s)",
+			agentgatewayComponentName, agentgatewaySourceRangesPath, detail))
+	case exposureScoped, exposureOpen:
+		b.appendWarning(fmt.Sprintf(
+			"%s: %s is set but %s is %s; loadBalancerSourceRanges applies only to a LoadBalancer "+
+				"Service, so the ranges are not rendered and the inference-gateway is reachable only as a %s Service",
+			agentgatewayComponentName, agentgatewaySourceRangesPath, agentgatewayServiceTypePath, serviceType, serviceType))
+		slog.Warn("agentgateway allowedSourceRanges ignored for a non-LoadBalancer inference-gateway Service",
+			"component", agentgatewayComponentName,
+			"serviceType", serviceType,
+		)
+	case exposureUnset:
+		b.appendWarning(fmt.Sprintf(
+			"%s: %s is %s, so the inference-gateway Service is not a LoadBalancer and %s does not apply; "+
+				"the private-by-default source ranges are not injected",
+			agentgatewayComponentName, agentgatewayServiceTypePath, serviceType, agentgatewaySourceRangesPath))
+		slog.Info("agentgateway inference-gateway Service is not a LoadBalancer; skipping source-range default",
+			"component", agentgatewayComponentName,
+			"serviceType", serviceType,
+		)
+	default:
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+			"unhandled agentgateway exposure state %d", state))
+	}
+	return nil
 }
 
 // classifyAgentgatewaySourceRanges inspects the value at path and reports how it

@@ -4469,7 +4469,59 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 		wantErr     bool
 		wantWarning bool
 		wantDefault bool // expects allowedSourceRanges defaulted to the RFC1918 set
+		wantNoRange bool // expects allowedSourceRanges left absent (non-LoadBalancer serviceType)
 	}{
+		{
+			name:        "ClusterIP serviceType skips the private default and notes that ranges do not apply",
+			values:      map[string]any{"serviceType": "ClusterIP"},
+			present:     true,
+			wantWarning: true,
+			wantNoRange: true,
+		},
+		{
+			name:        "NodePort serviceType with explicit ranges warns that they are not rendered",
+			values:      map[string]any{"serviceType": "NodePort", "allowedSourceRanges": []any{"10.0.0.0/8"}},
+			present:     true,
+			wantWarning: true,
+		},
+		{
+			name:    "ClusterIP serviceType still rejects an invalid allowedSourceRanges value",
+			values:  map[string]any{"serviceType": "ClusterIP", "allowedSourceRanges": "10.0.0.0/8"},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:        "explicit LoadBalancer serviceType keeps the private default",
+			values:      map[string]any{"serviceType": "LoadBalancer"},
+			present:     true,
+			wantWarning: true,
+			wantDefault: true,
+		},
+		{
+			name:        "empty serviceType keeps the private default",
+			values:      map[string]any{"serviceType": ""},
+			present:     true,
+			wantWarning: true,
+			wantDefault: true,
+		},
+		{
+			name:    "errors on a serviceType outside LoadBalancer, ClusterIP, NodePort",
+			values:  map[string]any{"serviceType": "ExternalName"},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "errors on a lowercase serviceType (case-sensitive)",
+			values:  map[string]any{"serviceType": "clusterip"},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "errors on a non-string serviceType",
+			values:  map[string]any{"serviceType": true},
+			present: true,
+			wantErr: true,
+		},
 		{
 			name:        "defaults to private ranges when allowedSourceRanges is unset",
 			values:      map[string]any{"fullnameOverride": "agentgateway"},
@@ -4579,6 +4631,12 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 					if !strings.Contains(warning, want) {
 						t.Errorf("warning = %q, want substring %q", warning, want)
 					}
+				}
+			}
+
+			if tt.wantNoRange {
+				if got, ok := componentValues[agentgatewayComponentName][agentgatewaySourceRangesPath]; ok {
+					t.Errorf("allowedSourceRanges = %#v, want it left absent for a non-LoadBalancer serviceType", got)
 				}
 			}
 

@@ -108,13 +108,16 @@ deployment` catches this: the agentgateway health check asserts that
 deployment phase instead of passing it
 ([#3714](https://github.com/NVIDIA/aicr/issues/3714)).
 
-On an LB-less tenant, keep the step rather than skipping it: generate the
+On an LB-less tenant, keep the step rather than skipping it, and generate the
 bundle with `--set agentgateway:serviceType=ClusterIP`. The controller then
 programs the Gateway onto a ClusterIP Service, the shape the NVKE GB200
 cluster runs, and the conformance check records "No LoadBalancer Service".
-With `ClusterIP` the rendered Service carries no `loadBalancerSourceRanges`,
-a field Kubernetes accepts only on a LoadBalancer Service. Never edit the
-generated bundle to get there; `aicr verify` checksums every file in it.
+The knob is not what makes the health check pass: as noted above, agentgateway
+v1.5.0 reports `Programmed=True` without an address. It avoids a Service that
+sits at `EXTERNAL-IP <pending>` forever and a LoadBalancer-only field the
+cluster cannot honor; with `ClusterIP` the rendered Service carries no
+`loadBalancerSourceRanges`. Never edit the generated bundle to get there;
+`aicr verify` checksums every file in it.
 
 ### Evidence
 

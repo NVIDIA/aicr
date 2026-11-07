@@ -58,23 +58,21 @@ the `< 1.36.0` Kubernetes cap and the Gateway API / LoadBalancer prerequisites
   default before deploying the `inference-dynamo` bundle.
 - **LoadBalancer (inference chain only).** RKE2 provisions no LoadBalancer
   controller, and the `inference-gateway` Service the `rke2-inference` base
-  installs is `type: LoadBalancer`. Install a bare-metal LB implementation
-  (e.g. MetalLB or kube-vip) before deploying the `inference` or
-  `inference-dynamo` bundle. Without one the Service sits at
-  `EXTERNAL-IP <pending>` and the chain's conformance check gates on
-  `Gateway.status.conditions[?type=='Programmed'].status == 'True'` — it
-  will not go green. (Until an LB exists the gateway is still reachable via
-  its NodePort / ClusterIP for smoke tests.)
-  The deployment phase gates on the same Gateway: the `agentgateway` health
-  check asserts `agentgateway-system/inference-gateway` exists with
-  `Accepted=True` and `Programmed=True`, so a bundle deployed without its
-  `agentgateway-post` step fails `aicr validate --phase deployment`
-  ([#3714](https://github.com/NVIDIA/aicr/issues/3714)). Without an LB,
-  generate the bundle with `--set agentgateway:serviceType=ClusterIP`
-  instead: the controller then programs the Gateway onto a ClusterIP
-  Service and the conformance check records "No LoadBalancer Service".
-  Never edit the generated bundle to get there; `aicr verify` checksums
-  every file in it.
+  installs is `type: LoadBalancer`. Either install a bare-metal LB
+  implementation (e.g. MetalLB or kube-vip) before deploying the `inference`
+  or `inference-dynamo` bundle, or generate the bundle with
+  `--set agentgateway:serviceType=ClusterIP` so the controller programs the
+  Gateway onto a ClusterIP Service and the conformance check records
+  "No LoadBalancer Service". Without either, the Service sits at
+  `EXTERNAL-IP <pending>` forever, though the gateway stays reachable via its
+  NodePort / ClusterIP for smoke tests. Neither choice decides the
+  `agentgateway` health check, which asserts
+  `agentgateway-system/inference-gateway` exists with `Accepted=True` and
+  `Programmed=True` ([#3714](https://github.com/NVIDIA/aicr/issues/3714)):
+  on agentgateway v1.5.0 `Programmed` does not wait for an address. What the
+  check does catch is a bundle deployed without its `agentgateway-post` step.
+  Never edit the generated bundle to switch the Service type; `aicr verify`
+  checksums every file in it.
 - **Mask the host `nvidia-imex` service on every GPU node.** The Vera Rubin
   reference image installs the host-managed 615 driver stack, which enables
   an `nvidia-imex` systemd service by default. All four shipped coordinates

@@ -85,13 +85,16 @@ rbac:
 allowedSourceRanges: []
 
 # Service type of the inference-gateway Service the controller generates.
-# Empty keeps the controller default, LoadBalancer. Set it to ClusterIP on a
-# cluster with no LoadBalancer provider (bare-metal NVKE or RKE2 tenants without
-# MetalLB or kube-vip): a LoadBalancer Service there never gets an address, and
-# the deployment health check requires the Gateway to be Programmed. ClusterIP
-# drops allowedSourceRanges from the rendered Service, because
-# loadBalancerSourceRanges is a LoadBalancer-only field the apiserver rejects on
-# any other type; the gateway is then reachable only from inside the cluster.
+# Empty keeps the controller default, LoadBalancer. Accepted values are
+# LoadBalancer, ClusterIP and NodePort (case-sensitive); anything else fails
+# bundle generation. Set ClusterIP on a cluster with no LoadBalancer provider
+# (bare-metal NVKE or RKE2 tenants without MetalLB or kube-vip) to avoid a
+# Service that sits at EXTERNAL-IP <pending> forever and a LoadBalancer-only
+# field the cluster cannot honor. The deployment health check passes either
+# way on agentgateway v1.5.0, whose Programmed condition does not wait for an
+# address. ClusterIP drops allowedSourceRanges from the rendered Service,
+# because loadBalancerSourceRanges is accepted only on a LoadBalancer Service;
+# the gateway is then reachable only from inside the cluster.
 #
 #   aicr bundle -r recipe.yaml --set agentgateway:serviceType=ClusterIP
 serviceType: ""
