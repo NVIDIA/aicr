@@ -23,20 +23,81 @@ Collected with the `vr200-nvke-ubuntu-inference` recipe
 
 ## Results
 
-| # | Requirement | Feature | Result | Evidence |
-|---|-------------|---------|--------|----------|
-| 1 | `dra_support` | Dynamic Resource Allocation | PASS | [dra-support.md](evidence/dra-support.md) |
-| 2 | `gang_scheduling` | Gang Scheduling (KAI Scheduler, two-phase barrier) | PASS | [gang-scheduling.md](evidence/gang-scheduling.md) |
-| 3 | `secure_accelerator_access` | Secure Accelerator Access | PASS | [secure-accelerator-access.md](evidence/secure-accelerator-access.md) |
-| 4 | `accelerator_metrics` | Accelerator Metrics (DCGM Exporter) | PASS | [accelerator-metrics.md](evidence/accelerator-metrics.md) |
-| 5 | `ai_service_metrics` | AI Service Metrics | PASS | [ai-service-metrics.md](evidence/ai-service-metrics.md) |
-| 6 | `ai_inference` | Inference API Gateway (agentgateway v1.5.0) | PASS | [inference-gateway.md](evidence/inference-gateway.md), [header routing and weighted traffic](evidence/gateway-routing-behavior.txt) |
-| 7 | `robust_controller` | Robust AI Operator (Kubeflow Trainer, webhook-attributed) | PASS | [robust-operator.md](evidence/robust-operator.md) |
-| 8 | `pod_autoscaling` | Pod Autoscaling (HPA + GPU metrics) | PASS | [pod-autoscaling.md](evidence/pod-autoscaling.md) |
-| 9 | `cluster_autoscaling` | Cluster Autoscaling | SKIP — bare metal, no cloud node group | [cluster-autoscaling.md](evidence/cluster-autoscaling.md) |
+These are **check results**, not checklist verdicts. AICR's
+`--cncf-submission` renderer produces the verdicts, and the run that produced
+these files predates it — see [How this was collected](#how-this-was-collected).
 
-**8 PASS, 1 SKIP, 0 FAIL.** Collected 2026-11-06 with
-`aicr validate --phase conformance --cncf-submission`.
+The v1.36 checklist carries eight MUST requirements:
+
+| # | Requirement (v1.36 MUST) | Feature | Check result | Evidence |
+|---|---|---|---|---|
+| 1 | `gang_scheduling` | Gang Scheduling (KAI Scheduler, two-phase barrier) | PASS | [gang-scheduling.md](evidence/gang-scheduling.md) |
+| 2 | `secure_accelerator_access` | Secure Accelerator Access | PASS | [secure-accelerator-access.md](evidence/secure-accelerator-access.md) |
+| 3 | `accelerator_metrics` | Accelerator Metrics (DCGM Exporter) | PASS | [accelerator-metrics.md](evidence/accelerator-metrics.md) |
+| 4 | `ai_service_metrics` | AI Service Metrics | PASS | [ai-service-metrics.md](evidence/ai-service-metrics.md) |
+| 5 | `ai_inference` | Inference API Gateway (agentgateway v1.5.0) | PASS | [inference-gateway.md](evidence/inference-gateway.md), [header routing and weighted traffic](evidence/gateway-routing-behavior.txt) |
+| 6 | `robust_controller` | Robust AI Operator (Kubeflow Trainer) | PASS — admission only, reconciliation not demonstrated | [robust-operator.md](evidence/robust-operator.md) |
+| 7 | `pod_autoscaling` | Pod Autoscaling (HPA + GPU metrics) | PASS — scale-up only | [pod-autoscaling.md](evidence/pod-autoscaling.md) |
+| 8 | `cluster_autoscaling` | Cluster Autoscaling | NOT TESTED — bare metal, no cloud node group | [cluster-autoscaling.md](evidence/cluster-autoscaling.md) |
+
+**Supporting evidence**, which the v1.36 checklist does not carry as a
+requirement:
+
+| Requirement | Feature | Check result | Evidence |
+|---|---|---|---|
+| `dra_support` | Dynamic Resource Allocation | PASS — MNNVL subtest did not run | [dra-support.md](evidence/dra-support.md) |
+
+`dra_support` was a requirement at v1.35 only. Later checklists drop it and
+AICR renders it as supporting evidence rather than a requirement row
+(`pkg/evidence/cncf/requirements.go`). An earlier draft of this README counted
+"8 PASS, 1 SKIP" — that was nine collector sections, one more than the
+checklist has requirements, with DRA among them.
+
+So: **five of the eight requirements pass outright, two pass with the
+qualifications below, and one was not tested.** `cluster_autoscaling` was
+skipped rather than declared not-applicable, so nothing here establishes it
+either way.
+
+The v1.36 checklist also carries six SHOULDs — `driver_runtime_management`,
+`gpu_sharing`, `virtualized_accelerator`, `advanced_inference_ingress`,
+`high_performance_networking` and `disaggregated_inference`. **None of them is
+tested here**, and none has a section in this set. AICR has a check for one,
+`driver_runtime_management`, added in
+[#3683](https://github.com/NVIDIA/aicr/pull/3683) after this collection ran;
+the other five have no AICR check.
+
+## How this was collected
+
+- **Command** — `aicr validate --phase conformance --cncf-submission`, run
+  2026-11-06 against the tenant cluster.
+- **Recipe** — `vr200-nvke-ubuntu-inference` as it stood on the
+  [#3679](https://github.com/NVIDIA/aicr/pull/3679) branch.
+- **Binary** — built from source at `f12ed731d`. It reports
+  `aicr version dev (commit: unknown, date: unknown)`, so the files carry no
+  version string of their own; this README is the record of which build made
+  them.
+- **Outcome** — every section listed above completed and none reported FAIL.
+  `platform-health` was not among them, for the reason in
+  [The cluster was not deployed from this recipe](#the-cluster-was-not-deployed-from-this-recipe).
+
+`f12ed731d` predates [#3666](https://github.com/NVIDIA/aicr/pull/3666)
+(`bd08bec25`), which replaced the shell collector at
+`pkg/evidence/cncf/scripts/collect-evidence.sh` with rendering from the
+conformance run and made check selection follow the recipe. **These files are
+that shell collector's output.** The same command on current `main` would not
+reproduce them:
+
+- Check selection now comes from the recipe, and `vr200-nvke-ubuntu-inference`
+  declares neither `gang-scheduling` nor `robust-controller`, so neither
+  section would be produced at all.
+- Checks of the same name now test more: `robust-controller` requires a valid
+  TrainJob reconciled to `Complete`, `pod-autoscaling` adds a one-replica
+  negative control and a scale-down, and `ai-service-metrics` looks for a
+  request counter rather than scraped training metrics.
+
+Read the sections here as observations of the platform, not as results of the
+checks that carry those names today. Re-collecting against a current build is
+what would turn them into current validation results.
 
 ## What the gateway result rests on
 
@@ -53,8 +114,11 @@ from another install is not evidence for this recipe."* The same cluster
 recorded that SKIP under the training recipe and records PASS here, because
 `vr200-nvke-ubuntu-inference` declares `agentgateway-crds` and `agentgateway`.
 
-Beyond the collector's own check (GatewayClass Accepted, Gateway Programmed,
-InferencePool CRD Established), the Gateway was exercised directly: header
+Beyond the collector's own check — GatewayClass Accepted, Gateway Programmed,
+and the InferencePool CRDs registered (the collector's result line calls them
+Established; what it captured is a `kubectl get crds` listing, which shows
+registration and creation time, not the `Established` condition) — the Gateway
+was exercised directly: header
 routing selected the expected backend both ways, and a configured 80/20 split
 produced 82/18 across 100 requests with no failures. Those probes are not
 collector output; they are recorded in
@@ -62,14 +126,29 @@ collector output; they are recorded in
 objects that produced them in
 [gateway-routing-configuration.json](evidence/gateway-routing-configuration.json).
 
-## Two results that are narrower than they look
+## Results that are narrower than they look
 
-**`robust_controller` credits an operator this recipe does not ship.** The
-check found Kubeflow Trainer 2.2.0 and drove a TrainJob through it. Kubeflow
-Trainer is on this cluster from the training bring-up; the inference recipe
-declares no AI operator, matching `vr200-rke2-ubuntu-inference`, which declares
-none either. The capability is demonstrated on the platform, but a cluster
-built from this recipe alone would have no operator for the check to find.
+**`robust_controller` shows the operator admitting, not reconciling.** The
+check found Kubeflow Trainer 2.2.0 running with its three CRDs registered, and
+verified that the validating webhook rejected a schema-valid but rule-invalid
+TrainJob with a webhook-attributed message. That TrainJob was submitted as a
+server-side dry run, so nothing was persisted and nothing was reconciled.
+AICR's own requirement text for the Kubeflow path asks for a valid TrainJob
+reconciled to `Complete`; this set does not carry that, and the PASS above
+should be read as admission control working, not the controller reconciling.
+
+**The operator is also not this recipe's.** Kubeflow Trainer is on this cluster
+from the training bring-up; `vr200-nvke-ubuntu-inference` declares no AI
+operator, matching `vr200-rke2-ubuntu-inference`. Today's
+`robust_controller_check.go` takes its subject from the recipe —
+`kubeflow-trainer`, else `dynamo-platform`, else skip — so a cluster built from
+this recipe alone records a skip here rather than any result.
+
+**`pod_autoscaling` records a scale-up only.** The HPA read `gpu_utilization`
+through the Prometheus Adapter and took the Deployment from one replica to two
+under load; that is in [Pods After Scale-Up](evidence/pod-autoscaling.md). The
+current check also wants a one-replica negative control and a scale-down back
+to one. Neither is in this set.
 
 **`dra_support` passed without its MNNVL subtest.** The DRA API, the
 `compute-domain.nvidia.com` ResourceSlices on both workers and the DeviceClass
@@ -93,12 +172,22 @@ diverge in both directions: the cluster carries `kubeflow-trainer` and
 `nodewright-operator`, `nodewright-customizations`, `dra-node-labeler` and
 `k8s-ephemeral-storage-metrics`, which it does.
 
-None of those five feeds any of the nine requirements, so the verdicts above
+None of those five feeds any of the requirements above, so the observations
 stand on their own. But a `--phase conformance` validator run against this
 recipe on this cluster would fail `platform-health`, which expects every
 declared component present, and that is expected rather than a conformance
-result. What this set shows is that the platform meets the requirements; it
-does not show that a cluster built from this recipe alone reproduces it.
+result. It is also why no `platform-health` section appears here.
+
+The versions diverge too. The cluster runs the **NVIDIA DRA driver 25.8.1**,
+while the recipe pins the upstream `dra-driver-nvidia-gpu` chart at **0.5.1**
+(chart version and appVersion alike) — a different distribution of the driver
+on a different version scheme, not an older or newer build of the same one.
+
+What this set shows is that the platform met five of the eight v1.36
+requirements outright under the collector that produced it and two more with
+the qualifications above, with `cluster_autoscaling` untested. It is not a
+conformance claim, and it does not show that a cluster built from this recipe
+alone reproduces any of it.
 
 ## Tested platform
 
@@ -136,8 +225,12 @@ did not affect these results, which are single-request HTTP through a Gateway
 and per-node metrics and scheduling, but anything moving bulk data between pods
 on this cluster would be affected.
 
-The evidence carries no internal IP addresses. Tenant node names, GPU UUIDs,
-DCGM `pci_bus_id` labels and the cluster's `providerID` are retained, matching
-[`../trainer-nvke-vr200/`](../trainer-nvke-vr200/) exactly; none identifies a
-site or a host outside this tenant cluster. Commands, timestamps, versions,
-outcomes and measured values are retained verbatim.
+The evidence retains this tenant cluster's private addressing. Pod IPs and
+Service ClusterIPs appear in eight of the reports — in `kubectl` output, in
+endpoint listings and in Prometheus labels. They are RFC 1918 addresses inside
+one tenant cluster's overlay: they route nowhere outside it and name no site,
+rack or host. Tenant node names, GPU UUIDs, DCGM `pci_bus_id` labels and the
+cluster's `providerID` are retained on the same reasoning, and
+[`../trainer-nvke-vr200/`](../trainer-nvke-vr200/) retains the same classes of
+value. Commands, timestamps, versions, outcomes and measured values are
+retained verbatim.
