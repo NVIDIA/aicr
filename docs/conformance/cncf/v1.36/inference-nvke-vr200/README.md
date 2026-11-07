@@ -45,18 +45,16 @@ requirement:
 
 | Requirement | Feature | Check result | Evidence |
 |---|---|---|---|
-| `dra_support` | Dynamic Resource Allocation | PASS — MNNVL subtest did not run | [dra-support.md](evidence/dra-support.md) |
+| `dra_support` | Dynamic Resource Allocation | PASS — API and ResourceSlices only, no allocation test | [dra-support.md](evidence/dra-support.md) |
 
 `dra_support` was a requirement at v1.35 only. Later checklists drop it and
 AICR renders it as supporting evidence rather than a requirement row
-(`pkg/evidence/cncf/requirements.go`). An earlier draft of this README counted
-"8 PASS, 1 SKIP" — that was nine collector sections, one more than the
-checklist has requirements, with DRA among them.
+(`pkg/evidence/cncf/requirements.go`).
 
-So: **five of the eight requirements pass outright, two pass with the
-qualifications below, and one was not tested.** `cluster_autoscaling` was
-skipped rather than declared not-applicable, so nothing here establishes it
-either way.
+So, in the collector's sections: **five of the eight requirements pass
+outright, two pass with the qualifications below, and one was not tested.**
+`cluster_autoscaling` was skipped rather than declared not-applicable, so
+nothing here establishes it either way.
 
 The v1.36 checklist also carries six SHOULDs — `driver_runtime_management`,
 `gpu_sharing`, `virtualized_accelerator`, `advanced_inference_ingress`,
@@ -82,24 +80,37 @@ aicr validate -k <tenant.kubeconfig> \
 - **Recipe** — `vr200-nvke-ubuntu-inference`, from the branch that became
   [#3679](https://github.com/NVIDIA/aicr/pull/3679), passed as a resolved file
   with `--data` pointing at that branch's `recipes/` tree (497 files).
-- **Binary** — built from source at `f12ed731d`. It reports
-  `aicr version dev (commit: unknown, date: unknown)`, so the files carry no
-  version string of their own; this README is the record of which build made
-  them.
+- **Binary** — built from source at `f12ed731d`, which is on the
+  `feat/vr200-nvke-training` branch of
+  [#3620](https://github.com/NVIDIA/aicr/pull/3620) and not on `main`: that PR
+  was squashed into `fe2618f46`, so `main` has the code but not this commit.
+  It reports `aicr version dev (commit: unknown, date: unknown)`, so the files
+  carry no version string of their own; this README is the record of which
+  build made them.
 - **Features** — no `--feature`, so all nine were collected: `dra-support`,
   `gang-scheduling`, `secure-access`, `accelerator-metrics`,
   `ai-service-metrics`, `inference-gateway`, `robust-operator`,
   `pod-autoscaling`, `cluster-autoscaling`.
 - **Outcome** — exit status 0. Every section completed and none reported FAIL.
 
-**`--phase conformance` had no effect on this run.** At `f12ed731d` the
-`validate` action short-circuits on `--cncf-submission` and calls
-`runCNCFSubmission` before it parses the phase selection, so no validator phase
-executed and no check ran. The recipe was loaded for exactly one purpose, which
-the run log states: *"loading recipe to resolve the GPU allocation policy for
-CNCF evidence collection"*, resolving
-`gpuAllocationPolicy=device-plugin-extended-resource`. The flag is recorded
-above because it was typed, not because it did anything.
+**Three of those flags did nothing.** At `f12ed731d` the `validate` action
+short-circuits on `--cncf-submission` and returns `runCNCFSubmission` before it
+parses the phase selection or resolves the snapshot path
+(`pkg/cli/validate.go`), and `runCNCFSubmission` never touches the output flag.
+So `--phase conformance` ran no validator phase and therefore no check,
+`--snapshot` was never read — the collector queried the live cluster through
+`-k` — and no CTRF file was written at `-o`. All three are recorded above
+because they were typed, not because they did anything.
+
+**The recipe was read for two things.** The run log states the first:
+*"loading recipe to resolve the GPU allocation policy for CNCF evidence
+collection"*, resolving `gpuAllocationPolicy=device-plugin-extended-resource`.
+The second is silent — `CollectCNCFEvidence` calls
+`ResolveInferenceGatewayProfile` on the recipe's component refs
+(`pkg/client/v1/evidence.go`) and threads the declared Gateway into the
+collector. That selection is what makes `ai_inference` PASS here and SKIP under
+the training recipe; see
+[What the gateway result rests on](#what-the-gateway-result-rests-on).
 
 `f12ed731d` predates [#3666](https://github.com/NVIDIA/aicr/pull/3666)
 (`bd08bec25`), which replaced the shell collector at
@@ -171,16 +182,20 @@ under load; that is in [Pods After Scale-Up](evidence/pod-autoscaling.md). The
 current check also wants a one-replica negative control and a scale-down back
 to one. Neither is in this set.
 
-**`dra_support` passed without its MNNVL subtest.** The DRA API, the
-`compute-domain.nvidia.com` ResourceSlices on both workers and the DeviceClass
-are all present and recorded. The behavioral IMEX-channel subtest did not run,
-because it requires a node carrying the `nvidia.com/gpu.clique` label and no
-pod was holding the ComputeDomain's channel at collection time — with IMEX
-down, each GPU reports its own cliqueId and GFD publishes no node-level clique.
-The fabric itself was healthy throughout (`Fabric State: Completed`, `Global
-Fabric Manager State: Connected`). The multi-node NVLink claim for this
-hardware lives in [`../trainer-nvke-vr200/`](../trainer-nvke-vr200/), which
-measured 996 GB/s across both trays; this profile does not restate it.
+**`dra_support` rests on API and ResourceSlice checks only.** The section
+records the served `resource.k8s.io/v1` API, the DeviceClasses, the DRA driver
+pods and the two `compute-domain.nvidia.com` ResourceSlices, one per worker.
+Nothing was allocated: under the recipe's `device-plugin-extended-resource`
+policy the collector deploys no claim pod and marks the behavioral full-GPU
+ResourceClaim test **not applicable**, because whole GPUs are
+device-plugin-allocated through the `nvidia.com/gpu` extended resource. The
+file says so, and adds that pool-generation and device-taint validation of
+those slices belongs to the Go validator rather than the script — which, per
+the section above, did not run on this path. The collector carries no
+multi-node NVLink test of any kind, so nothing here speaks to MNNVL; that claim
+for this hardware lives in
+[`../trainer-nvke-vr200/`](../trainer-nvke-vr200/), which measured 996 GB/s
+across both trays.
 
 ## The cluster was not deployed from this recipe
 
@@ -206,11 +221,12 @@ while the recipe pins the upstream `dra-driver-nvidia-gpu` chart at **0.5.1**
 (chart version and appVersion alike) — a different distribution of the driver
 on a different version scheme, not an older or newer build of the same one.
 
-What this set shows is that the platform met five of the eight v1.36
-requirements outright under the collector that produced it and two more with
-the qualifications above, with `cluster_autoscaling` untested. It is not a
-conformance claim, and it does not show that a cluster built from this recipe
-alone reproduces any of it.
+What this set shows is that, in the collector's sections, five of the eight
+v1.36 requirements pass outright and two more pass with the qualifications
+above, with `cluster_autoscaling` untested. Those are that collector's
+observations and not checklist verdicts: this is not a conformance claim, and
+it does not show that a cluster built from this recipe alone reproduces any of
+it.
 
 ## Tested platform
 
