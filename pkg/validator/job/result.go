@@ -123,13 +123,13 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 // termination message, since the verdict does not depend on the output; the
 // read error is logged.
 func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, result *ctrf.ValidatorResult) {
-	logs, logErr := d.readValidatorLogs(ctx, podName)
+	logs, attempts, logErr := d.readValidatorLogs(ctx, podName)
 	switch {
 	case logErr != nil && result.ExitCode == 0:
 		result.ExitCode = -1
 		result.TerminationMsg = boundTerminationMsg(fmt.Sprintf(
-			"result output unavailable: logs of pod %s could not be read after %d attempts, so the check's passing exit code is not credited: %v",
-			podName, defaults.ValidatorLogReadAttempts, logErr), defaults.ValidatorMaxTerminationMsgBytes)
+			"result output unavailable: logs of pod %s could not be read after %d attempt(s), so the check's passing exit code is not credited: %v",
+			podName, attempts, logErr), defaults.ValidatorMaxTerminationMsgBytes)
 	case logErr != nil:
 		slog.Warn("failed to capture pod logs", "pod", podName, "error", logErr)
 	case logs != "":
@@ -140,30 +140,32 @@ func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, r
 // readValidatorLogs reads the validator container's logs, retrying once
 // after ValidatorLogReadRetryDelay so a transient apiserver or kubelet error
 // does not by itself turn a pass into an unreadable result. The pause is cut
-// short by ctx; a context already done returns the last read error.
-func (d *Deployer) readValidatorLogs(ctx context.Context, podName string) (string, error) {
+// short by ctx; a context already done returns the last read error. attempts
+// is how many reads were made, so the message reports what happened rather
+// than the configured maximum.
+func (d *Deployer) readValidatorLogs(ctx context.Context, podName string) (logs string, attempts int, err error) {
 	read := d.config.LogReader
 	if read == nil {
 		read = pod.GetPodLogs
 	}
 	var lastErr error
-	for attempt := 1; attempt <= defaults.ValidatorLogReadAttempts; attempt++ {
+	for attempts = 1; attempts <= defaults.ValidatorLogReadAttempts; attempts++ {
 		logs, err := read(ctx, d.config.Clientset, d.config.Namespace, podName, ValidatorContainerName)
 		if err == nil {
-			return logs, nil
+			return logs, attempts, nil
 		}
 		lastErr = err
-		if attempt == defaults.ValidatorLogReadAttempts {
+		if attempts == defaults.ValidatorLogReadAttempts {
 			break
 		}
-		slog.Warn("failed to read validator pod logs; retrying", "pod", podName, "attempt", attempt, "error", err)
+		slog.Warn("failed to read validator pod logs; retrying", "pod", podName, "attempt", attempts, "error", err)
 		select {
 		case <-ctx.Done():
-			return "", lastErr
+			return "", attempts, lastErr
 		case <-time.After(defaults.ValidatorLogReadRetryDelay):
 		}
 	}
-	return "", lastErr
+	return "", min(attempts, defaults.ValidatorLogReadAttempts), lastErr
 }
 
 // missingPodOutcome classifies an ExtractResult run whose Job pod could not be

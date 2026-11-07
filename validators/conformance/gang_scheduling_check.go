@@ -29,6 +29,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -124,6 +125,26 @@ type gangTestRun struct {
 	negGroupName string
 	negPods      []string
 	negShape     gangNegativeShape
+
+	// imagePullSecrets and validatorNamespace are the --image-pull-secret
+	// names the orchestrator forwarded and where they live, copied into the
+	// per-run namespace at creation and attached to every member pod, as
+	// gpuTestRun does for the GPU probes.
+	imagePullSecrets   []string
+	validatorNamespace string
+}
+
+// imagePullSecretRefs returns the pod-spec references to the run's copied
+// image pull Secrets; nil when the orchestrator forwarded none.
+func (run *gangTestRun) imagePullSecretRefs() []corev1.LocalObjectReference {
+	if run == nil || len(run.imagePullSecrets) == 0 {
+		return nil
+	}
+	refs := make([]corev1.LocalObjectReference, 0, len(run.imagePullSecrets))
+	for _, name := range run.imagePullSecrets {
+		refs = append(refs, corev1.LocalObjectReference{Name: name})
+	}
+	return refs
 }
 
 type gangSchedulingReport struct {
@@ -166,10 +187,12 @@ func newGangTestRun() (*gangTestRun, error) {
 	}
 	suffix := hex.EncodeToString(b)
 	run := &gangTestRun{
-		suffix:       suffix,
-		namespace:    gangTestNSPrefix + suffix,
-		groupName:    gangGroupPrefix + suffix,
-		negGroupName: gangNegativeGroupPrefix + suffix,
+		suffix:             suffix,
+		namespace:          gangTestNSPrefix + suffix,
+		groupName:          gangGroupPrefix + suffix,
+		negGroupName:       gangNegativeGroupPrefix + suffix,
+		imagePullSecrets:   validators.ImagePullSecretNames(),
+		validatorNamespace: validators.ValidatorNamespace(),
 	}
 	for i := range gangMinMembers {
 		run.pods[i] = fmt.Sprintf("%s%s-%d", gangPodPrefix, suffix, i)
@@ -372,7 +395,12 @@ func createGangTestNamespace(ctx context.Context, clientset kubernetes.Interface
 	if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); k8s.IgnoreAlreadyExists(err) != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
 	}
-	return nil
+	// The member pods pull with the forwarded --image-pull-secret Secrets,
+	// which a pod resolves only in its own namespace; the copies die with it.
+	return copyImagePullSecrets(ctx, clientset, &gpuTestRun{
+		token: run.suffix, namespace: run.namespace,
+		imagePullSecrets: run.imagePullSecrets, validatorNamespace: run.validatorNamespace,
+	})
 }
 
 // failOnGangCleanup is the check's final verdict once cleanup ran: a run that
@@ -1144,7 +1172,47 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 	if err := k8s.IgnoreNotFound(clientset.CoreV1().Namespaces().Delete(nsCtx, run.namespace, metav1.DeleteOptions{})); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to delete gang test namespace", err)
 	}
-	return nil
+	// Confirm the namespace is gone within the budget, so the artifact reports
+	// what was observed. An accepted deletion that is still Terminating when
+	// the budget ends is not a leak: the namespace controller finishes it
+	// server-side, as cleanupGPUTestNamespace also records. It is returned as
+	// an error only when the namespace is still present and not Terminating.
+	//nolint:contextcheck // same fresh deadline as the Delete above, so a stuck wait earlier cannot starve the confirmation
+	return confirmGangNamespaceGone(nsCtx, clientset, run.namespace)
+}
+
+// confirmGangNamespaceGone polls until the namespace is absent or ctx ends.
+//
+// Errors:
+//   - ErrCodeInternal when the budget ends with the namespace present and not
+//     Terminating (no deletion in progress), or a read failed throughout.
+func confirmGangNamespaceGone(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+	var last *corev1.Namespace
+	var lastErr error
+	pollErr := wait.PollUntilContextCancel(ctx, defaults.PodPollInterval, true, func(c context.Context) (bool, error) {
+		ns, err := clientset.CoreV1().Namespaces().Get(c, namespace, metav1.GetOptions{})
+		switch {
+		case apierrors.IsNotFound(err):
+			return true, nil
+		case err != nil:
+			lastErr = err
+			return false, nil
+		}
+		last, lastErr = ns, nil
+		return false, nil
+	})
+	if pollErr == nil {
+		return nil
+	}
+	if last != nil && last.DeletionTimestamp != nil {
+		slog.Warn("gang test namespace deletion accepted but not confirmed within the cleanup budget; the namespace controller finishes it server-side",
+			"namespace", namespace)
+		return nil
+	}
+	if lastErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("gang test namespace %s could not be confirmed gone within the cleanup budget", namespace), lastErr)
+	}
+	return errors.New(errors.ErrCodeInternal, fmt.Sprintf("gang test namespace %s still exists with no deletion in progress after the cleanup budget", namespace))
 }
 
 // buildPodGroup returns the unstructured PodGroup for the positive case.
@@ -1181,7 +1249,7 @@ func buildGangTestPod(run *gangTestRun, index int, tolerations []corev1.Tolerati
 		corev1.ResourceCPU:    resource.MustParse(gangWorkerCPURequest),
 		corev1.ResourceMemory: resource.MustParse(gangWorkerMemoryRequest),
 	}
-	return newGangMemberPod(run.namespace, run.pods[index], run.groupName, gangPhasePositive,
+	return newGangMemberPod(run, run.pods[index], run.groupName, gangPhasePositive,
 		[]string{"sh", "-c", fmt.Sprintf("echo 'Gang worker %d completed successfully'", index)},
 		requests, tolerations)
 }
@@ -1194,11 +1262,12 @@ func buildGangNegativePod(run *gangTestRun, index int, tolerations []corev1.Tole
 		corev1.ResourceCPU:    run.negShape.CPUPerMember.DeepCopy(),
 		corev1.ResourceMemory: run.negShape.MemoryPerMember.DeepCopy(),
 	}
-	return newGangMemberPod(run.namespace, run.negPods[index], run.negGroupName, gangPhaseNegative,
+	return newGangMemberPod(run, run.negPods[index], run.negGroupName, gangPhaseNegative,
 		[]string{"sh", "-c", "sleep 300"}, requests, tolerations)
 }
 
-func newGangMemberPod(namespace, name, groupName, phase string, command []string, requests corev1.ResourceList, tolerations []corev1.Toleration) *corev1.Pod {
+func newGangMemberPod(run *gangTestRun, name, groupName, phase string, command []string, requests corev1.ResourceList, tolerations []corev1.Toleration) *corev1.Pod {
+	namespace := run.namespace
 	if tolerations == nil {
 		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
 	}
@@ -1216,9 +1285,10 @@ func newGangMemberPod(namespace, name, groupName, phase string, command []string
 			},
 		},
 		Spec: corev1.PodSpec{
-			SchedulerName: kaiSchedulerName,
-			RestartPolicy: corev1.RestartPolicyNever,
-			Tolerations:   tolerations,
+			ImagePullSecrets: run.imagePullSecretRefs(),
+			SchedulerName:    kaiSchedulerName,
+			RestartPolicy:    corev1.RestartPolicyNever,
+			Tolerations:      tolerations,
 			Containers: []corev1.Container{
 				{
 					Name:    "worker",

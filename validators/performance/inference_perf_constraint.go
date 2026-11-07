@@ -456,7 +456,12 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// Guard B: dynamo-platform must be declared in the recipe's componentRefs.
 	// Presence of a Criteria block is independent and not consulted here.
 	if !hasDynamoPlatform(ctx) {
-		validators.EmitExtraOrWarn(map[string]string{validators.ExtraKeySkipReason: validators.SkipReasonComponentNotInRecipe})
+		// The skip reason is what the aggregation reads as the NOT TESTED
+		// reason, so a reason that could not be written fails the check
+		// rather than skipping it unexplained.
+		if err := validators.EmitExtra(map[string]string{validators.ExtraKeySkipReason: validators.SkipReasonComponentNotInRecipe}); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to publish the skip reason "+validators.SkipReasonComponentNotInRecipe, err)
+		}
 		return &inferenceResult{status: inferenceSkipMsgNoDynamoPlatform}, nil
 	}
 

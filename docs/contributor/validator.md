@@ -91,8 +91,10 @@ which does not establish a MUST (`StatusObserved`) unless
 `spec.validate.evidence.cncf.documented` attests it. A check the aggregation
 knows to be observation-only (`v1.IsObservationOnlyCheck`, today
 `cluster-autoscaling`) is observed too when its `passed` result carries no
-`resultSchema` stamp: the image predates the marker, so its silence is not a
-demonstration, and `CheckResult.Reason` records the mismatch. `Aggregate.Passed` is
+marker, whatever its `resultSchema` stamp says: no stamp means the image
+predates the marker, the known version means the marker line was dropped, an
+unknown version means this reader cannot interpret its markers; none of them
+is a demonstration, and `CheckResult.Reason` records which. `Aggregate.Passed` is
 scoped by level: every applicable MUST established (passed, or observed and
 documented), SHOULDs excluded; `NOT APPLICABLE` comes only from
 `spec.validate.evidence.cncf.notApplicable` and only for the conditional
@@ -671,10 +673,17 @@ Three sentinels exist today, with deliberately different lifecycles:
 
 The runner (`validators.Run`) emits one `##AICR-EXTRA##` line before the check
 starts, `resultSchema: "1"` (`ctrf.ResultSchemaVersion`): the result-contract
-version this image speaks. Every result the image produces carries it, a skip,
-a failure or a context-load failure included, and a stamp that cannot be
-written fails the check. `pkg/evidence/cncf` reads it to tell an image that
-could not have marked an observation from one that chose not to (see
+version this image speaks. The stamp is written before anything else, so a
+result carries it whenever the stamp write succeeded, a skip, a failure or a
+context-load failure included; a stamp that cannot be written fails the check
+(exit 1, no marker), and a pod whose logs the orchestrator could not read
+carries no markers at all and is reported `other`. A `passed` result read
+from its logs therefore carries the stamp unless the image predates it.
+`pkg/evidence/cncf` reads the stamp to word the reason when a check known to
+be observation-only passed without its marker: no stamp, the image predates
+the marker; the known version, the marker line was dropped; an unknown
+version, this reader cannot interpret its markers. In every one of these
+cases the pass is read as an observation, never a demonstration (see
 [Structured evidence that survives redaction](#structured-evidence-that-survives-redaction)).
 
 All are parsed with `strings.CutPrefix` and the parsers are pure, unit-tested
@@ -704,17 +713,15 @@ CTRF `extra` map (`ctrf.TestResult.Extra`, mirroring the CTRF spec's `extra`
 object) via `validators.EmitExtra`:
 
 ```go
-// Emit failures are non-fatal — warn, but never flip the check's verdict on a
-// failed stdout write (checkNvidiaSMI wraps this as the emitExtraOrWarn helper):
-emit := func(extra map[string]string) {
-    if err := validators.EmitExtra(extra); err != nil {
-        slog.Warn("failed to emit validator extra", "error", err)
-    }
-}
-// Success path — coverage disclosure (counts only, never node names/IPs):
-emit(map[string]string{"nodesValidated": "1", "nodesTotal": "2"})
-// Skip path — reason enum code:
-emit(map[string]string{"skipReason": "no-gpu-nodes"})
+// Informational extras (counts, measured values) are warn-only: a failed
+// stdout write never flips the check's verdict (validators.EmitExtraOrWarn):
+validators.EmitExtraOrWarn(map[string]string{
+    validators.ExtraKeyNodesValidated: "1", validators.ExtraKeyNodesTotal: "2",
+})
+// Skip path: the reason code decides how the aggregation reads the result,
+// so it goes through SkipWithReason, which fails the check when the code
+// cannot be written instead of skipping it unexplained:
+return validators.SkipWithReason(validators.SkipReasonNoGPUNodes, "no GPU nodes found in the cluster")
 ```
 
 **Transport.** `EmitExtra` writes the map to stdout as one
@@ -787,7 +794,7 @@ page are the contract.
 | `check-nvidia-smi` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
 | `cluster-autoscaling`, on every passing path | `observationOnly` |
 | any check, on an in-pod skip | `skipReason` |
-| any check, on every result | `resultSchema`, stamped by the runner before the check starts |
+| any check, on every result whose stamp write succeeded (every `passed` and `skipped` result an image that stamps produces) | `resultSchema`, stamped by the runner before the check starts |
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the
   benchmark runs, so a failed run still records its scope. `fabric` appears

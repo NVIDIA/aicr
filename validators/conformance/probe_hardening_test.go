@@ -252,6 +252,34 @@ func TestProbePodsCarryImagePullSecrets(t *testing.T) {
 	})
 }
 
+func TestPodAwaitingSandbox(t *testing.T) {
+	running := creatingPod()
+	running.Status.ContainerStatuses[0].State = corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}
+	finished := creatingPod()
+	finished.Status.Phase = corev1.PodSucceeded
+	initDone := creatingPod()
+	initDone.Status.InitContainerStatuses = []corev1.ContainerStatus{{Name: "init", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{}}}}
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		want bool
+	}{
+		{"not yet observed", nil, true},
+		{"pending, ContainerCreating", creatingPod(), true},
+		{"pending with no container status", &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodPending}}, true},
+		{"a container is running", running, false},
+		{"the pod finished", finished, false},
+		{"an init container ran", initDone, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := podAwaitingSandbox(tt.pod); got != tt.want {
+				t.Errorf("podAwaitingSandbox() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSandboxCreateFailure(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -412,6 +440,29 @@ func TestWaitForTerminalPod_MissingHandlerFailsFast(t *testing.T) {
 		pod, err := waitForTerminalPodWithin(context.Background(), client, "test-ns", "p", "sandbox probe pod", sandboxFastFailWait)
 		if err != nil {
 			t.Fatalf("waitForTerminalPodWithin() error = %v, want the pod to complete past the transient event", err)
+		}
+		if pod.Status.Phase != corev1.PodSucceeded {
+			t.Errorf("phase = %s, want Succeeded", pod.Status.Phase)
+		}
+	})
+
+	t.Run("a stale event is ignored once the pod has started", func(t *testing.T) {
+		// The handler was configured after the first sandbox failure: the
+		// event remains, the pod is Running. The List must not fail it.
+		started := creatingPod()
+		started.Status.ContainerStatuses[0].State = corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}
+		client := k8sfake.NewClientset(started, missingHandlerEvent("p.sandbox", "p"))
+		podsGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			done := creatingPod()
+			done.Status.Phase = corev1.PodSucceeded
+			done.Status.ContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}
+			_ = client.Tracker().Update(podsGVR, done, "test-ns")
+		}()
+		pod, err := waitForTerminalPodWithin(context.Background(), client, "test-ns", "p", "sandbox probe pod", sandboxFastFailWait)
+		if err != nil {
+			t.Fatalf("waitForTerminalPodWithin() error = %v, want the started pod to run to completion past the stale event", err)
 		}
 		if pod.Status.Phase != corev1.PodSucceeded {
 			t.Errorf("phase = %s, want Succeeded", pod.Status.Phase)

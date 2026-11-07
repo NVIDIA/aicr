@@ -153,7 +153,7 @@ func TestExtractResultUnreadableOutputFailsClosed(t *testing.T) {
 	if result.CTRFStatus() != ctrf.StatusOther {
 		t.Errorf("CTRFStatus = %q, want %q", result.CTRFStatus(), ctrf.StatusOther)
 	}
-	for _, want := range []string{"result output unavailable", "could not find the requested resource", "not credited"} {
+	for _, want := range []string{"result output unavailable", "after 2 attempt(s)", "could not find the requested resource", "not credited"} {
 		if !strings.Contains(result.TerminationMsg, want) {
 			t.Errorf("TerminationMsg = %q, want substring %q", result.TerminationMsg, want)
 		}
@@ -267,12 +267,12 @@ func TestReadValidatorLogsContextDoneSkipsRetry(t *testing.T) {
 	cancel()
 
 	start := time.Now()
-	_, err := d.readValidatorLogs(ctx, "pod")
+	_, attempts, err := d.readValidatorLogs(ctx, "pod")
 	if !stderrors.Is(err, errLogsUnavailable) {
 		t.Errorf("readValidatorLogs() error = %v, want the read error", err)
 	}
-	if logs.attempts != 1 {
-		t.Errorf("log read attempts = %d, want 1 with a done context", logs.attempts)
+	if logs.attempts != 1 || attempts != 1 {
+		t.Errorf("log read attempts = %d (reported %d), want 1 with a done context", logs.attempts, attempts)
 	}
 	if elapsed := time.Since(start); elapsed >= defaults.ValidatorLogReadRetryDelay {
 		t.Errorf("readValidatorLogs() waited %v, want the pause skipped", elapsed)

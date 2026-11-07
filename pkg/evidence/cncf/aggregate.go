@@ -57,18 +57,35 @@ const (
 	extraKeyObservationOnly = ctrf.ExtraKeyObservationOnly
 
 	// extraKeyResultSchema is the result-contract version the validator
-	// image stamped on the result. Absent, the image predates the
-	// observation-only marker, so a pass from a check known to be
-	// observation-only (v1.IsObservationOnlyCheck) is not credited.
+	// image stamped on the result; it tells the Reason of an unmarked pass
+	// of a check known to be observation-only (v1.IsObservationOnlyCheck).
 	extraKeyResultSchema = ctrf.ExtraKeyResultSchema
 
 	// extraValueTrue is the published form of a true boolean extra.
 	extraValueTrue = ctrf.ExtraValueTrue
 
-	// reasonResultSchemaAbsent is the CheckResult.Reason of an
-	// observation-only check whose pass carries no result-contract stamp.
-	reasonResultSchemaAbsent = "result contract marker absent, so the pass is read as an observation"
+	// CheckResult.Reason of an observation-only check whose pass carries no
+	// observationOnly marker, by what the result-contract stamp says.
+	reasonResultSchemaAbsent  = "result contract marker absent, so the pass is read as an observation"
+	reasonMarkerDroppedPrefix = "observation-only marker absent from a result stamped with contract version "
+	reasonSchemaUnknownPrefix = "result contract version unknown to this reader: "
 )
+
+// observationOnlyReason explains why an unmarked pass of a check known to be
+// observation-only is read as an observation rather than a demonstration,
+// from the result-contract stamp it carries: none (the image predates the
+// marker), the known version (the marker line was dropped in transit) or a
+// version this reader does not know (its markers may differ).
+func observationOnlyReason(stamp string) string {
+	switch stamp {
+	case "":
+		return reasonResultSchemaAbsent
+	case ctrf.ResultSchemaVersion:
+		return reasonMarkerDroppedPrefix + stamp
+	default:
+		return reasonSchemaUnknownPrefix + stamp
+	}
+}
 
 // conditionalMusts are the MUST requirements upstream allows a product to
 // declare not applicable with a justification. Every other requirement is
@@ -527,11 +544,13 @@ func evaluatePath(path []string, byName map[string]CheckResult) (RequirementStat
 // phases) passes only when every result passed; the worst status wins, in
 // the order failed, then any non-passed status, then passed. A passed
 // result marked observation-only marks the fold: one observation among the
-// passes keeps the check from demonstrating anything. So does a passed
-// result of a check known to be observation-only that carries no
-// result-contract stamp: the image that produced it could not have marked
-// it, and a reader that credited it would render the false PASSED #3681
-// removed (#3703).
+// passes keeps the check from demonstrating anything. So does any passed
+// result of a check known to be observation-only (v1.IsObservationOnlyCheck)
+// that lacks the marker: whether the image predates the marker, dropped the
+// marker line, or speaks a contract version this reader does not know, its
+// pass is never read as a demonstration, and the Reason says which (#3703).
+// A reason set by an earlier skipped or failed result of the same check is
+// kept, since the fold's status is that result's.
 func checkResult(name string, tests []ctrf.TestResult) CheckResult {
 	if len(tests) == 0 {
 		return CheckResult{Name: name}
@@ -543,9 +562,11 @@ func checkResult(name string, tests []ctrf.TestResult) CheckResult {
 			switch {
 			case t.Extra[extraKeyObservationOnly] == extraValueTrue:
 				c.ObservationOnly = true
-			case v1.IsObservationOnlyCheck(name) && t.Extra[extraKeyResultSchema] == "":
+			case v1.IsObservationOnlyCheck(name):
 				c.ObservationOnly = true
-				c.Reason = reasonResultSchemaAbsent
+				if c.Status == ctrf.StatusPassed {
+					c.Reason = observationOnlyReason(t.Extra[extraKeyResultSchema])
+				}
 			}
 		case ctrf.StatusFailed:
 			c.Status = ctrf.StatusFailed

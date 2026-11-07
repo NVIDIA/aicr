@@ -73,8 +73,6 @@ func TestCleanupGangTestResourcesDeletesNamespace(t *testing.T) {
 	}
 }
 
-// TestFailOnGangCleanup pins that a passing run fails when its namespace
-// could not be deleted, and that a failed run keeps its own error.
 func TestFailOnGangCleanup(t *testing.T) {
 	nsErr := errors.New(errors.ErrCodeInternal, "failed to delete gang test namespace")
 	phaseErr := errors.New(errors.ErrCodeNotFound, "positive phase failed")
@@ -108,9 +106,9 @@ func TestFailOnGangCleanup(t *testing.T) {
 	}
 }
 
-// TestGangTestRunTokenAndLabel pins the shared run model: a 128-bit token
-// names every resource within the DNS-1123 limit, and the namespace carries
-// the ownership label the GPU test namespaces carry.
+// TestGangTestRunTokenAndLabel: 32 hex characters is the 128-bit token of
+// newGPUTestRun, the width that makes a same-name collision across runs
+// implausible.
 func TestGangTestRunTokenAndLabel(t *testing.T) {
 	run, err := newGangTestRun()
 	if err != nil {
@@ -134,6 +132,35 @@ func TestGangTestRunTokenAndLabel(t *testing.T) {
 	}
 	if ns.Labels[gpuTestRunLabel] != run.suffix {
 		t.Errorf("namespace label %s = %q, want the run token", gpuTestRunLabel, ns.Labels[gpuTestRunLabel])
+	}
+}
+
+// TestGangMemberPodsCarryImagePullSecrets pins that the gang namespace gets
+// the forwarded Secrets and both member pod kinds reference them.
+func TestGangMemberPodsCarryImagePullSecrets(t *testing.T) {
+	run, err := newGangTestRun()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.imagePullSecrets = []string{"regcred"}
+	run.validatorNamespace = "aicr-validation"
+	run.negPods = []string{"neg-0"}
+	clientset := k8sfake.NewClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "regcred", Namespace: "aicr-validation"},
+		Type:       corev1.SecretTypeDockerConfigJson,
+		Data:       map[string][]byte{corev1.DockerConfigJsonKey: []byte(`{"auths":{}}`)},
+	})
+	if err := createGangTestNamespace(context.Background(), clientset, run); err != nil {
+		t.Fatalf("createGangTestNamespace: %v", err)
+	}
+	if _, err := clientset.CoreV1().Secrets(run.namespace).Get(context.Background(), "regcred", metav1.GetOptions{}); err != nil {
+		t.Fatalf("pull secret not copied into %s: %v", run.namespace, err)
+	}
+	want := []corev1.LocalObjectReference{{Name: "regcred"}}
+	for name, pod := range map[string]*corev1.Pod{"positive": buildGangTestPod(run, 0, nil), "negative": buildGangNegativePod(run, 0, nil)} {
+		if got := pod.Spec.ImagePullSecrets; len(got) != 1 || got[0] != want[0] {
+			t.Errorf("%s member pod ImagePullSecrets = %v, want %v", name, got, want)
+		}
 	}
 }
 

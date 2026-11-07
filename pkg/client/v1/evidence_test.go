@@ -163,6 +163,7 @@ func TestCollectCNCFEvidence(t *testing.T) {
 		{name: "recipe from another client", client: newClientForBundleTest(t), ctx: context.Background(), rec: rec, opts: valid, wantMessage: "Client"},
 		{name: "empty dir", client: client, ctx: context.Background(), rec: rec, opts: withoutDir, wantMessage: "directory is required"},
 		{name: "non-conditional notApplicable", client: client, ctx: context.Background(), rec: rec, opts: badNotApplicable, wantMessage: `"gang_scheduling" is not a conditional MUST`},
+		{name: "uncarried ConformanceVersion", client: client, ctx: context.Background(), rec: rec, opts: CNCFCollectOptions{Dir: t.TempDir(), ConformanceVersion: "v1.99"}, wantMessage: "v1.99"},
 		{name: "nil client", ctx: context.Background(), rec: rec, opts: valid, wantMessage: "not initialized"},
 		{name: "nil context", client: client, rec: rec, opts: valid, wantMessage: "context is required"},
 		{name: "closed client", client: closed, ctx: context.Background(), rec: closedRec, opts: valid, wantMessage: "already closed"},
@@ -345,6 +346,8 @@ type fakeSubmissionRunner struct {
 	// ran before ValidateState.
 	preflightOpts *CNCFSubmissionOptions
 	preflightErr  error
+	coverageOpts  *RenderCNCFEvidenceOptions
+	coverageErr   error
 	stages        []string
 	// snapshotVersion is the Kubernetes version the fake snapshot reports.
 	snapshotVersion string
@@ -380,6 +383,12 @@ func (f *fakeSubmissionRunner) ValidateCNCFSubmissionOptions(opts CNCFSubmission
 	f.stages = append(f.stages, "ValidateCNCFSubmissionOptions")
 	f.preflightOpts = &opts
 	return f.preflightErr
+}
+
+func (f *fakeSubmissionRunner) ValidateCNCFRecipeCoverage(_ *RecipeResult, opts RenderCNCFEvidenceOptions) error {
+	f.stages = append(f.stages, "ValidateCNCFRecipeCoverage")
+	f.coverageOpts = &opts
+	return f.coverageErr
 }
 
 func (f *fakeSubmissionRunner) ValidateState(_ context.Context, _ *RecipeResult, _ *Snapshot, opts ...ValidateOption) ([]*PhaseResult, error) {
@@ -448,12 +457,38 @@ func TestRunCNCFSubmissionExactMinorPreflight(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runCNCFSubmission() error = %v", err)
 		}
-		want := []string{"CollectSnapshot", "ValidateCNCFSubmissionOptions", "ValidateState"}
-		if len(runner.stages) < 3 || !slices.Equal(runner.stages[:3], want) {
+		want := []string{"CollectSnapshot", "ValidateCNCFSubmissionOptions", "ValidateCNCFRecipeCoverage", "ValidateState"}
+		if len(runner.stages) < 4 || !slices.Equal(runner.stages[:4], want) {
 			t.Errorf("stages = %v, want prefix %v", runner.stages, want)
 		}
-		if runner.preflightOpts.ConformanceVersion != "v1.37" || runner.submitOpts == nil || runner.submitOpts.ConformanceVersion != "v1.37" {
+		if runner.preflightOpts == nil || runner.preflightOpts.ConformanceVersion != "v1.37" || runner.submitOpts == nil || runner.submitOpts.ConformanceVersion != "v1.37" {
 			t.Errorf("ConformanceVersion not carried: pre-flight %+v, write %+v", runner.preflightOpts, runner.submitOpts)
+		}
+	})
+
+	t.Run("a recipe that cannot establish a MUST fails before ValidateState", func(t *testing.T) {
+		runner := &fakeSubmissionRunner{agg: passed, snapshotVersion: "1.37.2",
+			coverageErr: aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "gang_scheduling: missing gang-scheduling")}
+		err := runCNCFSubmission(context.Background(), runner, &RecipeResult{}, cncfSubmissionInputs{dir: "/tmp/out", vendor: &vendor,
+			notApplicable: map[string]string{"cluster_autoscaling": "fixed"}})
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+		want := []string{"CollectSnapshot", "ValidateCNCFSubmissionOptions", "ValidateCNCFRecipeCoverage"}
+		if !slices.Equal(runner.stages, want) {
+			t.Errorf("stages = %v, want %v: the coverage refusal must land before any validator Job", runner.stages, want)
+		}
+		if runner.coverageOpts == nil || runner.coverageOpts.KubernetesVersion != "1.37.2" || runner.coverageOpts.NotApplicable["cluster_autoscaling"] == "" {
+			t.Errorf("coverage options = %+v, want the snapshot's version and notApplicable", runner.coverageOpts)
+		}
+	})
+
+	t.Run("the pages render only warns on a coverage gap", func(t *testing.T) {
+		runner := &fakeSubmissionRunner{agg: passed, snapshotVersion: "1.37.2",
+			coverageErr: aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "gang_scheduling: missing gang-scheduling")}
+		if err := runCNCFSubmission(context.Background(), runner, &RecipeResult{}, cncfSubmissionInputs{dir: "/tmp/out"}); err != nil {
+			t.Fatalf("runCNCFSubmission() error = %v, want the pages render to proceed", err)
+		}
+		if !slices.Contains(runner.stages, "ValidateState") {
+			t.Errorf("stages = %v, want ValidateState reached", runner.stages)
 		}
 	})
 

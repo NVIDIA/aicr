@@ -1654,7 +1654,7 @@ func TestBuildJobPlan_ForwardsImagePullSecretNames(t *testing.T) {
 		}
 		var got []string
 		for _, e := range plan.Env {
-			if e.Name == imagePullSecretsEnv {
+			if e.Name == ImagePullSecretsEnv {
 				got = append(got, e.Value)
 			}
 		}
@@ -1679,20 +1679,20 @@ func TestBuildJobPlan_ForwardsImagePullSecretNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := values(tt.entry, tt.secrets); !slices.Equal(got, tt.want) {
-				t.Errorf("%s env = %v, want %v", imagePullSecretsEnv, got, tt.want)
+				t.Errorf("%s env = %v, want %v", ImagePullSecretsEnv, got, tt.want)
 			}
 		})
 	}
 	t.Run("catalog value cannot name the Secrets", func(t *testing.T) {
 		pinned := conformance
-		pinned.Env = []EnvVar{{Name: imagePullSecretsEnv, Value: "regcred"}}
+		pinned.Env = []EnvVar{{Name: ImagePullSecretsEnv, Value: "regcred"}}
 		if got := values(pinned, nil); len(got) != 0 {
-			t.Errorf("%s env = %v, want none (the catalog must not name pull Secrets)", imagePullSecretsEnv, got)
+			t.Errorf("%s env = %v, want none (the catalog must not name pull Secrets)", ImagePullSecretsEnv, got)
 		}
 	})
 	t.Run("env-name literal locked", func(t *testing.T) {
-		if imagePullSecretsEnv != "AICR_IMAGE_PULL_SECRETS" {
-			t.Errorf("imagePullSecretsEnv = %q, want AICR_IMAGE_PULL_SECRETS (keep in sync with validators.ImagePullSecretsEnv)", imagePullSecretsEnv)
+		if ImagePullSecretsEnv != "AICR_IMAGE_PULL_SECRETS" {
+			t.Errorf("ImagePullSecretsEnv = %q, want AICR_IMAGE_PULL_SECRETS (keep in sync with validators.ImagePullSecretsEnv)", ImagePullSecretsEnv)
 		}
 	})
 }
