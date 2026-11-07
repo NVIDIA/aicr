@@ -18,8 +18,9 @@
 # (GPU node, VPC network group, router/NAT, resource group, node-pool service
 # accounts and their project IAM bindings, TF state) behind when
 # teardown never runs: a runner hard-killed mid-cancel, a daytime-up held cluster
-# whose evening daytime-down never fired, a manual skip_delete run abandoned, or a
-# Bringup "failure" that stranded a healthy cluster. Those orphans accumulate until
+# whose evening daytime-down never fired, a skip_delete run from before uat-run.yaml
+# refused nightly skip_delete on cloud reservations, or a Bringup "failure" that
+# stranded a healthy cluster. Those orphans accumulate until
 # they exhaust a cloud quota (in Aug 2026 the GCP NETWORKS quota, 50, hit 48/50).
 #
 # This reaps them. For every cloud resource whose name carries the UAT deployment
@@ -87,14 +88,12 @@
 #   * AGE FLOOR — keyed off the RUN's updated_at (uniform across clouds), not the
 #     cloud resource's create time. Nightly/ad-hoc: NIGHTLY_MIN_AGE_HOURS (default
 #     24h). Well above the 280-min job cap, so a still-finishing run's just-created
-#     cluster is never touched — and, deliberately, long enough that a nightly
-#     `skip_delete` run (a supported debugging hold, uat-{aws,azure,gcp}.yaml) can
-#     survive a full working day before the janitor reclaims it. There is NO API
-#     signal that distinguishes a skip_delete hold from a genuine orphan, so the
-#     floor is the only lever: a real mid-cancel orphan therefore also persists up
-#     to ~a day, which is acceptable — quota pressure builds over days, and the
-#     hourly janitor reaps within the hour once the floor clears. (Lower it only if
-#     a cloud's quota headroom demands faster reclamation.) Daytime:
+#     cluster is never touched. A mid-cancel orphan therefore persists up to ~a
+#     day, which is acceptable — quota pressure builds over days, and the hourly
+#     janitor reaps within the hour once the floor clears. (Lower it only if a
+#     cloud's quota headroom demands faster reclamation.) Nightly skip_delete is
+#     no hold: uat-run.yaml refuses it on cloud reservations, and a debugging
+#     hold uses daytime-up. Daytime:
 #     DAYTIME_MIN_AGE_HOURS (default 24h). daytime-up is on-demand (workflow_dispatch), so its run is
 #     already `completed` while the cluster is legitimately HELD for the working
 #     day; the sole daytime schedule is the evening daytime-down (uat-daytime.yaml,
@@ -104,12 +103,13 @@
 #     evening daytime-down = an orphan the nightly teardown missed. (Do NOT lower
 #     this to the nightly floor: a completed daytime-up run does not mean the
 #     cluster should be gone.)
-#   * DRY_RUN — defaults to true. It reports every decision and never deletes until
-#     a caller sets DRY_RUN=false (the workflow's `enforce` dispatch input). Only
-#     the exact strings `true`/`false` are accepted; anything else aborts before
-#     discovery rather than being resolved toward enforce. In dry-run the summary
-#     counts "would-reap", never "reaped" — a report must not claim a destroy
-#     that did not happen.
+#   * DRY_RUN — defaults to true for a direct run: it reports every decision and
+#     never deletes until a caller sets DRY_RUN=false. uat-janitor.yaml sets false
+#     for scheduled runs and for a dispatch with enforce=true, and true for any
+#     other run. Only the exact strings `true`/`false` are accepted; anything
+#     else aborts before discovery rather than being resolved toward enforce.
+#     In dry-run the summary counts "would-reap", never "reaped" — a report must
+#     not claim a destroy that did not happen.
 #
 # Usage:   DRY_RUN=true ./uat-janitor.sh <gcp|aws|azure>
 # Requires: gh (GH_TOKEN in env, actions:read), jq, yq, docker, and the cloud CLI
@@ -199,8 +199,9 @@ age_hours_since() {
 # This is a liveness PROBE, not a mutex: it collapses the common race (a
 # scheduled/dispatched down already running) to near zero, but a residual TOCTOU
 # window remains — a down that STARTS in the ~1h between this check and the reap.
-# The 24h floor and DRY_RUN-default backstop that window; a shared cross-workflow
-# lease (#2132) is the tracked follow-up for a hard "never races" guarantee.
+# Scheduled runs enforce with that window accepted, backstopped by the 24h
+# daytime floor; a shared cross-workflow lease (#2132) is the path to a hard
+# "never races" guarantee.
 #
 # Fails CLOSED: any API error, or a 200 whose body is not a well-formed run list
 # (`{"message":...}`, `{"workflow_runs":null}`), reads as "active" (defer) rather
@@ -211,8 +212,8 @@ uat_lifecycle_active() {
   # Filter to in_progress SERVER-SIDE (?status=in_progress) rather than reading the
   # newest N mixed-status runs and filtering here — that removes any dependence on
   # dispatch volume fitting in one page. in_progress is the state of a run actually
-  # executing a teardown; a run still queued / about to start is the documented
-  # TOCTOU residual, backstopped by the 24h floor + DRY_RUN default. per_page=100
+  # executing a teardown; a run still queued / about to start is the accepted
+  # TOCTOU residual, backstopped by the 24h daytime floor. per_page=100
   # is far above the number of concurrently-executing uat-run runs (the lease
   # serializes per reservation), so the count is effectively unbounded for our need.
   json="$(gh api "repos/${REPO}/actions/workflows/${LIFECYCLE_WORKFLOW}/runs?status=in_progress&per_page=100" 2>/dev/null)" || return 0
@@ -281,8 +282,9 @@ classify() {
   # only daytime needs it — a nightly cluster's owning run IS the one the gate
   # above already checked, but a daytime name points at the daytime-UP run, not
   # the daytime-DOWN run (a uat-run.yaml run) that tears it down. Defer if any
-  # uat-run lifecycle run is in flight. Reduces, does not eliminate, the race
-  # (residual TOCTOU per uat_lifecycle_active); fails closed.
+  # uat-run lifecycle run is in flight. Reduces, does not eliminate, the race:
+  # scheduled runs enforce with the residual TOCTOU accepted (see
+  # uat_lifecycle_active), backstopped by the 24h daytime floor. Fails closed.
   if is_daytime "$id" && uat_lifecycle_active; then
     echo "SKIP:lifecycle-active(run ${run_id})"; return
   fi
@@ -349,10 +351,65 @@ aws_actuator_destroy() {
     "$JANITOR_ACTUATOR_IMAGE" apply
 }
 
+# One AKS actuator destroy pass for the staged config <cfg> (<id> names it in
+# the log), with a fresh copy of the runner's az credentials. Factored out so
+# the Azure reap can run it, sweep the deployment's AKS cluster, and run it again.
+#
+# The actuator container runs as uid `builder` (not the runner's uid) and
+# writes to its az config dir on startup, so it needs a writable copy —
+# `chmod -R a+rwX` on a throwaway mirrors the proven Bringup/Destroy steps
+# in uat-azure.yaml. Do not tighten the mode without confirming the image's
+# uid, or every Azure reap fails. mktemp -d is 0700, so the copy is private
+# until the chmod, and the runner is ephemeral and single-tenant.
+#
+# Cleanup is already armed: AZ_MOUNT is module-level and main() installs an
+# EXIT trap for it before any reap runs, so the credentials cannot survive
+# even a `set -e` abort between mktemp and the copy. The inline call below
+# removes them at the earliest possible moment rather than at exit.
+azure_actuator_destroy() {
+  local rc=0
+  AZ_MOUNT="$(mktemp -d)"
+  if cp -a "$HOME/.azure/." "$AZ_MOUNT/" && chmod -R a+rwX "$AZ_MOUNT"; then
+    docker run --rm \
+      -e CONFIG_CONTENT="$(base64 <"$1" | tr -d '\n')" \
+      -e AUTO_APPROVE=true \
+      -v "$AZ_MOUNT:/home/builder/.azure" \
+      "$JANITOR_ACTUATOR_IMAGE" apply || rc=$?
+  else
+    rc=1
+    echo "::warning::janitor could not stage az config for ${2}"
+  fi
+  cleanup_az_mount
+  return "$rc"
+}
+
+# Delete deployment <id>'s own AKS cluster, <id> in resource group <id>-rg, when
+# it exists. A Bringup that dies after Azure creates the cluster but before
+# Terraform records it leaves the cluster outside state, and the destroy then
+# fails on every cycle: the resource group still holds the cluster, or its
+# node pool's NICs still use the deployment's subnet. Addresses only that one
+# name, never a listing or a pattern, and only for an allowlisted id.
+# Best-effort like uat-aws-cleanup-lb.sh sweep: always returns 0, and the
+# destroy retry is the source of truth.
+azure_sweep_aks() {
+  local id="$1"
+  if [[ ! "$id" =~ ^aicr-uat-[0-9]+$ ]] && [[ ! "$id" =~ ^aicr-uat-day-[a-z0-9-]+-[0-9]+$ ]]; then
+    log "refusing to sweep AKS for '${id}': not a UAT deployment id"
+    return 0
+  fi
+  if az aks show --resource-group "${id}-rg" --name "$id" \
+    --subscription "$AZURE_SUBSCRIPTION_ID" >/dev/null 2>&1; then
+    log "deleting AKS cluster ${id} before the retry"
+    az aks delete --resource-group "${id}-rg" --name "$id" \
+      --subscription "$AZURE_SUBSCRIPTION_ID" --yes ||
+      log "AKS delete failed for ${id}; the retry decides the reap"
+  fi
+  return 0
+}
+
 # Destroy one orphaned deployment via the actuator (destroy == apply w/ destroy=true).
 # Returns the actuator's exit status so the caller counts only destroys that
-# actually happened — the rollout asks operators to trust these logs before
-# enabling enforce, so a reported reap must be a real one.
+# actually happened, and a failed one fails the run.
 reap() {
   local id="$1" cfg rc=0
   # `reap` is invoked as `if reap "$id"`, which disables errexit for this whole
@@ -389,6 +446,18 @@ reap() {
       rm -f "$cfg"
       return 1
     fi
+  fi
+
+  # That pre-destroy refresh also reads every non-ARN .cluster.eks.adminRoles
+  # name with iam:GetRole, which infra/uat-aws-account/federation.tf grants
+  # github-actions-role-aicr only on role/aicr-*, service-linked and SSO roles
+  # and itself, so a destroy staged with nvsentinel-e2e-runner-role fails.
+  # Stage none: destroy runs over Terraform state, so the access entries the
+  # roles were granted are still destroyed.
+  if [ "$CLOUD" = aws ] && ! yq -i '.cluster.eks.adminRoles = []' "$cfg"; then
+    echo "::error::janitor cannot stage ${id}: could not clear .cluster.eks.adminRoles (destroy NOT attempted)"
+    rm -f "$cfg"
+    return 1
   fi
 
   if [ "$DRY_RUN" = "true" ]; then
@@ -434,29 +503,24 @@ reap() {
       fi
       ;;
     azure)
-      # The actuator container runs as uid `builder` (not the runner's uid) and
-      # writes to its az config dir on startup, so it needs a writable copy —
-      # `chmod -R a+rwX` on a throwaway mirrors the proven Bringup/Destroy steps
-      # in uat-azure.yaml. Do not tighten the mode without confirming the image's
-      # uid, or every Azure reap fails. mktemp -d is 0700, so the copy is private
-      # until the chmod, and the runner is ephemeral and single-tenant.
-      #
-      # Cleanup is already armed: AZ_MOUNT is module-level and main() installs an
-      # EXIT trap for it before any reap runs, so the credentials cannot survive
-      # even a `set -e` abort between mktemp and the copy. The inline call below
-      # removes them at the earliest possible moment rather than at exit.
-      AZ_MOUNT="$(mktemp -d)"
-      if cp -a "$HOME/.azure/." "$AZ_MOUNT/" && chmod -R a+rwX "$AZ_MOUNT"; then
-        docker run --rm \
-          -e CONFIG_CONTENT="$(base64 <"$cfg" | tr -d '\n')" \
-          -e AUTO_APPROVE=true \
-          -v "$AZ_MOUNT:/home/builder/.azure" \
-          "$JANITOR_ACTUATOR_IMAGE" apply || rc=$?
-      else
-        rc=1
-        echo "::warning::janitor could not stage az config for ${id}"
+      # On failure, sweep an AKS cluster left outside state (azure_sweep_aks)
+      # and retry once. Re-login before the sweep and again before the retry:
+      # the failed destroy and the AKS delete can each outlast the session.
+      azure_actuator_destroy "$cfg" "$id" || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        log "azure destroy failed for ${id} (rc=${rc}); sweeping its AKS cluster and retrying once"
+        if ! az_federated_relogin; then
+          log "could not refresh the az session for ${id}; no sweep and no retry"
+        else
+          azure_sweep_aks "$id"
+          if ! az_federated_relogin; then
+            log "could not refresh the az session for ${id}; no retry"
+          else
+            rc=0
+            azure_actuator_destroy "$cfg" "$id" || rc=$?
+          fi
+        fi
       fi
-      cleanup_az_mount
       ;;
   esac
   rm -f "$cfg"
@@ -464,7 +528,7 @@ reap() {
   if [ "$rc" -eq 0 ]; then
     log "reaped: ${id}"
   else
-    echo "::warning::janitor reap failed for ${id} (rc=${rc}; will retry next run)"
+    echo "::error::janitor reap failed for ${id} (rc=${rc})"
   fi
   return "$rc"
 }
@@ -676,8 +740,8 @@ main() {
   done <<<"$candidates"
 
   # In dry-run nothing was destroyed, so the count is of candidates that WOULD
-  # be — never label it "reaped". Operators read these logs to decide whether to
-  # trust enforce; a report claiming destroys that never happened poisons that.
+  # be — never label it "reaped". A dry run is a workflow_dispatch without
+  # enforce=true, read to see what an enforce run would destroy.
   local mode verb
   if [ "$DRY_RUN" = true ]; then mode=dry-run; verb=would-reap; else mode=enforce; verb=reaped; fi
   log "summary: ${reaped} ${verb}, ${failed} failed, ${skipped} skipped (${mode})"
