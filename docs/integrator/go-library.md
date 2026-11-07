@@ -547,7 +547,10 @@ the whole submission run, matching
   whose requirement the selected version no longer lists (`dra_support` from
   v1.36 on) renders as supporting evidence rather than a requirement row.
 - `ValidateCNCFEvidenceOptions(opts)` checks `RenderCNCFEvidenceOptions` the
-  way the render will, without rendering: the version resolves and every
+  way the render will, without rendering: the version resolves, every
+  `Documented` entry names a requirement of that version not also in
+  `NotApplicable` and carries at least one absolute http(s) URL and a note,
+  and every
   `NotApplicable` id is a conditional MUST with a justification. `aicr
   validate` calls it before any recipe, snapshot or cluster work so a bad
   `notApplicable` key fails in milliseconds; the render repeats the check as

@@ -127,8 +127,9 @@ surface owes notice before a removal; the removal shipped with the collector
 because the behavior the flag selected no longer exists, and it is recorded
 here for that reason.
 
-**What to do.** Drop the flag or key. To write the submission evidence, pass
-`--cncf-submission --evidence-dir <dir>`; see
+**What to do.** Drop the flag or key. To write the submission directory, pass
+`--cncf-submission --evidence-dir <dir>` with `spec.validate.evidence.cncf.vendor`
+in `--config`; see
 [CNCF submission evidence](validation.md#cncf-submission-evidence).
 
 ### `--evidence-dir` without `--cncf-submission`
@@ -195,7 +196,8 @@ hostNetwork and host mounts for the GPU, SystemD and OS collectors) in
 `ValidateState` creates per-run RBAC for the validator Jobs, a cluster-admin
 binding by default. A caller that needs a restricted agent or its own
 validator ServiceAccount composes `CollectSnapshot`, `ValidateState`,
-`MergeReports` and `RenderCNCFEvidenceWithResult` directly. `staticcheck`
+`MergeReports` and `RenderCNCFEvidenceWithResult` (or `WriteCNCFSubmission`)
+directly. `staticcheck`
 reports the deprecated members as `SA1019` at build time.
 
 **What to do.** Pass the recipe from `LoadRecipe` or `ResolveRecipe`; for an

@@ -319,7 +319,9 @@ type RegistrySpec struct {
 }
 
 // ValidateSpec captures the inputs to `aicr validate`. Evidence emission
-// (both CNCF AI Conformance markdown and the recipe-evidence bundle)
+// (both the CNCF AI Conformance submission directory (PRODUCT.yaml,
+// README.md, junit.xml, e2e.log and evidence pages) and the recipe-evidence
+// bundle)
 // is configured via the Evidence umbrella (EvidenceSpec) — see that type
 // for the per-kind shape and the corresponding `aicr validate --…` flag
 // surface.
@@ -331,8 +333,8 @@ type ValidateSpec struct {
 }
 
 // EvidenceSpec is the umbrella for the two evidence kinds `aicr validate`
-// can emit: CNCF AI Conformance markdown (CNCF) and the recipe-evidence
-// bundle (Attestation). Either or both may be populated; an unset section
+// can emit: the CNCF AI Conformance submission directory (CNCF) and the
+// recipe-evidence bundle (Attestation). Either or both may be populated; an unset section
 // means the corresponding kind is CLI-only.
 type EvidenceSpec struct {
 	CNCF        *EvidenceCNCFSpec        `yaml:"cncf,omitempty" json:"cncf,omitempty"`

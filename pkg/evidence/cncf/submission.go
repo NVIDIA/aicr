@@ -81,6 +81,12 @@ type SubmissionResult struct {
 	Redaction []string
 }
 
+// StagedDirContextKey is the key under which an error returned after the
+// redaction pass completed carries, in its StructuredError.Context, the
+// staged product directory that was kept for inspection; errors before that
+// point carry none, since the tree was removed.
+const StagedDirContextKey = "stagedDir"
+
 // IncompleteSuffix is appended to the requested directory to name the
 // staging tree a submission run writes into. A run that completes moves its
 // product directory out of it and removes it; a run that does not leaves it
@@ -123,7 +129,7 @@ func ValidateSubmissionDir(dir string) error {
 	}
 	if _, err := os.Stat(abs + IncompleteSuffix); err == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-			"%s exists: an earlier submission run left its incomplete directory; inspect and remove it first", abs+IncompleteSuffix))
+			"%s exists: an earlier submission run left it, either because an applicable MUST was not established or because the upstream validator did not accept the directory (its README.md Validation section says which); inspect it, then remove it; every run exits 2 while it exists", abs+IncompleteSuffix))
 	} else if !stderrors.Is(err, fs.ErrNotExist) {
 		return errors.Wrap(errors.ErrCodeInternal, "stat incomplete submission directory", err)
 	}
@@ -165,6 +171,9 @@ func ValidateSubmissionDir(dir string) error {
 //   - ErrCodeInternal when a file cannot be written or the validator
 //     rejected the directory; the message carries the validator's report.
 //   - ErrCodeTimeout, or ErrCodeCanceled on cancellation, when ctx ends.
+//
+// An error returned after the redaction pass completed carries the kept
+// product directory in its context under StagedDirContextKey.
 func WriteSubmission(ctx context.Context, dir string, in SubmissionInput) (*SubmissionResult, error) {
 	if in.Report == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "a CTRF report is required to write a submission")
@@ -219,13 +228,13 @@ func WriteSubmission(ctx context.Context, dir string, in SubmissionInput) (*Subm
 		if rerr := st.writeReadme(validatorFailureState(err)); rerr != nil {
 			slog.Warn("could not record the validator outcome in README.md", "error", rerr)
 		}
-		return nil, err
+		return nil, st.staged(err)
 	}
 	if err := st.writeReadme(validationState{Outcome: validationAccepted}); err != nil {
-		return nil, err
+		return nil, st.staged(err)
 	}
 	if err := st.promote(abs); err != nil {
-		return nil, err
+		return nil, st.staged(err)
 	}
 	res.Complete, res.Dir = true, abs
 	return res, nil
@@ -350,7 +359,7 @@ func (st *staging) write(ctx context.Context, in SubmissionInput, cl *Checklist)
 		return nil, err
 	}
 	if err = ctx.Err(); err != nil {
-		return nil, errors.WrapCtxErr(err, errors.ErrCodeTimeout, "writing submission")
+		return nil, st.staged(errors.WrapCtxErr(err, errors.ErrCodeTimeout, "writing submission"))
 	}
 	return &SubmissionResult{Aggregate: agg, Dir: st.productDir, Redaction: st.readme.redaction}, nil
 }
@@ -369,6 +378,19 @@ func validatorFailureState(err error) validationState {
 		return validationState{Outcome: validationNotRun, Detail: "the validator was interrupted before it reached a verdict (" + err.Error() + ")" + tail}
 	}
 	return validationState{Outcome: validationRejected, Detail: "its report is in the run log" + tail}
+}
+
+// staged returns err with the kept product directory in its context under
+// StagedDirContextKey, so a caller can tell the operator where the redacted
+// copy is and that it must be removed before the next run. A structured
+// error keeps its code; any other error is INTERNAL.
+func (st *staging) staged(err error) error {
+	code := errors.ErrCodeInternal
+	if se, ok := stderrors.AsType[*errors.StructuredError](err); ok && se.Code != "" {
+		code = se.Code
+	}
+	return errors.WrapWithContext(code, "submission not promoted; the staged copy is kept at "+st.productDir, err,
+		map[string]any{StagedDirContextKey: st.productDir})
 }
 
 // writeReadme renders README.md with the given validation outcome. It is

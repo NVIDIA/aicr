@@ -16,6 +16,7 @@ package cncf
 
 import (
 	"context"
+	stderrors "errors"
 	"io"
 	"net/http"
 	"os"
@@ -476,6 +477,10 @@ func TestWriteSubmissionValidatorGate(t *testing.T) {
 			if _, statErr := os.Stat(filepath.Join(dir+IncompleteSuffix, "v1.37", "submission", productFile)); statErr != nil {
 				t.Errorf("staging tree not kept: %v", statErr)
 			}
+			se, ok := stderrors.AsType[*errors.StructuredError](err)
+			if !ok || se.Context[StagedDirContextKey] != filepath.Join(dir+IncompleteSuffix, "v1.37", "submission") {
+				t.Errorf("error does not carry the staged directory: %+v", err)
+			}
 			readme := readFile(t, filepath.Join(dir+IncompleteSuffix, "v1.37", "submission", readmeFile))
 			wantOutcome := "**Outcome:** rejected;"
 			if tt.wantCode == errors.ErrCodeUnavailable {
@@ -515,7 +520,7 @@ func TestWriteSubmissionRefusals(t *testing.T) {
 		{name: "malformed vendor", dir: filepath.Join(base, "b"), mutate: func(in *SubmissionInput) { in.Vendor.Name = "" }, wantCode: errors.ErrCodeInvalidRequest, wantText: "vendor.name is required"},
 		{name: "empty dir", dir: "", wantCode: errors.ErrCodeInvalidRequest, wantText: "directory is required"},
 		{name: "non-empty dir", dir: nonEmpty, wantCode: errors.ErrCodeInvalidRequest, wantText: "is not empty"},
-		{name: "stale incomplete tree", dir: filepath.Join(base, "stale"), wantCode: errors.ErrCodeInvalidRequest, wantText: "earlier submission run left"},
+		{name: "stale incomplete tree", dir: filepath.Join(base, "stale"), wantCode: errors.ErrCodeInvalidRequest, wantText: "inspect it, then remove it; every run exits 2 while it exists"},
 		{name: "version-like parent segment", dir: filepath.Join(base, "v1.2", "out"), wantCode: errors.ErrCodeInvalidRequest, wantText: "vX.Y"},
 		{name: "unsupported version", dir: filepath.Join(base, "c"), mutate: func(in *SubmissionInput) { in.Version = "v1.30" }, wantCode: errors.ErrCodeInvalidRequest, wantText: "unsupported"},
 		{name: "malformed documented", dir: filepath.Join(base, "d"), mutate: func(in *SubmissionInput) {

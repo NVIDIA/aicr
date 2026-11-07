@@ -302,6 +302,28 @@ func TestValidationExit(t *testing.T) {
 	}
 }
 
+// A submission failure that kept its staged copy names that path and the
+// removal rule; one that kept nothing says so.
+func TestLogSubmissionFailure(t *testing.T) {
+	kept := errors.WrapWithContext(errors.ErrCodeInternal, "submission not promoted", errors.New(errors.ErrCodeInternal, "rejected"),
+		map[string]any{aicr.CNCFStagedDirContextKey: "/out/submission.incomplete/v1.37/submission"})
+	if got := stagedSubmissionDir(kept); got != "/out/submission.incomplete/v1.37/submission" {
+		t.Errorf("stagedSubmissionDir() = %q", got)
+	}
+	if got := stagedSubmissionDir(errors.New(errors.ErrCodeInternal, "write failed")); got != "" {
+		t.Errorf("stagedSubmissionDir() = %q for an error without a staged copy", got)
+	}
+	logs := captureJSONLogs(t)
+	logSubmissionFailure(kept, "/out/submission")
+	logSubmissionFailure(errors.New(errors.ErrCodeInternal, "write failed"), "/out/submission")
+	out := logs.String()
+	for _, want := range []string{"staged copy is kept for inspection and must be removed before the next run", "/out/submission.incomplete/v1.37/submission", "nothing was kept"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("logs lack %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestRunValidationSubmissionVerdict drives runValidation as a submission
 // run offline through CNCFRequirementAggregate.Outcome. --no-cluster is
 // refused above runValidation, so the internal call is the one route without

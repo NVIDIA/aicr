@@ -1016,9 +1016,11 @@ with and without it. The two flags require each other, `--recipe` is required
 because the checks are selected from it, the vendor block is required in
 `--config`, and `--no-cluster` and `--skip-check` are refused: submission
 evidence comes from checks that ran on a live cluster against the whole
-recipe. `--evidence-dir` must be absent or empty; the directory reaches it
-only when the run is complete, and an incomplete run leaves its staged copy
-at `<evidence-dir>.incomplete/` instead (see
+recipe. `--evidence-dir` must be absent or empty, with no parent path
+segment of the form `vX.Y/` (the upstream validator would read it as the
+checklist version); the directory reaches it only when the run is complete,
+and an incomplete run leaves its staged copy at `<evidence-dir>.incomplete/`
+instead, which the next run refuses with exit 2 until it is removed (see
 [Submission directory](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#submission-directory)
 for the status, export and manual-attestation rules).
 
@@ -1571,7 +1573,10 @@ Common reasons and their cause:
 
 The check (CNCF `driver_runtime_management`, SHOULD at v1.37 and MUST at v1.38)
 runs a pod from a vanilla `ubuntu:22.04` image that requests one GPU, and reads
-the driver from inside it. Its artifacts (`Driver runtime probe pod logs`,
+the driver from inside it. The probe pod carries no `imagePullSecrets`
+(`--image-pull-secret` reaches the validator Job, not the per-run namespace),
+so a mirror of the probe image that needs credentials must supply them
+node-side, through the container runtime's registry configuration. Its artifacts (`Driver runtime probe pod logs`,
 `Advertised driver version`, `Driver runtime compatibility`) name the failing
 step:
 

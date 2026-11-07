@@ -30,7 +30,7 @@ What changed between versions, as it affects AICR evidence:
 |---------|--------|--------------------|
 | v1.35 | Baseline: 9 MUST requirements including `dra_support` | `dra-support.md` is a requirement row |
 | v1.36 | `dra_support` removed; `advanced_inference_ingress`, `high_performance_networking`, `disaggregated_inference` added (SHOULD) | `dra-support.md` renders under **Supporting Evidence**, not as a requirement; the SHOULD rows have no AICR check and appear in the index as `NOT TESTED (no AICR check)` |
-| v1.37 | `workload_sandboxing` added (SHOULD); hybrid verification recommends `junit.xml` and `e2e.log` | The `workload-sandboxing` check evidences it on a recipe that declares the check; no embedded recipe does yet, so the row reads `NOT TESTED (not run)` (see below). Hybrid verification is #3605. PRODUCT.yaml renders a SHOULD that is not established Not Implemented, and the submission directory carries `junit.xml` and `e2e.log` at every version (see [Submission directory](#submission-directory)) |
+| v1.37 | `workload_sandboxing` added (SHOULD); hybrid verification recommends `junit.xml` and `e2e.log` | The `workload-sandboxing` check evidences it on a recipe that declares the check; no embedded recipe does yet, so the row reads `NOT TESTED (not run)` (see below). Hybrid verification is the submission directory's `junit.xml` and `e2e.log` (#3605, see [Submission directory](#submission-directory)). PRODUCT.yaml renders a SHOULD that is not established Not Implemented |
 
 `driver_runtime_management` is SHOULD at every carried checklist and graduates
 to MUST at v1.38 (upstream KAR-0001). The `driver-runtime-management` check
@@ -43,11 +43,15 @@ v1.38 checklist is carried the same result blocks the submission. The check
 never records N/A.
 
 Once at least one submission-required check has produced a result, the
-rendered `index.md` lists every requirement of the selected checklist in
-upstream order with its aggregate status (below). A requirement no non-skipped
-check evidenced has no page and no evidence link. A report whose conformance
-checks were all skipped or are all diagnostic writes nothing at all, not even
-those rows.
+requirement table lists every requirement of the selected checklist in
+upstream order with its aggregate status (below): in `index.md` for the
+evidence-pages render the Go SDK's `RenderCNCFEvidence*` methods perform, and
+in `README.md` of the submission directory `aicr validate --cncf-submission`
+writes. A requirement no non-skipped check evidenced has no page and no
+evidence link. A report whose conformance checks were all skipped or are all
+diagnostic renders no pages and no index; a submission run still writes
+PRODUCT.yaml, README.md and the artifacts, with every requirement not
+established.
 
 `workload_sandboxing` is SHOULD at v1.37, the only carried checklist that
 lists it, and graduates to MUST at v1.38 (upstream KAR-0020). The
@@ -74,7 +78,7 @@ A requirement's status is computed from every check expected to evidence it
 at the selected checklist version (`pkg/evidence/cncf/aggregate.go`,
 `AggregateReport`), fail-closed: a requirement never reads as passed because
 nothing contradicted it. The same aggregation feeds the evidence index and the
-submission statuses (#3605); the CTRF report keeps every check's real verdict.
+submission statuses of PRODUCT.yaml (see [Statuses are never typed](#statuses-are-never-typed)); the CTRF report keeps every check's real verdict.
 
 | Status | Meaning | How it arises |
 |--------|---------|---------------|
@@ -213,7 +217,7 @@ PRODUCT.yaml metadata (`name`, `platformName`, `platformVersion`,
 `description`, `contactEmail`, `websiteUrl`, `documentationUrl`,
 `productLogoUrl`, `k8sConformanceUrl`; `repoUrl` optional), so the command
 stays at two flags. A missing field, a bracketed placeholder, a relative URL
-or a `k8sConformanceUrl` outside `https://github.com/cncf/k8s-conformance/tree/master/vX.Y/<product>`
+or a `k8sConformanceUrl` outside `https://github.com/cncf/k8s-conformance/tree/(master or main)/vX.Y/<product>`
 is refused with `INVALID_REQUEST` before any check runs. Whether the URLs
 answer and whether `name` matches a CNCF member in the landscape is the
 upstream validator's check at the end of the run. See
@@ -287,7 +291,13 @@ non-zero naming the MUST; when the validator rejects the directory the run
 exits non-zero with its report (`INTERNAL`), and when it cannot start because
 the CNCF landscape is unreachable it exits with `SERVICE_UNAVAILABLE`. The
 staged tree stays in either case for inspection and must be removed before
-the next run; `--evidence-dir` itself must be absent or empty. The validator
+the next run, which exits 2 while it exists (its README.md Validation section
+says why it was kept); `--evidence-dir` itself must be absent or empty, and a
+path with a `vX.Y/` parent segment is refused because the validator would
+read that segment as the checklist version. The whole write, including the
+validator's run, is bounded by `defaults.CNCFSubmissionTimeout` (10 minutes);
+exceeding it exits `TIMEOUT` (5) with the staged tree kept, as for a
+rejection. The validator
 needs network access: it fetches the landscape to check the vendor name and
 requests every URL the submission cites. A refresh of the pinned revision
 re-checks the assumptions this design relies on (fragments on every artifact
@@ -307,7 +317,9 @@ The scrubber is not a guarantee that nothing sensitive remains (a free-form
 hostname that is not a node name passes through, and so does a node absent
 from a partial or redacted snapshot, since the node list comes from the
 snapshot), so the operator reviews the directory before submitting it; the
-README says so. A staged tree is kept only once the
+README says so. Review, do not edit: a change made after the run is not
+covered by the README's validator outcome; fix the config or the cluster and
+re-run. A staged tree is kept only once the
 redaction pass has completed (because a MUST was not established or the
 validator rejected it); an error or cancellation before that point removes
 the whole tree, so no raw check output is left behind. The README's

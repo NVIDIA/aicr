@@ -87,6 +87,14 @@ type CNCFSubmissionOptions struct {
 	Commit string
 }
 
+// CNCFStagedDirContextKey is the StructuredError.Context key under which an
+// error WriteCNCFSubmission returns after the redaction pass completed (a
+// validator rejection, an interrupted validator, a failure to move the
+// directory into place) carries the staged product directory that was kept
+// for inspection; it must be removed before the next run. Errors before
+// that point carry none: the tree was removed.
+const CNCFStagedDirContextKey = cncf.StagedDirContextKey
+
 // CNCFSubmissionResult is what Client.WriteCNCFSubmission produced.
 type CNCFSubmissionResult struct {
 	// Aggregate is the requirement aggregation the directory was rendered
@@ -169,11 +177,17 @@ func (c *Client) ValidateCNCFSubmissionOptions(opts CNCFSubmissionOptions, dir s
 //     nil, dir is empty or fails ValidateCNCFSubmissionOptions, an option
 //     is malformed, or the report carries a check withheld by
 //     WithValidationSkipChecks (as RenderCNCFEvidenceWithResult refuses).
+//   - ErrCodeConflict when <dir>.incomplete appeared between the pre-flight
+//     and the claim (another run, or a tree left behind); it is never
+//     removed by this run.
 //   - ErrCodeUnavailable when the upstream validator could not run.
 //   - ErrCodeInternal when a file cannot be written or the validator
 //     rejected the directory; the message carries its report.
 //   - ErrCodeTimeout when writing exceeds defaults.CNCFSubmissionTimeout,
 //     or ErrCodeCanceled when ctx is canceled.
+//
+// An error returned after the redaction pass completed carries the kept
+// staged directory in its context under CNCFStagedDirContextKey.
 func (c *Client) WriteCNCFSubmission(ctx context.Context, report *ctrf.Report, dir string, snap *Snapshot, rec *RecipeResult, opts CNCFSubmissionOptions) (*CNCFSubmissionResult, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")

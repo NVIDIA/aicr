@@ -678,7 +678,7 @@ func runValidation(
 		switch {
 		case err != nil:
 			renderErr = err
-			slog.Error("CNCF submission directory not written", "error", err, "dir", cfg.evidenceDir)
+			logSubmissionFailure(err, cfg.evidenceDir)
 		case res.Complete:
 			slog.Info("CNCF submission directory written and accepted by the upstream validator",
 				"dir", res.Dir, "kubernetesVersion", opts.KubernetesVersion, "checklist", res.Aggregate.Version)
@@ -747,6 +747,30 @@ func runOutcome(checksFailed bool, submissionErr error) error {
 		return errors.New(errors.ErrCodeInternal, "validation failed: one or more phases did not pass")
 	}
 	return nil
+}
+
+// logSubmissionFailure reports a submission that was not promoted. When the
+// error carries the staged directory (the redaction pass had completed), the
+// operator is told where the redacted copy is and that the next run exits 2
+// until it is removed; otherwise nothing was kept.
+func logSubmissionFailure(err error, requested string) {
+	if staged := stagedSubmissionDir(err); staged != "" {
+		slog.Error("CNCF submission not promoted; the staged copy is kept for inspection and must be removed before the next run",
+			"error", err, "staged", staged, "requested", requested)
+		return
+	}
+	slog.Error("CNCF submission directory not written; nothing was kept", "error", err, "requested", requested)
+}
+
+// stagedSubmissionDir returns the staged directory an error carries under
+// aicr.CNCFStagedDirContextKey, or "".
+func stagedSubmissionDir(err error) string {
+	se, ok := stderrors.AsType[*errors.StructuredError](err)
+	if !ok {
+		return ""
+	}
+	staged, _ := se.Context[aicr.CNCFStagedDirContextKey].(string)
+	return staged
 }
 
 // logValidatorOutput relays the upstream validator's report line by line,

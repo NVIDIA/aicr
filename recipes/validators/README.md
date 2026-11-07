@@ -76,9 +76,9 @@ Neither constraint applies to `nccl-cre-all-reduce-bw` or
 | `dra-support` | Verify Dynamic Resource Allocation support | 5m |
 | `gang-scheduling` | Verify gang scheduling with KAI scheduler using CPU-only workers | 10m |
 | `accelerator-metrics` | Verify accelerator metrics from DCGM exporter | 5m |
-| `ai-service-metrics` | Verify AI service metrics via Prometheus | 5m |
-| `inference-gateway` | Verify the recipe's inference gateway (Gateway API + Inference Extension) is operational | 5m |
-| `pod-autoscaling` | Verify HPA-driven pod autoscaling with GPU metrics | 10m |
+| `ai-service-metrics` | Verify AI service metrics via Prometheus | 10m |
+| `inference-gateway` | Verify the recipe's inference gateway (Gateway API + Inference Extension) is operational, then drive header-routed and weighted traffic through it from a probe pod | 15m |
+| `pod-autoscaling` | Verify HPA-driven pod autoscaling of accelerator-requesting pods on a per-pod custom metric served by prometheus-adapter (needs two allocatable accelerators) | 15m |
 | `cluster-autoscaling` | Verify cluster autoscaling with Karpenter | 10m |
 | `robust-controller` | Verify AI operator controller, webhooks and CR reconciliation (Kubeflow Trainer reconciles a TrainJob to Complete; Dynamo records observations) | 8m |
 | `secure-accelerator-access` | Verify secure GPU access via DRA or device plugin (no host device mounts); skips on Slinky Slurm recipes, where on GPU-backed leaves slinky-slurm-gpu-access verifies the Slurm path | 10m |

@@ -336,15 +336,18 @@ type CNCFRequirementAggregate = cncf.Aggregate
 
 // ValidateCNCFEvidenceOptions checks RenderCNCFEvidenceOptions the way
 // RenderCNCFEvidenceWithResult will, without rendering: the checklist version
-// resolves (an unsupported ConformanceVersion is refused) and every
+// resolves (an unsupported ConformanceVersion is refused), every
 // NotApplicable id is a conditional MUST of that version with a non-blank
-// justification. It exists so a caller can refuse a bad notApplicable key
-// before the validation run, rather than after every check has run.
+// justification, and every Documented entry names a requirement of that
+// version not also in NotApplicable, with at least one absolute http(s) URL
+// and a note. It exists so a caller can refuse a bad key before the
+// validation run, rather than after every check has run.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client is nil, opts.ConformanceVersion
-//     is unsupported, or opts.NotApplicable names a requirement that may not
-//     be declared not applicable or lacks a justification.
+//     is unsupported, opts.NotApplicable names a requirement that may not
+//     be declared not applicable or lacks a justification, or opts.Documented
+//     is malformed.
 func (c *Client) ValidateCNCFEvidenceOptions(opts RenderCNCFEvidenceOptions) error {
 	if c == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
