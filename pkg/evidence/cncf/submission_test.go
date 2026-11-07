@@ -252,7 +252,9 @@ func TestWriteSubmissionComplete(t *testing.T) {
 	if gang.Status != productImplemented || strings.Join(gang.Evidence, " ") != "evidence/gang-scheduling.md junit.xml#gang-scheduling e2e.log#gang-scheduling" {
 		t.Errorf("gang_scheduling = %+v", gang)
 	}
-	if got := product["workload_sandboxing"]; got.Status != productNotImplemented || !strings.Contains(got.Notes, "no check") {
+	// workload-sandboxing has a check since #3697 but the fixture does not
+	// run it, so the SHOULD is not claimed for want of a result.
+	if got := product["workload_sandboxing"]; got.Status != productNotImplemented || !strings.Contains(got.Notes, "Not claimed by this run: not run") {
 		t.Errorf("workload_sandboxing = %+v", got)
 	}
 	if got := product["cluster_autoscaling"]; got.Status != productImplemented || len(got.Evidence) != 2 || got.Evidence[0] != autoscalerDocumentation.Evidence[0] {

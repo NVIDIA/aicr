@@ -62,7 +62,7 @@ result) set it (see [Requirement status](https://github.com/NVIDIA/aicr/blob/mai
 | `accelerator_metrics` | MUST | Implemented | PASSED | [`evidence/accelerator-metrics.md`](evidence/accelerator-metrics.md), [`junit.xml#accelerator-metrics`](junit.xml), [`e2e.log#accelerator-metrics`](e2e.log) |
 | `ai_service_metrics` | MUST | Implemented | PASSED | [`evidence/ai-service-metrics.md`](evidence/ai-service-metrics.md), [`junit.xml#ai-service-metrics`](junit.xml), [`e2e.log#ai-service-metrics`](e2e.log) |
 | `secure_accelerator_access` | MUST | Implemented | PASSED | [`evidence/secure-accelerator-access.md`](evidence/secure-accelerator-access.md), [`junit.xml#secure-accelerator-access`](junit.xml), [`e2e.log#secure-accelerator-access`](e2e.log) |
-| `workload_sandboxing` | SHOULD | Not Implemented | NOT TESTED (no AICR check) | - |
+| `workload_sandboxing` | SHOULD | Not Implemented | NOT TESTED (not run) | - |
 | `robust_controller` | MUST | Implemented | PASSED | [`evidence/robust-operator.md`](evidence/robust-operator.md), [`junit.xml#robust-controller`](junit.xml), [`e2e.log#robust-controller`](e2e.log) |
 
 ### Supporting evidence

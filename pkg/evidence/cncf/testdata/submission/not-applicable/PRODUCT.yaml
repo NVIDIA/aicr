@@ -118,7 +118,7 @@ spec:
       level: SHOULD
       status: Not Implemented
       evidence: []
-      notes: 'Not claimed: AICR has no check for this requirement and no documentation was cited.'
+      notes: 'Not claimed by this run: not run.'
   operator:
     - id: robust_controller
       description: The platform must prove that at least one complex AI operator with a CRD (e.g., Ray, Kubeflow) can be installed and functions reliably. This includes verifying that the operator's pods run correctly, its webhooks are operational, and its custom resources can be reconciled.
