@@ -586,7 +586,12 @@ one retry of the read) the result is reported as `other` with the message
 `result output unavailable: ...`, never as `passed`; a `skipped` or `failed`
 exit keeps its verdict, since it does not rest on the output. Before #3703 the
 pass stood with an empty `extra`, and an observation-only check whose logs
-were lost rendered `PASSED`.
+were lost rendered `PASSED`. The read itself (`pkg/k8s/pod.GetPodLogs`) drains
+the stream in chunks rather than lines, so one over-long log line no longer
+fails the whole read as it did under `bufio.Scanner`. On the check side,
+`validators.SkipWithReason` fails the check when its `skipReason` code cannot
+be written, as `EmitExtra` does for the `observationOnly` and `resultSchema`
+markers; `EmitExtraOrWarn` is for informational extras only.
 
 ### Capability applicability contract
 

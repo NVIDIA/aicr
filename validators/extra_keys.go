@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
@@ -100,13 +101,24 @@ const (
 )
 
 // SkipWithReason publishes code as the skip reason and returns Skip(reason).
-// Only code survives minimal redaction.
+// Only code survives minimal redaction, and the CNCF aggregation reads it as
+// the NOT TESTED reason, so a code that could not be written fails the check
+// instead of skipping it: a skip with no reason would read as an unexplained
+// gap in the evidence.
+//
+// Errors:
+//   - ErrCodeInternal when the skip reason could not be written to stdout.
 func SkipWithReason(code, reason string) error {
-	EmitExtraOrWarn(map[string]string{ExtraKeySkipReason: code})
+	if err := EmitExtra(map[string]string{ExtraKeySkipReason: code}); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to publish the skip reason "+code+" for: "+reason, err)
+	}
 	return Skip(reason)
 }
 
 // EmitExtraOrWarn calls EmitExtra and logs, rather than returns, any error.
+// Use it for informational extras only (counts, measured values, the
+// allocation mode a check exercised); an extra that decides how a result is
+// read goes through EmitExtra with the error returned.
 func EmitExtraOrWarn(extra map[string]string) {
 	if err := EmitExtra(extra); err != nil {
 		slog.Warn("failed to emit validator extra", "error", err)
