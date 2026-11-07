@@ -362,6 +362,45 @@ func (c *Client) ValidateCNCFEvidenceOptions(opts RenderCNCFEvidenceOptions) err
 	return cncf.ValidateDocumented(version, toInternalDocumented(opts.Documented), opts.NotApplicable)
 }
 
+// ValidateCNCFRecipeCoverage checks, before a submission run, that rec
+// declares a complete proof path for every applicable MUST of the checklist
+// opts selects (resolved as RenderCNCFEvidenceWithResult will, with
+// opts.NotApplicable removing the requirements it declares): a recipe that
+// does not cannot establish the submission whatever its checks find, so the
+// run is refused before any validator Job rather than failing after them.
+// The check list is rec's spec.validation.conformance.checks; a recipe with
+// none declares nothing.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client or rec is nil, rec has no
+//     internal recipe state, opts does not resolve (see
+//     ValidateCNCFEvidenceOptions), or the recipe cannot establish one or
+//     more applicable MUSTs; the message names each requirement and the
+//     checks that would close its gap.
+func (c *Client) ValidateCNCFRecipeCoverage(rec *RecipeResult, opts RenderCNCFEvidenceOptions) error {
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if rec == nil || rec.internal == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"recipe is required: the conformance checks a submission runs are selected from it")
+	}
+	version, err := resolveConformanceVersion(opts)
+	if err != nil {
+		return err
+	}
+	return cncf.ValidateRecipeCoverage(version, recipeConformanceChecks(rec), opts.NotApplicable)
+}
+
+// recipeConformanceChecks returns rec's declared conformance checks, nil
+// when the recipe declares no conformance phase.
+func recipeConformanceChecks(rec *RecipeResult) []string {
+	if rec == nil || rec.internal == nil || rec.internal.Validation == nil || rec.internal.Validation.Conformance == nil {
+		return nil
+	}
+	return rec.internal.Validation.Conformance.Checks
+}
+
 // RenderCNCFEvidence writes CNCF AI Conformance evidence markdown (one file
 // per submission requirement, plus index.md) to dir from a CTRF report,
 // typically the one MergeReports returns, against the latest checklist
