@@ -102,16 +102,19 @@ and `agentgateway-post`, which applies
 creates `agentgateway-system/inference-gateway`. The chart alone creates no
 Gateway, so an install or upgrade that runs only the `helm upgrade` leaves the
 `inference-gateway` check with nothing to read. `aicr validate --phase
-deployment` does not catch this today — the agentgateway health check asserts
-the controller Deployment and pod health, never the Gateway CR
+deployment` catches this: the agentgateway health check asserts that
+`agentgateway-system/inference-gateway` exists with `Accepted=True` and
+`Programmed=True`, so a deploy that held back `agentgateway-post` fails the
+deployment phase instead of passing it
 ([#3714](https://github.com/NVIDIA/aicr/issues/3714)).
 
-On an LB-less tenant, keep the step rather than skipping it: deploy the Gateway
-with a ClusterIP Service. The chart has no knob for this — the manifest's
-`AgentgatewayParameters.spec.service` block sets only
-`loadBalancerSourceRanges` and is itself gated on `allowedSourceRanges` — so
-until one exists this means applying the Gateway and its
-`AgentgatewayParameters` by hand with `service.spec.type: ClusterIP`.
+On an LB-less tenant, keep the step rather than skipping it: generate the
+bundle with `--set agentgateway:serviceType=ClusterIP`. The controller then
+programs the Gateway onto a ClusterIP Service, the shape the NVKE GB200
+cluster runs, and the conformance check records "No LoadBalancer Service".
+With `ClusterIP` the rendered Service carries no `loadBalancerSourceRanges`,
+a field Kubernetes accepts only on a LoadBalancer Service. Never edit the
+generated bundle to get there; `aicr verify` checksums every file in it.
 
 ### Evidence
 

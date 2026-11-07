@@ -65,6 +65,16 @@ the `< 1.36.0` Kubernetes cap and the Gateway API / LoadBalancer prerequisites
   `Gateway.status.conditions[?type=='Programmed'].status == 'True'` — it
   will not go green. (Until an LB exists the gateway is still reachable via
   its NodePort / ClusterIP for smoke tests.)
+  The deployment phase gates on the same Gateway: the `agentgateway` health
+  check asserts `agentgateway-system/inference-gateway` exists with
+  `Accepted=True` and `Programmed=True`, so a bundle deployed without its
+  `agentgateway-post` step fails `aicr validate --phase deployment`
+  ([#3714](https://github.com/NVIDIA/aicr/issues/3714)). Without an LB,
+  deploy the Gateway with a ClusterIP Service instead. The recipe values
+  expose no setting for the Service type: add `type: ClusterIP` under
+  `spec.service.spec` of the `system-proxy` `AgentgatewayParameters` in
+  `templates/inference-gateway.yaml` of the bundle's `agentgateway-post`
+  chart before applying it; that block is merged onto the generated Service.
 - **Mask the host `nvidia-imex` service on every GPU node.** The Vera Rubin
   reference image installs the host-managed 615 driver stack, which enables
   an `nvidia-imex` systemd service by default. All four shipped coordinates
