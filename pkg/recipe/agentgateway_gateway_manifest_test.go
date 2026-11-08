@@ -65,8 +65,9 @@ func renderAgentgatewayParameters(t *testing.T, values map[string]any) map[strin
 }
 
 // TestAgentgatewayGatewayManifest_ServiceType pins the Service block of the
-// AgentgatewayParameters CR. The bundler always injects allowedSourceRanges,
-// so the rendered Service type decides whether they may appear:
+// AgentgatewayParameters CR. The bundler injects allowedSourceRanges only for
+// a LoadBalancer serviceType, and the rendered Service type decides whether
+// they may appear:
 // loadBalancerSourceRanges is accepted by the apiserver only on a
 // LoadBalancer Service.
 func TestAgentgatewayGatewayManifest_ServiceType(t *testing.T) {
