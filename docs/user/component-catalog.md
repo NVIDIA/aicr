@@ -2833,8 +2833,10 @@ Deployment up there to report each framework usable, and it reads the
 Deployment's image tag to learn the operator's version through a tag-to-version
 map the chart renders as a ConfigMap. Upstream tags the image by commit, and
 chart 3.0.20 knows tags only up to 1.9.3, so
-`components/runai-cluster/values.yaml` adds the 1.9.4 entry
-(`trainingOperatorImageTags`) and keeps `operands.trainingOperator.enabled`
+`components/runai-cluster/values.yaml` adds the 1.9.4 entries
+(`trainingOperatorImageTags`, keyed by the image tag and, because the operator
+reads whatever follows the reference's last colon, by the hex of the digest
+AICR pins) and keeps `operands.trainingOperator.enabled`
 on, which renders that ConfigMap and has the operator create a ServiceMonitor
 for the training operator's metrics Service; it installs no operator of its
 own. `runai-cluster` depends on the training operator so the first reconcile

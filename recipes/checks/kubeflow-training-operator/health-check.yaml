@@ -26,7 +26,10 @@
 #    injects the CA into the ValidatingWebhookConfiguration. With
 #    failurePolicy Fail, an operator that never got this far rejects every
 #    kubeflow.org job, so a populated Secret is what proves the admission
-#    path works, and the configuration must still be there to be served.
+#    path works, and the configuration must still be there to be served:
+#    five webhooks (JAXJob, PaddleJob, PyTorchJob, TFJob, XGBoostJob; MPIJob
+#    v1 has none upstream), which TestKubeflowTrainingOperatorWebhookCount
+#    keeps equal to the vendored manifest.
 #
 # Names verified against training-operator v1.9.4's standalone overlay;
 # re-verify on every re-vendor.
@@ -150,4 +153,4 @@ spec:
               kind: ValidatingWebhookConfiguration
               metadata:
                 name: validator.training-operator.kubeflow.org
-              (webhooks[?clientConfig.service.name == 'training-operator' && clientConfig.service.namespace == 'kubeflow'] | length(@) == `6`): true
+              (webhooks[?clientConfig.service.name == 'training-operator' && clientConfig.service.namespace == 'kubeflow'] | length(@) == `5`): true
