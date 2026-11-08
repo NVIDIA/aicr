@@ -2845,7 +2845,11 @@ namespace, so nothing collides, but no recipe installs both (`--platform`
 takes one value) and the combination is not qualified. The operator's
 webhook certificate is self-managed, so cert-manager is not a dependency.
 Upstream ships v1 only as Kustomize; the manifests are vendored from tag
-v1.9.4 with the image pinned by digest, and the component's health check
+v1.9.4 with the image pinned by digest. The CRDs are vendored with their
+`description` fields removed: they are 60% of the 3.7 MB of CRD YAML, and with
+them the component's Helm release record exceeds the apiserver's 1 MiB object
+limit, so the install fails (observed on GKE); schema and validation are
+unchanged, only `kubectl explain` loses its text. The component's health check
 asserts the six `kubeflow.org` CRDs are Established, the Deployment has
 rolled out, and the webhook serving certificate was written.
 

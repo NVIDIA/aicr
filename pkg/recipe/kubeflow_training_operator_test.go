@@ -215,8 +215,10 @@ func TestKubeflowTrainingOperatorTagMappedForRunai(t *testing.T) {
 
 // TestKubeflowTrainingOperatorVendoredCRDs checks that the vendored CRD files
 // define exactly the kubeflow.org kinds the health check asserts and that each
-// records the upstream tag it was taken from, so a partial re-vendor fails
-// here rather than as a CRD the operator serves and the check never looks at.
+// records the upstream tag it was taken from and carries no description
+// fields, so a partial or unstripped re-vendor fails here rather than as a CRD
+// the operator serves and the check never looks at, or as a release Secret the
+// apiserver rejects.
 func TestKubeflowTrainingOperatorVendoredCRDs(t *testing.T) {
 	t.Parallel()
 
@@ -251,6 +253,13 @@ func TestKubeflowTrainingOperatorVendoredCRDs(t *testing.T) {
 		}
 		if !slices.Equal(names, []string{crd}) {
 			t.Errorf("%s defines CRDs %v, want exactly [%s]", file, names, crd)
+		}
+		// Descriptions are stripped on purpose: with them the Helm release
+		// Secret for the component exceeds the apiserver's 1 MiB object limit
+		// (observed on GKE, 2026-11-08). A re-vendor that forgets the yq
+		// transform in the file header fails here, not at helm install.
+		if strings.Contains(string(data), "description:") {
+			t.Errorf("%s carries description fields; re-vendor with the yq transform in its header", file)
 		}
 		if !strings.Contains(string(check), "name: "+crd) {
 			t.Errorf("health check does not assert CRD %s", crd)
