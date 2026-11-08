@@ -82,12 +82,10 @@ func GetPodLogs(ctx context.Context, client kubernetes.Interface, namespace, pod
 }
 
 // readLogStream drains a completed pod's log stream into a string, checking
-// ctx between chunks. It reads fixed-size chunks rather than lines, so a
-// single line longer than any buffer (a check that prints a large JSON
-// document on one line) cannot fail the whole read: with bufio.Scanner that
-// read ended in ErrTooLong, and the orchestrator then saw no output at all
-// for a result that had exited 0 (#3703). The line structure is restored by
-// the callers that split on newlines.
+// ctx between chunks. It reads fixed-size chunks rather than lines: no line
+// length may fail the read, since a check may print a large JSON document on
+// one line and the orchestrator must still see the output of a result that
+// exited 0 (#3703). Callers split the string on newlines.
 //
 // Errors:
 //   - ErrCodeTimeout or ErrCodeCanceled when ctx ends before the stream does.
@@ -110,8 +108,7 @@ func readLogStream(ctx context.Context, stream io.Reader) (string, error) {
 			return "", errors.Wrap(errors.ErrCodeInternal, "failed to read pod logs", err)
 		}
 	}
-	// The scanner this replaces emitted every line newline-terminated, and
-	// the callers' line splitting relies on the final line being terminated.
+	// Callers split on '\n' and expect the final line to be terminated.
 	if logBuffer.Len() > 0 && logBuffer.Bytes()[logBuffer.Len()-1] != '\n' {
 		logBuffer.WriteByte('\n')
 	}
