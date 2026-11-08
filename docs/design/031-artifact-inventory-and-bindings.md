@@ -1,4 +1,4 @@
-# ADR-030: Artifact Inventory and Catalog Bindings
+# ADR-031: Artifact Inventory and Catalog Bindings
 
 ## Status
 
@@ -45,17 +45,15 @@ the user who chooses the inventory.
 ## Context
 
 The following behavior was checked against origin `main` at
-[`fe2618f4696b181a4936e8dcf1d0f013512c16e0`](https://github.com/NVIDIA/aicr/tree/fe2618f4696b181a4936e8dcf1d0f013512c16e0).
-It describes the implementation this proposal extends. The cited code is
-unchanged on origin `main` at
-[`5e65afd5b9d80e2e580f4f15836d38da2351ff3b`](https://github.com/NVIDIA/aicr/tree/5e65afd5b9d80e2e580f4f15836d38da2351ff3b).
+[`0cf4a65433b55f6cb29370a7645e41496e70593c`](https://github.com/NVIDIA/aicr/tree/0cf4a65433b55f6cb29370a7645e41496e70593c).
+It describes the implementation this proposal extends.
 
 | Current behavior | Consequence for this design |
 |---|---|
 | `pkg/config` defines `AICRConfig` on the `aicr.run/v1beta1` authoring track, with `spec.recipe.data` and strict field decoding. [Config schema][config], [loader][config-loader] | Add user choices to that schema and its normal resolution path. |
 | A filesystem provider requires an external `registry.yaml` and layers external data over embedded data. Matching external registry entries replace whole component entries. [Provider][provider], [merge][merge] | Binding preserves complete effective entries and their policy. It does not replace the embedded catalog. |
 | The client constructs its provider before its recipe builder. [Client construction][client] | Compose before builder/provider caches are populated, through a shared functional path. |
-| Registry defaults fill absent recipe coordinates. Values files participate according to the component ref's `valuesFile`; a filename alone does not enable loading. [Defaults][defaults], [values][values] | Reject conflicting explicit coordinates and require each image target file to participate in the selected component's values. |
+| Registry defaults fill absent recipe coordinates. Values files participate according to the component ref's `valuesFile`; a filename alone does not enable loading. [Defaults][defaults], [values][values] | Rebind catalog restatements of defaults, reject other conflicting coordinates and require each image target file to participate in the selected component's values. |
 | `helm.defaultDigest` identifies the chart `.tgz`, including for OCI charts. `ResolveChartDigests` returns a pin only when source, chart and version still match the registry. [Helm schema][helm-schema], [digest resolution][chart-digests] | Bind coordinates and archive digest together, then reject identity changes after composition. |
 | `RecipeResultMetadata` has no artifact-binding record. Loading a saved result attaches the caller's provider. [Metadata][metadata], [recipe loader][recipe-loader] | Serialized provenance and checks on reload are new work, not guarantees of the existing provider association. |
 
@@ -138,10 +136,12 @@ binding set. Each inventory entry then fails ordinary accounting with
    unused embedded binding must not break loading. Clone effective entries and
    update only active chart fields and image values.
    Preserve class, namespace, dependencies, scheduling, checks, manifests and
-   other integration policy. Do not mutate shared caches.
+   other integration policy, subject to the CRD ownership rule below. Rebind
+   catalog restatements of chart defaults as described below. Do not mutate
+   shared caches.
 3. For each bound chart, split its OCI reference at the final path component
    into `helm.defaultRepository` and `helm.defaultChart`. Set
-   `helm.defaultVersion` from `version` and `helm.defaultDigest` from
+   `helm.defaultVersion` verbatim from `version` and `helm.defaultDigest` from
    `archiveDigest` together. A missing archive digest fails; an old pin must
    never survive a coordinate change. Record `manifestDigest` as provenance
    only. No `helm.defaultManifestDigest` is introduced.
@@ -156,7 +156,8 @@ binding set. Each inventory entry then fails ordinary accounting with
    components do not require coverage. An image binding alone cannot cover a
    chart, and a chart match alone cannot cover declared but unmatched images.
 5. Apply a shared identity guard after final value composition on every
-   consumer path. Explicit recipe coordinates, overlays, profiles and user
+   supported consumer path, after identity inheritance. Apart from catalog
+   default restatements, explicit coordinates, overlays, profiles and user
    overrides must agree with bound chart coordinates and image identities.
    Equal values are allowed; changes to a bound repository, version, chart,
    digest or required tag clearing fail. Dynamic declarations that overlap
@@ -167,34 +168,99 @@ binding set. Each inventory entry then fails ordinary accounting with
    inventory, bindings, base catalog and exceptions. Missing inputs or a
    mismatch fail before validation, discovery or bundle output.
 
-The shared implementation belongs below the CLI, so SDK and server callers
-receive the same checks. `recipe`, `validate`, `mirror list` and `bundle` must
-all pass artifact configuration into provider construction and run the guard
-where their final values are known. Recipe selection coverage cannot be
-completed solely during provider loading.
+### Supported consumers
 
-A binding does not renew version-specific integration evidence. A changed
-chart must not inherit an `ownsCRDs` audit for different chart coordinates or
-archive bytes; the reviewed catalog must first name the incoming identity.
-When a bound chart changes the effective CRD set, catalog review must revalidate
-all affected owners against the full effective chart set, including changed
-charts that do not declare `ownsCRDs`. An unchanged owner's audit cannot vouch
-for exclusive ownership if another chart now ships the same CRD. Keep audit
-evidence tied to the reviewed incoming identities and drop `ownsCRDs` where
-its guarantees no longer hold. This follows the existing
-[CRD ownership audit procedure][crd-audit]. Health checks and upgrade guidance
-remain the catalog author's responsibility.
+The shared implementation belongs below the CLI. `recipe`, `validate`,
+`mirror list` and `bundle` pass artifact configuration into provider
+construction and run the identity guard where final values are known. Recipe
+selection coverage cannot be completed solely during provider loading.
+
+| Consumer or source | Initial artifact support |
+|---|---|
+| CLI `recipe`, `validate`, `mirror list`, `bundle` | Supported through the existing `--config` and `--data` inputs. |
+| SDK with `EmbeddedSource` or `FilesystemSource` | Supported through a new typed client option carrying the same inventory path and exceptions as `AICRConfig`. Provider construction and saved-recipe checks use the same implementation as the CLI. |
+| `aicrd` | Unsupported for artifact-bearing recipes. Reject with reason `artifact-inputs-required` before execution; this proposal adds no server inventory transport or configuration. |
+| CLI `upgrade-check` and SDK `UpgradeCheck` | Unsupported for artifact-bound inputs or an inventory-enabled client. Reject with reason `artifact-upgrade-unsupported` before consulting upgrade records. Defining upgrade evidence for rebound pins is separate work. |
+| SDK `OCISource` | Unsupported for composition. Reject artifact options or artifact-bearing recipes with reason `artifact-source-unsupported`. Ordinary OCI catalogs without an inventory remain supported. |
+
+These are proposed reason values on `ErrCodeInvalidRequest`, not new error
+codes. Supported consumers also reject missing composition inputs with
+`artifact-inputs-required` and changed inputs with `artifact-inputs-mismatch`.
+Unsupported consumers must detect artifact provenance before executing any
+operation; they cannot discard it and proceed. This support boundary reflects
+current [server construction][server-source], [upgrade loading][upgrade-load]
+and [SDK source options][sdk-sources]. Extending it requires specifying how the
+consumer obtains and hashes the same inputs. An OCI-referenced inventory and
+composition over an OCI catalog are both outside this proposal.
+
+### Catalog defaults and inherited identity
+
+Before binding, retain the effective registry defaults and the origin of each
+catalog coordinate. Catalog overlays and mixins can restate those defaults;
+[the base overlay][base-overlay] does so today. For each catalog-origin source,
+chart or version field, rewrite it to the corresponding bound field only if
+it equals that component's pre-binding registry default. Compare charts by
+their effective chart name and versions verbatim. Absent fields use the bound
+registry defaults normally. Explicit fields already equal to the incoming
+identity also pass. Other explicit values remain subject to the identity guard
+and fail if they conflict. This rule applies to catalog data, never to a saved
+recipe, profile or user override.
+
+For example, a catalog overlay that repeats the registry's HTTPS source moves
+to the inventory's OCI source with its binding. An overlay that deliberately
+selects a different repository fails instead of silently losing that choice.
+Track origin before composition so equal-looking user input is not mistaken
+for a catalog default.
+
+`--inherit-from` currently copies prior source and chart identity after
+resolution. [Inheritance][inheritance] remains deliberate user input. Run the
+guard after inheritance and reject differing bound coordinates with reason
+`artifact-identity-conflict`; neither binding nor inheritance silently wins.
+A pre-inventory recipe may be an inheritance source, but its differing source
+or chart will cause that conflict. The existing `--inherit=namespace` mode
+lets the user keep namespaces while adopting the new bound chart identity.
+An artifact-bearing inheritance source must still pass input-provenance
+comparison, including in namespace mode. `allowCatalogPins` does not waive a
+conflict with an active binding.
+
+### CRD ownership after binding
+
+The existing [ownership audit][crd-audit] checks embedded pins in tests.
+[Runtime CRD policy][crd-policy] compares refs against the effective registry;
+changing that registry through binding would otherwise carry `ownsCRDs` into
+an unaudited composition.
+
+At provider composition, compare every active chart binding with its
+pre-binding repository, effective chart name, verbatim version and archive
+digest. If any differs, or the old archive digest is absent, clear `ownsCRDs`
+on **all** entries in the cloned effective registry and omit their CRD
+ownership exclusions. Emit a diagnostic naming the changed identities and the
+disabled owners. An unchanged owner's audit cannot establish exclusivity when
+a different chart may have acquired the same CRD, including a chart that does
+not declare `ownsCRDs`. Clearing only the changed component is insufficient.
+If every bound identity matches exactly, preserve the existing ownership policy.
+
+This conservative rule requires no registry fetch or producer attestation.
+It can disable CRD upgrades even for unaffected owners; it does not prove a
+new composition safe. Restoring the policy requires a reviewed base catalog
+that pins the incoming identities and revalidates ownership against the full
+chart set. Health checks and upgrade guidance remain the catalog author's
+responsibility. This controls deployers that consult `ownsCRDs`; Argo CD
+applies CRDs as ordinary manifests and is not gated by this flag.
 
 ## Proposal
 
 ### Document rules
 
-`ArtifactInventory` and `ArtifactBindings` use
-`apiVersion: artifacts.aicr.run/v1alpha1`. This is a separate, explicitly
-versioned contract; it does not add an `aicr.run/v1alpha1` track. Its parser
-accepts only supported kind/version pairs. Implementation must register and
-document those gates consistently with
-[ADR-011](011-artifact-apiversion-policy.md) and
+`ArtifactInventory` and `ArtifactBindings` use `apiVersion: aicr.run/v1beta1`,
+the existing authoring track and API group. The proposed rows in
+[ADR-022 section 2](022-artifact-maturity-and-deprecation.md#2-per-kind-maturity-map)
+assign both kinds to beta from their first release. They follow
+[ADR-013](013-aicr-run-domain-migration.md) without adding an API group or alpha
+lane. Implementation must add kind-specific read-gate entries in the same
+change that introduces their parsers. Each gate accepts only its own kind with
+`aicr.run/v1beta1`; reject every other kind/version pair. Apply the compatibility
+and deprecation rules of [ADR-011](011-artifact-apiversion-policy.md) and
 [ADR-022](022-artifact-maturity-and-deprecation.md).
 
 Each file contains one UTF-8 YAML or JSON document with string mapping keys.
@@ -211,23 +277,29 @@ References contain no credentials. Documents must contain no secret values.
 
 | Field | Required | Contract |
 |---|---|---|
-| `apiVersion`, `kind` | Yes | `artifacts.aicr.run/v1alpha1`, `ArtifactInventory`. |
+| `apiVersion`, `kind` | Yes | `aicr.run/v1beta1`, `ArtifactInventory`. |
 | `metadata.name` | No | Human-readable label using the name grammar. |
 | `artifacts` | Yes | List of at most 10,000 artifacts. May be empty; order has no meaning. |
 | `artifacts[].name` | Yes | Unique name, stable across releases. No component-name semantics. |
 | `artifacts[].type` | Yes | `chart`, `image` or `other`; all are OCI-hosted. |
 | `artifacts[].reference` | Yes | Lowercase `oci://host[:port]/repo/path`, without a tag, digest or userinfo. |
-| `artifacts[].version` | Yes | Concrete SemVer without a `v` prefix for charts. An opaque label for images and other artifacts, never interpreted as a tag. |
+| `artifacts[].version` | Yes | Concrete SemVer with an optional leading `v` for charts, preserving the published OCI tag verbatim. An opaque label for images and other artifacts, never interpreted as a tag. |
 | `artifacts[].manifestDigest` | Yes | Identity of the exact OCI manifest bytes, or image-index bytes. Recorded, not checked during loading. |
 | `artifacts[].archiveDigest` | Bound charts | Identity of the exact chart `.tgz` blob. Allowed only for charts and mandatory for a chart binding. |
 | `artifacts[].platform` | No | Image-only object with `os`, `architecture` and optional `variant`. Describes a single-platform manifest; omit for a multi-platform index. |
+
+Chart versions are not normalized when written to `helm.defaultVersion` or
+passed to OCI consumers. A published `v2.4.1` remains `v2.4.1`; the inventory
+must name the tag that exists. The [Argo CD deployer][argocd-tag] already
+preserves OCI versions verbatim because stripping `v` can select a nonexistent
+tag. Archive verification remains independent of tag spelling.
 
 The inventory may be partial relative to the catalog. Every artifact it does
 contain must be accounted for, including `other`, which can only be explicitly
 ignored in this version.
 
 ```yaml
-apiVersion: artifacts.aicr.run/v1alpha1
+apiVersion: aicr.run/v1beta1
 kind: ArtifactInventory
 metadata:
   name: release-2.4.1
@@ -235,7 +307,7 @@ artifacts:
   - name: task-runner-chart
     type: chart
     reference: oci://registry.example.test/charts/task-runner
-    version: "2.4.1"
+    version: "v2.4.1"
     manifestDigest: sha256:1111111111111111111111111111111111111111111111111111111111111111
     archiveDigest: sha256:2222222222222222222222222222222222222222222222222222222222222222
   - name: task-runner-controller
@@ -294,7 +366,7 @@ values as intended. Unsupported image-value layouts require a future typed
 form, not arbitrary string templates.
 
 ```yaml
-apiVersion: artifacts.aicr.run/v1alpha1
+apiVersion: aicr.run/v1beta1
 kind: ArtifactBindings
 charts:
   task-runner-chart:
@@ -466,11 +538,14 @@ evidence need separate work.
    plumbing. Preserve behavior whenever no inventory is supplied, including
    catalogs that publish bindings.
 3. Add selected-recipe coverage, final-value guards, saved-recipe comparison
-   and bundle provenance capture across CLI, SDK and server paths.
+   and bundle provenance capture on supported CLI and SDK paths. Add the
+   explicit rejection paths for `aicrd`, `upgrade-check` and `OCISource`.
 4. Qualify full-reference and split repository/digest image forms with real
    charts. Exercise embedded-only bindings, external same-name replacements,
    superset bindings, inactive stale targets, partial component coverage,
    missing active targets, explicit exceptions and changed inputs on reload.
+   Exercise verbatim OCI tags, catalog default restatements, inheritance
+   conflicts and disabling CRD ownership across the composed catalog.
    Check repeatability and unchanged behavior without an inventory. Verify
    mismatching chart archives are rejected by every supported vendoring path.
 
@@ -486,21 +561,29 @@ relocation evidence remain separate from metadata composition.
 - [External data extension](../integrator/data-extension.md)
 - [Terraform and Fleet GitRepo ChartDigest prerequisite](https://github.com/NVIDIA/aicr/issues/3653)
 
-[config]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/config/config.go#L25
-[config-loader]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/config/loader.go#L208
-[provider]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/recipe/provider.go#L306
-[merge]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/recipe/provider.go#L723
-[client]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/client/v1/aicr.go#L362
-[defaults]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/recipe/metadata.go#L270
-[values]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/recipe/adapter.go#L328
-[helm-schema]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/recipe/components.go#L342
-[chart-digests]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/bundler/deployer/chartdigest.go#L35
-[metadata]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/recipe/metadata.go#L1249
-[recipe-loader]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/recipe/loader.go#L183
-[terraform]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/bundler/deployer/terraform/terraform.go#L476
-[fleet]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/bundler/deployer/fleet/fleet.go#L624
-[verify]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/bundler/deployer/localformat/vendor.go#L124
-[render]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/helm/render.go#L31
-[discovery]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/mirror/discover.go#L212
-[crd-audit]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/recipe/ownscrds_audit_test.go#L26
-[provider-reads]: https://github.com/NVIDIA/aicr/blob/fe2618f4696b181a4936e8dcf1d0f013512c16e0/pkg/recipe/provider.go#L439
+[config]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/config/config.go#L25
+[config-loader]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/config/loader.go#L208
+[provider]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/recipe/provider.go#L306
+[merge]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/recipe/provider.go#L723
+[client]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/client/v1/aicr.go#L362
+[defaults]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/recipe/metadata.go#L270
+[values]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/recipe/adapter.go#L328
+[helm-schema]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/recipe/components.go#L342
+[chart-digests]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/bundler/deployer/chartdigest.go#L35
+[metadata]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/recipe/metadata.go#L1249
+[recipe-loader]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/recipe/loader.go#L183
+[terraform]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/bundler/deployer/terraform/terraform.go#L476
+[fleet]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/bundler/deployer/fleet/fleet.go#L624
+[verify]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/bundler/deployer/localformat/vendor.go#L124
+[render]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/helm/render.go#L31
+[discovery]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/mirror/discover.go#L212
+[crd-audit]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/recipe/ownscrds_audit_test.go#L26
+[provider-reads]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/recipe/provider.go#L439
+
+[server-source]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/server/serve.go#L93
+[upgrade-load]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/client/v1/upgrade.go#L203
+[sdk-sources]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/client/v1/options.go#L455
+[base-overlay]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/recipes/overlays/base.yaml#L27
+[inheritance]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/recipe/metadata.go#L368
+[crd-policy]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/bundler/deployer/crds.go#L49
+[argocd-tag]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/bundler/deployer/argocd/argocd.go#L926
