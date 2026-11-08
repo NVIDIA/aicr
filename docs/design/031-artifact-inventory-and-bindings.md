@@ -164,9 +164,9 @@ binding set. Each inventory entry then fails ordinary accounting with
    bound identity paths fail. An exception permits retaining catalog pins for
    unmatched bindings, including on a partially matched component. It does not
    suppress active bindings or disable their identity guards.
-6. Record provenance in the recipe. Loading that recipe later requires matching
-   inventory, bindings, base catalog and exceptions. Missing inputs or a
-   mismatch fail before validation, discovery or bundle output.
+6. Record provenance in the recipe. Loading it for validation, discovery or
+   bundling requires matching inventory, bindings, base catalog and exceptions.
+   Missing inputs or a mismatch fail before the operation produces output.
 
 ### Supported consumers
 
@@ -192,6 +192,18 @@ current [server construction][server-source], [upgrade loading][upgrade-load]
 and [SDK source options][sdk-sources]. Extending it requires specifying how the
 consumer obtains and hashes the same inputs. An OCI-referenced inventory and
 composition over an OCI catalog are both outside this proposal.
+
+Historical comparison is a different operation from loading a recipe for
+validation, discovery or bundling. The current `UpgradeCheck` loads both
+`--from` and `--to` through one client, so adding one inventory option would
+not let two releases with different provenance pass the matching-input guard.
+[Source load][upgrade-load], [target load][upgrade-target]. Artifact-bearing
+recipes remain explicitly unsupported by `upgrade-check`, on either side.
+A future comparison reader would inspect recorded identities and provenance
+without hydrating either recipe from the current provider or treating it as
+ready for execution. It would also need to define which release's upgrade
+evidence applies. This proposal adds no such reader and does not relax the
+execution guard to enable comparison.
 
 ### Catalog defaults and inherited identity
 
@@ -430,7 +442,7 @@ provider pointer.
 |---|---|
 | `inventoryDigest` | SHA-256 of the exact inventory bytes consumed. |
 | `bindingsDigest` | SHA-256 of the canonical merged bindings document, including inactive entries. |
-| `baseCatalogDigest` | Digest of the external base catalog file inventory plus the embedded catalog identity, before binding. |
+| `baseCatalogDigest` | SHA-256 of the canonical external base file list and embedded catalog content digest, before binding. Independent of the binary version. |
 | `allowCatalogPins` | Sorted effective exception set from the user config. |
 | `verification` | `metadata-only` at composition time. |
 
@@ -442,17 +454,40 @@ formatting or a shadowed entry does not change this digest. When neither layer
 has bindings, hash the canonical empty document with empty `charts`, `images`
 and `ignoredArtifacts` maps and the normal kind/version header.
 
-For `baseCatalogDigest`, enumerate external base files, including those under
-`artifacts/`. Exclude only files used exclusively as inventory or binding
-documents, whose effective inputs have separate digests. Any file also consumed
-as catalog data must remain in the base file inventory. For example, a component
-can use `artifacts/values.yaml`; changing it must change `baseCatalogDigest`
-and fail the reload comparison. [Provider reads][provider-reads], [values][values].
-Sort relative paths and encode each entry as `[path, size, sha256]`. Hash a
-documented canonical encoding of that list and the embedded catalog identity.
-Exclude mtimes and absolute paths and include every base file consumed.
-Record the AICR version/build identity alongside this record using recipe
-metadata conventions.
+For `baseCatalogDigest`, enumerate the external base files and the files
+exposed by the embedded catalog provider before layering or binding. The
+embedded set is the catalog filesystem compiled into the binary, currently
+[`recipes.FS`][embedded-files], not the whole executable or repository. Include
+all base files in each set, even if a file is unused by the selected recipe
+or an external layer shadows an embedded file.
+
+For both sets, include files under `artifacts/`. Exclude only files used
+exclusively as inventory or binding documents, whose effective inputs have
+separate digests. Any file also consumed as catalog data remains in its base
+file list. For example, a component can use `artifacts/values.yaml`; changing
+it changes `baseCatalogDigest` and fails the reload comparison.
+[Provider reads][provider-reads], [values][values].
+
+Represent each file as `[path, size, sha256]`: its provider-relative path with
+`/` separators, byte length and `sha256:` digest of the exact bytes. Sort each
+list by the UTF-8 bytes of its paths and encode it as compact UTF-8 JSON.
+Exclude mtimes, permissions and absolute paths. The embedded catalog identity is the SHA-256 of the
+encoded embedded list. Compute `baseCatalogDigest` over a compact UTF-8 JSON
+object with keys `embedded` and `external`, in that order. Its values are the
+embedded digest string and the external file list; use `[]` when no external
+catalog is supplied. These inputs define the hash; they add no wire fields.
+Record AICR version/build identity separately using recipe metadata conventions.
+
+A change to either included file set, path or file bytes rejects a saved
+artifact-bearing recipe on execution reload with `artifact-inputs-mismatch`,
+even if its selected chart pins are unchanged. This deliberately includes
+unselected files and shadowed embedded files; it identifies the whole base
+catalog rather than only the selected recipe's dependencies. Reuse the
+original catalog inputs for that recipe, or regenerate it and review the new
+composition. A newer binary with identical embedded catalog content does not
+fail this digest comparison solely because its version changed. Schema and
+other compatibility checks still apply; matching catalog content does not
+assert that two binaries have identical behavior.
 
 The provenance must also retain each applied artifact's name, reference,
 version, manifest digest and, where applicable, archive digest or platform,
@@ -545,7 +580,9 @@ evidence need separate work.
    superset bindings, inactive stale targets, partial component coverage,
    missing active targets, explicit exceptions and changed inputs on reload.
    Exercise verbatim OCI tags, catalog default restatements, inheritance
-   conflicts and disabling CRD ownership across the composed catalog.
+   conflicts and disabling CRD ownership across the composed catalog. Check
+   that a binary version change alone leaves the catalog digest unchanged,
+   while changes to included catalog files reject execution reloads.
    Check repeatability and unchanged behavior without an inventory. Verify
    mismatching chart archives are rejected by every supported vendoring path.
 
@@ -587,3 +624,5 @@ relocation evidence remain separate from metadata composition.
 [inheritance]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/recipe/metadata.go#L368
 [crd-policy]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/bundler/deployer/crds.go#L49
 [argocd-tag]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/bundler/deployer/argocd/argocd.go#L926
+[upgrade-target]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/client/v1/upgrade.go#L738
+[embedded-files]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/recipes/data.go#L21
