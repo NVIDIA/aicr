@@ -102,16 +102,23 @@ and `agentgateway-post`, which applies
 creates `agentgateway-system/inference-gateway`. The chart alone creates no
 Gateway, so an install or upgrade that runs only the `helm upgrade` leaves the
 `inference-gateway` check with nothing to read. `aicr validate --phase
-deployment` does not catch this today — the agentgateway health check asserts
-the controller Deployment and pod health, never the Gateway CR
-([#3714](https://github.com/NVIDIA/aicr/issues/3714)).
+deployment` catches the result: the agentgateway health check asserts that
+`agentgateway-system/inference-gateway` exists with `Accepted=True` and
+`Programmed=True`, so a cluster with no Gateway, or an unprogrammed one, fails
+the deployment phase ([#3714](https://github.com/NVIDIA/aicr/issues/3714)).
+The check detects a missing or unprogrammed Gateway, not which deployment
+created it; a healthy Gateway left by an earlier deployment satisfies it.
 
-On an LB-less tenant, keep the step rather than skipping it: deploy the Gateway
-with a ClusterIP Service. The chart has no knob for this — the manifest's
-`AgentgatewayParameters.spec.service` block sets only
-`loadBalancerSourceRanges` and is itself gated on `allowedSourceRanges` — so
-until one exists this means applying the Gateway and its
-`AgentgatewayParameters` by hand with `service.spec.type: ClusterIP`.
+On an LB-less tenant, keep the step rather than skipping it, and generate the
+bundle with `--set agentgateway:serviceType=ClusterIP`. The controller then
+programs the Gateway onto a ClusterIP Service, the shape the NVKE GB200
+cluster runs, and the conformance check records "No LoadBalancer Service".
+The knob is not what makes the health check pass: as noted above, agentgateway
+v1.5.0 reports `Programmed=True` without an address. It avoids a Service that
+sits at `EXTERNAL-IP <pending>` forever and a LoadBalancer-only field the
+cluster cannot honor; with `ClusterIP` the rendered Service carries no
+`loadBalancerSourceRanges`. Never edit the generated bundle to get there;
+`aicr verify` checksums every file in it.
 
 ### Evidence
 

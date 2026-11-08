@@ -1747,6 +1747,16 @@ aicr bundle -r recipe.yaml \
 
 This setting filters by source IP only; it does not add TLS or authentication to the gateway listener.
 
+### Clusters without a LoadBalancer provider
+
+On a cluster that provisions no LoadBalancer (a bare-metal NVKE or RKE2 tenant without MetalLB or kube-vip), set `agentgateway.serviceType` to `ClusterIP` so the controller programs the Gateway onto a ClusterIP Service instead:
+
+```shell
+aicr bundle -r recipe.yaml --set agentgateway:serviceType=ClusterIP
+```
+
+Accepted values are `LoadBalancer`, `ClusterIP` and `NodePort` (case-sensitive); anything else fails bundle generation. The knob avoids a Service that sits at `EXTERNAL-IP <pending>` forever and a LoadBalancer-only field the cluster cannot honor. It is not needed for the deployment health check, which asserts the recipe's Gateway is `Accepted` and `Programmed` ([#3714](https://github.com/NVIDIA/aicr/issues/3714)): on agentgateway v1.5.0 `Programmed` does not wait for an address, so the check passes either way. With `ClusterIP` or `NodePort` the bundler skips the private-by-default source ranges and the rendered Service carries no `loadBalancerSourceRanges`, because Kubernetes accepts that field only on a LoadBalancer Service; `allowedSourceRanges` passed explicitly is reported as not applying. With `ClusterIP` the gateway is reachable only from inside the cluster. With `NodePort` it is reachable by every client that can reach a node's NodePort, and that is the plaintext, unauthenticated Gateway once a route exists, so restrict access with an upstream firewall or a CNI network policy. In both cases the conformance check records "No LoadBalancer Service" rather than a source-range finding. Leave `serviceType` unset everywhere a load balancer exists.
+
 ### Exposure guardrails
 
 AICR enforces and surfaces inference-gateway exposure in two places:
