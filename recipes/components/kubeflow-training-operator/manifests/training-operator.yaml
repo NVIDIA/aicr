@@ -21,7 +21,8 @@
 #   kubectl kustomize manifests/overlays/standalone
 #
 # The six CRDs that render alongside are the kubeflow.org_*.yaml files in this
-# directory, byte for byte. Differences from the render in this file:
+# directory, with their description fields removed (see their headers for why).
+# Differences from the render in this file:
 #
 #   - the Namespace object is dropped: every deployer creates the release
 #     namespace itself, and a second owner of the kubeflow namespace would
