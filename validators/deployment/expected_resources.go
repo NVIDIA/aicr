@@ -838,13 +838,16 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 			complete = len(expectedNames) - len(statusFailures)
 
 			// A declared CR the cluster does not have means the deployment is
-			// incomplete, not "not ready yet": every supported deployer applies
-			// the chart's CRs with the operator before this phase runs, so no
-			// poll will find it and waiting the whole budget only costs the
-			// chainsaw asserts their evaluation. The check fails now; a
-			// deployment still mid-sync (an Argo CD wave) is validated after
-			// the sync completes, not during it. CRs that exist keep being
-			// waited on.
+			// incomplete, not "not ready yet". The CRs come from the
+			// manifest-only nodewright-customizations component, which the
+			// GitOps deployers sync in a later wave than the operator, so a
+			// run started mid-sync can see the CRD served and the CRs still
+			// absent; this phase is documented to start after every wave has
+			// synced (docs/user/validation.md), and once it has, no poll will
+			// find a missing CR and waiting the whole budget only costs the
+			// chainsaw asserts their evaluation. The check fails now rather
+			// than poll, since a poll would mask a sync gap. CRs that exist
+			// keep being waited on.
 			if len(missing) > 0 {
 				return &terminalProbeError{err: errors.New(errors.ErrCodeNotFound, fmt.Sprintf(
 					"%s; %d of %d declared Nodewright CR(s) absent, so the recipe's %s manifests were not applied to this cluster and waiting cannot change that",
