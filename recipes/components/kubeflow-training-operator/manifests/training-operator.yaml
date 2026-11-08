@@ -447,10 +447,12 @@ spec:
                 fieldRef:
                   fieldPath: metadata.name
           # Literal, not templated from values: tools/bom and aicr mirror read
-          # embedded manifests without rendering them. The tag is the key the
-          # Run:ai operator maps to a version through runai-cluster's
-          # trainingOperatorImageTags (components/runai-cluster/values.yaml);
-          # TestKubeflowTrainingOperatorTagMappedForRunai keeps the two equal.
+          # embedded manifests without rendering them. The tag and the digest
+          # are both keys the Run:ai operator maps to a version through
+          # runai-cluster's trainingOperatorImageTags
+          # (components/runai-cluster/values.yaml): it reads the text after the
+          # reference's last colon, the digest's hex here.
+          # TestKubeflowTrainingOperatorTagMappedForRunai keeps them equal.
           image: ghcr.io/kubeflow/training-v1/training-operator:v1-93c5489@sha256:45aa299d92c21a1abc0e9731694f01be637ab5c6c9681a687aedf142b0468d45
           livenessProbe:
             httpGet:

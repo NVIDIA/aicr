@@ -16,6 +16,8 @@ package recipe
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,14 +28,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// The vendored Kubeflow Training Operator: its component name, the upstream
+// release the manifests under kubeflowTrainingOperatorDir come from (also the
+// version the Run:ai operator must resolve the image to; bump together with a
+// re-vendor), and where they live.
 const (
 	kubeflowTrainingOperatorComponent = "kubeflow-training-operator"
-	// kubeflowTrainingOperatorVersion is the upstream release the manifests
-	// under components/kubeflow-training-operator/manifests are vendored
-	// from, and the version the Run:ai operator must resolve the image tag
-	// to. Bump together with a re-vendor.
-	kubeflowTrainingOperatorVersion = "1.9.4"
-	kubeflowTrainingOperatorDir     = "../../recipes/components/kubeflow-training-operator/manifests"
+	kubeflowTrainingOperatorVersion   = "1.9.4"
+	kubeflowTrainingOperatorDir       = "../../recipes/components/kubeflow-training-operator/manifests"
 )
 
 // kubeflowTrainingOperatorImagePattern matches the operator image in the
@@ -180,6 +182,7 @@ func TestKubeflowTrainingOperatorTagMappedForRunai(t *testing.T) {
 		t.Fatalf("%s has %d digest-pinned training-operator images, want exactly one", manifest, len(matches))
 	}
 	tag := matches[0][2]
+	digestHex := strings.TrimPrefix(matches[0][3], "sha256:")
 	if !strings.Contains(string(data), "tag v"+kubeflowTrainingOperatorVersion) {
 		t.Errorf("%s does not record upstream tag v%s in its provenance header", manifest, kubeflowTrainingOperatorVersion)
 	}
@@ -200,13 +203,20 @@ func TestKubeflowTrainingOperatorTagMappedForRunai(t *testing.T) {
 	if err := yaml.Unmarshal(raw, &values); err != nil {
 		t.Fatalf("parsing %s: %v", valuesPath, err)
 	}
-	got, ok := values.TrainingOperatorImageTags[tag]
-	if !ok {
-		t.Fatalf("%s maps tags %v; the vendored image tag %s is missing, so the Run:ai operator would report an unknown training operator",
-			valuesPath, values.TrainingOperatorImageTags, tag)
-	}
-	if got != kubeflowTrainingOperatorVersion {
-		t.Errorf("%s maps %s to %q, want %q", valuesPath, tag, got, kubeflowTrainingOperatorVersion)
+	// The operator reads the text after the reference's last colon, which for
+	// a digest-pinned image is the digest's hex, so both keys must map (the
+	// live run of 2026-11-08 reported "unknown image tag <hex>" with the tag
+	// key alone).
+	for _, key := range []string{tag, digestHex} {
+		got, ok := values.TrainingOperatorImageTags[key]
+		if !ok {
+			t.Errorf("%s maps keys %v; %q from the vendored image is missing, so the Run:ai operator would report an unknown training operator",
+				valuesPath, slices.Sorted(maps.Keys(values.TrainingOperatorImageTags)), key)
+			continue
+		}
+		if got != kubeflowTrainingOperatorVersion {
+			t.Errorf("%s maps %s to %q, want %q", valuesPath, key, got, kubeflowTrainingOperatorVersion)
+		}
 	}
 	if values.Operands.TrainingOperator.Enabled == nil || !*values.Operands.TrainingOperator.Enabled {
 		t.Errorf("%s does not set operands.trainingOperator.enabled: true; the chart renders the tag ConfigMap only under that switch", valuesPath)
@@ -264,5 +274,35 @@ func TestKubeflowTrainingOperatorVendoredCRDs(t *testing.T) {
 		if !strings.Contains(string(check), "name: "+crd) {
 			t.Errorf("health check does not assert CRD %s", crd)
 		}
+	}
+}
+
+// TestKubeflowTrainingOperatorWebhookCount keeps the health check's webhook
+// count equal to the vendored ValidatingWebhookConfiguration. Upstream v1.9.4
+// validates five kinds (JAXJob, PaddleJob, PyTorchJob, TFJob, XGBoostJob; MPIJob
+// v1 has no webhook), one fewer than the CRDs, which is how the first draft
+// asserted six and would have failed every install.
+func TestKubeflowTrainingOperatorWebhookCount(t *testing.T) {
+	t.Parallel()
+
+	manifest, err := os.ReadFile(filepath.Join(kubeflowTrainingOperatorDir, "training-operator.yaml"))
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	webhooks := regexp.MustCompile(`(?m)^\s+name: validator\.[a-z]+job\.training-operator\.kubeflow\.org$`).FindAllString(string(manifest), -1)
+	if len(webhooks) == 0 {
+		t.Fatal("no validator.<kind>.training-operator.kubeflow.org webhooks in the vendored manifest")
+	}
+
+	check, err := os.ReadFile("../../recipes/checks/kubeflow-training-operator/health-check.yaml")
+	if err != nil {
+		t.Fatalf("reading health check: %v", err)
+	}
+	m := regexp.MustCompile("webhooks\\[\\?[^\\]]*\\] \\| length\\(@\\) == `([0-9]+)`").FindStringSubmatch(string(check))
+	if m == nil {
+		t.Fatal("health check has no webhook count assertion")
+	}
+	if m[1] != fmt.Sprint(len(webhooks)) {
+		t.Errorf("health check asserts %s webhooks, but the vendored manifest declares %d", m[1], len(webhooks))
 	}
 }
