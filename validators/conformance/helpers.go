@@ -400,14 +400,18 @@ func podStuckReason(pod *corev1.Pod) string {
 // event message that mean the pod's RuntimeClass handler is not served on the
 // node it landed on, a state no retry repairs: containerd's "no runtime for
 // \"<handler>\" is configured" (wrapped as "failed to get sandbox runtime"),
-// CRI-O's "runtime handler" lookup failure, and a shim binary the handler
-// names but the node lacks. Network-setup failures of the same event reason
-// are transient and deliberately absent, so a CNI that is still starting
-// does not fail the probe.
+// CRI-O's "failed to find runtime handler" lookup failure, containerd's
+// "runtime \"<type>\" binary not installed" for a shim the handler names but
+// the node lacks (core/runtime/v2/shim_manager.go), and the exec failure a
+// runc-type handler reports when its options.BinaryName runtime is missing.
+// Network-setup failures of the same event reason are transient and
+// deliberately absent, so a CNI that is still starting does not fail the
+// probe.
 var sandboxRuntimeMissingMarkers = []string{
 	"no runtime for",
 	"failed to get sandbox runtime",
 	"runtime handler",
+	"binary not installed",
 	"executable file not found",
 }
 

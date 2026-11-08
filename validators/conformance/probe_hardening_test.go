@@ -407,12 +407,17 @@ func TestSandboxCreateFailure(t *testing.T) {
 		},
 		{
 			name:  "CRI-O: runtime handler not found",
-			event: &corev1.Event{Reason: eventReasonFailedCreatePodSandBox, Message: `Failed to create pod sandbox: rpc error: code = Unknown desc = no runtime handler "kata" found`},
+			event: &corev1.Event{Reason: eventReasonFailedCreatePodSandBox, Message: `Failed to create pod sandbox: rpc error: code = Unknown desc = failed to find runtime handler kata from runtime list map[crun:0x... runc:0x...]`},
 			want:  "runtime handler",
 		},
 		{
-			name:  "shim binary missing on the node",
-			event: &corev1.Event{Reason: eventReasonFailedCreatePodSandBox, Message: `failed to create shim task: failed to start shim: exec: "containerd-shim-runsc-v1": executable file not found in $PATH`},
+			name:  "containerd: shim binary missing on the node",
+			event: &corev1.Event{Reason: eventReasonFailedCreatePodSandBox, Message: `Failed to create pod sandbox: rpc error: code = Unknown desc = failed to create containerd task: failed to create shim task: runtime "io.containerd.kata.v2" binary not installed "containerd-shim-kata-v2": file does not exist`},
+			want:  "binary not installed",
+		},
+		{
+			name:  "containerd: runc-type handler whose runtime binary is missing",
+			event: &corev1.Event{Reason: eventReasonFailedCreatePodSandBox, Message: `Failed to create pod sandbox: rpc error: code = Unknown desc = failed to create containerd task: failed to create shim task: OCI runtime create failed: exec: "kata-runtime": executable file not found in $PATH`},
 			want:  "executable file not found",
 		},
 		{
