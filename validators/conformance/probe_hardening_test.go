@@ -30,6 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
@@ -236,6 +237,7 @@ func TestProbePodsCarryImagePullSecrets(t *testing.T) {
 		{"gateway traffic pod spec", gatewayTrafficPodSpec(corev1.Container{Name: "c"}, nil, refs)},
 		{"HPA workload", deploySpec(buildHPADeployment(run.namespace, false, nil, nil, refs))},
 		{"AI metrics workload", podSpec(metricsPod)},
+		{"cluster-autoscaling workload", deploySpec(buildClusterAutoTestDeployment("scale", run.namespace, "gpu-pool", refs))},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -245,9 +247,120 @@ func TestProbePodsCarryImagePullSecrets(t *testing.T) {
 		})
 	}
 
+	// The TrainJob has no pod spec of its own: the Secrets reach its node pod
+	// through a spec.runtimePatches entry that Trainer merges into the
+	// runtime's pod template.
+	t.Run("robust-controller TrainJob", func(t *testing.T) {
+		tj := buildValidTrainJob(run.namespace, refs)
+		patches, found, err := unstructured.NestedSlice(tj.Object, "spec", "runtimePatches")
+		if err != nil || !found || len(patches) != 1 {
+			t.Fatalf("spec.runtimePatches = %v (found %v, err %v), want one entry", patches, found, err)
+		}
+		patch, ok := patches[0].(map[string]any)
+		if !ok {
+			t.Fatalf("runtimePatches[0] = %T, want a map", patches[0])
+		}
+		if manager, _, _ := unstructured.NestedString(patch, "manager"); manager != trainJobPatchManager {
+			t.Errorf("manager = %q, want %q", manager, trainJobPatchManager)
+		}
+		jobs, found, err := unstructured.NestedSlice(patch, "trainingRuntimeSpec", "template", "spec", "replicatedJobs")
+		if err != nil || !found || len(jobs) != 1 {
+			t.Fatalf("replicatedJobs = %v (found %v, err %v), want the node job", jobs, found, err)
+		}
+		job, ok := jobs[0].(map[string]any)
+		if !ok {
+			t.Fatalf("replicatedJobs[0] = %T, want a map", jobs[0])
+		}
+		if name, _, _ := unstructured.NestedString(job, "name"); name != trainJobNodeReplicatedJob {
+			t.Errorf("replicated job name = %q, want %q", name, trainJobNodeReplicatedJob)
+		}
+		secrets, found, err := unstructured.NestedSlice(job, "template", "spec", "template", "spec", "imagePullSecrets")
+		if err != nil || !found {
+			t.Fatalf("imagePullSecrets missing from the node pod template patch (err %v)", err)
+		}
+		got := make([]corev1.LocalObjectReference, 0, len(secrets))
+		for _, s := range secrets {
+			name, _, _ := unstructured.NestedString(s.(map[string]any), "name")
+			got = append(got, corev1.LocalObjectReference{Name: name})
+		}
+		if !slices.Equal(got, refs) {
+			t.Errorf("imagePullSecrets = %v, want %v", got, refs)
+		}
+	})
+
 	t.Run("no Secret forwarded leaves the spec clean", func(t *testing.T) {
 		if got := buildDRATestPod(pullSecretRun(), nil).Spec.ImagePullSecrets; got != nil {
 			t.Errorf("ImagePullSecrets = %v, want nil", got)
+		}
+		if got := buildClusterAutoTestDeployment("scale", "ns", "gpu-pool", nil).Spec.Template.Spec.ImagePullSecrets; got != nil {
+			t.Errorf("cluster-autoscaling ImagePullSecrets = %v, want nil", got)
+		}
+		if _, found, _ := unstructured.NestedSlice(buildValidTrainJob("ns", nil).Object, "spec", "runtimePatches"); found {
+			t.Error("TrainJob carries spec.runtimePatches without a forwarded Secret; the bare TrainJob is the design")
+		}
+	})
+}
+
+// TestValidateClusterAutoscaling_ImagePullSecrets pins that the
+// cluster-autoscaling run copies the forwarded Secrets into its namespace
+// before the workload exists, and fails closed when a named Secret is not in
+// the validator namespace, exactly as the gpuTestRun checks do.
+func TestValidateClusterAutoscaling_ImagePullSecrets(t *testing.T) {
+	shortenCleanupTimeout(t)
+	t.Setenv(validators.ImagePullSecretsEnv, testPullSecretName)
+	t.Setenv("AICR_NAMESPACE", testValidatorNS)
+
+	t.Run("copied before the workload", func(t *testing.T) {
+		c := k8sfake.NewClientset(sourcePullSecret())
+		passClusterAutoscalingFakes(c, "gpu-pool")
+		// Reactors record the order of the writes: the fake holds its lock
+		// while a reactor runs, so the copy cannot be read back from inside one.
+		copiedInto := ""
+		c.PrependReactor("create", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			copiedInto = action.GetNamespace()
+			return false, nil, nil
+		})
+		var deploy *appsv1.Deployment
+		c.PrependReactor("create", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			deploy = action.(k8stesting.CreateAction).GetObject().(*appsv1.Deployment)
+			if copiedInto != deploy.Namespace {
+				t.Errorf("Secret copied into %q, want %q before the Deployment was created", copiedInto, deploy.Namespace)
+			}
+			return false, nil, nil
+		})
+		if _, err := validateClusterAutoscaling(&validators.Context{Ctx: context.Background(), Clientset: c}, "gpu-pool"); err != nil {
+			t.Fatalf("validateClusterAutoscaling() error = %v", err)
+		}
+		if deploy == nil {
+			t.Fatal("no Deployment created")
+		}
+		copied, err := c.CoreV1().Secrets(deploy.Namespace).Get(context.Background(), testPullSecretName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("copied Secret missing from %s: %v", deploy.Namespace, err)
+		}
+		if copied.Labels[gpuTestRunLabel] == "" {
+			t.Error("copied Secret lacks the run ownership label")
+		}
+		if want := []corev1.LocalObjectReference{{Name: testPullSecretName}}; !slices.Equal(deploy.Spec.Template.Spec.ImagePullSecrets, want) {
+			t.Errorf("ImagePullSecrets = %v, want %v", deploy.Spec.Template.Spec.ImagePullSecrets, want)
+		}
+	})
+
+	t.Run("missing Secret fails closed", func(t *testing.T) {
+		c := k8sfake.NewClientset()
+		passClusterAutoscalingFakes(c, "gpu-pool")
+		deployments := 0
+		c.PrependReactor("create", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
+			deployments++
+			return false, nil, nil
+		})
+		_, err := validateClusterAutoscaling(&validators.Context{Ctx: context.Background(), Clientset: c}, "gpu-pool")
+		errorstest.WantReportedCode(t, err, errors.ErrCodeNotFound)
+		if err == nil || !strings.Contains(err.Error(), testPullSecretName) {
+			t.Errorf("error = %v, want it to name the missing Secret", err)
+		}
+		if deployments != 0 {
+			t.Errorf("Deployment creates = %d, want 0 after the copy failed", deployments)
 		}
 	})
 }
