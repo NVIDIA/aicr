@@ -161,10 +161,11 @@ func ObservationOnlyExtra() map[string]string {
 
 // ResultSchemaExtra returns the Extra stamping the result-contract version
 // this image speaks (ctrf.ResultSchemaVersion). The runner publishes it before
-// the check runs, so every result the orchestrator reads carries it and the
-// CNCF aggregation can tell an image that never marked observations from one
-// that chose not to (#3703). Emit it with EmitExtra and fail the check when
-// the write fails.
+// the check runs, so every result the orchestrator reads carries it. The CNCF
+// aggregation reads an unmarked pass of an observation-only check as observed
+// with or without it; the stamp only tells it whether to report an image
+// that predates the marker or a marker that went missing (#3703). Emit it
+// with EmitExtra and fail the check when the write fails.
 func ResultSchemaExtra() map[string]string {
 	return map[string]string{ExtraKeyResultSchema: ctrf.ResultSchemaVersion}
 }

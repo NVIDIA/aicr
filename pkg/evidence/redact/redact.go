@@ -332,8 +332,9 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	ctrf.ExtraKeyObservationOnly: closedSet("true", "false"),
 
 	// The result contract the validator image spoke, stamped on every result;
-	// the CNCF aggregation refuses to credit an observation-only check whose
-	// result lacks it. Only the versions a reader knows are publishable.
+	// the CNCF aggregation reads an unmarked pass of an observation-only
+	// check as observed either way and uses it only to word the reason. Only
+	// the versions a reader knows are publishable.
 	ctrf.ExtraKeyResultSchema: closedSet(ctrf.ResultSchemaVersion),
 }
 

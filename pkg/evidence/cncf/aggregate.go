@@ -126,11 +126,12 @@ type CheckResult struct {
 	// ObservationOnly is true when a passed result carries the
 	// observation-only marker (extra.observationOnly): the check recorded
 	// what it saw and drove no behavioral test, so its pass demonstrates
-	// nothing. It is also true, with Reason saying so, when a check known to
-	// be observation-only (v1.IsObservationOnlyCheck) passed without the
-	// result-contract stamp (extra.resultSchema): the image predates the
-	// marker, so its silence is not a demonstration. Always false for a
-	// result that did not pass.
+	// nothing. It is also true, with Reason saying so, for every unmarked
+	// pass of a check known to be observation-only (v1.IsObservationOnlyCheck),
+	// whatever its result-contract stamp (extra.resultSchema) says: the stamp
+	// only decides whether Reason reports an image that predates the marker
+	// or a marker that went missing. Always false for a result that did not
+	// pass.
 	ObservationOnly bool
 }
 

@@ -24,9 +24,10 @@ const ClusterAutoscalingCheckName = "cluster-autoscaling"
 // observation (validators.ObservationOnlyExtra), never a demonstration. It is
 // the one list both ends of the result contract consult: the conformance
 // image's tests assert each name is a registered check that emits the marker,
-// and pkg/evidence/cncf refuses to credit a pass from one of them when the
-// result carries no ctrf.ExtraKeyResultSchema, since an image that predates
-// the contract could not have marked it.
+// and pkg/evidence/cncf reads every unmarked pass from one of them as an
+// observation regardless of the ctrf.ExtraKeyResultSchema stamp; the stamp
+// only decides whether the reason says the image predates the contract or
+// the marker went missing.
 var observationOnlyChecks = map[string]bool{
 	ClusterAutoscalingCheckName: true,
 }

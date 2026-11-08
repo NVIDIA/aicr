@@ -30,8 +30,9 @@ const (
 	// ExtraKeyResultSchema is the result-contract version the validator image
 	// spoke, stamped on every result before the check runs; the value is
 	// ResultSchemaVersion. A reader that knows a check to be observation-only
-	// refuses to credit its pass when this key is absent, since the image then
-	// predates ExtraKeyObservationOnly and its silence says nothing.
+	// reads its unmarked pass as an observation whether or not this key is
+	// present; the key only tells the reader whether the image predates
+	// ExtraKeyObservationOnly or dropped the marker.
 	ExtraKeyResultSchema = "resultSchema"
 
 	// ExtraValueTrue is the published form of a true boolean extra.
