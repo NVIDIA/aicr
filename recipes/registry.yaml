@@ -1521,6 +1521,48 @@ components:
           accelerator:
             - h100
 
+  # Kubeflow Training Operator v1: the kubeflow.org/v1 PyTorchJob, TFJob,
+  # XGBoostJob, PaddleJob, JAXJob and MPIJob v1 controller, which Run:ai 3.0
+  # submits distributed training through and whose Deployment its operator
+  # looks up by name (training-operator in kubeflow). Not Kubeflow Trainer v2
+  # (kubeflow-trainer, trainer.kubeflow.org): the two install different CRD
+  # groups and differently named objects, no recipe installs both, and the
+  # combination is not qualified. Upstream ships v1 only as Kustomize, so the
+  # manifests are vendored from tag v1.9.4 (see
+  # components/kubeflow-training-operator/manifests/training-operator.yaml for
+  # provenance and the deliberate differences). The CRDs are in the vendored
+  # manifests, so the health check's CRD assertions anchor there and the
+  # component has no crds.yaml. Added by the Run:ai leaves, which also map the
+  # image tag to its version for the Run:ai operator in
+  # components/runai-cluster/values.yaml. See #3302 (Phase 1.3).
+  - name: kubeflow-training-operator
+    displayName: Kubeflow Training Operator
+    class: ops
+    valueOverrideKeys:
+      - kubeflowtrainingoperator
+      - trainingoperator
+    healthCheck:
+      assertFile: checks/kubeflow-training-operator/health-check.yaml
+    helm:
+      defaultRepository: ""
+      # Fixed, not a preference: the Run:ai operator reads the Deployment at
+      # kubeflow/training-operator.
+      defaultNamespace: kubeflow
+    manifestFiles:
+      - components/kubeflow-training-operator/manifests/kubeflow.org_jaxjobs.yaml
+      - components/kubeflow-training-operator/manifests/kubeflow.org_mpijobs.yaml
+      - components/kubeflow-training-operator/manifests/kubeflow.org_paddlejobs.yaml
+      - components/kubeflow-training-operator/manifests/kubeflow.org_pytorchjobs.yaml
+      - components/kubeflow-training-operator/manifests/kubeflow.org_tfjobs.yaml
+      - components/kubeflow-training-operator/manifests/kubeflow.org_xgboostjobs.yaml
+      - components/kubeflow-training-operator/manifests/training-operator.yaml
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - systemNodeSelector
+        tolerationPaths:
+          - systemTolerations
+
   - name: runai-cluster
     displayName: Run:ai cluster
     class: ops

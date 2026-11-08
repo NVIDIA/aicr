@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **58**
-- Unique images: **166**
+- Components: **59**
+- Unique images: **167**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -56,6 +56,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kai-scheduler | helm | kai-scheduler | v0.16.9 | 12 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
+| kubeflow-training-operator | manifest | — | — | 1 |
 | kueue | helm | kueue | 0.19.6 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.1 | 0 |
@@ -254,6 +255,10 @@ _No images extracted._
 - `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be`
 - `registry.k8s.io/jobset/jobset:v0.11.0`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21@sha256:8d9e10fd589a34ab8a0aa64f7e70ad075c8f1c69bea176350f8d211367697e3d`
+
+### kubeflow-training-operator
+
+- `ghcr.io/kubeflow/training-v1/training-operator:v1-93c5489@sha256:45aa299d92c21a1abc0e9731694f01be637ab5c6c9681a687aedf142b0468d45`
 
 ### kueue
 

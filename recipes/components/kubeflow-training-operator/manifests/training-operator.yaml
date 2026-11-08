@@ -1,0 +1,594 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Kubeflow Training Operator v1 (the kubeflow.org/v1 PyTorchJob, TFJob,
+# XGBoostJob, PaddleJob, JAXJob and MPIJob v1 controller), as a vendored
+# manifest-only component: upstream ships v1 only as Kustomize, with no chart.
+# Rendered from github.com/kubeflow/training-operator tag v1.9.4 (commit
+# 4445c12aa62e4345b0c2c6ac9b215a70eca46ed7) with
+#
+#   kubectl kustomize manifests/overlays/standalone
+#
+# The six CRDs that render alongside are the kubeflow.org_*.yaml files in this
+# directory, byte for byte. Differences from the render in this file:
+#
+#   - the Namespace object is dropped: every deployer creates the release
+#     namespace itself, and a second owner of the kubeflow namespace would
+#     fail the install where Kubeflow Trainer already created it.
+#   - namespaced objects and the webhook's service reference use the release
+#     namespace, which the registry pins to kubeflow: the Run:ai operator
+#     looks the Deployment up by name there (TrainingOperatorNamespace and
+#     TrainingOperatorDeploymentName in runai-cluster 3.0.20's go-operator
+#     consts), so neither the name nor the namespace may change.
+#   - the image carries its digest, and the pod takes the system node
+#     placement from values. Nothing else about the pod spec is changed; in
+#     particular no --enable-scheme argument is added, because the Run:ai
+#     operator reads that list to decide which frameworks are usable and an
+#     absent list means all of them.
+#
+# This is the v1 API, not Kubeflow Trainer v2 (AICR's kubeflow-trainer):
+# Run:ai 3.0 submits distributed training as kubeflow.org/v1 jobs and does not
+# speak trainer.kubeflow.org. The two operators install different CRD groups
+# and differently named objects, so nothing here collides with
+# kubeflow-trainer in the same namespace, but no AICR recipe installs both and
+# the combination is not qualified (--platform takes one value).
+#
+# The webhook's serving certificate is self-managed: the operator's
+# cert-controller writes a CA and serving pair into the (shipped empty)
+# training-operator-webhook-cert Secret and injects the CA into the
+# ValidatingWebhookConfiguration at runtime, which is why neither the Secret
+# data nor the caBundle appears here and why cert-manager is not a dependency.
+# failurePolicy is Fail upstream and is left so: a kubeflow.org job created
+# while the webhook is unreachable is rejected rather than admitted unchecked.
+{{- $vals := index .Values "kubeflow-training-operator" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: training-operator
+  name: training-operator
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: training-operator
+rules:
+  - apiGroups:
+    - ""
+    resources:
+    - configmaps
+    verbs:
+    - create
+    - list
+    - update
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - events
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - pods
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - pods/exec
+    verbs:
+    - create
+  - apiGroups:
+    - ""
+    resources:
+    - secrets
+    verbs:
+    - get
+    - list
+    - update
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - serviceaccounts
+    verbs:
+    - create
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - services
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - admissionregistration.k8s.io
+    resources:
+    - validatingwebhookconfigurations
+    verbs:
+    - get
+    - list
+    - update
+    - watch
+  - apiGroups:
+    - autoscaling
+    resources:
+    - horizontalpodautoscalers
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - jaxjobs
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - jaxjobs/finalizers
+    verbs:
+    - update
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - jaxjobs/status
+    verbs:
+    - get
+    - patch
+    - update
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - mpijobs
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - mpijobs/finalizers
+    verbs:
+    - update
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - mpijobs/status
+    verbs:
+    - get
+    - patch
+    - update
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - paddlejobs
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - paddlejobs/finalizers
+    verbs:
+    - update
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - paddlejobs/status
+    verbs:
+    - get
+    - patch
+    - update
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - pytorchjobs
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - pytorchjobs/finalizers
+    verbs:
+    - update
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - pytorchjobs/status
+    verbs:
+    - get
+    - patch
+    - update
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - tfjobs
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - tfjobs/finalizers
+    verbs:
+    - update
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - tfjobs/status
+    verbs:
+    - get
+    - patch
+    - update
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - xgboostjobs
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - xgboostjobs/finalizers
+    verbs:
+    - update
+  - apiGroups:
+    - kubeflow.org
+    resources:
+    - xgboostjobs/status
+    verbs:
+    - get
+    - patch
+    - update
+  - apiGroups:
+    - rbac.authorization.k8s.io
+    resources:
+    - rolebindings
+    verbs:
+    - create
+    - list
+    - update
+    - watch
+  - apiGroups:
+    - rbac.authorization.k8s.io
+    resources:
+    - roles
+    verbs:
+    - create
+    - list
+    - update
+    - watch
+  - apiGroups:
+    - scheduling.volcano.sh
+    resources:
+    - podgroups
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - scheduling.x-k8s.io
+    resources:
+    - podgroups
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app: training-operator
+  name: training-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: training-operator
+subjects:
+  - kind: ServiceAccount
+    name: training-operator
+    namespace: {{ .Release.Namespace }}
+---
+# Shipped empty, as upstream's secretGenerator ships it; the operator fills it
+# at startup. Every deployer applies with a three-way merge, so the filled data
+# survives a re-apply of this empty spec.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: training-operator-webhook-cert
+  namespace: {{ .Release.Namespace }}
+type: Opaque
+data: {}
+---
+# The app label and the monitoring-port name are what the ServiceMonitor the
+# Run:ai operator creates for an external training operator selects on
+# (operands.trainingOperator.enabled); keep both when re-vendoring.
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8080"
+    prometheus.io/scrape: "true"
+  labels:
+    app: training-operator
+  name: training-operator
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+    - name: monitoring-port
+      port: 8080
+      targetPort: 8080
+    - name: webhook-server
+      port: 443
+      protocol: TCP
+      targetPort: 9443
+  selector:
+    control-plane: kubeflow-training-operator
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    control-plane: kubeflow-training-operator
+  name: training-operator
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: kubeflow-training-operator
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+      labels:
+        control-plane: kubeflow-training-operator
+    spec:
+      {{- if $vals.systemNodeSelector }}
+      nodeSelector:
+        {{- toYaml $vals.systemNodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if $vals.systemTolerations }}
+      tolerations:
+        {{- toYaml $vals.systemTolerations | nindent 8 }}
+      {{- end }}
+      containers:
+        - command:
+            - /manager
+          env:
+            - name: MY_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          # Literal, not templated from values: tools/bom and aicr mirror read
+          # embedded manifests without rendering them. The tag is the key the
+          # Run:ai operator maps to a version through runai-cluster's
+          # trainingOperatorImageTags (components/runai-cluster/values.yaml);
+          # TestKubeflowTrainingOperatorTagMappedForRunai keeps the two equal.
+          image: ghcr.io/kubeflow/training-v1/training-operator:v1-93c5489@sha256:45aa299d92c21a1abc0e9731694f01be637ab5c6c9681a687aedf142b0468d45
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+          name: training-operator
+          ports:
+            - containerPort: 8080
+            - containerPort: 9443
+              name: webhook-server
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - mountPath: /tmp/k8s-webhook-server/serving-certs
+              name: cert
+              readOnly: true
+      serviceAccountName: training-operator
+      terminationGracePeriodSeconds: 10
+      volumes:
+        - name: cert
+          secret:
+            defaultMode: 420
+            secretName: training-operator-webhook-cert
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  labels:
+    control-plane: kubeflow-training-operator
+  name: validator.training-operator.kubeflow.org
+webhooks:
+  - admissionReviewVersions:
+    - v1
+    clientConfig:
+      service:
+        name: training-operator
+        namespace: {{ .Release.Namespace }}
+        path: /validate-kubeflow-org-v1-jaxjob
+    failurePolicy: Fail
+    name: validator.jaxjob.training-operator.kubeflow.org
+    rules:
+    - apiGroups:
+      - kubeflow.org
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jaxjobs
+    sideEffects: None
+  - admissionReviewVersions:
+    - v1
+    clientConfig:
+      service:
+        name: training-operator
+        namespace: {{ .Release.Namespace }}
+        path: /validate-kubeflow-org-v1-paddlejob
+    failurePolicy: Fail
+    name: validator.paddlejob.training-operator.kubeflow.org
+    rules:
+    - apiGroups:
+      - kubeflow.org
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - paddlejobs
+    sideEffects: None
+  - admissionReviewVersions:
+    - v1
+    clientConfig:
+      service:
+        name: training-operator
+        namespace: {{ .Release.Namespace }}
+        path: /validate-kubeflow-org-v1-pytorchjob
+    failurePolicy: Fail
+    name: validator.pytorchjob.training-operator.kubeflow.org
+    rules:
+    - apiGroups:
+      - kubeflow.org
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pytorchjobs
+    sideEffects: None
+  - admissionReviewVersions:
+    - v1
+    clientConfig:
+      service:
+        name: training-operator
+        namespace: {{ .Release.Namespace }}
+        path: /validate-kubeflow-org-v1-tfjob
+    failurePolicy: Fail
+    name: validator.tfjob.training-operator.kubeflow.org
+    rules:
+    - apiGroups:
+      - kubeflow.org
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - tfjobs
+    sideEffects: None
+  - admissionReviewVersions:
+    - v1
+    clientConfig:
+      service:
+        name: training-operator
+        namespace: {{ .Release.Namespace }}
+        path: /validate-kubeflow-org-v1-xgboostjob
+    failurePolicy: Fail
+    name: validator.xgboostjob.training-operator.kubeflow.org
+    rules:
+    - apiGroups:
+      - kubeflow.org
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - xgboostjobs
+    sideEffects: None
