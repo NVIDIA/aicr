@@ -2,23 +2,26 @@
 
 ## GPU Device-Plugin Ownership
 
-GKE has two mutually exclusive GPU **device-plugin ownership modes**, expressed
-as an ADR-015 `gpuStack` configuration profile on the GKE recipe family. The
+GKE has three mutually exclusive GPU **stack ownership modes**, expressed
+as an ADR-015 `gpuStack` configuration profile on the GKE recipe family: two
+device-plugin modes, and a DRA ResourceClaims mode
+([#2517](https://github.com/NVIDIA/aicr/issues/2517)). The
 selected value is chosen at recipe generation (`--profile`, or the declaration
 default) and recorded in `metadata.selectedProfile`; each value carries a
 constraint that the snapshot and the `aicr validate` readiness pre-flight
 verify against the cluster's GPU-node labels.
 
-| Value | `nvidia.com/gpu` advertiser | Driver provisioning | Node-label requirement | Pool-creation requirement | Recipe effect |
+| Value | Whole-GPU advertiser | Driver provisioning | Node-label requirement | Pool-creation requirement | Recipe effect |
 |------|------|------|------|------|------|
 | `gke-default` (default) | GKE's managed device plugin (recorded as `advertiser: external`) | GKE's managed driver install | **No** GPU node carries `gke-no-default-nvidia-gpu-device-plugin` | Normal pools with `gpu-driver-version=default` or `latest` — zero extra setup, no `--gke-gpu-pools` required | `devicePlugin.enabled=false` (profile-owned) |
 | `bundle-installer` | GPU Operator's device plugin (sole advertiser) | the bundle's `gcp-driver-installer` DaemonSet (recipe-pinned version) | **Every** GPU node carries `gke-no-default-nvidia-gpu-device-plugin=true` | Pools created with the label and `gpu-driver-version=disabled`, verified via `K8s.gke-gpu-pools.gpu-driver-installation` (`--gke-gpu-pools`) | `devicePlugin.enabled=true` (profile-owned) |
+| `dra` (experimental) | NVIDIA DRA driver ResourceSlices — workloads allocate through DRA **ResourceClaims only**; plain `nvidia.com/gpu` requests are not served | the bundle's `gcp-driver-installer` DaemonSet (same pool shape as `bundle-installer`) | **Every** GPU node carries `gke-no-default-nvidia-gpu-device-plugin=true` | Same as `bundle-installer`, plus Kubernetes >= 1.35 (the value's own floor) | `devicePlugin.enabled=false`, `resources.gpus.enabled=true`, `gpuResourcesEnabledOverride=true` (all profile-owned) |
 
-Both values keep `driver.enabled=false` in the GPU Operator values — the GPU
+Every value keeps `driver.enabled=false` in the GPU Operator values — the GPU
 Operator cannot install a driver on COS node images, so driver provisioning is
-never the operator's responsibility in either mode.
+never the operator's responsibility in any mode.
 
-Exactly **one** `nvidia.com/gpu` advertiser per node is required. Two plugins
+Exactly **one** whole-GPU advertiser per node is required. Two plugins
 registering the same resource name is not a benign overlap: kubelet's device
 manager keys its endpoint and device inventory by resource name, so competing
 registrations replace each other, ownership becomes nondeterministic, and one
@@ -36,11 +39,11 @@ synthesizes the GPU-node universe from the snapshot's `NodeTopology.label`
 readings (nodes carrying `cloud.google.com/gke-accelerator`) and quantifies a
 label predicate over it, in both directions: the positive form
 `gke-no-default-nvidia-gpu-device-plugin=true` (every GPU node carries the
-label) qualifies `bundle-installer`, and the negated form
+label) qualifies `bundle-installer` and `dra`, and the negated form
 `!gke-no-default-nvidia-gpu-device-plugin` (no GPU node carries the key)
 qualifies `gke-default`.
 
-`bundle-installer` carries a second, corroborating constraint. The label
+`bundle-installer` and `dra` carry a second, corroborating constraint. The label
 alone proves only that GKE's own device plugin has been evicted, not that
 the labeled pool was actually **created** with `gpu-driver-version=disabled`.
 A pool GKE still finalizes the managed driver install on can carry the
@@ -54,7 +57,7 @@ pass the dump via `aicr snapshot --gke-gpu-pools <dump>` (or
 `aicr validate --gke-gpu-pools <dump>`). The projection reads each GPU
 pool's `gpuDriverInstallationConfig.gpuDriverVersion` into the
 `K8s.gke-gpu-pools.gpu-driver-installation` reading. Only `Disabled`
-satisfies `bundle-installer`, whether the pool set that explicitly or left
+satisfies `bundle-installer` and `dra`, whether the pool set that explicitly or left
 the field absent or unspecified on a GKE version whose documented default
 for that case is no install. `Installed`, mixed, and unrecognized values
 all fail closed. `gke-default` declares no
@@ -94,7 +97,7 @@ aicr bundle -r recipe.yaml -o ./bundles
 The reading qualifies the selection — it does not choose for you. Every
 combination is deterministic:
 
-| GPU-node labels read | Default (`gke-default`) | `--profile gpuStack=bundle-installer` |
+| GPU-node labels read | Default (`gke-default`) | `--profile gpuStack=bundle-installer` or `gpuStack=dra` |
 |---|---|---|
 | all GPU nodes label-absent | ✅ resolves | ❌ fails closed: constraint expects the label on every GPU node |
 | all GPU nodes `gke-no-default-nvidia-gpu-device-plugin=true` | ❌ fails closed: constraint expects no labeled GPU node | ✅ resolves (still subject to the pool-creation check below) |
@@ -106,13 +109,13 @@ A wrong selection can never silently produce a mismatched recipe — the error
 names the observed label state, and fixing it means changing the selection or
 the pools, never overriding the values by hand.
 
-`bundle-installer` additionally requires a `--gke-gpu-pools` projection
-corroborating the label, since the label alone cannot prove the pool was
-actually created with the managed install disabled:
+`bundle-installer` and `dra` additionally require a `--gke-gpu-pools`
+projection corroborating the label, since the label alone cannot prove the
+pool was actually created with the managed install disabled:
 
-| `K8s.gke-gpu-pools.gpu-driver-installation` reading | `--profile gpuStack=bundle-installer` (label already satisfied) |
+| `K8s.gke-gpu-pools.gpu-driver-installation` reading | `--profile gpuStack=bundle-installer` or `gpuStack=dra` (label already satisfied) |
 |---|---|
-| `Disabled` (every GPU pool created with `gpu-driver-version=disabled`, or left absent/unspecified on a GKE version whose documented default for that case is no install) | ✅ resolves |
+| `Disabled` (every GPU pool created with `gpu-driver-version=disabled`, or left absent/unspecified on a GKE version whose documented default for that case is no install) | ✅ resolves (`dra` additionally needs the cluster on Kubernetes >= 1.35) |
 | `Installed` (some pool created with `default`/`latest`, or left absent/unspecified on a GKE version whose documented default for that case is to install) | ❌ fails closed: a labeled pool GKE still finalizes the driver on races the bundle's installer |
 | `NotConfigured` or `NotInstalled` (some pool left absent or unspecified, and its `version` couldn't be parsed to resolve which default applies) | ❌ fails closed. An unresolvable version is never treated as proof of `disabled` |
 | mixed across or within pools | ❌ fails closed naming the observed state |
@@ -123,7 +126,7 @@ absence) decides the selection; `--snapshot` (or its absence) decides whether
 the selection is verified now or later. The selection is NEVER derived from
 the snapshot, and the check is NEVER skipped when a snapshot is present:
 
-| Invocation | Selected value | Node-label check | Pool-creation check (`bundle-installer` only) |
+| Invocation | Selected value | Node-label check | Pool-creation check (`bundle-installer` and `dra` only; `dra` rows behave identically) |
 |---|---|---|---|
 | no `--profile`, no `--snapshot` | declaration default (`gke-default`) | none possible (no cluster data). The constraint is still recorded in the recipe and enforced at `aicr validate` readiness | n/a |
 | `--profile gpuStack=bundle-installer`, no `--snapshot` | `bundle-installer` | same, deferred to validate | same, deferred to validate |
@@ -204,11 +207,12 @@ override is needed:
 |---|---|---|
 | `gke-default` (default) | `true` | no driver pod exists to observe |
 | `bundle-installer` | `false` | the bundle's `gcp-driver-installer` DaemonSet supplies one |
+| `dra` | `false` | same installer DaemonSet, same driver pod evidence |
 
 Because the path is profile-owned, a bundle-time `--set` diverging from the
 selected value is **rejected** rather than silently applied. The explicit
-`false` under `bundle-installer` is deliberate: skipping detection there would
-keep the label applied across an unloaded driver.
+`false` under `bundle-installer` and `dra` is deliberate: skipping detection
+there would keep the label applied across an unloaded driver.
 
 The value renders the labeler's `--assume-driver-installed` argument — the
 chart-level automation of the Manual Labeling Procedure in NVSentinel design
@@ -218,8 +222,8 @@ recommended, permanent mechanism for host-installed drivers (no automatic
 detection fallback will be added). Under `gke-default` a recipe that reaches
 bundle generation without it is a **blocking error**
 (`CheckNVSentinelDriverLabelDetectable`), so the silent half-rollout cannot
-ship. Under `bundle-installer` the gate does not fire: the bundle's installer
-supplies an observable driver pod.
+ship. Under `bundle-installer` and `dra` the gate does not fire: the bundle's
+installer supplies an observable driver pod.
 
 **Labeling the nodes by hand does not persist.** Applying the label manually:
 
@@ -444,12 +448,61 @@ regenerate with `--profile gpuStack=bundle-installer`, and deploy the
 bundle. Nodes with a loaded driver are untouched (the installer's fast path
 skips them); the bundle takes over provisioning for new and rebooted nodes.
 
+### Alternative: DRA ResourceClaims as the Advertiser (experimental)
+
+The `dra` value ([#2517](https://github.com/NVIDIA/aicr/issues/2517)) is the
+`bundle-installer` pool shape with a different whole-GPU advertiser: both
+device plugins stay off, and the NVIDIA DRA driver advertises whole GPUs
+through DRA ResourceSlices (`resources.gpus.enabled=true` with the chart's
+`gpuResourcesEnabledOverride` install-guard waiver — the
+[#1327](https://github.com/NVIDIA/aicr/issues/1327) DRA opt-in tuple, all
+three paths profile-owned). The resolved recipe's allocation policy is
+`dra-resource-claim`, which remains **experimental** pending the #1327
+graduation checklist (tracked in
+[#3282](https://github.com/NVIDIA/aicr/issues/3282)); see
+[Validation › GPU allocation policy](../user/validation.md).
+
+```shell
+aicr recipe --service gke --accelerator h100 --os cos --intent training \
+  --profile gpuStack=dra \
+  -o recipe.yaml
+aicr bundle -r recipe.yaml -o ./bundles
+```
+
+Know what you are selecting:
+
+- **ResourceClaim-only.** Workloads allocate GPUs exclusively through DRA
+  ResourceClaims. Pods requesting the `nvidia.com/gpu` extended resource are
+  **not served** — serving them from the DRA backend needs the
+  `DRAExtendedResource` mapping (KEP-5004, beta and on by default from
+  Kubernetes 1.36), which AICR does not validate yet
+  ([#3282](https://github.com/NVIDIA/aicr/issues/3282)).
+- **Kubernetes >= 1.35.** Google supports DRA on GKE Standard from 1.35, so
+  the value carries its own `K8s.server.version >= 1.35.0` floor. It
+  tightens the composed chain's floor at generation
+  ([#2643](https://github.com/NVIDIA/aicr/issues/2643)); on the GB300
+  overlays, whose floor names per-GKE-track minimums, the intersection
+  resolves to the 1.35 track's build minimum.
+- **Same pool prerequisites as `bundle-installer`.** Every GPU pool carries
+  `gke-no-default-nvidia-gpu-device-plugin=true` and is created with
+  `gpu-driver-version=disabled`; the bundle's `gcp-driver-installer`
+  supplies the driver. The pool-creation commands, retrofit procedure, and
+  `--gke-gpu-pools` corroboration above apply unchanged — substitute
+  `--profile gpuStack=dra` for `--profile gpuStack=bundle-installer`.
+- **The three settings above read the same**, except the GPU Operator's
+  device plugin stays **off** (`devicePlugin.enabled=false`): the DRA
+  driver, not the Operator's plugin, is the sole whole-GPU advertiser. The
+  "no advertiser at all" troubleshooting entry below reads differently too:
+  under `dra`, GPU nodes never report allocatable `nvidia.com/gpu` — that
+  is the selected contract, not a failure; ResourceSlices are the
+  advertisement surface (`kubectl get resourceslices`).
+
 ## DRA kubelet plugin node labels are not required on GKE
 
 DRA eviction coordination is opt-in, and by default it does nothing on
-supported GKE recipes. Every GKE overlay is COS, and both the default and
-`gpuStack=bundle-installer` profiles keep GPU Operator's `driver.enabled=false`
-— `bundle-installer` provisions the driver through a separate
+supported GKE recipes. Every GKE overlay is COS, and every `gpuStack` value
+keeps GPU Operator's `driver.enabled=false`
+— `bundle-installer` and `dra` provision the driver through a separate
 `gcp-driver-installer` DaemonSet, not a GPU Operator driver pod. With no GPU
 Operator driver pod there is no Driver Manager to coordinate with.
 
@@ -504,7 +557,7 @@ same kube-system DaemonSet the opt-out label disables. Labeling the pool
 disabled the whole DaemonSet — device plugin *and* driver finalization — so
 the pairing "label + managed driver install" is never functional.
 
-Generating or validating `bundle-installer` with a `--gke-gpu-pools`
+Generating or validating `bundle-installer` or `dra` with a `--gke-gpu-pools`
 projection catches this pairing before deploy: a pool reporting `Installed`
 on `K8s.gke-gpu-pools.gpu-driver-installation` fails closed instead of
 producing a recipe that reaches this symptom live.

@@ -15,7 +15,8 @@
 # gcp-driver-installer Health Check
 #
 # Validates the values-gated cos-gpu-installer DaemonSet. The component
-# renders it only under gpuStack=bundle-installer (installer.enabled=true);
+# renders it only under gpuStack=bundle-installer and gpuStack=dra
+# (installer.enabled=true);
 # under every other profile value the render is empty and the deployment
 # validator suppresses this assert (render-aware gating, same mechanism as
 # nodewright-customizations, issue #1844) — a static assert cannot see value
