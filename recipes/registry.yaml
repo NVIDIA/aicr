@@ -1083,6 +1083,8 @@ components:
       - prometheusoperatorcrds
     healthCheck:
       assertFile: checks/prometheus-operator-crds/health-check.yaml
+    upgrades:
+      file: components/prometheus-operator-crds/upgrades.yaml
     # CRDs-only chart for the prometheus-operator; kube-prometheus-stack
     # (and any sibling chart that creates ServiceMonitor / PodMonitor /
     # Alertmanager / Prometheus / etc. CRs) consumes the kinds it
@@ -1097,7 +1099,7 @@ components:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/prometheus-operator-crds
       # renovate: datasource=helm depName=prometheus-operator-crds registryUrl=https://prometheus-community.github.io/helm-charts
-      defaultVersion: 28.0.1
+      defaultVersion: 31.0.1
       defaultNamespace: monitoring
 
   - name: kube-prometheus-stack
@@ -1113,11 +1115,13 @@ components:
     # described in issue #914.
     healthCheck:
       assertFile: checks/kube-prometheus-stack/health-check.yaml
+    upgrades:
+      file: components/kube-prometheus-stack/upgrades.yaml
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/kube-prometheus-stack
       # renovate: datasource=helm depName=kube-prometheus-stack registryUrl=https://prometheus-community.github.io/helm-charts
-      defaultVersion: 84.4.0
+      defaultVersion: 88.6.5
       defaultNamespace: monitoring
     nodeScheduling:
       system:

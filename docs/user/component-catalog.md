@@ -2829,8 +2829,8 @@ reports `Deployed`, `Available` and `DependenciesFulfilled`, and that the
 operator Deployments and the agent and `cluster-sync` operands are available.
 `DependenciesFulfilled` is the Run:ai operator's own verdict on its
 prerequisites: the GPU Operator, a Prometheus Operator at the version Run:ai
-requires (kube-prometheus-stack 88.6.5 or later; AICR's stack-wide pin is
-being raised to it), and an ingress controller or Gateway API implementation
+requires (kube-prometheus-stack 88.6.5 or later, which AICR's stack-wide pin
+now meets), and an ingress controller or Gateway API implementation
 with the two TLS Secrets Run:ai documents in the `runai` namespace. Until the
 recipe ships those, the check fails on a bare training base; that is the
 intended fail-closed shape, not a flake. Run:ai's pre-install hook labels the

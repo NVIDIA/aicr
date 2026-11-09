@@ -133,25 +133,25 @@ func TestExternalRegistryDefaultWinsWithoutPin(t *testing.T) {
 	}
 }
 
-// TestExplicitPinWinsOverExternalDefault pins side (b): the aks overlay's
-// kube-prometheus-stack pin is the one sanctioned divergence
-// (versionPinExemptions, #700) — it must survive an external registry
+// TestExplicitPinWinsOverExternalDefault pins side (b): the
+// vr200-nvke-ubuntu-training leaf's network-operator pin is a sanctioned
+// divergence (versionPinExemptions) — it must survive an external registry
 // override of the component's defaultVersion.
 func TestExplicitPinWinsOverExternalDefault(t *testing.T) {
 	t.Cleanup(ResetMetadataStoreForTesting)
 
-	// The pin this test protects; keep in lockstep with the aks overlay and
+	// The pin this test protects; keep in lockstep with the leaf overlay and
 	// its versionPinExemptions entry.
-	const aksPin = "83.7.0"
+	const leafPin = "26.7.1"
 
 	dir := writeExternalRegistryOverride(t, map[string]string{
-		"kube-prometheus-stack": "99.0.0",
+		"network-operator": "99.0.0",
 	})
 
-	ref := resolveWithExternalRegistry(t, dir, "a100-aks-ubuntu-training", "kube-prometheus-stack")
-	if ref.Version != aksPin {
-		t.Errorf("kube-prometheus-stack resolved version = %q, want the aks overlay's "+
-			"explicit pin %q; an intentional (exempted) pin must win over an external "+
-			"registry defaultVersion", ref.Version, aksPin)
+	ref := resolveWithExternalRegistry(t, dir, "vr200-nvke-ubuntu-training", "network-operator")
+	if ref.Version != leafPin {
+		t.Errorf("network-operator resolved version = %q, want the vr200-nvke-ubuntu-training "+
+			"leaf's explicit pin %q; an intentional (exempted) pin must win over an external "+
+			"registry defaultVersion", ref.Version, leafPin)
 	}
 }

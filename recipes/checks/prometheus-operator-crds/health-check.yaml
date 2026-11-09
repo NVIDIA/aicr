@@ -19,7 +19,7 @@
 # apiserver will accept CRs of those kinds).
 #
 # CRDs come from the upstream prometheus-community/prometheus-operator-crds
-# chart pinned to 28.0.1 in recipes/registry.yaml. The 8 kinds under
+# chart pinned to 31.0.1 in recipes/registry.yaml. The 8 kinds under
 # monitoring.coreos.com/v1 are enumerated in
 # recipes/components/prometheus-operator-crds/values.yaml header:
 # Alertmanager, AlertmanagerConfig, PodMonitor, Probe, Prometheus,

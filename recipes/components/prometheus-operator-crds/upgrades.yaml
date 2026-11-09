@@ -1,0 +1,49 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The CRD half of the prometheus-operator upgrade. This chart renders its CRDs
+# as templates rather than under crds/, so every deployer's in-place upgrade
+# of the release applies the new schema; nothing is applied out of band.
+# kube-prometheus-stack's record describes the operator half.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: prometheus-operator-crds
+transitions:
+  # 28.0.1 is the only pin AICR shipped before 31.0.1.
+  - from: ">=28.0.1 <31.0.1"
+    to: "=31.0.1"
+    verdict: safe
+    verifiedBy: >-
+      A diff of the 28.0.1 and 31.0.1 charts: the same ten CRDs under
+      monitoring.coreos.com, the same served versions (v1 and v1alpha1), and
+      only added optional fields and tightened validation, per the
+      prometheus-operator v0.91.0 to v0.93.1 release notes (externalId in
+      SigV4, Mattermost and email threading receivers, staleSeriesCompaction
+      Threshold, chunkEncoding, unsigned fields rejecting negatives). The
+      CRD inventory regenerated at 31.0.1 lists the same CRDs the health
+      check asserts. In-place Helm upgrade on a single-node Kind v1.37.0
+      cluster, 2026-11-09: 28.0.1 to 31.0.1 with kube-prometheus-stack
+      84.4.0 still running; all ten CRDs Established on the v0.93.1 schema,
+      the running Prometheus and Alertmanager stayed Available, the shipped
+      health check passed, and the stack then upgraded to 88.6.5 on the new
+      schema.
+    summary: >-
+      CRD schema update for prometheus-operator v0.93.1, applied in place by
+      the release upgrade. Upgrade this release before kube-prometheus-stack,
+      as the bundle's dependency order already does.
+    references:
+      - https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.91.0
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.92.0
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.93.0

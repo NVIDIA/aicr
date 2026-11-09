@@ -28,7 +28,7 @@ The catalog lists the driver version that the default chart render carries. Vers
 ## Summary
 
 - Components: **58**
-- Unique images: **168**
+- Unique images: **163**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -62,7 +62,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
 | kai-scheduler | helm | kai-scheduler | v0.16.9 | 12 |
-| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
+| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 88.6.5 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
 | kueue | helm | kueue | 0.19.6 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
@@ -84,7 +84,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nvsentinel-mongodb | helm | psmdb-db | 1.23.3 | 5 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
-| prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
+| prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 31.0.1 | 0 |
 | psmdb-operator | helm | psmdb-operator | 1.23.2 | 1 |
 | rdma-modules | manifest | — | — | 1 |
 | runai-cluster | helm | runai-cluster | 3.0.20 | 10 |
@@ -107,7 +107,6 @@ from the component's registry default above.
 |-----------|-----------------|-------------|--------|
 | dynamo-platform | 1.5.0 | b300-mk8s-ubuntu-inference-dynamo | 1 |
 | kai-scheduler | v0.17.1 | b300-mk8s-ubuntu-inference-dynamo | 12 |
-| kube-prometheus-stack | 83.7.0 | aks | 8 |
 | network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 23 |
 | network-operator | 26.7.1 | vr200-nvke-ubuntu-training | 23 |
 
@@ -151,7 +150,7 @@ _No images extracted._
 
 ### dra-node-labeler
 
-- `docker.io/alpine/kubectl:1.37.2@sha256:5e2de75d37e811ba6eb92e06890b1b3263eae4f0a1c17b49269edec589b1352a`
+- `docker.io/alpine/kubectl:1.37.2@sha256:1a7fc3308a8eee1c8bd177930fc521088c6dc64ad8b68c88319151fd87d79deb`
 
 ### dranet
 
@@ -248,14 +247,14 @@ _No images extracted._
 
 ### kube-prometheus-stack
 
-- `docker.io/grafana/grafana:13.0.1`
-- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.2`
-- `quay.io/kiwigrid/k8s-sidecar:2.7.1`
-- `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
-- `quay.io/prometheus/alertmanager:v0.32.0`
-- `quay.io/prometheus/node-exporter:v1.11.1`
-- `quay.io/prometheus/prometheus:v3.11.3`
-- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
+- `docker.io/grafana/grafana:13.2.0`
+- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.8`
+- `quay.io/kiwigrid/k8s-sidecar:2.10.1`
+- `quay.io/prometheus-operator/prometheus-operator:v0.93.1`
+- `quay.io/prometheus/alertmanager:v0.34.0`
+- `quay.io/prometheus/node-exporter:v1.12.1-distroless`
+- `quay.io/prometheus/prometheus:v3.14.0-distroless`
+- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0`
 
 ### kubeflow-trainer
 
@@ -475,17 +474,6 @@ _No images extracted._
 - `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.17.1`
 - `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.17.1`
 - `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.17.1`
-
-### kube-prometheus-stack@83.7.0 (variant)
-
-- `docker.io/grafana/grafana:12.4.3`
-- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.1`
-- `quay.io/kiwigrid/k8s-sidecar:2.6.0`
-- `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
-- `quay.io/prometheus/alertmanager:v0.32.0`
-- `quay.io/prometheus/node-exporter:v1.11.1`
-- `quay.io/prometheus/prometheus:v3.11.2`
-- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
 
 ### network-operator@25.7.0 (variant)
 
