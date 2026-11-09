@@ -5965,7 +5965,7 @@ vr200-nvke-ubuntu-training-kubeflow:
   012-network-operator-post/Chart.yaml: e5a71c6d0ba97bef989a82cd6a0fc9d9904c4eec8706c16278737ae8140a83e4
   012-network-operator-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-network-operator-post/install.sh: 95f69b34ff635b03c53c5f2558235ab92b3ef34b1e0db07d4d37c0c94226562f
-  012-network-operator-post/templates/nic-cluster-policy-nvke-vr200.yaml: c48d43b1bfa0bd91142e7d823959050efcf1c1f140f13a9d5b1c8e2f6c64bcc0
+  012-network-operator-post/templates/nic-cluster-policy-nvke-vr200.yaml: d5ea0ab375baf67b9b04129b0748e214dc03ccf926c4891b4e558c27fa49da5e
   012-network-operator-post/values.yaml: e9d6f1481a61bac0626eecd824ba302bde4ea1258648b8bfd0fd8ca6a96330fc
   013-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
@@ -5988,7 +5988,7 @@ vr200-nvke-ubuntu-training-kubeflow:
   README.md: 4f662ada37bc4a32893e6f66887ba8d722e3d2d09d1865a2ff145876679d529a
   UPGRADING.md: 5b326bcf1ffc5558122e69eff1925bb3e42bae2d09b0ed79bbf25a2764c0cc88
   bundle-info.yaml: 76b533a96fa9889f264fef93e8f7cdc2948b26ece9625c13e78d6d15c047335b
-  checksums.txt: 7a76962e0def753c2c5dd72b9ab4ff919085d2cb0c2e9c07985c7d77574b1f96
+  checksums.txt: 5bb6feaebc2a6295f950747f06f59dd1e7ea80347471b770c0fb7eeadcf4b615
   deploy.sh: 5a842759e05308dfd2ca478a1c0d7ed57ee92ea40c865682718f907acab44acf
   recipe.yaml: b2928e7bbf6c902e9d0cd7c6e9e252c9e27b69728aea87dae0a4888411ace722
 vr200-rke2-ubuntu-inference-dynamo:
