@@ -265,6 +265,9 @@ func waitForJobPodsChange(ctx context.Context, client kubernetes.Interface, name
 		LabelSelector: selector, ResourceVersion: resourceVersion,
 	})
 	if err != nil {
+		if apierrors.IsResourceExpired(err) || apierrors.IsGone(err) {
+			return true, nil
+		}
 		return false, errors.Wrap(APIErrorCode(ctx, err), "failed to watch Job pods for termination", err)
 	}
 	defer watcher.Stop()

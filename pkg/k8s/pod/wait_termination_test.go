@@ -256,6 +256,39 @@ func TestWaitForJobPodsTermination_APIErrors(t *testing.T) {
 	}
 }
 
+// TestWaitForJobPodsTermination_RelistsExpiredWatch proves a Watch call that
+// itself fails with 410 Expired or Gone re-lists instead of aborting the wait.
+func TestWaitForJobPodsTermination_RelistsExpiredWatch(t *testing.T) {
+	gone := &apierrors.StatusError{ErrStatus: metav1.Status{
+		Status: metav1.StatusFailure, Code: 410, Reason: metav1.StatusReasonGone, Message: "gone",
+	}}
+	for _, expired := range []error{apierrors.NewResourceExpired("too old resource version"), gone} {
+		t.Run(string(apierrors.ReasonForError(expired)), func(t *testing.T) {
+			p := terminatingJobPod("pod")
+			cs := fake.NewSimpleClientset(p)
+			watches := 0
+			cs.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+				watches++
+				if watches == 1 {
+					done := p.DeepCopy()
+					done.Status.Phase = corev1.PodSucceeded
+					if err := cs.Tracker().Update(corev1.SchemeGroupVersion.WithResource("pods"), done, "ns"); err != nil {
+						t.Error(err)
+					}
+					return true, nil, expired
+				}
+				t.Error("watched again after the re-list found every pod terminal")
+				return true, watch.NewRaceFreeFake(), nil
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), terminationWaitTimeout)
+			defer cancel()
+			if err := pod.WaitForJobPodsTermination(ctx, cs, "ns", "job"); err != nil {
+				t.Fatalf("WaitForJobPodsTermination() = %v, want nil after re-list", err)
+			}
+		})
+	}
+}
+
 func TestWaitForJobPodsTermination_ResyncsClosedWatch(t *testing.T) {
 	for _, phase := range []corev1.PodPhase{corev1.PodRunning, corev1.PodSucceeded} {
 		t.Run(string(phase), func(t *testing.T) {
