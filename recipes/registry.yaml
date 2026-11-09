@@ -254,7 +254,7 @@ components:
   # GKE COS NVIDIA driver installer (issue #1716): Google's cos-gpu-installer
   # DaemonSet as an AICR-managed, values-gated component. Present
   # unconditionally in the gke-cos chain; renders nothing unless the gpuStack
-  # bundle-installer profile value flips installer.enabled true. The
+  # bundle-installer or dra profile value flips installer.enabled true. The
   # DaemonSet carries its own nodeAffinity (GPU nodes without GKE-managed
   # driver labels), so no nodeSelector injection — only accelerated
   # tolerations flow through.
@@ -744,7 +744,8 @@ components:
       # itself — from the gpuStack profile on AKS, GKE-COS, and OKE, at
       # overlay level on Kind (#2181) — so this gate is defense in depth
       # rather than the primary mechanism. GKE
-      # gpuStack=bundle-installer and AKS gpuStack=operator-managed
+      # gpuStack=bundle-installer and gpuStack=dra, and AKS
+      # gpuStack=operator-managed,
       # assign an explicit false: a driver pod exists there for the
       # labeler to detect. Issue #2175.
       - function: CheckNVSentinelDriverLabelDetectable
