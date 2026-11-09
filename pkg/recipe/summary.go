@@ -16,27 +16,44 @@ package recipe
 
 import (
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 )
 
-// Validation phase names as they appear in Summary.Validation, in the order
-// the phases run.
+// RecipeSummaryKind is the kind of a Summary document. It differs from
+// RecipeResultKind so that a saved summary fails the recipe loader's kind
+// gate instead of loading as a recipe.
+const RecipeSummaryKind = "RecipeSummary"
+
+// RecipeSummaryAPIVersion is the apiVersion of a Summary document: the
+// ADR-022 §7 default for a new kind. The kind is output-only; AICR never
+// reads it back, so it has no read gate.
+const RecipeSummaryAPIVersion = header.GroupVersionV1Beta1
+
+// Validation phase names as they appear in Summary.Validation, in run order:
+// the readiness pre-flight, then validator.PhaseOrder (deployment,
+// conformance, performance). pkg/recipe cannot import pkg/validator, so this
+// order is kept by hand; a pkg/cli test fails if it drifts.
 const (
 	SummaryPhaseReadiness   = "readiness"
 	SummaryPhaseDeployment  = "deployment"
-	SummaryPhasePerformance = "performance"
 	SummaryPhaseConformance = "conformance"
+	SummaryPhasePerformance = "performance"
 )
 
 // Summary is the in-memory projection of an already loaded or resolved
 // RecipeResult. Its construction performs no I/O; upstream profile-coherence
 // validation remains separate. Every slice keeps a deterministic order:
 // enabled components follow deployment order, constraints and overlays keep
-// recipe order, and validation phases run readiness, deployment, performance,
-// conformance.
+// recipe order, and validation phases run readiness, deployment, conformance,
+// performance.
 type Summary struct {
-	// APIVersion and Kind identify the document the summary was built from.
+	// APIVersion and Kind identify the summary document itself:
+	// RecipeSummaryAPIVersion and RecipeSummaryKind.
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 	Kind       string `json:"kind" yaml:"kind"`
+
+	// Source is the header of the recipe the summary was built from.
+	Source SummarySource `json:"source" yaml:"source"`
 
 	// Version is the recipe version (the CLI version that generated it).
 	Version string `json:"version,omitempty" yaml:"version,omitempty"`
@@ -65,6 +82,13 @@ type Summary struct {
 
 	// Validation lists the validation phases that declare checks.
 	Validation []SummaryPhase `json:"validation,omitempty" yaml:"validation,omitempty"`
+}
+
+// SummarySource is the apiVersion and kind of the recipe a Summary was built
+// from.
+type SummarySource struct {
+	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
+	Kind       string `json:"kind" yaml:"kind"`
 }
 
 // SummaryConstraint is one recipe constraint, with the name exactly as the
@@ -99,8 +123,9 @@ func BuildSummary(r *RecipeResult) (*Summary, error) {
 	}
 
 	s := &Summary{
-		APIVersion:      r.APIVersion,
-		Kind:            r.Kind,
+		APIVersion:      RecipeSummaryAPIVersion,
+		Kind:            RecipeSummaryKind,
+		Source:          SummarySource{APIVersion: r.APIVersion, Kind: r.Kind},
 		Version:         r.Metadata.Version,
 		GPUDriver:       r.Metadata.GPUDriverState,
 		AppliedOverlays: append([]string(nil), r.Metadata.AppliedOverlays...),
@@ -197,8 +222,8 @@ func summaryPhases(v *ValidationConfig) []SummaryPhase {
 	}{
 		{SummaryPhaseReadiness, v.Readiness},
 		{SummaryPhaseDeployment, v.Deployment},
-		{SummaryPhasePerformance, v.Performance},
 		{SummaryPhaseConformance, v.Conformance},
+		{SummaryPhasePerformance, v.Performance},
 	} {
 		if p.phase == nil || len(p.phase.Checks) == 0 {
 			continue

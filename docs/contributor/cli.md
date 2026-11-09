@@ -162,26 +162,15 @@ rendering, validator orchestration, OCI pushes — is a boundary
 violation. If the facade is missing the surface you need, add it to
 `pkg/client/v1` first.
 
-**Query summaries.** `query --summary` projects `result.Resolved()` through the pure
-`recipe.BuildSummary` function. It skips the selector's additional full hydration;
-canonical loader/resolver profile-coherence validation still reads locked component
-values and can reject missing or invalid values files. Enabled components follow
-`DeploymentOrder`, with unlisted enabled references appended in recipe order; components
-disabled by `enabled: false` or `install: false` are omitted, and dependency edges to them
-are pruned as the bundler prunes them. Kustomize versions
-come from `Tag`. Validation phases have a fixed readiness, deployment, performance,
-conformance order. `query_summary.go` owns only presentation, using `text/tabwriter` and
-the command writer for text, and the existing deterministic YAML/JSON writer for
-structured summaries. `--recipe` goes through the same per-command client and
-`LoadRecipe` as other consumers, so loader error codes and provider binding are
-preserved. The evidence gate runs before either presentation branch. While evidence is
-required, `--recipe` is rejected before the file is read: a committed pointer attests an
-embedded resolve, and a loaded file only names its criteria, profile, and leaf overlay.
-Summary/selector and recipe/generation-input exclusions are checked before reading the
-recipe; config-sourced generation inputs are rejected too. Renderer goldens live in
+**Query summaries.** `query --summary` projects `result.Resolved()` through
+`recipe.BuildSummary`, a pure function in `pkg/recipe/summary.go` that performs no
+I/O and does not modify the recipe. `pkg/cli/query_summary.go` owns only
+presentation: the text view and the YAML/JSON document. Renderer goldens live in
 `pkg/cli/testdata/query-summary-*.golden`; regenerate them with
-`go test ./pkg/cli/ -run TestWriteRecipeSummaryTextGolden -update`. No REST summary
-endpoint or `recipe --summary` is introduced.
+`go test ./pkg/cli/ -run TestWriteRecipeSummaryTextGolden -update`. For the
+user-facing rules (flag exclusions, ordering, the summary document, and
+`--recipe` behavior), see the
+[CLI reference](../user/cli-reference.md#recipe-summary).
 
 **What `--snapshot` still owns.** `buildRecipeFromCmdWithConfig` in
 `query.go` derives criteria from the snapshot fingerprint, layers config and

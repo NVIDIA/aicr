@@ -632,6 +632,39 @@ func TestQueryCmdFlagCombinations(t *testing.T) {
 	}
 }
 
+// TestQueryCmdRecipeFlagPartition fails when a query flag is neither rejected
+// with --recipe (recipeGenerationFlags) nor listed here as valid with it, so a
+// generation flag added to recipeCmdFlags cannot be silently ignored.
+func TestQueryCmdRecipeFlagPartition(t *testing.T) {
+	allowedWithRecipe := map[string]bool{
+		cmdNameRecipe: true, flagSelector: true, flagSummary: true, flagFormat: true,
+		"config": true, "data": true, "kubeconfig": true, "criteria-strict": true, flagRequireEvidence: true,
+	}
+	rejected := make(map[string]bool, len(recipeGenerationFlags))
+	for _, name := range recipeGenerationFlags {
+		rejected[name] = true
+	}
+	declared := map[string]bool{}
+	for _, f := range queryCmdFlags() {
+		name := f.Names()[0]
+		declared[name] = true
+		switch {
+		case rejected[name] && allowedWithRecipe[name]:
+			t.Errorf("--%s is both in recipeGenerationFlags and allowed with --recipe", name)
+		case !rejected[name] && !allowedWithRecipe[name]:
+			t.Errorf("--%s is new: add it to recipeGenerationFlags if it shapes the resolved recipe, "+
+				"or to allowedWithRecipe in this test if it is valid with --recipe", name)
+		}
+	}
+	for _, names := range []map[string]bool{rejected, allowedWithRecipe} {
+		for name := range names {
+			if !declared[name] {
+				t.Errorf("--%s is classified but is not a query flag", name)
+			}
+		}
+	}
+}
+
 func TestQueryCmdRecipeExcludesGenerationFlags(t *testing.T) {
 	// Keep this list independent of recipeGenerationFlags so dropping an entry
 	// from the implementation does not also drop its regression test.
@@ -723,6 +756,32 @@ func TestQueryCmdRecipeLoaderErrors(t *testing.T) {
 			}
 			err := queryCmd().Run(t.Context(), []string{"query", "--recipe", path, "--summary"})
 			errorstest.WantReportedCode(t, err, errorstest.ReportedCode(loaderErr))
+		})
+	}
+}
+
+// TestQueryCmdRecipeRejectsSavedSummary proves a saved summary is not a
+// recipe: its own kind fails the loader's kind gate before the body is
+// decoded, so it neither loads as an empty recipe nor fails with a type error.
+func TestQueryCmdRecipeRejectsSavedSummary(t *testing.T) {
+	_, resolved, path := queryRecipeFixture(t)
+	if resolved.Validation == nil {
+		t.Fatal("setup: the fixture recipe must declare validation checks")
+	}
+	for _, format := range []string{"yaml", "json"} {
+		t.Run(format, func(t *testing.T) {
+			summary := runQueryValue(t, "query", "--recipe", path, "--summary", "--format="+format)
+			if !strings.Contains(summary, "validation") {
+				t.Fatalf("setup: summary must carry validation phases: %s", summary)
+			}
+			saved := writeYAML(t, "summary."+format, summary)
+			for _, selection := range []string{"--summary", "--selector=components"} {
+				err := queryCmd().Run(t.Context(), []string{"query", "--recipe", saved, selection})
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				if err == nil || !strings.Contains(err.Error(), `kind "`+recipe.RecipeSummaryKind+`"`) {
+					t.Errorf("%s: error = %v, want rejection naming kind %q", selection, err, recipe.RecipeSummaryKind)
+				}
+			}
 		})
 	}
 }

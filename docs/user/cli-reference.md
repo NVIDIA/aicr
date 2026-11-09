@@ -1091,10 +1091,11 @@ prometheus-adapter             Helm  5.3.0    monitoring              kube-prome
 
 VALIDATION
   Deployment:   operator-health, expected-resources, gpu-operator-version, check-nvidia-smi
-  Performance:  nccl-all-reduce-bw
   Conformance:  platform-health, gpu-operator-health, dra-support, accelerator-metrics, ai-service-metrics, gang-scheduling, pod-autoscaling, cluster-autoscaling, secure-accelerator-access
+  Performance:  nccl-all-reduce-bw
 ```
 
+`API Version` and `Kind` are the summarized recipe's header.
 `GPU Driver` is the snapshot-observed state recorded in recipe metadata:
 `preinstalled`, `absent`, or `unknown` when none was recorded. It is not inferred
 from the presence of a GPU operator. A selected profile appears as `name=value`.
@@ -1105,12 +1106,17 @@ are left out of the table and the `COMPONENTS (n)` count, and dependencies on th
 dropped from DEPENDS ON. `--selector components` still lists every component, including
 disabled ones.
 Constraints and applied overlays keep recipe order. Validation phases always appear
-in readiness, deployment, performance, conformance order, omitting phases without
-checks. Empty sections and empty table cells use `-`; a recipe with no components
-still shows the component table header. Unspecified criteria display as `any`.
+in run order: readiness, then deployment, conformance, performance as `aicr validate`
+runs them, omitting phases without checks. Empty sections and empty table cells use
+`-`; a recipe with no components still shows the component table header. Unspecified
+criteria display as `any`.
 `--format yaml` and `--format json` emit the typed summary document rather than the
-full recipe, with empty optional fields omitted; `--format table` selects the text
-view explicitly. A format from `spec.recipe.output.format` is honored too.
+full recipe, with empty optional fields omitted. The document has its own header,
+`apiVersion: aicr.run/v1beta1` and `kind: RecipeSummary`, and carries the summarized
+recipe's header under `source.apiVersion` and `source.kind`. A summary is output only:
+`--recipe`, `aicr bundle --recipe`, and other recipe inputs reject it by kind.
+`--format table` selects the text view explicitly. A format from
+`spec.recipe.output.format` is honored too.
 
 #### Selector Syntax
 

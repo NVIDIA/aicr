@@ -19,6 +19,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,14 +27,16 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
+	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
 // syntheticSummary is a fixed Summary, so the renderer tests do not depend on
 // any shipped recipe.
 func syntheticSummary() *recipe.Summary {
 	return &recipe.Summary{
-		APIVersion: "aicr.run/v1",
-		Kind:       "RecipeResult",
+		APIVersion: recipe.RecipeSummaryAPIVersion,
+		Kind:       recipe.RecipeSummaryKind,
+		Source:     recipe.SummarySource{APIVersion: "aicr.run/v1", Kind: "RecipeResult"},
 		Version:    "v1.2.3",
 		GPUDriver:  recipe.GPUDriverStatePreinstalled,
 		Profile:    "gpuStack=operator-managed",
@@ -168,5 +171,33 @@ func TestWriteRecipeSummaryWriteError(t *testing.T) {
 			err := writeRecipeSummary(t.Context(), failingWriter{}, syntheticSummary(), format)
 			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
 		})
+	}
+}
+
+// TestBuildSummaryPhaseOrderMatchesValidator pins the summary's phase order to
+// the order the validator runs. pkg/recipe cannot import pkg/validator, so the
+// summary keeps that order by hand; this package imports both.
+func TestBuildSummaryPhaseOrderMatchesValidator(t *testing.T) {
+	phase := func(check string) *recipe.ValidationPhase { return &recipe.ValidationPhase{Checks: []string{check}} }
+	summary, err := recipe.BuildSummary(&recipe.RecipeResult{Validation: &recipe.ValidationConfig{
+		Readiness:   phase("ready"),
+		Deployment:  phase("dep"),
+		Performance: phase("perf"),
+		Conformance: phase("conf"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(summary.Validation))
+	for _, p := range summary.Validation {
+		got = append(got, p.Name)
+	}
+	want := make([]string, 0, 1+len(validator.PhaseOrder))
+	want = append(want, recipe.SummaryPhaseReadiness)
+	for _, p := range validator.PhaseOrder {
+		want = append(want, string(p))
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("summary phase order = %v, want readiness then validator.PhaseOrder %v", got, want)
 	}
 }

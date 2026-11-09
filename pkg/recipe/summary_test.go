@@ -72,8 +72,11 @@ func TestBuildSummaryIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BuildSummary() error = %v", err)
 			}
-			if got.APIVersion != "aicr.run/v1" || got.Kind != "RecipeResult" || got.Version != "v1.2.3" {
-				t.Errorf("identity = %q %q %q", got.APIVersion, got.Kind, got.Version)
+			if got.APIVersion != RecipeSummaryAPIVersion || got.Kind != RecipeSummaryKind {
+				t.Errorf("summary header = %q %q, want %q %q", got.APIVersion, got.Kind, RecipeSummaryAPIVersion, RecipeSummaryKind)
+			}
+			if want := (SummarySource{APIVersion: "aicr.run/v1", Kind: "RecipeResult"}); got.Source != want || got.Version != "v1.2.3" {
+				t.Errorf("source = %+v version = %q, want %+v v1.2.3", got.Source, got.Version, want)
 			}
 			if got.GPUDriver != tt.wantDriver {
 				t.Errorf("GPUDriver = %q, want %q", got.GPUDriver, tt.wantDriver)
@@ -101,6 +104,9 @@ func TestBuildSummaryMinimal(t *testing.T) {
 	}
 	if got.Criteria != (Criteria{}) {
 		t.Errorf("Criteria = %+v, want zero value for a recipe without criteria", got.Criteria)
+	}
+	if got.Kind != RecipeSummaryKind || got.Source != (SummarySource{}) {
+		t.Errorf("kind = %q source = %+v, want %q and an empty source", got.Kind, got.Source, RecipeSummaryKind)
 	}
 }
 
@@ -245,8 +251,8 @@ func TestBuildSummaryValidation(t *testing.T) {
 		}, want: []SummaryPhase{
 			{Name: SummaryPhaseReadiness, Checks: []string{"ready"}},
 			{Name: SummaryPhaseDeployment, Checks: []string{"dep"}},
-			{Name: SummaryPhasePerformance, Checks: []string{"perf1", "perf2"}},
 			{Name: SummaryPhaseConformance, Checks: []string{"conf"}},
+			{Name: SummaryPhasePerformance, Checks: []string{"perf1", "perf2"}},
 		}},
 	}
 	for _, tt := range tests {

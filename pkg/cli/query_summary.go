@@ -57,9 +57,11 @@ func writeRecipeSummary(ctx context.Context, w io.Writer, summary *recipe.Summar
 // return errors.
 func renderRecipeSummary(ctx context.Context, buf *bytes.Buffer, s *recipe.Summary) error {
 	fmt.Fprintln(buf, "RECIPE SUMMARY")
+	// The text view is not a document, so it shows the summarized recipe's
+	// header rather than the summary's own.
 	identity := [][2]string{
-		{"API Version", orDash(s.APIVersion)},
-		{"Kind", orDash(s.Kind)},
+		{"API Version", orDash(s.Source.APIVersion)},
+		{"Kind", orDash(s.Source.Kind)},
 		{"Version", orDash(s.Version)},
 		{"GPU Driver", s.GPUDriver},
 	}
