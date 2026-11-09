@@ -1491,7 +1491,7 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 | `5` | A structured `ErrCodeTimeout` reached the top-level CLI — for example while loading the recipe or snapshot, waiting on the snapshot-agent Job, or signing evidence under `--emit-attestation --push` (which runs after the checks). A per-validator wait deadline does **not** reach this code: `runPhase` converts that error into a check result, so it surfaces as exit `8` (see note 2) |
 | `6` | A structured `ErrCodeUnavailable` reached the top-level CLI; under `--cncf-submission`, the pinned upstream validator could not start because the CNCF landscape was unreachable ([Exit status of a submission run](#exit-status-of-a-submission-run)) |
 | `8` | A privileged RBAC revocation failed after operator cancellation (`ErrCodeInternal`; not suppressed by `--fail-on-error=false`), **or** one or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Only the result-driven phase exits are suppressed by `--fail-on-error=false`. Under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error`, and a submission write, redaction or upstream-validator failure ([Exit status of a submission run](#exit-status-of-a-submission-run)). |
-| `9` | Operator interrupted the CLI with Ctrl-C or SIGTERM (`ErrCodeCanceled`) and privileged cleanup did not fail. Not suppressed by `--fail-on-error=false`; completed checks and the partial current phase are retained and CTRF output is attempted |
+| `9` | Operator interrupted the CLI with Ctrl-C or SIGTERM (`ErrCodeCanceled`) before the last validation phase completed, and privileged cleanup did not fail. Not suppressed by `--fail-on-error=false`; completed checks and the partial current phase are retained, and CTRF output is attempted once at least one phase has results. A signal that arrives after the last phase completed takes the normal completion path instead (see **Interrupted runs** below) |
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
@@ -1502,19 +1502,37 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 cleanup enabled, deletes the in-flight validator Job using a fresh context.
 Completed verdicts and the partial current phase are retained; unstarted checks
 in that phase say `not run: validation canceled` and later phases do not start.
-The interrupted phase is blocking (`other` unless already `failed`). CTRF output
-is still attempted, even if the cluster's report ConfigMap cannot be written.
-Cleanup may take approximately 60s plus overhead: one shared 30s window for
-result capture, Job deletion, report persistence and pod termination, followed
-by the existing 30s per-run RBAC/data teardown window. The CLI records a 60s
-aggregate deadline when cancellation is first observed, not when validation
-starts. Partial output uses only the time remaining before that deadline (and
-at most its existing 30s I/O cap), never a third cleanup window. If no time
-remains, the in-memory results and original error are retained without starting
-output. These limits are cooperative: an arbitrary file/stdout writer is not
-physically interruptible just because it receives a context. A second Ctrl-C or
-SIGTERM force-terminates the CLI and can leave resources behind. `--no-cleanup`
+The interrupted phase is blocking (`other` unless already `failed`), and so is
+its CTRF report. When no check entry already records the interruption, for
+example because the signal landed between checks or between phases, the report
+gains a `validation-interrupted` entry with status `other`, so `summary.other`
+is non-zero. CTRF output is still attempted once at least one phase has
+results, even if the cluster's report ConfigMap cannot be written. A signal
+that arrives before any phase has results, for example during cluster
+preparation, writes no CTRF output. Partial output is written only for an
+interruption. Any other error (for example a later phase's pre-flight failure,
+or a privileged RBAC revocation failure after every phase completed) writes no
+CTRF output, as before.
+Cleanup typically takes about 35s, and about 95s plus overhead in the worst
+case. One shared 30s window covers result capture, Job deletion and report
+persistence. The wait for the validator pod to terminate then covers the pod's
+full 30s SIGTERM grace from Job deletion (plus a 5s margin), so the validator's
+RBAC stays in place while a cooperative check cleans up. The existing 30s
+per-run RBAC/data teardown window follows. The CLI records this 95s aggregate
+deadline when cancellation is first observed, not when validation starts.
+Partial output uses only the time remaining before that deadline (and at most
+its existing 30s I/O cap), never a further cleanup window. If no time remains,
+the in-memory results and original error are retained without starting output.
+These limits are cooperative: an arbitrary file/stdout writer is not physically
+interruptible just because it receives a context. A second Ctrl-C or SIGTERM
+force-terminates the CLI and can leave resources behind. `--no-cleanup`
 continues to leave them intentionally.
+
+Exit `9` applies only when the signal arrives before the last phase completed.
+A signal that arrives after that, for example during the final per-run RBAC/data
+teardown or while evidence is rendered, signed or pushed, takes the normal
+completion path on a canceled context. The run may then exit `0`, `8` or another
+code, depending on what that work returns.
 
 If cancellation coincides with a **privileged RBAC revocation failure**, the
 returned error is instead `ErrCodeInternal` (CLI exit `8`), explicitly warning

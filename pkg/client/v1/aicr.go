@@ -2481,7 +2481,8 @@ func (c *Client) PreflightValidatorServiceAccount(ctx context.Context, opts ...V
 // completed checks and the partial current phase alongside ErrCodeCanceled
 // (operator abort) or ErrCodeTimeout (deadline). If privileged RBAC revocation
 // also fails after an operator abort, ErrCodeInternal preserves both causes and
-// warns that the cluster-admin binding may be orphaned. Callers must inspect
+// warns that the cluster-admin binding may be orphaned. Other errors may also
+// arrive with the results of phases completed before them. Callers must inspect
 // both results and error; partial results do not mean the run succeeded.
 //
 // recipe must come from a prior Client.ResolveRecipe call on this

@@ -508,9 +508,12 @@ type validationConfig struct {
 	imageRefs *imageRefsTarget
 }
 
-// validationCancellationBudget covers the shared phase cleanup window and the
-// separate privileged RBAC/data teardown window. Partial output cannot renew it.
-const validationCancellationBudget = 2 * defaults.K8sCleanupTimeout
+// validationCancellationBudget covers the shared phase cleanup window, the pod
+// termination wait that keeps per-run RBAC alive through the validator pod's
+// SIGTERM grace, and the separate privileged RBAC/data teardown window.
+// Partial output cannot renew it.
+const validationCancellationBudget = 2*defaults.K8sCleanupTimeout +
+	defaults.ValidatorTerminationGracePeriod + defaults.ValidatorTerminationWaitMargin
 
 type validationCancellation struct {
 	deadline time.Time
@@ -629,6 +632,32 @@ func runValidation(
 	return finishValidation(ctx, cancellation, client, rec, snap, cfg, results, validationErr)
 }
 
+// isValidationInterruption reports whether a ValidateState error is an operator
+// interruption, including one whose privileged RBAC revocation also failed.
+// Only those errors carry partial results that the CLI persists as CTRF output.
+func isValidationInterruption(err error) bool {
+	return stderrors.Is(err, context.Canceled) || stderrors.Is(err, errors.New(errors.ErrCodeCanceled, ""))
+}
+
+// newOutputWriter is a variable only so tests can expire the partial-output
+// budget after the writer has created (and truncated) a file output.
+var newOutputWriter = serializer.NewFileWriterOrStdoutWithKubeconfig
+
+// logCleanupDisabled tells the operator which validator resources a
+// --cleanup=false run kept and how to inspect and remove them.
+func logCleanupDisabled(cfg validationConfig) {
+	kept := "Jobs and RBAC"
+	if cfg.validatorServiceAccountName != "" {
+		kept = "Jobs and ConfigMaps"
+	}
+	slog.Info("cleanup disabled - validator "+kept+" kept for debugging",
+		"namespace", cfg.validationNamespace,
+		"runID", cfg.runID)
+	slog.Info("to inspect Job logs: kubectl logs -l " + labels.RunID + "=" + cfg.runID + " -n " + cfg.validationNamespace)
+	slog.Info("to list Jobs: kubectl get jobs -n " + cfg.validationNamespace)
+	slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
+}
+
 func finishValidation(
 	ctx context.Context,
 	cancellation *validationCancellation,
@@ -640,12 +669,19 @@ func finishValidation(
 	validationErr error,
 ) error {
 
-	if validationErr != nil && len(results) == 0 {
-		return errors.PropagateOrWrap(validationErr, errors.ErrCodeInternal, "validation interrupted")
+	interrupted := isValidationInterruption(validationErr)
+	if validationErr != nil && (len(results) == 0 || !interrupted) {
+		msg := "validation failed"
+		if interrupted {
+			msg = "validation interrupted"
+		}
+		return errors.PropagateOrWrap(validationErr, errors.ErrCodeInternal, msg)
 	}
 	if validationErr != nil {
 		// Persist partial output, but never continue signing/pushing evidence
 		// after cancellation or replace the interruption with an output error.
+		// The budget is checked only before the writer exists: creating a file
+		// output truncates it, so abandoning it afterwards would leave it empty.
 		outputCtx, cancel := cancellation.outputContext(ctx)
 		defer cancel()
 		ctx = outputCtx
@@ -662,7 +698,7 @@ func finishValidation(
 
 	// Serialize combined report; thread kubeconfig so ConfigMap writes
 	// target the same cluster used for snapshot/recipe reads.
-	ser, serErr := serializer.NewFileWriterOrStdoutWithKubeconfig(cfg.outFormat, cfg.output, cfg.kubeconfig)
+	ser, serErr := newOutputWriter(cfg.outFormat, cfg.output, cfg.kubeconfig)
 	if serErr != nil {
 		if validationErr != nil {
 			slog.Warn("failed to create partial CTRF writer", "error", serErr)
@@ -678,10 +714,6 @@ func finishValidation(
 		}
 	}()
 
-	if validationErr != nil && ctx.Err() != nil {
-		slog.Warn("partial CTRF output budget exhausted", "error", ctx.Err())
-		return validationErr
-	}
 	if writeErr := ser.Serialize(ctx, combined); writeErr != nil {
 		if validationErr != nil {
 			slog.Warn("failed to serialize partial CTRF report", "error", writeErr)
@@ -710,18 +742,8 @@ func finishValidation(
 		}
 	}
 
-	// If cleanup is disabled, provide helpful debugging info
 	if !cfg.cleanup {
-		kept := "Jobs and RBAC"
-		if cfg.validatorServiceAccountName != "" {
-			kept = "Jobs and ConfigMaps"
-		}
-		slog.Info("cleanup disabled - validator "+kept+" kept for debugging",
-			"namespace", cfg.validationNamespace,
-			"runID", cfg.runID)
-		slog.Info("to inspect Job logs: kubectl logs -l " + labels.RunID + "=" + cfg.runID + " -n " + cfg.validationNamespace)
-		slog.Info("to list Jobs: kubectl get jobs -n " + cfg.validationNamespace)
-		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
+		logCleanupDisabled(cfg)
 	}
 
 	if validationErr != nil {

@@ -81,6 +81,7 @@ func TestTimeoutConstants(t *testing.T) {
 		{"ValidatorJobDeadlineHeadroom", ValidatorJobDeadlineHeadroom, 1 * time.Minute, 10 * time.Minute},
 		{"ValidatorDefaultTimeout", ValidatorDefaultTimeout, 1 * time.Minute, 15 * time.Minute},
 		{"ValidatorTerminationGracePeriod", ValidatorTerminationGracePeriod, 10 * time.Second, 60 * time.Second},
+		{"ValidatorTerminationWaitMargin", ValidatorTerminationWaitMargin, 1 * time.Second, 15 * time.Second},
 		{"ValidatorMinCompletionWait", ValidatorMinCompletionWait, 10 * time.Second, 60 * time.Second},
 
 		// ConfigMap read/write budgets — held as distinct constants so the
@@ -282,6 +283,18 @@ func TestValidatorTimeoutRelationships(t *testing.T) {
 		if bound > ValidatorTerminationGracePeriod {
 			t.Errorf("%s (%v) exceeds termination grace (%v)", name, bound, ValidatorTerminationGracePeriod)
 		}
+	}
+	// The interrupted-run termination wait covers the pod's full SIGTERM grace
+	// from Job deletion plus a delivery margin. The margin is not a work budget,
+	// and the normal post-deletion wait must cover the same window so both
+	// paths keep RBAC alive for the whole grace.
+	if ValidatorTerminationWaitMargin <= 0 || ValidatorTerminationWaitMargin >= ValidatorTerminationGracePeriod {
+		t.Errorf("ValidatorTerminationWaitMargin (%v) must be positive and below termination grace (%v)",
+			ValidatorTerminationWaitMargin, ValidatorTerminationGracePeriod)
+	}
+	if K8sPodTerminationWaitTimeout < ValidatorTerminationGracePeriod+ValidatorTerminationWaitMargin {
+		t.Errorf("K8sPodTerminationWaitTimeout (%v) must cover termination grace + margin (%v)",
+			K8sPodTerminationWaitTimeout, ValidatorTerminationGracePeriod+ValidatorTerminationWaitMargin)
 	}
 	// Grace period must fit within the wait buffer so the orchestrator
 	// outlives the container's SIGTERM window.

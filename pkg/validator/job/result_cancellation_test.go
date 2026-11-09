@@ -39,7 +39,11 @@ func TestWaitFailureMessageAndHandleTimeout(t *testing.T) {
 		{"deadline", errors.WrapCtxErr(context.DeadlineExceeded, errors.ErrCodeTimeout, "wait"), errors.ErrCodeTimeout, "timeout: validator did not complete within"},
 		{"canceled", errors.WrapCtxErr(context.Canceled, errors.ErrCodeTimeout, "wait"), errors.ErrCodeCanceled, "canceled: validation run was interrupted"},
 		{"unavailable", errors.New(errors.ErrCodeUnavailable, "connection refused"), errors.ErrCodeUnavailable, "validation failed:"},
-		{"outer unavailable overrides nested cancellation", errors.Wrap(errors.ErrCodeUnavailable, "infrastructure failed", errors.New(errors.ErrCodeCanceled, "inner")), errors.ErrCodeUnavailable, "validation failed:"},
+		// WaitForJobTerminal wraps its initial Get/Watch failures as internal
+		// without consulting ctx, so cancellation sits below the outer code.
+		{"initial Get canceled", errors.Wrap(errors.ErrCodeInternal, "failed to get Job", context.Canceled), errors.ErrCodeInternal, "canceled: validation run was interrupted"},
+		{"nested structured cancellation", errors.Wrap(errors.ErrCodeUnavailable, "infrastructure failed", errors.New(errors.ErrCodeCanceled, "inner")), errors.ErrCodeUnavailable, "canceled: validation run was interrupted"},
+		{"initial Get deadline stays timeout", errors.Wrap(errors.ErrCodeInternal, "failed to get Job", context.DeadlineExceeded), errors.ErrCodeInternal, "timeout: validator did not complete within"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

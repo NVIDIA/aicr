@@ -1550,7 +1550,8 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 | `0` | All phases passed or were skipped (also returned under `--fail-on-error=false` even when phases report `failed`/`other`). Under `--cncf-submission` also requires every applicable MUST requirement to be established: an all-skipped submission run exits `8`, see [Exit status of a submission run](validation.md#exit-status-of-a-submission-run) |
 | `2` | Invalid input (bad flags, missing recipe), a readiness pre-flight constraint not met, or a declared check that does not resolve to exactly one catalog validator in its phase (unmatched, cross-phase, or duplicate) — these pre-flight gates always fail closed here regardless of `--fail-on-error` |
 | `5` | A structured timeout reached the top-level CLI (recipe/snapshot load, snapshot-agent wait, evidence signing). A per-validator wait deadline becomes a check result instead and exits `8` — see [validation: CI/CD integration](validation.md#cicd-integration) |
-| `8` | One or more phase checks reported `failed` (including a validator Job killed on its `activeDeadlineSeconds`) or `other` (crash/OOM) — when `--fail-on-error` is set; under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error` ([Exit status of a submission run](validation.md#exit-status-of-a-submission-run)) |
+| `8` | One or more phase checks reported `failed` (including a validator Job killed on its `activeDeadlineSeconds`) or `other` (crash/OOM) — when `--fail-on-error` is set; under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error` ([Exit status of a submission run](validation.md#exit-status-of-a-submission-run)). Also returned when operator cancellation coincides with a failed privileged RBAC revocation (the cluster-admin binding may be orphaned); that case is **not** suppressed by `--fail-on-error=false` |
+| `9` | Operator cancellation (first Ctrl-C or SIGTERM, `ErrCodeCanceled`) with privileged cleanup succeeding. Not suppressed by `--fail-on-error=false`. Partial CTRF output is attempted only when at least one phase has results. A signal that arrives after the last phase completed may end in another code — see [validation: interrupted runs](validation.md#cicd-integration) |
 
 ---
 
@@ -4347,6 +4348,17 @@ AICR respects standard environment variables:
 | 7 | Rate limited (client exceeded rate limit) |
 | 8 | Internal error (unexpected failure) |
 | 9 | Operation aborted by the operator (SIGINT/SIGTERM) |
+
+**Interrupts.** The first SIGINT (Ctrl-C) or SIGTERM cancels the running
+command. The command then runs its bounded cleanup, such as deleting
+snapshot-agent or validator Jobs and RBAC, and exits with the code of the
+error it returns: `9` when it reports the cancellation. A signal that arrives
+after the command's main work has already finished may still end in another
+code, including `0`. A second SIGINT or SIGTERM, for any
+subcommand, terminates the process immediately with the default signal
+disposition (the shell typically reports `130` for Ctrl-C and `143` for
+SIGTERM). Cleanup still in progress is cut short and may leave cluster
+resources behind.
 
 ## Common Usage Patterns
 

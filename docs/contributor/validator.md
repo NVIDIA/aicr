@@ -567,6 +567,9 @@ validators.Run(map[string]validators.CheckFunc{
 | `0` | passed | `passed` |
 | `1` | failed | `failed` |
 | `2` | skipped | `skipped` — return `validators.Skip(reason)` |
+| `3` | interrupted by SIGTERM | `other` — written by `validators.Run` whenever SIGTERM arrived before the check returned, whatever it returned (see [Cancellation and cleanup lifecycle](#cancellation-and-cleanup-lifecycle)) |
+
+Any other exit code also maps to CTRF `other`.
 
 | Channel | Captured as |
 |---------|-------------|
@@ -1098,7 +1101,8 @@ type Context struct {
 
 `ctx.Timeout(d)` returns a child context with a shorter deadline.
 `validators.Run(map)` is the container entry point; it dispatches by
-`os.Args[1]`, maps `Skip` → exit 2, errors → exit 1, nil → exit 0.
+`os.Args[1]`, maps `Skip` → exit 2, errors → exit 1, nil → exit 0. A check
+interrupted by SIGTERM exits 3 instead, regardless of its result.
 
 **Scheduling overrides.** When creating inner workloads, check
 `ctx.NodeSelector` and `ctx.Tolerations` before applying hardcoded
@@ -1132,10 +1136,20 @@ bounds nor the pod grace are increased here. SIGKILL, OOM and crashes cannot
 run defers; an external orphan sweeper remains outside this implementation.
 
 On operator cancellation, the orchestrator uses one fresh 30s deadline for the
-in-flight Job's result capture, deletion, partial CTRF persistence, and remaining
-pod-termination wait, in that order. It does **not** start a fresh 60s pod wait.
-Per-run RBAC/data teardown keeps its separate 30s deadline: total cleanup is
-approximately 60s plus normal overhead in the worst case. If privileged RBAC
+in-flight Job's result capture, deletion and partial CTRF persistence, in that
+order, followed by the pod-termination wait. It does **not** start a fresh 60s
+pod wait. Instead, the wait keeps that shared deadline but always extends to at
+least the Job deletion time plus the pod's 30s termination grace
+(`ValidatorTerminationGracePeriod`) plus a 5s delivery margin
+(`ValidatorTerminationWaitMargin`). This keeps per-run RBAC alive for the pod's
+full SIGTERM grace, so a cooperative check can finish its in-grace cleanup. The
+wait still ends as soon as the Job's pods are terminal or gone. This applies on
+every interrupted path that deletes a Job: the in-flight check, an apply whose
+response was lost, and cancellation during the normal post-deletion wait.
+Per-run RBAC/data teardown keeps its separate 30s deadline. Total cleanup is
+typically about 35s, and about 95s plus normal overhead in the worst case
+(capture/deletion/persistence, then the pod's grace, then RBAC/data teardown).
+If privileged RBAC
 revocation also fails, both `ValidatePhase` and `ValidatePhases` return
 `ErrCodeInternal` with joined cancellation and cleanup causes and an explicit
 warning that the cluster-admin binding may be orphaned. Ordinary cancellation
@@ -1145,17 +1159,36 @@ remain best effort; a partial report is still returned when persistence fails.
 Unstarted checks in the current phase are `skipped` with
 `not run: validation canceled`; a deadline instead says `not run: validation timed out`.
 The interrupted phase cannot be passed, and later phases are not started.
+The report enforces this as well as `PhaseResult.Status`. When no entry already
+blocks it (cancellation between checks, between phases, or during the final
+report write), `interruptedPhase` adds a synthetic `validation-interrupted`
+entry with status `other`. The persisted, merged and `--output` CTRF summary
+therefore never reads as passing. Cancellation observed between phases records
+the next phase as interrupted rather than dropping it. Without cancellation,
+result capture, Job deletion and the final report write keep the caller's
+context (the CLI leaves it uncapped). The detached 30s budget applies only once
+cancellation is observed, and timeout/infra capture keeps its own fresh 30s
+window.
 
 `Validator.ValidatePhases` and `Client.ValidateState` return **both** partial
 results and the interruption or privileged-cleanup error. Consumers must inspect
 both. The CLI observes first cancellation at validation entry and records a
-60s aggregate deadline derived from the phase and per-run cleanup windows;
+95s aggregate deadline (`validationCancellationBudget`), derived from the phase
+cleanup window, the pod's grace plus margin, and the per-run cleanup window;
 normal validation time does not consume it. Partial CTRF output gets only the
-remaining time, capped by its existing 30s I/O allowance, with no renewed third
+remaining time, capped by its existing 30s I/O allowance, with no renewed
 window. An exhausted budget leaves the in-memory results and original error
-intact. Context deadlines bound cooperative I/O, not arbitrary blocking
-file/stdout writes. Ordinary cancellation exits `9`; the combined privileged
-cleanup failure exits `8`, regardless of `--fail-on-error`. Neither path renders,
+intact. The budget is checked before the output writer is created, never after,
+because creating a file output truncates it. Partial output is written only for
+an interruption (`ErrCodeCanceled`, or the combined cancellation-plus-revocation
+failure). Any other error that comes with results returns without output, as
+before. Context deadlines bound cooperative I/O, not arbitrary blocking
+file/stdout writes. Ordinary cancellation before the last phase completed exits `9`;
+the combined privileged cleanup failure exits `8`, regardless of
+`--fail-on-error`. A signal that arrives after the last phase completed
+(including during the final per-run teardown, after which `ValidateState`
+succeeds) takes the normal completion path, which can exit `0` or `8`, or fail
+in evidence handling. Neither interruption path renders,
 signs or pushes evidence. A second SIGINT/SIGTERM force-terminates the CLI and
 may cut cleanup or blocked output short. `--no-cleanup` still leaves resources
 for inspection.

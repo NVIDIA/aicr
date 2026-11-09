@@ -412,13 +412,13 @@ func waitFailureMessage(cause error, configured time.Duration) string {
 	return fmt.Sprintf("validation failed: %v", cause)
 }
 
-// isCanceledCause uses the reported structured code, falling back to the
-// stdlib sentinel only when no structured classification is present.
+// isCanceledCause reports whether cancellation appears anywhere in err's chain,
+// as the stdlib sentinel or a StructuredError carrying ErrCodeCanceled. An abort
+// landing in WaitForJobTerminal's initial Get or Watch is wrapped as
+// ErrCodeInternal, so the outermost code alone would call it a validation
+// failure. A deadline expiry carries neither and still renders as a timeout.
 func isCanceledCause(err error) bool {
-	if structured, ok := stderrors.AsType[*errors.StructuredError](err); ok {
-		return structured.Code == errors.ErrCodeCanceled
-	}
-	return stderrors.Is(err, context.Canceled)
+	return stderrors.Is(err, context.Canceled) || stderrors.Is(err, errors.New(errors.ErrCodeCanceled, ""))
 }
 
 // isDeadlineCause reports whether err represents a genuine context-deadline

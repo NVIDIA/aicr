@@ -216,16 +216,22 @@ run deferred cleanup; an external orphan-resource sweeper is not implemented her
 
 Operator SIGINT/SIGTERM preserves completed and partial current-phase CTRF results,
 records unstarted checks in that phase as skipped, and returns `ErrCodeCanceled`
-unless privileged RBAC revocation also fails. That combined case returns
+unless privileged RBAC revocation also fails. When no check entry already blocks
+the phase, a synthetic `validation-interrupted` entry with CTRF status `other`
+keeps the report itself from reading as passing. That combined case returns
 `ErrCodeInternal`, joining both causes and warning that the cluster-admin
 binding may be orphaned, without discarding partial results.
-With cleanup enabled, post-wait capture, Job deletion, report persistence and pod
-termination waiting share one fresh 30s budget, with persistence before waiting.
-The existing per-run RBAC/data cleanup has a separate 30s budget (approximately
-60s total cleanup plus overhead). Partial CLI output can use only the remainder
-of a 60s aggregate deadline recorded on first observed cancellation, capped by
-its existing 30s I/O allowance; it cannot start a third window. Normal validation
-time does not consume this budget. Context deadlines cannot physically interrupt
+With cleanup enabled, post-wait capture, Job deletion and report persistence
+share one fresh 30s budget once cancellation is observed, with persistence before
+the pod-termination wait. That wait keeps the shared deadline but extends to at
+least Job deletion plus the pod's 30s SIGTERM grace and a 5s delivery margin, so
+the per-run RBAC lifetime covers the pod's full grace. An uninterrupted run keeps
+the caller's context for capture and deletion.
+The existing per-run RBAC/data cleanup has a separate 30s budget (typically about
+35s total cleanup, about 95s plus overhead in the worst case). Partial CLI output
+can use only the remainder of a 95s aggregate deadline recorded on first observed
+cancellation, capped by its existing 30s I/O allowance; it cannot start a further
+window. Normal validation time does not consume this budget. Context deadlines cannot physically interrupt
 arbitrary blocking file/stdout writes. ConfigMap persistence is best effort and
 does not replace the partial return value. Neither interrupted nor fatal cleanup
 paths publish evidence. A second CLI signal restores force-exit behavior and
