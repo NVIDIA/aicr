@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -515,12 +516,11 @@ func CheckHostMofedWithoutNetworkOperator(ctx context.Context, componentName str
 // recipes/registry.yaml. Used only in log/error message text below —
 // for actual component lookups, use resolveDRAComponentRef, which also
 // matches the OCP variant (see draDriverComponentNames).
-const draDriverComponentName = "nvidia-dra-driver-gpu"
+const draDriverComponentName = allocpolicy.ComponentDRADriver
 
 // draDriverComponentNames are every registry-level component name that
-// represents the NVIDIA DRA GPU driver, canonical plus OCP variant. They
-// come from config.DRADriverOwnership, which the argocd-helm install-time
-// guard also reads.
+// represents the NVIDIA DRA GPU driver, canonical plus OCP variant, from
+// config.DRADriverOwnership.
 var draDriverComponentNames = config.DRADriverOwnership.ComponentNames
 
 // resolveDRAComponentRef looks up the DRA driver's ComponentRef by
@@ -1428,9 +1428,8 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 
 // gpuOperatorComponentNames are the registry-level component names that
 // carry GPU Operator driver-ownership values (the canonical chart and its
-// OCP variant). They come from config.GPUOperatorDriverOwnership, which the
-// argocd-helm install-time guard also reads, and mirror the pair that
-// registers CheckDriverOwnershipCoherence in recipes/registry.yaml.
+// OCP variant), from config.GPUOperatorDriverOwnership. They mirror the pair
+// that registers CheckDriverOwnershipCoherence in recipes/registry.yaml.
 var gpuOperatorComponentNames = config.GPUOperatorDriverOwnership.ComponentNames
 
 // nvsentinelAssumeDriverInstalledOverrideSet is the documented

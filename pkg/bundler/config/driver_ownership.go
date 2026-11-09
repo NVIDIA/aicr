@@ -14,10 +14,10 @@
 
 package config
 
+import "github.com/NVIDIA/aicr/pkg/allocpolicy"
+
 // DriverOwnershipFamily names the registry components that share one set of
-// GPU driver-ownership leaf paths. CheckDriverOwnershipCoherence verifies
-// those paths at bundle time, and the argocd-helm deployer rejects them at
-// install time, so both read this declaration.
+// GPU driver-ownership leaf paths.
 type DriverOwnershipFamily struct {
 	// ComponentNames are the canonical registry name first, then its
 	// OpenShift variant.
@@ -29,13 +29,13 @@ type DriverOwnershipFamily struct {
 
 // GPUOperatorDriverOwnership is the GPU Operator family.
 var GPUOperatorDriverOwnership = DriverOwnershipFamily{
-	ComponentNames: []string{"gpu-operator", "gpu-operator-ocp"},
+	ComponentNames: []string{allocpolicy.ComponentGPUOperator, allocpolicy.ComponentGPUOperatorOCP},
 	Paths:          []string{"driver.enabled", "toolkit.enabled", "hostPaths.driverInstallDir"},
 }
 
 // DRADriverOwnership is the NVIDIA DRA GPU driver family.
 var DRADriverOwnership = DriverOwnershipFamily{
-	ComponentNames: []string{"nvidia-dra-driver-gpu", "nvidia-dra-driver-gpu-ocp"},
+	ComponentNames: []string{allocpolicy.ComponentDRADriver, allocpolicy.ComponentDRADriverOCP},
 	Paths:          []string{"nvidiaDriverRoot"},
 }
 

@@ -124,8 +124,6 @@ const (
 
 	profileLockTemplateHeader = "{{- /* AICR profile install-time ownership guard. */ -}}\n"
 
-	// driverOwnershipLockTemplateName is reserved only when the bundle ships
-	// a component of a bundlercfg driver-ownership family.
 	driverOwnershipLockTemplateName = "aicr-driver-ownership-lock"
 
 	driverOwnershipLockTemplateHeader = "{{- /* AICR driver-ownership install-time guard. */ -}}\n"
@@ -842,7 +840,9 @@ func vendoredSubcharts(srcDir string, releases []deployer.Release) (map[string]s
 }
 
 // reservedTemplateNames lists the deployer-owned templates this generation
-// emits, which no component template may reuse.
+// emits, which no component template may reuse. The driver-ownership lock is
+// reserved only when the bundle ships a component of a bundlercfg
+// driver-ownership family.
 func (g *Generator) reservedTemplateNames() []string {
 	var reserved []string
 	if g.RecipeResult != nil && g.RecipeResult.Metadata.SelectedProfile != nil {
