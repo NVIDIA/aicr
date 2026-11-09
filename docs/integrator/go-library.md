@@ -253,8 +253,8 @@ reported as no drift.
 // role from a
 // `gcloud container node-pools list --cluster <cluster> --format=json`
 // dump, merged as the K8s.gke-gpu-pools.gpu-driver-installation reading.
-// It's required only when resolving the GKE `bundle-installer` gpuStack
-// value from a snapshot. The default `gke-default` value needs no pool
+// It's required only when resolving the GKE `bundle-installer` or `dra`
+// gpuStack value from a snapshot. The default `gke-default` value needs no pool
 // dump.
 // Give the Job-backed snapshot its own deadline: contexts cap the
 // configured timeouts from the parent side, so reusing the 30-second
@@ -287,7 +287,7 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Cleanup:         true,
 	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
 	OKEAddonsPath:   "/path/to/oke-addons.json",    // OKE only
-	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer only
+	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer and dra only
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)

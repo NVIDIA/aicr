@@ -5,7 +5,9 @@
 **Accepted** — 2026-07-21 (proposed 2026-07-14). Amended
 2026-07-27 to stage the service-agnostic mechanism through an AKS-first,
 GKE-second rollout; amended 2026-09-08 (#2512) to intersect, rather than
-reject, a profile constraint that tightens a composed version range.
+reject, a profile constraint that tightens a composed version range;
+amended 2026-11-09 (#2517) to distribute that intersection over a composed
+expression's `||` alternatives.
 
 Originated from an internal GKE device-plugin ownership discussion
 (2026-07-14) and
@@ -515,10 +517,27 @@ to the surviving composition:
    keep failing closed: a candidate that adds no restriction is dropped
    rather than applied; an intersection no version can satisfy is rejected;
    and a pair with no ordering to intersect — an exact match, `!=`, a
-   node-set label predicate, or an expression carrying `||` alternatives —
+   node-set label predicate, or a candidate carrying `||` alternatives —
    is rejected as a collision, as are two same-direction bounds written at
    different precisions, which `pkg/version` compares at the lower of the
    two so that neither can be called stricter. `mergeMixins` is unchanged.
+
+   *Amended 2026-11-09
+   ([#2517](https://github.com/NVIDIA/aicr/issues/2517)): a composed
+   expression carrying `||` alternatives intersects per-alternative.* The
+   GKE GB300 chain states its floor as per-GKE-track alternatives, which
+   the first amendment rejected wholesale, leaving the `dra` value's 1.35
+   floor unstatable on those leaves. Intersection distributes over union,
+   so a **simple** profile range now intersects each alternative of a
+   compound composed expression independently and the survivors rejoin;
+   an alternative the profile empties is dropped only when its emptiness
+   is witness-free at every comparison precision (an exclusive ceiling),
+   and is otherwise rejected as a collision — a coarse reading can
+   straddle a pair disjoint at full precision, and dropping such a track
+   would silently narrow past the true intersection. Every alternative
+   must intersect cleanly; one precision mismatch or non-range
+   alternative still rejects the whole expression, and a compound
+   profile-side candidate stays rejected.
 
    Then evaluate
    **profile-contributed constraints** fail-closed: under a
@@ -1549,6 +1568,19 @@ recurrence — the shape the Problem section expects.
 
    *Amended 2026-08-24 (#1716):* shipped as `bundle-installer`, replacing
    `driver-installer` (breaking; same pool shape — see Deferred Decision 5).
+
+   *Amended 2026-11-09 (#2517):* a third value `dra` landed —
+   `bundle-installer`'s pool shape with the NVIDIA DRA driver's
+   ResourceSlices as the sole whole-GPU advertiser (the #1327 DRA opt-in
+   tuple, resolving `dra-resource-claim`; ResourceClaim-only pending
+   KEP-5004 / #3282) and the value's own `K8s.server.version >= 1.35.0`
+   floor via the step-5 intersection rule. Declaring it was the
+   ownership-surface expansion this step describes: the DRA selector
+   paths (`resources.gpus.enabled`, `gpuResourcesEnabledOverride`)
+   joined the declaration-wide union, so `gke-default` and
+   `bundle-installer` each gained explicit `false` assignments for them
+   — previously closure-locked only, now declared-owned, with identical
+   lock behavior.
 
    Any dcgm-exporter GPU-ID-mapping adjustment for `csp-managed` is an
    external GKE behavior not verifiable from this repository. It is

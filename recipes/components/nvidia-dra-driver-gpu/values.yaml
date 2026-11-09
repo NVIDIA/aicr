@@ -55,6 +55,8 @@
 #   nvidia-dra-driver-gpu: resources.gpus.enabled=true
 #   nvidia-dra-driver-gpu: gpuResourcesEnabledOverride=true
 #   gpu-operator:          devicePlugin.enabled=false
+# On GKE-COS the gpuStack profile's dra value (issue #2517) is the stock
+# selection of exactly this tuple; the profile owns all three paths there.
 #
 # Future: KEP-5004 (DRAExtendedResource) lets the same nvidia.com/gpu
 # extended-resource request be served by either backend. When served by DRA,
