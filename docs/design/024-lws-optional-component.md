@@ -57,6 +57,16 @@ allowlist (see [registry-egress](../contributor/registry-egress.md)).
   controller Deployment is available, and its pods are healthy.
 - The BOM row, component-catalog row, and ADR-021 upgrade-record coverage
   on every version bump.
+- Review of the chart's rendered RBAC and webhook configuration — upstream
+  content AICR installs unmodified. AICR re-reads both at each pin bump
+  and calls out any widening in the bump PR; it does not patch the chart.
+  Gate 3 covers only the initial registration; this line carries the
+  obligation across bumps, which happen before adoption too and reach
+  custom-overlay consumers.
+- Mirror coverage: `aicr mirror list` renders each referenced component's
+  chart and extracts its images, so a recipe that references `lws` lists
+  the chart and the controller image with no LWS-specific code. AICR owns
+  keeping the pinned chart rendering cleanly there.
 
 Upstream owns the chart, image, and CRD schema. Users own every
 `LeaderWorkerSet` CR — AICR ships no workload CRs.
@@ -81,10 +91,18 @@ on `main`.
 3. **RBAC and webhook review.** The PR records its rendered-RBAC and
    webhook-configuration review — the rendered rules, what they permit,
    and the conclusion — as ADR-019 did for `k8s-aibom`.
-4. **CRD lifecycle.** The chart ships its CRD under `crds/`, so per
-   ADR-021 plain Helm leaves it at the first-install schema. The PR
-   records how the CRD is upgraded: either `ownsCRDs` (with the audit its
-   doc comment requires) or the documented per-deployer manual step.
+4. **CRD lifecycle.** The chart ships its CRDs under `crds/`, so per
+   ADR-021 plain Helm leaves them at the first-install schema — and the
+   CRD set is already growing: lws v1.0.0 adds two `DisaggregatedSet`
+   CRDs beside `LeaderWorkerSet`. `ownsCRDs` and the manual CRD step are
+   not alternatives. Per ADR-021 Decision 8, `ownsCRDs` automates the
+   CRD upgrade only on the helm and flux deployers: helmfile emits no
+   CRD hook, terraform upgrades through `helm_release`, which skips
+   `crds/`, and fleet cannot run `apply-crds.sh` either. The PR records
+   the `ownsCRDs` decision (with the audit its doc comment requires) for
+   helm and flux, and every transition record carries the manual CRD
+   step as an explicit group for helmfile, terraform, and fleet
+   regardless of that decision.
 5. **Registered without a stock consumer.** A registry test in the style
    of `TestNVCRERegisteredWithoutOverlay` keeps `lws` installable while no
    stock overlay or mixin references it.
@@ -121,7 +139,7 @@ on `main`.
   chart-default sub-images
 - [ADR-019](019-k8s-aibom-runtime-inventory.md) — the recorded
   rendered-RBAC review this follows
-- [ADR-021](021-component-upgrade-safety.md) — CRD upgrade behavior and
-  `ownsCRDs`
+- [ADR-021](021-component-upgrade-safety.md) — CRD upgrade behavior,
+  `ownsCRDs`, and the Decision 8 deployer gap Gate 4 builds on
 - [registry-egress](../contributor/registry-egress.md) — the
   `registry.k8s.io` allowlist entry
