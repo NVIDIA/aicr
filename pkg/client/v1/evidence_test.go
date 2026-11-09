@@ -339,6 +339,8 @@ type fakeSubmissionRunner struct {
 	validateOpts []ValidateOption
 	renderOpts   RenderCNCFEvidenceOptions
 	renderDir    string
+	submitOpts   *CNCFSubmissionOptions
+	submitDir    string
 
 	snapshotErr error
 	validateErr error
@@ -378,6 +380,52 @@ func (f *fakeSubmissionRunner) RenderCNCFEvidenceWithResult(_ context.Context, _
 		return nil, f.renderErr
 	}
 	return f.agg, nil
+}
+
+func (f *fakeSubmissionRunner) WriteCNCFSubmission(_ context.Context, _ *ctrf.Report, dir string, _ *Snapshot, _ *RecipeResult, opts CNCFSubmissionOptions) (*CNCFSubmissionResult, error) {
+	f.submitDir = dir
+	f.submitOpts = &opts
+	if f.renderErr != nil {
+		return nil, f.renderErr
+	}
+	return &CNCFSubmissionResult{Aggregate: f.agg, Complete: f.agg != nil && f.agg.Passed(), Dir: dir}, nil
+}
+
+// With a vendor, runCNCFSubmission writes the submission directory instead
+// of rendering the evidence pages, carrying the same options plus the
+// vendor, and still takes its exit status from the aggregate.
+func TestRunCNCFSubmissionWithVendor(t *testing.T) {
+	vendor := CNCFVendor{Name: "Test Vendor", PlatformName: "P", PlatformVersion: "1", Description: "d", ContactEmail: "o@v.example",
+		WebsiteURL: "https://v.example", DocumentationURL: "https://v.example/docs", ProductLogoURL: "https://v.example/l.svg",
+		K8sConformanceURL: "https://github.com/cncf/k8s-conformance/tree/master/v1.37/p"}
+	documented := map[string]CNCFDocumentation{"cluster_autoscaling": {Evidence: []string{"https://v.example/autoscaling"}, Notes: "n"}}
+	for _, tc := range []struct {
+		name    string
+		agg     *CNCFRequirementAggregate
+		wantErr bool
+	}{
+		{name: "complete", agg: &CNCFRequirementAggregate{Version: cncf.LatestVersion, Requirements: []cncf.RequirementResult{
+			{ID: "gang_scheduling", Level: cncf.LevelMust, Status: cncf.StatusPassed}}}},
+		{name: "incomplete MUST fails the run", agg: &CNCFRequirementAggregate{Version: cncf.LatestVersion, Requirements: []cncf.RequirementResult{
+			{ID: "gang_scheduling", Level: cncf.LevelMust, Status: cncf.StatusFailed, Reason: "gang-scheduling failed"}}}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeSubmissionRunner{agg: tc.agg}
+			err := runCNCFSubmission(context.Background(), runner, &RecipeResult{}, cncfSubmissionInputs{
+				dir: "/tmp/out", notApplicable: map[string]string{}, documented: documented, vendor: &vendor,
+			})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("runCNCFSubmission() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			if runner.renderDir != "" {
+				t.Error("evidence pages were rendered although a vendor was set")
+			}
+			carried := runner.submitOpts != nil && runner.submitOpts.Vendor == vendor && runner.submitOpts.Documented["cluster_autoscaling"].Notes == "n"
+			if runner.submitDir != "/tmp/out" || !carried {
+				t.Errorf("WriteCNCFSubmission called with dir %q opts %+v", runner.submitDir, runner.submitOpts)
+			}
+		})
+	}
 }
 
 // TestRunCNCFSubmission drives the submission run through a fake runner:

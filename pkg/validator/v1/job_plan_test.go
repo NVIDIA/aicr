@@ -1503,6 +1503,76 @@ func TestOrchestratorWaitForRebasesOntoJobStart(t *testing.T) {
 	}
 }
 
+// TestBuildJobPlan_ForwardsWorkloadSandboxingEnv verifies the RuntimeClass
+// and probe image overrides reach only the workload-sandboxing Job, from the
+// CLI process environment and never from a catalog-pinned value.
+func TestBuildJobPlan_ForwardsWorkloadSandboxingEnv(t *testing.T) {
+	values := func(entry ValidatorEntry, name string) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == name {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+	const (
+		testClass = "kata-mshv-vm-isolation"
+		testImage = "mirror.example.com/os/ubuntu:22.04"
+	)
+	entry := ValidatorEntry{Name: WorkloadSandboxingCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+
+	t.Run("both forwarded verbatim", func(t *testing.T) {
+		t.Setenv(sandboxRuntimeClassEnv, testClass)
+		t.Setenv(sandboxProbeImageEnv, testImage)
+		if got := values(entry, sandboxRuntimeClassEnv); len(got) != 1 || got[0] != testClass {
+			t.Errorf("%s env = %v, want [%s]", sandboxRuntimeClassEnv, got, testClass)
+		}
+		if got := values(entry, sandboxProbeImageEnv); len(got) != 1 || got[0] != testImage {
+			t.Errorf("%s env = %v, want [%s]", sandboxProbeImageEnv, got, testImage)
+		}
+	})
+	t.Run("unset omitted", func(t *testing.T) {
+		t.Setenv(sandboxRuntimeClassEnv, "")
+		t.Setenv(sandboxProbeImageEnv, "")
+		for _, name := range []string{sandboxRuntimeClassEnv, sandboxProbeImageEnv} {
+			if got := values(entry, name); len(got) != 0 {
+				t.Errorf("%s env = %v, want none", name, got)
+			}
+		}
+	})
+	t.Run("not forwarded to other validators", func(t *testing.T) {
+		t.Setenv(sandboxRuntimeClassEnv, testClass)
+		t.Setenv(sandboxProbeImageEnv, testImage)
+		other := ValidatorEntry{Name: "secure-accelerator-access", Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+		for _, name := range []string{sandboxRuntimeClassEnv, sandboxProbeImageEnv} {
+			if got := values(other, name); len(got) != 0 {
+				t.Errorf("%s must not be forwarded to another check, got %v", name, got)
+			}
+		}
+	})
+	t.Run("catalog value cannot select the class or image", func(t *testing.T) {
+		t.Setenv(sandboxRuntimeClassEnv, "")
+		t.Setenv(sandboxProbeImageEnv, "")
+		pinned := entry
+		pinned.Env = []EnvVar{{Name: sandboxRuntimeClassEnv, Value: testClass}, {Name: sandboxProbeImageEnv, Value: testImage}}
+		for _, name := range []string{sandboxRuntimeClassEnv, sandboxProbeImageEnv} {
+			if got := values(pinned, name); len(got) != 0 {
+				t.Errorf("%s env = %v, want none (catalog must not select it)", name, got)
+			}
+		}
+	})
+	t.Run("env-name literals locked", func(t *testing.T) {
+		if sandboxRuntimeClassEnv != "AICR_SANDBOX_RUNTIME_CLASS" || sandboxProbeImageEnv != "AICR_SANDBOX_PROBE_IMAGE" {
+			t.Errorf("env names = %q, %q; keep in sync with the pod-side consts", sandboxRuntimeClassEnv, sandboxProbeImageEnv)
+		}
+	})
+}
+
 // TestOrchestratorWaitForUnobservedStart pins the zero-time contract: a caller
 // that never saw a start time gets the unrebased budget, which is the
 // pre-#2473 behavior and still strictly under the Job deadline as long as the
@@ -1515,4 +1585,58 @@ func TestOrchestratorWaitForUnobservedStart(t *testing.T) {
 	if got := OrchestratorWaitFor(time.Time{}, time.Now(), checkTimeout); got != want {
 		t.Errorf("OrchestratorWaitFor(zero, now, %v) = %v, want %v", checkTimeout, got, want)
 	}
+}
+
+// TestBuildJobPlan_ForwardsDriverRuntimeImageEnv verifies the vanilla probe
+// image override reaches only the driver-runtime-management Job, from the CLI
+// process environment and never from a catalog-pinned value.
+func TestBuildJobPlan_ForwardsDriverRuntimeImageEnv(t *testing.T) {
+	values := func(entry ValidatorEntry) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == driverRuntimeImageEnv {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+	const testImage = "mirror.example.com/os/ubuntu:22.04"
+	entry := ValidatorEntry{Name: DriverRuntimeManagementCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+
+	t.Run("forwarded verbatim", func(t *testing.T) {
+		t.Setenv(driverRuntimeImageEnv, testImage)
+		if got := values(entry); len(got) != 1 || got[0] != testImage {
+			t.Errorf("%s env = %v, want [%s]", driverRuntimeImageEnv, got, testImage)
+		}
+	})
+	t.Run("unset omitted", func(t *testing.T) {
+		t.Setenv(driverRuntimeImageEnv, "")
+		if got := values(entry); len(got) != 0 {
+			t.Errorf("%s env = %v, want none", driverRuntimeImageEnv, got)
+		}
+	})
+	t.Run("not forwarded to other validators", func(t *testing.T) {
+		t.Setenv(driverRuntimeImageEnv, testImage)
+		other := ValidatorEntry{Name: "secure-accelerator-access", Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+		if got := values(other); len(got) != 0 {
+			t.Errorf("%s must not be forwarded to another check, got %v", driverRuntimeImageEnv, got)
+		}
+	})
+	t.Run("catalog value cannot select the image", func(t *testing.T) {
+		t.Setenv(driverRuntimeImageEnv, "")
+		pinned := entry
+		pinned.Env = []EnvVar{{Name: driverRuntimeImageEnv, Value: testImage}}
+		if got := values(pinned); len(got) != 0 {
+			t.Errorf("%s env = %v, want none (catalog must not select the probe image)", driverRuntimeImageEnv, got)
+		}
+	})
+	t.Run("env-name literal locked", func(t *testing.T) {
+		if driverRuntimeImageEnv != "AICR_DRIVER_RUNTIME_IMAGE" {
+			t.Errorf("driverRuntimeImageEnv = %q, want AICR_DRIVER_RUNTIME_IMAGE (keep in sync with the pod-side const)", driverRuntimeImageEnv)
+		}
+	})
 }

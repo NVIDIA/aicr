@@ -27,6 +27,8 @@ const (
 	checkRobustController     = "robust-controller"
 	checkSecureAccess         = "secure-accelerator-access"
 	checkSlinkySlurmGPUAccess = "slinky-slurm-gpu-access"
+	checkDriverRuntime        = "driver-runtime-management"
+	checkWorkloadSandboxing   = "workload-sandboxing"
 )
 
 // evidencePage is AICR's side of the requirement map: the evidence document
@@ -56,10 +58,21 @@ type evidencePage struct {
 
 // evidencePages lists every requirement AICR has a check for, in upstream
 // category order. Requirements with no AICR check (gpu_sharing,
-// virtualized_accelerator, the v1.36 networking SHOULDs, workload_sandboxing,
-// driver_runtime_management) have no page here; ChecklistFor still carries
-// them, so a complete submission can list them.
+// virtualized_accelerator, the v1.36 networking SHOULDs) have no page here;
+// ChecklistFor still carries them, so a complete submission can list them.
+// The level is the checklist's at the rendered version, never fixed here:
+// driver_runtime_management is SHOULD at every carried checklist and
+// workload_sandboxing at the v1.37 checklist, and both graduate to MUST at
+// v1.38 (KAR-0001, KAR-0020), which the v1.38 checklist will say when it is
+// carried.
 var evidencePages = []evidencePage{
+	{
+		RequirementID: "driver_runtime_management",
+		Title:         "Accelerator Driver and Runtime Management",
+		Description:   "Demonstrates that a pod built from a vanilla OS image and granted one accelerator finds the vendor tools the container runtime configuration injected, initializes the driver, and reports a driver version that matches the one the platform advertises for the node (DRA ResourceSlice attribute, else the node's feature-discovery label; an unadvertised version is recorded as a warning).",
+		File:          "driver-runtime-management.md",
+		Checks:        []string{checkDriverRuntime},
+	},
 	{
 		RequirementID: "dra_support",
 		Title:         "DRA Support (Dynamic Resource Allocation)",
@@ -70,7 +83,7 @@ var evidencePages = []evidencePage{
 	{
 		RequirementID: "ai_inference",
 		Title:         "Inference API Gateway",
-		Description:   "Demonstrates that the cluster supports the Kubernetes Gateway API for AI/ML inference routing with an operational GatewayClass and Gateway. The implementation observed is recorded in the check output.",
+		Description:   "Demonstrates that the cluster supports the Kubernetes Gateway API for AI/ML inference routing: an operational GatewayClass and Gateway, and an HTTPRoute on that Gateway that sends header-matched requests to a canary backend and splits the rest 70/30 by weight, measured from a probe pod. The implementation observed is recorded in the check output.",
 		File:          "inference-gateway.md",
 		Checks:        []string{checkInferenceGateway},
 	},
@@ -115,6 +128,13 @@ var evidencePages = []evidencePage{
 		Description:   "Demonstrates that GPU access is mediated through a Kubernetes allocation mechanism (DRA ResourceClaims or device plugin resource limits) with no direct host device access or hostPath mounts. On Slinky Slurm recipes the Slurm access path (GRES allocation and cgroup device confinement on the GPUs the NodeSet pod holds) fills this page instead.",
 		File:          "secure-accelerator-access.md",
 		Checks:        []string{checkSecureAccess, checkSlinkySlurmGPUAccess},
+	},
+	{
+		RequirementID: "workload_sandboxing",
+		Title:         "Workload Sandboxing",
+		Description:   "Demonstrates that the platform provides a sandboxed RuntimeClass (gVisor, Kata or another kernel-isolating runtime) and that a CPU-only pod on it is isolated from the host node's processes, kernel memory devices, filesystem and network, observing a kernel identity distinct from an unsandboxed pod on the same node. A cluster with no sandboxed RuntimeClass fails the check: the requirement is Not Implemented there, never not-applicable.",
+		File:          "workload-sandboxing.md",
+		Checks:        []string{checkWorkloadSandboxing},
 	},
 	{
 		RequirementID: "robust_controller",

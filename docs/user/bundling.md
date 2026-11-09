@@ -468,7 +468,9 @@ aicr bundle --recipe recipe.yaml \
 The `agentgateway` inference-gateway is **private by default**: with no
 `allowedSourceRanges` override, the bundler scopes the LoadBalancer to private
 RFC1918 ranges so it is not exposed to the public internet. Use the override
-above to admit specific clients (e.g. a corporate VPN). See
+above to admit specific clients (e.g. a corporate VPN). On a cluster with no
+LoadBalancer provider, `--set agentgateway:serviceType=ClusterIP` gives the
+gateway a ClusterIP Service instead, to which source ranges do not apply. See
 [Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
 
 ### Size controllers for large clusters

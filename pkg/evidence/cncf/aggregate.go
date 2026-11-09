@@ -130,12 +130,28 @@ type RequirementResult struct {
 	// Page is the evidence file the requirement renders to, empty when AICR
 	// has no check for it.
 	Page string
+
+	// Documented is the vendor's manual attestation of a requirement the run
+	// only observed (StatusObserved): the public documentation PRODUCT.yaml
+	// cites instead of the testcase. Nil otherwise; it is never set on a
+	// passed, failed, not-tested or not-applicable requirement, whatever
+	// the configuration declared, since documentation attests only what a
+	// check observed and did not disprove.
+	Documented *Documentation
 }
 
 // Applicable reports whether the requirement counts toward the run verdict:
 // a MUST not declared not applicable.
 func (r *RequirementResult) Applicable() bool {
 	return r.Level == LevelMust && r.Status != StatusNotApplicable
+}
+
+// Established reports whether the requirement is shown: demonstrated by a
+// complete proof path (StatusPassed), or observed by a check and attested
+// by vendor documentation (StatusObserved with Documented). PRODUCT.yaml
+// renders an established requirement Implemented.
+func (r *RequirementResult) Established() bool {
+	return r.Status == StatusPassed || (r.Status == StatusObserved && r.Documented != nil)
 }
 
 // Aggregate is the requirement status aggregation of one CTRF report against
@@ -165,30 +181,31 @@ func (a *Aggregate) Requirement(id string) *RequirementResult {
 	return nil
 }
 
-// IncompleteMusts returns every applicable MUST whose status is not
-// StatusPassed, in checklist order: failed, observed and not tested alike,
-// since none of them demonstrates the requirement. A SHOULD never appears
-// here, whatever its status.
+// IncompleteMusts returns every applicable MUST that is not Established, in
+// checklist order: failed, not tested, and observed without a documented
+// attestation alike, since none of them shows the requirement. A SHOULD
+// never appears here, whatever its status.
 func (a *Aggregate) IncompleteMusts() []RequirementResult {
 	var out []RequirementResult
 	for _, r := range a.Requirements {
-		if r.Applicable() && r.Status != StatusPassed {
+		if r.Applicable() && !r.Established() {
 			out = append(out, r)
 		}
 	}
 	return out
 }
 
-// Passed reports whether every applicable MUST passed. SHOULDs do not
-// participate: a SHOULD with no claim renders Not Implemented without failing
-// the run.
+// Passed reports whether every applicable MUST is established: demonstrated
+// by a complete proof path, or observed and attested by vendor documentation
+// (RequirementResult.Established). SHOULDs do not participate: a SHOULD with
+// no claim renders Not Implemented without failing the run.
 func (a *Aggregate) Passed() bool {
 	return len(a.IncompleteMusts()) == 0
 }
 
 // Verdict is the requirement half of a submission run's exit status: nil when
-// every applicable MUST passed, else an error naming each MUST that is not
-// established with its status and reason. Outcome adds it to the per-check
+// every applicable MUST is established, else an error naming each MUST that
+// is not, with its status and reason. Outcome adds it to the per-check
 // rule; on its own it never fails on a SHOULD. The evidence has been written
 // when it is consulted, so the directory still documents what was and was
 // not shown.
@@ -205,7 +222,7 @@ func (a *Aggregate) Verdict() error {
 		parts = append(parts, fmt.Sprintf("%s %s (%s)", r.ID, r.Status, r.Reason))
 	}
 	return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
-		"CNCF submission not established: %d applicable MUST requirement(s) of the %s checklist did not pass: %s",
+		"CNCF submission not established: %d applicable MUST requirement(s) of the %s checklist are not established: %s",
 		len(incomplete), a.Version, strings.Join(parts, "; ")))
 }
 
@@ -289,9 +306,30 @@ func ValidateNotApplicable(v Version, notApplicable map[string]string) error {
 	return nil
 }
 
-// AggregateReport computes the requirement status of every requirement of
-// the checklist at version v from the report's test results. A nil report
-// aggregates as if no check ran.
+// AggregateOptions are the configuration inputs of an aggregation: the
+// validate config keys spec.validate.evidence.cncf.notApplicable and
+// spec.validate.evidence.cncf.documented.
+type AggregateOptions struct {
+	// NotApplicable maps a conditional MUST id to the justification that
+	// renders it not applicable; see ValidateNotApplicable.
+	NotApplicable map[string]string
+
+	// Documented maps a requirement id to the vendor documentation that
+	// attests it when the run only observed it; see ValidateDocumented. An
+	// entry for a requirement in any other status is ignored, and the
+	// aggregate's Reason says so for a MUST that stays incomplete.
+	Documented map[string]Documentation
+}
+
+// AggregateReport is AggregateSubmission with only NotApplicable set; see
+// there for the contract.
+func AggregateReport(v Version, report *ctrf.Report, notApplicable map[string]string) (*Aggregate, error) {
+	return AggregateSubmission(v, report, AggregateOptions{NotApplicable: notApplicable})
+}
+
+// AggregateSubmission computes the requirement status of every requirement
+// of the checklist at version v from the report's test results. A nil
+// report aggregates as if no check ran.
 //
 // A requirement passes only when one of its proof paths is complete: every
 // check on the path present and passed as a demonstration, and no path
@@ -300,19 +338,27 @@ func ValidateNotApplicable(v Version, notApplicable map[string]string) error {
 // incomplete. A path whose checks all passed but one of them marked its
 // result observation-only is observed, not complete: the requirement is
 // observed when no path failed and none is complete, and not tested when no
-// path is observed either. notApplicable overrides the computed status of
-// the requirements it names with StatusNotApplicable; the results of their
-// checks are kept as observations.
+// path is observed either. opts.NotApplicable overrides the computed status
+// of the requirements it names with StatusNotApplicable; the results of
+// their checks are kept as observations. opts.Documented attaches the
+// vendor's documentation to a requirement whose computed status is observed,
+// which establishes it (RequirementResult.Established) without changing the
+// status.
 //
 // Errors:
-//   - ErrCodeInvalidRequest when v is unsupported or notApplicable names a
-//     requirement that may not be declared not applicable.
-func AggregateReport(v Version, report *ctrf.Report, notApplicable map[string]string) (*Aggregate, error) {
+//   - ErrCodeInvalidRequest when v is unsupported, opts.NotApplicable names
+//     a requirement that may not be declared not applicable, or
+//     opts.Documented is malformed (ValidateDocumented).
+func AggregateSubmission(v Version, report *ctrf.Report, opts AggregateOptions) (*Aggregate, error) {
 	cl, err := ChecklistFor(v)
 	if err != nil {
 		return nil, err
 	}
+	notApplicable := opts.NotApplicable
 	if err := ValidateNotApplicable(v, notApplicable); err != nil {
+		return nil, err
+	}
+	if err := ValidateDocumented(v, opts.Documented, notApplicable); err != nil {
 		return nil, err
 	}
 
@@ -331,6 +377,14 @@ func AggregateReport(v Version, report *ctrf.Report, notApplicable map[string]st
 			r.Status = StatusNotApplicable
 			r.Reason = strings.TrimSpace(justification)
 			r.Proof = nil
+		}
+		if doc, ok := opts.Documented[req.ID]; ok {
+			if r.Status == StatusObserved {
+				d := Documentation{Evidence: append([]string(nil), doc.Evidence...), Notes: strings.TrimSpace(doc.Notes)}
+				r.Documented = &d
+			} else if r.Applicable() && !r.Established() {
+				r.Reason += "; documented attestation ignored: it applies only to an observed requirement"
+			}
 		}
 		agg.Requirements = append(agg.Requirements, r)
 	}

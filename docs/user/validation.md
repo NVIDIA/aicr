@@ -61,7 +61,7 @@ a component the bundler enabled at bundle time is not checked.
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
 - Effectively cluster-admin for the identity running `aicr validate`. Each run creates a ServiceAccount for its validator Jobs and binds it to the built-in `cluster-admin` ClusterRole through a per-run `aicr-validator-<run-id>` ClusterRoleBinding, and Kubernetes RBAC only lets you bind a role whose permissions you already hold. The run deletes the binding at cleanup; `--no-cleanup` leaves it active until you delete it yourself. AICR creates its own `aicr-validation` namespace on first run. To run without that grant, have an administrator provision the ServiceAccount instead; see [Running under a pre-provisioned ServiceAccount](#running-under-a-pre-provisioned-serviceaccount).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
-- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate with no cap set, from the flag, `AICR_MAX_NODES_PER_ENTRY`, or `spec.snapshot.execution.maxNodesPerEntry`; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` additionally re-evaluates `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so the value fails closed. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
+- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` and `dra` require every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin — or, under `dra`, the NVIDIA DRA driver's ResourceSlices — is the sole whole-GPU advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate with no cap set, from the flag, `AICR_MAX_NODES_PER_ENTRY`, or `spec.snapshot.execution.maxNodesPerEntry`; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` and `dra` additionally re-evaluate `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so those values fail closed. `dra` also re-evaluates its own `K8s.server.version >= 1.35.0` floor. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
 - **`NodeTopology.gpu-nodes.label` readiness constraints outside GKE** (including bare metal and `--data` services): GPU nodes are those the GPU Operator labels `nvidia.com/gpu.present=true`, so capture the snapshot after it is running. A snapshot with no such node fails readiness closed (exit 2), and GPU nodes it has not labeled are not checked.
 
 ## Training performance validation
@@ -872,7 +872,13 @@ waiver would disarm the upstream chart's install-guard tripwire).
 
 Stock recipes ship the production default: `gpus.enabled=false`,
 `gpuResourcesEnabledOverride=false`, and `devicePlugin.enabled=true`; the
-experimental DRA opt-in flips all three together in a recipe overlay.
+experimental DRA opt-in flips all three together in a recipe overlay. On
+GKE-COS the `gpuStack=dra` profile value
+([#2517](https://github.com/NVIDIA/aicr/issues/2517)) is the stock selection
+of exactly that opt-in tuple — the one stock selection resolving
+`dra-resource-claim`, still experimental pending the #1327 graduation
+checklist ([#3282](https://github.com/NVIDIA/aicr/issues/3282)); see
+[GKE GPU Setup](../integrator/gke-gpu-setup.md#alternative-dra-resourceclaims-as-the-advertiser-experimental).
 
 **Upgrading a cluster from the dual-advertised (pre-flip) configuration:**
 applying the flipped bundle does not drain existing workloads — a running
@@ -1003,21 +1009,77 @@ validator run.
 `aicr validate --phase conformance` is the only runner for CNCF AI
 Conformance: the recipe declares which conformance checks run, and every run
 executes all of them. `--cncf-submission` adds one thing to that run: after
-the checks finish, the CTRF report is rendered into `--evidence-dir` as one
-evidence page per requirement a non-skipped check evidenced, plus `index.md`;
-only a run in which every check was skipped writes nothing (a check that
-crashed still gets its page). The flag never changes what a
+the checks finish, the CTRF report is rendered into the submission directory
+a vendor files as `vX.Y/<product>/` in cncf/k8s-ai-conformance, under
+`--evidence-dir`: `PRODUCT.yaml` (statuses from the run, metadata from
+`spec.validate.evidence.cncf.vendor`), `README.md` (the index, with the
+platform facts the notes cite), `junit.xml` and `e2e.log` (one testcase per
+check, named by check) and one evidence page per requirement a non-skipped
+check evidenced under `evidence/`, redacted in one pass and checked by the
+pinned upstream validator as the last step. The flag never changes what a
 check does or how it decides; for the same recipe the verdicts are identical
 with and without it. The two flags require each other, `--recipe` is required
-because the checks are selected from it, and `--no-cluster` and `--skip-check`
-are refused: submission evidence comes from checks that ran on a live cluster
-against the whole recipe.
+because the checks are selected from it, the vendor block is required in
+`--config`, and `--no-cluster` and `--skip-check` are refused: submission
+evidence comes from checks that ran on a live cluster against the whole
+recipe. `--evidence-dir` must be absent or empty, with no parent path
+segment of the form `vX.Y/` (the upstream validator would read it as the
+checklist version); the directory reaches it only when the run is complete,
+and an incomplete run leaves its staged copy at `<evidence-dir>.incomplete/`
+instead, which the next run refuses with exit 2 until it is removed. The
+checklist version is the cluster's Kubernetes minor and must be one this
+build carries (v1.35 to v1.37); a cluster on another minor is refused with
+exit 2 rather than certified against a neighboring checklist, unless
+`spec.validate.evidence.cncf.conformanceVersion` names one deliberately (see
+[Submission directory](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#submission-directory)
+for the status, export and manual-attestation rules).
 
 ```bash
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml \
+  --config aicr-config.yaml \
   --phase conformance \
   --cncf-submission \
-  --evidence-dir ./evidence
+  --evidence-dir ./submission
+```
+
+The config carries the vendor metadata and, for `cluster_autoscaling`, either
+the conditional justification when the cluster has no autoscaler
+(`notApplicable`, shown) or the documentation that attests a requirement the
+run only observed (`documented`, below); see
+[`evidence.cncf`](cli-config.md#specvalidate):
+
+```yaml
+kind: AICRConfig
+apiVersion: aicr.run/v1beta1
+spec:
+  validate:
+    evidence:
+      cncf:
+        vendor:
+          name: Example Vendor            # exactly as listed under CNCF Members in the landscape
+          platformName: Example Platform
+          platformVersion: 1.0.0
+          description: One sentence describing the offering.
+          contactEmail: maintainers@example.com
+          websiteUrl: https://example.com/platform
+          documentationUrl: https://example.com/platform/docs
+          productLogoUrl: https://example.com/platform/logo.svg
+          k8sConformanceUrl: https://github.com/cncf/k8s-conformance/tree/master/v1.37/example-platform
+        notApplicable:
+          cluster_autoscaling: "Fixed-size node pools; no cluster autoscaler or Karpenter is deployed."
+```
+
+On a cluster whose autoscaler the `cluster-autoscaling` check observed but
+did not drive, replace `notApplicable` with a `documented` entry; the run's
+`OBSERVED` result is then established by the documentation, which
+`PRODUCT.yaml` cites instead of the testcase:
+
+```yaml
+        documented:
+          cluster_autoscaling:
+            evidence:
+              - https://example.com/platform/docs/cluster-autoscaler
+            notes: "The managed cluster autoscaler scales the GPU node pool on pending accelerator pods."
 ```
 
 The `--feature` flag and `spec.validate.evidence.cncf.features` key scoped the
@@ -1050,9 +1112,17 @@ on top of the per-check rule every run applies:
   `cluster-autoscaling` on every path that passes) leaves its requirement
   `OBSERVED`, which is not established either: the exit message names it,
   e.g. `cluster_autoscaling observed (cluster-autoscaling observed, not
-  demonstrated)`, and the remedy on a platform without a behavioral
-  autoscaling test is a `spec.validate.evidence.cncf.notApplicable`
-  justification, which renders `NOT APPLICABLE` and exits 0. Where a requirement has
+  demonstrated)`. Only a cluster with no cluster autoscaler at all (fixed-size
+  node pools, no Karpenter) may declare the requirement not applicable through
+  a `spec.validate.evidence.cncf.notApplicable` justification, which renders
+  `NOT APPLICABLE` and removes only that requirement from the verdict: the run
+  still exits nonzero when another applicable MUST is not established or when a
+  check itself failed (on EKS the `cluster-autoscaling` check fails when no
+  autoscaler is confirmed, and the default `--fail-on-error` still applies). A
+  platform whose autoscaler is present but not behaviorally demonstrated keeps
+  `OBSERVED` and is established only by a `spec.validate.evidence.cncf.documented`
+  entry naming public documentation, which PRODUCT.yaml then cites instead of
+  the testcase. Where a requirement has
   alternative proofs (`secure_accelerator_access`: `secure-accelerator-access`
   on ordinary recipes, `slinky-slurm-gpu-access` on Slinky Slurm recipes) a
   passing alternative establishes it even when the primary check was skipped
@@ -1060,11 +1130,20 @@ on top of the per-check rule every run applies:
   verdict applies regardless of `--fail-on-error=false`.
 - The aggregation itself never fails the run on a SHOULD, whatever its
   checks did; its page records the real status. A SHOULD-backed check that
-  `failed` still trips the per-check rule above; exporting it as skipped is
-  #3605's export rule.
+  `failed` still trips the per-check rule above (pass `--fail-on-error=false`
+  to accept it), while the submission artifacts export its testcase as
+  skipped so the directory stays submittable.
+- A write or redaction error, or the pinned upstream validator rejecting the
+  directory, fails the run with `INTERNAL` after the recipe-evidence
+  attestation (if any) was emitted; a validator that cannot start because the
+  CNCF landscape is unreachable fails it with `SERVICE_UNAVAILABLE`. Flag and
+  config refusals, including a missing or malformed vendor field and a
+  non-empty `--evidence-dir`, exit `2` before any check runs.
 
-The full submission directory (PRODUCT.yaml, README, `junit.xml`, `e2e.log`,
-one redaction pass and the pinned upstream validator) is #3605.
+A complete submission directory exists at `--evidence-dir` only when the run's
+requirement verdict is clean and the validator accepted it; otherwise the
+staged copy at `<evidence-dir>.incomplete/` documents what was and was not
+shown.
 
 ## Emitting recipe evidence
 
@@ -1416,7 +1495,8 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 | `0` | All phases reported status `passed` or `skipped`; under `--cncf-submission`, additionally every applicable MUST requirement established (an all-skipped submission run exits `8`), see [Exit status of a submission run](#exit-status-of-a-submission-run) |
 | `2` | Invalid input or request (`ErrCodeInvalidRequest`) — bad CLI flag, malformed argument, a validator rejecting a recipe value (e.g., an inference constraint that uses the wrong comparator direction), or a **readiness pre-flight** constraint not met. The readiness gate always fails closed with this code, even under `--fail-on-error=false` |
 | `5` | A structured `ErrCodeTimeout` reached the top-level CLI — for example while loading the recipe or snapshot, waiting on the snapshot-agent Job, or signing evidence under `--emit-attestation --push` (which runs after the checks). A per-validator wait deadline does **not** reach this code: `runPhase` converts that error into a check result, so it surfaces as exit `8` (see note 2) |
-| `8` | One or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false`. Under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error` ([Exit status of a submission run](#exit-status-of-a-submission-run)). |
+| `6` | A structured `ErrCodeUnavailable` reached the top-level CLI; under `--cncf-submission`, the pinned upstream validator could not start because the CNCF landscape was unreachable ([Exit status of a submission run](#exit-status-of-a-submission-run)) |
+| `8` | One or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false`. Under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error`, and a submission write, redaction or upstream-validator failure ([Exit status of a submission run](#exit-status-of-a-submission-run)). |
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
@@ -1499,6 +1579,36 @@ Common reasons and their cause:
 | `named in skipChecks` | `message`, and `extra.skipReason` as `named-in-skip-checks` (the channel that survives bundle redaction) | The caller withheld this check with `--skip-check` or `spec.validate.execution.skipChecks` | Drop the name from the skip list to run it again; see [Skipping checks a run cannot satisfy](#skipping-checks-a-run-cannot-satisfy) |
 | `skipped due to previous phase failure` | `message` | `--fail-fast` was set and an earlier phase failed, so subsequent phases were skipped | Fix the earlier phase first, or drop `--fail-fast` to run all phases regardless |
 
+### `driver-runtime-management` fails
+
+The check (CNCF `driver_runtime_management`, SHOULD at v1.37 and MUST at v1.38)
+runs a pod from a vanilla `ubuntu:22.04` image that requests one GPU, and reads
+the driver from inside it. The probe pod carries no `imagePullSecrets`
+(`--image-pull-secret` reaches the validator Job, not the per-run namespace),
+so a mirror of the probe image that needs credentials must supply them
+node-side, through the container runtime's registry configuration. Its artifacts (`Driver runtime probe pod logs`,
+`Advertised driver version`, `Driver runtime compatibility`) name the failing
+step:
+
+| Verdict excerpt | Meaning | Fix |
+|-----------------|---------|-----|
+| `did not inject the accelerator driver tools` | No `nvidia-smi` appeared inside the vanilla container: the container runtime configuration (CDI or the `nvidia` runtime hook) is not injecting the driver stack for GPU-requesting pods | Check the GPU Operator toolkit DaemonSet and the node's `nvidia-container-runtime` configuration; on AKS, the `nvidia-setup` tuning that writes it |
+| `failed to initialize or report a numeric version` | `nvidia-smi` is present but NVML failed, typically `Driver/library version mismatch` after a driver upgrade without a node reboot or a user-space library that does not match the kernel module | Reconcile the driver on the node (driver DaemonSet restart or node reboot) |
+| `advertises driver version ... does not match` | The node label (`nvidia.com/cuda.driver-version.full`) or DRA `driverVersion` attribute says one version and the container sees another | The advertiser is stale (GPU Feature Discovery or the DRA kubelet plugin has not re-published since the driver changed); restart it or wait for the next publish |
+| `saw 0 accelerator device(s)` | The pod was granted a GPU but no `/dev/nvidia[0-9]*` appeared inside | Device-plugin or CDI device injection is broken on that node |
+| `WARNING: node ... advertises no accelerator driver version` (artifact only) | The platform advertises no version, so only the in-container probe decides; the check still passes when the probe succeeds | Expected on a platform whose GPU stack publishes no GPU Feature Discovery label and no DRA `driverVersion` attribute |
+
+The probe image (`docker.io/library/ubuntu:22.04`) pulls from Docker Hub by
+default and, like the busybox probe image and the NCCL workload image (but
+unlike the Dynamo runtime images `inference-perf` pulls), is not rewritten by
+`AICR_VALIDATOR_IMAGE_REGISTRY`. In a mirrored environment set
+`AICR_DRIVER_RUNTIME_IMAGE=<image ref>` in the `aicr validate` environment to
+the full reference of your copy or of another vanilla OS image. It must ship no
+accelerator driver or tools, and it must provide what the probe script runs on:
+a POSIX `/bin/sh`, `head` and `tr` (`timeout` is used when present). A
+distroless image cannot run the probe; mirroring the Ubuntu image is the
+simplest choice.
+
 ### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus unreachable"
 
 On EKS clusters that split worker and system pods across separate security
@@ -1541,6 +1651,43 @@ orchestrator lands on a node whose SG can reach Prometheus, then leave the
 image cached there so image-locality keeps subsequent runs on the same node.
 This is unreliable and should not be used as the steady-state validation
 strategy.
+
+### `workload-sandboxing` fails
+
+The check (CNCF `workload_sandboxing`, SHOULD at v1.37 and MUST at v1.38)
+looks for a sandboxed `RuntimeClass`, runs a CPU-only `ubuntu:22.04` probe pod
+on it and an unsandboxed control pod on the same node, and compares what the
+two observe. No embedded recipe declares it yet: none ships a sandboxed
+`RuntimeClass`, so until the #3615 runtime decision provides one and the
+recipes declare the check, the `workload_sandboxing` evidence row renders
+`NOT TESTED (not run)` at SHOULD. A cluster that already has gVisor or Kata
+can run it today by adding `workload-sandboxing` to
+`spec.validation.conformance.checks` in a recipe copy (and naming the class
+with `AICR_SANDBOX_RUNTIME_CLASS` when detection does not match). Its artifacts (`Sandboxed RuntimeClass`, `Sandboxed probe pod
+logs`, `Unsandboxed control pod logs`, `Workload sandboxing verdict`) name the
+failing step:
+
+| Verdict excerpt | Meaning | Fix |
+|-----------------|---------|-----|
+| `unmet prerequisite: no sandboxed RuntimeClass` | Auto-detection found no `RuntimeClass` whose name or handler contains `gvisor`, `runsc`, `kata` (the AKS `kata-mshv-vm-isolation` class matches), `sandboxed`, `quark` or `krun`. A sandboxed class may still exist under another name; the check never skips or records N/A for this | Provide a sandbox runtime (which one AICR recipes ship, and on which pool, is the pending decision in #3615), or set `AICR_SANDBOX_RUNTIME_CLASS=<name>` when the cluster has one under another name |
+| `AICR_SANDBOX_RUNTIME_CLASS names RuntimeClass "...", which does not exist on this cluster` | The override names a class the cluster does not have | Fix the name (`kubectl get runtimeclass`) or unset the variable to auto-detect |
+| `kernel identity: the sandboxed pod observes the same kernel identity` | Every kernel identity field both pods reported (release, version, boot id) matched, or neither pod reported a comparable field. With matching fields the pods share the host kernel: the class's handler maps to a runc-like runtime | Read the identity values in both probe log artifacts. If no field was comparable, find out why the probes could not read them; otherwise check that the containerd runtime configuration maps the handler to the sandbox binary |
+| `sandboxed probe pod did not complete in time` with `status=ContainerCreating` | The pod was bound to a node but its sandbox never started: the handler is not configured, or its binary is missing, on that node (`FailedCreatePodSandBox` events), or the node is cordoned or NotReady | Check that the `RuntimeClass` `scheduling.nodeSelector` selects only nodes with the sandbox runtime installed, and read the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs |
+| `process isolation:`, `kernel and memory isolation:`, `filesystem isolation:` or `network isolation:` | The named probe saw host state inside the sandbox (a host daemon in `/proc`, a readable `/dev/mem`, a host path such as `/var/lib/kubelet`, a bridge such as `cni0`); the probe logs artifact shows what it saw | The sandbox shares that host namespace or mount; correct the runtime configuration |
+| `sandboxed probe pod stuck:` or `unsandboxed control pod stuck:` | The pod could not pull its image or be scheduled (`Unschedulable`); for the sandboxed pod, usually a `RuntimeClass` `scheduling.nodeSelector` that no node satisfies | Inspect the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs; for mirrors see the image note below |
+
+The probe image (`docker.io/library/ubuntu:22.04`) pulls from Docker Hub by
+default and, like the busybox probe image and the NCCL workload image, is not
+rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`. In a mirrored environment set
+`AICR_SANDBOX_PROBE_IMAGE=<image ref>` in the `aicr validate` environment to
+the full reference of your copy or of another vanilla OS image. It must
+provide what the probe script runs on: a POSIX `/bin/sh`, `uname`, `cat`,
+`ls`, `wc`, `head`, `awk` and `tr`. A distroless image cannot run the probe;
+mirroring the Ubuntu image is the simplest choice. The two probe pods carry
+no `imagePullSecrets` (`--image-pull-secret` reaches the validator Job, not
+the per-run namespace, the same as for the other vanilla probe images), so a
+mirror that needs credentials must supply them node-side, through the
+container runtime's registry configuration.
 
 ### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus did not load the ServiceMonitor/PodMonitor"
 

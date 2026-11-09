@@ -18,8 +18,9 @@
 //
 //   - cncf — CNCF AI Conformance evidence: the versioned requirement
 //     checklists, the fail-closed requirement aggregation of a
-//     conformance run's CTRF report, and the markdown pages rendered
-//     from it for submission to the CNCF conformance program.
+//     conformance run's CTRF report, and the submission directory
+//     (PRODUCT.yaml, README.md, junit.xml, e2e.log and evidence pages)
+//     rendered from it for the CNCF conformance program.
 //   - attestation — recipe-test attestation pipeline (signed in-toto
 //     Statement plus supporting bundle).
 //   - verifier — offline verification for recipe-evidence bundles

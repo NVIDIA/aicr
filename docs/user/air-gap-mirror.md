@@ -312,6 +312,14 @@ the images AICR itself runs in the cluster, so mirror these separately:
   `performance`, `conformance`, and `aiperf-bench` for inference performance
   checks), run by `aicr validate`.
 
+A CNCF submission run (`aicr validate --cncf-submission`) cannot complete
+offline: its last step runs the upstream submission validator on the machine
+`aicr` runs on, which fetches the CNCF landscape from
+`raw.githubusercontent.com` and requests every vendor and documentation URL
+the submission cites. Without that egress the run exits 6
+(`SERVICE_UNAVAILABLE`); see
+[Exit status of a submission run](validation.md#exit-status-of-a-submission-run).
+
 Release builds use each image at the CLI's own version tag. Copy them into your
 registry, then point AICR at the copies:
 
@@ -335,7 +343,11 @@ source path (`${REGISTRY}/nvidia/aicr-validators/...`), set the variable to
 `${REGISTRY}/nvidia` instead. Add `--image-pull-secret` when the registry needs
 credentials. Some benchmark checks pin workload images the variable does not
 rewrite, such as the NCCL runtime image (override it with
-`AICR_NCCL_RUNTIME_IMAGE`); see [Validation](validation.md).
+`AICR_NCCL_RUNTIME_IMAGE`) and the vanilla `docker.io/library/ubuntu:22.04`
+probe image of the `driver-runtime-management` and `workload-sandboxing`
+conformance checks (override it with `AICR_DRIVER_RUNTIME_IMAGE` and
+`AICR_SANDBOX_PROBE_IMAGE`, each a full reference to your copy); see
+[Validation](validation.md).
 
 The inference performance check also runs the Dynamo runtime images
 `nvcr.io/nvidia/ai-dynamo/vllm-runtime` and

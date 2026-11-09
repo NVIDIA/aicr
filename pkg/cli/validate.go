@@ -490,6 +490,15 @@ type validationConfig struct {
 	// cncfNotApplicable is spec.validate.evidence.cncf.notApplicable, the
 	// conditional MUSTs declared not applicable with their justifications.
 	cncfNotApplicable map[string]string
+	// cncfDocumented is spec.validate.evidence.cncf.documented, the
+	// requirements the run may only observe, attested by documentation.
+	cncfDocumented map[string]aicr.CNCFDocumentation
+	// cncfVendor is spec.validate.evidence.cncf.vendor, the PRODUCT.yaml
+	// metadata; required for a submission run and refused up front otherwise.
+	cncfVendor *aicr.CNCFVendor
+	// cncfConformanceVersion is spec.validate.evidence.cncf.conformanceVersion,
+	// the explicit checklist; empty follows the cluster's minor exactly.
+	cncfConformanceVersion string
 
 	// Recipe-evidence bundle config; nil disables --emit-attestation work.
 	evidence *recipeEvidenceConfig
@@ -633,7 +642,7 @@ func runValidation(
 		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
 	}
 
-	// Render the submission evidence when requested. The checklist version
+	// Write the submission directory when requested. The checklist version
 	// follows the validated cluster's Kubernetes minor. A minor this build
 	// carries no checklist for renders against the nearest carried one and the
 	// facade warns: below v1.35 against v1.35, above the newest against the
@@ -645,36 +654,46 @@ func runValidation(
 	// without the flag (conformance checks with no requirement mapping, such
 	// as platform-health, are visible only to that rule), and an applicable
 	// MUST that is not established fails it on top (ADR-007 amendment,
-	// decision 2). A render error, like that outcome, is held until the
-	// attestation below has been emitted: the two evidence kinds are
-	// independent pipelines over the same run, and a failed CNCF render must
-	// not cost the run its signed recipe-evidence bundle.
+	// decision 2). The directory itself is complete only when that verdict
+	// is clean and the pinned upstream validator accepted it; otherwise the
+	// staged copy is kept beside the requested path. A write, redaction or
+	// validator error, like that outcome, is held until the attestation
+	// below has been emitted: the two evidence kinds are independent
+	// pipelines over the same run, and a failed submission must not cost the
+	// run its signed recipe-evidence bundle.
 	var renderErr error
-	// outcome is CNCFRequirementAggregate.Outcome once the evidence rendered;
-	// decided marks that it was computed, since nil is a valid outcome.
+	// outcome is CNCFRequirementAggregate.Outcome once the directory was
+	// written; decided marks that it was computed, since nil is a valid
+	// outcome.
 	var outcome error
 	var decided bool
 	if cfg.cncfSubmission {
-		renderOpts := aicr.RenderCNCFEvidenceOptions{
-			KubernetesVersion: snap.KubernetesVersion(),
-			NotApplicable:     cfg.cncfNotApplicable,
+		opts := aicr.CNCFSubmissionOptions{
+			ConformanceVersion: cfg.cncfConformanceVersion,
+			KubernetesVersion:  snap.KubernetesVersion(),
+			NotApplicable:      cfg.cncfNotApplicable,
+			Documented:         cfg.cncfDocumented,
+			Commit:             commit,
 		}
-		agg, err := client.RenderCNCFEvidenceWithResult(ctx, combined, cfg.evidenceDir, renderOpts)
+		if cfg.cncfVendor != nil {
+			opts.Vendor = *cfg.cncfVendor
+		}
+		res, err := client.WriteCNCFSubmission(ctx, combined, cfg.evidenceDir, snap, rec, opts)
 		switch {
 		case err != nil:
 			renderErr = err
-			slog.Error("conformance evidence rendering failed", "error", err, "dir", cfg.evidenceDir)
-		case anyRenderedCheck(agg):
-			slog.Info("conformance evidence written", "dir", cfg.evidenceDir, "kubernetesVersion", renderOpts.KubernetesVersion)
-			logRequirementAggregate(agg)
-			outcome, decided = agg.Outcome(combined, cfg.failOnError), true
+			logSubmissionFailure(err, cfg.evidenceDir)
+		case res.Complete:
+			slog.Info("CNCF submission directory written and accepted by the upstream validator",
+				"dir", res.Dir, "kubernetesVersion", opts.KubernetesVersion, "checklist", res.Aggregate.Version)
+			logValidatorOutput(res.ValidatorOutput)
+			logRequirementAggregate(res.Aggregate)
+			outcome, decided = res.Aggregate.Outcome(combined, cfg.failOnError), true
 		default:
-			// The renderer drops skipped results and writes a page for every
-			// other one, crashed included; with every check skipped it creates
-			// nothing, not even the directory.
-			slog.Warn("every conformance check was skipped; no evidence was written", "dir", cfg.evidenceDir)
-			logRequirementAggregate(agg)
-			outcome, decided = agg.Outcome(combined, cfg.failOnError), true
+			slog.Warn("CNCF submission directory is incomplete; the staged copy is kept and nothing was written to the requested path",
+				"staged", res.Dir, "requested", cfg.evidenceDir)
+			logRequirementAggregate(res.Aggregate)
+			outcome, decided = res.Aggregate.Outcome(combined, cfg.failOnError), true
 		}
 	}
 
@@ -696,11 +715,13 @@ func runValidation(
 	return validationExit(decided, outcome, cfg.failOnError && anyFailed, renderErr)
 }
 
-// validationExit picks the run's exit error. A submission run whose evidence
-// rendered is decided by CNCFRequirementAggregate.Outcome alone: it already
-// applied the per-check rule to the same merged report, so wrapping it again
-// with the phase-level failure would repeat the message. Every other run,
-// including a submission run whose render failed, goes through runOutcome.
+// validationExit picks the run's exit error. A submission run whose
+// directory was written, complete or not, is decided by
+// CNCFRequirementAggregate.Outcome alone: it already applied the per-check
+// rule to the same merged report, so wrapping it again with the phase-level
+// failure would repeat the message. Every other run, including a submission
+// run whose write, redaction or validator gate failed, goes through
+// runOutcome.
 func validationExit(decided bool, outcome error, checksFailed bool, renderErr error) error {
 	if decided {
 		return outcome
@@ -709,11 +730,12 @@ func validationExit(decided bool, outcome error, checksFailed bool, renderErr er
 }
 
 // runOutcome combines a per-check failure with a submission-stage error, the
-// render failing before any outcome was computed. When both are present the
-// submission error is wrapped with the per-check context under its own classified code
-// (a render canceled by the operator stays CANCELED, a timed-out one stays
-// TIMEOUT), so the exit code follows the cause rather than the context; a
-// plain error falls back to INTERNAL.
+// write, redaction or upstream validator failing before any outcome was
+// computed. When both are present the submission error is wrapped with the
+// per-check context under its own classified code (a run canceled by the
+// operator stays CANCELED, a timed-out one stays TIMEOUT, a validator that
+// could not start stays SERVICE_UNAVAILABLE), so the exit code follows the
+// cause rather than the context; a plain error falls back to INTERNAL.
 func runOutcome(checksFailed bool, submissionErr error) error {
 	switch {
 	case submissionErr != nil && checksFailed:
@@ -722,7 +744,7 @@ func runOutcome(checksFailed bool, submissionErr error) error {
 			code = se.Code
 		}
 		return errors.Wrap(code,
-			"validation failed: one or more phases did not pass, and the CNCF evidence render failed", submissionErr)
+			"validation failed: one or more phases did not pass, and the CNCF submission failed", submissionErr)
 	case submissionErr != nil:
 		return submissionErr
 	case checksFailed:
@@ -731,29 +753,38 @@ func runOutcome(checksFailed bool, submissionErr error) error {
 	return nil
 }
 
-// anyRenderedCheck reports whether the renderer had anything to write: a
-// check that is present and not skipped, on a requirement or as supporting
-// evidence. The renderer drops skipped results before grouping, so a report
-// of only skips renders no page and no index.
-func anyRenderedCheck(agg *aicr.CNCFRequirementAggregate) bool {
-	if agg == nil {
-		return false
+// logSubmissionFailure reports a submission that was not promoted. When the
+// error carries the staged directory (the redaction pass had completed), the
+// operator is told where the redacted copy is and that the next run exits 2
+// until it is removed; otherwise nothing was kept.
+func logSubmissionFailure(err error, requested string) {
+	if staged := stagedSubmissionDir(err); staged != "" {
+		slog.Error("CNCF submission not promoted; the staged copy is kept for inspection and must be removed before the next run",
+			"error", err, "staged", staged, "requested", requested)
+		return
 	}
-	for _, r := range agg.Requirements {
-		for _, c := range r.Checks {
-			if c.Present && c.Status != ctrf.StatusSkipped {
-				return true
-			}
+	slog.Error("CNCF submission directory not written; nothing was kept", "error", err, "requested", requested)
+}
+
+// stagedSubmissionDir returns the staged directory an error carries under
+// aicr.CNCFStagedDirContextKey, or "".
+func stagedSubmissionDir(err error) string {
+	se, ok := stderrors.AsType[*errors.StructuredError](err)
+	if !ok {
+		return ""
+	}
+	staged, _ := se.Context[aicr.CNCFStagedDirContextKey].(string)
+	return staged
+}
+
+// logValidatorOutput relays the upstream validator's report line by line,
+// warnings included, so an operator sees what the reviewer will.
+func logValidatorOutput(output string) {
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			slog.Info("upstream validator: " + line)
 		}
 	}
-	for _, r := range agg.Supporting {
-		for _, c := range r.Checks {
-			if c.Present && c.Status != ctrf.StatusSkipped {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func validateCmdFlags() []cli.Flag {
@@ -922,17 +953,21 @@ func validateEvidenceFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
 			Name: "evidence-dir",
-			Usage: `Directory the CNCF AI Conformance submission evidence is written to.
+			Usage: `Directory the CNCF AI Conformance submission directory is written to; it must be absent or empty.
 	Requires --cncf-submission; the two flags require each other.`,
 			Category: catEvidence,
 		},
 		&cli.BoolFlag{
 			Name: "cncf-submission",
-			Usage: `Also write the CNCF AI Conformance submission evidence for this run into --evidence-dir.
+			Usage: `Also write the CNCF AI Conformance submission directory for this run into --evidence-dir.
 	The run is the conformance phase as the recipe declares it: the same checks with the same verdicts
-	as a run without this flag, rendered afterwards into one evidence page per requirement a non-skipped check
-	evidenced, plus index.md; only a run in which every check was skipped writes nothing.
-	Requires --recipe, --evidence-dir and the conformance phase; refused with --no-cluster and --skip-check.
+	as a run without this flag, rendered afterwards into PRODUCT.yaml, README.md, junit.xml, e2e.log and one
+	evidence page per requirement a non-skipped check evidenced under evidence/, redacted in one pass, then
+	checked by the pinned upstream validator (cncf/k8s-ai-conformance scripts/validate.go, which needs network
+	access). The directory reaches --evidence-dir only when every applicable MUST is established and the
+	validator accepts it; otherwise the staged copy stays at <evidence-dir>.incomplete for inspection.
+	Requires --recipe, --evidence-dir, the conformance phase and spec.validate.evidence.cncf.vendor in --config;
+	refused with --no-cluster and --skip-check.
 	The exit status adds the requirement aggregation to the per-check rule: an applicable MUST that is not
 	established fails the run regardless of --fail-on-error; the aggregation never fails it on a SHOULD.`,
 			Category: catEvidence,
@@ -1233,7 +1268,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// handle to the same directory (dataDir) so SLSA / conformance
 			// evidence resolves files against the command's source rather
 			// than the package global.
-			client, err := validateClient(ctx, cmd, cfg, evidenceDir, cncfOpts.NotApplicable)
+			client, err := validateClient(ctx, cmd, cfg, evidenceDir, cncfOpts)
 			if err != nil {
 				return err
 			}
@@ -1366,6 +1401,9 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				evidenceDir:                 evidenceDir,
 				cncfSubmission:              cncfSubmission,
 				cncfNotApplicable:           cncfOpts.NotApplicable,
+				cncfDocumented:              cncfOpts.Documented,
+				cncfVendor:                  cncfOpts.Vendor,
+				cncfConformanceVersion:      cncfOpts.ConformanceVersion,
 				evidence:                    evidenceCfg,
 				imageRefs:                   imageRefs,
 			})
@@ -1374,15 +1412,19 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 }
 
 // validateClient builds the facade Client for a validation run and refuses a
-// bad spec.validate.evidence.cncf.notApplicable key against it before any
-// recipe, snapshot or cluster work, rather than leaving that to the render
-// after every validator Job has run. The checklist version is not known yet
-// (it follows the snapshot), so the pre-flight checks against the latest
-// carried checklist; the conditional MUST set is the same in every carried
-// version, and the renderer repeats the check against the selected version
-// as the fail-closed backstop. A run without --evidence-dir renders nothing
-// and is not checked. The Client is closed when the pre-flight refuses.
-func validateClient(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, evidenceDir string, notApplicable map[string]string) (*aicr.Client, error) {
+// bad spec.validate.evidence.cncf block against it before any recipe,
+// snapshot or cluster work, rather than leaving that to the submission after
+// every validator Job has run: a notApplicable or documented key that is not
+// allowed, a missing or malformed vendor field (PRODUCT.yaml needs every
+// required one), and a submission directory that is not absent or empty.
+// The checklist version is not known yet (it follows the snapshot), so the
+// pre-flight checks against the latest carried checklist; the conditional
+// MUST set is the same in every carried version, and the submission repeats
+// the check against the selected version as the fail-closed backstop.
+// Whether the vendor's URLs answer is the upstream validator's check at the
+// end of the run. A run without --evidence-dir writes nothing and is not
+// checked. The Client is closed when the pre-flight refuses.
+func validateClient(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, evidenceDir string, cncfOpts aicr.CNCFEvidenceOptions) (*aicr.Client, error) {
 	client, err := recipeClientFromCmd(ctx, cmd, cfg)
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to initialize data provider")
@@ -1390,7 +1432,18 @@ func validateClient(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, evi
 	if evidenceDir == "" {
 		return client, nil
 	}
-	if err := client.ValidateCNCFEvidenceOptions(aicr.RenderCNCFEvidenceOptions{NotApplicable: notApplicable}); err != nil {
+	if cncfOpts.Vendor == nil {
+		_ = client.Close()
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--cncf-submission requires spec.validate.evidence.cncf.vendor in --config: PRODUCT.yaml carries its fields "+
+				"(name, platformName, platformVersion, description, contactEmail, websiteUrl, documentationUrl, productLogoUrl, k8sConformanceUrl; repoUrl optional)")
+	}
+	if err := client.ValidateCNCFSubmissionOptions(aicr.CNCFSubmissionOptions{
+		ConformanceVersion: cncfOpts.ConformanceVersion,
+		NotApplicable:      cncfOpts.NotApplicable,
+		Documented:         cncfOpts.Documented,
+		Vendor:             *cncfOpts.Vendor,
+	}, evidenceDir); err != nil {
 		_ = client.Close()
 		return nil, err
 	}
@@ -1398,8 +1451,8 @@ func validateClient(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, evi
 }
 
 // logRequirementAggregate reports the CNCF requirement aggregation of a
-// submission run: the checklist, whether every applicable MUST passed, and
-// each MUST that is not established with its reason. When no conformance
+// submission run: the checklist, whether every applicable MUST is
+// established, and each MUST that is not with its reason. When no conformance
 // check produced a result at all (a recipe that declares none), one warning
 // says so instead of one per MUST, since every MUST would read not run for
 // the same reason. The exit status is CNCFRequirementAggregate.Outcome.
@@ -1410,7 +1463,7 @@ func logRequirementAggregate(agg *aicr.CNCFRequirementAggregate) {
 	incomplete := agg.IncompleteMusts()
 	slog.Info("CNCF requirement aggregation",
 		"checklist", agg.Version,
-		"applicableMustsPassed", agg.Passed(),
+		"applicableMustsEstablished", agg.Passed(),
 		"incompleteMusts", len(incomplete))
 	switch {
 	case len(incomplete) == 0:

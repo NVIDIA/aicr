@@ -1359,7 +1359,8 @@ accepted; each names the sub-issue that lands it. Decisions 1 to 3 landed
 with [#3602](https://github.com/NVIDIA/aicr/issues/3602) on 2026-11-05: the
 collector and `--feature` are gone and `--cncf-submission` renders from the
 conformance run. The packaging of decision 7 is
-[#3605](https://github.com/NVIDIA/aicr/issues/3605). The
+[#3605](https://github.com/NVIDIA/aicr/issues/3605); it landed with
+[#3701](https://github.com/NVIDIA/aicr/pull/3701) on 2026-11-07. The
 recipe-test-attestation kind, the bundle format, the pointer layout and
 the verifier are not affected. The depth and submission-output scope
 were revised on 2026-11-04 after an audit against the CNCF requirement
@@ -1432,7 +1433,10 @@ the other phases, not capacity, bound what can be always-on.
    exits non-zero for: (a) flag and input refusals before any check runs,
    and the readiness pre-flight, with exit 2 as today; (b) an incomplete
    applicable MUST requirement; (c) a write or redaction error, or the
-   pinned upstream validator failing or being unable to run (for example
+   pinned upstream validator failing or being unable to run (refined
+   2026-11-07 in #3701: a validator that cannot run because the CNCF
+   landscape is unreachable exits `SERVICE_UNAVAILABLE`, not an internal
+   error) (for example
    it cannot fetch the CNCF landscape), reported as an internal error. A
    submission run derives its exit status from the requirement
    aggregation, so the per-check rule of `--fail-on-error` is superseded:

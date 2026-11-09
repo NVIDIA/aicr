@@ -470,6 +470,12 @@ const (
 	// EvidenceRenderTimeout is the timeout for rendering conformance evidence.
 	EvidenceRenderTimeout = 30 * time.Second
 
+	// CNCFSubmissionTimeout bounds writing a CNCF submission directory,
+	// including the pinned upstream validator's run: it fetches the CNCF
+	// landscape and requests every URL the submission cites, each request
+	// bounded by its own 30s timeout and retried on 429 with backoff.
+	CNCFSubmissionTimeout = 10 * time.Minute
+
 	// EvidenceBundleBuildTimeout bounds local bundle assembly. Local I/O
 	// only; 60s is headroom over the typical few-second pipeline.
 	EvidenceBundleBuildTimeout = 60 * time.Second
@@ -764,6 +770,59 @@ const (
 	// before it is available, so a single-shot discovery right after the
 	// deployment phase can race that window.
 	MetricsAPIWarmupTimeout = 60 * time.Second
+)
+
+// Inference gateway traffic conformance validation (CNCF ai_inference): two
+// CPU backends and one HTTPRoute on the recipe's Gateway, probed from a pod
+// with header-matched and weighted requests. Weights, request counts,
+// tolerance, rounds and consecutive successes follow the upstream
+// TestGatewayAPIInference, which takes them from the Gateway API
+// HTTPRouteWeight conformance test.
+const (
+	// GatewayTrafficBackendReadyTimeout bounds both backend Deployments
+	// becoming available (image pull plus readiness probe).
+	GatewayTrafficBackendReadyTimeout = 3 * time.Minute
+
+	// GatewayTrafficRouteAcceptTimeout bounds the HTTPRoute reporting
+	// Accepted and ResolvedRefs for the recipe's Gateway.
+	GatewayTrafficRouteAcceptTimeout = 2 * time.Minute
+
+	// GatewayTrafficRouteReadyWindow is how long the probe pod waits for the
+	// accepted route to serve from the data plane before it starts counting:
+	// GatewayTrafficConsecutive consecutive header and default requests must
+	// each reach a test backend.
+	GatewayTrafficRouteReadyWindow = 2 * time.Minute
+
+	// GatewayTrafficProbeTimeout bounds the probe pod from creation to a
+	// terminal phase: the readiness window, the header rounds and the
+	// weighted rounds.
+	GatewayTrafficProbeTimeout = 6 * time.Minute
+
+	// GatewayTrafficHeaderRequests is the number of requests sent with the
+	// canary header; every one must reach the alternate backend.
+	GatewayTrafficHeaderRequests = 20
+
+	// GatewayTrafficRequests is the number of unmatched requests per weighted
+	// round.
+	GatewayTrafficRequests = 500
+
+	// GatewayTrafficPrimaryWeight and GatewayTrafficAlternateWeight are the
+	// HTTPRoute backend weights of the default rule.
+	GatewayTrafficPrimaryWeight   = 70
+	GatewayTrafficAlternateWeight = 30
+
+	// GatewayTrafficRounds bounds the header and the weighted rounds; the
+	// probe stops at the first header round with no error and the first
+	// weighted round within tolerance.
+	GatewayTrafficRounds = 10
+
+	// GatewayTrafficConsecutive is the number of consecutive routed request
+	// pairs the probe needs before it counts.
+	GatewayTrafficConsecutive = 3
+
+	// GatewayTrafficTolerance is the allowed deviation of the primary
+	// backend's share from its weight, as a fraction (5 percentage points).
+	GatewayTrafficTolerance = 0.05
 )
 
 // Prometheus Operator monitor loading, shared by the conformance checks that

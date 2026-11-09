@@ -87,9 +87,10 @@ every check on one of its proof paths is present and `passed`
 (`alternativeProofs` lists the requirements with more than one path), a failed
 check fails it, `other`, `pending` or absent checks leave it not tested, and a
 check that `passed` with the `observationOnly` marker leaves it observed,
-which does not establish a MUST (`StatusObserved`). `Aggregate.Passed` is
-scoped by level: every applicable MUST passed, SHOULDs
-excluded; `NOT APPLICABLE` comes only from
+which does not establish a MUST (`StatusObserved`) unless
+`spec.validate.evidence.cncf.documented` attests it. `Aggregate.Passed` is
+scoped by level: every applicable MUST established (passed, or observed and
+documented), SHOULDs excluded; `NOT APPLICABLE` comes only from
 `spec.validate.evidence.cncf.notApplicable` and only for the conditional
 MUSTs in `conditionalMusts` (`ValidateNotApplicable`). The requirement set it
 aggregates is the upstream checklist for the selected version
@@ -285,6 +286,41 @@ cluster where the class cannot be established from the ClusterPolicy records
 `NOT RUN` ("not probed").
 Privileged pods are out of scope: they see every GPU by design.
 
+`driver-runtime-management` (#3615, CNCF `driver_runtime_management`: SHOULD at
+every carried checklist, MUST at v1.38 per KAR-0001) mirrors the upstream
+`TestAcceleratorDriverRuntimeManagement`. It resolves the GPU the same way
+`secure-accelerator-access` does (policy verify, then DRA ResourceClaim or
+`nvidia.com/gpu: 1` with required node affinity to the device-plugin nodes,
+context tolerations) and runs one probe container from a vanilla image,
+`docker.io/library/ubuntu:22.04` by default. The image ships no driver or
+tools, so an executable `nvidia-smi` inside it can only come from the container
+runtime configuration (CDI spec or runtime hook); the probe script prints
+`RESULT:` lines for the device count, that injection, a functional NVML query
+and the version it returned, and exits 0 so the pod reaches a terminal phase
+and the logs are complete. `parseDriverRuntimeProbeLogs` and
+`verifyDriverRuntime` decide: exactly one device, tools injected, driver
+functional with a numeric version, and that version compatible with the one the
+platform advertises for the node the pod landed on. The advertisement is read
+by `inspectAdvertisedDriverVersion`: the `gpu.nvidia.com` ResourceSlice
+`driverVersion` device attribute (version or string value, v1beta1 `basic`
+wrapper unwrapped) whenever the cluster serves the DRA API, else the GFD label
+`nvidia.com/cuda.driver-version.full`, else the legacy
+`nvidia.com/cuda.driver.major`/`minor`/`rev` triple; none is a recorded warning,
+never a failure, so a platform whose GPU stack publishes no GFD label and no
+DRA attribute is judged by the probe alone. `versionsCompatible` is the upstream rule: numeric segments
+compared as integers over the shared prefix, so `580.65.6` and `580.65` both
+match `580.65.06`. Every probe verdict failure is `ErrCodeInternal`; an
+incomplete probe output is a failure, not a pass on what was seen. A cluster
+with no usable GPU allocation mechanism fails with `ErrCodeUnavailable`, a
+check deadline too short for cleanup fails with `ErrCodeTimeout`, and a
+cleanup or apiserver read failure carries its own classified code. The probe image is
+configurable for mirrors through `AICR_DRIVER_RUNTIME_IMAGE` (forwarded from
+the orchestrator's shell to this check only), which replaces the full
+reference; `AICR_VALIDATOR_IMAGE_REGISTRY` deliberately does not rewrite it,
+as it does not rewrite the busybox probe or the NCCL workload image, because
+dev lanes point that variable at a namespace holding only validator images. The check skips with
+`slurm-managed-gpus` on Slinky Slurm recipes.
+
 `robust-controller` prefers the Kubeflow Trainer path when the recipe ships
 `kubeflow-trainer`, because that path reconciles a custom resource to a
 terminal condition: after the deployment, webhook, CRD `Established=True` and
@@ -302,6 +338,113 @@ the CTRF message. The TrainJob's pod is created by the operator from the
 runtime, whose scheduling vocabulary the bundler bakes in, so the context
 tolerations do not apply to it. The Dynamo path records the existing
 `DynamoGraphDeployment` conditions as an observation and creates no CR.
+
+`inference-gateway` reads the recipe's Gateway once (profile from
+`pkg/validator/v1.ResolveInferenceGatewayProfile`) and hands it to the
+data-plane, exposure and traffic steps. The traffic phase
+(`validators/conformance/inference_gateway_traffic.go`) mirrors the upstream
+`TestGatewayAPIInference` with one difference: the HTTPRoute attaches to the
+recipe's Gateway across namespaces instead of a Gateway the test creates, so
+the data plane under test is the one AICR deployed. Before creating anything
+it resolves the endpoint the probe posts to from the Gateway's first
+hostname-free HTTP listener (a hostname-bound or missing HTTP listener fails
+with `ErrCodeInvalidRequest`, as the performance validator does; the per-run
+`.conformance.invalid` hostname never intersects a listener hostname, so a
+hostname-bound listener would never accept the route), and the HTTPRoute's
+parentRef names that listener as its `sectionName`, so the `Accepted` wait
+judges the listener the probe's requests arrive on and an acceptance through
+another listener on the Gateway does not count: the proxy
+Service's in-cluster name for a `service-endpoints` data plane, the first
+`IPAddress` or `Hostname` status address for `gateway-address`. With a
+declared `gateway-address` profile the probe connects to that status address
+from inside the cluster, so the address's `loadBalancerSourceRanges` and the
+load balancer's hairpin behavior apply to it; no shipped recipe declares that
+profile (agentgateway is `service-endpoints`). In a per-run namespace
+(`gateway-traffic-<token>`, the shared ownership token and UID-guarded
+cleanup, labeled `app.kubernetes.io/component=inference-perf` so a listener
+whose `allowedRoutes` selector admits the performance validator's namespaces
+admits it too, and without `app.kubernetes.io/managed-by` so the performance
+validator's stale-namespace prune never selects it) it creates two CPU backends (`model-v1`, `model-v2`: Deployment +
+Service each, `defaults.PythonProbeImage`, answering every request with their
+own name) and one HTTPRoute with the per-run hostname
+`ai-conformance-<token>.conformance.invalid`, which the probe sends as the
+`Host` header of every request, and two rules that both match the per-run
+path prefix `/ai-conformance-<token>`: the first additionally matches
+`OpenAI-Project: ai-conformance-canary` exactly and routes to `model-v2`, the
+default rule splits 70/30. The hostname and path are what isolate the test
+route from a tenant's route on the same listener: Gateway API ranks routes by
+hostname, then longest path, then method, then header matches, and a route
+with no hostname matches any `Host`, so rules with neither would lose every
+request, header-matched ones included, to a pre-existing `/v1` route; with
+the exact per-run hostname a tenant route carrying another hostname does not
+match the probe's requests at all, a hostname-less one ranks below it, and a
+tenant route can outrank the probe only by matching that exact hostname (and
+path). The routes already attached to the Gateway are recorded
+(`Gateway traffic: routes already attached`, a WARNING when there are any)
+and named in a verdict failure. It waits for the Gateway to report the route
+`Accepted` and `ResolvedRefs` (watch, re-Get on a closed channel; the
+`Gateway traffic: HTTPRoute status` artifact records what the Gateway did
+report, such as `NotAllowedByListeners`), then runs a probe pod that waits
+for the route to go live, sends 20 header requests and up to 10 rounds of 500
+unmatched requests, printing `HEADER` and `WEIGHTED` count lines the Go side
+re-evaluates: all header requests must reach `model-v2`, and one weighted
+round must land `model-v1` within `defaults.GatewayTrafficTolerance` of 70%
+with `other=0` (a failed request or one answered by a non-test backend). The
+`Gateway traffic verdict` artifact carries every round's counts and the step
+that decided (`deploy`, `route`, `probe`, `verdict`). Every pod honors the
+context tolerations; the HTTPRoute is deleted explicitly before the namespace
+so it does not stay attached to the recipe's Gateway while the namespace
+drains. The bounds (`defaults.GatewayTraffic*`) sit under the
+`inferenceGatewayWorkBudget` the 15m catalog timeout covers; a recipe that
+declares no gateway still skips before the phase.
+
+`workload-sandboxing` (#3615, CNCF `workload_sandboxing`: SHOULD at v1.37,
+MUST at v1.38 per KAR-0020) mirrors the upstream `TestWorkloadSandboxing`.
+`resolveSandboxedRuntimeClass` picks the RuntimeClass under test: the one
+`AICR_SANDBOX_RUNTIME_CLASS` names (accepted as given, as upstream accepts its
+flag; a name that matches no class is `ErrCodeInvalidRequest`), else the
+first by name whose name or handler contains one of the upstream keywords
+(`gvisor`, `runsc`, `kata`, `sandboxed`, `quark`, `krun`). None is
+`ErrCodeUnavailable` with the message `unmet prerequisite: no sandboxed
+RuntimeClass`: a failure, where upstream skips, because the requirement
+counts a platform without a sandbox runtime as Not Implemented and never
+not-applicable. Both outcomes record every RuntimeClass consulted. The check
+then runs the upstream probe script (`sandboxProbeScript`, exiting 0 so the
+pod reaches a terminal phase and the logs are complete, where upstream sleeps
+and polls) in two CPU-only pods from a vanilla image,
+`docker.io/library/ubuntu:22.04` by default: the sandboxed pod on the chosen
+RuntimeClass, left to the scheduler so the class's own `scheduling`
+constraints apply, with the context tolerations (the package's tolerate-all
+default when none are set, which upstream does not grant its sandboxed pod: a
+deliberate choice so a sandbox runtime on a tainted GPU pool is reachable, at
+the cost that a cordoned or NotReady node inside the class's node set can
+absorb the pod until the pod timeout); then an unsandboxed control
+pod pinned by `spec.nodeName` to the node the sandboxed pod landed on, with
+tolerate-all so a dedicated sandbox pool's taints do not evict it.
+`parseSandboxProbeLogs` reads the `SANDBOX_INFO` and `SANDBOX_PROBE` lines and
+`verifyWorkloadSandboxing` decides: both scripts printed their completion
+marker, the sandboxed pod passed the four probes (no host daemon in `/proc`,
+`/dev/mem` and `/dev/kmem` unreadable, no `/etc/kubernetes`,
+`/var/lib/kubelet` or `/var/log/pods`, no host bridge, CNI or bond
+interface), and `kernelIdentitiesDiffer` finds its `uname -r`,
+`/proc/version` or `boot_id` different from the control pod's (a field either
+side could not read is not compared). Every failing probe is named in one
+`ErrCodeInternal` error, the code the other probe checks use for a failed
+subtest; incomplete output is a failure, not a pass on what was seen. A check
+deadline too short for cleanup fails with `ErrCodeTimeout` before anything is
+created, and a cleanup or apiserver read failure carries its own classified
+code. The probe image is configurable for mirrors through
+`AICR_SANDBOX_PROBE_IMAGE` (forwarded from the orchestrator's shell to this
+check only), which replaces the full reference; `AICR_VALIDATOR_IMAGE_REGISTRY`
+deliberately does not rewrite it, for the reason given for the busybox probe
+and the NCCL workload image. The check does not skip on Slinky Slurm recipes:
+the probe requests no GPU, so the NodeSet holding every GPU is no obstacle.
+Which sandbox runtime AICR recipes provide, and on which pool, is the pending
+product decision of #3615; until it lands no embedded recipe declares the
+check, so the `workload_sandboxing` row renders `NOT TESTED (not run)` at
+SHOULD, and an operator whose cluster already has gVisor or Kata can declare
+it on a recipe copy today (naming the class with `AICR_SANDBOX_RUNTIME_CLASS`
+when detection does not match).
 
 `cluster-autoscaling` drives a scale event only on the Karpenter path and
 records that scale-up as an observation (scale-down is not observed). The EKS,
@@ -321,7 +464,10 @@ Karpenter) fail `NotFound` when every read answered NotFound, or with the
 read's classified code when the Deployment was unavailable or a read could not
 land; the artifacts still record the unread reads as unread. The remedy for a
 platform without workload-driven autoscaling is a
-`spec.validate.evidence.cncf.notApplicable` justification. A providerID no
+`spec.validate.evidence.cncf.notApplicable` justification; for a platform
+whose autoscaler the check observed but did not drive (the OBSERVED pass),
+a `spec.validate.evidence.cncf.documented` entry citing the provider's
+autoscaler documentation establishes the requirement in the submission. A providerID no
 probe recognizes skips as "no autoscaler probe for this provider" (naming the
 scheme, or an unschemed providerID such as OKE's bare OCID), a missing probe
 rather than product nonapplicability, which only that declaration states.
@@ -770,9 +916,12 @@ be set from the catalog or a `--data` overlay:
 | Variable | Forwarded to | Purpose |
 |----------|--------------|---------|
 | `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
+| `AICR_SANDBOX_RUNTIME_CLASS` | `workload-sandboxing` | Names the sandboxed `RuntimeClass` to test instead of auto-detecting one by the gVisor/Kata keywords (the upstream `-sandbox-runtime-class` flag); a name the cluster has no class for fails the check with `ErrCodeInvalidRequest`. |
+| `AICR_SANDBOX_PROBE_IMAGE` | `workload-sandboxing` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must provide a POSIX `/bin/sh`, `uname`, `cat`, `ls`, `wc`, `head`, `awk` and `tr` for the probe script; the probe pods carry no `imagePullSecrets`, as the other vanilla probes in this package do not, so a mirror that needs credentials must supply them node-side. |
 | `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
 | `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway is open to the internet. What is assessed follows the declared `dataPlane`, not whether the controller runs a Service: with `service-endpoints` (the default), the proxy `LoadBalancer`'s `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`); with `gateway-address`, Service source ranges are not read at all, and the check fails when a Gateway status address is public, or is a `Hostname` or an unspecified address (`0.0.0.0`, `::`) the check cannot classify (a Gateway with no `status.addresses` at all fails the data-plane step in every mode, before exposure is assessed). Default (unset): the open exposure is recorded and warned but the check still passes. Which gateway is assessed, and how, comes from the recipe's inference gateway profile (`pkg/validator/v1.ResolveInferenceGatewayProfile`; see [Declaring the inference gateway](../integrator/data-extension.md#declaring-the-inference-gateway)). |
 | `AICR_NCCL_RUNTIME_IMAGE` | `nccl-all-reduce-bw`, `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls` | Overrides the NCCL launcher/worker image baked into the per-platform TrainingRuntime templates; a malformed reference fails closed in the pod. |
+| `AICR_DRIVER_RUNTIME_IMAGE` | `driver-runtime-management` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must ship no accelerator driver or tools (finding them inside is what the check proves) and must provide a POSIX `/bin/sh`, `head` and `tr` for the probe script. |
 
 **RBAC.** The engine creates a per-run ServiceAccount and
 ClusterRoleBinding named `aicr-validator-<runID>`. Per-run naming

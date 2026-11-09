@@ -195,12 +195,24 @@ type gpuTestRun struct {
 	// runtimeClassProbePodName is the AICR hardening extra's probe pod
 	// (secure-accelerator-access only).
 	runtimeClassProbePodName string
+	// driverProbePodName is the vanilla-image probe pod of
+	// driver-runtime-management.
+	driverProbePodName string
 	// IMEX channel subtest names (dra-support): the per-run ComputeDomain,
 	// the ResourceClaimTemplate the DRA driver generates from it, and the
 	// probe pod that consumes one channel from that template.
 	computeDomainName string
 	claimTemplateName string
 	imexPodName       string
+	// workload-sandboxing probe pods: the one on the sandboxed RuntimeClass
+	// and the unsandboxed control pinned to the same node.
+	sandboxProbePodName   string
+	sandboxControlPodName string
+
+	// namespaceLabels are stamped on the namespace beside the ownership
+	// label; a check sets them when something outside the run selects the
+	// namespace by label (a Gateway listener's allowedRoutes selector).
+	namespaceLabels map[string]string
 
 	nsObserved     bool
 	nsUID          types.UID
@@ -251,10 +263,14 @@ func newGPUTestRun() (*gpuTestRun, error) {
 		noAllocPodName: noAllocProbePrefix + token,
 
 		runtimeClassProbePodName: runtimeClassProbePrefix + token,
+		driverProbePodName:       driverRuntimeProbePodPrefix + token,
 
 		computeDomainName: imexComputeDomainPrefix + token,
 		claimTemplateName: imexClaimTemplatePrefix + token,
 		imexPodName:       imexTestPodPrefix + token,
+
+		sandboxProbePodName:   sandboxProbePodPrefix + token,
+		sandboxControlPodName: sandboxControlPodPrefix + token,
 	}, nil
 }
 
@@ -268,10 +284,16 @@ func newGPUTestRun() (*gpuTestRun, error) {
 // it and capture its UID. Anything else is a FOREIGN namespace: fail the
 // check with ErrCodeConflict and mark the run so cleanup never deletes it.
 func createGPUTestNamespace(ctx context.Context, clientset kubernetes.Interface, run *gpuTestRun) error {
+	nsLabels := map[string]string{gpuTestRunLabel: run.token}
+	for k, v := range run.namespaceLabels {
+		if k != gpuTestRunLabel {
+			nsLabels[k] = v
+		}
+	}
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   run.namespace,
-			Labels: map[string]string{gpuTestRunLabel: run.token},
+			Labels: nsLabels,
 		},
 	}
 	created, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
@@ -875,7 +897,13 @@ func waitForGPUTestPod(ctx context.Context, clientset kubernetes.Interface, run 
 // to re-Get + re-watch instead of failing — see the repo anti-pattern list.
 // what names the pod in error messages.
 func waitForTerminalPod(ctx context.Context, clientset kubernetes.Interface, namespace, name, what string) (*corev1.Pod, error) {
-	waitCtx, cancel := context.WithTimeout(ctx, defaults.DRATestPodTimeout)
+	return waitForTerminalPodWithin(ctx, clientset, namespace, name, what, defaults.DRATestPodTimeout)
+}
+
+// waitForTerminalPodWithin is waitForTerminalPod under a caller-chosen bound,
+// for probes whose run is longer or shorter than a GPU test pod's.
+func waitForTerminalPodWithin(ctx context.Context, clientset kubernetes.Interface, namespace, name, what string, timeout time.Duration) (*corev1.Pod, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	var lastPhase corev1.PodPhase

@@ -1,0 +1,132 @@
+metadata:
+  kubernetesVersion: v1.37
+  platformName: Test Platform
+  platformVersion: 1.2.3
+  vendorName: Test Vendor
+  websiteUrl: https://vendor.example/platform
+  repoUrl: https://github.com/vendor/platform
+  documentationUrl: https://vendor.example/docs
+  productLogoUrl: https://vendor.example/logo.svg
+  description: A GPU platform under test.
+  contactEmailAddress: owner@vendor.example
+  k8sConformanceUrl: https://github.com/cncf/k8s-conformance/tree/master/v1.37/test-platform
+spec:
+  accelerators:
+    - id: driver_runtime_management
+      description: Provide a verifiable mechanism for ensuring that compatible accelerator drivers and corresponding container runtime configurations are correctly installed and maintained on nodes with accelerators. Once the accelerator supports exposing driver and runtime version information as part of DRA, then the platform should use the DRA mechanism for verification.
+      level: SHOULD
+      status: Not Implemented
+      evidence: []
+      notes: 'Not claimed by this run: driver-runtime-management failed.'
+    - id: gpu_sharing
+      description: 'For accelerators that support static GPU sharing, provide well-defined mechanisms for at least one GPU sharing strategy to improve utilization for workloads that do not require a full dedicated GPU. If hardware-level partitioning is supported, then these fractional GPU resources should be exposed as schedulable resources. If software-based sharing (e.g. time-slicing) is supported, then oversubscription of GPUs should be allowed. Forward-looking: Once the accelerator supports static GPU sharing as part of DRA, the platform should expose the DRA mechanism to allow users to leverage static GPU sharing. Once the accelerator supports dynamic GPU sharing as part of DRA and the partitionable devices feature is GA, the platform should expose the DRA mechanism to allow users to leverage dynamic GPU sharing.'
+      level: SHOULD
+      status: Not Implemented
+      evidence: []
+      notes: 'Not claimed: AICR has no check for this requirement and no documentation was cited.'
+    - id: virtualized_accelerator
+      description: 'For accelerators that support virtualized accelerator technologies (e.g. vGPU), provide well-defined mechanisms for these to be exposed and managed, maintaining consistency with physical fractional GPUs. Forward-looking: Once the accelerator supports virtualized accelerator technologies as part of DRA, then the platform should use the DRA mechanism.'
+      level: SHOULD
+      status: Not Implemented
+      evidence: []
+      notes: 'Not claimed: AICR has no check for this requirement and no documentation was cited.'
+  networking:
+    - id: ai_inference
+      description: Support the Kubernetes Gateway API with an implementation for advanced traffic management for inference services, which enables capabilities like weighted traffic splitting, header-based routing (for OpenAI protocol headers), and optional integration with service meshes.
+      level: MUST
+      status: Implemented
+      evidence:
+        - evidence/inference-gateway.md
+        - junit.xml#inference-gateway
+        - e2e.log#inference-gateway
+      notes: 'Demonstrates that the cluster supports the Kubernetes Gateway API for AI/ML inference routing: an operational GatewayClass and Gateway, and an HTTPRoute on that Gateway that sends header-matched requests to a canary backend and splits the rest 70/30 by weight, measured from a probe pod. The implementation observed is recorded in the check output. Demonstrated by the AICR conformance check inference-gateway (junit.xml and e2e.log testcases of the same name).'
+    - id: advanced_inference_ingress
+      description: Support an implementation of the Gateway API Inference Extension (GAIE), which can route requests to models hosted on Kubernetes. The implementation supports serving LLMs and making advanced routing decisions (e.g., K/V cache-aware routing) based on metrics and capabilities advertised by the underlying model serving platform.
+      level: SHOULD
+      status: Not Implemented
+      evidence: []
+      notes: 'Not claimed: AICR has no check for this requirement and no documentation was cited.'
+    - id: high_performance_networking
+      description: If high performance pod-to-pod communication is needed, then provide well-defined mechanisms for these specialized network resources to be managed and exposed such that their characteristics should be discoverable to enable informed scheduling or workload configuration and to enable pods to attach to multiple network interfaces. Platforms should use DRA as the mechanism to manage and expose these specialized network resources (e.g., DRANET).
+      level: SHOULD
+      status: Not Implemented
+      evidence: []
+      notes: 'Not claimed: AICR has no check for this requirement and no documentation was cited.'
+    - id: disaggregated_inference
+      description: Support the deployment and operation of disaggregated inference architectures. To be conformant, the platform should demonstrate that it can successfully install and run a disaggregated inference solution (e.g., vLLM, SGLang, llm-d, or Dynamo, with separate instances for distinct phases like prefill and decode). Disaggregated serving splits phases such as prefill and decode into separately scalable components so each phase can match different compute/memory/network needs, improving GPU utilization and tail latency while enabling higher throughput under mixed and bursty LLM workloads.
+      level: SHOULD
+      status: Not Implemented
+      evidence: []
+      notes: 'Not claimed: AICR has no check for this requirement and no documentation was cited.'
+  schedulingOrchestration:
+    - id: gang_scheduling
+      description: The platform must allow for the installation and successful operation of at least one gang scheduling solution that ensures all-or-nothing scheduling for distributed AI workloads (e.g. Kueue, Volcano, etc.) To be conformant, the vendor must demonstrate that their platform can successfully run at least one such solution.
+      level: MUST
+      status: Implemented
+      evidence:
+        - evidence/gang-scheduling.md
+        - junit.xml#gang-scheduling
+        - e2e.log#gang-scheduling
+      notes: Demonstrates that the cluster supports gang (all-or-nothing) scheduling of a PodGroup. The scheduler observed is recorded in the check output. Demonstrated by the AICR conformance check gang-scheduling (junit.xml and e2e.log testcases of the same name).
+    - id: cluster_autoscaling
+      description: If the platform provides a cluster autoscaler or an equivalent mechanism, it must be able to scale up/down node groups containing specific accelerator types based on pending pods requesting those accelerators.
+      level: MUST
+      status: Implemented
+      evidence:
+        - https://vendor.example/docs/cluster-autoscaler
+        - evidence/cluster-autoscaling.md
+      notes: The managed cluster autoscaler scales the GPU node pool on pending accelerator pods. AICR recorded the cluster's arrangement without a behavioral test (cluster-autoscaling observed, not demonstrated); the claim rests on the documentation cited.
+    - id: pod_autoscaling
+      description: If the platform supports the HorizontalPodAutoscaler, it must function correctly for pods utilizing accelerators. This includes the ability to scale these Pods based on custom metrics relevant to AI/ML workloads.
+      level: MUST
+      status: Implemented
+      evidence:
+        - evidence/pod-autoscaling.md
+        - junit.xml#pod-autoscaling
+        - e2e.log#pod-autoscaling
+      notes: Demonstrates that a HorizontalPodAutoscaler scales accelerator-requesting pods from one to two replicas and back on a per-pod custom metric served through the custom metrics API, holding one replica while the metric is below target. Demonstrated by the AICR conformance check pod-autoscaling (junit.xml and e2e.log testcases of the same name).
+  observability:
+    - id: accelerator_metrics
+      description: For supported accelerator types, the platform must allow for the installation and successful operation of at least one accelerator metrics solution that exposes fine-grained performance metrics via a standardized, machine-readable metrics endpoint. This must include a core set of metrics for per-accelerator utilization and memory usage. Additionally, other relevant metrics such as temperature, power draw, and interconnect bandwidth should be exposed if the underlying hardware or virtualization layer makes they available. The list of metrics should align with emerging standards, such as OpenTelemetry metrics, to ensure interoperability. The platform may provide a managed solution, but this is not required for conformance.
+      level: MUST
+      status: Implemented
+      evidence:
+        - evidence/accelerator-metrics.md
+        - junit.xml#accelerator-metrics
+        - e2e.log#accelerator-metrics
+      notes: Demonstrates that an accelerator metrics exporter exposes per-device utilization and memory metrics in Prometheus exposition format; temperature, power and interconnect metrics are recorded where present. Demonstrated by the AICR conformance check accelerator-metrics (junit.xml and e2e.log testcases of the same name).
+    - id: ai_service_metrics
+      description: Provide a monitoring system capable of discovering and collecting metrics from workloads that expose them in a standard format (e.g. Prometheus exposition format). This ensures easy integration for collecting key metrics from common AI frameworks and servers.
+      level: MUST
+      status: Implemented
+      evidence:
+        - evidence/ai-service-metrics.md
+        - junit.xml#ai-service-metrics
+        - e2e.log#ai-service-metrics
+      notes: Demonstrates that the monitoring system discovers a workload's Prometheus exposition endpoint through a ServiceMonitor and collects its request counter, which rises by exactly the requests sent. Demonstrated by the AICR conformance check ai-service-metrics (junit.xml and e2e.log testcases of the same name).
+  security:
+    - id: secure_accelerator_access
+      description: Ensure that access to accelerators from within containers is properly isolated and mediated by the Kubernetes resource management framework (device plugin or DRA) and container runtime, preventing unauthorized access or interference between workloads.
+      level: MUST
+      status: Implemented
+      evidence:
+        - evidence/secure-accelerator-access.md
+        - junit.xml#secure-accelerator-access
+        - e2e.log#secure-accelerator-access
+      notes: Demonstrates that GPU access is mediated through a Kubernetes allocation mechanism (DRA ResourceClaims or device plugin resource limits) with no direct host device access or hostPath mounts. On Slinky Slurm recipes the Slurm access path (GRES allocation and cgroup device confinement on the GPUs the NodeSet pod holds) fills this page instead. Demonstrated by the AICR conformance check secure-accelerator-access (junit.xml and e2e.log testcases of the same name).
+    - id: workload_sandboxing
+      description: Provide a mechanism to run workloads in a sandbox that provides strong isolation from the host node kernel. This is crucial for AI agent use cases that may execute untrusted code. The sandbox should isolate the workload's process, memory, filesystem, and network access from the host node and other co-located pods.
+      level: SHOULD
+      status: Not Implemented
+      evidence: []
+      notes: 'Not claimed by this run: not run.'
+  operator:
+    - id: robust_controller
+      description: The platform must prove that at least one complex AI operator with a CRD (e.g., Ray, Kubeflow) can be installed and functions reliably. This includes verifying that the operator's pods run correctly, its webhooks are operational, and its custom resources can be reconciled.
+      level: MUST
+      status: Implemented
+      evidence:
+        - evidence/robust-operator.md
+        - junit.xml#robust-controller
+        - e2e.log#robust-controller
+      notes: 'Demonstrates that a complex AI operator with a CRD can be installed and functions reliably: operator pods, an Established CRD, and a webhook that rejects an invalid custom resource. On the Kubeflow Trainer path a valid TrainJob is also reconciled to Complete; the Dynamo path records the existing resources'' conditions as an observation only. The operator observed is recorded in the check output. Demonstrated by the AICR conformance check robust-controller (junit.xml and e2e.log testcases of the same name).'

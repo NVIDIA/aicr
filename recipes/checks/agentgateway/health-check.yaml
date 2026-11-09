@@ -16,8 +16,9 @@
 #
 # Validates that agentgateway is running and healthy in the agentgateway-system
 # namespace. Checks that the agentgateway deployment has at least one available
-# replica and that no pods in the namespace are stuck in Pending, Failed, or
-# Unknown phases.
+# replica, that no pods in the namespace are stuck in Pending, Failed, or
+# Unknown phases, and that the recipe's Gateway (applied by the separate
+# agentgateway-post step) exists and is Accepted and Programmed.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -39,6 +40,28 @@ spec:
                 namespace: agentgateway-system
               status:
                 (availableReplicas > `0`): true
+    - name: validate-inference-gateway-programmed
+      try:
+        # The Gateway is not part of the agentgateway chart: the bundler
+        # applies recipes/components/agentgateway/manifests/inference-gateway.yaml
+        # as the separate agentgateway-post step, so a healthy controller
+        # says nothing about whether that step ran (#3714). Accepted=True
+        # means the controller claimed the Gateway for its GatewayClass;
+        # Programmed=True means it generated the proxy Deployment and
+        # Service. Each condition is selected by type with a JMESPath
+        # projection rather than matched by position in the list.
+        - assert:
+            resource:
+              apiVersion: gateway.networking.k8s.io/v1
+              kind: Gateway
+              metadata:
+                name: inference-gateway
+                namespace: agentgateway-system
+              status:
+                (conditions[?type == 'Accepted']):
+                  - status: "True"
+                (conditions[?type == 'Programmed']):
+                  - status: "True"
     - name: validate-all-pods-healthy
       try:
         # Assert no pods are in unhealthy phases (Pending / Failed /

@@ -32,5 +32,5 @@ charts:
       - nodewrights.nodewright.nvidia.com
       - skyhooks.skyhook.nvidia.com
     repository: oci://ghcr.io/nvidia/nodewright/charts
-    sourceVersion: v0.20.0
+    sourceVersion: v0.21.0
 component: nodewright-operator

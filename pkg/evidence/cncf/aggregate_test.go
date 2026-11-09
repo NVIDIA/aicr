@@ -111,9 +111,75 @@ func TestAggregateReportRequirementStatus(t *testing.T) {
 		{
 			name:        "a SHOULD with no AICR check is not tested without failing the run",
 			tests:       allMustsPassed,
-			requirement: "workload_sandboxing",
+			requirement: "gpu_sharing",
 			wantStatus:  StatusNotTested,
 			wantReason:  untestedNoCheck,
+			wantPassed:  true,
+		},
+		{
+			name:        "a passed SHOULD check passes its requirement with proof",
+			tests:       append(slices.Clone(allMustsPassed), ctrf.TestResult{Name: "driver-runtime-management", Status: "passed"}),
+			requirement: "driver_runtime_management",
+			wantStatus:  StatusPassed,
+			wantProof:   []string{"driver-runtime-management"},
+			wantPassed:  true,
+		},
+		{
+			// driver_runtime_management is SHOULD at v1.37: a disproven
+			// capability renders FAILED on its own row and the requirement
+			// aggregate still passes (the validate run's own per-check
+			// --fail-on-error verdict is a separate matter).
+			name:        "a failed SHOULD check fails the requirement but not the aggregate",
+			tests:       append(slices.Clone(allMustsPassed), ctrf.TestResult{Name: "driver-runtime-management", Status: "failed", Message: "version mismatch"}),
+			requirement: "driver_runtime_management",
+			wantStatus:  StatusFailed,
+			wantReason:  "driver-runtime-management failed",
+			wantPassed:  true,
+		},
+		{
+			name: "a skipped SHOULD check is not tested without failing the aggregate",
+			tests: append(slices.Clone(allMustsPassed), ctrf.TestResult{Name: "driver-runtime-management", Status: "skipped",
+				Extra: map[string]string{"skipReason": "slurm-managed-gpus"}}),
+			requirement: "driver_runtime_management",
+			wantStatus:  StatusNotTested,
+			wantReason:  "driver-runtime-management skipped: slurm-managed-gpus",
+			wantPassed:  true,
+		},
+		{
+			name:        "a SHOULD check absent from the run is not tested without failing the aggregate",
+			tests:       allMustsPassed,
+			requirement: "driver_runtime_management",
+			wantStatus:  StatusNotTested,
+			wantReason:  untestedNotRun,
+			wantPassed:  true,
+		},
+		{
+			name:        "a passed workload_sandboxing check passes its requirement with proof",
+			tests:       append(slices.Clone(allMustsPassed), ctrf.TestResult{Name: "workload-sandboxing", Status: "passed"}),
+			requirement: "workload_sandboxing",
+			wantStatus:  StatusPassed,
+			wantProof:   []string{"workload-sandboxing"},
+			wantPassed:  true,
+		},
+		{
+			// workload_sandboxing is SHOULD at v1.37: a cluster with no
+			// sandboxed RuntimeClass fails the check, renders FAILED on its
+			// own row, and the requirement aggregate still passes (the
+			// validate run's own per-check --fail-on-error verdict is a
+			// separate matter).
+			name:        "a failed workload_sandboxing check fails the requirement but not the aggregate",
+			tests:       append(slices.Clone(allMustsPassed), ctrf.TestResult{Name: "workload-sandboxing", Status: "failed", Message: "unmet prerequisite: no sandboxed RuntimeClass"}),
+			requirement: "workload_sandboxing",
+			wantStatus:  StatusFailed,
+			wantReason:  "workload-sandboxing failed",
+			wantPassed:  true,
+		},
+		{
+			name:        "a workload_sandboxing check absent from the run is not tested without failing the aggregate",
+			tests:       allMustsPassed,
+			requirement: "workload_sandboxing",
+			wantStatus:  StatusNotTested,
+			wantReason:  untestedNotRun,
 			wantPassed:  true,
 		},
 		{
@@ -723,5 +789,118 @@ func TestAggregateOutcome(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// driver_runtime_management graduates to MUST at v1.38 (KAR-0001). No v1.38
+// checklist is carried yet, so the level flip is exercised on the
+// requirement aggregation directly: the same failed or skipped result that
+// leaves the aggregate passing at SHOULD blocks it once the level is MUST,
+// and a passed result establishes the MUST.
+func TestDriverRuntimeManagementLevelDecidesRunVerdict(t *testing.T) {
+	page := pageForRequirement("driver_runtime_management")
+	if page == nil {
+		t.Fatal("driver_runtime_management has no evidence page")
+	}
+	results := func(status string) map[string][]ctrf.TestResult {
+		return map[string][]ctrf.TestResult{"driver-runtime-management": {{Name: "driver-runtime-management", Status: status}}}
+	}
+	tests := []struct {
+		name       string
+		level      Level
+		status     string
+		wantStatus RequirementStatus
+		wantPassed bool
+	}{
+		{"SHOULD failed does not block", LevelShould, "failed", StatusFailed, true},
+		{"SHOULD skipped does not block", LevelShould, "skipped", StatusNotTested, true},
+		{"MUST failed blocks", LevelMust, "failed", StatusFailed, false},
+		{"MUST skipped blocks", LevelMust, "skipped", StatusNotTested, false},
+		{"MUST passed establishes", LevelMust, "passed", StatusPassed, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := aggregateRequirement("driver_runtime_management", tt.level, page, results(tt.status))
+			if r.Status != tt.wantStatus {
+				t.Errorf("Status = %q, want %q", r.Status, tt.wantStatus)
+			}
+			agg := &Aggregate{Version: Version137, Requirements: []RequirementResult{r}}
+			if agg.Passed() != tt.wantPassed {
+				t.Errorf("Passed() = %v, want %v (incomplete: %v)", agg.Passed(), tt.wantPassed, incompleteIDs(agg))
+			}
+		})
+	}
+	// Every carried checklist holds driver_runtime_management at SHOULD, the
+	// level the SHOULD cases above assume; the MUST cases model v1.38.
+	for _, v := range SupportedVersions() {
+		cl, err := ChecklistFor(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r := cl.Requirement("driver_runtime_management"); r == nil || r.Level != LevelShould {
+			t.Errorf("%s: driver_runtime_management = %+v, want SHOULD", v, r)
+		}
+	}
+}
+
+// workload_sandboxing graduates to MUST at v1.38 (KAR-0020). No v1.38
+// checklist is carried yet, so the level flip is exercised on the
+// requirement aggregation directly: the same failed result (a cluster with no
+// sandboxed RuntimeClass fails the check, it never skips) that leaves the
+// aggregate passing at SHOULD blocks it once the level is MUST, and a passed
+// result establishes the MUST.
+func TestWorkloadSandboxingLevelDecidesRunVerdict(t *testing.T) {
+	page := pageForRequirement("workload_sandboxing")
+	if page == nil {
+		t.Fatal("workload_sandboxing has no evidence page")
+	}
+	results := func(status string) map[string][]ctrf.TestResult {
+		return map[string][]ctrf.TestResult{"workload-sandboxing": {{Name: "workload-sandboxing", Status: status, Message: "unmet prerequisite: no sandboxed RuntimeClass"}}}
+	}
+	tests := []struct {
+		name       string
+		level      Level
+		status     string
+		wantStatus RequirementStatus
+		wantPassed bool
+	}{
+		{"SHOULD failed does not block", LevelShould, "failed", StatusFailed, true},
+		{"SHOULD not run does not block", LevelShould, "pending", StatusNotTested, true},
+		{"MUST failed blocks", LevelMust, "failed", StatusFailed, false},
+		{"MUST not run blocks", LevelMust, "pending", StatusNotTested, false},
+		{"MUST passed establishes", LevelMust, "passed", StatusPassed, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := aggregateRequirement("workload_sandboxing", tt.level, page, results(tt.status))
+			if r.Status != tt.wantStatus {
+				t.Errorf("Status = %q, want %q", r.Status, tt.wantStatus)
+			}
+			agg := &Aggregate{Version: Version137, Requirements: []RequirementResult{r}}
+			if agg.Passed() != tt.wantPassed {
+				t.Errorf("Passed() = %v, want %v (incomplete: %v)", agg.Passed(), tt.wantPassed, incompleteIDs(agg))
+			}
+		})
+	}
+	// Every carried checklist that carries workload_sandboxing holds it at
+	// SHOULD, the level the SHOULD cases above assume; the MUST cases model
+	// v1.38. Checklists before v1.37 do not carry it at all.
+	var carried int
+	for _, v := range SupportedVersions() {
+		cl, err := ChecklistFor(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := cl.Requirement("workload_sandboxing")
+		if r == nil {
+			continue
+		}
+		carried++
+		if r.Level != LevelShould {
+			t.Errorf("%s: workload_sandboxing = %+v, want SHOULD", v, r)
+		}
+	}
+	if carried == 0 {
+		t.Error("no carried checklist holds workload_sandboxing; the SHOULD cases above assert against nothing")
 	}
 }

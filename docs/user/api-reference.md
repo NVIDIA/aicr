@@ -521,7 +521,8 @@ device plugin when resolving from a snapshot. See
 
 ```shell
 # GKE: omit profile= for the gke-default default, or select
-# gpuStack=bundle-installer explicitly, then POST to /v1/bundle.
+# gpuStack=bundle-installer (or gpuStack=dra) explicitly, then POST to
+# /v1/bundle.
 # -f stops on an HTTP error so a 4xx/5xx recipe body is never staged and
 # an error response is never written to bundles.zip.
 set -euo pipefail
@@ -627,7 +628,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `dranet` | DRA network driver for the ConnectX-9 RDMA fabric (VR200 RKE2) |
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
 | `gatekeeper` | OPA Gatekeeper policy controller |
-| `gcp-driver-installer` | Google cos-gpu-installer DaemonSet; renders only under `gpuStack=bundle-installer` (GKE) |
+| `gcp-driver-installer` | Google cos-gpu-installer DaemonSet; renders only under `gpuStack=bundle-installer` and `gpuStack=dra` (GKE) |
 | `gke-gb200-rdma` | NCCL gIB (GPUDirect-RDMA over RoCE) plugin installer for GB200 (GKE) |
 | `gke-nccl-tcpxo` | NCCL TCPXO network plugin for optimized collective communication (GKE) |
 | `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
