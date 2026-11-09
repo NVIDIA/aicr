@@ -384,33 +384,24 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// default. The inner app-of-apps.yaml is discarded, so the only
 		// observable effect is a correct collision baseline.
 		AppName: cmp.Or(g.AppName, DefaultAppName),
-		// Forward CascadeDelete and SyncRetry too: child finalizers and
-		// syncPolicy.retry survive the YAML round-trip in
-		// transformApplication untouched. NamePrefix /
-		// DestinationServer / Project are NOT forwarded — those fields
-		// are rewritten into `.Values.deployer.*` template expressions
-		// during transform, so forwarding would bake values the rewrite
-		// then discards.
+		// The inner generator checks every child name, with the baked
+		// NamePrefix default composed in, against AppName. transformApplication
+		// rebuilds metadata.name from a `.Values.deployer.namePrefix`
+		// expression, so the baked prefix does not reach the chart. The
+		// rendered template guard covers install-time overrides.
+		NamePrefix: g.NamePrefix,
+		// Child finalizers and syncPolicy.retry survive the YAML round-trip
+		// in transformApplication untouched. DestinationServer and Project
+		// are left unset because the transform rewrites them into
+		// `.Values.deployer.*` expressions.
 		CascadeDelete: g.CascadeDelete,
 		SyncRetry:     g.SyncRetry,
 	}
 
-	baseOut, genErr := argocdGen.Generate(ctx, tmpDir)
-	if genErr != nil {
+	if _, genErr := argocdGen.Generate(ctx, tmpDir); genErr != nil {
 		// PropagateOrWrap keeps the delegate's code, so a chart digest
 		// mismatch reports CONFLICT here as it does under the argocd deployer.
 		return nil, errors.PropagateOrWrap(genErr, errors.ErrCodeInternal, "failed to generate base Argo CD output")
-	}
-
-	// The baked NamePrefix default composes into every child template, so
-	// validate it against the emitted releases before outputDir exists. The
-	// rendered template guard covers install-time deployer.namePrefix overrides.
-	releases := make([]string, 0, len(baseOut.Releases))
-	for _, r := range baseOut.Releases {
-		releases = append(releases, r.Name)
-	}
-	if nameErr := argocd.ValidateChildAppNames(g.NamePrefix, cmp.Or(g.AppName, DefaultAppName), releases); nameErr != nil {
-		return nil, nameErr
 	}
 
 	// Step 2: Create Helm chart output structure

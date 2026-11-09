@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
@@ -3419,6 +3420,11 @@ func TestHelmTemplate_IncludeRootAppToggle(t *testing.T) {
 // output is written. The install-time equivalents are covered by
 // TestHelmTemplate_ChildNameGuards below.
 func TestGenerate_ChildNameLimits(t *testing.T) {
+	manifest := func() map[string]map[string][]byte {
+		return map[string]map[string][]byte{
+			"gpu-operator": {"extra.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: extra\n")},
+		}
+	}
 	tests := []struct {
 		name      string
 		mutate    func(*Generator)
@@ -3434,6 +3440,33 @@ func TestGenerate_ChildNameLimits(t *testing.T) {
 			mutate: func(g *Generator) {
 				g.AppName = "tenant-gpu-operator"
 				g.NamePrefix = "tenant-"
+			},
+			errSubstr: "collides",
+		},
+		{
+			name: "pre child collides with parent app name",
+			mutate: func(g *Generator) {
+				g.AppName = "tenant-gpu-operator-pre"
+				g.NamePrefix = "tenant-"
+				g.ComponentPreManifests = manifest()
+			},
+			errSubstr: "collides",
+		},
+		{
+			name: "post child collides with parent app name",
+			mutate: func(g *Generator) {
+				g.AppName = "tenant-gpu-operator-post"
+				g.NamePrefix = "tenant-"
+				g.ComponentPostManifests = manifest()
+			},
+			errSubstr: "collides",
+		},
+		{
+			name: "readiness child collides with parent app name",
+			mutate: func(g *Generator) {
+				g.AppName = "tenant-gpu-operator-readiness"
+				g.NamePrefix = "tenant-"
+				g.ComponentReadiness = manifest()
 			},
 			errSubstr: "collides",
 		},
@@ -3457,6 +3490,33 @@ func TestGenerate_ChildNameLimits(t *testing.T) {
 				t.Errorf("error %q does not mention %q", err.Error(), tt.errSubstr)
 			}
 		})
+	}
+}
+
+// TestGenerate_PrefixedChildMatchesAppNameUnprefixed covers an app name equal
+// to a component name, which collides only when the prefix is dropped.
+func TestGenerate_PrefixedChildMatchesAppNameUnprefixed(t *testing.T) {
+	g := newTestHelmGenerator(t)
+	g.AppName, g.NamePrefix = "gpu-operator", "t1-"
+	outputDir := t.TempDir()
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	walkErr := filepath.WalkDir(outputDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if strings.Contains(string(data), "t1-gpu-operator") {
+			t.Errorf("%s bakes the prefixed child name", path)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk output: %v", walkErr)
 	}
 }
 
