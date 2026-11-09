@@ -2032,20 +2032,29 @@ func (b *DefaultBundler) warnExcludedDriverInstaller(recipeResult *recipe.Recipe
 	b.appendWarning(warning)
 }
 
-// aksToolkitHardeningManifest is the nodewright-customizations manifest that
-// sets the NVIDIA container toolkit device-isolation keys on AKS GPU nodes.
-const aksToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml"
+// aksToolkitHardeningManifest and okeToolkitHardeningManifest are the
+// nodewright-customizations manifests that set the NVIDIA container toolkit
+// device-isolation keys on AKS and OKE GPU nodes.
+const (
+	aksToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml"
+	okeToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-oke.yaml"
+)
 
-// warnExcludedToolkitHardening warns when a component carrying the AKS toolkit
-// hardening is left out of the bundle while gpu-operator's effective values
-// leave the node-image toolkit in place (toolkit.enabled=false, the
-// azure-managed profile). The hardening ships in nvidia-setup through
-// nodewright-customizations, so leaving that component out is an explicit
-// opt-out of it; this warns rather than blocks, but nothing else in the bundle
-// sets those keys. When gpu-operator's values cannot be resolved it warns too.
+// warnExcludedToolkitHardening warns when a component carrying the AKS or OKE
+// toolkit hardening is left out of the bundle while gpu-operator's effective
+// values leave the node-image toolkit in place (toolkit.enabled=false: the
+// azure-managed and oci-managed profiles). The hardening ships in nvidia-setup
+// through nodewright-customizations, so leaving that component out is an
+// explicit opt-out of it; this warns rather than blocks, but nothing else in
+// the bundle sets those keys. When gpu-operator's values cannot be resolved it
+// warns too.
 func (b *DefaultBundler) warnExcludedToolkitHardening(ctx context.Context, recipeResult *recipe.RecipeResult, componentName, how string) {
 	ref := recipeResult.GetComponentRef(componentName)
-	if ref == nil || !slices.Contains(ref.ManifestFiles, aksToolkitHardeningManifest) {
+	if ref == nil {
+		return
+	}
+	aks := slices.Contains(ref.ManifestFiles, aksToolkitHardeningManifest)
+	if !aks && !slices.Contains(ref.ManifestFiles, okeToolkitHardeningManifest) {
 		return
 	}
 	if recipeResult.GetComponentRef(gpuOperatorComponentName) == nil {
@@ -2059,9 +2068,12 @@ func (b *DefaultBundler) warnExcludedToolkitHardening(ctx context.Context, recip
 		"%s is excluded from this bundle (%s), which removes the NVIDIA container toolkit "+
 			"device-isolation hardening it delivers through nvidia-setup: any unprivileged pod "+
 			"that sets NVIDIA_VISIBLE_DEVICES gets every GPU on the node, and "+
-			"secure-accelerator-access fails. To skip only the InfiniBand/RDMA host prep, keep "+
-			"the component and set nodewrightcustomizations:accelerator=generic instead.",
+			"secure-accelerator-access fails.",
 		componentName, how)
+	if aks {
+		warning += " To skip only the InfiniBand/RDMA host prep, keep the component and set " +
+			"nodewrightcustomizations:accelerator=generic instead."
+	}
 	if err != nil {
 		warning += fmt.Sprintf(" (gpu-operator toolkit.enabled could not be resolved: %v)", err)
 	}

@@ -100,6 +100,13 @@ so `aicr validate` readiness fails until the add-on is reconfigured. An
 existing cluster on the add-on's default strategy needs that one change before
 it deploys an OKE recipe.
 
+Leaving `nodewright-customizations` out of a bundle (`--set
+nodewrightcustomizations:enabled=false`, or a `bundlers` filter that omits it)
+removes the `toolkit-hardening` CR along with every other nodewright
+customization. Under `oci-managed` that removes the hardening, so `aicr bundle`
+warns and `secure-accelerator-access` fails; under `operator-managed` the GPU
+Operator's toolkit keeps the keys.
+
 ## Alternative: Bring-Your-Own Image (`operator-managed`)
 
 Custom images (OKE Ubuntu pools are always custom images) may ship no NVIDIA
@@ -347,7 +354,7 @@ GB300 node:
 - A CRI-O drop-in sets `cni_default_network = "multus-cni-network"`, so CRI-O
   waits for Multus instead of starting pods on the primary network alone. Multus
   comes from `network-operator`, so `aicr bundle` rejects a GB300 bundle that
-  leaves `network-operator` out while keeping `nodewright-customizations`.
+  leaves `network-operator` out.
 - A systemd unit holds kubelet until the RDMA VFs have their driver bound and
   have stopped changing. Oracle Cloud Agent rebinds each VF seconds after
   creating it, and the SR-IOV device plugin scans once at start, so a scan

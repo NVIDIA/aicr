@@ -544,8 +544,7 @@ components:
             - gb300
         message: "The OKE GB300 tuning CR makes CRI-O require Multus, which
           network-operator installs, so without it the tuned nodes stay
-          NotReady. Re-enable network-operator, or also disable
-          nodewright-customizations with --set nodewrightcustomizations:enabled=false."
+          NotReady. Re-enable network-operator."
       - function: CheckWildcardAcceleratedToleration
         # Blocking: the wildcard deadlock requires manual node cordon/reboot to
         # recover, so fail the bundle rather than emit a missable warning.
