@@ -508,6 +508,30 @@ pod-grouper ignores them and creates per-pod groups). No GPU is requested in
 either phase, and the `Gang scheduling verdict` artifact records which phase
 decided the check.
 
+The scheduler under test is resolved from the recipe (`resolveGangTarget`).
+A recipe that declares `kai-scheduler`, or neither scheduler, exercises
+AICR's KAI: namespace `kai-scheduler`, `schedulerName: kai-scheduler`, the
+seven operand Deployments, PodGroups in `default-queue`, and a per-run
+`gang-scheduling-test-<suffix>` namespace the check creates and deletes. A
+recipe that declares `runai-cluster` (the `platform=runai` leaves, which
+disable `kai-scheduler`) exercises the KAI that Run:ai bundles instead:
+namespace `runai`, `schedulerName: runai-scheduler`, the `runai-operator` and
+`kai-operator` Deployments plus the KAI operands `kai-operator` renders
+(`admission`, `binder`, `pod-grouper`, `podgroup-controller`,
+`queue-controller`), and at least one scheduler shard, discovered as the
+`runai-scheduler-*` Deployments because Run:ai renders one per node pool.
+Run:ai refuses user-created Queues and resolves each PodGroup's queue from
+the Run:ai Project that owns its namespace, so on that target both phases run
+in the Project namespace named by `AICR_RUNAI_PROJECT_NAMESPACE` (a Project
+with explicit CPU and memory quota; one without gets zero and the positive
+phase cannot schedule), the PodGroups join the queue read from that
+namespace's `runai/queue` label, and cleanup deletes the pods and PodGroups
+but leaves the namespace, which belongs to the Project. A Run:ai recipe
+without that input fails rather than skips, because a Skip there would pass
+conformance without exercising the scheduler. The Run:ai path is verified by
+unit tests only until a UAT lane with a Run:ai control plane exists
+(NVIDIA/aicr#3302).
+
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
 **exclusive** — combining `all` with any other phase is rejected.
@@ -957,6 +981,7 @@ be set from the catalog or a `--data` overlay:
 | Variable | Forwarded to | Purpose |
 |----------|--------------|---------|
 | `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
+| `AICR_RUNAI_PROJECT_NAMESPACE` | `gang-scheduling` | The Run:ai Project namespace (`runai-<project>`) the gang test pods run in when the recipe declares `runai-cluster`. Required there: the check fails with `ErrCodeInvalidRequest` when it is unset, when the namespace does not exist, or when it carries no `runai/queue` label (so it is not a Project namespace). Ignored on every other recipe. The constant is `defaults.EnvRunaiProjectNamespace`. |
 | `AICR_SANDBOX_RUNTIME_CLASS` | `workload-sandboxing` | Names the sandboxed `RuntimeClass` to test instead of auto-detecting one by the gVisor/Kata keywords (the upstream `-sandbox-runtime-class` flag); a name the cluster has no class for fails the check with `ErrCodeInvalidRequest`. |
 | `AICR_SANDBOX_PROBE_IMAGE` | `workload-sandboxing` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must provide a POSIX `/bin/sh`, `uname`, `cat`, `ls`, `wc`, `head`, `awk` and `tr` for the probe script; the probe pods carry the `--image-pull-secret` Secrets copied into the per-run namespace, as every probe pod in this package does. |
 | `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
@@ -1841,7 +1866,7 @@ unrecognized value, which keeps a typo'd severity non-silent.
 | `CheckNKTPExportersHaveBackend` | With NKTP's bundled `otel-lgtm` disabled, each of its five backend exporter endpoints (`gateway_metrics`, `gateway_logs`, `gateway_traces`, `watchdog`, and `watchdog.sidecar`, each at `otelcol.config.exporters.otlp_grpc.endpoint`) is set explicitly, since the chart default targets `otel-lgtm`; a null or blank value counts as unset. A `--dynamic` `otel-lgtm.enabled` counts as disabled; a `--dynamic` endpoint counts as set. Wired at `severity: error`. |
 | `CheckNVSentinelNicHealthMonitorRequiresMetadataCollector` | `nic-health-monitor` is not enabled without `metadata-collector` (or a `nicInclusionRegexOverride`), which would otherwise discover zero devices |
 | `CheckNVSentinelPreflightDCGMReachable` | The preflight DCGM check's hostengine address resolves to a served Service (gpu-operator present, not relocated, and `dcgm.enabled`) |
-| `CheckNVSentinelPreflightGangSchedulerRequired` | Preflight gang coordination against KAI PodGroups is not enabled while `kai-scheduler` is disabled or absent |
+| `CheckNVSentinelPreflightGangSchedulerRequired` | Preflight gang coordination against KAI PodGroups is not enabled unless a component that installs the PodGroup CRD is enabled: `kai-scheduler`, or `runai-cluster`, whose chart bundles KAI |
 
 Registered in `pkg/bundler/validations/checks.go::init()`.
 

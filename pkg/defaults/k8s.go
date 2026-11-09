@@ -51,6 +51,14 @@ const (
 	// GangSchedulingTestNamespacePrefix prefixes the per-run namespace the
 	// gang-scheduling conformance check creates.
 	GangSchedulingTestNamespacePrefix = "gang-scheduling-test-"
+
+	// EnvRunaiProjectNamespace names the Run:ai Project namespace
+	// (runai-<project>) the gang-scheduling conformance check runs its test
+	// pods in when the recipe declares runai-cluster: Run:ai resolves each
+	// PodGroup's queue from the Project that owns its namespace, so the check
+	// cannot create a namespace of its own there. Read from the shell running
+	// aicr validate and forwarded to that check's pod only.
+	EnvRunaiProjectNamespace = "AICR_RUNAI_PROJECT_NAMESPACE"
 )
 
 // K8sAccessReviewConcurrency bounds how many Self/SubjectAccessReview

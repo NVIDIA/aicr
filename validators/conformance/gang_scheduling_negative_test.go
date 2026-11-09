@@ -588,7 +588,7 @@ func TestRunGangPositivePhase(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			run, err := newGangTestRun()
+			run, err := newGangTestRun(kaiGangTarget())
 			if err != nil {
 				t.Fatalf("newGangTestRun: %v", err)
 			}
@@ -707,7 +707,7 @@ func TestRunGangNegativePhase(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			run, err := newGangTestRun()
+			run, err := newGangTestRun(kaiGangTarget())
 			if err != nil {
 				t.Fatalf("newGangTestRun: %v", err)
 			}
@@ -779,7 +779,7 @@ func TestGangPhaseBudgetUnderThreeMinutes(t *testing.T) {
 // TestCleanupGangTestResourcesDeletesNegativeMembers extends the namespace
 // cleanup guard to the negative phase: its pods and PodGroup go with the run.
 func TestCleanupGangTestResourcesDeletesNegativeMembers(t *testing.T) {
-	run, err := newGangTestRun()
+	run, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatalf("newGangTestRun: %v", err)
 	}

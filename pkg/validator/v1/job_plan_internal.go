@@ -128,6 +128,14 @@ const (
 	// leave its namespace/DGD/workers/frontend/AIPerf Job in place after the run
 	// for post-mortem inspection. Forwarded only to the inference-perf pod.
 	inferencePerfNoCleanupEnv = "AICR_INFERENCE_PERF_NO_CLEANUP"
+
+	// GangSchedulingCheckName is the catalog name of the gang-scheduling
+	// conformance check; defaults.EnvRunaiProjectNamespace forwarding is
+	// scoped to it. Exported so the catalog package can assert (in
+	// TestEmbeddedCatalog_GangSchedulingEntryExists) that an embedded entry
+	// with this exact name exists, since a rename would otherwise silently
+	// no-op the forwarding and fail every Run:ai gang-scheduling run.
+	GangSchedulingCheckName = "gang-scheduling"
 )
 
 // hfTokenEnvVar is the environment variable name used to forward the
@@ -273,6 +281,13 @@ func buildEnv(
 		}
 	}
 
+	// Forward the Run:ai Project namespace to the gang-scheduling check only.
+	// On a recipe that declares runai-cluster the check runs its test pods
+	// there and fails without it; the pod validates the value itself.
+	if v := strings.TrimSpace(os.Getenv(defaults.EnvRunaiProjectNamespace)); v != "" && entry.Name == GangSchedulingCheckName {
+		env = append(env, corev1.EnvVar{Name: defaults.EnvRunaiProjectNamespace, Value: v})
+	}
+
 	// Add catalog entry's custom env vars. Orchestrator-controlled env vars are
 	// deliberately skipped here: they must come only from the process
 	// environment (forwarded above), never from the in-repo catalog. Appending
@@ -283,7 +298,7 @@ func buildEnv(
 		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclRuntimeImageEnv || e.Name == driverRuntimeImageEnv {
 			continue
 		}
-		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv || e.Name == ImagePullSecretsEnv {
+		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv || e.Name == ImagePullSecretsEnv || e.Name == defaults.EnvRunaiProjectNamespace {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})

@@ -79,7 +79,8 @@ func preflightOnWithAddr(gangGroup, addr string) map[string]any {
 
 // preflightGangGVR builds a preflight block whose podGroupGVR parts are set
 // individually, so a group-only match can be distinguished from a full one.
-func preflightGangGVR(group, version, resource string) map[string]any {
+func preflightGangGVR(version, resource string) map[string]any {
+	group := kaiPodGroupGVR.group
 	return map[string]any{
 		"global": map[string]any{"preflight": map[string]any{"enabled": true}},
 		"preflight": map[string]any{
@@ -104,6 +105,12 @@ func TestCheckNVSentinelPreflightGangSchedulerRequired(t *testing.T) {
 	kai := func(overrides map[string]any) recipe.ComponentRef {
 		return recipe.ComponentRef{Name: "kai-scheduler", Overrides: overrides}
 	}
+	// runai-cluster bundles KAI, so it installs the PodGroup CRD too; the
+	// Run:ai leaves declare it enabled next to a disabled kai-scheduler.
+	runai := func(overrides map[string]any) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: "runai-cluster", Overrides: overrides}
+	}
+	disabled := map[string]any{"enabled": false}
 	result := func(refs ...recipe.ComponentRef) *recipe.RecipeResult {
 		return &recipe.RecipeResult{ComponentRefs: refs}
 	}
@@ -117,6 +124,50 @@ func TestCheckNVSentinelPreflightGangSchedulerRequired(t *testing.T) {
 		{
 			name:         "nil recipe result -> skipped",
 			recipeResult: nil,
+		},
+		{
+			// The shipped Run:ai leaf shape.
+			name:         "preflight on, KAI GVR, runai-cluster enabled with kai disabled -> passes",
+			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), kai(disabled), runai(nil)),
+		},
+		{
+			name:         "preflight on, KAI GVR, runai-cluster enabled and kai absent -> passes",
+			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), runai(nil)),
+		},
+		{
+			name:         "preflight on, KAI GVR, both providers disabled -> blocked",
+			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), kai(disabled), runai(disabled)),
+			wantBlocked:  true,
+		},
+		{
+			name:         "preflight on, KAI GVR, runai-cluster alone but disabled -> blocked",
+			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), runai(disabled)),
+			wantBlocked:  true,
+		},
+		{
+			name:         "preflight on, KAI GVR, runai-cluster disabled by --set -> blocked",
+			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), kai(disabled), runai(nil)),
+			bundlerConfig: config.NewConfig(config.WithValueOverrides(map[string]map[string]string{
+				"runai-cluster": {"enabled": "false"},
+			})),
+			wantBlocked: true,
+		},
+		{
+			// Same fail-open hole as kai's enabled flag: --dynamic moves the
+			// toggle into cluster-values.yaml, loaded after this gate runs.
+			name:         "runai-cluster enabled but --dynamic on its enabled flag -> blocked",
+			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), kai(disabled), runai(nil)),
+			bundlerConfig: config.NewConfig(config.WithDynamicValues(map[string][]string{
+				"runai-cluster": {"enabled"},
+			})),
+			wantBlocked: true,
+		},
+		{
+			// The malformed-GVR rejection does not depend on who provides the
+			// CRD: Run:ai serves the same v2alpha2 podgroups.
+			name:         "KAI group but wrong version with runai-cluster -> blocked",
+			recipeResult: result(sentinel(preflightGangGVR("v1alpha1", "podgroups")), runai(nil)),
+			wantBlocked:  true,
 		},
 		{
 			name:         "no nvsentinel ref -> skipped",
@@ -178,12 +229,12 @@ func TestCheckNVSentinelPreflightGangSchedulerRequired(t *testing.T) {
 			// crash-loops it exactly like a missing CRD -- and failurePolicy
 			// Ignore then admits every GPU pod unchecked.
 			name:         "KAI group but wrong version -> blocked",
-			recipeResult: result(sentinel(preflightGangGVR("scheduling.run.ai", "v1alpha1", "podgroups")), kai(nil)),
+			recipeResult: result(sentinel(preflightGangGVR("v1alpha1", "podgroups")), kai(nil)),
 			wantBlocked:  true,
 		},
 		{
 			name:         "KAI group but wrong resource -> blocked",
-			recipeResult: result(sentinel(preflightGangGVR("scheduling.run.ai", "v2alpha2", "workloads")), kai(nil)),
+			recipeResult: result(sentinel(preflightGangGVR("v2alpha2", "workloads")), kai(nil)),
 			wantBlocked:  true,
 		},
 		{
@@ -216,7 +267,7 @@ func TestCheckNVSentinelPreflightGangSchedulerRequired(t *testing.T) {
 		},
 		{
 			name:         "complete KAI GVR with kai absent -> blocked",
-			recipeResult: result(sentinel(preflightGangGVR("scheduling.run.ai", "v2alpha2", "podgroups"))),
+			recipeResult: result(sentinel(preflightGangGVR("v2alpha2", "podgroups"))),
 			wantBlocked:  true,
 		},
 		{

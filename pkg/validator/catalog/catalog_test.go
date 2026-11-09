@@ -1296,6 +1296,27 @@ func TestEmbeddedCatalog_InferenceGatewayEntryExists(t *testing.T) {
 	t.Fatalf("no embedded catalog entry named %q (AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY forwarding would silently no-op)", v1.InferenceGatewayCheckName)
 }
 
+// TestEmbeddedCatalog_GangSchedulingEntryExists locks the embedded catalog
+// entry name to v1.GangSchedulingCheckName, which scopes the Run:ai Project
+// namespace forwarding (defaults.EnvRunaiProjectNamespace). A renamed entry
+// would otherwise stop the forwarding silently, and every Run:ai
+// gang-scheduling run would then fail on the missing input.
+func TestEmbeddedCatalog_GangSchedulingEntryExists(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for _, v := range cat.Validators {
+		if v.Name == v1.GangSchedulingCheckName {
+			if v.Phase != "conformance" {
+				t.Errorf("%q phase = %q, want conformance", v1.GangSchedulingCheckName, v.Phase)
+			}
+			return
+		}
+	}
+	t.Fatalf("no embedded catalog entry named %q (%s forwarding would silently no-op)", v1.GangSchedulingCheckName, defaults.EnvRunaiProjectNamespace)
+}
+
 // TestEmbeddedCatalog_ProbeImageEntriesExist locks the embedded catalog entry
 // names to the v1.DriverRuntimeManagementCheckName and
 // v1.WorkloadSandboxingCheckName constants that scope AICR_DRIVER_RUNTIME_IMAGE
