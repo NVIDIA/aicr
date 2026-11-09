@@ -457,6 +457,11 @@ profile's owned paths are locked. The lock is enforced per surface:
   (`aicr bundle --set gpuoperator:driver.enabled=...`) so the coherence
   check runs; siblings such as `gpuoperator.driver.version` stay
   overridable. The guard lives in `templates/aicr-driver-ownership-lock.yaml`.
+  With `--vendor-charts`, a component's wrapper chart forwards values to the
+  upstream chart under its dependency name, so the guard also rejects the
+  same paths there (for example `gpuoperator.gpu-operator.driver.enabled`, or
+  `dradriver.dra-driver-nvidia-gpu.nvidiaDriverRoot`); siblings such as
+  `gpuoperator.gpu-operator.driver.version` stay overridable.
   A bundle subset (`--bundlers`) that omits these components carries no guard
   for them. When regenerating into an existing directory, stale artifacts
   for an omitted or disabled guarded component are rejected before changing

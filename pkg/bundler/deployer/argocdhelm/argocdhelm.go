@@ -487,7 +487,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if mkdirErr := os.MkdirAll(templatesDir, 0755); mkdirErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create templates directory", mkdirErr)
 	}
-	if lockErr := g.writeLockTemplates(templatesDir, output, rootDefaults); lockErr != nil {
+	if lockErr := g.writeLockTemplates(templatesDir, output, rootDefaults, tmpDir, baseOut.Releases); lockErr != nil {
 		return nil, lockErr
 	}
 
@@ -586,10 +586,22 @@ func (g *Generator) validateDriverOwnershipOutput(ctx context.Context, outputDir
 	return nil
 }
 
-func (g *Generator) writeLockTemplates(templatesDir string, output *deployer.Output, rootDefaults map[string]any) error {
+// writeLockTemplates writes the deployer-owned guards. srcDir and releases are
+// the delegated argocd output, read for the vendored wrapper dependencies.
+func (g *Generator) writeLockTemplates(
+	templatesDir string, output *deployer.Output, rootDefaults map[string]any,
+	srcDir string, releases []deployer.Release,
+) error {
+
+	subcharts, err := vendoredSubcharts(srcDir, releases)
+	if err != nil {
+		return err
+	}
 	for _, writeLock := range []func(string) (string, int64, error){
 		g.writeProfileLockTemplate,
-		func(dir string) (string, int64, error) { return g.writeDriverOwnershipLockTemplate(dir, rootDefaults) },
+		func(dir string) (string, int64, error) {
+			return g.writeDriverOwnershipLockTemplate(dir, rootDefaults, subcharts)
+		},
 	} {
 		lockPath, lockSize, lockErr := writeLock(templatesDir)
 		if lockErr != nil {
@@ -680,7 +692,10 @@ type driverOwnershipGuard struct {
 
 // writeDriverOwnershipLockTemplate preserves the bundle-time ownership
 // verdict against install-time edits, independently of profile selection.
-func (g *Generator) writeDriverOwnershipLockTemplate(templatesDir string, rootDefaults map[string]any) (string, int64, error) {
+// subcharts maps a vendored component to the dependency its wrapper chart
+// forwards values under; Helm hands the upstream chart only that subtree, so
+// the same paths are guarded there too.
+func (g *Generator) writeDriverOwnershipLockTemplate(templatesDir string, rootDefaults map[string]any, subcharts map[string]string) (string, int64, error) {
 	guards := g.driverOwnershipGuards()
 	if len(guards) == 0 {
 		return writeGuardTemplate(templatesDir, driverOwnershipLockTemplate, "", false)
@@ -695,19 +710,72 @@ func (g *Generator) writeDriverOwnershipLockTemplate(templatesDir string, rootDe
 		}
 		for pathIndex, guardedPath := range guard.paths {
 			displayPath := guard.component + "." + guardedPath
+			failMessage := fmt.Sprintf("install-time value intersects driver-ownership path %s; set driver "+
+				"ownership at bundle time (aicr bundle --set %s:%s=...) so "+
+				"CheckDriverOwnershipCoherence can verify it", displayPath, overrideKey, guardedPath)
+			segments := strings.Split(guardedPath, ".")
 			writePathGuard(
 				&buf,
 				".Values",
-				append([]string{overrideKey}, strings.Split(guardedPath, ".")...),
+				append([]string{overrideKey}, segments...),
 				fmt.Sprintf("aicrDriver%d_%d", componentIndex, pathIndex),
-				fmt.Sprintf("install-time value intersects driver-ownership path %s; set driver "+
-					"ownership at bundle time (aicr bundle --set %s:%s=...) so "+
-					"CheckDriverOwnershipCoherence can verify it", displayPath, overrideKey, guardedPath),
+				failMessage,
 				rootDefaults,
 			)
+			if subchart := subcharts[guard.component]; subchart != "" {
+				writePathGuard(
+					&buf,
+					".Values",
+					append([]string{overrideKey, subchart}, segments...),
+					fmt.Sprintf("aicrDriverVendored%d_%d", componentIndex, pathIndex),
+					failMessage,
+					rootDefaults,
+				)
+			}
 		}
 	}
 	return writeGuardTemplate(templatesDir, driverOwnershipLockTemplate, buf.String(), true)
+}
+
+// vendoredSubcharts maps each component whose primary folder is a
+// --vendor-charts wrapper to the dependency name that wrapper forwards values
+// under. Like bundleinfo, it reads the name from the wrapper Chart.yaml the
+// delegated generator wrote instead of deriving it from the component name:
+// the two differ when a chart is not named after its component
+// (nvidia-dra-driver-gpu vendors dra-driver-nvidia-gpu). A folder with no
+// Chart.yaml (upstream Helm) or no dependency (local chart) is not vendored.
+func vendoredSubcharts(srcDir string, releases []deployer.Release) (map[string]string, error) {
+	subcharts := make(map[string]string)
+	for _, release := range releases {
+		if release.Name != release.Component {
+			continue
+		}
+		chartPath, err := deployer.SafeJoin(srcDir, filepath.Join(release.Path, fileChart))
+		if err != nil {
+			return nil, err
+		}
+		data, err := os.ReadFile(chartPath)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to read %s for %s", fileChart, release.Component), err)
+		}
+		var chart struct {
+			Dependencies []struct {
+				Name string `yaml:"name"`
+			} `yaml:"dependencies"`
+		}
+		if parseErr := yaml.Unmarshal(data, &chart); parseErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to parse %s for %s", fileChart, release.Component), parseErr)
+		}
+		if len(chart.Dependencies) > 0 {
+			subcharts[release.Component] = chart.Dependencies[0].Name
+		}
+	}
+	return subcharts, nil
 }
 
 // reservedTemplateNames lists the deployer-owned templates this generation
