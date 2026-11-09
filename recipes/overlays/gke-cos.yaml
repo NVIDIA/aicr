@@ -312,7 +312,9 @@ spec:
               The dra profile value advertises whole GPUs through DRA
               ResourceClaims (allocation policy dra-resource-claim), which
               GKE supports from Kubernetes 1.35 (GKE Standard; see
-              Google's DRA setup guide). Upgrade the control plane and GPU
+              Google's DRA setup guide,
+              https://docs.cloud.google.com/kubernetes-engine/docs/how-to/set-up-dra).
+              Upgrade the control plane and GPU
               node pools to 1.35 or newer and recapture the snapshot, or
               select a device-plugin value instead (--profile
               gpuStack=bundle-installer, or the gke-default default).

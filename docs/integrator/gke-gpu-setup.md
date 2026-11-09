@@ -477,8 +477,13 @@ Know what you are selecting:
   `DRAExtendedResource` mapping (KEP-5004, beta and on by default from
   Kubernetes 1.36), which AICR does not validate yet
   ([#3282](https://github.com/NVIDIA/aicr/issues/3282)).
-- **Kubernetes >= 1.35.** Google supports DRA on GKE Standard from 1.35, so
-  the value carries its own `K8s.server.version >= 1.35.0` floor. It
+- **Kubernetes >= 1.35.** Google's
+  [DRA setup guide](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/set-up-dra)
+  requires a GKE Standard cluster running 1.35 or later, so the value
+  carries its own `K8s.server.version >= 1.35.0` floor — note this is
+  GKE's supported minimum, not upstream DRA GA (Kubernetes 1.34), which
+  is what the GKE Dynamo overlays' "DRA requires Kubernetes 1.34+ (GA)"
+  wording refers to. It
   tightens the composed chain's floor at generation
   ([#2643](https://github.com/NVIDIA/aicr/issues/2643)); on the GB300
   overlays, whose floor names per-GKE-track minimums, the intersection
