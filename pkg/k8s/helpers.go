@@ -15,13 +15,17 @@
 package k8s
 
 import (
-	"k8s.io/apimachinery/pkg/api/errors"
+	"context"
+	stderrors "errors"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // IgnoreNotFound returns nil if the error is "not found", otherwise returns the error.
 // Used to make resource deletion idempotent.
 func IgnoreNotFound(err error) error {
-	if errors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) {
 		return nil
 	}
 	return err
@@ -30,8 +34,26 @@ func IgnoreNotFound(err error) error {
 // IgnoreAlreadyExists returns nil if the error is "already exists", otherwise returns the error.
 // Used to make resource creation idempotent.
 func IgnoreAlreadyExists(err error) error {
-	if errors.IsAlreadyExists(err) {
+	if apierrors.IsAlreadyExists(err) {
 		return nil
 	}
 	return err
+}
+
+// APIErrorCode classifies an unexpected apiserver error: a dead context is a
+// cancellation or a timeout, rejected credentials are unauthorized, a network
+// failure is retryable, and anything else is internal.
+func APIErrorCode(ctx context.Context, err error) errors.ErrorCode {
+	switch {
+	case stderrors.Is(ctx.Err(), context.Canceled):
+		return errors.ErrCodeCanceled
+	case ctx.Err() != nil:
+		return errors.ErrCodeTimeout
+	case apierrors.IsUnauthorized(err):
+		return errors.ErrCodeUnauthorized
+	case errors.IsNetworkError(err):
+		return errors.ErrCodeUnavailable
+	default:
+		return errors.ErrCodeInternal
+	}
 }

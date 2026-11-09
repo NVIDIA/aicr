@@ -818,12 +818,19 @@ func TestWaitForCompletionTimeout(t *testing.T) {
 }
 
 // TestWaitForPodTerminationPropagatesNonNotFound verifies that an API failure
-// cannot be mistaken for an empty list of pods during the termination wait.
+// cannot be mistaken for an empty list of pods during the termination wait, and
+// that the deployer scopes the shared wait to its own namespace and Job.
 func TestWaitForPodTerminationPropagatesNonNotFound(t *testing.T) {
 	t.Parallel()
 
 	cs := fake.NewSimpleClientset()
 	cs.PrependReactor("list", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		if ns := action.GetNamespace(); ns != "default" {
+			t.Errorf("namespace = %q, want default", ns)
+		}
+		if got := action.(clienttesting.ListAction).GetListRestrictions().Labels.String(); got != batchv1.JobNameLabel+"=test-job" {
+			t.Errorf("selector = %q, want the Job's job-name label", got)
+		}
 		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "*", stderrors.New("forbidden"))
 	})
 

@@ -370,3 +370,12 @@ func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration)
 	}
 	return nil
 }
+
+// WaitForPodTermination waits until all pods of the Job are terminal or absent,
+// including pods in their deletion grace period and overlapping replacements,
+// so per-run RBAC is not revoked while a pod may still use it. The supplied
+// context bounds the entire wait; API failures remain errors. See
+// pod.WaitForJobPodsTermination.
+func (d *Deployer) WaitForPodTermination(ctx context.Context) error {
+	return pod.WaitForJobPodsTermination(ctx, d.config.Clientset, d.config.Namespace, d.jobName)
+}

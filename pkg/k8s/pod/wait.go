@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -187,101 +188,87 @@ func checkPodPhase(p *corev1.Pod) (bool, error) {
 	}
 }
 
-// WaitForTermination watches a pod and returns nil once it has reached a
-// terminal state — either the pod object has been deleted (the API server
-// emitted a watch.Deleted event or a subsequent Get returns NotFound) or its
-// phase is Succeeded or Failed. Unlike WaitForPodSucceeded, a Failed phase is
-// NOT treated as an error here: the caller has already decided that any
-// terminal disposition is acceptable (e.g., RBAC cleanup races).
+// WaitForJobPodsTermination waits until every pod of the named Job is terminal
+// (Succeeded or Failed) or absent. It lists and watches all pods carrying the
+// Job's job-name label, including pods in their deletion grace period and
+// overlapping replacements, because a deleted Job alone does not establish
+// that its pods have stopped using their credentials (e.g., before per-run
+// RBAC is revoked).
 //
-// If the watch channel closes before a terminal state is observed, this
-// function performs ONE retry by re-issuing the watch starting from the most
-// recent ResourceVersion observed. If the second watch also closes without
-// reaching a terminal state, an ErrCodeUnavailable error is returned so
-// callers can decide log severity rather than swallow the failure.
-//
-// Context cancellation surfaces as ErrCodeCanceled; deadline expiry surfaces
-// as ErrCodeTimeout.
-func WaitForTermination(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
-	// Fast path: pod may already be deleted or terminal.
-	current, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
+// The supplied context bounds the entire wait: there is no internal retry
+// limit, and a dead context reports ErrCodeCanceled or ErrCodeTimeout. List
+// and Watch failures remain errors, classified by k8s.APIErrorCode, so they are
+// never mistaken for an empty pod list.
+func WaitForJobPodsTermination(ctx context.Context, client kubernetes.Interface, namespace, jobName string) error {
+	selector := jobNameLabel + "=" + jobName
+	for {
+		if err := ctx.Err(); err != nil {
+			return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "waiting for Job pod termination")
+		}
+		pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			return errors.Wrap(k8s.APIErrorCode(ctx, err), "failed to list Job pods for termination", err)
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "waiting for Job pod termination")
+		}
+		active := false
+		for i := range pods.Items {
+			if !isPodTerminal(&pods.Items[i]) {
+				active = true
+				break
+			}
+		}
+		if !active {
 			return nil
 		}
-		return errors.Wrap(errors.ErrCodeInternal, "failed to get pod", err)
-	}
-	if isPodTerminal(current) {
-		return nil
-	}
 
-	resourceVersion := current.ResourceVersion
-
-	// First watch attempt.
-	terminal, lastRV, err := watchUntilTerminal(ctx, client, namespace, name, resourceVersion)
-	if err != nil {
-		return err
+		closed, err := waitForJobPodsChange(ctx, client, namespace, selector, pods.ResourceVersion)
+		if err != nil {
+			return err
+		}
+		if closed {
+			// Pace reconnects on a flapping stream. Re-list with a current
+			// collection RV: an old pod's RV can already have been compacted.
+			select {
+			case <-ctx.Done():
+				return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "waiting for Job pod termination")
+			case <-time.After(jobWatchResumeBackoff):
+			}
+		}
 	}
-	if terminal {
-		return nil
-	}
-
-	// Watch closed before terminal state — retry once with the latest RV.
-	slog.Debug("pod watch closed before terminal state, retrying", "namespace", namespace, "pod", name)
-	terminal, _, err = watchUntilTerminal(ctx, client, namespace, name, lastRV)
-	if err != nil {
-		return err
-	}
-	if terminal {
-		return nil
-	}
-
-	return errors.WrapWithContext(errors.ErrCodeUnavailable,
-		"pod watch closed before terminal state after retry", nil,
-		map[string]any{"namespace": namespace, "pod": name})
 }
 
-// watchUntilTerminal opens a Watch on the named pod starting at resourceVersion
-// and consumes events until either:
-//   - the pod reaches a terminal state (returns terminal=true)
-//   - the pod is Deleted (returns terminal=true)
-//   - the watch channel closes (returns terminal=false, lastRV=most recent RV)
-//   - the context ends (returns ErrCodeCanceled on an operator abort,
-//     ErrCodeTimeout on deadline expiry)
-//   - the Watch call itself fails (returns ErrCodeInternal)
-//
-// On a successful terminal observation, lastRV may be empty.
-func watchUntilTerminal(ctx context.Context, client kubernetes.Interface, namespace, name, resourceVersion string) (terminal bool, lastRV string, err error) {
-	watcher, watchErr := client.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{
-		FieldSelector:   "metadata.name=" + name,
-		ResourceVersion: resourceVersion,
+// waitForJobPodsChange watches from the List's collection RV so a transition
+// between List and Watch is replayed. Every terminal/deleted event triggers a
+// re-list to account for other pods, including replacements. closed reports a
+// watch that ended (channel close or 410 Expired/Gone) and must be re-listed.
+func waitForJobPodsChange(ctx context.Context, client kubernetes.Interface, namespace, selector, resourceVersion string) (closed bool, err error) {
+	watcher, err := client.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{
+		LabelSelector: selector, ResourceVersion: resourceVersion,
 	})
-	if watchErr != nil {
-		return false, resourceVersion, errors.Wrap(errors.ErrCodeInternal, "failed to watch pod", watchErr)
+	if err != nil {
+		return false, errors.Wrap(k8s.APIErrorCode(ctx, err), "failed to watch Job pods for termination", err)
 	}
 	defer watcher.Stop()
-
-	lastRV = resourceVersion
 	for {
 		select {
 		case <-ctx.Done():
-			return false, lastRV, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "waiting for pod termination")
+			return false, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "waiting for Job pod termination")
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return false, lastRV, nil
+				return true, nil
 			}
-			if event.Type == watch.Deleted {
-				return true, lastRV, nil
+			if event.Type == watch.Error {
+				cause := apierrors.FromObject(event.Object)
+				if apierrors.IsResourceExpired(cause) || apierrors.IsGone(cause) {
+					return true, nil
+				}
+				return false, errors.Wrap(k8s.APIErrorCode(ctx, cause), "Job pod termination watch error", cause)
 			}
-			watchedPod, isPod := event.Object.(*corev1.Pod)
-			if !isPod {
-				continue
-			}
-			if watchedPod.ResourceVersion != "" {
-				lastRV = watchedPod.ResourceVersion
-			}
-			if isPodTerminal(watchedPod) {
-				return true, lastRV, nil
+			p, ok := event.Object.(*corev1.Pod)
+			if ok && (event.Type == watch.Deleted || isPodTerminal(p)) {
+				return false, nil
 			}
 		}
 	}
