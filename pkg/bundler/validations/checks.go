@@ -54,6 +54,7 @@ func init() {
 	registerCheck("CheckWorkloadSelectorMissing", CheckWorkloadSelectorMissing)
 	registerCheck("CheckAcceleratedSelectorMissing", CheckAcceleratedSelectorMissing)
 	registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
+	registerCheck("CheckNetworkOperatorEnabled", CheckNetworkOperatorEnabled)
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
 	registerCheck("CheckNodewrightRuntimeRequiredTaintKey", CheckNodewrightRuntimeRequiredTaintKey)
 	registerCheck("CheckGB300HostKernelGranule", CheckGB300HostKernelGranule)
@@ -520,6 +521,29 @@ func CheckHostMofedWithoutNetworkOperator(ctx context.Context, componentName str
 	slog.Warn(msg, logKeyComponent, componentName)
 
 	return []string{msg}, nil
+}
+
+// networkOperatorComponent is the canonical name of the network-operator
+// component.
+const networkOperatorComponent = "network-operator"
+
+// CheckNetworkOperatorEnabled reports when componentName is in the bundle but
+// network-operator is not: absent from the recipe, disabled there, or disabled
+// with --set (any registered override key and boolean spelling). The registry
+// entry's message says why the component needs it.
+func CheckNetworkOperatorEnabled(_ context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil || componentDisabled(ref, bundlerConfig, componentOverrideKeys(componentName, recipeResult.DataProvider())) {
+		return nil, nil
+	}
+	netop := recipeResult.GetComponentRef(networkOperatorComponent)
+	if netop != nil && !componentDisabled(netop, bundlerConfig, componentOverrideKeys(networkOperatorComponent, recipeResult.DataProvider())) {
+		return nil, nil
+	}
+	return []string{fmt.Sprintf("%s is in the bundle but %s is not", componentName, networkOperatorComponent)}, nil
 }
 
 // draDriverComponentName is the CANONICAL ComponentRef.Name used by the

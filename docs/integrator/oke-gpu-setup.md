@@ -345,7 +345,9 @@ Beside the OKE-wide `toolkit-hardening` CR, a GB300 tuning CR prepares each
 GB300 node:
 
 - A CRI-O drop-in sets `cni_default_network = "multus-cni-network"`, so CRI-O
-  waits for Multus instead of starting pods on the primary network alone.
+  waits for Multus instead of starting pods on the primary network alone. Multus
+  comes from `network-operator`, so `aicr bundle` rejects a GB300 bundle that
+  leaves `network-operator` out while keeping `nodewright-customizations`.
 - A systemd unit holds kubelet until the RDMA VFs have their driver bound and
   have stopped changing. Oracle Cloud Agent rebinds each VF seconds after
   creating it, and the SR-IOV device plugin scans once at start, so a scan

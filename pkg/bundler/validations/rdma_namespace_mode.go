@@ -72,7 +72,7 @@ func CheckRDMANamespaceModeCoherent(ctx context.Context, componentName string, r
 	}
 
 	const fixExclusive = "set exclusive mode on every RDMA node " +
-		"(`options ib_core netns_mode=0` in /etc/modprobe.d/ib_core.conf, then reboot)"
+		"(`options ib_core netns_mode=0` in /etc/modprobe.d/ib_core.conf, then `update-initramfs -u` and reboot)"
 	switch mode := recipeResult.Metadata.RDMANamespaceMode; {
 	case mode == recipe.RDMANamespaceModeShared && enabled:
 		return []string{fmt.Sprintf(

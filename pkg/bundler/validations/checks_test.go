@@ -2340,3 +2340,62 @@ func TestSelectorChecksSkipNoInterruptManifests(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckNetworkOperatorEnabled(t *testing.T) {
+	t.Parallel()
+
+	const component = "nodewright-customizations"
+	refs := func(netop *recipe.ComponentRef) *recipe.RecipeResult {
+		r := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: component}}}
+		if netop != nil {
+			r.ComponentRefs = append(r.ComponentRefs, *netop)
+		}
+		return r
+	}
+	set := func(kv map[string]map[string]string) *config.Config {
+		return config.NewConfig(config.WithValueOverrides(kv))
+	}
+
+	tests := []struct {
+		name         string
+		recipeResult *recipe.RecipeResult
+		cfg          *config.Config
+		wantWarnings int
+	}{
+		{name: "nil recipe skipped"},
+		{name: "network-operator present and enabled", recipeResult: refs(&recipe.ComponentRef{Name: "network-operator"})},
+		{name: "network-operator absent", recipeResult: refs(nil), wantWarnings: 1},
+		{
+			name:         "network-operator disabled in the recipe",
+			recipeResult: refs(&recipe.ComponentRef{Name: "network-operator", Overrides: map[string]any{"enabled": false}}),
+			wantWarnings: 1,
+		},
+		{
+			name:         "network-operator disabled with --set",
+			recipeResult: refs(&recipe.ComponentRef{Name: "network-operator"}),
+			cfg:          set(map[string]map[string]string{"networkoperator": {"enabled": "false"}}),
+			wantWarnings: 1,
+		},
+		{
+			name:         "both disabled with --set",
+			recipeResult: refs(&recipe.ComponentRef{Name: "network-operator"}),
+			cfg: set(map[string]map[string]string{
+				"networkoperator":          {"enabled": "false"},
+				"nodewrightcustomizations": {"enabled": "false"},
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			warnings, errs := CheckNetworkOperatorEnabled(context.Background(), component, tt.recipeResult, tt.cfg, nil)
+			if len(errs) != 0 {
+				t.Fatalf("errors = %v, want none", errs)
+			}
+			if len(warnings) != tt.wantWarnings {
+				t.Fatalf("warnings = %v, want %d", warnings, tt.wantWarnings)
+			}
+		})
+	}
+}

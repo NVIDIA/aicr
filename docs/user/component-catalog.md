@@ -944,8 +944,8 @@ The reset Job runs `nvidia-smi` by chrooting into the host's driver root, so whe
 | GPU Operator installs the driver (EKS except os=amazonlinux, BCM, LKE, OCP, k0s, generic) | `/run/nvidia/driver` (chart default) | `nvidia` (chart default) | — |
 | AKS `gpuStack=azure-managed` (default) | `/` | `nvidia-container-runtime` | the `gpuStack` profile |
 | AKS `gpuStack=operator-managed` | `/run/nvidia/driver` | `nvidia` | the `gpuStack` profile |
-| OKE `gpuStack=oci-managed` (default) | `/` | `nvidia` (chart default) | the `gpuStack` profile |
-| OKE `gpuStack=operator-managed` | `/run/nvidia/driver` | `nvidia` (chart default) | the `gpuStack` profile |
+| OKE `gpuStack=oci-managed` (default) | `/` | `runc` | the `gpuStack` profile |
+| OKE `gpuStack=operator-managed` | `/run/nvidia/driver` | `nvidia` | the `gpuStack` profile |
 | EKS `os=amazonlinux` leaves (require the NVIDIA AL2023 AMI) | `/` | `nvidia` (chart default) | the leaf overlay |
 | Kind (nvkind), H200 k0s | `/` | `nvidia` (chart default) | the overlay |
 | RKE2 (CDI with NRI) | `/` on VR200, the chart default elsewhere | none (`""`) | the `rke2` and VR200 overlays |
@@ -1564,6 +1564,13 @@ The AKS `gpuStack` profile now owns these names — `gpu-operator.operator.runti
 | AKS profile value | `operator.runtimeClass` | `metadata-collector.runtimeClassName` | janitor `resetJob.runtimeClassName` |
 |---|---|---|---|
 | `azure-managed` (default) | `nvidia-container-runtime` | `nvidia-container-runtime` | `nvidia-container-runtime` |
+| `operator-managed` | `nvidia` | `nvidia` | `nvidia` |
+
+The OKE `gpuStack` profile owns the same three names. Oracle's GPU node images register no `nvidia` runtime handler; OKE's node bootstrap runs the image's container toolkit for every container through a CRI-O hook on the default `runc` runtime, so `oci-managed` points all three at `runc`:
+
+| OKE profile value | `operator.runtimeClass` | `metadata-collector.runtimeClassName` | janitor `resetJob.runtimeClassName` |
+|---|---|---|---|
+| `oci-managed` (default) | `runc` | `runc` | `runc` |
 | `operator-managed` | `nvidia` | `nvidia` | `nvidia` |
 
 Every other platform leaves `operator.runtimeClass` at the shared chart default `nvidia`, so no side needs a value. The exception is RKE2: its GPU Operator runs CDI with the NRI plugin, which registers no RuntimeClass.

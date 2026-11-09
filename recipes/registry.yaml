@@ -532,6 +532,20 @@ components:
         message: "The OKE GB300 tuning CR reboots every node it matches and
           makes CRI-O depend on Multus. Pass --accelerated-node-selector with a
           label only the GB300 pool carries."
+      - function: CheckNetworkOperatorEnabled
+        # Blocking for OKE GB300: tuning-oke-gb300.yaml sets CRI-O's default
+        # network to Multus, which network-operator installs; without it, pod
+        # sandboxes fail and the tuned nodes stay NotReady.
+        severity: error
+        conditions:
+          service:
+            - oke
+          accelerator:
+            - gb300
+        message: "The OKE GB300 tuning CR makes CRI-O require Multus, which
+          network-operator installs, so without it the tuned nodes stay
+          NotReady. Re-enable network-operator, or also disable
+          nodewright-customizations with --set nodewrightcustomizations:enabled=false."
       - function: CheckWildcardAcceleratedToleration
         # Blocking: the wildcard deadlock requires manual node cordon/reboot to
         # recover, so fail the bundle rather than emit a missable warning.
