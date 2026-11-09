@@ -4043,10 +4043,10 @@ h100-gke-cos-training-kubeflow+gpustack-dra:
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 1afd09f4909356cefb0fe3c36023d093e8092594ddfb575b331a0f83f773ff34
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
-  bundle-info.yaml: 726702cc6aa2fc6f150fb4ca992ced0baf9f46a75e1812bed99fbb6ca4281b6a
-  checksums.txt: b0a7c7b030ce43055749563ee8d152c82964f5588dddea3996e43140904bb9be
+  bundle-info.yaml: e3c0a13aa65fd2be7242db0a5647a5c728108f55cfce8f60b9aaebdd41b00385
+  checksums.txt: 45dc2eba9013138b9a5d69c730c6cad968c4beae2d2a73a445ae7c4a9a83a163
   deploy.sh: 0f6a2c61ae21d657eacbd33dcbdb5224b6148dbd42c8182f6dd56d7d06c9be8a
-  recipe.yaml: 2139184d49fce23ba2eecb29ac18b33ad9904d38535a4f47048341f720d17f7e
+  recipe.yaml: 962aff9a2fc5655ea2178e675323226272959d324dc601610dee88efae89e803
 h100-gke-cos-training-kueue:
   001-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   001-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
