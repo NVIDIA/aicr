@@ -380,6 +380,7 @@ func TestValidateStaticProfilePatch(t *testing.T) {
 	valid := `spec: {profile: {values: {custom: {advertiser: external, componentRefs: [
   {name: gcp-driver-installer, overrides: {installer: {enabled: false}}},
   {name: gpu-operator, overrides: {devicePlugin: {enabled: false}}},
+  {name: nvidia-dra-driver-gpu, overrides: {gpuResourcesEnabledOverride: false, resources: {gpus: {enabled: false}}}},
   {name: nvsentinel, optional: true, overrides: {labeler: {assumeDriverInstalled: true}}}]}}}}`
 	tests := []struct {
 		name, patch, wantDiagnostic string

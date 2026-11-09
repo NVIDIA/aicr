@@ -160,7 +160,8 @@ a differently created pool: set `gpu-driver-version=disabled` in
 `--node-labels`. It also needs the pool list passed to `aicr snapshot` or
 `aicr validate` with `--gke-gpu-pools`. A pool created with the command above
 fails both of that profile's constraints, so choose the profile before you
-create the pool. See
+create the pool. (`gpuStack=dra` uses the same pool shape and the same
+projection.) See
 [GKE GPU Setup › GPU Device-Plugin Ownership](gke-gpu-setup.md#gpu-device-plugin-ownership).
 
 ### Installing `asapd-lite`

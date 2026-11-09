@@ -185,6 +185,7 @@ func TestExternalOverlayContributesProfileValue(t *testing.T) {
 			patch: `spec: {profile: {values: {custom: {advertiser: external, componentRefs: [
   {name: gcp-driver-installer, overrides: {installer: {enabled: false}}},
   {name: gpu-operator, overrides: {devicePlugin: {enabled: false}}},
+  {name: nvidia-dra-driver-gpu, overrides: {gpuResourcesEnabledOverride: false, resources: {gpus: {enabled: false}}}},
   {name: nvsentinel, optional: true, overrides: {labeler: {assumeDriverInstalled: true}}}]}}}}`,
 			wantSelected: map[string]string{
 				"":                          "gke-default",
@@ -197,12 +198,13 @@ func TestExternalOverlayContributesProfileValue(t *testing.T) {
 			patch: `spec: {profile: {values: {custom: {advertiser: external, componentRefs: [
   {name: gcp-driver-installer, overrides: {installer: {enabled: false}}},
   {name: gpu-operator, overrides: {devicePlugin: {enabled: false}}},
+  {name: nvidia-dra-driver-gpu, overrides: {gpuResourcesEnabledOverride: false, resources: {gpus: {enabled: false}}}},
   {name: nvsentinel, overrides: {labeler: {assumeDriverInstalled: true}}}]}}}}`,
 			wantLoadErr: "as optional in some values but not others",
 		},
 		{
 			name: "value assigning only a DRA path fails union totality at catalog load",
-			patch: `spec: {profile: {values: {dra: {componentRefs: [{name: nvidia-dra-driver-gpu,
+			patch: `spec: {profile: {values: {dra-partial: {componentRefs: [{name: nvidia-dra-driver-gpu,
   overrides: {gpuResourcesEnabledOverride: true, resources: {gpus: {enabled: true}}}}]}}}}`,
 			wantLoadErr: "union totality",
 		},
