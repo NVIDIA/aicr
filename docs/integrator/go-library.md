@@ -1117,6 +1117,13 @@ It derives a `defaults.FileReadTimeout`-bounded context internally, so the
 reads stay bounded but the caller cannot cancel them. Prefer the
 context-aware form wherever a `context.Context` is available.
 
+`SummarizeRecipe(rec)` returns the overview `aicr query --summary` prints, as
+an `*aicr.RecipeSummary` (a transparent alias of `pkg/recipe.Summary`):
+identity, criteria, applied overlays, constraints, enabled components in
+deployment order, and the validation checks per phase. It performs no I/O and
+does not hydrate component values. A `nil` `*RecipeResult`, or one without
+internal recipe state, returns `ErrCodeInvalidRequest`.
+
 The **outermost** structured code distinguishes the two failure stages, so a
 caller can shape a response without reimplementing hydrate-then-select:
 `ErrCodeNotFound` means the selector path does not exist, and any other code
@@ -1283,7 +1290,8 @@ derive step rather than the load step.
 
 `IsRequireEvidence()` is a read, like `IsCriteriaStrict()`. It does not change
 resolution. After `ResolveRecipe`, call `PublishedEvidenceRequired` to combine
-that field with a flag and `AICR_REQUIRE_EVIDENCE`, then
+that field with a flag and `AICR_REQUIRE_EVIDENCE` (named by
+`aicr.RequireEvidenceEnvVar`), then
 `Client.RequirePublishedEvidence` when it reports true. That call rejects a
 Client whose recipe source is not `EmbeddedSource()`, including
 `FilesystemSource` from `--data` or `spec.recipe.data`, before it checks the

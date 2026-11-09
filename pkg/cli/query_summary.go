@@ -23,8 +23,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -34,7 +34,7 @@ const emptyCell = "-"
 
 // writeRecipeSummary writes summary to w: a text overview for
 // serializer.FormatTable, and the Summary document for YAML and JSON.
-func writeRecipeSummary(ctx context.Context, w io.Writer, summary *recipe.Summary, format serializer.Format) error {
+func writeRecipeSummary(ctx context.Context, w io.Writer, summary *aicr.RecipeSummary, format serializer.Format) error {
 	if err := ctx.Err(); err != nil {
 		return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "recipe summary canceled")
 	}
@@ -55,7 +55,7 @@ func writeRecipeSummary(ctx context.Context, w io.Writer, summary *recipe.Summar
 // renderRecipeSummary renders the text overview into buf. Writes to a
 // bytes.Buffer cannot fail, so only the tabwriter flush and the context check
 // return errors.
-func renderRecipeSummary(ctx context.Context, buf *bytes.Buffer, s *recipe.Summary) error {
+func renderRecipeSummary(ctx context.Context, buf *bytes.Buffer, s *aicr.RecipeSummary) error {
 	fmt.Fprintln(buf, "RECIPE SUMMARY")
 	// The text view is not a document, so it shows the summarized recipe's
 	// header rather than the summary's own.

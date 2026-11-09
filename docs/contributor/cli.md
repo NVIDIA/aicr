@@ -162,9 +162,11 @@ rendering, validator orchestration, OCI pushes — is a boundary
 violation. If the facade is missing the surface you need, add it to
 `pkg/client/v1` first.
 
-**Query summaries.** `query --summary` projects `result.Resolved()` through
-`recipe.BuildSummary`, a pure function in `pkg/recipe/summary.go` that performs no
-I/O and does not modify the recipe. `pkg/cli/query_summary.go` owns only
+**Query summaries.** `query --summary` projects the recipe through
+`aicr.SummarizeRecipe`, which returns an `*aicr.RecipeSummary` (a transparent
+alias of `recipe.Summary`). The projection itself is `recipe.BuildSummary`, a
+pure function in `pkg/recipe/summary.go` that performs no I/O and does not
+modify the recipe. `pkg/cli/query_summary.go` owns only
 presentation: the text view and the YAML/JSON document. Renderer goldens live in
 `pkg/cli/testdata/query-summary-*.golden`; regenerate them with
 `go test ./pkg/cli/ -run TestWriteRecipeSummaryTextGolden -update`. For the

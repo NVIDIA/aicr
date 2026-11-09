@@ -25,7 +25,6 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	evidenceindex "github.com/NVIDIA/aicr/pkg/evidence/index"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -199,7 +198,7 @@ Use in shell scripts:
 			if cmd.Bool(flagSummary) {
 				// Skip additional selector hydration. The loader/resolver's
 				// profile-coherence checks have already validated locked values.
-				summary, buildErr := recipe.BuildSummary(result.Resolved())
+				summary, buildErr := aicr.SummarizeRecipe(result)
 				if buildErr != nil {
 					return buildErr
 				}
@@ -281,7 +280,7 @@ func loadQueryRecipe(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, cl
 	if required {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"--recipe cannot be used while evidence is required (--require-evidence, spec.recipe.requireEvidence, "+
-				"or "+evidenceindex.EnvVar+"): a loaded recipe is not proven to match the attested catalog recipe; "+
+				"or "+aicr.RequireEvidenceEnvVar+"): a loaded recipe is not proven to match the attested catalog recipe; "+
 				"query by criteria instead, or turn the evidence requirement off")
 	}
 
