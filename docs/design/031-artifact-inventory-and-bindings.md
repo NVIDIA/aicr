@@ -123,13 +123,15 @@ binding set. Each inventory entry then fails ordinary accounting with
 
 ### Composition and consumer checks
 
-1. When an inventory is supplied, read bounded snapshots of it and the
-   catalog's binding layers. Merge bindings and validate document shapes and
-   inventory accounting before publishing a provider. Every inventory entry
+1. When an inventory is supplied, capture bounded snapshots of it, the
+   catalog's binding layers and the base catalog file sets. Retain the captured
+   bytes before hashing or constructing the composed provider. Merge bindings
+   and validate document shapes and inventory accounting before publishing it. Every inventory entry
    must be bound or explicitly ignored. An unmatched binding is inactive and
    leaves its target fields at catalog pins. Reads and later bundle capture
    must use the same snapshot.
-2. Load the ordinary layered catalog. Validate targets only for active bindings:
+2. Layer the catalog from the retained base snapshot, without falling back to
+   the live directory. Validate targets only for active bindings:
    component and values-file existence, JSON Pointer existence and platform
    agreement. Defer values-file participation to recipe selection below.
    Inactive bindings receive schema/shape validation only; a stale target in an
@@ -202,8 +204,9 @@ recipes remain explicitly unsupported by `upgrade-check`, on either side.
 A future comparison reader would inspect recorded identities and provenance
 without hydrating either recipe from the current provider or treating it as
 ready for execution. It would also need to define which release's upgrade
-evidence applies. This proposal adds no such reader and does not relax the
-execution guard to enable comparison.
+evidence applies. This proposal adds no general historical comparison reader
+for UpgradeCheck. The namespace-only extraction below is a limited exception
+to input matching; it does not relax the execution guard.
 
 ### Catalog defaults and inherited identity
 
@@ -228,12 +231,26 @@ for a catalog default.
 resolution. [Inheritance][inheritance] remains deliberate user input. Run the
 guard after inheritance and reject differing bound coordinates with reason
 `artifact-identity-conflict`; neither binding nor inheritance silently wins.
-A pre-inventory recipe may be an inheritance source, but its differing source
-or chart will cause that conflict. The existing `--inherit=namespace` mode
-lets the user keep namespaces while adopting the new bound chart identity.
-An artifact-bearing inheritance source must still pass input-provenance
-comparison, including in namespace mode. `allowCatalogPins` does not waive a
-conflict with an active binding.
+In full inheritance mode, a pre-inventory recipe may be an inheritance source,
+but its differing source or chart causes that conflict. An artifact-bearing
+source still requires matching input provenance in full inheritance mode.
+`allowCatalogPins` does not waive a conflict with an active binding.
+
+For `--inherit=namespace`, read the prior hydrated recipe, including a recipe
+in a bundle, through a strict non-executing reader. Validate its supported
+schema and recorded metadata, reject duplicate component names and invalid
+namespace syntax, and retain the existing criteria-compatibility check.
+Extract only component names and namespaces. Do not attach a provider,
+hydrate values, resolve defaults or make the prior recipe executable. Its
+recorded provenance need not match the new inventory: namespaces from a recipe
+using inventory A may be inherited by a recipe using inventory B.
+
+Resolve the new recipe against its own inputs, apply the namespace map, rebind
+its health checks and run its final identity guards. Chart coordinates, image
+values, manifests and object-name overrides remain those of the newly resolved
+recipe. Full inheritance and execution reload still require matching
+provenance. This exception neither enables artifact-bearing UpgradeCheck
+inputs nor introduces a general API for reading historical recipes.
 
 ### CRD ownership after binding
 
@@ -295,16 +312,35 @@ References contain no credentials. Documents must contain no secret values.
 | `artifacts[].name` | Yes | Unique name, stable across releases. No component-name semantics. |
 | `artifacts[].type` | Yes | `chart`, `image` or `other`; all are OCI-hosted. |
 | `artifacts[].reference` | Yes | Lowercase `oci://host[:port]/repo/path`, without a tag, digest or userinfo. |
-| `artifacts[].version` | Yes | Concrete SemVer with an optional leading `v` for charts, preserving the published OCI tag verbatim. An opaque label for images and other artifacts, never interpreted as a tag. |
+| `artifacts[].version` | Yes | Literal Helm-published OCI tag for charts, using the SemVer encoding below and preserving any leading `v`. An opaque label for images and other artifacts, never interpreted as a tag. |
 | `artifacts[].manifestDigest` | Yes | Identity of the exact OCI manifest bytes, or image-index bytes. Recorded, not checked during loading. |
 | `artifacts[].archiveDigest` | Bound charts | Identity of the exact chart `.tgz` blob. Allowed only for charts and mandatory for a chart binding. |
 | `artifacts[].platform` | No | Image-only object with `os`, `architecture` and optional `variant`. Describes a single-platform manifest; omit for a multi-platform index. |
 
-Chart versions are not normalized when written to `helm.defaultVersion` or
-passed to OCI consumers. A published `v2.4.1` remains `v2.4.1`; the inventory
-must name the tag that exists. The [Argo CD deployer][argocd-tag] already
-preserves OCI versions verbatim because stripping `v` can select a nonexistent
-tag. Archive verification remains independent of tag spelling.
+For charts, `version` is the literal published OCI tag. Validate it as a
+concrete SemVer with an optional leading `v`, encoded using
+[Helm's OCI convention][helm-oci-tags]: the build-metadata separator `+`
+becomes `_`. A single `_` must decode to a valid SemVer build-metadata
+separator. Reject raw `+`, multiple underscores, malformed build metadata and
+version ranges. Derive the semantic version only for parsing or semantic
+comparison by reversing this encoding; a parser may ignore the leading `v`.
+The derived value is not a second inventory field.
+
+| Chart version | Inventory `version` and published OCI tag |
+|---|---|
+| `1.2.3` | `1.2.3` |
+| `v1.2.3` | `v1.2.3` |
+| `1.2.3+build.1` | `1.2.3_build.1` |
+| `v1.2.3-rc.1+build.1` | `v1.2.3-rc.1_build.1` |
+
+Preserve the original tag in provenance, `helm.defaultVersion`, resolved
+identity and OCI retrieval. Identity guards compare literal tags; semantic
+equality must not discard differing build metadata when checking artifact
+identity. The [Argo CD deployer][argocd-tag] already preserves OCI versions
+verbatim because stripping `v` can select a nonexistent tag. Implementation
+must account for encoded tags in semantic-version consumers without rewriting
+the tag used for retrieval. Archive verification remains independent of tag
+spelling.
 
 The inventory may be partial relative to the catalog. Every artifact it does
 contain must be accounted for, including `other`, which can only be explicitly
@@ -461,6 +497,25 @@ embedded set is the catalog filesystem compiled into the binary, currently
 all base files in each set, even if a file is unused by the selected recipe
 or an external layer shadows an embedded file.
 
+When an inventory is active, capture and retain these base file sets before
+creating the composed provider. Hash the retained bytes, and layer and bind
+against that immutable snapshot. Keep binding writes in separate composed
+copies; the original captured inputs remain unchanged. Retain the snapshot
+for the lifetime of the composed provider and associated recipe. All catalog
+reads during resolution, validation, mirror discovery and bundling use it;
+none may fall back to the live external directory. Bound capture resources and
+reject capture failures before publishing the provider.
+
+Bundle capture must receive explicit access to the retained snapshot of
+external inputs and copy those bytes, including the captured inventory and binding
+inputs, rather than rereading source paths. The current
+[bundle data copy][bundle-data-copy] depends on a concrete layered provider and
+copies the live directory; wrapping provider reads alone would not satisfy
+this contract. A later execution reload captures fresh inputs and compares
+their digests before use. Without an inventory, preserve existing provider
+behavior. The snapshot guarantees that consumed bytes match hashed bytes; it
+does not promise an atomic transaction across a producer's changing directory.
+
 For both sets, include files under `artifacts/`. Exclude only files used
 exclusively as inventory or binding documents, whose effective inputs have
 separate digests. Any file also consumed as catalog data remains in its base
@@ -471,9 +526,9 @@ it changes `baseCatalogDigest` and fails the reload comparison.
 Represent each file as `[path, size, sha256]`: its provider-relative path with
 `/` separators, byte length and `sha256:` digest of the exact bytes. Sort each
 list by the UTF-8 bytes of its paths and encode it as compact UTF-8 JSON.
-Exclude mtimes, permissions and absolute paths. The embedded catalog identity is the SHA-256 of the
-encoded embedded list. Compute `baseCatalogDigest` over a compact UTF-8 JSON
-object with keys `embedded` and `external`, in that order. Its values are the
+Exclude mtimes, permissions and absolute paths. The embedded catalog identity
+is the SHA-256 of the encoded embedded list. Compute `baseCatalogDigest` over
+a compact UTF-8 JSON object with keys `embedded` and `external`, in that order. Its values are the
 embedded digest string and the external file list; use `[]` when no external
 catalog is supplied. These inputs define the hash; they add no wire fields.
 Record AICR version/build identity separately using recipe metadata conventions.
@@ -579,9 +634,12 @@ evidence need separate work.
    charts. Exercise embedded-only bindings, external same-name replacements,
    superset bindings, inactive stale targets, partial component coverage,
    missing active targets, explicit exceptions and changed inputs on reload.
-   Exercise verbatim OCI tags, catalog default restatements, inheritance
-   conflicts and disabling CRD ownership across the composed catalog. Check
-   that a binary version change alone leaves the catalog digest unchanged,
+   Exercise literal OCI tags with build metadata, catalog default restatements,
+   full-inheritance conflicts, namespace-only inheritance across different
+   inventories and disabling CRD ownership across the composed catalog.
+   Change an external values file after capture and verify that catalog reads
+   and bundle capture still use the retained bytes. Check that a binary version
+   change alone leaves the catalog digest unchanged,
    while changes to included catalog files reject execution reloads.
    Check repeatability and unchanged behavior without an inventory. Verify
    mismatching chart archives are rejected by every supported vendoring path.
@@ -626,3 +684,5 @@ relocation evidence remain separate from metadata composition.
 [argocd-tag]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/bundler/deployer/argocd/argocd.go#L926
 [upgrade-target]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/pkg/client/v1/upgrade.go#L738
 [embedded-files]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/recipes/data.go#L21
+[helm-oci-tags]: https://helm.sh/docs/v3/topics/registries/#oci-feature-deprecation-and-behavior-changes-with-v380
+[bundle-data-copy]: https://github.com/NVIDIA/aicr/blob/80388fb35cafec9262bbb6fa066832249b20c0a0/pkg/bundler/bundler.go#L3067
