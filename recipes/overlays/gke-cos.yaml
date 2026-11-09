@@ -95,9 +95,12 @@ spec:
   # mapping arrives with Kubernetes 1.36+ (issue #3282). The value carries
   # its own K8s.server.version floor (>= 1.35, Google's GKE DRA minimum),
   # which tightens the composed chain constraint per the #2643
-  # intersection rule. On leaves whose floor is not a simple range (the
-  # gb300 overlays' || expression) that intersection is undefined, so
-  # selecting dra there fails closed with the collision message.
+  # intersection rule. On leaves whose floor is "||" alternatives (the
+  # gb300 overlays) the floor distributes over them per-alternative —
+  # dra resolves there to the 1.35 track's build minimum. What still
+  # fails closed: a compound profile-side value, and a floor written at
+  # a precision that does not order against every alternative (hence
+  # full precision below).
   #
   # nvsentinel.labeler.assumeDriverInstalled is owned per value because driver
   # evidence differs between them (#2181). The NVSentinel labeler infers driver
