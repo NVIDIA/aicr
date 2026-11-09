@@ -48,6 +48,15 @@ transitions:
       CRs reported Available, every chart ServiceMonitor was scraped (the
       four control-plane targets Kind binds to localhost were down before
       and after), and the shipped health check passed before and after.
+      Live upgrade on the UAT GKE daytime cluster (h100-gke-cos-inference-
+      dynamo, helmfile, 10 nodes, k8s 1.35), 2026-11-09: the same two
+      steps against the deployed releases with their live values, Prometheus
+      on a 50Gi premium-rwo PVC. The StatefulSets rolled in under seven
+      minutes, the PVC kept its volume and samples scraped before the
+      upgrade stayed queryable, 103 of 105 targets up (the two kube-dns
+      endpoints GKE does not expose were down before as well), and the
+      kube-prometheus-stack, prometheus-operator-crds and prometheus-adapter
+      health checks passed.
     summary: >-
       Prometheus moves to v3.14.0 on a distroless image, Alertmanager to
       v0.34.0 and the operator to v0.93.1; the Prometheus and Alertmanager

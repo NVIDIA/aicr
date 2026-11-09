@@ -37,7 +37,9 @@ transitions:
       84.4.0 still running; all ten CRDs Established on the v0.93.1 schema,
       the running Prometheus and Alertmanager stayed Available, the shipped
       health check passed, and the stack then upgraded to 88.6.5 on the new
-      schema.
+      schema. The same sequence on the UAT GKE daytime cluster
+      (h100-gke-cos-inference-dynamo, helmfile), 2026-11-09, with the same
+      result.
     summary: >-
       CRD schema update for prometheus-operator v0.93.1, applied in place by
       the release upgrade. Upgrade this release before kube-prometheus-stack,
