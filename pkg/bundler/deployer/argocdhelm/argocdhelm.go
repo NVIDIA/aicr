@@ -47,9 +47,9 @@
 //     profile-owned path, so the lock survives helm install/upgrade rather
 //     than holding only at bundle generation. Likewise
 //     templates/aicr-driver-ownership-lock.yaml, emitted for any bundle
-//     with an enabled GPU Operator or DRA driver component, fails the install
+//     that ships a GPU Operator or DRA driver component, fails the install
 //     if a value is supplied for a GPU driver-ownership path, which only
-//     CheckDriverOwnershipCoherence verifies at bundle time.
+//     bundle-time checks verify.
 //
 // This approach means changes to the Argo CD deployer (new component types,
 // sync policies, etc.) automatically flow through without duplication.
@@ -100,6 +100,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
@@ -124,7 +125,7 @@ const (
 	profileLockTemplateHeader = "{{- /* AICR profile install-time ownership guard. */ -}}\n"
 
 	// driverOwnershipLockTemplateName is reserved only when the bundle ships
-	// an enabled component of a bundlercfg driver-ownership family.
+	// a component of a bundlercfg driver-ownership family.
 	driverOwnershipLockTemplateName = "aicr-driver-ownership-lock"
 
 	driverOwnershipLockTemplateHeader = "{{- /* AICR driver-ownership install-time guard. */ -}}\n"
@@ -342,7 +343,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if g.RecipeResult == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
 	}
-	if err := g.validateDriverOwnershipOutput(ctx, outputDir); err != nil {
+	if err := ValidateDriverOwnership(ctx, g.RecipeResult, g.DynamicValues, g.VendorCharts, outputDir); err != nil {
 		return nil, err
 	}
 	if g.BundleChartVersion != "" {
@@ -535,11 +536,76 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	return output, nil
 }
 
+// ValidateDriverOwnership rejects generation the driver-ownership lock would
+// break, without writing to outputDir: a dynamic path that intersects a
+// guarded path, whose stub in the root values.yaml the lock would reject on
+// every render, and stale artifacts of a guarded component the bundle omits.
+// Generate runs it for direct callers; the bundler runs it before copying
+// --data files, which a rejection inside Generate would leave behind.
+func ValidateDriverOwnership(
+	ctx context.Context, result *recipe.RecipeResult, dynamicValues map[string][]string,
+	vendorCharts bool, outputDir string,
+) error {
+
+	if result == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
+	}
+	if err := validateDriverOwnershipDynamicPaths(result, dynamicValues, vendorCharts); err != nil {
+		return err
+	}
+	return validateDriverOwnershipOutput(ctx, result, outputDir)
+}
+
+// validateDriverOwnershipDynamicPaths matches each guarded path equal to,
+// above or below a dynamic path. A vendored chart forwards values under its
+// dependency, the ref's EffectiveChart, so that form is matched too.
+func validateDriverOwnershipDynamicPaths(result *recipe.RecipeResult, dynamicValues map[string][]string, vendorCharts bool) error {
+	for _, guard := range driverOwnershipGuards(result) {
+		prefixes := []string{""}
+		ref := result.GetComponentRef(guard.component)
+		if vendorCharts && localformat.ShouldVendor(localformat.Component{Repository: ref.Source, Tag: ref.Tag, Path: ref.Path}) {
+			prefixes = append(prefixes, ref.EffectiveChart()+".")
+		}
+		for _, dynamicPath := range dynamicValues[guard.component] {
+			for _, prefix := range prefixes {
+				for _, guardedPath := range guard.paths {
+					if !recipe.PathsIntersect(dynamicPath, prefix+guardedPath) {
+						continue
+					}
+					overrideKey, err := resolveOverrideKey(guard.component, result.DataProvider())
+					if err != nil {
+						return err
+					}
+					return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+						"install-time path %s.%s intersects driver-ownership path %s.%s%s, which the "+
+							"argocd-helm driver-ownership lock would reject on every render; %s",
+						guard.component, dynamicPath, guard.component, prefix, guardedPath,
+						driverOwnershipRemedy(result, guard.component, overrideKey, guardedPath)))
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// driverOwnershipRemedy names where a guarded path is set instead. A path the
+// selected profile owns cannot take a bundle-time --set, so it points at the
+// recipe-time profile selection.
+func driverOwnershipRemedy(result *recipe.RecipeResult, component, overrideKey, path string) string {
+	if result.OwnsProfilePath(component, path) {
+		profile := result.Metadata.SelectedProfile
+		return fmt.Sprintf("the selected profile %s=%s owns it, so choose the profile value at "+
+			"recipe time (aicr recipe --profile %s=...)", profile.Name, profile.Value, profile.Name)
+	}
+	return fmt.Sprintf("set driver ownership at bundle time (aicr bundle --set %s:%s=...) so "+
+		"bundle-time ownership checks apply", overrideKey, path)
+}
+
 // validateDriverOwnershipOutput prevents regeneration from dropping a guard
 // while stale component artifacts remain in the chart, even without checksums.
-// Reuse is rejected before any output mutation; the caller can choose a fresh
-// directory without losing the previous bundle or foreign files.
-func (g *Generator) validateDriverOwnershipOutput(ctx context.Context, outputDir string) error {
+// It only reads outputDir, so the caller can choose a fresh directory without
+// losing the previous bundle or foreign files.
+func validateDriverOwnershipOutput(ctx context.Context, result *recipe.RecipeResult, outputDir string) error {
 	for _, dir := range []string{"", dirTemplates, "static"} {
 		if dir == "static" {
 			if err := checkStaticPath(filepath.Join(outputDir, dir)); err != nil {
@@ -569,15 +635,12 @@ func (g *Generator) validateDriverOwnershipOutput(ctx context.Context, outputDir
 			}
 			for _, family := range bundlercfg.DriverOwnershipFamilies() {
 				for _, componentName := range family.ComponentNames {
-					ref := g.RecipeResult.GetComponentRef(componentName)
-					if ref != nil && ref.IsEnabled() {
+					if result.GetComponentRef(componentName) != nil {
 						continue
 					}
-					for _, suffix := range []string{"", "-pre", "-post", "-readiness"} {
-						if name == componentName+suffix {
-							return errors.New(errors.ErrCodeInvalidRequest,
-								fmt.Sprintf("prior driver-ownership artifact %q belongs to omitted or disabled component %q; generate into a fresh output directory", filepath.Join(outputDir, dir, entry.Name()), componentName))
-						}
+					if slices.Contains(bundleinfo.ComponentReleaseNames(componentName), name) {
+						return errors.New(errors.ErrCodeInvalidRequest,
+							fmt.Sprintf("prior driver-ownership artifact %q belongs to component %q, which this bundle omits; generate into a fresh output directory", filepath.Join(outputDir, dir, entry.Name()), componentName))
 					}
 				}
 			}
@@ -666,16 +729,17 @@ func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64
 	return writeGuardTemplate(templatesDir, profileLockTemplate, buf.String(), true)
 }
 
-// driverOwnershipGuards uses the bundler's post-filter refs: components
-// dropped by --bundlers or disabled have no Application to guard.
-func (g *Generator) driverOwnershipGuards() []driverOwnershipGuard {
-	if g.RecipeResult == nil {
+// driverOwnershipGuards keys on ref presence, as Generate emits an Application
+// for every ref, disabled or not. The bundler passes its post-filter refs, so
+// components removed by the bundlers filter or disabled are not present.
+func driverOwnershipGuards(result *recipe.RecipeResult) []driverOwnershipGuard {
+	if result == nil {
 		return nil
 	}
 	var guards []driverOwnershipGuard
 	for _, family := range bundlercfg.DriverOwnershipFamilies() {
 		for _, name := range family.ComponentNames {
-			if ref := g.RecipeResult.GetComponentRef(name); ref != nil && ref.IsEnabled() {
+			if result.GetComponentRef(name) != nil {
 				guards = append(guards, driverOwnershipGuard{component: name, paths: family.Paths})
 			}
 		}
@@ -696,7 +760,7 @@ type driverOwnershipGuard struct {
 // forwards values under; Helm hands the upstream chart only that subtree, so
 // the same paths are guarded there too.
 func (g *Generator) writeDriverOwnershipLockTemplate(templatesDir string, rootDefaults map[string]any, subcharts map[string]string) (string, int64, error) {
-	guards := g.driverOwnershipGuards()
+	guards := driverOwnershipGuards(g.RecipeResult)
 	if len(guards) == 0 {
 		return writeGuardTemplate(templatesDir, driverOwnershipLockTemplate, "", false)
 	}
@@ -709,10 +773,9 @@ func (g *Generator) writeDriverOwnershipLockTemplate(templatesDir string, rootDe
 			return "", 0, err
 		}
 		for pathIndex, guardedPath := range guard.paths {
-			displayPath := guard.component + "." + guardedPath
-			failMessage := fmt.Sprintf("install-time value intersects driver-ownership path %s; set driver "+
-				"ownership at bundle time (aicr bundle --set %s:%s=...) so "+
-				"CheckDriverOwnershipCoherence can verify it", displayPath, overrideKey, guardedPath)
+			failMessage := fmt.Sprintf("install-time value intersects driver-ownership path %s.%s; %s",
+				guard.component, guardedPath,
+				driverOwnershipRemedy(g.RecipeResult, guard.component, overrideKey, guardedPath))
 			segments := strings.Split(guardedPath, ".")
 			writePathGuard(
 				&buf,
@@ -785,7 +848,7 @@ func (g *Generator) reservedTemplateNames() []string {
 	if g.RecipeResult != nil && g.RecipeResult.Metadata.SelectedProfile != nil {
 		reserved = append(reserved, profileLockTemplateName)
 	}
-	if len(g.driverOwnershipGuards()) > 0 {
+	if len(driverOwnershipGuards(g.RecipeResult)) > 0 {
 		reserved = append(reserved, driverOwnershipLockTemplateName)
 	}
 	return reserved
