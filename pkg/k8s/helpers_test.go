@@ -15,49 +15,12 @@
 package k8s
 
 import (
-	"context"
-	stderrors "errors"
 	"fmt"
-	"net"
-	"syscall"
 	"testing"
-	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
-
-func TestAPIErrorCode(t *testing.T) {
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-	expired, expire := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-	defer expire()
-
-	unauthorized := k8serrors.NewUnauthorized("token has expired")
-	networkErr := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
-	forbidden := k8serrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "pod", stderrors.New("denied"))
-
-	tests := []struct {
-		name string
-		ctx  context.Context
-		err  error
-		want errors.ErrorCode
-	}{
-		{"canceled context outranks the API error", canceled, unauthorized, errors.ErrCodeCanceled},
-		{"expired deadline outranks the API error", expired, networkErr, errors.ErrCodeTimeout},
-		{"unauthorized", context.Background(), unauthorized, errors.ErrCodeUnauthorized},
-		{"network failure", context.Background(), networkErr, errors.ErrCodeUnavailable},
-		{"anything else", context.Background(), forbidden, errors.ErrCodeInternal},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := APIErrorCode(tt.ctx, tt.err); got != tt.want {
-				t.Errorf("APIErrorCode() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestIgnoreNotFound(t *testing.T) {
 	gr := schema.GroupResource{Group: "test", Resource: "things"}

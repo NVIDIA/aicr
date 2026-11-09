@@ -21,13 +21,30 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
+
+// APIErrorCode classifies an unexpected apiserver error: a dead context is a
+// cancellation or a timeout, rejected credentials are unauthorized, a network
+// failure is retryable, and anything else is internal.
+func APIErrorCode(ctx context.Context, err error) errors.ErrorCode {
+	switch {
+	case stderrors.Is(ctx.Err(), context.Canceled):
+		return errors.ErrCodeCanceled
+	case ctx.Err() != nil:
+		return errors.ErrCodeTimeout
+	case apierrors.IsUnauthorized(err):
+		return errors.ErrCodeUnauthorized
+	case errors.IsNetworkError(err):
+		return errors.ErrCodeUnavailable
+	default:
+		return errors.ErrCodeInternal
+	}
+}
 
 // classifyReGetError preserves the dead-context error code when a re-Get
 // races against context expiry. Without this guard, a context that ended
@@ -197,7 +214,7 @@ func checkPodPhase(p *corev1.Pod) (bool, error) {
 //
 // The supplied context bounds the entire wait: there is no internal retry
 // limit, and a dead context reports ErrCodeCanceled or ErrCodeTimeout. List
-// and Watch failures remain errors, classified by k8s.APIErrorCode, so they are
+// and Watch failures remain errors, classified by APIErrorCode, so they are
 // never mistaken for an empty pod list.
 func WaitForJobPodsTermination(ctx context.Context, client kubernetes.Interface, namespace, jobName string) error {
 	selector := jobNameLabel + "=" + jobName
@@ -207,7 +224,7 @@ func WaitForJobPodsTermination(ctx context.Context, client kubernetes.Interface,
 		}
 		pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 		if err != nil {
-			return errors.Wrap(k8s.APIErrorCode(ctx, err), "failed to list Job pods for termination", err)
+			return errors.Wrap(APIErrorCode(ctx, err), "failed to list Job pods for termination", err)
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "waiting for Job pod termination")
@@ -248,7 +265,7 @@ func waitForJobPodsChange(ctx context.Context, client kubernetes.Interface, name
 		LabelSelector: selector, ResourceVersion: resourceVersion,
 	})
 	if err != nil {
-		return false, errors.Wrap(k8s.APIErrorCode(ctx, err), "failed to watch Job pods for termination", err)
+		return false, errors.Wrap(APIErrorCode(ctx, err), "failed to watch Job pods for termination", err)
 	}
 	defer watcher.Stop()
 	for {
@@ -264,7 +281,7 @@ func waitForJobPodsChange(ctx context.Context, client kubernetes.Interface, name
 				if apierrors.IsResourceExpired(cause) || apierrors.IsGone(cause) {
 					return true, nil
 				}
-				return false, errors.Wrap(k8s.APIErrorCode(ctx, cause), "Job pod termination watch error", cause)
+				return false, errors.Wrap(APIErrorCode(ctx, cause), "Job pod termination watch error", cause)
 			}
 			p, ok := event.Object.(*corev1.Pod)
 			if ok && (event.Type == watch.Deleted || isPodTerminal(p)) {

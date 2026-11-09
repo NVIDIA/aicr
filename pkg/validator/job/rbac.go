@@ -22,7 +22,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s"
+	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -211,7 +211,7 @@ func VerifyServiceAccount(ctx context.Context, clientset kubernetes.Interface, n
 				name, namespace),
 			err)
 	case err != nil:
-		return errors.Wrap(k8s.APIErrorCode(ctx, err), fmt.Sprintf("failed to read ServiceAccount %q in namespace %q", name, namespace), err)
+		return errors.Wrap(pod.APIErrorCode(ctx, err), fmt.Sprintf("failed to read ServiceAccount %q in namespace %q", name, namespace), err)
 	}
 	// The validator pod spec leaves token automount to the ServiceAccount, so
 	// a ServiceAccount that disables it yields pods with no credential to
@@ -243,7 +243,7 @@ func VerifyServiceAccount(ctx context.Context, clientset kubernetes.Interface, n
 				"unverified identity", name, namespace),
 			err)
 	case err != nil:
-		return errors.Wrap(k8s.APIErrorCode(ctx, err),
+		return errors.Wrap(pod.APIErrorCode(ctx, err),
 			fmt.Sprintf("failed to review the permissions of ServiceAccount %q in namespace %q", name, namespace), err)
 	}
 	if !result.Status.Allowed {
