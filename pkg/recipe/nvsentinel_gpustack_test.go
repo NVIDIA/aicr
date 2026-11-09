@@ -90,6 +90,12 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 			wantAssume: ptr(false),
 		},
 		{
+			name:       "GKE-COS dra: same bundle-carried installer, same driver pod evidence",
+			criteria:   gkeCriteria(),
+			profile:    "gpuStack=dra",
+			wantAssume: ptr(false),
+		},
+		{
 			name: "OKE oci-managed: image driver + OKE's plugin, no driver pod",
 			criteria: &Criteria{
 				Service:     CriteriaServiceOKE,

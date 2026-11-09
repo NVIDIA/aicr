@@ -39,9 +39,15 @@ spec:
 
   # Run:ai 3.0's support matrix covers upstream Kubernetes 1.35 through 1.37,
   # with GKE following upstream. Tighter than the parent's 1.32 floor.
+  # Full precision deliberately: the gpuStack dra value's own ">= 1.35.0"
+  # floor intersects this one (#2643), and same-direction bounds at
+  # different precisions do not order — ">= 1.35" would reject the dra
+  # selection as a precision mismatch. Evaluation is unchanged (versions
+  # compare at the lower precision, so 1.35 and 1.35.0 admit the same
+  # actuals).
   constraints:
     - name: K8s.server.version
-      value: ">= 1.35"
+      value: ">= 1.35.0"
 
   componentRefs:
     # runai-cluster bundles KAI Scheduler 0.18 through its
