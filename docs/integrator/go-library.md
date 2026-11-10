@@ -1379,7 +1379,10 @@ once the bundle is complete, so a call that fails while rendering leaves
 `OutputDir` as it found it. An `OutputDir` that holds an earlier bundle is
 replaced, and content that is neither part of it nor named like the new
 bundle's output fails the call. With `config.WithIncludeChecksums(false)`,
-other top-level entries are kept instead. See
+nothing is checked. A top-level entry the new bundle also writes is replaced
+whole, so a directory such as `data/` loses every file the new bundle does
+not write, and other top-level entries are kept. Copy out any file you need
+before reusing `OutputDir`. See
 [Output directory](../user/bundling.md#output-directory) for which entries
 are replaced.
 
