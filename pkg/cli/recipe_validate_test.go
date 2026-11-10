@@ -25,6 +25,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 func TestRecipeValidateJSONFailure(t *testing.T) {
@@ -65,17 +66,10 @@ func TestRecipeValidateArguments(t *testing.T) {
 }
 
 func TestRecipeValidateExternalOnly(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(dir, "overlays"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	content := "apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: example\nspec:\n  base: h100-eks-training\n"
-	if err := os.WriteFile(filepath.Join(dir, "overlays", "example.yaml"), []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	dir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":         []byte(providertest.EmptyRegistryYAML),
+		"overlays/example.yaml": []byte("apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: example\nspec:\n  base: h100-eks-training\n"),
+	})
 	for _, externalOnly := range []bool{false, true} {
 		t.Run(fmt.Sprint(externalOnly), func(t *testing.T) {
 			var output bytes.Buffer

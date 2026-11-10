@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 )
 
 func TestValidateStaticFile(t *testing.T) {
@@ -164,8 +166,7 @@ func TestValidateStaticFileOverlayNames(t *testing.T) {
 				if err := os.Mkdir(filepath.Join(dir, "overlays"), 0o700); err != nil {
 					t.Fatal(err)
 				}
-				registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
-				if err := os.WriteFile(filepath.Join(dir, RegistryFileName), []byte(registry), 0o600); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, RegistryFileName), []byte(providertest.EmptyRegistryYAML), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			} else if err := os.CopyFS(dir, GetEmbeddedFS()); err != nil {
@@ -391,18 +392,11 @@ func TestValidateStaticProfilePatch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
-			if err := os.WriteFile(filepath.Join(dir, RegistryFileName), []byte(registry), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			dir := providertest.WriteDir(t, map[string][]byte{
+				RegistryFileName:        []byte(providertest.EmptyRegistryYAML),
+				"overlays/gke-cos.yaml": []byte(withPatch(t, "gke-cos.yaml", tt.patch)),
+			})
 			path := filepath.Join(dir, "overlays", "gke-cos.yaml")
-			if err := os.WriteFile(path, []byte(withPatch(t, "gke-cos.yaml", tt.patch)), 0o600); err != nil {
-				t.Fatal(err)
-			}
 			diagnostics, err := ValidateStatic(t.Context(), path, dir)
 			if err != nil {
 				t.Fatal(err)
