@@ -37,9 +37,11 @@
 # its template and RBAC render only with its mixin, and that
 # kubernetes-object-monitor prints a declared policy's enabled and isFatal
 # verbatim, the maintenance-request one asserts the controller, its socket
-# mount, its webhooks and the quarantine rule set its events match, and the
-# CRD exclusion one asserts every component's ownsCRDsExcludeSubcharts
-# (nvsentinel's and nktp's) still matches its pinned chart.
+# mount, its webhooks and the quarantine rule set its events match, the
+# csp-health-monitor one asserts both images, STORE_ONLY and each cloud's
+# workload identity annotation, and the CRD exclusion one asserts every
+# component's ownsCRDsExcludeSubcharts (nvsentinel's and nktp's) still matches
+# its pinned chart.
 # All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
 # place they execute. There is no PR-blocking trigger here on purpose: these
@@ -120,6 +122,7 @@ jobs:
             TestNVSentinelNodeValidationChartRender
             TestNVSentinelPostRemediationValidationChartRender
             TestNVSentinelMaintenanceRequestChartRender
+            TestNVSentinelCSPHealthMonitorChartRender
           )
           pattern="^($(IFS='|'; echo "${tests[*]}"))$"
           out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?

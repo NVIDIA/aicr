@@ -86,6 +86,7 @@ func TestNVSentinelHealthCheckClusterStates(t *testing.T) {
 		{"Deployment", "health-events-analyzer"},
 		{"Deployment", "event-exporter"},
 		{"Deployment", "nvsentinel-incluster-file-server"},
+		{"Deployment", "csp-health-monitor"},
 		{"Deployment", "lifecycle-manager"},
 	}
 	// pipeline returns every remediation workload fully rolled out, except

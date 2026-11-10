@@ -616,9 +616,10 @@ components:
     # nvsentinel-observe, -quarantine and -remediation,
     # nvsentinel-slinky-drainer (#2615), nvsentinel-health-events-analyzer
     # (#2618), nvsentinel-event-exporter (#2621), nvsentinel-log-collector
-    # (#2619), nvsentinel-node-validation (#3088) and
-    # nvsentinel-external-remediation (#3091) mixins: the exact leaf paths a
-    # mixin may set on this
+    # (#2619), nvsentinel-node-validation (#3088),
+    # nvsentinel-external-remediation (#3091), and
+    # nvsentinel-csp-health-monitor-aws and -gcp (#2620) mixins: the exact
+    # leaf paths a mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
     # recipe's own override, or an operator --set), never from a mixin, so
@@ -771,6 +772,10 @@ components:
       - lifecycle-manager.config.newNodeValidation.newNodeTests
       - fault-quarantine.validation.enabled
       - fault-quarantine.validation.ruleSets
+      - global.cspHealthMonitor.enabled
+      - csp-health-monitor.cspName
+      - csp-health-monitor.processingStrategy
+      - csp-health-monitor.configToml.triggerQuarantineWorkflowTimeLimitMinutes
     # The in-cluster file server's ReadWriteOnce volume, which the
     # nvsentinel-log-collector mixin turns on (#2619).
     storageClassPaths:
@@ -906,6 +911,9 @@ components:
       # Blocking: a MaintenanceRequest (#3092) that would be accepted but
       # neither cordon nor drain its node. The rules are in the function's doc.
       - function: CheckNVSentinelMaintenanceRequestCoherent
+        severity: error
+      # Blocking (#2620). The rules are in the function's doc.
+      - function: CheckNVSentinelCSPHealthMonitorCoherent
         severity: error
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
