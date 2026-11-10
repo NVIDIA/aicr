@@ -10,9 +10,9 @@ proposed behavior; it does not introduce an implemented command or schema.
 ## Decision Summary
 
 The embedded catalog may publish `artifacts/bindings.yaml`; a `--data`
-catalog can add or override bindings by artifact name. Checks activate only
-when the user supplies an inventory, through `artifacts/inventory.yaml` in
-`--data` or the existing config file. AICR applies matching bindings in memory
+catalog can add or override bindings by artifact name. Composition and coverage
+checks activate only when the user supplies an inventory, through
+`artifacts/inventory.yaml` in `--data` or the existing config file. AICR applies matching bindings in memory
 during catalog/provider loading, before recipe resolution.
 The producer lists release artifacts without knowing AICR component names.
 The catalog author maps those artifacts to chart coordinates and image values.
@@ -114,8 +114,9 @@ An inventory activates composition and coverage checks. Read it from
 `spec.recipe.artifacts.inventory` when supplied. The explicit path also works
 with only the embedded catalog; `--data` is not required. An explicitly named
 missing file or an invalid inventory fails loading. Without an inventory,
-bindings are ignored and catalog behavior is unchanged, whether either layer
-has bindings or not.
+bindings are ignored during ordinary recipe, validation, mirror and bundle
+loading, whether either layer has bindings or not. Explicit static catalog
+validation checks binding schemas as described below.
 
 If an inventory is supplied but neither layer has bindings, use an empty
 binding set. Each inventory entry then fails ordinary accounting with
@@ -180,6 +181,7 @@ selection coverage cannot be completed solely during provider loading.
 | Consumer or source | Initial artifact support |
 |---|---|
 | CLI `recipe`, `validate`, `mirror list`, `bundle` | Supported through the existing `--config` and `--data` inputs. |
+| CLI `recipe validate` and static-validation SDK facade | Supported for artifact schemas, inventory accounting and active-target checks. Selected-recipe coverage and values-file participation remain resolve-time checks. |
 | SDK with `EmbeddedSource` or `FilesystemSource` | Supported through a new typed client option carrying the same inventory path and exceptions as `AICRConfig`. Provider construction and saved-recipe checks use the same implementation as the CLI. |
 | `aicrd` | Unsupported for artifact-bearing recipes. Reject with reason `artifact-inputs-required` before execution; this proposal adds no server inventory transport or configuration. |
 | CLI `upgrade-check` and SDK `UpgradeCheck` | Unsupported for artifact-bound inputs or an inventory-enabled client. Reject with reason `artifact-upgrade-unsupported` before consulting upgrade records. Defining upgrade evidence for rebound pins is separate work. |
@@ -207,6 +209,36 @@ ready for execution. It would also need to define which release's upgrade
 evidence applies. This proposal adds no general historical comparison reader
 for UpgradeCheck. The namespace-only extraction below is a limited exception
 to input matching; it does not relax the execution guard.
+
+### Static catalog validation
+
+`aicr recipe validate` checks `artifacts/bindings.yaml` and, when selected,
+`artifacts/inventory.yaml` as part of catalog validation. It uses the same
+precedence for the inventory override and catalog default as composition,
+with the same captured inputs and existing config and data inputs. Extend the static-validation SDK
+facade to receive the same typed artifact choices; add no flags.
+
+Check document schemas and supported kind/version pairs, including duplicate
+keys and field shapes. Validate binding layers and the merged set's disjoint
+artifact dispositions and one-chart-per-component rule even without an
+inventory. This is an explicit authoring check; it does not activate binding
+or coverage in ordinary commands that have no inventory.
+
+With an inventory, require every artifact to be bound or explicitly ignored.
+Check type agreement and active targets: component and values-file existence,
+JSON Pointer paths and leaf types, overlapping writes, and platform assertions.
+Inactive targets remain subject only to schema and shape validation. Do not
+require an inventory to cover every component or resolve every catalog recipe
+against it. Selected-recipe coverage, values-file participation and final
+identity guards run when a recipe is resolved or consumed.
+
+An explicitly supplied inventory or bindings file can receive standalone
+schema validation. Accounting and target checks require catalog context;
+diagnostics must distinguish schema-only validation from the checks performed
+with that context. Preserve the command's existing layered and
+`--external-only` static-validation modes. A successful static check does not
+qualify a selected recipe, verify chart archives or establish runtime image
+completeness.
 
 ### Catalog defaults and inherited identity
 
@@ -475,7 +507,7 @@ spec:
 
 | Field | Default | Contract |
 |---|---|---|
-| `spec.recipe.artifacts.inventory` | `<data>/artifacts/inventory.yaml` when present | Optional local path, including with only the embedded catalog. Must identify an existing regular file, not a symlink. No OCI reference. Without either source, checks stay inactive. |
+| `spec.recipe.artifacts.inventory` | `<data>/artifacts/inventory.yaml` when present | Optional local path, including with only the embedded catalog. Must identify an existing regular file, not a symlink. No OCI reference. Without either source, composition and coverage stay inactive. |
 | `spec.recipe.artifacts.allowCatalogPins` | `[]` | Selected components the user permits to retain catalog pins for missing chart or image matches. Active bindings still apply. Reject unknown names and duplicates; record the effective set in provenance. |
 
 A user can retain `cert-manager` from the catalog while supplying both
@@ -580,6 +612,25 @@ preserve the consumed inventory and merged bindings, including an inventory
 read through the override, and propagate the recipe's provenance.
 There is no generated lock file or resolved-catalog directory to reconcile.
 
+### Saved recipes without artifact provenance
+
+When an inventory is active, reject a hydrated saved recipe that lacks
+`metadata.artifacts` before validation, discovery or bundling. Return
+`ErrCodeInvalidRequest` with reason `artifact-provenance-required` and direct
+the user to re-resolve the recipe under the chosen inventory. This includes
+an inventory found in `--data` and one selected through the config override.
+Do not attach the composed provider and proceed, silently rebind saved
+output, or stamp current provenance onto an unknown historical composition.
+Matching chart coordinates and `allowCatalogPins` do not waive this rule.
+
+Without an active inventory, legacy recipe loading retains its existing
+behavior. A `RecipeMetadata` input freshly hydrated against the active
+composition produces a new recipe with provenance and is not a legacy saved
+result. This execution-load rule does not change the approved
+[inheritance paths](#catalog-defaults-and-inherited-identity): namespace mode
+reads only historical namespaces without execution, and full inheritance
+resolves a new recipe subject to its existing provenance and identity guards.
+
 ## Alternatives considered
 
 | Alternative | Disposition and reason |
@@ -647,8 +698,9 @@ evidence need separate work.
 1. Settle the minimum-version declaration and recipe schema gate, including
    rejection by unsupported readers. Fix the Terraform/Fleet prerequisite.
 2. Add neutral strict parsers, in-memory provider composition and config
-   plumbing. Preserve behavior whenever no inventory is supplied, including
-   catalogs that publish bindings.
+   plumbing, including static artifact validation. Preserve ordinary loading
+   behavior without an inventory; explicit static validation still checks
+   binding schemas and merged invariants.
 3. Add selected-recipe coverage, final-value guards, saved-recipe comparison
    and bundle provenance capture on supported CLI and SDK paths. Add the
    explicit rejection paths for `aicrd`, `upgrade-check` and `OCISource`.
@@ -656,6 +708,10 @@ evidence need separate work.
    charts. Exercise embedded-only bindings, external same-name replacements,
    superset bindings, inactive stale targets, partial component coverage,
    missing active targets, explicit exceptions and changed inputs on reload.
+   Check static validation with and without inventory, standalone artifact
+   files, and partial inventories that are valid for only some recipes.
+   Verify rejection of legacy hydrated results with an active inventory,
+   unchanged loading without one, and fresh resolution with provenance.
    Exercise literal OCI tags with build metadata, catalog default restatements,
    full-inheritance conflicts, namespace-only inheritance across different
    inventories and disabling CRD ownership across the composed catalog.
@@ -663,7 +719,7 @@ evidence need separate work.
    and bundle capture still use the retained bytes. Check that a binary version
    change alone leaves the catalog digest unchanged,
    while changes to included catalog files reject execution reloads.
-   Check repeatability and unchanged behavior without an inventory. Verify
+   Check repeatability and unchanged ordinary loading without an inventory. Verify
    mismatching chart archives are rejected by every supported vendoring path.
 
 Before implementation, resolve how platform assertions are checked for mixed
