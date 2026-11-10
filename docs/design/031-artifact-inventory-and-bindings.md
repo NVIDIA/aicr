@@ -12,8 +12,9 @@ proposed behavior; it does not introduce an implemented command or schema.
 The embedded catalog may publish `artifacts/bindings.yaml`; a `--data`
 catalog can add or override bindings by artifact name. Composition and coverage
 checks activate only when the user supplies an inventory, through
-`artifacts/inventory.yaml` in `--data` or the existing config file. AICR applies matching bindings in memory
-during catalog/provider loading, before recipe resolution.
+`artifacts/inventory.yaml` in `--data` or the existing config file. AICR applies
+matching bindings in memory during catalog/provider loading, before recipe
+resolution.
 The producer lists release artifacts without knowing AICR component names.
 The catalog author maps those artifacts to chart coordinates and image values.
 The user controls an optional inventory path override and coverage exceptions
@@ -127,9 +128,10 @@ binding set. Each inventory entry then fails ordinary accounting with
 1. When an inventory is supplied, capture bounded snapshots of it, the
    catalog's binding layers and the base catalog file sets. Retain the captured
    bytes before hashing or constructing the composed provider. Merge bindings
-   and validate document shapes and inventory accounting before publishing it. Every inventory entry
-   must be bound or explicitly ignored. An unmatched binding is inactive and
-   leaves its target fields at catalog pins. Reads and later bundle capture
+   and validate document shapes and inventory accounting before publishing it.
+   Every inventory entry must be bound or explicitly ignored. An unmatched
+   binding is inactive and leaves its target fields at catalog pins. Reads and
+   later bundle capture
    must use the same snapshot.
 2. Layer the catalog from the retained base snapshot, without falling back to
    the live directory. Validate targets only for active bindings:
@@ -215,8 +217,9 @@ to input matching; it does not relax the execution guard.
 `aicr recipe validate` checks `artifacts/bindings.yaml` and, when selected,
 `artifacts/inventory.yaml` as part of catalog validation. It uses the same
 precedence for the inventory override and catalog default as composition,
-with the same captured inputs and existing config and data inputs. Extend the static-validation SDK
-facade to receive the same typed artifact choices; add no flags.
+with the same captured inputs and existing config and data inputs. Extend the
+static-validation SDK facade to receive the same typed artifact choices; add
+no flags.
 
 Check document schemas and supported kind/version pairs, including duplicate
 keys and field shapes. Validate binding layers and the merged set's disjoint
@@ -331,8 +334,9 @@ assign both kinds to beta from their first release. They follow
 [ADR-013](013-aicr-run-domain-migration.md) without adding an API group or alpha
 lane. Implementation must add kind-specific read-gate entries in the same
 change that introduces their parsers. Each gate accepts only its own kind with
-`aicr.run/v1beta1`; reject every other kind/version pair. Apply the compatibility
-and deprecation rules of [ADR-011](011-artifact-apiversion-policy.md) and
+`aicr.run/v1beta1`; reject every other kind/version pair. Apply the
+compatibility and deprecation rules of
+[ADR-011](011-artifact-apiversion-policy.md) and
 [ADR-022](022-artifact-maturity-and-deprecation.md).
 
 Each file contains one UTF-8 YAML or JSON document with string mapping keys.
@@ -536,9 +540,17 @@ provider pointer.
 | `allowCatalogPins` | Sorted effective exception set from the user config. |
 | `verification` | `metadata-only` at composition time. |
 
+Use [RFC 8785 JSON Canonicalization Scheme (JCS)][jcs] for all JSON hashed by
+`bindingsDigest` and `baseCatalogDigest`, including the embedded file-list
+hash. Hash the exact canonical UTF-8 bytes with no trailing newline. JCS
+specifies property ordering, string escaping and number serialization.
+Preserve binding array order and use the file-list ordering defined below.
+Go's [`encoding/json` default HTML escaping][go-json-escaping] must not be
+used for the bytes being hashed; disabling HTML escaping alone is not a
+substitute for JCS canonicalization.
+
 Compute `bindingsDigest` after external entries replace same-name embedded
-entries. Encode the merged document as compact UTF-8 JSON with recursively
-sorted object keys and no insignificant whitespace; preserve array order.
+entries. Encode the merged document with JCS.
 Include every effective chart, image and ignored-artifact entry. Per-layer
 formatting or a shadowed entry does not change this digest. When neither layer
 has bindings, hash the canonical empty document with empty `charts`, `images`
@@ -561,8 +573,8 @@ none may fall back to the live external directory. Bound capture resources and
 reject capture failures before publishing the provider.
 
 Bundle capture must receive explicit access to the retained snapshot of
-external inputs and copy those bytes, including the captured inventory and binding
-inputs, rather than rereading source paths. The current
+external inputs and copy those bytes, including the captured inventory and
+binding inputs, rather than rereading source paths. The current
 [bundle data copy][bundle-data-copy] depends on a concrete layered provider and
 copies the live directory; wrapping provider reads alone would not satisfy
 this contract. A later execution reload captures fresh inputs and compares
@@ -579,12 +591,13 @@ it changes `baseCatalogDigest` and fails the reload comparison.
 
 Represent each file as `[path, size, sha256]`: its provider-relative path with
 `/` separators, byte length and `sha256:` digest of the exact bytes. Sort each
-list by the UTF-8 bytes of its paths and encode it as compact UTF-8 JSON.
+list by the UTF-8 bytes of its paths and encode it with JCS.
 Exclude mtimes, permissions and absolute paths. The embedded catalog identity
 is the SHA-256 of the encoded embedded list. Compute `baseCatalogDigest` over
-a compact UTF-8 JSON object with keys `embedded` and `external`, in that order. Its values are the
-embedded digest string and the external file list; use `[]` when no external
-catalog is supplied. These inputs define the hash; they add no wire fields.
+the JCS encoding of an object with keys `embedded` and `external`. Their values
+are the embedded digest string and the external file list; use `[]` when no
+external catalog is supplied. These inputs define the hash; they add no wire
+fields.
 Record AICR version/build identity separately using recipe metadata conventions.
 
 A change to either included file set, path or file bytes rejects a saved
@@ -719,8 +732,9 @@ evidence need separate work.
    and bundle capture still use the retained bytes. Check that a binary version
    change alone leaves the catalog digest unchanged,
    while changes to included catalog files reject execution reloads.
-   Check repeatability and unchanged ordinary loading without an inventory. Verify
-   mismatching chart archives are rejected by every supported vendoring path.
+   Check repeatability and unchanged ordinary loading without an inventory.
+   Verify mismatching chart archives are rejected by every supported vendoring
+   path.
 
 Before implementation, resolve how platform assertions are checked for mixed
 architectures, the exact per-artifact provenance representation, and the
@@ -767,3 +781,5 @@ relocation evidence remain separate from metadata composition.
 [crd-example-registry]: https://github.com/NVIDIA/aicr/blob/2ba9496dde063169e1d09f09bcab9e709af1a2cf/recipes/registry.yaml#L1581
 [gpu-image-values]: https://github.com/NVIDIA/aicr/blob/2ba9496dde063169e1d09f09bcab9e709af1a2cf/recipes/components/gpu-operator/values.yaml#L183
 [network-image-values]: https://github.com/NVIDIA/aicr/blob/2ba9496dde063169e1d09f09bcab9e709af1a2cf/recipes/components/network-operator/values.yaml#L16
+[jcs]: https://www.rfc-editor.org/rfc/rfc8785.html
+[go-json-escaping]: https://pkg.go.dev/encoding/json#Marshal
