@@ -1195,12 +1195,13 @@ components:
       - nktp
     healthCheck:
       assertFile: checks/nktp/health-check.yaml
+    upgrades:
+      file: components/nktp/upgrades.yaml
     helm:
-      defaultRepository: oci://ghcr.io/dsx-ai-factory/nvke/charts
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nktp
-      # Moves to 0.1.1 at GA.
-      # renovate: datasource=docker depName=ghcr.io/dsx-ai-factory/nvke/charts/nktp
-      defaultVersion: "0.1.1-rc.3"
+      # renovate: datasource=helm depName=nktp registryUrl=https://helm.ngc.nvidia.com/nvidia
+      defaultVersion: "0.2.0"
       # The node collector is privileged: a platform that enforces Pod
       # Security needs this namespace labeled privileged (os-talos pattern).
       defaultNamespace: nktp

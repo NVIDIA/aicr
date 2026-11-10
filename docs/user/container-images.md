@@ -65,7 +65,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nfd | helm | node-feature-discovery | 0.20.1 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
-| nktp | helm | nktp | 0.1.1-rc.3 | 8 |
+| nktp | helm | nktp | 0.2.0 | 8 |
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
 | nodewright-customizations | manifest | — | — | 6 |
 | nodewright-operator | helm | nodewright | v0.21.0 | 2 |
@@ -318,11 +318,11 @@ _No images extracted._
 - `busybox:latest`
 - `ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator:0.161.0`
 - `ghcr.io/open-telemetry/opentelemetry-operator/target-allocator:0.161.0`
-- `grafana/otel-lgtm:0.32.0`
-- `otel/opentelemetry-collector-k8s:0.162.0`
+- `grafana/otel-lgtm:0.38.0`
+- `otel/opentelemetry-collector-k8s:0.164.0`
 - `quay.io/prometheus/node-exporter:v1.12.1`
-- `rancher/kubectl:v1.34.1`
 - `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0`
+- `registry.k8s.io/kubectl:v1.35.10`
 
 ### node-problem-detector
 
