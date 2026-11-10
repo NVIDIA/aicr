@@ -130,11 +130,8 @@ const (
 	inferencePerfNoCleanupEnv = "AICR_INFERENCE_PERF_NO_CLEANUP"
 
 	// GangSchedulingCheckName is the catalog name of the gang-scheduling
-	// conformance check; defaults.EnvRunaiProjectNamespace forwarding is
-	// scoped to it. Exported so the catalog package can assert (in
-	// TestEmbeddedCatalog_GangSchedulingEntryExists) that an embedded entry
-	// with this exact name exists, since a rename would otherwise silently
-	// no-op the forwarding and fail every Run:ai gang-scheduling run.
+	// conformance check, the only one defaults.EnvRunaiProjectNamespace is
+	// forwarded to.
 	GangSchedulingCheckName = "gang-scheduling"
 )
 

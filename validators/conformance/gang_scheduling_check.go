@@ -62,8 +62,8 @@ const (
 	gangWorkerCPURequest    = "100m"
 	gangWorkerMemoryRequest = "128Mi"
 
-	// gangPhaseLabel marks which phase a test pod belongs to; its values are
-	// gangPhasePositive and gangPhaseNegative.
+	// gangPhaseLabel marks which phase a test pod or PodGroup belongs to; its
+	// values are gangPhasePositive and gangPhaseNegative.
 	gangPhaseLabel    = "gang-scheduling.aicr.nvidia.com/phase"
 	gangPhasePositive = "positive"
 	gangPhaseNegative = "negative"
@@ -84,37 +84,22 @@ const (
 	// request, and the recipe componentRef name that declares the capability.
 	kaiSchedulerName = "kai-scheduler"
 
-	// kaiDefaultQueue is the Queue AICR's kai-scheduler values create, which
-	// the test PodGroups join on the KAI target. Run:ai refuses user-created
-	// Queues and derives each PodGroup's queue from the Project that owns its
-	// namespace, so the Run:ai target reads the queue from the Project
-	// namespace instead (runaiQueueLabel).
+	// kaiDefaultQueue is the Queue AICR's kai-scheduler values create.
 	kaiDefaultQueue = "default-queue"
 
-	// runaiClusterComponent is the recipe componentRef that installs the
-	// Run:ai cluster side. Its kai-resource-management subchart bundles KAI
-	// into runaiNamespace under the scheduler name runaiSchedulerName, and
-	// the Run:ai leaves disable kai-scheduler, so the two targets never
-	// coexist on one recipe.
-	runaiClusterComponent = "runai-cluster"
-	runaiNamespace        = "runai"
-	runaiSchedulerName    = "runai-scheduler"
-
-	// runaiKAIOperatorDeployment is the KAI operator Deployment the Run:ai
-	// chart renders; the applicability gate probes it first.
+	// The Run:ai target (see gangTarget): the recipe componentRef, the
+	// namespace its bundled KAI runs in, the schedulerName it answers to, the
+	// Deployment the applicability gate probes, and the name prefix of the
+	// per-shard scheduler Deployments.
+	runaiClusterComponent      = "runai-cluster"
+	runaiNamespace             = "runai"
+	runaiSchedulerName         = "runai-scheduler"
 	runaiKAIOperatorDeployment = "kai-operator"
+	runaiSchedulerShardPrefix  = runaiSchedulerName + "-"
 
-	// runaiQueueLabel is the namespace label Run:ai configures as KAI's
-	// queueLabelKey: a Project namespace (runai-<project>) carries it with the
-	// Project's queue as its value, and KAI resolves every PodGroup's queue
-	// from it. The check reads the same label for the PodGroups it
-	// pre-creates there.
+	// runaiQueueLabel is the Project namespace label whose value is the
+	// Project's queue (the queueLabelKey of Run:ai's KAI).
 	runaiQueueLabel = "runai/queue"
-
-	// runaiSchedulerShardPrefix prefixes the per-shard scheduler Deployments
-	// KAI's operator renders as <schedulerName>-<shard>. Run:ai creates one
-	// shard per node pool, so the names are discovered, not listed.
-	runaiSchedulerShardPrefix = runaiSchedulerName + "-"
 
 	// kaiGangRefusalFormat is the affirmative all-or-nothing refusal KAI writes
 	// to PodGroup status.schedulingConditions when fewer members fit than
@@ -1476,15 +1461,17 @@ func confirmGangNamespaceGone(ctx context.Context, clientset kubernetes.Interfac
 
 // buildPodGroup returns the unstructured PodGroup for the positive case.
 func buildPodGroup(run *gangTestRun) *unstructured.Unstructured {
-	return newPodGroup(run.namespace, run.groupName, run.queue, gangMinMembers)
+	return newPodGroup(run.namespace, run.groupName, run.queue, gangPhasePositive, gangMinMembers)
 }
 
 // buildNegativePodGroup returns the unstructured PodGroup for the negative case.
 func buildNegativePodGroup(run *gangTestRun) *unstructured.Unstructured {
-	return newPodGroup(run.namespace, run.negGroupName, run.queue, run.negShape.Members)
+	return newPodGroup(run.namespace, run.negGroupName, run.queue, gangPhaseNegative, run.negShape.Members)
 }
 
-func newPodGroup(namespace, name, queue string, minMember int) *unstructured.Unstructured {
+// newPodGroup labels the PodGroup with gangPhaseLabel like its members, so
+// one selector finds everything a run left in a namespace it does not own.
+func newPodGroup(namespace, name, queue, phase string, minMember int) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]any{
 			keyAPIVersion: "scheduling.run.ai/v2alpha2",
@@ -1492,6 +1479,7 @@ func newPodGroup(namespace, name, queue string, minMember int) *unstructured.Uns
 			keyMetadata: map[string]any{
 				keyName:      name,
 				keyNamespace: namespace,
+				"labels":     map[string]any{gangPhaseLabel: phase},
 			},
 			keySpec: map[string]any{
 				"minMember": int64(minMember),

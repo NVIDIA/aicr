@@ -25,7 +25,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 
@@ -309,13 +308,17 @@ func TestNewGangTestRunTarget(t *testing.T) {
 					t.Errorf("pod %d namespace = %q, want %q", i, pod.Namespace, run.namespace)
 				}
 			}
-			for _, pg := range []*unstructured.Unstructured{buildPodGroup(run), buildNegativePodGroup(run)} {
+			wantPhase := []string{gangPhasePositive, gangPhaseNegative}
+			for i, pg := range []*unstructured.Unstructured{buildPodGroup(run), buildNegativePodGroup(run)} {
 				queue, _, _ := unstructured.NestedString(pg.Object, keySpec, "queue")
 				if queue != tt.wantQueue {
 					t.Errorf("PodGroup %s queue = %q, want %q", pg.GetName(), queue, tt.wantQueue)
 				}
 				if pg.GetNamespace() != run.namespace {
 					t.Errorf("PodGroup %s namespace = %q, want %q", pg.GetName(), pg.GetNamespace(), run.namespace)
+				}
+				if got := pg.GetLabels()[gangPhaseLabel]; got != wantPhase[i] {
+					t.Errorf("PodGroup %s label %s = %q, want %q", pg.GetName(), gangPhaseLabel, got, wantPhase[i])
 				}
 			}
 		})
@@ -592,9 +595,9 @@ func TestRunGangPositivePhaseRunaiTarget(t *testing.T) {
 			t.Errorf("%s imagePullSecrets = %v, want the forwarded regcred reference", pod.Name, refs)
 		}
 	}
-	secrets, err := clientset.CoreV1().Secrets(testRunaiProjectNamespace).List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("list Secrets: %v", err)
+	secrets, listErr := clientset.CoreV1().Secrets(testRunaiProjectNamespace).List(context.Background(), metav1.ListOptions{})
+	if listErr != nil {
+		t.Fatalf("list Secrets: %v", listErr)
 	}
 	if len(secrets.Items) != 0 {
 		t.Errorf("no Secret may be copied into the Project namespace; found %d", len(secrets.Items))
@@ -603,7 +606,3 @@ func TestRunGangPositivePhaseRunaiTarget(t *testing.T) {
 		t.Errorf("the check must not create the Project namespace; Get returned %v", err)
 	}
 }
-
-// Compile-time guard that the recipe helper types used above stay the ones
-// the validator reads.
-var _ = recipe.ComponentRef{}

@@ -528,9 +528,26 @@ phase cannot schedule), the PodGroups join the queue read from that
 namespace's `runai/queue` label, and cleanup deletes the pods and PodGroups
 but leaves the namespace, which belongs to the Project. A Run:ai recipe
 without that input fails rather than skips, because a Skip there would pass
-conformance without exercising the scheduler. The Run:ai path is verified by
-unit tests only until a UAT lane with a Run:ai control plane exists
-(NVIDIA/aicr#3302).
+conformance without exercising the scheduler. The Run:ai path is covered by
+unit tests and one manual live run (NVIDIA/aicr#3731); no UAT lane exercises
+it until one with a Run:ai control plane exists (NVIDIA/aicr#3302).
+
+Two things differ in a Project namespace because the check does not own it.
+`--image-pull-secret` Secrets are not copied there, since the Project's users
+could read them: the test pods only reference them by name, so a private
+probe image needs a Secret of the same name already in the Project namespace.
+And a run killed before its cleanup leaves its pods and PodGroups behind,
+where `tools/cleanup` does not look (it sweeps the `gang-scheduling-test-`
+namespace prefix); the negative-phase pods stay `Pending` against the
+Project's quota until deleted. Every pod and PodGroup the check creates
+carries the `gang-scheduling.aicr.nvidia.com/phase` label, so remove them
+with:
+
+```shell
+PROJECT_NAMESPACE="runai-team-a"  # replace with your Run:ai Project namespace
+kubectl delete pods,podgroups.scheduling.run.ai -n "${PROJECT_NAMESPACE}" \
+  -l gang-scheduling.aicr.nvidia.com/phase
+```
 
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
