@@ -408,8 +408,8 @@ are not time-bounded and persist until `Client.Close()` is called.
 > family (profiled and unprofiled) with the same criteria parameters, plus
 > optional `profile=gpuStack=azure-managed` or
 > `profile=gpuStack=operator-managed` on AKS, and
-> `profile=gpuStack=gke-default` or `profile=gpuStack=bundle-installer`
-> on GKE
+> `profile=gpuStack=gke-default`, `profile=gpuStack=bundle-installer`, or
+> `profile=gpuStack=dra` on GKE
 > (see [GKE GPU Setup](gke-gpu-setup.md#gpu-device-plugin-ownership)).
 > `/v1/recipe` serves profiled and unprofiled compositions alike: omit
 > `profile=` to take the composition's declared default, or select one

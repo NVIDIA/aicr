@@ -126,6 +126,10 @@ navigation:
         path: integrator/cks-rtx-pro-6000-setup.md
       - page: NVKE GB200 Setup
         path: integrator/nvke-gb200-setup.md
+      - page: NVKE VR200 Setup
+        path: integrator/nvke-vr200-setup.md
+      - page: NVKE GB300 Setup
+        path: integrator/nvke-gb300-setup.md
       - page: EKS Dynamo Networking
         path: integrator/eks-dynamo-networking.md
       - page: GKE TCPXO Networking

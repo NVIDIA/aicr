@@ -31,7 +31,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry/remote"
 

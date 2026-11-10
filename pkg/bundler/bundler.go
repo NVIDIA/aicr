@@ -425,6 +425,16 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if dir == "" {
 		dir = "."
 	}
+	// After component validations, so a bundle that ships gpu-operator hears
+	// CheckDriverOwnershipCoherence's dynamic-path verdict first; before
+	// copyDataFiles, which a rejection inside Generate would leave behind.
+	if b.Config.Deployer() == config.DeployerArgoCDHelm {
+		if ownershipErr := argocdhelm.ValidateDriverOwnership(
+			ctx, recipeResult, dynamicValues, b.Config.VendorCharts(), dir,
+		); ownershipErr != nil {
+			return nil, ownershipErr
+		}
+	}
 	if dir != "." {
 		if mkdirErr := os.MkdirAll(dir, 0755); mkdirErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
@@ -2032,20 +2042,29 @@ func (b *DefaultBundler) warnExcludedDriverInstaller(recipeResult *recipe.Recipe
 	b.appendWarning(warning)
 }
 
-// aksToolkitHardeningManifest is the nodewright-customizations manifest that
-// sets the NVIDIA container toolkit device-isolation keys on AKS GPU nodes.
-const aksToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml"
+// aksToolkitHardeningManifest and okeToolkitHardeningManifest are the
+// nodewright-customizations manifests that set the NVIDIA container toolkit
+// device-isolation keys on AKS and OKE GPU nodes.
+const (
+	aksToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml"
+	okeToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-oke.yaml"
+)
 
-// warnExcludedToolkitHardening warns when a component carrying the AKS toolkit
-// hardening is left out of the bundle while gpu-operator's effective values
-// leave the node-image toolkit in place (toolkit.enabled=false, the
-// azure-managed profile). The hardening ships in nvidia-setup through
-// nodewright-customizations, so leaving that component out is an explicit
-// opt-out of it; this warns rather than blocks, but nothing else in the bundle
-// sets those keys. When gpu-operator's values cannot be resolved it warns too.
+// warnExcludedToolkitHardening warns when a component carrying the AKS or OKE
+// toolkit hardening is left out of the bundle while gpu-operator's effective
+// values leave the node-image toolkit in place (toolkit.enabled=false: the
+// azure-managed and oci-managed profiles). The hardening ships in nvidia-setup
+// through nodewright-customizations, so leaving that component out is an
+// explicit opt-out of it; this warns rather than blocks, but nothing else in
+// the bundle sets those keys. When gpu-operator's values cannot be resolved it
+// warns too.
 func (b *DefaultBundler) warnExcludedToolkitHardening(ctx context.Context, recipeResult *recipe.RecipeResult, componentName, how string) {
 	ref := recipeResult.GetComponentRef(componentName)
-	if ref == nil || !slices.Contains(ref.ManifestFiles, aksToolkitHardeningManifest) {
+	if ref == nil {
+		return
+	}
+	aks := slices.Contains(ref.ManifestFiles, aksToolkitHardeningManifest)
+	if !aks && !slices.Contains(ref.ManifestFiles, okeToolkitHardeningManifest) {
 		return
 	}
 	if recipeResult.GetComponentRef(gpuOperatorComponentName) == nil {
@@ -2059,9 +2078,12 @@ func (b *DefaultBundler) warnExcludedToolkitHardening(ctx context.Context, recip
 		"%s is excluded from this bundle (%s), which removes the NVIDIA container toolkit "+
 			"device-isolation hardening it delivers through nvidia-setup: any unprivileged pod "+
 			"that sets NVIDIA_VISIBLE_DEVICES gets every GPU on the node, and "+
-			"secure-accelerator-access fails. To skip only the InfiniBand/RDMA host prep, keep "+
-			"the component and set nodewrightcustomizations:accelerator=generic instead.",
+			"secure-accelerator-access fails.",
 		componentName, how)
+	if aks {
+		warning += " To skip only the InfiniBand/RDMA host prep, keep the component and set " +
+			"nodewrightcustomizations:accelerator=generic instead."
+	}
 	if err != nil {
 		warning += fmt.Sprintf(" (gpu-operator toolkit.enabled could not be resolved: %v)", err)
 	}
@@ -2737,7 +2759,14 @@ func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, rec
 const (
 	agentgatewayComponentName    = "agentgateway"
 	agentgatewaySourceRangesPath = "allowedSourceRanges"
+	agentgatewayServiceTypePath  = "serviceType"
+	agentgatewayServiceTypeLB    = "LoadBalancer"
 )
+
+// agentgatewayServiceTypes are the Service types the inference-gateway
+// manifest accepts in serviceType; the comparison is case-sensitive, as the
+// apiserver's is.
+var agentgatewayServiceTypes = []string{agentgatewayServiceTypeLB, "ClusterIP", "NodePort"}
 
 // agentgatewayDefaultSourceRanges is the private-by-default scope applied to the
 // inference-gateway LoadBalancer when the operator supplies no allowedSourceRanges
@@ -2793,6 +2822,14 @@ func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]
 	values := componentValues[agentgatewayComponentName]
 	if values == nil {
 		return nil
+	}
+
+	serviceType, err := agentgatewayServiceType(values)
+	if err != nil {
+		return err
+	}
+	if serviceType != "" && serviceType != agentgatewayServiceTypeLB {
+		return b.noteAgentgatewayNonLBService(values, serviceType)
 	}
 
 	state, detail := classifyAgentgatewaySourceRanges(values, agentgatewaySourceRangesPath)
@@ -2852,6 +2889,80 @@ func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]
 		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
 			"unhandled agentgateway exposure state %d", state))
 	}
+}
+
+// agentgatewayServiceType returns the validated serviceType value, or "" when
+// it is unset or empty. Anything but a string naming one of
+// agentgatewayServiceTypes is rejected, so a typo such as "clusterip" fails
+// bundle generation instead of rendering a Service the apiserver refuses.
+func agentgatewayServiceType(values map[string]any) (string, error) {
+	v, ok := component.GetValueByPath(values, agentgatewayServiceTypePath)
+	if !ok || v == nil {
+		return "", nil
+	}
+	s, isString := v.(string)
+	if !isString {
+		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: %s must be a string, got %T", agentgatewayComponentName, agentgatewayServiceTypePath, v))
+	}
+	if s == "" {
+		return "", nil
+	}
+	if !slices.Contains(agentgatewayServiceTypes, s) {
+		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: %s %q is not one of %s (case-sensitive)",
+			agentgatewayComponentName, agentgatewayServiceTypePath, s, strings.Join(agentgatewayServiceTypes, ", ")))
+	}
+	return s, nil
+}
+
+// agentgatewayNonLBReach describes who can reach the inference-gateway for a
+// non-LoadBalancer Service type, since no source-range filter applies there.
+func agentgatewayNonLBReach(serviceType string) string {
+	if serviceType == "NodePort" {
+		return "A NodePort is reachable by every client that can reach a node, so restrict access " +
+			"with network policy or a firewall."
+	}
+	return "The gateway is reachable only from inside the cluster."
+}
+
+// noteAgentgatewayNonLBService records that allowedSourceRanges does not apply
+// when serviceType is not LoadBalancer: loadBalancerSourceRanges is a
+// LoadBalancer-only Service field, so the manifest renders no ranges and the
+// private-by-default injection is skipped. Ranges the operator passed
+// explicitly are reported as a warning because they will not take effect.
+func (b *DefaultBundler) noteAgentgatewayNonLBService(values map[string]any, serviceType string) error {
+	state, detail := classifyAgentgatewaySourceRanges(values, agentgatewaySourceRangesPath)
+	switch state {
+	case exposureInvalid:
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: %s must be a list of CIDR strings (%s)",
+			agentgatewayComponentName, agentgatewaySourceRangesPath, detail))
+	case exposureScoped, exposureOpen:
+		b.appendWarning(fmt.Sprintf(
+			"%s: %s is set but %s is %s; loadBalancerSourceRanges applies only to a LoadBalancer "+
+				"Service, so the inference-gateway renders without them. %s",
+			agentgatewayComponentName, agentgatewaySourceRangesPath, agentgatewayServiceTypePath, serviceType,
+			agentgatewayNonLBReach(serviceType)))
+		slog.Warn("agentgateway allowedSourceRanges ignored for a non-LoadBalancer inference-gateway Service",
+			"component", agentgatewayComponentName,
+			"serviceType", serviceType,
+		)
+	case exposureUnset:
+		b.appendWarning(fmt.Sprintf(
+			"%s: %s is %s, so the inference-gateway Service is not a LoadBalancer and %s does not apply; "+
+				"the private-by-default source ranges are not injected. %s",
+			agentgatewayComponentName, agentgatewayServiceTypePath, serviceType, agentgatewaySourceRangesPath,
+			agentgatewayNonLBReach(serviceType)))
+		slog.Info("agentgateway inference-gateway Service is not a LoadBalancer; skipping source-range default",
+			"component", agentgatewayComponentName,
+			"serviceType", serviceType,
+		)
+	default:
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+			"unhandled agentgateway exposure state %d", state))
+	}
+	return nil
 }
 
 // classifyAgentgatewaySourceRanges inspects the value at path and reports how it
@@ -3761,8 +3872,8 @@ const (
 )
 
 var (
-	gpuOperatorComponentNames = []string{gpuOperatorComponentName, gpuOperatorOCPComponentName}
-	draComponentNames         = []string{draComponentName, "nvidia-dra-driver-gpu-ocp"}
+	gpuOperatorComponentNames = config.GPUOperatorDriverOwnership.ComponentNames
+	draComponentNames         = config.DRADriverOwnership.ComponentNames
 )
 
 func isDRAComponent(name string) bool {

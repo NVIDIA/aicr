@@ -1866,6 +1866,7 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 			ManifestFiles: manifests, Overrides: overrides}
 	}
 	hardening := []string{aksToolkitHardeningManifest}
+	okeHardening := []string{okeToolkitHardeningManifest}
 	disableSet := []config.Option{config.WithValueOverrides(map[string]map[string]string{
 		"nodewrightcustomizations": {"enabled": "false"},
 	})}
@@ -1875,6 +1876,7 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 		refs        []recipe.ComponentRef
 		cfgOpts     []config.Option
 		wantWarning string // substring expected in b.warnings; "" = no warning
+		oke         bool   // OKE hardening: the AKS-only accelerator=generic tip must be absent
 	}{
 		{
 			name:        "disabled via --set, azure-managed",
@@ -1946,6 +1948,25 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 			wantWarning: "could not be resolved",
 		},
 		{
+			name:        "OKE disabled via --set, oci-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(okeHardening, nil)},
+			cfgOpts:     disableSet,
+			wantWarning: "disabled via --set",
+			oke:         true,
+		},
+		{
+			name:        "OKE excluded by bundlers filter, oci-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(okeHardening, nil)},
+			cfgOpts:     []config.Option{config.WithBundlers([]string{"gpu-operator"})},
+			wantWarning: "excluded by the bundlers filter",
+			oke:         true,
+		},
+		{
+			name:    "OKE disabled via --set, operator-managed",
+			refs:    []recipe.ComponentRef{gpuOp(true), nwc(okeHardening, nil)},
+			cfgOpts: disableSet,
+		},
+		{
 			name:    "disabled without the hardening manifest",
 			refs:    []recipe.ComponentRef{gpuOp(false), nwc(nil, nil)},
 			cfgOpts: disableSet,
@@ -1981,7 +2002,13 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 				return
 			}
 			joined := strings.Join(b.warnings, "\n")
-			for _, want := range []string{tt.wantWarning, "device-isolation", "accelerator=generic"} {
+			wants := []string{tt.wantWarning, "device-isolation"}
+			if !tt.oke {
+				wants = append(wants, "accelerator=generic")
+			} else if strings.Contains(joined, "accelerator=generic") {
+				t.Errorf("warnings = %v, want no AKS accelerator=generic tip for OKE", b.warnings)
+			}
+			for _, want := range wants {
 				if !strings.Contains(joined, want) {
 					t.Errorf("warnings = %v, want substring %q", b.warnings, want)
 				}
@@ -4468,8 +4495,63 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 		present     bool
 		wantErr     bool
 		wantWarning bool
-		wantDefault bool // expects allowedSourceRanges defaulted to the RFC1918 set
+		wantDefault bool   // expects allowedSourceRanges defaulted to the RFC1918 set
+		wantNoRange bool   // expects allowedSourceRanges left absent (non-LoadBalancer serviceType)
+		wantReach   string // substring of the reach guidance expected in the warning
 	}{
+		{
+			name:        "ClusterIP serviceType skips the private default and notes that ranges do not apply",
+			values:      map[string]any{"serviceType": "ClusterIP"},
+			present:     true,
+			wantWarning: true,
+			wantNoRange: true,
+			wantReach:   "only from inside the cluster",
+		},
+		{
+			name:        "NodePort serviceType with explicit ranges warns that they are not rendered",
+			values:      map[string]any{"serviceType": "NodePort", "allowedSourceRanges": []any{"10.0.0.0/8"}},
+			present:     true,
+			wantWarning: true,
+			wantReach:   "every client that can reach a node",
+		},
+		{
+			name:    "ClusterIP serviceType still rejects an invalid allowedSourceRanges value",
+			values:  map[string]any{"serviceType": "ClusterIP", "allowedSourceRanges": "10.0.0.0/8"},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:        "explicit LoadBalancer serviceType keeps the private default",
+			values:      map[string]any{"serviceType": "LoadBalancer"},
+			present:     true,
+			wantWarning: true,
+			wantDefault: true,
+		},
+		{
+			name:        "empty serviceType keeps the private default",
+			values:      map[string]any{"serviceType": ""},
+			present:     true,
+			wantWarning: true,
+			wantDefault: true,
+		},
+		{
+			name:    "errors on a serviceType outside LoadBalancer, ClusterIP, NodePort",
+			values:  map[string]any{"serviceType": "ExternalName"},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "errors on a lowercase serviceType (case-sensitive)",
+			values:  map[string]any{"serviceType": "clusterip"},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "errors on a non-string serviceType",
+			values:  map[string]any{"serviceType": true},
+			present: true,
+			wantErr: true,
+		},
 		{
 			name:        "defaults to private ranges when allowedSourceRanges is unset",
 			values:      map[string]any{"fullnameOverride": "agentgateway"},
@@ -4579,6 +4661,16 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 					if !strings.Contains(warning, want) {
 						t.Errorf("warning = %q, want substring %q", warning, want)
 					}
+				}
+			}
+
+			if tt.wantReach != "" && !strings.Contains(b.warnings[0], tt.wantReach) {
+				t.Errorf("warning = %q, want reach guidance %q", b.warnings[0], tt.wantReach)
+			}
+
+			if tt.wantNoRange {
+				if got, ok := componentValues[agentgatewayComponentName][agentgatewaySourceRangesPath]; ok {
+					t.Errorf("allowedSourceRanges = %#v, want it left absent for a non-LoadBalancer serviceType", got)
 				}
 			}
 

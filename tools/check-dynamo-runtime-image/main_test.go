@@ -82,7 +82,6 @@ func TestRuntimeImageTagMatchesRegistry(t *testing.T) {
 		"../../tests/manifests/dynamo-vllm-smoke-test.yaml",
 		"../../tests/uat/lib/phases.sh",
 		"../../demos/workloads/inference/vllm-agg.yaml",
-		"../../pkg/evidence/cncf/scripts/manifests/dynamo-vllm-agg.yaml",
 	} {
 		data, err := os.ReadFile(path)
 		if err != nil {

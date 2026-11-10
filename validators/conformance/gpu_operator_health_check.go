@@ -22,7 +22,6 @@ import (
 	"github.com/NVIDIA/aicr/validators"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // CheckGPUOperatorHealth validates CNCF requirement #1: GPU Management.
@@ -49,10 +48,7 @@ func CheckGPUOperatorHealth(ctx *validators.Context) error {
 	if err != nil {
 		return err
 	}
-	gvr := schema.GroupVersionResource{
-		Group: apiGroupNVIDIA, Version: "v1", Resource: "clusterpolicies",
-	}
-	cp, err := dynClient.Resource(gvr).Get(ctx.Ctx, "cluster-policy", metav1.GetOptions{})
+	cp, err := dynClient.Resource(clusterPolicyGVR).Get(ctx.Ctx, clusterPolicyName, metav1.GetOptions{})
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeNotFound, "ClusterPolicy not found", err)
 	}
@@ -60,7 +56,7 @@ func CheckGPUOperatorHealth(ctx *validators.Context) error {
 	if err != nil || !found {
 		return errors.New(errors.ErrCodeInternal, "ClusterPolicy status.state not found")
 	}
-	if state != "ready" {
+	if state != clusterPolicyStateReady {
 		return errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("ClusterPolicy state=%s (want ready)", state))
 	}

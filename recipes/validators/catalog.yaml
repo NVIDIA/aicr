@@ -218,9 +218,9 @@ validators:
     description: "Verify Prometheus discovers a ServiceMonitor-selected CPU stub workload and collects exactly the requests sent to it"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     # 8m30s shared work budget enforced by the check's workCtx, plus 30s
-    # cleanup and 60s margin; the per-wait caps (stub Ready 3m, each
-    # collection wait 3m) are individual bounds under that budget, not a
-    # sum. See validators/conformance/consts.go.
+    # cleanup and 60s margin; the per-wait caps (stub Ready 3m, monitor load
+    # 5m, each collection wait 3m) are individual bounds under that budget,
+    # not a sum. See validators/conformance/consts.go.
     timeout: 10m
     args: ["ai-service-metrics"]
     env: []
@@ -237,9 +237,17 @@ validators:
         requirement: preferred
   - name: inference-gateway
     phase: conformance
-    description: "Verify the recipe's inference gateway (Gateway API + Inference Extension) is operational"
+    description: >-
+      Verify the recipe's inference gateway (Gateway API + Inference Extension)
+      is operational and routes traffic: an HTTPRoute on its Gateway sends
+      header-matched requests to a canary backend and splits the rest 70/30
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
-    timeout: 5m
+    # 13m30s work budget enforced by the check's workCtx, plus 30s cleanup
+    # and 60s margin; the traffic phase's per-wait caps (backends available
+    # 3m, HTTPRoute accepted 2m, probe pod 6m) are individual bounds under
+    # that budget, not a sum; a passing run takes 1-3 minutes. See
+    # validators/conformance/consts.go.
+    timeout: 15m
     args: ["inference-gateway"]
     env: []
   - name: pod-autoscaling
@@ -250,14 +258,22 @@ validators:
       control; needs two allocatable accelerators at once
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     # 13m30s shared work budget enforced by the check's workCtx, plus 30s
-    # cleanup and 60s margin; the per-wait caps (baseline Ready 3m, each
-    # metric change 3m, 1m negative control, scale-up 3m, scale-down 4m
-    # incl. 60s stabilization) are individual bounds under that budget, not
-    # a sum; a passing run takes 6-9 minutes. See
+    # cleanup and 60s margin; the per-wait caps (baseline Ready 3m, monitor
+    # load 5m, each metric change 3m, 1m negative control, scale-up 3m,
+    # scale-down 4m incl. 60s stabilization) are individual bounds under
+    # that budget, not a sum; a passing run takes 6-9 minutes. See
     # validators/conformance/consts.go.
     timeout: 15m
     args: ["pod-autoscaling"]
     env: []
+    # The check dials Prometheus for the PodMonitor load wait when the recipe
+    # declares kube-prometheus-stack, so it takes the same best-effort
+    # co-location as ai-service-metrics (see that entry and #933).
+    dependencyAffinity:
+      - componentRef: kube-prometheus-stack
+        podLabelSelector:
+          app.kubernetes.io/name: prometheus
+        requirement: preferred
   - name: cluster-autoscaling
     phase: conformance
     description: "Verify cluster autoscaling with Karpenter"
@@ -267,9 +283,11 @@ validators:
     env: []
   - name: robust-controller
     phase: conformance
-    description: "Verify AI operator controller and webhooks (Dynamo or Kubeflow Trainer)"
+    description: "Verify AI operator controller, webhooks and CR reconciliation (Kubeflow Trainer reconciles a TrainJob to Complete; Dynamo records observations)"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
-    timeout: 5m
+    # 6m30s work budget (robustControllerWorkBudget: deployment and webhook
+    # reads plus the 3m TrainJobReconcileTimeout) + 30s cleanup + 60s margin.
+    timeout: 8m
     args: ["robust-controller"]
     env: []
   - name: secure-accelerator-access
@@ -278,6 +296,16 @@ validators:
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     timeout: 10m
     args: ["secure-accelerator-access"]
+    env: []
+  - name: driver-runtime-management
+    phase: conformance
+    description: "Verify driver and container runtime configuration from a vanilla-image pod granted one GPU: injected nvidia-smi, a functional driver, and a version matching the advertised one"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    # 8m30s work budget + 30s cleanup + 60s margin (see gpuCheckWorkBudget in
+    # validators/conformance/consts.go): one namespace, one probe pod wait
+    # bounded by DRATestPodTimeout, log collection.
+    timeout: 10m
+    args: ["driver-runtime-management"]
     env: []
   - name: slinky-slurm-health
     phase: conformance
@@ -302,6 +330,17 @@ validators:
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     timeout: 5m
     args: ["slinky-slurm-gpu-access"]
+    env: []
+  - name: workload-sandboxing
+    phase: conformance
+    description: "Verify a sandboxed RuntimeClass (gVisor, Kata) isolates a CPU-only pod from the host kernel, processes, filesystem and network; fails when no sandboxed RuntimeClass exists"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    # 8m30s work budget + 30s cleanup + 60s margin (see
+    # workloadSandboxingWorkBudget in validators/conformance/consts.go): one
+    # namespace, two CPU-only probe pod waits each bounded by
+    # DRATestPodTimeout, log collection.
+    timeout: 10m
+    args: ["workload-sandboxing"]
     env: []
   - name: gpu-operator-health
     phase: conformance

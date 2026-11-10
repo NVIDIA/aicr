@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,7 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
@@ -66,6 +66,28 @@ const (
 	// noAllocProbePrefix names the standalone probe pod that is granted no
 	// GPU at all (no ResourceClaims, no nvidia.com/gpu limits).
 	noAllocProbePrefix = "no-alloc-probe-"
+	// runtimeClassProbePrefix names the AICR hardening extra's probe pod: an
+	// unprivileged pod on the nvidia RuntimeClass with
+	// NVIDIA_VISIBLE_DEVICES=all and no allocation.
+	runtimeClassProbePrefix = "runtimeclass-probe-"
+
+	// nvidiaRuntimeClassName is the GPU Operator's default operator.runtimeClass
+	// name; the probe resolves the class actually installed (see
+	// resolveNVIDIARuntimeClass), since recipes rename it (nvidia-cdi,
+	// nvidia-container-runtime on AKS).
+	nvidiaRuntimeClassName = "nvidia"
+	// nvidiaRuntimeHandlerPrefix selects the nvidia-prefixed RuntimeClasses
+	// (handler or name) the extra lists as an observation when it cannot
+	// establish the class; the prefix is not evidence of what serves them.
+	nvidiaRuntimeHandlerPrefix = "nvidia"
+	// envNVIDIAVisibleDevices is the container-toolkit device-list envvar
+	// that, without the hardening, exposes every GPU on the node.
+	envNVIDIAVisibleDevices = "NVIDIA_VISIBLE_DEVICES"
+	// runtimeClassExtraLabel prefixes every artifact of the RuntimeClass
+	// bypass probe so the evidence page shows it is an AICR hardening extra,
+	// not one of the CNCF secure_accelerator_access subtests, and its outcome
+	// never decides the check (see recordRuntimeClassBypassExtra).
+	runtimeClassExtraLabel = "AICR hardening extra (not a CNCF item): NVIDIA RuntimeClass bypass probe"
 
 	// allocationModeExactCount is the Kubernetes DRA DeviceRequest
 	// allocationMode enum value. It is an upstream API constant, not an AICR
@@ -170,17 +192,54 @@ type gpuTestRun struct {
 	podName        string
 	claimName      string
 	noAllocPodName string
+	// runtimeClassProbePodName is the AICR hardening extra's probe pod
+	// (secure-accelerator-access only).
+	runtimeClassProbePodName string
+	// driverProbePodName is the vanilla-image probe pod of
+	// driver-runtime-management.
+	driverProbePodName string
 	// IMEX channel subtest names (dra-support): the per-run ComputeDomain,
 	// the ResourceClaimTemplate the DRA driver generates from it, and the
 	// probe pod that consumes one channel from that template.
 	computeDomainName string
 	claimTemplateName string
 	imexPodName       string
+	// workload-sandboxing probe pods: the one on the sandboxed RuntimeClass
+	// and the unsandboxed control pinned to the same node.
+	sandboxProbePodName   string
+	sandboxControlPodName string
+
+	// namespaceLabels are stamped on the namespace beside the ownership
+	// label; a check sets them when something outside the run selects the
+	// namespace by label (a Gateway listener's allowedRoutes selector).
+	namespaceLabels map[string]string
 
 	nsObserved     bool
 	nsUID          types.UID
 	nsForeign      bool
 	nsNeverCreated bool
+
+	// imagePullSecrets are the --image-pull-secret names the orchestrator
+	// forwarded (validators.ImagePullSecretsEnv). createGPUTestNamespace
+	// copies each from validatorNamespace into the per-run namespace, where
+	// the probe pods reference them (imagePullSecretRefs); the copies die
+	// with the namespace.
+	imagePullSecrets   []string
+	validatorNamespace string
+}
+
+// imagePullSecretRefs returns the pod-spec references to the run's copied
+// image pull Secrets; nil when the orchestrator forwarded none (or for a nil
+// run, so a builder test with no run reads as "none").
+func (run *gpuTestRun) imagePullSecretRefs() []corev1.LocalObjectReference {
+	if run == nil || len(run.imagePullSecrets) == 0 {
+		return nil
+	}
+	refs := make([]corev1.LocalObjectReference, 0, len(run.imagePullSecrets))
+	for _, name := range run.imagePullSecrets {
+		refs = append(refs, corev1.LocalObjectReference{Name: name})
+	}
+	return refs
 }
 
 type draPatternReport struct {
@@ -225,9 +284,18 @@ func newGPUTestRun() (*gpuTestRun, error) {
 		claimName:      gpuClaimPrefix + token,
 		noAllocPodName: noAllocProbePrefix + token,
 
+		runtimeClassProbePodName: runtimeClassProbePrefix + token,
+		driverProbePodName:       driverRuntimeProbePodPrefix + token,
+
 		computeDomainName: imexComputeDomainPrefix + token,
 		claimTemplateName: imexClaimTemplatePrefix + token,
 		imexPodName:       imexTestPodPrefix + token,
+
+		sandboxProbePodName:   sandboxProbePodPrefix + token,
+		sandboxControlPodName: sandboxControlPodPrefix + token,
+
+		imagePullSecrets:   validators.ImagePullSecretNames(),
+		validatorNamespace: validators.ValidatorNamespace(),
 	}, nil
 }
 
@@ -240,11 +308,29 @@ func newGPUTestRun() (*gpuTestRun, error) {
 // own ambiguously committed create (response lost, object persisted) — adopt
 // it and capture its UID. Anything else is a FOREIGN namespace: fail the
 // check with ErrCodeConflict and mark the run so cleanup never deletes it.
+//
+// Once the namespace is owned, the run's image pull Secrets are copied into
+// it (copyImagePullSecrets), so the Secret is there before the first probe
+// pod is created and gone with the namespace.
 func createGPUTestNamespace(ctx context.Context, clientset kubernetes.Interface, run *gpuTestRun) error {
+	if err := ensureGPUTestNamespace(ctx, clientset, run); err != nil {
+		return err
+	}
+	return copyImagePullSecrets(ctx, clientset, run)
+}
+
+// ensureGPUTestNamespace is the namespace half of createGPUTestNamespace.
+func ensureGPUTestNamespace(ctx context.Context, clientset kubernetes.Interface, run *gpuTestRun) error {
+	nsLabels := map[string]string{gpuTestRunLabel: run.token}
+	for k, v := range run.namespaceLabels {
+		if k != gpuTestRunLabel {
+			nsLabels[k] = v
+		}
+	}
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   run.namespace,
-			Labels: map[string]string{gpuTestRunLabel: run.token},
+			Labels: nsLabels,
 		},
 	}
 	created, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
@@ -301,6 +387,79 @@ func createDefinitelyRejected(err error) bool {
 		k8serrors.IsNotAcceptable(err) ||
 		k8serrors.IsUnsupportedMediaType(err) ||
 		k8serrors.IsRequestEntityTooLargeError(err)
+}
+
+// copyImagePullSecrets copies each of run.imagePullSecrets from the validator
+// namespace into the per-run namespace: a pod resolves imagePullSecrets only
+// in its own namespace, so without the copy a probe on a private-mirror
+// cluster fails on image pull with the credentials sitting one namespace
+// away. The copies carry the run's ownership label and are deleted with the
+// namespace. It fails closed, since a probe that pulls without the Secret
+// fails later with a worse message:
+//
+// Errors:
+//   - ErrCodeNotFound when a named Secret does not exist in the validator
+//     namespace (the --image-pull-secret value is wrong).
+//   - ErrCodeUnauthorized when a read or write is Forbidden.
+//   - ErrCodeTimeout when a call did not land within
+//     defaults.ImagePullSecretCopyTimeout.
+//   - ErrCodeInternal for any other API failure.
+func copyImagePullSecrets(ctx context.Context, clientset kubernetes.Interface, run *gpuTestRun) error {
+	for _, name := range run.imagePullSecrets {
+		if err := copyImagePullSecret(ctx, clientset, run, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyImagePullSecret(ctx context.Context, clientset kubernetes.Interface, run *gpuTestRun, name string) error {
+	opCtx, cancel := context.WithTimeout(ctx, defaults.ImagePullSecretCopyTimeout)
+	defer cancel()
+
+	source, err := clientset.CoreV1().Secrets(run.validatorNamespace).Get(opCtx, name, metav1.GetOptions{})
+	if err != nil {
+		return classifySecretCopyError(err, fmt.Sprintf(
+			"read image pull secret %q in the validator namespace %s", name, run.validatorNamespace),
+			fmt.Sprintf("image pull secret %q named by --image-pull-secret does not exist in the validator namespace %s",
+				name, run.validatorNamespace))
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: run.namespace,
+			Labels:    map[string]string{gpuTestRunLabel: run.token},
+		},
+		Type: source.Type,
+		Data: source.Data,
+	}
+	dst := clientset.CoreV1().Secrets(run.namespace)
+	_, err = dst.Create(opCtx, secret, metav1.CreateOptions{})
+	if k8serrors.IsAlreadyExists(err) {
+		// Our own earlier copy, in a namespace adopted after an ambiguous
+		// create; refresh it rather than keep a stale credential.
+		_, err = dst.Update(opCtx, secret, metav1.UpdateOptions{})
+	}
+	if err != nil {
+		return classifySecretCopyError(err, fmt.Sprintf(
+			"copy image pull secret %q into test namespace %s", name, run.namespace), "")
+	}
+	return nil
+}
+
+// classifySecretCopyError wraps a Secret read or write failure with the code
+// matching its cause; notFoundMsg, when set, is the message of a NotFound.
+func classifySecretCopyError(err error, op, notFoundMsg string) error {
+	switch {
+	case k8serrors.IsNotFound(err) && notFoundMsg != "":
+		return errors.Wrap(errors.ErrCodeNotFound, notFoundMsg, err)
+	case k8serrors.IsForbidden(err), k8serrors.IsUnauthorized(err):
+		return errors.Wrap(errors.ErrCodeUnauthorized, "not permitted to "+op, err)
+	case isK8sTimeoutErr(err):
+		return errors.Wrap(errors.ErrCodeTimeout, "timed out trying to "+op, err)
+	default:
+		return errors.Wrap(errors.ErrCodeInternal, "failed to "+op, err)
+	}
 }
 
 // CheckSecureAcceleratorAccess validates CNCF requirement #3: Secure Accelerator Access.
@@ -491,6 +650,10 @@ func runDRASecureAccessTest(ctx *validators.Context, dynClient dynamic.Interface
 		fmt.Sprintf("Pod:               %s/%s\nPhase:             %s\nExitCode:          %d\nResourceClaims:    %d\nHostPathGPUMounts: %d",
 			run.namespace, isolationReport.PodName, isolationReport.PodPhase,
 			isolationReport.ExitCode, isolationReport.ResourceClaims, isolationReport.HostPathGPUMounts))
+
+	// AICR hardening extra, recorded after the CNCF subtests have passed and
+	// never part of the verdict.
+	recordRuntimeClassBypassExtra(ctx, run, pod.Spec.NodeName)
 	return nil
 }
 
@@ -589,6 +752,10 @@ func runDevicePluginSecureAccessTest(ctx *validators.Context, pluginNodes []stri
 		fmt.Sprintf("Pod:               %s/%s\nPhase:             %s\nExitCode:          %d\nResourceClaims:    %d\nHostPathGPUMounts: %d",
 			run.namespace, isolationReport.PodName, isolationReport.PodPhase,
 			isolationReport.ExitCode, isolationReport.ResourceClaims, isolationReport.HostPathGPUMounts))
+
+	// AICR hardening extra, recorded after the CNCF subtests have passed and
+	// never part of the verdict.
+	recordRuntimeClassBypassExtra(ctx, run, pod.Spec.NodeName)
 	return nil
 }
 
@@ -637,9 +804,10 @@ func buildDevicePluginTestPod(run *gpuTestRun, tolerations []corev1.Toleration, 
 			Namespace: run.namespace,
 		},
 		Spec: corev1.PodSpec{
-			Affinity:      nodeNameAffinity(nodeNames),
-			RestartPolicy: corev1.RestartPolicyNever,
-			Tolerations:   tolerations,
+			Affinity:         nodeNameAffinity(nodeNames),
+			RestartPolicy:    corev1.RestartPolicyNever,
+			Tolerations:      tolerations,
+			ImagePullSecrets: run.imagePullSecretRefs(),
 			Containers: []corev1.Container{
 				{
 					Name:    containerNameGPUTest,
@@ -723,10 +891,7 @@ func validateDevicePluginPatterns(pod *corev1.Pod) (*devicePluginPatternReport, 
 // the ResourceSlice artifacts record that instead of listing).
 func collectSecureAccessBaselineArtifacts(ctx *validators.Context, dynClient dynamic.Interface, draAPIVersion string) {
 	// ClusterPolicy status.
-	clusterPolicyGVR := schema.GroupVersionResource{
-		Group: apiGroupNVIDIA, Version: "v1", Resource: "clusterpolicies",
-	}
-	cp, err := dynClient.Resource(clusterPolicyGVR).Get(ctx.Ctx, "cluster-policy", metav1.GetOptions{})
+	cp, err := dynClient.Resource(clusterPolicyGVR).Get(ctx.Ctx, clusterPolicyName, metav1.GetOptions{})
 	if err != nil {
 		recordRawTextArtifact(ctx, "ClusterPolicy status", "kubectl get clusterpolicy -o wide",
 			fmt.Sprintf("failed to read ClusterPolicy: %v", err))
@@ -843,7 +1008,13 @@ func waitForGPUTestPod(ctx context.Context, clientset kubernetes.Interface, run 
 // to re-Get + re-watch instead of failing — see the repo anti-pattern list.
 // what names the pod in error messages.
 func waitForTerminalPod(ctx context.Context, clientset kubernetes.Interface, namespace, name, what string) (*corev1.Pod, error) {
-	waitCtx, cancel := context.WithTimeout(ctx, defaults.DRATestPodTimeout)
+	return waitForTerminalPodWithin(ctx, clientset, namespace, name, what, defaults.DRATestPodTimeout)
+}
+
+// waitForTerminalPodWithin is waitForTerminalPod under a caller-chosen bound,
+// for probes whose run is longer or shorter than a GPU test pod's.
+func waitForTerminalPodWithin(ctx context.Context, clientset kubernetes.Interface, namespace, name, what string, timeout time.Duration) (*corev1.Pod, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	var lastPhase corev1.PodPhase
@@ -853,13 +1024,17 @@ func waitForTerminalPod(ctx context.Context, clientset kubernetes.Interface, nam
 			"%s did not complete in time (last phase=%s, status=%s)",
 			what, lastPhase, lastContainerStatus), cause)
 	}
+	// lastPod is the pod as last observed; the sandbox-event judge consults
+	// it so a stale FailedCreatePodSandBox event (a handler configured after
+	// the first failure) cannot fail a pod that has since started.
+	var lastPod *corev1.Pod
 	evalPod := func(pod *corev1.Pod) (*corev1.Pod, bool, error) {
+		lastPod = pod
 		lastPhase = pod.Status.Phase
 		lastContainerStatus = podWaitingStatus(pod)
 		// Fail fast if pod is stuck in a non-recoverable state (e.g. ImagePullBackOff).
 		if reason := podStuckReason(pod); reason != "" {
-			return nil, true, errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("%s stuck: %s", what, reason))
+			return nil, true, podStuckErr(what, reason)
 		}
 		switch pod.Status.Phase { //nolint:exhaustive // only terminal states matter
 		case corev1.PodSucceeded, corev1.PodFailed:
@@ -868,6 +1043,7 @@ func waitForTerminalPod(ctx context.Context, clientset kubernetes.Interface, nam
 			return nil, false, nil
 		}
 	}
+	evalEvent := sandboxEventEvaluator(name, what, func() bool { return podAwaitingSandbox(lastPod) })
 
 	// Backoff between watch-restart iterations: an apiserver (or LB) that
 	// accepts watches and closes them immediately must not turn the restart
@@ -902,6 +1078,11 @@ func waitForTerminalPod(ctx context.Context, clientset kubernetes.Interface, nam
 		}
 		if p, done, err := evalPod(pod); done {
 			return p, err
+		}
+		// Events emitted before the event watch below is established (or
+		// while it was down) are only visible to a List.
+		if err := listedSandboxFailure(waitCtx, clientset, namespace, name, evalEvent); err != nil {
+			return nil, err
 		}
 
 		// Watch from the pod's object resourceVersion unless a prior 410
@@ -943,7 +1124,8 @@ func waitForTerminalPod(ctx context.Context, clientset kubernetes.Interface, nam
 			}
 			continue
 		}
-		res, done, received, evErr := consumeWatchEvents(watcher, evalPod, what)
+		eventWatcher := watchSandboxEvents(waitCtx, clientset, namespace, name, what)
+		res, done, received, evErr := consumeWatchEvents(watcher, eventWatcher, evalPod, evalEvent, what)
 		if done {
 			return res, evErr
 		}
@@ -968,29 +1150,137 @@ func waitForTerminalPod(ctx context.Context, clientset kubernetes.Interface, nam
 	}
 }
 
-// consumeWatchEvents drains an established watch until a terminal verdict
-// (done=true: result/err are final), a deletion (done=true with error), or
-// the channel closes (done=false — the caller's restart loop takes over).
-// received reports whether at least one event arrived (backoff-reset signal).
-// Non-Pod objects (e.g. *metav1.Status bookmark/error events) are skipped —
-// the caller's re-Get recovers.
-func consumeWatchEvents(watcher watch.Interface, evalPod func(*corev1.Pod) (*corev1.Pod, bool, error), what string) (result *corev1.Pod, done, received bool, err error) {
-	defer watcher.Stop()
-	for event := range watcher.ResultChan() {
-		received = true
-		if event.Type == watch.Deleted {
-			return nil, true, received, errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("%s was deleted while waiting for completion", what))
+// sandboxEventEvaluator returns the judge of the pod's FailedCreatePodSandBox
+// events for waitForTerminalPodWithin: a missing RuntimeClass handler never
+// changes the pod's status, so the pod watch alone would wait out the whole
+// timeout and the kubelet's event is the signal (#3703). what names the pod
+// in the stuck error. awaitingSandbox reports whether the pod,
+// as last observed, is still blocked before sandbox creation: an event the
+// per-iteration List re-reads after the handler was configured and the pod
+// started is history, not a verdict, so it is ignored once the pod has
+// progressed.
+func sandboxEventEvaluator(name, what string, awaitingSandbox func() bool) func(*corev1.Event) error {
+	return func(ev *corev1.Event) error {
+		// The field selector already scopes the List and Watch to this pod;
+		// checking again costs nothing and keeps a sibling's failure out.
+		if ev == nil || ev.InvolvedObject.Name != name || !awaitingSandbox() {
+			return nil
 		}
-		p, ok := event.Object.(*corev1.Pod)
-		if !ok {
-			continue
+		if reason := sandboxCreateFailure(ev); reason != "" {
+			return podStuckErr(what, reason)
 		}
-		if res, terminal, evalErr := evalPod(p); terminal {
-			return res, true, received, evalErr
+		return nil
+	}
+}
+
+// podStuckErr is the wait's verdict for a pod in a state no retry repairs.
+func podStuckErr(what, reason string) error {
+	return errors.New(errors.ErrCodeInternal, fmt.Sprintf("%s stuck: %s", what, reason))
+}
+
+// podAwaitingSandbox reports whether pod has not progressed past sandbox
+// creation: it is Pending (or not yet observed) and no container has started
+// or finished. A pod with a Running or Terminated container got its sandbox,
+// whatever the events say.
+func podAwaitingSandbox(pod *corev1.Pod) bool {
+	if pod == nil {
+		return true
+	}
+	if pod.Status.Phase != corev1.PodPending && pod.Status.Phase != "" {
+		return false
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Running != nil || cs.State.Terminated != nil {
+			return false
 		}
 	}
-	return nil, false, received, nil
+	for _, cs := range pod.Status.InitContainerStatuses {
+		if cs.State.Running != nil || cs.State.Terminated != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// listedSandboxFailure lists the pod's FailedCreatePodSandBox events and
+// returns evalEvent's verdict on the first terminal one. A List that fails is
+// logged and ignored: the fast failure is an acceleration of the pod wait,
+// not its verdict, and the timeout still decides.
+func listedSandboxFailure(ctx context.Context, clientset kubernetes.Interface, namespace, name string, evalEvent func(*corev1.Event) error) error {
+	events, err := clientset.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{FieldSelector: podSandboxEventSelector(name)})
+	if err != nil {
+		slog.Debug("failed to list pod sandbox events; relying on the pod watch", "pod", name, "error", err)
+		return nil
+	}
+	for i := range events.Items {
+		if err := evalEvent(&events.Items[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// watchSandboxEvents opens a watch on the pod's FailedCreatePodSandBox
+// events, returning nil when it cannot: the pod watch and the per-iteration
+// List then carry the wait, as before the event watch existed.
+func watchSandboxEvents(ctx context.Context, clientset kubernetes.Interface, namespace, name, what string) watch.Interface {
+	eventWatcher, err := clientset.CoreV1().Events(namespace).Watch(ctx, metav1.ListOptions{FieldSelector: podSandboxEventSelector(name)})
+	if err != nil {
+		slog.Debug("failed to watch pod sandbox events; relying on the pod watch", "target", what, "error", err)
+		return nil
+	}
+	return eventWatcher
+}
+
+// consumeWatchEvents drains an established pod watch, and the pod's sandbox
+// event watch when one was established (events may be nil), until a terminal
+// verdict (done=true: result/err are final), a deletion (done=true with
+// error), a terminal sandbox failure (done=true with error), or the pod watch
+// channel closes (done=false — the caller's restart loop takes over). The
+// event channel closing on its own only stops the event side. received
+// reports whether at least one pod event arrived (backoff-reset signal).
+// Non-Pod objects (e.g. *metav1.Status bookmark/error events) are skipped —
+// the caller's re-Get recovers.
+func consumeWatchEvents(watcher, events watch.Interface, evalPod func(*corev1.Pod) (*corev1.Pod, bool, error),
+	evalEvent func(*corev1.Event) error, what string) (result *corev1.Pod, done, received bool, err error) {
+
+	defer watcher.Stop()
+	var eventCh <-chan watch.Event
+	if events != nil {
+		defer events.Stop()
+		eventCh = events.ResultChan()
+	}
+	podCh := watcher.ResultChan()
+	for {
+		select {
+		case event, ok := <-podCh:
+			if !ok {
+				return nil, false, received, nil
+			}
+			received = true
+			if event.Type == watch.Deleted {
+				return nil, true, received, errors.New(errors.ErrCodeInternal,
+					fmt.Sprintf("%s was deleted while waiting for completion", what))
+			}
+			p, ok := event.Object.(*corev1.Pod)
+			if !ok {
+				continue
+			}
+			if res, terminal, evalErr := evalPod(p); terminal {
+				return res, true, received, evalErr
+			}
+		case event, ok := <-eventCh:
+			if !ok {
+				eventCh = nil // a nil channel never selects; the pod watch carries on
+				continue
+			}
+			if ev, isEvent := event.Object.(*corev1.Event); isEvent {
+				if evalErr := evalEvent(ev); evalErr != nil {
+					return nil, true, received, evalErr
+				}
+			}
+		}
+	}
 }
 
 // refreshExpiredWatchRV returns a fresh COLLECTION resourceVersion for the
@@ -1204,6 +1494,223 @@ func verifyNoAllocationIsolation(vctx *validators.Context, run *gpuTestRun, gpuN
 	report.HostPathGPUMounts = 0
 
 	return report, nil
+}
+
+// runtimeClassBypassOutcome is the recorded verdict of the AICR hardening
+// extra. It is evidence only: none of these fails the check.
+type runtimeClassBypassOutcome string
+
+// The outcomes: HARDENED, the unprivileged pod saw no GPU device although it
+// asked for every one through NVIDIA_VISIBLE_DEVICES=all, consistent with a
+// toolkit that ignores the envvar for unprivileged containers (the probe does
+// not read the toolkit configuration); EXPOSED, the pod saw GPU devices it was
+// never allocated, so the envvar device-list path is open to unprivileged
+// pods; INCONCLUSIVE, the probe reached no verdict (pod failed for another
+// reason, timed out, or could not be created); NOT RUN, the NVIDIA
+// RuntimeClass could not be established from the ClusterPolicy, so nothing
+// was probed.
+const (
+	runtimeClassBypassHardened     runtimeClassBypassOutcome = "HARDENED"
+	runtimeClassBypassExposed      runtimeClassBypassOutcome = "EXPOSED"
+	runtimeClassBypassInconclusive runtimeClassBypassOutcome = "INCONCLUSIVE"
+	runtimeClassBypassNotRun       runtimeClassBypassOutcome = "NOT RUN"
+)
+
+// evaluateRuntimeClassBypass maps the probe pod's terminal state to the
+// recorded outcome: the probe script exits 0 when no /dev/nvidia* device is
+// visible and 1 when one is; any other exit code or phase is inconclusive.
+func evaluateRuntimeClassBypass(pod *corev1.Pod) runtimeClassBypassOutcome {
+	exit := podExitCode(pod)
+	switch {
+	case pod.Status.Phase == corev1.PodSucceeded && exit == 0:
+		return runtimeClassBypassHardened
+	case pod.Status.Phase == corev1.PodFailed && exit == 1:
+		return runtimeClassBypassExposed
+	default:
+		return runtimeClassBypassInconclusive
+	}
+}
+
+// recordRuntimeClassBypassExtra runs the AICR hardening extra after the CNCF
+// subtests: an UNPRIVILEGED pod on the RuntimeClass the GPU Operator's
+// ClusterPolicy names that sets
+// NVIDIA_VISIBLE_DEVICES=all and requests no accelerator, pinned to the GPU
+// node the test pod ran on. With the toolkit hardening AICR ships
+// (ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false) it sees no
+// GPU device; without it the envvar exposes every GPU on the node to a pod
+// that was allocated none (observed on NVKE before the hardening, #3428).
+// Its outcome is recorded under runtimeClassExtraLabel as an observation,
+// warned about when EXPOSED, and never fails the check or feeds the
+// requirement row. Privileged pods are out of scope: they see every GPU by
+// design.
+//
+// The probe runs last and its pod wait shares the check's work budget (the
+// 8m30s secure-access fallback, or the catalog-derived budget) with the CNCF
+// subtests that ran before it, so on a slow image pull this is the probe that
+// is starved first and records INCONCLUSIVE rather than cutting into the
+// cleanup reserve.
+//
+// The caller's deferred namespace cleanup removes the probe pod.
+func recordRuntimeClassBypassExtra(vctx *validators.Context, run *gpuTestRun, gpuNodeName string) {
+	ctx := vctx.Ctx
+	clientset := vctx.Clientset
+	outcomeLabel := runtimeClassExtraLabel + " — outcome"
+	runtimeClass, how, resolveErr := resolveNVIDIARuntimeClass(vctx)
+	record := func(outcome runtimeClassBypassOutcome, detail string) {
+		recordRawTextArtifact(vctx, outcomeLabel,
+			fmt.Sprintf("kubectl get runtimeclass; kubectl logs %s -n %s", run.runtimeClassProbePodName, run.namespace),
+			fmt.Sprintf("Outcome:       %s\nScope:         AICR hardening extra, not a CNCF secure_accelerator_access subtest; this outcome does not decide the check\nRuntimeClass:  %s (%s)\nProbe:         unprivileged pod, %s=all, no accelerator requested, node=%s\nDetail:        %s",
+				outcome, valueOrUnknown(runtimeClass), how, envNVIDIAVisibleDevices, gpuNodeName, detail))
+	}
+	if resolveErr != nil {
+		record(runtimeClassBypassInconclusive, resolveErr.Error())
+		return
+	}
+	if runtimeClass == "" {
+		record(runtimeClassBypassNotRun, "not probed: NVIDIA RuntimeClass "+how)
+		return
+	}
+
+	pod := buildRuntimeClassBypassProbePod(run, runtimeClass, gpuNodeName, vctx.Tolerations)
+	if err := createPodWhenSAReady(ctx, clientset, run.namespace, pod); err != nil {
+		record(runtimeClassBypassInconclusive, fmt.Sprintf("probe pod could not be created: %v", err))
+		return
+	}
+	resultPod, err := waitForTerminalPod(ctx, clientset, run.namespace, run.runtimeClassProbePodName,
+		fmt.Sprintf("RuntimeClass bypass probe pod (node=%s)", gpuNodeName))
+	if err != nil {
+		record(runtimeClassBypassInconclusive, fmt.Sprintf("probe pod did not reach a terminal state: %v", err))
+		return
+	}
+
+	var logs string
+	if logBytes, logErr := clientset.CoreV1().Pods(run.namespace).GetLogs(
+		run.runtimeClassProbePodName, &corev1.PodLogOptions{}).DoRaw(ctx); logErr != nil {
+		logs = fmt.Sprintf("failed to read logs: %v", logErr)
+	} else {
+		logs = string(logBytes)
+	}
+	recordRawTextArtifact(vctx, runtimeClassExtraLabel+" — pod logs",
+		fmt.Sprintf("kubectl logs %s -n %s", run.runtimeClassProbePodName, run.namespace), logs)
+
+	outcome := evaluateRuntimeClassBypass(resultPod)
+	detail := fmt.Sprintf("phase=%s exit=%d", resultPod.Status.Phase, podExitCode(resultPod))
+	switch outcome {
+	case runtimeClassBypassHardened:
+		detail += "; no GPU device visible, consistent with the toolkit hardening that ignores " + envNVIDIAVisibleDevices + " for unprivileged containers (ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false); the toolkit configuration itself was not read"
+	case runtimeClassBypassExposed:
+		detail += "; GPU devices visible to a pod that was allocated none: the container toolkit honors " + envNVIDIAVisibleDevices +
+			" for unprivileged containers on this RuntimeClass. Set ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false (with ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS=true) in the GPU Operator toolkit env, as the AICR AKS and NVKE values do"
+		slog.Warn("RuntimeClass bypass probe saw GPU devices without an allocation (AICR hardening extra, not a CNCF item; the check is not failed)",
+			"runtimeClass", runtimeClass, "node", gpuNodeName, "pod", run.runtimeClassProbePodName)
+	case runtimeClassBypassInconclusive, runtimeClassBypassNotRun:
+		detail += "; the probe script exits 0 (no device) or 1 (device visible), so this state carries no verdict"
+	}
+	record(outcome, detail)
+}
+
+// resolveNVIDIARuntimeClass names the RuntimeClass the GPU Operator's
+// container toolkit serves on this cluster, and how it was established. Only
+// the ClusterPolicy can establish it: spec.operator.runtimeClass, or the
+// GPU Operator's documented default nvidia when the field is unset, and the
+// class must exist, and the ClusterPolicy must report status.state ready (the
+// same gate gpu-operator-health applies: before that the toolkit and its
+// RuntimeClass may not be in service yet). A class picked by name alone would
+// let a same-named class with another handler record HARDENED, so without a
+// ready, readable ClusterPolicy (or when the named class is absent) name is
+// "" and the extra is not probed; how then says why, listing the
+// nvidia-prefixed classes seen as an observation. A RuntimeClass list error is
+// returned.
+func resolveNVIDIARuntimeClass(vctx *validators.Context) (name, how string, err error) {
+	classes, listErr := vctx.Clientset.NodeV1().RuntimeClasses().List(vctx.Ctx, metav1.ListOptions{})
+	if listErr != nil {
+		return "", "", errors.Wrap(errors.ErrCodeInternal, "failed to list RuntimeClasses", listErr)
+	}
+	present := make(map[string]bool, len(classes.Items))
+	var nvidiaClasses []string
+	for i := range classes.Items {
+		rc := &classes.Items[i]
+		present[rc.Name] = true
+		if strings.HasPrefix(rc.Handler, nvidiaRuntimeHandlerPrefix) || strings.HasPrefix(rc.Name, nvidiaRuntimeHandlerPrefix) {
+			nvidiaClasses = append(nvidiaClasses, rc.Name)
+		}
+	}
+	sort.Strings(nvidiaClasses)
+	seen := valueNone
+	if len(nvidiaClasses) > 0 {
+		seen = strings.Join(nvidiaClasses, ", ")
+	}
+
+	dynClient, dynErr := getDynamicClient(vctx)
+	if dynErr != nil {
+		return "", fmt.Sprintf("not established from ClusterPolicy: no dynamic client (%v); nvidia-prefixed RuntimeClasses present (handler or name): %s", dynErr, seen), nil
+	}
+	cp, cpErr := dynClient.Resource(clusterPolicyGVR).Get(vctx.Ctx, clusterPolicyName, metav1.GetOptions{})
+	if cpErr != nil {
+		return "", fmt.Sprintf("not established from ClusterPolicy: %s could not be read (%v); nvidia-prefixed RuntimeClasses present (handler or name): %s", clusterPolicyName, cpErr, seen), nil
+	}
+	state, _, _ := unstructured.NestedString(cp.Object, "status", "state")
+	if state != clusterPolicyStateReady {
+		return "", fmt.Sprintf("not established from ClusterPolicy: %s status.state=%q, not %s, so the toolkit RuntimeClass may not be in service; nvidia-prefixed RuntimeClasses present (handler or name): %s",
+			clusterPolicyName, valueOrUnknown(state), clusterPolicyStateReady, seen), nil
+	}
+	named, _, _ := unstructured.NestedString(cp.Object, keySpec, "operator", "runtimeClass")
+	source := "named by ClusterPolicy spec.operator.runtimeClass"
+	if named == "" {
+		named = nvidiaRuntimeClassName
+		source = "the GPU Operator default, ClusterPolicy spec.operator.runtimeClass unset"
+	}
+	if !present[named] {
+		return "", fmt.Sprintf("not established from ClusterPolicy: it names RuntimeClass %s (%s) but no such RuntimeClass exists; nvidia-prefixed RuntimeClasses present (handler or name): %s", named, source, seen), nil
+	}
+	return named, source, nil
+}
+
+// buildRuntimeClassBypassProbePod constructs the hardening extra's probe: an
+// unprivileged, no-allocation pod on the resolved NVIDIA RuntimeClass that
+// asks for every GPU through the envvar, pinned to the GPU node like the
+// no-allocation probe. A nil tolerations argument uses the default
+// tolerate-all policy; a non-nil argument is used as supplied.
+func buildRuntimeClassBypassProbePod(run *gpuTestRun, runtimeClass, gpuNodeName string, tolerations []corev1.Toleration) *corev1.Pod {
+	if tolerations == nil {
+		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
+	}
+	runAsUser := int64(65534)
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      run.runtimeClassProbePodName,
+			Namespace: run.namespace,
+		},
+		Spec: corev1.PodSpec{
+			NodeName:         gpuNodeName,
+			RuntimeClassName: &runtimeClass,
+			RestartPolicy:    corev1.RestartPolicyNever,
+			Tolerations:      tolerations,
+			ImagePullSecrets: run.imagePullSecretRefs(),
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsNonRoot: helper.BoolPtr(true),
+				RunAsUser:    &runAsUser,
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name:    "runtimeclass-probe",
+					Image:   defaults.ProbeImage,
+					Command: []string{"sh", "-c", gpuAbsenceProbeScript},
+					Env: []corev1.EnvVar{
+						{Name: envNVIDIAVisibleDevices, Value: "all"},
+					},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged:               helper.BoolPtr(false),
+						AllowPrivilegeEscalation: helper.BoolPtr(false),
+						Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+					},
+				},
+			},
+		},
+	}
 }
 
 // saProvisionTimeout bounds the retry window for pod creation racing the
@@ -1483,8 +1990,9 @@ func buildDRATestPod(run *gpuTestRun, tolerations []corev1.Toleration) *corev1.P
 			Namespace: run.namespace,
 		},
 		Spec: corev1.PodSpec{
-			RestartPolicy: corev1.RestartPolicyNever,
-			Tolerations:   tolerations,
+			RestartPolicy:    corev1.RestartPolicyNever,
+			Tolerations:      tolerations,
+			ImagePullSecrets: run.imagePullSecretRefs(),
 			ResourceClaims: []corev1.PodResourceClaim{
 				{
 					Name:              gpuClaimName,
@@ -1622,8 +2130,9 @@ func buildNoAllocationProbePod(run *gpuTestRun, gpuNodeName string) *corev1.Pod 
 			Namespace: run.namespace,
 		},
 		Spec: corev1.PodSpec{
-			NodeName:      gpuNodeName,
-			RestartPolicy: corev1.RestartPolicyNever,
+			NodeName:         gpuNodeName,
+			RestartPolicy:    corev1.RestartPolicyNever,
+			ImagePullSecrets: run.imagePullSecretRefs(),
 			Tolerations: []corev1.Toleration{
 				{Operator: corev1.TolerationOpExists},
 			},

@@ -125,5 +125,6 @@ spec:
         - inference-gateway
         - robust-controller
         - secure-accelerator-access
+        - driver-runtime-management
         - pod-autoscaling
         - cluster-autoscaling

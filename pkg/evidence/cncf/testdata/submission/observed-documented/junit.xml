@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="aicr/conformance" tests="11" failures="0" skipped="1" time="41.750">
+	<testsuite name="aicr/conformance" tests="11" failures="0" skipped="1" time="41.750" timestamp="2026-11-06T12:00:00">
+		<testcase name="gang-scheduling" classname="aicr/conformance" time="1.000"></testcase>
+		<testcase name="accelerator-metrics" classname="aicr/conformance" time="2.000"></testcase>
+		<testcase name="ai-service-metrics" classname="aicr/conformance" time="3.000"></testcase>
+		<testcase name="inference-gateway" classname="aicr/conformance" time="4.000"></testcase>
+		<testcase name="pod-autoscaling" classname="aicr/conformance" time="5.000"></testcase>
+		<testcase name="robust-controller" classname="aicr/conformance" time="7.000"></testcase>
+		<testcase name="secure-accelerator-access" classname="aicr/conformance" time="8.000"></testcase>
+		<testcase name="driver-runtime-management" classname="aicr/conformance" time="9.000">
+			<skipped message="not implemented: driver_runtime_management is a SHOULD at v1.37 and is not claimed; original verdict failed: driver version mismatch on node-3: probe 580.65.06, advertised 580.82.07"></skipped>
+		</testcase>
+		<testcase name="dra-support" classname="aicr/conformance" time="0.500"></testcase>
+		<testcase name="platform-health" classname="aicr/conformance" time="0.250"></testcase>
+		<testcase name="cluster-autoscaling" classname="aicr/conformance" time="2.000"></testcase>
+	</testsuite>
+</testsuites>

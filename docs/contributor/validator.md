@@ -85,9 +85,18 @@ in the index (`TestRenderSkippedReasonReachesIndex`); a skipped check gets no
 page section (`TestRenderSkippedExcluded`). A requirement passes only when
 every check on one of its proof paths is present and `passed`
 (`alternativeProofs` lists the requirements with more than one path), a failed
-check fails it, and `other`, `pending` or absent checks leave it not tested.
-`Aggregate.Passed` is scoped by level: every applicable MUST passed, SHOULDs
-excluded; `NOT APPLICABLE` comes only from
+check fails it, `other`, `pending` or absent checks leave it not tested, and a
+check that `passed` with the `observationOnly` marker leaves it observed,
+which does not establish a MUST (`StatusObserved`) unless
+`spec.validate.evidence.cncf.documented` attests it. A check the aggregation
+knows to be observation-only (`v1.IsObservationOnlyCheck`, today
+`cluster-autoscaling`) is observed too when its `passed` result carries no
+marker, whatever its `resultSchema` stamp says: no stamp means the image
+predates the marker, the known version means the marker line was dropped, an
+unknown version means this reader cannot interpret its markers; none of them
+is a demonstration, and `CheckResult.Reason` records which. `Aggregate.Passed` is
+scoped by level: every applicable MUST established (passed, or observed and
+documented), SHOULDs excluded; `NOT APPLICABLE` comes only from
 `spec.validate.evidence.cncf.notApplicable` and only for the conditional
 MUSTs in `conditionalMusts` (`ValidateNotApplicable`). The requirement set it
 aggregates is the upstream checklist for the selected version
@@ -263,6 +272,212 @@ each `/dev/nvidiaN`); `parseSlurmGPUProbe` and the two evaluate functions decide
 It never lists `/dev/nvidia*` to infer isolation: the cgroup device controller
 leaves the nodes visible and refuses `open()` with EPERM.
 
+After its CNCF subtests pass, `secure-accelerator-access` records one AICR
+hardening extra (#3428): an unprivileged pod on the NVIDIA RuntimeClass the GPU
+Operator installed, with `NVIDIA_VISIBLE_DEVICES=all` and no allocation, pinned
+to the GPU node the test pod ran on, honoring the context tolerations.
+`resolveNVIDIARuntimeClass` takes the class only from the ClusterPolicy
+(`spec.operator.runtimeClass`, or the GPU Operator default `nvidia` when the
+field is unset) and only when that RuntimeClass exists; AICR's default AKS
+profile names `nvidia-container-runtime`. A class present by name alone is not
+probed, because nothing ties it to the NVIDIA toolkit and a same-named class
+with another handler would read as hardened. With the toolkit hardening AICR
+ships (`ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED=false`) it sees
+no GPU device (`HARDENED`, worded as consistent with that hardening since the
+toolkit configuration is not read); without it the envvar exposes every GPU on
+the node (`EXPOSED`). The upstream `TestSecureAcceleratorAccess` has no such
+probe, so every artifact carries the label "AICR hardening extra (not a CNCF
+item)", an `EXPOSED` outcome is warned about but never fails the check, and a
+cluster where the class cannot be established from the ClusterPolicy records
+`NOT RUN` ("not probed").
+Privileged pods are out of scope: they see every GPU by design.
+
+`driver-runtime-management` (#3615, CNCF `driver_runtime_management`: SHOULD at
+every carried checklist, MUST at v1.38 per KAR-0001) mirrors the upstream
+`TestAcceleratorDriverRuntimeManagement`. It resolves the GPU the same way
+`secure-accelerator-access` does (policy verify, then DRA ResourceClaim or
+`nvidia.com/gpu: 1` with required node affinity to the device-plugin nodes,
+context tolerations) and runs one probe container from a vanilla image,
+`docker.io/library/ubuntu:22.04` by default. The image ships no driver or
+tools, so an executable `nvidia-smi` inside it can only come from the container
+runtime configuration (CDI spec or runtime hook); the probe script prints
+`RESULT:` lines for the device count, that injection, a functional NVML query
+and the version it returned, and exits 0 so the pod reaches a terminal phase
+and the logs are complete. `parseDriverRuntimeProbeLogs` and
+`verifyDriverRuntime` decide: exactly one device, tools injected, driver
+functional with a numeric version, and that version compatible with the one the
+platform advertises for the node the pod landed on. The advertisement is read
+by `inspectAdvertisedDriverVersion`: the `gpu.nvidia.com` ResourceSlice
+`driverVersion` device attribute (version or string value, v1beta1 `basic`
+wrapper unwrapped) whenever the cluster serves the DRA API, else the GFD label
+`nvidia.com/cuda.driver-version.full`, else the legacy
+`nvidia.com/cuda.driver.major`/`minor`/`rev` triple; none is a recorded warning,
+never a failure, so a platform whose GPU stack publishes no GFD label and no
+DRA attribute is judged by the probe alone. `versionsCompatible` is the upstream rule: numeric segments
+compared as integers over the shared prefix, so `580.65.6` and `580.65` both
+match `580.65.06`. Every probe verdict failure is `ErrCodeInternal`; an
+incomplete probe output is a failure, not a pass on what was seen. A cluster
+with no usable GPU allocation mechanism fails with `ErrCodeUnavailable`, a
+check deadline too short for cleanup fails with `ErrCodeTimeout`, and a
+cleanup or apiserver read failure carries its own classified code. The probe image is
+configurable for mirrors through `AICR_DRIVER_RUNTIME_IMAGE` (forwarded from
+the orchestrator's shell to this check only), which replaces the full
+reference; `AICR_VALIDATOR_IMAGE_REGISTRY` deliberately does not rewrite it,
+as it does not rewrite the busybox probe or the NCCL workload image, because
+dev lanes point that variable at a namespace holding only validator images. The check skips with
+`slurm-managed-gpus` on Slinky Slurm recipes.
+
+`robust-controller` prefers the Kubeflow Trainer path when the recipe ships
+`kubeflow-trainer`, because that path reconciles a custom resource to a
+terminal condition: after the deployment, webhook, CRD `Established=True` and
+webhook-rejection steps it creates a valid TrainJob on the default
+`torch-distributed` `ClusterTrainingRuntime` in a per-run namespace (one node,
+no accelerator, `defaults.ProbeImage` with a command that exits 0) and
+requires `Complete=True`, failing on `Failed=True`, on the bound, or on a
+missing runtime. The `TrainJobReconcileTimeout` of 3 min covers the whole
+chain, not only the controller: the JobSet, Job and pod it derives, the pod's
+scheduling and the probe-image pull, so a scheduling delay or an unavailable
+registry can consume the bound after the controller has already created the
+pod. The bound verdict therefore folds in the recorded pod state (phase,
+node, `podStuckReason` or waiting status) so the cause is diagnosable from
+the CTRF message. The TrainJob's pod is created by the operator from the
+runtime, whose scheduling vocabulary the bundler bakes in, so the context
+tolerations do not apply to it. The Dynamo path records the existing
+`DynamoGraphDeployment` conditions as an observation and creates no CR.
+
+`inference-gateway` reads the recipe's Gateway once (profile from
+`pkg/validator/v1.ResolveInferenceGatewayProfile`) and hands it to the
+data-plane, exposure and traffic steps. The traffic phase
+(`validators/conformance/inference_gateway_traffic.go`) mirrors the upstream
+`TestGatewayAPIInference` with one difference: the HTTPRoute attaches to the
+recipe's Gateway across namespaces instead of a Gateway the test creates, so
+the data plane under test is the one AICR deployed. Before creating anything
+it resolves the endpoint the probe posts to from the Gateway's first
+hostname-free HTTP listener (a hostname-bound or missing HTTP listener fails
+with `ErrCodeInvalidRequest`, as the performance validator does; the per-run
+`.conformance.invalid` hostname never intersects a listener hostname, so a
+hostname-bound listener would never accept the route), and the HTTPRoute's
+parentRef names that listener as its `sectionName`, so the `Accepted` wait
+judges the listener the probe's requests arrive on and an acceptance through
+another listener on the Gateway does not count: the proxy
+Service's in-cluster name for a `service-endpoints` data plane, the first
+`IPAddress` or `Hostname` status address for `gateway-address`. With a
+declared `gateway-address` profile the probe connects to that status address
+from inside the cluster, so the address's `loadBalancerSourceRanges` and the
+load balancer's hairpin behavior apply to it; no shipped recipe declares that
+profile (agentgateway is `service-endpoints`). In a per-run namespace
+(`gateway-traffic-<token>`, the shared ownership token and UID-guarded
+cleanup, labeled `app.kubernetes.io/component=inference-perf` so a listener
+whose `allowedRoutes` selector admits the performance validator's namespaces
+admits it too, and without `app.kubernetes.io/managed-by` so the performance
+validator's stale-namespace prune never selects it) it creates two CPU backends (`model-v1`, `model-v2`: Deployment +
+Service each, `defaults.PythonProbeImage`, answering every request with their
+own name) and one HTTPRoute with the per-run hostname
+`ai-conformance-<token>.conformance.invalid`, which the probe sends as the
+`Host` header of every request, and two rules that both match the per-run
+path prefix `/ai-conformance-<token>`: the first additionally matches
+`OpenAI-Project: ai-conformance-canary` exactly and routes to `model-v2`, the
+default rule splits 70/30. The hostname and path are what isolate the test
+route from a tenant's route on the same listener: Gateway API ranks routes by
+hostname, then longest path, then method, then header matches, and a route
+with no hostname matches any `Host`, so rules with neither would lose every
+request, header-matched ones included, to a pre-existing `/v1` route; with
+the exact per-run hostname a tenant route carrying another hostname does not
+match the probe's requests at all, a hostname-less one ranks below it, and a
+tenant route can outrank the probe only by matching that exact hostname (and
+path). The routes already attached to the Gateway are recorded
+(`Gateway traffic: routes already attached`, a WARNING when there are any)
+and named in a verdict failure. It waits for the Gateway to report the route
+`Accepted` and `ResolvedRefs` (watch, re-Get on a closed channel; the
+`Gateway traffic: HTTPRoute status` artifact records what the Gateway did
+report, such as `NotAllowedByListeners`), then runs a probe pod that waits
+for the route to go live, sends 20 header requests and up to 10 rounds of 500
+unmatched requests, printing `HEADER` and `WEIGHTED` count lines the Go side
+re-evaluates: all header requests must reach `model-v2`, and one weighted
+round must land `model-v1` within `defaults.GatewayTrafficTolerance` of 70%
+with `other=0` (a failed request or one answered by a non-test backend). The
+`Gateway traffic verdict` artifact carries every round's counts and the step
+that decided (`deploy`, `route`, `probe`, `verdict`). Every pod honors the
+context tolerations; the HTTPRoute is deleted explicitly before the namespace
+so it does not stay attached to the recipe's Gateway while the namespace
+drains. The bounds (`defaults.GatewayTraffic*`) sit under the
+`inferenceGatewayWorkBudget` the 15m catalog timeout covers; a recipe that
+declares no gateway still skips before the phase.
+
+`workload-sandboxing` (#3615, CNCF `workload_sandboxing`: SHOULD at v1.37,
+MUST at v1.38 per KAR-0020) mirrors the upstream `TestWorkloadSandboxing`.
+`resolveSandboxedRuntimeClass` picks the RuntimeClass under test: the one
+`AICR_SANDBOX_RUNTIME_CLASS` names (accepted as given, as upstream accepts its
+flag; a name that matches no class is `ErrCodeInvalidRequest`), else the
+first by name whose name or handler contains one of the upstream keywords
+(`gvisor`, `runsc`, `kata`, `sandboxed`, `quark`, `krun`). None is
+`ErrCodeUnavailable` with the message `unmet prerequisite: no sandboxed
+RuntimeClass`: a failure, where upstream skips, because the requirement
+counts a platform without a sandbox runtime as Not Implemented and never
+not-applicable. Both outcomes record every RuntimeClass consulted. The check
+then runs the upstream probe script (`sandboxProbeScript`, exiting 0 so the
+pod reaches a terminal phase and the logs are complete, where upstream sleeps
+and polls) in two CPU-only pods from a vanilla image,
+`docker.io/library/ubuntu:22.04` by default: the sandboxed pod on the chosen
+RuntimeClass, left to the scheduler so the class's own `scheduling`
+constraints apply, with the context tolerations (the package's tolerate-all
+default when none are set, which upstream does not grant its sandboxed pod: a
+deliberate choice so a sandbox runtime on a tainted GPU pool is reachable, at
+the cost that a cordoned or NotReady node inside the class's node set can
+absorb the pod until the pod timeout); then an unsandboxed control
+pod pinned by `spec.nodeName` to the node the sandboxed pod landed on, with
+tolerate-all so a dedicated sandbox pool's taints do not evict it.
+`parseSandboxProbeLogs` reads the `SANDBOX_INFO` and `SANDBOX_PROBE` lines and
+`verifyWorkloadSandboxing` decides: both scripts printed their completion
+marker, the sandboxed pod passed the four probes (no host daemon in `/proc`,
+`/dev/mem` and `/dev/kmem` unreadable, no `/etc/kubernetes`,
+`/var/lib/kubelet` or `/var/log/pods`, no host bridge, CNI or bond
+interface), and `kernelIdentitiesDiffer` finds its `uname -r`,
+`/proc/version` or `boot_id` different from the control pod's (a field either
+side could not read is not compared). Every failing probe is named in one
+`ErrCodeInternal` error, the code the other probe checks use for a failed
+subtest; incomplete output is a failure, not a pass on what was seen. A check
+deadline too short for cleanup fails with `ErrCodeTimeout` before anything is
+created, and a cleanup or apiserver read failure carries its own classified
+code. The probe image is configurable for mirrors through
+`AICR_SANDBOX_PROBE_IMAGE` (forwarded from the orchestrator's shell to this
+check only), which replaces the full reference; `AICR_VALIDATOR_IMAGE_REGISTRY`
+deliberately does not rewrite it, for the reason given for the busybox probe
+and the NCCL workload image. The check does not skip on Slinky Slurm recipes:
+the probe requests no GPU, so the NodeSet holding every GPU is no obstacle.
+Which sandbox runtime AICR recipes provide, and on which pool, is the pending
+product decision of #3615; until it lands no embedded recipe declares the
+check, so the `workload_sandboxing` row renders `NOT TESTED (not run)` at
+SHOULD, and an operator whose cluster already has gVisor or Kata can declare
+it on a recipe copy today (naming the class with `AICR_SANDBOX_RUNTIME_CLASS`
+when detection does not match).
+
+`cluster-autoscaling` drives a scale event only on the Karpenter path and
+records that scale-up as an observation (scale-down is not observed). The EKS,
+AKS and GKE paths record autoscaler presence, GPU pool membership, the
+`cluster-autoscaler-status` ConfigMap and recent autoscaler events as
+`OBSERVED`. None of this is behavioral proof, so every passing path ends with
+`validators.EmitExtra(validators.ObservationOnlyExtra())`, publishing
+`observationOnly: "true"` on the `passed` result; a marker that cannot be
+written fails the check rather than letting the pass stand unmarked. The CNCF
+aggregation reads the marker (`CheckResult.ObservationOnly`) and renders the
+requirement `OBSERVED`, which does not establish a MUST — see
+[Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status). The EKS
+path fails when nothing confirmed an autoscaler: GPU nodes
+with no `eks.amazonaws.com/nodegroup` label, no available in-cluster Cluster
+Autoscaler Deployment and no `cluster-autoscaler-status` ConfigMap (and no
+Karpenter) fail `NotFound` when every read answered NotFound, or with the
+read's classified code when the Deployment was unavailable or a read could not
+land; the artifacts still record the unread reads as unread. The remedy for a
+platform without workload-driven autoscaling is a
+`spec.validate.evidence.cncf.notApplicable` justification; for a platform
+whose autoscaler the check observed but did not drive (the OBSERVED pass),
+a `spec.validate.evidence.cncf.documented` entry citing the provider's
+autoscaler documentation establishes the requirement in the submission. A providerID no
+probe recognizes skips as "no autoscaler probe for this provider" (naming the
+scheme, or an unschemed providerID such as OKE's bare OCID), a missing probe
+rather than product nonapplicability, which only that declaration states.
+
 `gang-scheduling` exercises KAI all-or-nothing scheduling with CPU-only
 members, matching the upstream `TestGangScheduling` (#3603). After the KAI
 deployment and CRD gates it runs two phases in one per-run namespace. The
@@ -358,6 +573,9 @@ validators.Run(map[string]validators.CheckFunc{
 | `0` | passed | `passed` |
 | `1` | failed | `failed` |
 | `2` | skipped | `skipped` — return `validators.Skip(reason)` |
+| `3` | interrupted by SIGTERM | `other` — written by `validators.Run` whenever SIGTERM arrived before the check returned, whatever it returned (see [Cancellation and cleanup lifecycle](#cancellation-and-cleanup-lifecycle)) |
+
+Any other exit code also maps to CTRF `other`.
 
 | Channel | Captured as |
 |---------|-------------|
@@ -365,6 +583,20 @@ validators.Run(map[string]validators.CheckFunc{
 | **stderr** | Streamed live to the user — use `slog.*` |
 | `/dev/termination-log` | Failure reason (≤ 4096 bytes), written on `return error` |
 | **stdout sentinel lines** | Structured/side-channel data — see [Stdout sentinels](#stdout-sentinels) |
+
+The orchestrator credits a check only from output it actually read. Every
+structured marker rides stdout, so when the pod logs of an exit-`0` result
+cannot be read (`pkg/validator/job.ExtractResult` and `HandleTimeout`, after
+one retry of the read) the result is reported as `other` with the message
+`result output unavailable: ...`, never as `passed`; a `skipped` or `failed`
+exit keeps its verdict, since it does not rest on the output. Before #3703 the
+pass stood with an empty `extra`, and an observation-only check whose logs
+were lost rendered `PASSED`. The read itself (`pkg/k8s/pod.GetPodLogs`) drains
+the stream in chunks rather than lines, so one over-long log line no longer
+fails the whole read as it did under `bufio.Scanner`. On the check side,
+`validators.SkipWithReason` fails the check when its `skipReason` code cannot
+be written, as `EmitExtra` does for the `observationOnly` and `resultSchema`
+markers; `EmitExtraOrWarn` is for informational extras only.
 
 ### Capability applicability contract
 
@@ -442,6 +674,21 @@ Three sentinels exist today, with deliberately different lifecycles:
 | `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseExtraSentinels` (`pkg/validator/job/result.go`) | one JSON object → `TestResult.Extra` (counts / enum codes) | **no** — stripped as transport, not evidence | **yes** — allowlisted keys are published (see below) |
 | `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseExtraSentinels` (same pass) | one JSON object → `TestResult.RuntimeProvenance` (template digests + key paths) | **no** — stripped as transport | **yes** — bounded by `redact.boundRuntimeProvenance` (see "NCCL benchmark runtime provenance") |
 
+The runner (`validators.Run`) emits one `##AICR-EXTRA##` line before the check
+starts, `resultSchema: "1"` (`ctrf.ResultSchemaVersion`): the result-contract
+version this image speaks. The stamp is written before anything else, so a
+result carries it whenever the stamp write succeeded, a skip, a failure or a
+context-load failure included; a stamp that cannot be written fails the check
+(exit 1, no marker), and a pod whose logs the orchestrator could not read
+carries no markers at all and is reported `other`. A `passed` result read
+from its logs therefore carries the stamp unless the image predates it.
+`pkg/evidence/cncf` reads the stamp to word the reason when a check known to
+be observation-only passed without its marker: no stamp, the image predates
+the marker; the known version, the marker line was dropped; an unknown
+version, this reader cannot interpret its markers. In every one of these
+cases the pass is read as an observation, never a demonstration (see
+[Structured evidence that survives redaction](#structured-evidence-that-survives-redaction)).
+
 All are parsed with `strings.CutPrefix` and the parsers are pure, unit-tested
 functions. They are separate channels on purpose: `RESULT:` surfaces live
 metrics to a human watching a run, so it carries unbounded free-form text and is
@@ -469,17 +716,15 @@ CTRF `extra` map (`ctrf.TestResult.Extra`, mirroring the CTRF spec's `extra`
 object) via `validators.EmitExtra`:
 
 ```go
-// Emit failures are non-fatal — warn, but never flip the check's verdict on a
-// failed stdout write (checkNvidiaSMI wraps this as the emitExtraOrWarn helper):
-emit := func(extra map[string]string) {
-    if err := validators.EmitExtra(extra); err != nil {
-        slog.Warn("failed to emit validator extra", "error", err)
-    }
-}
-// Success path — coverage disclosure (counts only, never node names/IPs):
-emit(map[string]string{"nodesValidated": "1", "nodesTotal": "2"})
-// Skip path — reason enum code:
-emit(map[string]string{"skipReason": "no-gpu-nodes"})
+// Informational extras (counts, measured values) are warn-only: a failed
+// stdout write never flips the check's verdict (validators.EmitExtraOrWarn):
+validators.EmitExtraOrWarn(map[string]string{
+    validators.ExtraKeyNodesValidated: "1", validators.ExtraKeyNodesTotal: "2",
+})
+// Skip path: the reason code decides how the aggregation reads the result,
+// so it goes through SkipWithReason, which fails the check when the code
+// cannot be written instead of skipping it unexplained:
+return validators.SkipWithReason(validators.SkipReasonNoGPUNodes, "no GPU nodes found in the cluster")
 ```
 
 **Transport.** `EmitExtra` writes the map to stdout as one
@@ -497,7 +742,11 @@ code and termination log. Provenance travels the same way as
 Keep the human-readable stdout lines too, for `--full` and live output.
 
 Keys, skip codes, and value formatters live in `validators/extra_keys.go`. A
-test there fails when a key has no redaction allowlist entry.
+test there fails when a key has no redaction allowlist entry. The keys the
+evidence readers consume by name (`skipReason`, `observationOnly`,
+`resultSchema`) are declared once in `pkg/validator/ctrf/extra_keys.go` and
+re-exported by `validators`, so `pkg/evidence/cncf` and the validator images
+cannot drift apart; `TestExtraKeysPinned` freezes the strings.
 
 **Low-cardinality + allowlist contract.** `extra` values MUST be low-cardinality
 (`"2"`, `"305.4"`, `"true"`, `"v25.10.1"`, `"no-schedulable-gpu-nodes"`), never
@@ -511,9 +760,9 @@ fails its key's shape (an IP under `nodesTotal`, `305.44` under
 | non-negative integer count | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped`, `workerNodes`, `gpusInvolved`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, `namespacesActive`, `namespacesExpected`, `gpusBenchmarked`, `gpusPerNode` |
 | non-negative decimal, at most one fractional digit | `achievedGbps`, `thresholdGbps`, `tolerancePct`, `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `ttftThresholdMs`, `scaledThreshold` |
 | signed decimal (`+1.8`, `-12.3`) | `passMargin` (percent above or below `thresholdGbps`) |
-| `true` or `false` | `nodeLocal`, `versionSatisfied` |
+| `true` or `false` | `nodeLocal`, `versionSatisfied`, `observationOnly` |
 | `v` plus one to three numeric parts, optional `-alpha`, `-beta`, or `-rc` suffix (`v25.3.0-rc.1`) | `detectedVersion` |
-| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`) |
+| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`), `resultSchema` (the versions a reader knows, today `1`) |
 
 Codes are closed sets rather than a shape regex, because a kebab-case regex
 would still pass an identifier like `customer-prod-cluster`. The `skipReason`
@@ -546,7 +795,9 @@ page are the contract.
 | `dra-support` | `configuredPolicy` |
 | `gpu-operator-version` | `detectedVersion`, `versionSatisfied` |
 | `check-nvidia-smi` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
+| `cluster-autoscaling`, on every passing path | `observationOnly` |
 | any check, on an in-pod skip | `skipReason` |
+| any check, on every result whose stamp write succeeded (every `passed` and `skipped` result an image that stamps produces) | `resultSchema`, stamped by the runner before the check starts |
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the
   benchmark runs, so a failed run still records its scope. `fabric` appears
@@ -706,9 +957,12 @@ be set from the catalog or a `--data` overlay:
 | Variable | Forwarded to | Purpose |
 |----------|--------------|---------|
 | `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
+| `AICR_SANDBOX_RUNTIME_CLASS` | `workload-sandboxing` | Names the sandboxed `RuntimeClass` to test instead of auto-detecting one by the gVisor/Kata keywords (the upstream `-sandbox-runtime-class` flag); a name the cluster has no class for fails the check with `ErrCodeInvalidRequest`. |
+| `AICR_SANDBOX_PROBE_IMAGE` | `workload-sandboxing` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must provide a POSIX `/bin/sh`, `uname`, `cat`, `ls`, `wc`, `head`, `awk` and `tr` for the probe script; the probe pods carry the `--image-pull-secret` Secrets copied into the per-run namespace, as every probe pod in this package does. |
 | `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
 | `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway is open to the internet. What is assessed follows the declared `dataPlane`, not whether the controller runs a Service: with `service-endpoints` (the default), the proxy `LoadBalancer`'s `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`); with `gateway-address`, Service source ranges are not read at all, and the check fails when a Gateway status address is public, or is a `Hostname` or an unspecified address (`0.0.0.0`, `::`) the check cannot classify (a Gateway with no `status.addresses` at all fails the data-plane step in every mode, before exposure is assessed). Default (unset): the open exposure is recorded and warned but the check still passes. Which gateway is assessed, and how, comes from the recipe's inference gateway profile (`pkg/validator/v1.ResolveInferenceGatewayProfile`; see [Declaring the inference gateway](../integrator/data-extension.md#declaring-the-inference-gateway)). |
 | `AICR_NCCL_RUNTIME_IMAGE` | `nccl-all-reduce-bw`, `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls` | Overrides the NCCL launcher/worker image baked into the per-platform TrainingRuntime templates; a malformed reference fails closed in the pod. |
+| `AICR_DRIVER_RUNTIME_IMAGE` | `driver-runtime-management` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must ship no accelerator driver or tools (finding them inside is what the check proves) and must provide a POSIX `/bin/sh`, `head` and `tr` for the probe script. |
 
 **RBAC.** The engine creates a per-run ServiceAccount and
 ClusterRoleBinding named `aicr-validator-<runID>`. Per-run naming
@@ -885,13 +1139,97 @@ type Context struct {
 
 `ctx.Timeout(d)` returns a child context with a shorter deadline.
 `validators.Run(map)` is the container entry point; it dispatches by
-`os.Args[1]`, maps `Skip` → exit 2, errors → exit 1, nil → exit 0.
+`os.Args[1]`, maps `Skip` → exit 2, errors → exit 1, nil → exit 0. A check
+interrupted by SIGTERM exits 3 instead, regardless of its result.
 
 **Scheduling overrides.** When creating inner workloads, check
 `ctx.NodeSelector` and `ctx.Tolerations` before applying hardcoded
 platform selectors. `nodeName` pinning (e.g. nvidia-smi, DRA
 isolation) bypasses the scheduler and should not apply
 `ctx.NodeSelector`.
+
+### Cancellation and cleanup lifecycle
+
+Checks must honor `ctx.Ctx.Done()` in waits, loops and I/O. `LoadContext` subscribes
+to SIGTERM and retains the existing `AICR_CHECK_TIMEOUT` deadline. Always call
+`ctx.Cancel()`; it stops signal delivery, cancels the timeout and joins the signal
+watcher, including on normal completion. When the SIGTERM cause is observed after
+the check returns, the runner writes `terminated by SIGTERM before the check
+completed` (with any check error), bounded by `TerminationLogMaxSize`, and exits
+`3` (CTRF `other`, indeterminate). A nil or skip result cannot turn that
+interruption into a pass. Normal pass/fail/skip exits remain `0`/`1`/`2`.
+
+Deferred cluster cleanup must use a **fresh, timeout-bounded context**, not the
+canceled check context, and should leave time to flush the termination message
+inside the pod's **30s** termination grace. The cleanup audit found the existing
+cleanup helpers already detach from the check context. Their bounds are not a
+guarantee of completing within grace: `K8sCleanupTimeout` and
+`PreflightCleanupTimeout` each consume up to 30s with no flush margin;
+`cleanupNCCLResources` additionally allows a 5m namespace termination wait,
+`deleteTrainer` has per-resource 30s attempts and retries, inference's nested
+AIPerf/workload cleanups can consume sequential 30s windows, and CRE's
+`teardownCRECertification` allows 10m. These existing paths may be SIGKILLed
+before cleanup returns or the termination message is written. Neither their
+bounds nor the pod grace are increased here. SIGKILL, OOM and crashes cannot
+run defers; an external orphan sweeper remains outside this implementation.
+
+On operator cancellation, the orchestrator uses one fresh 30s deadline for the
+in-flight Job's result capture, deletion and partial CTRF persistence, in that
+order, followed by the pod-termination wait. It does **not** start a fresh 60s
+pod wait. Instead, the wait keeps that shared deadline but always extends to at
+least the Job deletion time plus the pod's 30s termination grace
+(`ValidatorTerminationGracePeriod`) plus a 5s delivery margin
+(`ValidatorTerminationWaitMargin`). This keeps per-run RBAC alive for the pod's
+full SIGTERM grace, so a cooperative check can finish its in-grace cleanup. The
+wait still ends as soon as the Job's pods are terminal or gone. This applies on
+every interrupted path that deletes a Job: the in-flight check, an apply whose
+response was lost, and cancellation during the normal post-deletion wait.
+Per-run RBAC/data teardown keeps its separate 30s deadline. Total cleanup is
+typically about 35s, and about 95s plus normal overhead in the worst case
+(capture/deletion/persistence, then the pod's grace, then RBAC/data teardown).
+If privileged RBAC
+revocation also fails, both `ValidatePhase` and `ValidatePhases` return
+`ErrCodeInternal` with joined cancellation and cleanup causes and an explicit
+warning that the cluster-admin binding may be orphaned. Ordinary cancellation
+with successful privileged cleanup remains `ErrCodeCanceled`; other existing
+error precedence is unchanged. Resource deletion and ConfigMap persistence
+remain best effort; a partial report is still returned when persistence fails.
+Unstarted checks in the current phase are `skipped` with
+`not run: validation canceled`; a deadline instead says `not run: validation timed out`.
+The interrupted phase cannot be passed, and later phases are not started.
+The report enforces this as well as `PhaseResult.Status`. When no entry already
+blocks it (cancellation between checks, between phases, or during the final
+report write), `interruptedPhase` adds a synthetic `validation-interrupted`
+entry with status `other`. The persisted, merged and `--output` CTRF summary
+therefore never reads as passing. Cancellation observed between phases records
+the next phase as interrupted rather than dropping it. Without cancellation,
+result capture, Job deletion and the final report write keep the caller's
+context (the CLI leaves it uncapped). The detached 30s budget applies only once
+cancellation is observed, and timeout/infra capture keeps its own fresh 30s
+window.
+
+`Validator.ValidatePhases` and `Client.ValidateState` return **both** partial
+results and the interruption or privileged-cleanup error. Consumers must inspect
+both. The CLI observes first cancellation at validation entry and records a
+95s aggregate deadline (`validationCancellationBudget`), derived from the phase
+cleanup window, the pod's grace plus margin, and the per-run cleanup window;
+normal validation time does not consume it. Partial CTRF output gets only the
+remaining time, capped by its existing 30s I/O allowance, with no renewed
+window. An exhausted budget leaves the in-memory results and original error
+intact. The budget is checked before the output writer is created, never after,
+because creating a file output truncates it. Partial output is written only for
+an interruption (`ErrCodeCanceled`, or the combined cancellation-plus-revocation
+failure). Any other error that comes with results returns without output, as
+before. Context deadlines bound cooperative I/O, not arbitrary blocking
+file/stdout writes. Ordinary cancellation before the last phase completed exits `9`;
+the combined privileged cleanup failure exits `8`, regardless of
+`--fail-on-error`. A signal that arrives after the last phase completed
+(including during the final per-run teardown, after which `ValidateState`
+succeeds) takes the normal completion path, which can exit `0` or `8`, or fail
+in evidence handling. Neither interruption path renders,
+signs or pushes evidence. A second SIGINT/SIGTERM force-terminates the CLI and
+may cut cleanup or blocked output short. `--no-cleanup` still leaves resources
+for inspection.
 
 ### `PodLifecycle` helper
 
@@ -1443,16 +1781,19 @@ unrecognized value, which keeps a typo'd severity non-silent.
 
 | Function | Checks |
 |----------|--------|
-| `CheckWorkloadSelectorMissing` | nodewright `--workload-selector` set when conditions match; skipped when every manifest the component wires is on the `nodewrightNoInterruptManifests` allowlist (today only `toolkit-hardening-aks.yaml`) |
-| `CheckAcceleratedSelectorMissing` | nodewright `--accelerated-node-selector` set; skipped when every manifest the component wires is on the `nodewrightNoInterruptManifests` allowlist (today only `toolkit-hardening-aks.yaml`, which selects nodes by a fixed label) |
+| `CheckWorkloadSelectorMissing` | nodewright `--workload-selector` set when conditions match; skipped when every manifest the component wires is on the `nodewrightNoInterruptManifests` allowlist (today `toolkit-hardening-aks.yaml` and `toolkit-hardening-oke.yaml`) |
+| `CheckAcceleratedSelectorMissing` | nodewright `--accelerated-node-selector` set; skipped when every manifest the component wires is on the `nodewrightNoInterruptManifests` allowlist (today `toolkit-hardening-aks.yaml` and `toolkit-hardening-oke.yaml`, which select nodes by a fixed label); wired at `severity: error` for `service: oke` + `accelerator: gb300`, whose tuning CR reboots every node it matches and makes CRI-O wait for Multus; skipped when the component is disabled |
 | `CheckHostMofedWithoutNetworkOperator` | Host-mode MOFED component paired with `network-operator` |
-| `CheckWildcardAcceleratedToleration` | Accelerated-node tolerations carry no wildcard (keyless) entry — on AKS a wildcard deadlocks nodewright interrupt packages ([nodewright#296](https://github.com/NVIDIA/nodewright/issues/296)); wired at `severity: error`; skipped when every manifest the component wires is on the `nodewrightNoInterruptManifests` allowlist (today only `toolkit-hardening-aks.yaml`) or the component is disabled via `--set` |
+| `CheckWildcardAcceleratedToleration` | Accelerated-node tolerations carry no wildcard (keyless) entry — on AKS a wildcard deadlocks nodewright interrupt packages ([nodewright#296](https://github.com/NVIDIA/nodewright/issues/296)); wired at `severity: error`; skipped when every manifest the component wires is on the `nodewrightNoInterruptManifests` allowlist (today `toolkit-hardening-aks.yaml` and `toolkit-hardening-oke.yaml`) or the component is disabled via `--set` |
 | `CheckNodewrightRuntimeRequiredTaintKey` | The nodewright runtime-required taint key, from `--workload-gate` or the final effective values, has no DNS prefix and is at most 53 characters. The operator writes the key into the `nodewright.nvidia.com/autoTaint_<key>` annotation, and from v0.20.0 refuses to start on one that cannot form it. A `--dynamic` declaration on the path is rejected, since its install-time value is never checked. Blocking |
 | `CheckGB300HostKernelGranule` | Bare-metal GB300 (`service: generic`, `accelerator: gb300`) applies a tuned profile that sizes hugepages for a 64k-granule ARM64 host kernel. A 4k-granule host still boots — Linux rejects the `hugepagesz=512M` clause and drops its paired `hugepages=` count — so the node just runs without that pool. Advisory only (`severity: info`); skipped when the component is disabled or `tuningEnabled` resolves to false on the final effective values (recipe merge plus scalar `--set` and typed `--set-json`/`--set-file`, under the canonical name and its registry aliases). |
-| `CheckDriverOwnershipCoherence` | GPU driver-ownership coherence on the final effective values (recipe merge + `--set`/`--set-json`/`--set-file` under canonical names and registry aliases): a recipe whose snapshot observed no NVIDIA driver (`metadata.gpuDriverState: absent`) must not bundle with the preinstalled-driver assumption. When GPU Operator manages the driver, `nvidia-dra-driver-gpu.nvidiaDriverRoot` must equal `gpu-operator hostPaths.driverInstallDir`; with a preinstalled driver, the DRA root must avoid the unpopulated operator container root and may intentionally differ from `hostPaths.driverInstallDir` ([#1087](https://github.com/NVIDIA/aicr/issues/1087), [#1757](https://github.com/NVIDIA/aicr/issues/1757)). Wired at `severity: error`. |
+| `CheckDriverOwnershipCoherence` | GPU driver-ownership coherence on the final effective values (recipe merge + `--set`/`--set-json`/`--set-file` under canonical names and registry aliases): a recipe whose snapshot observed no NVIDIA driver (`metadata.gpuDriverState: absent`) must not bundle with the preinstalled-driver assumption. When GPU Operator manages the driver, `nvidia-dra-driver-gpu.nvidiaDriverRoot` must equal `gpu-operator hostPaths.driverInstallDir`; with a preinstalled driver, the DRA root must avoid the unpopulated operator container root and may intentionally differ from `hostPaths.driverInstallDir` ([#1087](https://github.com/NVIDIA/aicr/issues/1087), [#1757](https://github.com/NVIDIA/aicr/issues/1757)). Wired at `severity: error`. The paths it verifies (`config.DriverOwnershipFamilies`) are also rejected at install time by the `argocd-helm` deployer's `aicr-driver-ownership-lock` template. |
 | `CheckMariaDBOperatorOwnershipCoherence` | MariaDB Operator installation safety for AICR-provided Slurm accounting: `metadata.mariaDBOperatorState` values `crs-detected` and `unknown` block bundling, `api-detected` or omitted evidence warns, and `absent` proceeds silently. Wired at `severity: warning` so warning results remain non-blocking while returned errors still fail the bundle. |
+| `CheckNetworkOperatorEnabled` | A component that needs network-operator is in the bundle without it: network-operator absent from the recipe, disabled there, or disabled with `--set` under any registered key. Registered on `nodewright-customizations` for OKE GB300 at `severity: error`, because the GB300 tuning CR sets CRI-O's default network to Multus, which network-operator installs, and the tuned nodes would otherwise stay NotReady. |
+| `CheckRDMANamespaceModeCoherent` | The RDMA attachment matches the nodes' RDMA network namespace mode, from snapshot evidence (`metadata.rdmaNamespaceMode`). Applies to OKE GB300 when network-operator's effective values carry `rdmaCni`. Warns when the mode is `shared` and `rdmaCni.enabled` is `true` (the `rdma` CNI refuses shared mode), and when it is `exclusive` and `rdmaCni.enabled` is not `true` (`host-device` alone leaves the RDMA device in the host namespace). Wired at `severity: warning`, so a mismatch never blocks; a failure to resolve the component's effective values returns an error, which does. |
+| `CheckRDMANamespaceModeEvidence` | The same scope as `CheckRDMANamespaceModeCoherent`. Notes when the recipe carries no `metadata.rdmaNamespaceMode` evidence (built without a snapshot, or from one taken before the reading existed) or an unrecognized value, naming the mode the attachment needs. Wired at `severity: info`, so it never blocks: an effective-values resolution failure it returns is only logged, and blocks through `CheckRDMANamespaceModeCoherent`, which resolves the same values. |
 | `CheckNVSentinelDatastorePrerequisites` | Cluster prerequisites of `nvsentinel-mongodb` from snapshot evidence. `metadata.defaultStorageClassState`: `absent` and `unknown` block and `multiple` or no evidence warns, unless `replsets.rs0.volumeSpec.pvc.storageClassName` or `--storage-class` names a class; `present` proceeds. `metadata.perconaOperatorState`: `crs-detected`, `operator-detected`, and `unknown` block, `api-detected` warns that psmdb-operator replaces the existing CRDs, `absent` and `aicr-owned` proceed; omitted `perconaOperatorState` evidence warns. |
-| `CheckNVSentinelRemediationPipelineCoherent` | NVSentinel's fault pipeline can work as configured: no quarantine, drain or remediation stage, `health-events-analyzer` or `event-exporter` with the embedded `mongodbStore` or without a supported `global.datastore.provider`; each stage has the one before it (`node-drainer` needs `fault-quarantine`, `fault-remediation` needs `node-drainer`), `global.dryRun` is a boolean when `fault-remediation` is on, a live `fault-remediation` has `janitor`, `janitor` has `janitor-provider`, and `fault-remediation` has `metadata-collector`; janitor's GPU reset Job reads the driver from the root the GPU Operator populates, with a clean `driverRoot`, a RuntimeClass coherent with the enabled GPU Operator variant (none under CDI with NRI), and a service manager that waits only for operands the GPU Operator runs, in its namespace, with a custom spec's timeouts set; the GPU reset is rejected on GKE COS. With the `nvsentinel-mongodb-uri` datastore it also requires x509 auth with the `nvsentinel-mongodb-app-client` certificate and both Percona components deployed, enabled and in NVSentinel's namespace. Rejects `--dynamic` on any path it verifies. Wired at `severity: error`. |
+| `CheckNVSentinelRemediationPipelineCoherent` | NVSentinel's fault pipeline can work as configured: no quarantine, drain or remediation stage, `health-events-analyzer`, `event-exporter` or `csp-health-monitor` with the embedded `mongodbStore` or without a supported `global.datastore.provider`; each stage has the one before it (`node-drainer` needs `fault-quarantine`, `fault-remediation` needs `node-drainer`), `global.dryRun` is a boolean when `fault-remediation` is on, a live `fault-remediation` has `janitor`, `janitor` has `janitor-provider`, and `fault-remediation` has `metadata-collector`; janitor's GPU reset Job reads the driver from the root the GPU Operator populates, with a clean `driverRoot`, a RuntimeClass coherent with the enabled GPU Operator variant (none under CDI with NRI), and a service manager that waits only for operands the GPU Operator runs, in its namespace, with a custom spec's timeouts set; the GPU reset is rejected on GKE COS. With the `nvsentinel-mongodb-uri` datastore it also requires x509 auth with the `nvsentinel-mongodb-app-client` certificate and both Percona components deployed, enabled and in NVSentinel's namespace. Rejects `--dynamic` on any path it verifies. Wired at `severity: error`. |
 | `CheckNVSentinelMongoDBCoherent` | `nvsentinel-mongodb` is usable by NVSentinel: NVSentinel is deployed, TLS is `requireTLS`, sharding is off, the `$external` x509 app user has `readWrite` on `HealthEventsDatabase` and the `nvsentinelTTLIndex` role, `psmdb-operator` is deployed with `watchAllNamespaces: false` and `disableTelemetry: true`, and `crVersion` and `initImage` are at the operator image's minor. Dependencies are read from the declared component set, so a `bundlers=` subset still sees them. Rejects `--dynamic` on any path it verifies. Wired at `severity: error`. |
 | `CheckNVSentinelSlurmDrainMonitorRequiresSlinky` | NVSentinel's `slurm-drain-monitor` is not enabled without `slinky-slurm` (absent or disabled), or watching a blank namespace or one `slinky-slurm` does not deploy to: the monitor reads the `SlurmNodeStateDrain` condition off Slinky worker pods, which only `slinky-slurm`'s NodeSets create, so it would run and never see a pod. Rejects `--dynamic` on the monitor's toggle and namespace and on `slinky-slurm`'s `enabled`, even with the monitor off. Wired at `severity: error`. |
 | `CheckNVSentinelSlurmCustomDrainCoherent` | NVSentinel drains Slurm nodes through the slinky-drainer plugin: a recipe with `slinky-slurm` and a live (not dry-run) `fault-remediation` has `node-drainer.customDrain` on, while quarantine alone passes; `customDrain` is only on with a live `node-drainer`, a boolean `global.dryRun` that is false, `slinky-slurm`, the `slinky-drainer-crds` component, and the `slinky-drainer` component in NVSentinel's namespace watching the namespace `slinky-slurm` deploys to; and its values match the plugin's contract (DrainRequest kind, resource and `DrainComplete` condition, the `slinky-drain-template` template, NVSentinel's namespace, a positive whole-seconds `timeout`, and empty `userNamespaces` and `podDrainPolicies` with an empty `nodeSelector`, since a scope could leave slurmd nodes on pod eviction); and the slurmd NodeSet and every Slurm control pod in the Slurm namespace (slinky-slurm's controller, REST API, login and enabled accounting, and `slurm-accounting-mariadb` there) render non-empty node selectors (modelled on the bundler's order: `--set`, then node-selector injection unless the overlay opts out with an empty or null value, then `--set-json`), each control pod's giving some label key a different value from slurmd's, since the plugin waits for every Ready pod in that namespace on a drained node to report Slurm DRAIN. Rejects `--dynamic` on any path a rule that can still fire reads, so a monitoring-only Slurm recipe keeps its `--dynamic` paths. Wired at `severity: error`. |
@@ -1464,6 +1805,7 @@ unrecognized value, which keeps a typo'd severity non-silent.
 | `CheckNVSentinelNodeValidationCoherent` | NVSentinel's new-node validation can run. With lifecycle-manager on: `fullNameOverride` leaves the Deployment named `lifecycle-manager`, as the health check expects; `controllers.validationRequest.enabled` is a boolean; with that controller on, `lifecycle-manager.config.tests` and each test in it are maps and at least one test remains once null entries are dropped, a test's `command`, when set, is a non-empty list of strings, its `image` a non-empty string, and its `provider` one the config defines, where each provider, the chart's `k8s-job-provider` merged with AICR's overrides, is a map with the fields lifecycle-manager requires at startup and condition statuses of `True`, `False` or `Unknown` (image and provider required on a test AICR adds; on the chart's `dcgm-diag-test` an explicit null deletes the chart's value and is rejected), `newNodeTests` and `defaultTests` name only defined tests, each once, and are not both empty (a null list counts as empty), and `newNodeValidation` is a map, null or false, since lifecycle-manager exits at startup on any of these; when new-node validation runs (`newNodeValidation` a map), its criteria keep one named `cordoned` with the chart's expression and one named `not-under-quarantine` with the mixin's; and when the new-node tests include `dcgm-diag-test` with the chart's command, an enabled GPU Operator runs in `gpu-operator` with `dcgm.enabled: true`. Warns when `global.dryRun` is true and new-node validation runs, since lifecycle-manager ignores dry run, and when the bundle deploys no cert-manager and `webhook.certProvider` is not `openshift-service-ca`. Rejects `--dynamic` on `global.lifecycleManager`, on any `lifecycle-manager` value while it is on, and on the GPU Operator's `enabled` and `dcgm.enabled` while the DCGM rule applies. Wired at `severity: warning`; its blocking findings are errors. |
 | `CheckNVSentinelPostRemediationValidationCoherent` | NVSentinel's post-reboot validation can release a repaired node. `fault-quarantine.validation` is a map when set and its `enabled` a boolean. When it is on with `fault-quarantine` rendering: lifecycle-manager and its ValidationRequest controller run; `node-drainer` runs, since `fault-quarantine` validates only a fully drained node; `schedulingGate` and `schedulingGate.cordon` are maps when set and `cordon.remove` is true or unset; `readinessCriteria`, when set, is a list that keeps one named `not-under-quarantine` with the chart's expression; `ruleSets` is a non-empty list of maps with at least one enabled rule set and no two rule sets, disabled ones included, sharing a name; a rule set's `enabled` is a boolean when set (the chart defaults it to true); each enabled rule set has at least one `match.all` or `match.any` rule (a null list is skipped, as the chart does), each a `HealthEvent` rule with an expression, and names tests lifecycle-manager's config defines; `dcgm-diag-test` with the chart's command has an enabled GPU Operator in `gpu-operator` with `dcgm.enabled: true`; `fault-quarantine` and lifecycle-manager share a cordon label prefix, each a non-empty string when set; every `lifecycle-manager.config.schedulingGate.taints` entry's value is a string, since lifecycle-manager decodes it as one and exits at startup otherwise, and, while a requested test renders through the chart's Job template (NVSentinel v1.28.0), which writes it unquoted, is not a string such as `true`, `yes` or `1` that turns into a bool or number there and breaks every test Job; and every `NoSchedule` or `NoExecute` taint an enabled `fault-quarantine` rule set applies has such an entry with the same key, value and effect and `remove: true`, since `fault-quarantine` keeps its taints on the hand-over (with `fault-quarantine.ruleSets` unset, the chart's NVCRE certification taint counts while `global.nvcreCertificationMonitor` is on, and cannot be released at v1.28.0). Rejects `--dynamic` on `fault-quarantine.validation.enabled`, on `fault-quarantine.validation`, `fault-quarantine.labelPrefix` and `fault-quarantine.ruleSets` while validation is on, on `global.nvcreCertificationMonitor.enabled` while validation is on and `fault-quarantine.ruleSets` is unset, and on the GPU Operator's `enabled` and `dcgm.enabled` while the DCGM rule applies. Warns, without blocking, that the release values in a test Job are unverified when a requested test renders through a `lifecycle-manager.config.templates` override, which the bundle does not render; an override no requested test uses changes nothing. Wired at `severity: warning` to carry that note; every other finding is returned as an error and blocks. |
 | `CheckNVSentinelMaintenanceRequestCoherent` | A MaintenanceRequest would cordon and drain its node. `lifecycle-manager.controllers.maintenanceRequest.enabled` is a boolean; when it is true, lifecycle-manager (`global.lifecycleManager.enabled`), `fault-quarantine` and `node-drainer` render, `global.dryRun` is a boolean and not true, and `fault-quarantine.ruleSets`, when set, keeps the chart's `MaintenanceRequest ruleset` shape: enabled, `cordon.shouldCordon: true`, no `match.any`, and a `match.all` holding only the chart's `HealthEvent` rule and, optionally, its `Node` rule, compared with whitespace collapsed rather than evaluated; and every rule set's `enabled`, when set, is a boolean. The datastore is `CheckNVSentinelRemediationPipelineCoherent`'s. Rejects `--dynamic` on the controller toggle and, while it is on, on `global.lifecycleManager.enabled`, `global.faultQuarantine.enabled`, `global.nodeDrainer.enabled`, `global.dryRun` and `fault-quarantine.ruleSets`. Wired at `severity: error`. |
+| `CheckNVSentinelCSPHealthMonitorCoherent` | NVSentinel's CSP Health Monitor can poll its cloud's maintenance API: `cspName` is `aws` on an `eks` recipe or `gcp` on a `gke` recipe; `processingStrategy` is `STORE_ONLY`, `--set` included, since at NVSentinel v1.28.0 `fault-quarantine` keys a maintenance quarantine by agent, check, node and instance, among other fields, never by notice, so one notice's end can release a node another notice still holds; `configToml.clusterName` is a string that is not blank; every timing value present is a whole number below 1,000,000 (Helm prints larger ones in exponent form), and the shared ones and the active provider's poll interval are at or above the monitor's startup minimum (10 for `maintenanceEventPollIntervalSeconds` and 1 for the three minute values, where 0 takes the default for each of these four; 30 for the active provider's `aws.pollingIntervalSeconds` or `gcp.apiPollingIntervalSeconds`); on aws, `accountId` is a 12-digit string, `region` is `us-east-1` or `us-east-2` (the only AWS Health API endpoints, and NVSentinel filters events by the same value), and the IRSA role name (`iamRoleName`, else `<clusterName>-nvsentinel-health-monitor-assume-role-policy`) is a valid IAM role name behind an optional IAM path, checked apart (the path printable ASCII with no leading `/`), and, without `iamRoleName`, `clusterName` has no `/`; on gcp, `targetProjectId` and `logFilter` are non-empty strings and `gcpServiceAccountName` is a service account ID. Rejects `--dynamic` on `global.cspHealthMonitor.enabled`; otherwise a no-op unless the monitor is on, then also rejects `--dynamic` on any `csp-health-monitor` value. It cannot confirm the cloud identity exists. Wired at `severity: error`. |
 | `CheckNPDNotDuplicatingProviderNPD` | `node-problem-detector` is bundled only on an allowlist of verified platforms — never where the provider already runs its own NPD (GKE, AKS), on OpenShift (no privileged SCC binding), or on Talos (restricted namespace) |
 | `CheckGKETCPXOInterfacesCoherence` | The final resolved kubeflow-trainer `tcpxoInterfaces` value matches the mapping the recipe records in `configuration.gke.tcpxoInterfaces` |
 | `CheckNVSentinelDriverLabelDetectable` | Where the GPU Operator does not own the driver and no driver pod exists (driver ships in the node image), NVSentinel sets `labeler.assumeDriverInstalled`, so its driver-label-gated DaemonSets do not come up half-rolled-out |

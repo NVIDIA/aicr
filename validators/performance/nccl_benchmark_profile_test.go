@@ -194,10 +194,13 @@ func TestKnownBenchmarkProfiles(t *testing.T) {
 		"gb200/oke",
 		"gb300/eks",
 		"gb300/generic",
+		"gb300/nvke",
+		"gb300/oke",
 		"h100/aks",
 		"h100/eks",
 		"h100/gke",
 		"h200/eks",
+		"vr200/nvke",
 		"vr200/rke2",
 	}
 	if got := knownBenchmarkProfiles(); !reflect.DeepEqual(got, want) {

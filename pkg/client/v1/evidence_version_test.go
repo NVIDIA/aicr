@@ -22,8 +22,10 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	"github.com/NVIDIA/aicr/pkg/measurement"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
@@ -77,7 +79,7 @@ func TestRenderCNCFEvidenceWithOptions(t *testing.T) {
 		dir := t.TempDir()
 		err := (&Client{}).RenderCNCFEvidenceWithOptions(context.Background(), report, dir,
 			RenderCNCFEvidenceOptions{ConformanceVersion: "v1.38"})
-		requireCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
 		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 			t.Errorf("evidence dir not left empty: %v", entries)
 		}
@@ -187,7 +189,7 @@ func TestRenderCNCFEvidenceWithResult(t *testing.T) {
 		agg, err := (&Client{}).RenderCNCFEvidenceWithResult(context.Background(), report, dir, RenderCNCFEvidenceOptions{
 			NotApplicable: map[string]string{"gang_scheduling": "we do not gang"},
 		})
-		requireCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
 		if agg != nil {
 			t.Errorf("aggregate = %+v, want nil on error", agg)
 		}
@@ -211,11 +213,11 @@ func TestRenderCNCFEvidenceWithResult(t *testing.T) {
 			"unsupported version": {ConformanceVersion: "v1.38"},
 		} {
 			t.Run(name, func(t *testing.T) {
-				requireCode(t, c.ValidateCNCFEvidenceOptions(opts), aicrerrors.ErrCodeInvalidRequest)
+				errorstest.WantReportedCode(t, c.ValidateCNCFEvidenceOptions(opts), aicrerrors.ErrCodeInvalidRequest)
 			})
 		}
 		var nilClient *Client
-		requireCode(t, nilClient.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{}), aicrerrors.ErrCodeInvalidRequest)
+		errorstest.WantReportedCode(t, nilClient.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{}), aicrerrors.ErrCodeInvalidRequest)
 	})
 
 	t.Run("WithOptions still refuses the same way", func(t *testing.T) {
@@ -223,6 +225,66 @@ func TestRenderCNCFEvidenceWithResult(t *testing.T) {
 		err := (&Client{}).RenderCNCFEvidenceWithOptions(context.Background(), report, t.TempDir(), RenderCNCFEvidenceOptions{
 			NotApplicable: map[string]string{"workload_sandboxing": "no sandbox runtime"},
 		})
-		requireCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+	})
+}
+
+func coverageRecipe(checks ...string) *RecipeResult {
+	return &RecipeResult{Name: "r", internal: &recipe.RecipeResult{
+		Validation: &recipe.ValidationConfig{Conformance: &recipe.ValidationPhase{Checks: checks}},
+	}}
+}
+
+// TestValidateCNCFRecipeCoverage pins the #3703 pre-flight at the facade: a
+// recipe that declares no complete proof path for an applicable MUST is
+// refused for the checklist the options select, before any validator runs.
+func TestValidateCNCFRecipeCoverage(t *testing.T) {
+	t.Parallel()
+	complete := []string{"gang-scheduling", "accelerator-metrics", "ai-service-metrics", "inference-gateway",
+		"pod-autoscaling", "cluster-autoscaling", "robust-controller", "secure-accelerator-access"}
+	slinky := append([]string{"slinky-slurm-gpu-access"}, complete[:len(complete)-1]...)
+	missingGang := complete[1:]
+
+	tests := []struct {
+		name    string
+		rec     *RecipeResult
+		opts    RenderCNCFEvidenceOptions
+		wantErr []string // substrings of an ErrCodeInvalidRequest; nil means accepted
+	}{
+		{"complete recipe at the cluster's minor", coverageRecipe(complete...), RenderCNCFEvidenceOptions{KubernetesVersion: "v1.37.2"}, nil},
+		{"Slinky alternative path", coverageRecipe(slinky...), RenderCNCFEvidenceOptions{KubernetesVersion: "v1.37.2"}, nil},
+		{"missing gang-scheduling", coverageRecipe(missingGang...), RenderCNCFEvidenceOptions{KubernetesVersion: "v1.37.2"},
+			[]string{"gang_scheduling: missing gang-scheduling", "v1.37"}},
+		{"dra-support required by the v1.35 checklist the cluster selects", coverageRecipe(complete...), RenderCNCFEvidenceOptions{KubernetesVersion: "v1.35.0"},
+			[]string{"dra_support: missing dra-support", "v1.35"}},
+		{"notApplicable lifts a conditional MUST", coverageRecipe(complete[:5]...),
+			RenderCNCFEvidenceOptions{KubernetesVersion: "v1.37.2", NotApplicable: map[string]string{"cluster_autoscaling": "fixed-size"}},
+			[]string{"robust_controller: missing robust-controller", "secure_accelerator_access"}},
+		{"a recipe with no conformance phase declares nothing", &RecipeResult{Name: "r", internal: &recipe.RecipeResult{}},
+			RenderCNCFEvidenceOptions{ConformanceVersion: "v1.36"}, []string{"gang_scheduling", "ai_inference"}},
+		{"no internal recipe state", &RecipeResult{Name: "r"}, RenderCNCFEvidenceOptions{}, []string{"recipe is required"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := (&Client{}).ValidateCNCFRecipeCoverage(tt.rec, tt.opts)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("ValidateCNCFRecipeCoverage() = %v, want nil", err)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+			for _, want := range tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %v, want substring %q", err, want)
+				}
+			}
+		})
+	}
+	t.Run("nil client", func(t *testing.T) {
+		t.Parallel()
+		var c *Client
+		errorstest.WantReportedCode(t, c.ValidateCNCFRecipeCoverage(coverageRecipe(complete...), RenderCNCFEvidenceOptions{}), aicrerrors.ErrCodeInvalidRequest)
 	})
 }

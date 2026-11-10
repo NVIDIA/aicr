@@ -194,6 +194,26 @@ components:
     # disableValidation: true on the -post wrapper release only.
     # See issues #914 and #929 for the pattern.
     manifestsUseChartCRDs: true
+    validations:
+      # Advisory: the snapshot's RDMA network namespace mode
+      # (metadata.rdmaNamespaceMode) and rdmaCni.enabled disagree. Only the
+      # OKE GB300 manifests read rdmaCni.
+      - function: CheckRDMANamespaceModeCoherent
+        severity: warning
+        conditions:
+          service:
+            - oke
+          accelerator:
+            - gb300
+      # Informational: no usable evidence to compare, as for a recipe built
+      # without a snapshot.
+      - function: CheckRDMANamespaceModeEvidence
+        severity: info
+        conditions:
+          service:
+            - oke
+          accelerator:
+            - gb300
     healthCheck:
       assertFile: checks/network-operator/health-check.yaml
     upgrades:
@@ -254,7 +274,7 @@ components:
   # GKE COS NVIDIA driver installer (issue #1716): Google's cos-gpu-installer
   # DaemonSet as an AICR-managed, values-gated component. Present
   # unconditionally in the gke-cos chain; renders nothing unless the gpuStack
-  # bundle-installer profile value flips installer.enabled true. The
+  # bundle-installer or dra profile value flips installer.enabled true. The
   # DaemonSet carries its own nodeAffinity (GPU nodes without GKE-managed
   # driver labels), so no nodeSelector injection — only accelerated
   # tolerations flow through.
@@ -399,13 +419,15 @@ components:
       # 256Mi so the agent is not OOM-killed mid-reboot on 64K-page arm64 nodes
       # (#3101). v0.20.0 refuses to start on a runtime-required taint key with a
       # DNS prefix or over 53 characters, and stops releasing cordons it did not
-      # place (#3207). Every boundary here carries a transition record.
-      # The legacy skyhook.nvidia.com group, taint key, and
-      # metrics remain served through v0.20.x and are removed in v0.21.0, which
+      # place (#3207). v0.21.0 drains kube-system pods like any other
+      # namespace, honoring any PodDisruptionBudget that covers them, rather
+      # than leaving them to be killed by the reboot (#3694). Every boundary here carries a
+      # transition record. The legacy skyhook.nvidia.com group, taint key, and
+      # metrics remain served through v0.21.x and are removed in v0.22.0, which
       # is not reachable until the remaining skyhook.nvidia.com references in
       # health checks and overlays are migrated.
       # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
-      defaultVersion: v0.20.0
+      defaultVersion: v0.21.0
       defaultNamespace: nodewright
     nodeScheduling:
       nodeCountPaths:
@@ -497,6 +519,32 @@ components:
             - training
             - inference
         message: "Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes."
+      - function: CheckAcceleratedSelectorMissing
+        # Blocking for OKE GB300: tuning-oke-gb300.yaml makes CRI-O wait for
+        # Multus and reboots each node it matches, so an unscoped CR would
+        # reboot the CPU pools into the GB300 OCI profile.
+        severity: error
+        conditions:
+          service:
+            - oke
+          accelerator:
+            - gb300
+        message: "The OKE GB300 tuning CR reboots every node it matches and
+          makes CRI-O depend on Multus. Pass --accelerated-node-selector with a
+          label only the GB300 pool carries."
+      - function: CheckNetworkOperatorEnabled
+        # Blocking for OKE GB300: tuning-oke-gb300.yaml sets CRI-O's default
+        # network to Multus, which network-operator installs; without it, pod
+        # sandboxes fail and the tuned nodes stay NotReady.
+        severity: error
+        conditions:
+          service:
+            - oke
+          accelerator:
+            - gb300
+        message: "The OKE GB300 tuning CR makes CRI-O require Multus, which
+          network-operator installs, so without it the tuned nodes stay
+          NotReady. Re-enable network-operator."
       - function: CheckWildcardAcceleratedToleration
         # Blocking: the wildcard deadlock requires manual node cordon/reboot to
         # recover, so fail the bundle rather than emit a missable warning.
@@ -519,6 +567,7 @@ components:
         conditions:
           service:
             - generic
+            - oke
           accelerator:
             - gb300
         message: "nvidia-gb300-performance sizes hugepages for a 64k-page ARM64
@@ -567,9 +616,10 @@ components:
     # nvsentinel-observe, -quarantine and -remediation,
     # nvsentinel-slinky-drainer (#2615), nvsentinel-health-events-analyzer
     # (#2618), nvsentinel-event-exporter (#2621), nvsentinel-log-collector
-    # (#2619), nvsentinel-node-validation (#3088) and
-    # nvsentinel-external-remediation (#3091) mixins: the exact leaf paths a
-    # mixin may set on this
+    # (#2619), nvsentinel-node-validation (#3088),
+    # nvsentinel-external-remediation (#3091), and
+    # nvsentinel-csp-health-monitor-aws and -gcp (#2620) mixins: the exact
+    # leaf paths a mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
     # recipe's own override, or an operator --set), never from a mixin, so
@@ -722,6 +772,10 @@ components:
       - lifecycle-manager.config.newNodeValidation.newNodeTests
       - fault-quarantine.validation.enabled
       - fault-quarantine.validation.ruleSets
+      - global.cspHealthMonitor.enabled
+      - csp-health-monitor.cspName
+      - csp-health-monitor.processingStrategy
+      - csp-health-monitor.configToml.triggerQuarantineWorkflowTimeLimitMinutes
     # The in-cluster file server's ReadWriteOnce volume, which the
     # nvsentinel-log-collector mixin turns on (#2619).
     storageClassPaths:
@@ -742,7 +796,8 @@ components:
       # itself — from the gpuStack profile on AKS, GKE-COS, and OKE, at
       # overlay level on Kind (#2181) — so this gate is defense in depth
       # rather than the primary mechanism. GKE
-      # gpuStack=bundle-installer and AKS gpuStack=operator-managed
+      # gpuStack=bundle-installer and gpuStack=dra, and AKS
+      # gpuStack=operator-managed,
       # assign an explicit false: a driver pod exists there for the
       # labeler to detect. Issue #2175.
       - function: CheckNVSentinelDriverLabelDetectable
@@ -856,6 +911,9 @@ components:
       # Blocking: a MaintenanceRequest (#3092) that would be accepted but
       # neither cordon nor drain its node. The rules are in the function's doc.
       - function: CheckNVSentinelMaintenanceRequestCoherent
+        severity: error
+      # Blocking (#2620). The rules are in the function's doc.
+      - function: CheckNVSentinelCSPHealthMonitorCoherent
         severity: error
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,

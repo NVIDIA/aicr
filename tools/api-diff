@@ -62,6 +62,7 @@ readonly ALIAS_TARGETS=(
     'EvidenceVerification|github.com/NVIDIA/aicr/pkg/evidence/verifier|VerifyResult'
     'UpgradeReport|github.com/NVIDIA/aicr/pkg/upgrade|Report'
     'CNCFRequirementAggregate|github.com/NVIDIA/aicr/pkg/evidence/cncf|Aggregate'
+    'RecipeSummary|github.com/NVIDIA/aicr/pkg/recipe|Summary'
 )
 readonly GO_MOD_FILE="${REPO_ROOT}/go.mod"
 readonly EXCEPTIONS_FILE="${API_DIFF_EXCEPTIONS_FILE:-${REPO_ROOT}/pkg/client/v1/api-diff-exceptions.yaml}"

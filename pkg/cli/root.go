@@ -338,7 +338,7 @@ func RootCommand() *cli.Command {
 func Execute() {
 	cmd := newRootCmd()
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := commandSignalContext(context.Background())
 
 	err := cmd.Run(ctx, sanitizeCompletionArgs(os.Args))
 	cancel()
@@ -346,6 +346,23 @@ func Execute() {
 		exitCode := errors.ExitCodeFromError(err)
 		slog.Error("command failed", "error", err, "exitCode", exitCode)
 		os.Exit(exitCode) //nolint:gocritic // cancel() above; os.Exit skips defers intentionally
+	}
+}
+
+// commandSignalContext restores default signal handling after the first
+// interruption, so a second signal can terminate a command stuck in cleanup.
+// release joins the watcher on normal completion as well as cancellation.
+func commandSignalContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-ctx.Done()
+		stop()
+	}()
+	return ctx, func() {
+		stop()
+		<-done
 	}
 }
 

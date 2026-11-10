@@ -246,6 +246,31 @@ func TestCheckNVSentinelDriverLabelDetectable(t *testing.T) {
 			}(),
 		},
 		{
+			name: "GKE COS dra: same bundle-carried installer DaemonSet → skipped",
+			recipeResult: func() *recipe.RecipeResult {
+				r := profiled(result(gke, sentinelRef(nil),
+					gpuOpRef("gpu-operator", driverOff())), "gpuStack", "dra")
+				r.Criteria.OS = recipe.CriteriaOSCOS
+				return r
+			}(),
+		},
+		{
+			name: "non-GKE recipe borrowing the dra profile name → still blocked",
+			recipeResult: profiled(result(recipe.CriteriaServiceOKE, sentinelRef(nil),
+				gpuOpRef("gpu-operator", driverOff())), "gpuStack", "dra"),
+			wantBlocked: true,
+		},
+		{
+			name: "GKE non-COS recipe with the dra profile → still blocked (COS-only boundary)",
+			recipeResult: func() *recipe.RecipeResult {
+				r := profiled(result(gke, sentinelRef(nil),
+					gpuOpRef("gpu-operator", driverOff())), "gpuStack", "dra")
+				r.Criteria.OS = recipe.CriteriaOSUbuntu
+				return r
+			}(),
+			wantBlocked: true,
+		},
+		{
 			// Profile names are not reserved: an external overlay on any
 			// service can declare a gpuStack profile with a value named
 			// bundle-installer — with no installer DaemonSet ever
@@ -690,6 +715,15 @@ func TestNVSentinelDriverLabelPlatformMatrix(t *testing.T) {
 				OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining,
 			},
 			profile:     "gpuStack=bundle-installer",
+			wantBlocked: false,
+		},
+		{
+			name: "GKE COS dra",
+			criteria: &recipe.Criteria{
+				Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
+				OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining,
+			},
+			profile:     "gpuStack=dra",
 			wantBlocked: false,
 		},
 		{

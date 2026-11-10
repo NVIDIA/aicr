@@ -21,8 +21,8 @@ spec:
   description: |
     CLI-boundary coverage for `aicr query` (#1806): scalar and subtree
     selectors, output formats, snapshot-derived criteria, and the
-    documented failure modes (selector miss, no criteria, missing flag,
-    unknown format). No cluster needed.
+    documented failure modes (selector miss, no criteria, neither
+    --selector nor --summary, unknown format). No cluster needed.
     Run with: AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/cli/query
   timeouts:
     exec: 30s
@@ -143,8 +143,8 @@ spec:
               ($stdout): "exit=2\n"
               (contains($stderr, '[INVALID_REQUEST] no criteria provided')): true
 
-    - name: missing-selector-is-usage-error
-      description: --selector is a required flag; urfave reports it as an unstructured usage error (exit 1).
+    - name: missing-selector-and-summary-is-invalid-request
+      description: Omitting both --selector and --summary is rejected with exit 2.
       try:
         - script:
             content: |
@@ -152,10 +152,8 @@ spec:
               "${AICR_BIN}" query --service eks
               echo "exit=$?"
             check:
-              # urfave prints the usage text to stdout before the error, so pin the tail.
-              (ends_with($stdout, `"exit=1\n"`)): true
-              (contains($stdout, 'USAGE')): true
-              (contains($stderr, 'Required flag "selector" not set')): true
+              ($stdout): "exit=2\n"
+              (contains($stderr, '[INVALID_REQUEST] one of --selector or --summary is required')): true
 
     - name: unknown-format-is-invalid-request
       description: An unsupported --format value is rejected up front with exit 2.

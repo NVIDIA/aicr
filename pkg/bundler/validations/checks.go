@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -34,10 +35,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// overrideValueFalse is the string form of a disabled `--set <key>:enabled=false`
-// override — value overrides are collected as strings, so booleans arrive as
-// their string literal.
-const overrideValueFalse = "false"
+// overrideValueFalse and overrideValueTrue are the string forms of boolean
+// `--set` overrides — value overrides are collected as strings, so booleans
+// arrive as their string literal.
+const (
+	overrideValueFalse = "false"
+	overrideValueTrue  = "true"
+)
 
 // logKeyComponent is the shared structured-logging / error-context key
 // naming the component a validation message or error is about.
@@ -51,12 +55,15 @@ func init() {
 	registerCheck("CheckWorkloadSelectorMissing", CheckWorkloadSelectorMissing)
 	registerCheck("CheckAcceleratedSelectorMissing", CheckAcceleratedSelectorMissing)
 	registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
+	registerCheck("CheckNetworkOperatorEnabled", CheckNetworkOperatorEnabled)
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
 	registerCheck("CheckNodewrightRuntimeRequiredTaintKey", CheckNodewrightRuntimeRequiredTaintKey)
 	registerCheck("CheckGB300HostKernelGranule", CheckGB300HostKernelGranule)
 	registerCheck("CheckNPDNotDuplicatingProviderNPD", CheckNPDNotDuplicatingProviderNPD)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
 	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
+	registerCheck("CheckRDMANamespaceModeCoherent", CheckRDMANamespaceModeCoherent)
+	registerCheck("CheckRDMANamespaceModeEvidence", CheckRDMANamespaceModeEvidence)
 	registerCheck("CheckGKETCPXOInterfacesCoherence", CheckGKETCPXOInterfacesCoherence)
 	registerCheck("CheckNVSentinelDriverLabelDetectable", CheckNVSentinelDriverLabelDetectable)
 	registerCheck("CheckNVSentinelRuntimeClassCoherence", CheckNVSentinelRuntimeClassCoherence)
@@ -75,6 +82,7 @@ func init() {
 	registerCheck("CheckNVSentinelNodeValidationCoherent", CheckNVSentinelNodeValidationCoherent)
 	registerCheck("CheckNVSentinelPostRemediationValidationCoherent", CheckNVSentinelPostRemediationValidationCoherent)
 	registerCheck("CheckNVSentinelMaintenanceRequestCoherent", CheckNVSentinelMaintenanceRequestCoherent)
+	registerCheck("CheckNVSentinelCSPHealthMonitorCoherent", CheckNVSentinelCSPHealthMonitorCoherent)
 	registerCheck("CheckNVSentinelMongoDBCoherent", CheckNVSentinelMongoDBCoherent)
 	registerCheck("CheckNVSentinelDatastorePrerequisites", CheckNVSentinelDatastorePrerequisites)
 	registerCheck("CheckNKTPExportersHaveBackend", CheckNKTPExportersHaveBackend)
@@ -123,7 +131,9 @@ func CheckWorkloadSelectorMissing(ctx context.Context, componentName string, rec
 // CheckAcceleratedSelectorMissing checks if accelerated-node-selector is missing when conditions are met.
 // This is a generic check that can be used by any component. A component that
 // renders only nodewrightNoInterruptManifests is skipped: those manifests
-// select nodes by a fixed label and ignore the accelerated-node selector.
+// select nodes by a fixed label and ignore the accelerated-node selector. A
+// disabled component renders nothing that a selector would scope, so it is
+// skipped too.
 func CheckAcceleratedSelectorMissing(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
 	if bundlerConfig == nil {
 		return nil, nil
@@ -136,6 +146,10 @@ func CheckAcceleratedSelectorMissing(ctx context.Context, componentName string, 
 
 	// Check conditions (e.g., intent: [training, inference])
 	if !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+
+	if componentDisabled(ref, bundlerConfig, componentOverrideKeys(componentName, recipeResult.DataProvider())) {
 		return nil, nil
 	}
 
@@ -218,6 +232,7 @@ var nodewrightCustomizationsOverrideAliases = []string{"nodewrightcustomizations
 // does, so a new or custom manifest is checked until it is listed here.
 var nodewrightNoInterruptManifests = []string{
 	"components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml",
+	"components/nodewright-customizations/manifests/toolkit-hardening-oke.yaml",
 }
 
 // rendersOnlyNoInterruptPackages reports whether every manifest ref wires is
@@ -510,20 +525,40 @@ func CheckHostMofedWithoutNetworkOperator(ctx context.Context, componentName str
 	return []string{msg}, nil
 }
 
+// networkOperatorComponent is the canonical name of the network-operator
+// component.
+const networkOperatorComponent = "network-operator"
+
+// CheckNetworkOperatorEnabled reports when componentName is in the bundle but
+// network-operator is not: absent from the recipe, disabled there, or disabled
+// with --set (any registered override key and boolean spelling). The registry
+// entry's message says why the component needs it.
+func CheckNetworkOperatorEnabled(_ context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil || componentDisabled(ref, bundlerConfig, componentOverrideKeys(componentName, recipeResult.DataProvider())) {
+		return nil, nil
+	}
+	netop := recipeResult.GetComponentRef(networkOperatorComponent)
+	if netop != nil && !componentDisabled(netop, bundlerConfig, componentOverrideKeys(networkOperatorComponent, recipeResult.DataProvider())) {
+		return nil, nil
+	}
+	return []string{fmt.Sprintf("%s is in the bundle but %s is not", componentName, networkOperatorComponent)}, nil
+}
+
 // draDriverComponentName is the CANONICAL ComponentRef.Name used by the
 // recipe registry for the NVIDIA DRA GPU driver. Kept in sync with
 // recipes/registry.yaml. Used only in log/error message text below —
 // for actual component lookups, use resolveDRAComponentRef, which also
 // matches the OCP variant (see draDriverComponentNames).
-const draDriverComponentName = "nvidia-dra-driver-gpu"
+const draDriverComponentName = allocpolicy.ComponentDRADriver
 
 // draDriverComponentNames are every registry-level component name that
-// represents the NVIDIA DRA GPU driver, canonical plus OCP variant. This
-// package cannot import pkg/bundler (dependency cycle — see
-// componentOverrideKeys godoc for the same constraint elsewhere in this
-// file), so this list is a local duplicate of pkg/bundler's
-// draComponentNames; keep both in sync.
-var draDriverComponentNames = []string{draDriverComponentName, "nvidia-dra-driver-gpu-ocp"}
+// represents the NVIDIA DRA GPU driver, canonical plus OCP variant, from
+// config.DRADriverOwnership.
+var draDriverComponentNames = config.DRADriverOwnership.ComponentNames
 
 // resolveDRAComponentRef looks up the DRA driver's ComponentRef by
 // trying every known name variant in turn. recipeResult.GetComponentRef
@@ -658,7 +693,7 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"(opt-out label absent) provision the GPU node pools with " +
 				"the GKE-managed driver install (node pool " +
 				"gpu-driver-version=default). With --profile " +
-				"gpuStack=bundle-installer (pools labeled " +
+				"gpuStack=bundle-installer or gpuStack=dra (pools labeled " +
 				"gke-no-default-nvidia-gpu-device-plugin=true and created " +
 				"with gpu-driver-version=disabled) the bundle's " +
 				"gcp-driver-installer component supplies the driver with a " +
@@ -1131,7 +1166,7 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 	// paths in the caller: a dynamic DRA driver root escapes Rule 2 at
 	// bundle time.
 	draDynMsgs := dynamicOwnershipViolations(bundlerConfig, draRef.Name, draKeys,
-		[]string{"nvidiaDriverRoot"})
+		config.DRADriverOwnership.Paths)
 	msgs = append(msgs, draDynMsgs...)
 	draValues, draErr := effectiveComponentValues(ctx, recipeResult, bundlerConfig, draRef.Name, draKeys, "driver-ownership coherence")
 	if draErr != nil {
@@ -1271,7 +1306,7 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 	// declarations are rejected up front — before values resolution, so
 	// the rejection fires even when resolution itself fails.
 	if dynMsgs := dynamicOwnershipViolations(bundlerConfig, componentName, gpuOpKeys,
-		[]string{"driver.enabled", "toolkit.enabled", "hostPaths.driverInstallDir"}); len(dynMsgs) > 0 {
+		config.GPUOperatorDriverOwnership.Paths); len(dynMsgs) > 0 {
 		for _, msg := range dynMsgs {
 			slog.Warn(msg, logKeyComponent, componentName)
 		}
@@ -1430,13 +1465,9 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 
 // gpuOperatorComponentNames are the registry-level component names that
 // carry GPU Operator driver-ownership values (the canonical chart and its
-// OCP variant). This package cannot import pkg/bundler (dependency cycle
-// — see draDriverComponentNames above for the identical constraint and
-// the agreed keep-in-sync disposition), so this list is a local
-// duplicate of pkg/bundler's gpuOperatorComponentNames; it also mirrors
-// the pair that registers CheckDriverOwnershipCoherence in
-// recipes/registry.yaml. Keep all three in sync.
-var gpuOperatorComponentNames = []string{"gpu-operator", "gpu-operator-ocp"}
+// OCP variant), from config.GPUOperatorDriverOwnership. They mirror the pair
+// that registers CheckDriverOwnershipCoherence in recipes/registry.yaml.
+var gpuOperatorComponentNames = config.GPUOperatorDriverOwnership.ComponentNames
 
 // nvsentinelAssumeDriverInstalledOverrideSet is the documented
 // bundle-time override that makes the NVSentinel labeler apply
@@ -1457,6 +1488,12 @@ const nvsentinelDriverLabelPath = "labeler.assumeDriverInstalled"
 // cos-gpu-installer DaemonSet. Its pods ARE a driver pod the NVSentinel
 // labeler detects, so the label gate below must not reject this value.
 const gkeBundleInstallerProfileValue = "bundle-installer"
+
+// gkeDRAProfileValue is the GKE gpuStack value that advertises whole GPUs
+// through DRA ResourceClaims (issue #2517). It is the bundle-installer
+// pool shape with a different advertiser: the same gcp-driver-installer
+// component supplies the driver, so the labeler sees the same driver pods.
+const gkeDRAProfileValue = "dra"
 
 // gpuStackProfileName is the ADR-015 configuration-profile name that
 // selects who installs the GPU driver on AKS and GKE.
@@ -1581,21 +1618,22 @@ func nvsentinelAssumesDriverInstalled(values map[string]any) bool {
 // labeler recognizes exists on this recipe's platform even though the GPU
 // Operator installs no driver.
 //
-// One shipping configuration qualifies: GKE COS with
-// --profile gpuStack=bundle-installer, whose bundle-carried installer is
-// Google's standalone nvidia-driver-installer DaemonSet on pools created
-// with gpu-driver-version=disabled (recipes/overlays/gke-cos.yaml), the
-// bundle's gcp-driver-installer component carries the cos-gpu-installer
-// DaemonSet. The labeler's driver-pod detection sees those pods, so the
-// driver.installed label IS applied and the gate below must stay silent.
+// Two shipping configurations qualify, both GKE COS on pools created with
+// gpu-driver-version=disabled (recipes/overlays/gke-cos.yaml):
+// --profile gpuStack=bundle-installer and --profile gpuStack=dra. In both,
+// the bundle's gcp-driver-installer component carries the
+// cos-gpu-installer DaemonSet (Google's standalone nvidia-driver-installer
+// shape); the two values differ only in who advertises whole GPUs. The
+// labeler's driver-pod detection sees those pods, so the driver.installed
+// label IS applied and the gate below must stay silent.
 // The sibling value gke-default bakes the driver into the node at pool
 // creation, so no driver pod exists there — that value is affected.
 //
 // The exemption is scoped to GKE COS recipes, not to the profile
 // identifier alone: profile names are not reserved, and an external
 // --data overlay on any service can declare a gpuStack profile whose
-// value happens to be named bundle-installer — with no installer
-// DaemonSet ever deploying. Fail closed on anything but the one shape
+// value happens to be named bundle-installer or dra — with no installer
+// DaemonSet ever deploying. Fail closed on anything but the shapes
 // the embedded catalog documents (recipes/overlays/gke-cos.yaml); a
 // recipe without criteria stays blocked for the same reason.
 func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
@@ -1606,10 +1644,10 @@ func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
 		return false
 	}
 	selected := recipeResult.Metadata.SelectedProfile
-	if selected == nil {
+	if selected == nil || selected.Name != gpuStackProfileName {
 		return false
 	}
-	return selected.Name == gpuStackProfileName && selected.Value == gkeBundleInstallerProfileValue
+	return selected.Value == gkeBundleInstallerProfileValue || selected.Value == gkeDRAProfileValue
 }
 
 // NVSENTINEL GATE POLICY — what an nvsentinel gate means when parts of
@@ -1667,7 +1705,8 @@ func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
 //     --set/--set-json overrides), so the documented
 //     GPU-Operator-managed override set clears the gate,
 //   - no other driver pod source the labeler recognizes exists
-//     (labelerObservesDriverPod — GKE gpuStack=bundle-installer), and
+//     (labelerObservesDriverPod — GKE gpuStack=bundle-installer or
+//     gpuStack=dra), and
 //   - labeler.assumeDriverInstalled is not truthy in nvsentinel's
 //     effective values.
 //
@@ -2641,10 +2680,10 @@ func nvsentinelDryRun(values map[string]any) (dryRun, wellFormed bool) {
 // others, so every broken combination below deploys cleanly:
 //
 //   - fault-quarantine, node-drainer, fault-remediation,
-//     health-events-analyzer and event-exporter read a datastore: a
-//     global.datastore.provider of mongodb or postgresql, and, when it is
-//     nvsentinel-mongodb's, that component and psmdb-operator deployed
-//     alongside (see nvsentinelDatastoreViolations).
+//     health-events-analyzer, event-exporter and csp-health-monitor read a
+//     datastore: a global.datastore.provider of mongodb or postgresql, and,
+//     when it is nvsentinel-mongodb's, that component and psmdb-operator
+//     deployed alongside (see nvsentinelDatastoreViolations).
 //   - each stage acts only on events the one before it marked, so
 //     node-drainer needs fault-quarantine and fault-remediation needs
 //     node-drainer.
@@ -2693,6 +2732,7 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 	janitorProvider := nvsentinelSubchartRenders(values, "janitorProvider")
 	analyzer := nvsentinelSubchartRenders(values, "healthEventsAnalyzer")
 	exporter := nvsentinelSubchartRenders(values, "eventExporter")
+	cspMonitor := nvsentinelSubchartRenders(values, "cspHealthMonitor")
 
 	// Dynamic guard: a dynamic path matters only when a rule reading it can
 	// still fire, i.e. when that rule's stage renders or its toggle is
@@ -2704,11 +2744,13 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 		nvsentinelFaultQuarantineEnabledPath, nvsentinelNodeDrainerEnabledPath,
 		nvsentinelFaultRemediationEnabledPath, nvsentinelJanitorEnabledPath, nvsentinelAnalyzerEnabledPath,
 		eventExporterEnabledPath,
+		cspMonitorEnabledPath,
 	}
 	remediationCanRun := remediation || dynamic(nvsentinelFaultRemediationEnabledPath)
 	readerCanRun := remediationCanRun || quarantine || dynamic(nvsentinelFaultQuarantineEnabledPath) ||
 		drainer || dynamic(nvsentinelNodeDrainerEnabledPath) || analyzer || dynamic(nvsentinelAnalyzerEnabledPath) ||
-		exporter || dynamic(eventExporterEnabledPath)
+		exporter || dynamic(eventExporterEnabledPath) ||
+		cspMonitor || dynamic(cspMonitorEnabledPath)
 	if readerCanRun {
 		guarded = append(guarded, nvsentinelMongodbStoreEnabledPath, nvsentinelDatastoreProviderPath,
 			nvsentinelDatastoreSecretPath, nvsentinelDatastoreAuthMechPath, nvsentinelDatastoreClientCertKey)
@@ -2756,7 +2798,7 @@ func CheckNVSentinelRemediationPipelineCoherent(ctx context.Context, componentNa
 	}
 
 	var errs []error
-	if quarantine || drainer || remediation || analyzer || exporter {
+	if quarantine || drainer || remediation || analyzer || exporter || cspMonitor {
 		errs = append(errs, nvsentinelDatastoreViolations(recipeResult, bundlerConfig, componentName, values)...)
 	}
 	// NVSentinel v1.28.0's PostgreSQL client has no $lookup or $replaceRoot,
@@ -3157,7 +3199,7 @@ func nvsentinelDatastoreViolations(recipeResult *recipe.RecipeResult, bundlerCon
 	embedded := nvsentinelSubchartRenders(values, "mongodbStore")
 	if embedded {
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("component %q: %s is on with a remediation stage, health-events-analyzer or event-exporter -- "+
+			fmt.Sprintf("component %q: %s is on with a remediation stage, health-events-analyzer, event-exporter or csp-health-monitor -- "+
 				"the embedded MongoDB is not supported here. Use a remediation step mixin, which bundles "+
 				"Percona separately, or set it to false and configure %s", componentName,
 				nvsentinelMongodbStoreEnabledPath, nvsentinelDatastoreProviderPath)))
@@ -3172,7 +3214,7 @@ func nvsentinelDatastoreViolations(recipeResult *recipe.RecipeResult, bundlerCon
 		return errs
 	case !providerSet && providerIsString:
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("component %q: a remediation stage, health-events-analyzer or event-exporter is enabled with no "+
+			fmt.Sprintf("component %q: a remediation stage, health-events-analyzer, event-exporter or csp-health-monitor is enabled with no "+
 				"datastore -- they read health events from it and crash-loop without one. Use a remediation "+
 				"step mixin or set %s to mongodb or postgresql", componentName, nvsentinelDatastoreProviderPath)))
 		return errs
@@ -3183,7 +3225,7 @@ func nvsentinelDatastoreViolations(recipeResult *recipe.RecipeResult, bundlerCon
 		}
 		errs = append(errs, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q: %s is %s -- NVSentinel supports only \"mongodb\" and \"postgresql\", "+
-				"and the remediation stages, health-events-analyzer and event-exporter crash-loop on any other provider",
+				"and the remediation stages, health-events-analyzer, event-exporter and csp-health-monitor crash-loop on any other provider",
 				componentName, nvsentinelDatastoreProviderPath, got)))
 		return errs
 	}

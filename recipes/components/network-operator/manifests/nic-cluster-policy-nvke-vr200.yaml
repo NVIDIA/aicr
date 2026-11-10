@@ -1,0 +1,153 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Minimal NicClusterPolicy for NVKE VR200: nicConfigurationOperator ONLY.
+#
+# Its one job is to stand up the nic-configuration-daemon, without which
+# `aicr snapshot --discover-network` returns NOT_FOUND and emits no
+# NetworkTopology. Nothing here claims a fabric topology — wire the rails from
+# a real discovery result, not by copying another platform's.
+#
+# Deliberately absent:
+#   ofedDriver            NVKE runs the host's inbox mlx5_core. The NVKE setup
+#                         doc has a section headed "Never install DOCA-OFED on
+#                         these nodes". generic-gb300's policy carries it, which
+#                         is why that pair cannot be reused here.
+#   rdmaSharedDevicePlugin  The rails expose VFs through the SR-IOV device
+#                         plugin, not a shared HCA.
+#   sriov                 VR200 is ConnectX-9 and this cluster's rail
+#                         layout is unmeasured.
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+  annotations:
+    # Long-lived cluster networking, updated in place: a Helm hook would delete
+    # the live policy on every upgrade.
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  # Only Mellanox-NIC nodes, labelled by the nfd-worker rule in
+  # components/nfd/values-nvidia-nics.yaml.
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: feature.node.kubernetes.io/pci-15b3.present
+              operator: In
+              values:
+                - "true"
+  # operator.image must be set or the CRD rejects the whole policy (NKX-14991).
+  #
+  # NOT ghcr.io/mellanox v1.3.1, which the other in-tree policies pin. That tag
+  # is from 2026-02 and predates Mellanox c27f7ae ("fall back to sysfs for
+  # firmware discovery", #499/#533) by 180 commits. Without that commit the
+  # daemon treats a flint failure as fatal, and flint cannot read ConnectX-9
+  # here -- `flint -d <pci> q` returns MFE_NO_FLASH_DETECTED -- so discovery
+  # dies with "failed to discover NIC devices". Measured on both images:
+  # network-operator-v26.7.0 fails exactly that way, v26.7.1 logs "flint
+  # failed, falling back to sysfs" and discovers every port. ConnectX-7/8
+  # platforms never hit it because flint works there.
+  nicConfigurationOperator:
+    logLevel: info
+    # Tagged, not digest-pinned, which is the one place this file diverges from
+    # its neighbours. A crd-digest annotation carries `tag=network-operator-vX`
+    # and TestNetworkOperatorTagAnnotationsFollowChartPin requires that X equal
+    # registry.yaml's network-operator defaultVersion. This leaf deliberately
+    # pins the chart one patch ahead of that default, so a digest annotation
+    # here could only name a tag the guard rejects. The images stay on tags
+    # with an entry in imageDigestExemptions instead, which keeps the
+    # divergence inside this leaf rather than moving the whole fleet.
+    operator:
+      image: nic-configuration-operator
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v26.7.1
+    configurationDaemon:
+      image: nic-configuration-operator-daemon
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v26.7.1
+      imagePullSecrets: []
+      containerResources:
+        - name: nic-configuration-daemon
+          limits:
+            memory: 2Gi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+  # Addressing for the RoCE rails' IPPools. Added with
+  # manifests/nvke-vr200.yaml in sriov-ib-networks; without it the SriovNetwork
+  # ipam block names a pool nothing serves.
+  nvIpam:
+    image: nvidia-k8s-ipam
+    repository: nvcr.io/nvidia/mellanox
+    version: network-operator-v26.7.1
+    enableWebhook: false
+  # Required for the rails: a SriovNetwork renders a NetworkAttachmentDefinition
+  # and multus is what attaches it to a pod.
+  #
+  # CAUTION, measured on this platform: removing a NicClusterPolicy that
+  # carries this section deletes multus's DaemonSet and RBAC but leaves
+  # /etc/cni/net.d/00-multus.conflist on every node. That file sorts ahead of
+  # 10-ovn-kubernetes.conf, so the next pod on the node gets multus with no
+  # controller behind it and fails to create with Unauthorized -- cluster-wide,
+  # including the control plane. If this section is ever dropped, remove the
+  # conflist from every node in the same change.
+  secondaryNetwork:
+    cniPlugins:
+      image: plugins
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v26.7.1
+    multus:
+      image: multus-cni
+      repository: nvcr.io/nvidia/mellanox
+      version: network-operator-v26.7.1
+  tolerations:
+    - key: dedicated
+      operator: Exists
+    - key: components.gke.io/gke-managed-components
+      operator: Exists
+    - key: CriticalAddonsOnly
+      operator: Exists
+    - key: nvidia.com/gpu
+      operator: Exists
+    - key: node.lepton.ai/dedicated-node-group-id
+      operator: Exists
+      effect: NoExecute
+    - key: node.lepton.ai/dedicated-node-group-id
+      operator: Exists
+      effect: NoSchedule
+    - key: node.lepton.ai/unregistered
+      operator: Exists
+      effect: NoSchedule
+    - key: node.lepton.ai/unregistered
+      operator: Exists
+      effect: NoExecute
+    - key: node.lepton.ai/initialized
+      operator: Exists
+      effect: NoSchedule
+    - key: node.lepton.ai/acceptance-verifying
+      operator: Exists
+      effect: NoSchedule
+    - key: node.lepton.ai/impending-disruption
+      operator: Exists
+      effect: NoSchedule
+    - key: node.lepton.ai/disrupted
+      operator: Exists
+      effect: NoSchedule
+    - key: lepton.ai/resource-provider
+      operator: Exists
+      effect: NoExecute

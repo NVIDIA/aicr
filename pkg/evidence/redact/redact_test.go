@@ -437,6 +437,31 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			want: map[string]string{"skipReason": "no-gpu-nodes"},
 		},
 		{
+			// #3681: the marker that keeps an observation from rendering
+			// PASSED must reach the signed bundle, and only as a boolean.
+			name: "observation-only marker survives",
+			in:   map[string]string{"observationOnly": "true"},
+			want: map[string]string{"observationOnly": "true"},
+		},
+		{
+			name: "observation-only marker with free text is dropped",
+			in:   map[string]string{"observationOnly": "yes, on aks-prod-cluster"},
+			want: nil,
+		},
+		{
+			// #3703: the stamp that lets the aggregation tell an image that
+			// never marked observations from one that chose not to must
+			// reach the signed bundle, and only as a known version.
+			name: "result schema stamp survives",
+			in:   map[string]string{"resultSchema": "1"},
+			want: map[string]string{"resultSchema": "1"},
+		},
+		{
+			name: "result schema stamp of an unknown version is dropped",
+			in:   map[string]string{"resultSchema": "2-dev on aks-prod-cluster"},
+			want: nil,
+		},
+		{
 			name: "another listed skip code survives",
 			in:   map[string]string{"skipReason": "no-schedulable-gpu-nodes"},
 			want: map[string]string{"skipReason": "no-schedulable-gpu-nodes"},
