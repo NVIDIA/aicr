@@ -18,8 +18,9 @@
 # reaches through the current pin and skips lists the safe boundaries inside
 # it. A jump from below v0.18.0 lands on the rename steps rather than being
 # told to stop partway at a safe boundary that adds no work. Upstream serves
-# the legacy group through v0.20.x, so the steps hold that far. v0.21.0
-# removes it and needs a record of its own.
+# the legacy group through v0.21.x (the removal moved from v0.21.0 to v0.22.0
+# in NVIDIA/nodewright#988), so the steps hold that far. v0.22.0 removes it and
+# needs a record of its own.
 #
 # The rename is transcribed from NVIDIA/nodewright
 # docs/getting-started/migration.md, which remains the authoritative account.
@@ -30,8 +31,8 @@ kind: ComponentUpgrades
 component: nodewright-operator
 transitions:
   - from: "<0.18.0"
-    to: ">=0.18.0 <=0.20.0"
-    skips: ["0.19.0", "0.19.1", "0.20.0"]
+    to: ">=0.18.0 <=0.21.0"
+    skips: ["0.19.0", "0.19.1", "0.20.0", "0.21.0"]
     verdict: manual
     summary: >-
       v0.18.0 renames skyhook.nvidia.com/v1alpha1 Skyhook to
@@ -339,3 +340,35 @@ transitions:
       - https://github.com/NVIDIA/nodewright/releases/tag/agent%2Fv7.0.0
       - https://github.com/NVIDIA/nodewright/blob/main/docs/architecture/interrupt-flow.md#cordons-nodewright-did-not-create
       - https://github.com/NVIDIA/aicr/issues/3207
+
+  - from: ">=0.20.0 <0.21.0"
+    to: "=0.21.0"
+    verdict: safe
+    verifiedBy: >-
+      Chart diff v0.20.0 to v0.21.0: the CRDs change field descriptions and
+      add one optional status field, interruptPending; the Deployment gains
+      optional PPROF_PORT and GOMEMLIMIT_FRACTION env; the manager Role
+      narrows Secret access to the webhook serving-cert Secret by name and
+      drops pods/log; values move the operator image to v0.21.0, keep the
+      v7.0.0 agent, and gain a values schema for runtimeRequiredTaint. The
+      KWOK Tier 1 and Tier 2 lanes on the pull request for NVIDIA/aicr#3694
+      installed v0.21.0. Upstream release note operator/v0.21.0 for the
+      behavior changes.
+    summary: >-
+      Drain now evicts kube-system pods like any other namespace instead of
+      skipping them, so CoreDNS and similar workloads are evicted before an
+      interrupt rather than killed by the reboot. Eviction honors any
+      PodDisruptionBudget that covers a pod; a workload with no budget can
+      lose every replica on the nodes drained together. A kube-system
+      PodDisruptionBudget that allows no disruptions holds the drain until
+      spec.drainConfig.timeout, which AICR's tuning CRs leave unset, and with
+      the default drainConfig an evicted pod's emptyDir data is deleted and a
+      pod with no controller is not recreated. The operator also stops
+      writing the last-logs Job annotation. Nothing to change on upgrade;
+      before upgrading, confirm kubectl get pdb -n kube-system shows ALLOWED
+      DISRUPTIONS of at least 1 for workloads on nodes NodeWright interrupts.
+    references:
+      - https://github.com/NVIDIA/nodewright/releases/tag/operator%2Fv0.21.0
+      - https://github.com/NVIDIA/nodewright/releases/tag/chart%2Fv0.21.0
+      - https://github.com/NVIDIA/nodewright/blob/main/docs/architecture/interrupt-flow.md#drain-configuration
+      - https://github.com/NVIDIA/aicr/issues/3694

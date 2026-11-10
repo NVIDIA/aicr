@@ -247,8 +247,7 @@ func runNvidiaSMICheck(ctx *validators.Context, verifyNode func(nodeName string)
 			"no GPU nodes found in the cluster"); err != nil {
 			return err
 		}
-		emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNoGPUNodes))
-		return validators.Skip("no GPU nodes found in the cluster")
+		return validators.SkipWithReason(skipReasonNoGPUNodes, "no GPU nodes found in the cluster")
 	}
 
 	gpuNodes := coverage.schedulable
@@ -267,8 +266,7 @@ func runNvidiaSMICheck(ctx *validators.Context, verifyNode func(nodeName string)
 		if err := failClosedIfUnmeasurableGPUDriverFloor(ctx, reason); err != nil {
 			return err
 		}
-		emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNoSchedulableGPUNodes))
-		return validators.Skip(reason)
+		return validators.SkipWithReason(skipReasonNoSchedulableGPUNodes, reason)
 	}
 
 	// Probe each schedulable node for GPU occupancy immediately before
@@ -361,8 +359,7 @@ func noFreeGPUNodeOutcome(ctx *validators.Context, coverage gpuNodeCoverage, fir
 		if err := failClosedIfUnmeasurableGPUDriverFloor(ctx, reason); err != nil {
 			return err
 		}
-		emitExtraOrWarn(nvidiaSMISkipExtra(skipReasonNodesBusy))
-		return validators.Skip(reason)
+		return validators.SkipWithReason(skipReasonNodesBusy, reason)
 	}
 	// #2122 fail-closed: the busy-probe errored on every schedulable node, so
 	// it proved occupancy on none. An infra error (RBAC denial, timeout,
@@ -371,12 +368,6 @@ func noFreeGPUNodeOutcome(ctx *validators.Context, coverage gpuNodeCoverage, fir
 	// class instead of flattening it to a Skip.
 	return errors.PropagateOrWrap(firstProbeErr, errors.ErrCodeInternal,
 		"could not determine GPU node occupancy — the busy-probe failed on all schedulable GPU nodes")
-}
-
-// nvidiaSMISkipExtra builds the structured skip disclosure carrying only the
-// low-cardinality reason enum code.
-func nvidiaSMISkipExtra(reason string) map[string]string {
-	return map[string]string{"skipReason": reason}
 }
 
 // failClosedIfUnmeasurableGPUDriverFloor returns a blocking error when the

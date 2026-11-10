@@ -303,7 +303,7 @@ func BuildJobPlan(
 
 	// Build environment variables
 	env := buildEnv(entry, runID, version, commit, timeout, nodeSelector, tolerations,
-		imageRegistryOverride, imageTagOverride)
+		imageRegistryOverride, imageTagOverride, imagePullSecrets)
 
 	// Build volumes
 	volumes := buildVolumes(runID)

@@ -87,6 +87,43 @@ const (
 	// NVIDIA/aicr#1751).
 	ncclRuntimeImageEnv = "AICR_NCCL_RUNTIME_IMAGE"
 
+	// DriverRuntimeManagementCheckName is the catalog name of the conformance
+	// check that proves the accelerator driver and container runtime
+	// configuration from a vanilla-image pod; driverRuntimeImageEnv forwarding
+	// is scoped to it.
+	DriverRuntimeManagementCheckName = "driver-runtime-management"
+
+	// driverRuntimeImageEnv replaces the vanilla probe image
+	// (docker.io/library/ubuntu:22.04) of driver-runtime-management with a
+	// full reference, for registries that mirror it under another path than
+	// AICR_VALIDATOR_IMAGE_REGISTRY rewrites to. Forwarded verbatim to that
+	// check's pod only; the pod-side const of the same literal lives in
+	// validators/conformance/driver_runtime_management_check.go.
+	driverRuntimeImageEnv = "AICR_DRIVER_RUNTIME_IMAGE"
+
+	// WorkloadSandboxingCheckName is the catalog name of the conformance check
+	// that proves a sandboxed RuntimeClass isolates a pod from the host;
+	// sandboxRuntimeClassEnv and sandboxProbeImageEnv forwarding is scoped
+	// to it.
+	WorkloadSandboxingCheckName = "workload-sandboxing"
+
+	// sandboxRuntimeClassEnv names the RuntimeClass workload-sandboxing tests
+	// instead of auto-detecting a gVisor or Kata class (the upstream
+	// -sandbox-runtime-class flag); sandboxProbeImageEnv replaces its vanilla
+	// probe image (docker.io/library/ubuntu:22.04) with a full reference for
+	// mirrors, which AICR_VALIDATOR_IMAGE_REGISTRY does not rewrite. Both are
+	// forwarded verbatim to that check's pod only; the pod-side consts of the
+	// same literals live in validators/conformance/workload_sandboxing_check.go.
+	sandboxRuntimeClassEnv = "AICR_SANDBOX_RUNTIME_CLASS"
+	sandboxProbeImageEnv   = "AICR_SANDBOX_PROBE_IMAGE"
+	// ImagePullSecretsEnv carries the --image-pull-secret names, comma-separated,
+	// to every validator pod, so a check that creates a per-run namespace can
+	// copy the Secrets there and attach them to its probe pods; the names are
+	// the only thing forwarded, the Secrets stay in the validator namespace.
+	// Exported so the pod side (validators.ImagePullSecretsEnv) reads the same
+	// constant instead of a mirrored literal.
+	ImagePullSecretsEnv = "AICR_IMAGE_PULL_SECRETS" //nolint:gosec // G101: env var name, not a credential
+
 	// inferencePerfNoCleanupEnv, when truthy, makes the inference-perf validator
 	// leave its namespace/DGD/workers/frontend/AIPerf Job in place after the run
 	// for post-mortem inspection. Forwarded only to the inference-perf pod.
@@ -108,6 +145,7 @@ func buildEnv(
 	tolerations []corev1.Toleration,
 	imageRegistryOverride string,
 	imageTagOverride string,
+	imagePullSecrets []string,
 ) []corev1.EnvVar {
 
 	env := []corev1.EnvVar{
@@ -139,6 +177,9 @@ func buildEnv(
 			Name:  "AICR_TOLERATIONS",
 			Value: serializeTolerations(tolerations),
 		})
+	}
+	if names := nonEmptyNames(imagePullSecrets); len(names) > 0 {
+		env = append(env, corev1.EnvVar{Name: ImagePullSecretsEnv, Value: strings.Join(names, ",")})
 	}
 
 	// Add CLI version and commit
@@ -203,6 +244,12 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: ncclRuntimeImageEnv, Value: ncclRuntimeImageEnvVal})
 	}
 
+	// Forward the driver-runtime-management probe image override to that check
+	// only; the pod resolves the default and the registry override itself.
+	if v := os.Getenv(driverRuntimeImageEnv); v != "" && entry.Name == DriverRuntimeManagementCheckName {
+		env = append(env, corev1.EnvVar{Name: driverRuntimeImageEnv, Value: v})
+	}
+
 	// Forward the inference-perf no-cleanup debug toggle into that validator pod.
 	// Cleanup runs inside the Job, so it can't see the CLI process environment
 	// unless the orchestrator carries the value across. Scoped to the
@@ -216,6 +263,16 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: inferencePerfNoCleanupEnv, Value: "1"})
 	}
 
+	// Forward the workload-sandboxing RuntimeClass and probe image overrides
+	// to that check only; the pod resolves the defaults itself.
+	if entry.Name == WorkloadSandboxingCheckName {
+		for _, name := range []string{sandboxRuntimeClassEnv, sandboxProbeImageEnv} {
+			if v := os.Getenv(name); v != "" {
+				env = append(env, corev1.EnvVar{Name: name, Value: v})
+			}
+		}
+	}
+
 	// Add catalog entry's custom env vars. Orchestrator-controlled env vars are
 	// deliberately skipped here: they must come only from the process
 	// environment (forwarded above), never from the in-repo catalog. Appending
@@ -223,13 +280,28 @@ func buildEnv(
 	// forwarded value (k8s takes the last duplicate), breaking that trust
 	// boundary.
 	for _, e := range entry.Env {
-		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclRuntimeImageEnv {
+		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclRuntimeImageEnv || e.Name == driverRuntimeImageEnv {
+			continue
+		}
+		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv || e.Name == ImagePullSecretsEnv {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})
 	}
 
 	return env
+}
+
+// nonEmptyNames returns names with blank entries dropped, so a flag given an
+// empty value does not forward a dangling separator.
+func nonEmptyNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n = strings.TrimSpace(n); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // buildVolumes creates volumes for snapshot and validation ConfigMaps

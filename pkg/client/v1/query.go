@@ -85,3 +85,24 @@ func SelectFromRecipe(r *RecipeResult, selector string) (any, error) {
 	defer cancel()
 	return SelectFromRecipeWithContext(ctx, r, selector)
 }
+
+// RecipeSummary is the overview SummarizeRecipe returns. It is a transparent
+// alias of pkg/recipe.Summary rather than a restatement of it: the summary is
+// already a projection built for consumers, so copying it here would add a
+// second shape to keep in step with the first for no gain. Through its fields
+// the alias also exposes recipe.SummarySource, recipe.SummaryConstraint,
+// recipe.SummaryComponent, recipe.SummaryPhase, and recipe.Criteria.
+type RecipeSummary = recipe.Summary
+
+// SummarizeRecipe projects r into the overview `aicr query --summary` prints:
+// identity, criteria, applied overlays, constraints, enabled components in
+// deployment order, and the validation checks per phase. It performs no I/O,
+// does not hydrate component values, and does not modify r.
+//
+// The recipe must carry internal pkg/recipe state — obtain one from
+// Client.ResolveRecipe, Client.LoadRecipe, Client.AdoptRecipe, or
+// WrapResolved. A nil RecipeResult, or one constructed any other way, is
+// rejected with ErrCodeInvalidRequest.
+func SummarizeRecipe(r *RecipeResult) (*RecipeSummary, error) {
+	return recipe.BuildSummary(r.Resolved())
+}

@@ -73,6 +73,98 @@ func TestCleanupGangTestResourcesDeletesNamespace(t *testing.T) {
 	}
 }
 
+func TestFailOnGangCleanup(t *testing.T) {
+	nsErr := errors.New(errors.ErrCodeInternal, "failed to delete gang test namespace")
+	phaseErr := errors.New(errors.ErrCodeNotFound, "positive phase failed")
+	tests := []struct {
+		name     string
+		err      error
+		nsErr    error
+		wantNil  bool
+		wantCode errors.ErrorCode
+		wantSub  string
+	}{
+		{"passing run with clean cleanup stays nil", nil, nil, true, "", ""},
+		{"passing run with failed cleanup fails", nil, nsErr, false, errors.ErrCodeInternal, "cleanup failed after a passing run"},
+		{"failed run keeps its error", phaseErr, nsErr, false, errors.ErrCodeNotFound, "positive phase failed"},
+		{"failed run with clean cleanup keeps its error", phaseErr, nil, false, errors.ErrCodeNotFound, "positive phase failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := failOnGangCleanup(tt.err, tt.nsErr)
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("failOnGangCleanup() = %v, want nil", got)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, got, tt.wantCode)
+			if got == nil || !strings.Contains(got.Error(), tt.wantSub) {
+				t.Errorf("failOnGangCleanup() = %v, want substring %q", got, tt.wantSub)
+			}
+		})
+	}
+}
+
+// TestGangTestRunTokenAndLabel: 32 hex characters is the 128-bit token of
+// newGPUTestRun, the width that makes a same-name collision across runs
+// implausible.
+func TestGangTestRunTokenAndLabel(t *testing.T) {
+	t.Setenv(validators.ImagePullSecretsEnv, "") // an inherited value must not shape the run
+	run, err := newGangTestRun()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.suffix) != 32 {
+		t.Errorf("token %q has %d hex characters, want 32 (128 bits)", run.suffix, len(run.suffix))
+	}
+	for _, name := range append([]string{run.namespace, run.groupName, run.negGroupName}, run.pods[:]...) {
+		if len(name) > 63 {
+			t.Errorf("name %q is %d characters, over the DNS-1123 limit", name, len(name))
+		}
+	}
+	clientset := k8sfake.NewClientset()
+	if createErr := createGangTestNamespace(context.Background(), clientset, run); createErr != nil {
+		t.Fatalf("createGangTestNamespace: %v", createErr)
+	}
+	ns, err := clientset.CoreV1().Namespaces().Get(context.Background(), run.namespace, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ns.Labels[gpuTestRunLabel] != run.suffix {
+		t.Errorf("namespace label %s = %q, want the run token", gpuTestRunLabel, ns.Labels[gpuTestRunLabel])
+	}
+}
+
+// TestGangMemberPodsCarryImagePullSecrets pins that the gang namespace gets
+// the forwarded Secrets and both member pod kinds reference them.
+func TestGangMemberPodsCarryImagePullSecrets(t *testing.T) {
+	run, err := newGangTestRun()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.imagePullSecrets = []string{"regcred"}
+	run.validatorNamespace = "aicr-validation"
+	run.negPods = []string{"neg-0"}
+	clientset := k8sfake.NewClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "regcred", Namespace: "aicr-validation"},
+		Type:       corev1.SecretTypeDockerConfigJson,
+		Data:       map[string][]byte{corev1.DockerConfigJsonKey: []byte(`{"auths":{}}`)},
+	})
+	if err := createGangTestNamespace(context.Background(), clientset, run); err != nil {
+		t.Fatalf("createGangTestNamespace: %v", err)
+	}
+	if _, err := clientset.CoreV1().Secrets(run.namespace).Get(context.Background(), "regcred", metav1.GetOptions{}); err != nil {
+		t.Fatalf("pull secret not copied into %s: %v", run.namespace, err)
+	}
+	want := []corev1.LocalObjectReference{{Name: "regcred"}}
+	for name, pod := range map[string]*corev1.Pod{"positive": buildGangTestPod(run, 0, nil), "negative": buildGangNegativePod(run, 0, nil)} {
+		if got := pod.Spec.ImagePullSecrets; len(got) != 1 || got[0] != want[0] {
+			t.Errorf("%s member pod ImagePullSecrets = %v, want %v", name, got, want)
+		}
+	}
+}
+
 // TestGangTestRunNamespaceIsPerRun verifies two concurrent invocations derive
 // distinct namespaces. A shared namespace is what made the cleanup below
 // destructive: names are randomized per run, but the namespace was not.

@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **58**
-- Unique images: **160**
+- Unique images: **166**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -59,7 +59,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kueue | helm | kueue | 0.19.6 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.1 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.7.0 | 17 |
+| network-operator | helm | nvidia/network-operator | 26.7.0 | 22 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.20.1 | 1 |
@@ -68,7 +68,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nktp | helm | nktp | 0.1.1-rc.3 | 8 |
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
 | nodewright-customizations | manifest | — | — | 6 |
-| nodewright-operator | helm | nodewright | v0.20.0 | 2 |
+| nodewright-operator | helm | nodewright | v0.21.0 | 2 |
 | nvcre | helm | cluster-readiness-engine | v0.8.2 | 4 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
@@ -100,7 +100,8 @@ from the component's registry default above.
 | dynamo-platform | 1.5.0 | b300-mk8s-ubuntu-inference-dynamo | 1 |
 | kai-scheduler | v0.17.1 | b300-mk8s-ubuntu-inference-dynamo | 12 |
 | kube-prometheus-stack | 83.7.0 | aks | 8 |
-| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 17 |
+| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 22 |
+| network-operator | 26.7.1 | vr200-nvke-ubuntu-training | 22 |
 
 ## Images by component
 
@@ -282,8 +283,13 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
+- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
+- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
 
 ### network-operator-ocp
@@ -333,7 +339,7 @@ _No images extracted._
 ### nodewright-operator
 
 - `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
-- `ghcr.io/nvidia/nodewright/operator:v0.20.0@sha256:5ddfc211d3de8861c5c1721c61139f65e0a733c35bad4b31960dd8fe44d545a9`
+- `ghcr.io/nvidia/nodewright/operator:v0.21.0@sha256:d9ff4e5bd44e21b24baf727f8e2a0b57f0d5f4cf17b9a90b2a4b307930b238cd`
 
 ### nvcre
 
@@ -487,8 +493,38 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
+- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
+- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
+
+### network-operator@26.7.1 (variant)
+
+- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0`
+- `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
+- `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
+- `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
+- `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin@sha256:cabce074d10a0f1d62135e2cc5442d65b49094b95b8297fdd024a1a5f461319f`
+- `ghcr.io/mellanox/k8s-rdma-shared-dev-plugin@sha256:9f468fdc4449e65e4772575f83aa85840a00f97165f9a00ba34695c91d610fbd`
+- `ghcr.io/mellanox/nic-configuration-operator-daemon@sha256:35e38f05004116ee3c0489c9da9dc0639d69e0a75e9a5b90a5a44be2cdee72bd`
+- `ghcr.io/mellanox/nic-configuration-operator@sha256:8e2247c3832bdbd8f046731a2be1cfbf446e2ff8eb1b173b7dea8965ed470796`
+- `ghcr.io/mellanox/nvidia-k8s-ipam@sha256:47e1bb84ac97f9af49f97b49c2de44b4ba82b890b487880edc5c9adf86a176f7`
+- `nvcr.io/nvidia/cloud-native/network-operator:v26.7.1`
+- `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
+- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
+- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
+- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
 
 <!-- END AICR-BOM -->

@@ -1365,3 +1365,51 @@ func TestBundleResolve_ArgoCD(t *testing.T) {
 		})
 	}
 }
+
+// spec.validate.evidence.cncf resolves to a typed view that shares nothing
+// with the spec: the vendor block is copied, documented entries are
+// deep-copied, and an absent vendor stays nil.
+func TestValidateResolve_EvidenceCNCF(t *testing.T) {
+	tr := true
+	v := &config.ValidateSpec{Evidence: &config.EvidenceSpec{CNCF: &config.EvidenceCNCFSpec{
+		Dir:            "./submission",
+		CNCFSubmission: &tr,
+		NotApplicable:  map[string]string{"cluster_autoscaling": "fixed-size pools"},
+		Vendor: &config.EvidenceCNCFVendorSpec{
+			Name: "Vendor", PlatformName: "Platform", PlatformVersion: "1.0", Description: "d", ContactEmail: "o@v.example",
+			WebsiteURL: "https://v.example", DocumentationURL: "https://v.example/docs", RepoURL: "https://github.com/v/p",
+			ProductLogoURL: "https://v.example/l.svg", K8sConformanceURL: "https://github.com/cncf/k8s-conformance/tree/master/v1.37/p",
+		},
+		Documented: map[string]config.EvidenceCNCFDocumentedSpec{
+			"cluster_autoscaling": {Evidence: []string{"https://v.example/autoscaling"}, Notes: "scales"},
+		},
+	}}}
+	got, err := v.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	c := got.EvidenceCNCF
+	if c == nil || c.Dir != "./submission" || !c.CNCFSubmission || c.NotApplicable["cluster_autoscaling"] != "fixed-size pools" {
+		t.Fatalf("EvidenceCNCF = %+v", c)
+	}
+	if c.Vendor == nil || *c.Vendor != *v.Evidence.CNCF.Vendor || c.Vendor == v.Evidence.CNCF.Vendor {
+		t.Errorf("Vendor = %+v, want a copy of the spec block", c.Vendor)
+	}
+	doc := c.Documented["cluster_autoscaling"]
+	if doc.Notes != "scales" || len(doc.Evidence) != 1 || doc.Evidence[0] != "https://v.example/autoscaling" {
+		t.Errorf("Documented = %+v", c.Documented)
+	}
+	v.Evidence.CNCF.Documented["cluster_autoscaling"].Evidence[0] = "mutated"
+	if c.Documented["cluster_autoscaling"].Evidence[0] != "https://v.example/autoscaling" {
+		t.Error("Documented shares its evidence slice with the spec")
+	}
+
+	v.Evidence.CNCF.Vendor, v.Evidence.CNCF.Documented = nil, nil
+	got, err = v.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.EvidenceCNCF.Vendor != nil || got.EvidenceCNCF.Documented != nil {
+		t.Errorf("absent vendor and documented must resolve nil: %+v", got.EvidenceCNCF)
+	}
+}

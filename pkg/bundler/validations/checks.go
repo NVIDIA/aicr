@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -515,15 +516,12 @@ func CheckHostMofedWithoutNetworkOperator(ctx context.Context, componentName str
 // recipes/registry.yaml. Used only in log/error message text below —
 // for actual component lookups, use resolveDRAComponentRef, which also
 // matches the OCP variant (see draDriverComponentNames).
-const draDriverComponentName = "nvidia-dra-driver-gpu"
+const draDriverComponentName = allocpolicy.ComponentDRADriver
 
 // draDriverComponentNames are every registry-level component name that
-// represents the NVIDIA DRA GPU driver, canonical plus OCP variant. This
-// package cannot import pkg/bundler (dependency cycle — see
-// componentOverrideKeys godoc for the same constraint elsewhere in this
-// file), so this list is a local duplicate of pkg/bundler's
-// draComponentNames; keep both in sync.
-var draDriverComponentNames = []string{draDriverComponentName, "nvidia-dra-driver-gpu-ocp"}
+// represents the NVIDIA DRA GPU driver, canonical plus OCP variant, from
+// config.DRADriverOwnership.
+var draDriverComponentNames = config.DRADriverOwnership.ComponentNames
 
 // resolveDRAComponentRef looks up the DRA driver's ComponentRef by
 // trying every known name variant in turn. recipeResult.GetComponentRef
@@ -658,7 +656,7 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"(opt-out label absent) provision the GPU node pools with " +
 				"the GKE-managed driver install (node pool " +
 				"gpu-driver-version=default). With --profile " +
-				"gpuStack=bundle-installer (pools labeled " +
+				"gpuStack=bundle-installer or gpuStack=dra (pools labeled " +
 				"gke-no-default-nvidia-gpu-device-plugin=true and created " +
 				"with gpu-driver-version=disabled) the bundle's " +
 				"gcp-driver-installer component supplies the driver with a " +
@@ -1131,7 +1129,7 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 	// paths in the caller: a dynamic DRA driver root escapes Rule 2 at
 	// bundle time.
 	draDynMsgs := dynamicOwnershipViolations(bundlerConfig, draRef.Name, draKeys,
-		[]string{"nvidiaDriverRoot"})
+		config.DRADriverOwnership.Paths)
 	msgs = append(msgs, draDynMsgs...)
 	draValues, draErr := effectiveComponentValues(ctx, recipeResult, bundlerConfig, draRef.Name, draKeys, "driver-ownership coherence")
 	if draErr != nil {
@@ -1271,7 +1269,7 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 	// declarations are rejected up front — before values resolution, so
 	// the rejection fires even when resolution itself fails.
 	if dynMsgs := dynamicOwnershipViolations(bundlerConfig, componentName, gpuOpKeys,
-		[]string{"driver.enabled", "toolkit.enabled", "hostPaths.driverInstallDir"}); len(dynMsgs) > 0 {
+		config.GPUOperatorDriverOwnership.Paths); len(dynMsgs) > 0 {
 		for _, msg := range dynMsgs {
 			slog.Warn(msg, logKeyComponent, componentName)
 		}
@@ -1430,13 +1428,9 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 
 // gpuOperatorComponentNames are the registry-level component names that
 // carry GPU Operator driver-ownership values (the canonical chart and its
-// OCP variant). This package cannot import pkg/bundler (dependency cycle
-// — see draDriverComponentNames above for the identical constraint and
-// the agreed keep-in-sync disposition), so this list is a local
-// duplicate of pkg/bundler's gpuOperatorComponentNames; it also mirrors
-// the pair that registers CheckDriverOwnershipCoherence in
-// recipes/registry.yaml. Keep all three in sync.
-var gpuOperatorComponentNames = []string{"gpu-operator", "gpu-operator-ocp"}
+// OCP variant), from config.GPUOperatorDriverOwnership. They mirror the pair
+// that registers CheckDriverOwnershipCoherence in recipes/registry.yaml.
+var gpuOperatorComponentNames = config.GPUOperatorDriverOwnership.ComponentNames
 
 // nvsentinelAssumeDriverInstalledOverrideSet is the documented
 // bundle-time override that makes the NVSentinel labeler apply
@@ -1457,6 +1451,12 @@ const nvsentinelDriverLabelPath = "labeler.assumeDriverInstalled"
 // cos-gpu-installer DaemonSet. Its pods ARE a driver pod the NVSentinel
 // labeler detects, so the label gate below must not reject this value.
 const gkeBundleInstallerProfileValue = "bundle-installer"
+
+// gkeDRAProfileValue is the GKE gpuStack value that advertises whole GPUs
+// through DRA ResourceClaims (issue #2517). It is the bundle-installer
+// pool shape with a different advertiser: the same gcp-driver-installer
+// component supplies the driver, so the labeler sees the same driver pods.
+const gkeDRAProfileValue = "dra"
 
 // gpuStackProfileName is the ADR-015 configuration-profile name that
 // selects who installs the GPU driver on AKS and GKE.
@@ -1581,21 +1581,22 @@ func nvsentinelAssumesDriverInstalled(values map[string]any) bool {
 // labeler recognizes exists on this recipe's platform even though the GPU
 // Operator installs no driver.
 //
-// One shipping configuration qualifies: GKE COS with
-// --profile gpuStack=bundle-installer, whose bundle-carried installer is
-// Google's standalone nvidia-driver-installer DaemonSet on pools created
-// with gpu-driver-version=disabled (recipes/overlays/gke-cos.yaml), the
-// bundle's gcp-driver-installer component carries the cos-gpu-installer
-// DaemonSet. The labeler's driver-pod detection sees those pods, so the
-// driver.installed label IS applied and the gate below must stay silent.
+// Two shipping configurations qualify, both GKE COS on pools created with
+// gpu-driver-version=disabled (recipes/overlays/gke-cos.yaml):
+// --profile gpuStack=bundle-installer and --profile gpuStack=dra. In both,
+// the bundle's gcp-driver-installer component carries the
+// cos-gpu-installer DaemonSet (Google's standalone nvidia-driver-installer
+// shape); the two values differ only in who advertises whole GPUs. The
+// labeler's driver-pod detection sees those pods, so the driver.installed
+// label IS applied and the gate below must stay silent.
 // The sibling value gke-default bakes the driver into the node at pool
 // creation, so no driver pod exists there — that value is affected.
 //
 // The exemption is scoped to GKE COS recipes, not to the profile
 // identifier alone: profile names are not reserved, and an external
 // --data overlay on any service can declare a gpuStack profile whose
-// value happens to be named bundle-installer — with no installer
-// DaemonSet ever deploying. Fail closed on anything but the one shape
+// value happens to be named bundle-installer or dra — with no installer
+// DaemonSet ever deploying. Fail closed on anything but the shapes
 // the embedded catalog documents (recipes/overlays/gke-cos.yaml); a
 // recipe without criteria stays blocked for the same reason.
 func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
@@ -1606,10 +1607,10 @@ func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
 		return false
 	}
 	selected := recipeResult.Metadata.SelectedProfile
-	if selected == nil {
+	if selected == nil || selected.Name != gpuStackProfileName {
 		return false
 	}
-	return selected.Name == gpuStackProfileName && selected.Value == gkeBundleInstallerProfileValue
+	return selected.Value == gkeBundleInstallerProfileValue || selected.Value == gkeDRAProfileValue
 }
 
 // NVSENTINEL GATE POLICY — what an nvsentinel gate means when parts of
@@ -1667,7 +1668,8 @@ func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
 //     --set/--set-json overrides), so the documented
 //     GPU-Operator-managed override set clears the gate,
 //   - no other driver pod source the labeler recognizes exists
-//     (labelerObservesDriverPod — GKE gpuStack=bundle-installer), and
+//     (labelerObservesDriverPod — GKE gpuStack=bundle-installer or
+//     gpuStack=dra), and
 //   - labeler.assumeDriverInstalled is not truthy in nvsentinel's
 //     effective values.
 //

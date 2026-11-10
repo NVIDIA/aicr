@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -33,48 +34,62 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
-// A bad spec.validate.evidence.cncf.notApplicable key is refused before the
-// recipe is loaded or any cluster is contacted, so the run fails in
-// milliseconds rather than after every validator Job.
+// A bad spec.validate.evidence.cncf block (a notApplicable or documented
+// key that is not allowed, a missing or malformed vendor field) is refused
+// before the recipe is loaded or any cluster is contacted, so the run fails
+// in milliseconds rather than after every validator Job.
 func TestValidateCmd_NotApplicablePreflight(t *testing.T) {
 	tests := []struct {
-		name          string
-		notApplicable string
-		wantErr       bool
-		wantSubstr    string
+		name       string
+		cncfYAML   string
+		wantErr    bool
+		wantSubstr string
 	}{
 		{
-			name:          "non-conditional requirement is refused",
-			notApplicable: "gang_scheduling: we do not gang",
-			wantErr:       true,
-			wantSubstr:    `notApplicable: "gang_scheduling" is not a conditional MUST`,
+			name:       "non-conditional requirement is refused",
+			cncfYAML:   cncfVendorYAML + "        notApplicable:\n          gang_scheduling: we do not gang\n",
+			wantErr:    true,
+			wantSubstr: `notApplicable: "gang_scheduling" is not a conditional MUST`,
 		},
 		{
-			name:          "unknown requirement is refused",
-			notApplicable: "dra_support: retired",
-			wantErr:       true,
-			wantSubstr:    `notApplicable: "dra_support" is not a requirement`,
+			name:       "unknown requirement is refused",
+			cncfYAML:   cncfVendorYAML + "        notApplicable:\n          dra_support: retired\n",
+			wantErr:    true,
+			wantSubstr: `notApplicable: "dra_support" is not a requirement`,
 		},
 		{
-			name:          "blank justification is refused",
-			notApplicable: `cluster_autoscaling: "  "`,
-			wantErr:       true,
-			wantSubstr:    "needs a justification",
+			name:       "blank justification is refused",
+			cncfYAML:   cncfVendorYAML + "        notApplicable:\n          cluster_autoscaling: \"  \"\n",
+			wantErr:    true,
+			wantSubstr: "needs a justification",
 		},
 		{
-			name:          "a valid declaration passes the pre-flight",
-			notApplicable: "cluster_autoscaling: fixed-size cluster",
+			name:       "missing vendor is refused",
+			cncfYAML:   "        notApplicable:\n          cluster_autoscaling: fixed-size cluster\n",
+			wantErr:    true,
+			wantSubstr: "requires spec.validate.evidence.cncf.vendor",
+		},
+		{
+			name:       "malformed vendor URL is refused",
+			cncfYAML:   strings.Replace(cncfVendorYAML, "https://vendor.example/logo.svg", "vendor.example/logo.svg", 1),
+			wantErr:    true,
+			wantSubstr: "vendor.productLogoUrl",
+		},
+		{
+			name:       "documented without a URL is refused",
+			cncfYAML:   cncfVendorYAML + "        documented:\n          cluster_autoscaling:\n            notes: scales\n",
+			wantErr:    true,
+			wantSubstr: "documented.cluster_autoscaling: at least one documentation URL",
+		},
+		{
+			name:     "a valid declaration passes the pre-flight",
+			cncfYAML: cncfVendorYAML + "        notApplicable:\n          cluster_autoscaling: fixed-size cluster\n",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			cfgPath := filepath.Join(dir, "config.yaml")
-			cfgYAML := "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nmetadata:\n  name: test\nspec:\n  validate:\n" +
-				"    evidence:\n      cncf:\n        notApplicable:\n          " + tt.notApplicable + "\n"
-			if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			cfgPath := writeCNCFConfig(t, dir, tt.cncfYAML)
 			recipePath := filepath.Join(dir, "recipe.yaml")
 			recipeYAML := "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n" +
 				"    service: eks\n    accelerator: h100\n    intent: training\n    os: ubuntu\n"
@@ -101,8 +116,8 @@ func TestValidateCmd_NotApplicablePreflight(t *testing.T) {
 				}
 				return
 			}
-			if strings.Contains(err.Error(), "notApplicable") || !strings.Contains(err.Error(), "missing-snapshot.yaml") {
-				t.Errorf("error = %v, want the missing snapshot, not a notApplicable refusal", err)
+			if strings.Contains(err.Error(), "evidence.cncf") || !strings.Contains(err.Error(), "missing-snapshot.yaml") {
+				t.Errorf("error = %v, want the missing snapshot, not a config refusal", err)
 			}
 		})
 	}
@@ -144,7 +159,7 @@ func TestLogRequirementAggregate(t *testing.T) {
 			name: "incomplete MUSTs are named with status and reason",
 			agg:  agg,
 			want: []string{
-				"CNCF requirement aggregation", "checklist=v1.37", "applicableMustsPassed=false",
+				"CNCF requirement aggregation", "checklist=v1.37", "applicableMustsEstablished=false",
 				"requirement=gang_scheduling", "status=failed", `reason="gang-scheduling failed"`,
 				"requirement=pod_autoscaling", `status="not tested"`, "pod-autoscaling skipped: no-metrics-api",
 				"requirement=robust_controller", `reason="not run"`,
@@ -288,13 +303,37 @@ func TestValidationExit(t *testing.T) {
 	}
 }
 
+// A submission failure that kept its staged copy names that path and the
+// removal rule; one that kept nothing says so.
+func TestLogSubmissionFailure(t *testing.T) {
+	kept := errors.WrapWithContext(errors.ErrCodeInternal, "submission not promoted", errors.New(errors.ErrCodeInternal, "rejected"),
+		map[string]any{aicr.CNCFStagedDirContextKey: "/out/submission.incomplete/v1.37/submission"})
+	if got := stagedSubmissionDir(kept); got != "/out/submission.incomplete/v1.37/submission" {
+		t.Errorf("stagedSubmissionDir() = %q", got)
+	}
+	if got := stagedSubmissionDir(errors.New(errors.ErrCodeInternal, "write failed")); got != "" {
+		t.Errorf("stagedSubmissionDir() = %q for an error without a staged copy", got)
+	}
+	logs := captureJSONLogs(t)
+	logSubmissionFailure(kept, "/out/submission")
+	logSubmissionFailure(errors.New(errors.ErrCodeInternal, "write failed"), "/out/submission")
+	out := logs.String()
+	for _, want := range []string{"staged copy is kept for inspection and must be removed before the next run", "/out/submission.incomplete/v1.37/submission", "nothing was kept"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("logs lack %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestRunValidationSubmissionVerdict drives runValidation as a submission
-// run offline through CNCFRequirementAggregate.Outcome. --no-cluster is refused above runValidation, so the internal
-// call is the one route without a cluster: every check is skipped, so every
-// MUST reads not tested, the renderer writes nothing, and the run fails
-// naming a MUST, while the same run without the flag passes.
+// run offline through CNCFRequirementAggregate.Outcome. --no-cluster is
+// refused above runValidation, so the internal call is the one route without
+// a cluster: every check is skipped, so every MUST reads not tested, the
+// submission is staged but never reaches the requested path, and the run
+// fails naming a MUST, while the same run without the flag passes.
 func TestRunValidationSubmissionVerdict(t *testing.T) {
 	client, rec := phaseLogRecipe(t)
+	withEveryMustCheck(t, rec)
 	snap := phaseLogSnapshot()
 
 	for _, submission := range []bool{false, true} {
@@ -314,6 +353,10 @@ func TestRunValidationSubmissionVerdict(t *testing.T) {
 			if submission {
 				cfg.cncfSubmission = true
 				cfg.evidenceDir = evidenceDir
+				cfg.cncfVendor = testCNCFVendor()
+				// The fixture snapshot runs Kubernetes 1.34, which no carried
+				// checklist certifies; the explicit version is the override.
+				cfg.cncfConformanceVersion = "v1.37"
 			}
 			logs := captureJSONLogs(t)
 			err := runValidation(t.Context(), client, rec, snap, cfg)
@@ -333,15 +376,162 @@ func TestRunValidationSubmissionVerdict(t *testing.T) {
 				}
 			}
 			if _, statErr := os.Stat(evidenceDir); statErr == nil {
-				t.Errorf("%s exists; the renderer must write nothing for a report of only skips", evidenceDir)
+				t.Errorf("%s exists; an incomplete submission must not reach the requested path", evidenceDir)
+			}
+			// The checklist version follows the snapshot, so the staged
+			// product directory is <dir>.incomplete/vX.Y/evidence/.
+			if staged, _ := filepath.Glob(filepath.Join(evidenceDir+".incomplete", "v*", "evidence", "PRODUCT.yaml")); len(staged) != 1 {
+				t.Errorf("staged copy missing: %v", staged)
 			}
 			out := logs.String()
-			if strings.Contains(out, "conformance evidence written") {
-				t.Errorf("logged a write that did not happen:\n%s", out)
+			if strings.Contains(out, "accepted by the upstream validator") {
+				t.Errorf("logged a complete directory that does not exist:\n%s", out)
 			}
-			if !strings.Contains(out, "no evidence was written") {
-				t.Errorf("missing the no-write warning:\n%s", out)
+			if !strings.Contains(out, "CNCF submission directory is incomplete") {
+				t.Errorf("missing the incomplete warning:\n%s", out)
 			}
 		})
 	}
+}
+
+// withEveryMustCheck adds the MUST-evidencing checks the h100-eks-training
+// chain does not declare (inference-gateway, robust-controller), so a
+// submission run of the test recipe passes the #3703 coverage pre-flight and
+// reaches the code under test. The recipe is the test's own fixture.
+func withEveryMustCheck(t *testing.T, rec *aicr.RecipeResult) {
+	t.Helper()
+	resolved := rec.Resolved()
+	if resolved == nil || resolved.Validation == nil || resolved.Validation.Conformance == nil {
+		t.Fatal("setup: the test recipe declares no conformance phase")
+	}
+	for _, name := range []string{"inference-gateway", "robust-controller"} {
+		if !slices.Contains(resolved.Validation.Conformance.Checks, name) {
+			resolved.Validation.Conformance.Checks = append(resolved.Validation.Conformance.Checks, name)
+		}
+	}
+}
+
+// TestRunValidationRefusesRecipeCoverageGap pins the #3703 coverage
+// pre-flight at the CLI: a submission run of a recipe that cannot establish
+// an applicable MUST is refused before any check runs, naming the
+// requirement and the check; a plain conformance run logs the gap and
+// proceeds.
+func TestRunValidationRefusesRecipeCoverageGap(t *testing.T) {
+	client, rec := phaseLogRecipe(t)
+	withEveryMustCheck(t, rec)
+	resolved := rec.Resolved()
+	resolved.Validation.Conformance.Checks = slices.DeleteFunc(resolved.Validation.Conformance.Checks,
+		func(name string) bool { return name == "gang-scheduling" })
+	snap := phaseLogSnapshot()
+	base := func(dir string) validationConfig {
+		return validationConfig{
+			phases:              []validator.Phase{validator.PhaseConformance},
+			runID:               "20260908-000000-0123456789abcdef",
+			output:              filepath.Join(dir, "out.yaml"),
+			outFormat:           serializer.FormatYAML,
+			validationNamespace: "aicr-validation-test",
+			cleanup:             true,
+			noCluster:           true,
+			failOnError:         true,
+		}
+	}
+
+	t.Run("submission run refused before the run", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := base(dir)
+		cfg.cncfSubmission = true
+		cfg.evidenceDir = filepath.Join(dir, "evidence")
+		cfg.cncfVendor = testCNCFVendor()
+		// The fixture snapshot runs Kubernetes 1.34, which no carried
+		// checklist matches; the explicit version gets past that pre-flight
+		// so this one is the refusal under test.
+		cfg.cncfConformanceVersion = "v1.37"
+		err := runValidation(t.Context(), client, rec, snap, cfg)
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		for _, want := range []string{"gang_scheduling: missing gang-scheduling", "spec.validation.conformance.checks"} {
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %v, want substring %q", err, want)
+			}
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, "out.yaml")); statErr == nil {
+			t.Error("a CTRF report was written although the run was refused before it started")
+		}
+	})
+
+	t.Run("plain conformance run warns and proceeds", func(t *testing.T) {
+		dir := t.TempDir()
+		logs := captureJSONLogs(t)
+		if err := runValidation(t.Context(), client, rec, snap, base(dir)); err != nil {
+			t.Fatalf("runValidation: %v", err)
+		}
+		rec := findJSONLogRecord(t, logs.Bytes(), "the recipe's conformance checks would not establish every applicable MUST of the CNCF checklist; this run is not a submission, so it proceeds")
+		if msg, _ := rec["error"].(string); !strings.Contains(msg, "gang_scheduling: missing gang-scheduling") {
+			t.Errorf("warning error = %q, want the gap named", msg)
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, "out.yaml")); statErr != nil {
+			t.Errorf("CTRF report not written: %v; a plain run must proceed", statErr)
+		}
+	})
+}
+
+// TestRunValidationRefusesUncarriedMinor pins the #3703 version pre-flight at
+// the CLI: once the snapshot is in hand and before any check runs, a
+// submission run of a cluster whose Kubernetes minor no carried checklist
+// matches is refused, and spec.validate.evidence.cncf.conformanceVersion
+// lifts the refusal.
+func TestRunValidationRefusesUncarriedMinor(t *testing.T) {
+	client, rec := phaseLogRecipe(t)
+	withEveryMustCheck(t, rec)
+	snap := phaseLogSnapshot() // Kubernetes 1.34, which no carried checklist matches
+	base := func(dir string) validationConfig {
+		return validationConfig{
+			phases:              []validator.Phase{validator.PhaseConformance},
+			runID:               "20260908-000000-0123456789abcdef",
+			output:              filepath.Join(dir, "out.yaml"),
+			outFormat:           serializer.FormatYAML,
+			validationNamespace: "aicr-validation-test",
+			cleanup:             true,
+			noCluster:           true,
+			failOnError:         true,
+			cncfSubmission:      true,
+			evidenceDir:         filepath.Join(dir, "evidence"),
+			cncfVendor:          testCNCFVendor(),
+		}
+	}
+
+	t.Run("refused before the run", func(t *testing.T) {
+		dir := t.TempDir()
+		err := runValidation(t.Context(), client, rec, snap, base(dir))
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		if err == nil || !strings.Contains(err.Error(), "1.34.0") || !strings.Contains(err.Error(), "ConformanceVersion") {
+			t.Errorf("error = %v, want the cluster version and the override named", err)
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, "out.yaml")); statErr == nil {
+			t.Error("a CTRF report was written although the run was refused before it started")
+		}
+	})
+
+	t.Run("conformanceVersion lifts the refusal", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := base(dir)
+		cfg.cncfConformanceVersion = "v1.37"
+		err := runValidation(t.Context(), client, rec, snap, cfg)
+		// Under --no-cluster every check is skipped, so the run reaches the
+		// verdict and fails there, as TestRunValidationSubmissionVerdict does.
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+		if _, statErr := os.Stat(filepath.Join(dir, "out.yaml")); statErr != nil {
+			t.Errorf("CTRF report not written: %v; the run should have proceeded", statErr)
+		}
+	})
+
+	t.Run("a submission without a vendor is refused", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := base(dir)
+		cfg.cncfVendor = nil
+		err := runValidation(t.Context(), client, rec, snap, cfg)
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		if err == nil || !strings.Contains(err.Error(), "vendor") {
+			t.Errorf("error = %v, want the vendor requirement named", err)
+		}
+	})
 }

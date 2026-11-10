@@ -26,7 +26,7 @@ import (
 	"slices"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"

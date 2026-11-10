@@ -636,7 +636,9 @@ func TestValidateGatewayDataPlane(t *testing.T) {
 }
 
 // TestCheckInferenceGateway runs the whole check against fake clients, from
-// profile resolution through the exposure step.
+// profile resolution through the exposure step, with the traffic phase
+// stubbed: it must run only once every status check has passed, on the
+// Gateway those checks read, and its verdict is the check's.
 func TestCheckInferenceGateway(t *testing.T) {
 	const (
 		class   = testGatewayClass
@@ -666,6 +668,7 @@ func TestCheckInferenceGateway(t *testing.T) {
 		gatewayClass *unstructured.Unstructured
 		gateway      *unstructured.Unstructured
 		crds         []string
+		trafficErr   error
 		wantSkip     bool
 		wantErr      string
 		wantCode     errors.ErrorCode
@@ -724,6 +727,13 @@ func TestCheckInferenceGateway(t *testing.T) {
 			crds:    allCRDs,
 			wantErr: "proxy Service was not found", wantCode: errors.ErrCodeNotFound,
 		},
+		{
+			name: "traffic phase verdict is the check's",
+			refs: []recipe.ComponentRef{declare("gateway-address")}, gatewayClass: gatewayClassObject("True"), gateway: programmed("True"),
+			crds:       allCRDs,
+			trafficErr: errors.New(errors.ErrCodeInternal, "gateway traffic phase failed in step verdict: weights swapped"),
+			wantErr:    "weights swapped", wantCode: errors.ErrCodeInternal,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -743,7 +753,15 @@ func TestCheckInferenceGateway(t *testing.T) {
 				Ctx: context.Background(), Clientset: fake.NewClientset(), DynamicClient: dyn,
 				ValidationInput: &validatorv1.ValidationInput{ComponentRefs: tt.refs},
 			}
-			err := CheckInferenceGateway(vctx)
+			var trafficGW *unstructured.Unstructured
+			traffic := func(_ *validators.Context, p *validators.InferenceGatewayProfile, gw *unstructured.Unstructured) error {
+				trafficGW = gw
+				if p == nil || p.GatewayName != gateway || p.Namespace != ns {
+					t.Errorf("traffic phase got profile %+v, want %s/%s", p, ns, gateway)
+				}
+				return tt.trafficErr
+			}
+			err := checkInferenceGateway(vctx, traffic)
 			if tt.wantSkip {
 				if !validators.IsSkip(err) {
 					t.Fatalf("expected a skip, got %v", err)
@@ -758,10 +776,16 @@ func TestCheckInferenceGateway(t *testing.T) {
 					t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
 				}
 				errorstest.WantReportedCode(t, err, tt.wantCode)
+				if (trafficGW != nil) != (tt.trafficErr != nil) {
+					t.Errorf("traffic phase ran = %t; it must run only after every status check passed", trafficGW != nil)
+				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
+			}
+			if trafficGW == nil || trafficGW.GetName() != gateway {
+				t.Errorf("traffic phase must run on the Gateway the status checks read, got %v", trafficGW)
 			}
 			gets := 0
 			for _, action := range dyn.Actions() {

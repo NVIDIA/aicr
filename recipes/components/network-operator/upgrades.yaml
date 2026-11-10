@@ -20,7 +20,7 @@ transitions:
   # covering the AICR NicClusterPolicy and DOCA driver pins can flip this to
   # safe with that run in verifiedBy.
   - from: ">=26.4.1 <26.7.0"
-    to: "=26.7.0"
+    to: ">=26.7.0 <26.8.0"
     verdict: manual
     summary: >-
       26.7.0 updates the NicClusterPolicy CRD in place and then rolls the
@@ -28,7 +28,10 @@ transitions:
       device plugin restart on every RDMA node. The CRD change only adds
       fields, but the in-place path has not been run live with AICR's
       NicClusterPolicy and DOCA driver pins, so confirm reconciliation after
-      the upgrade.
+      the upgrade. The ceiling covers the whole 26.7 line: 26.7.1 is a patch
+      with no CRD schema change, carrying the nic-configuration-daemon fix
+      that falls back to sysfs when flint cannot read a device's firmware
+      (Mellanox #499/#533), which is what makes ConnectX-9 discoverable.
     precondition: >-
       The NicClusterPolicy is healthy. Check with `kubectl get
       nicclusterpolicy nic-cluster-policy`; STATUS must be ready.

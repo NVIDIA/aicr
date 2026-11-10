@@ -22,12 +22,14 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -69,234 +71,257 @@ func jobWithCondition(conds ...batchv1.JobCondition) *batchv1.Job {
 	}
 }
 
-func TestWaitForTermination_PodDeletedFastPath(t *testing.T) {
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset()
-
-	err := pod.WaitForTermination(context.Background(), client, "default", "missing-pod")
-	if err != nil {
-		t.Fatalf("expected nil for already-deleted pod, got: %v", err)
+// terminatingJobPod builds a Running pod of Job "job" in namespace "ns" that is
+// already in its deletion grace period, the case a log/result pod selector
+// skips but a termination wait must still count as active.
+func terminatingJobPod(name string) *corev1.Pod {
+	now := metav1.Now()
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns", Labels: map[string]string{batchv1.JobNameLabel: "job"}, DeletionTimestamp: &now},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
 	}
 }
 
-func TestWaitForTermination_PodAlreadyTerminal(t *testing.T) {
-	tests := []struct {
-		name  string
-		phase corev1.PodPhase
-	}{
-		{"succeeded", corev1.PodSucceeded},
-		{"failed", corev1.PodFailed},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-				Status:     corev1.PodStatus{Phase: tt.phase},
+func TestWaitForJobPodsTermination_IncludesTerminatingPods(t *testing.T) {
+	for _, disposition := range []string{"succeeded", "failed", "deleted"} {
+		t.Run(disposition, func(t *testing.T) {
+			p := terminatingJobPod("old")
+			// A completed replacement must not hide an older terminating pod.
+			newer := terminatingJobPod("newer")
+			newer.DeletionTimestamp = nil
+			newer.Status.Phase = corev1.PodSucceeded
+			cs := fake.NewSimpleClientset(p, newer)
+			cs.PrependReactor("list", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+				if got := a.(k8stesting.ListAction).GetListRestrictions().Labels.String(); got != batchv1.JobNameLabel+"=job" {
+					t.Errorf("selector=%q", got)
+				}
+				obj, err := cs.Tracker().List(corev1.SchemeGroupVersion.WithResource("pods"), corev1.SchemeGroupVersion.WithKind("Pod"), "ns")
+				if err == nil {
+					obj.(*corev1.PodList).ResourceVersion = "123"
+				}
+				return true, obj, err
+			})
+			ready := make(chan *watch.RaceFreeFakeWatcher, 1)
+			cs.PrependWatchReactor("pods", func(a k8stesting.Action) (bool, watch.Interface, error) {
+				r := a.(k8stesting.WatchAction).GetWatchRestrictions()
+				if r.ResourceVersion != "123" || r.Labels.String() != batchv1.JobNameLabel+"=job" {
+					t.Errorf("watch restrictions=%+v", r)
+				}
+				w := watch.NewRaceFreeFake()
+				ready <- w
+				return true, w, nil
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), terminationWaitTimeout)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- pod.WaitForJobPodsTermination(ctx, cs, "ns", "job") }()
+			var w *watch.RaceFreeFakeWatcher
+			select {
+			case w = <-ready:
+			case err := <-done:
+				t.Fatalf("terminating Running pod was mistaken for absent: %v", err)
+			case <-ctx.Done():
+				t.Fatal("wait did not open a watch")
 			}
-			//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-			client := fake.NewSimpleClientset(p)
-
-			if err := pod.WaitForTermination(context.Background(), client, "default", "test-pod"); err != nil {
-				t.Errorf("expected nil for terminal pod, got: %v", err)
+			select {
+			case err := <-done:
+				t.Fatalf("wait returned before terminal/deleted observation: %v", err)
+			default:
+			}
+			if disposition == "deleted" {
+				if err := cs.Tracker().Delete(corev1.SchemeGroupVersion.WithResource("pods"), "ns", p.Name); err != nil {
+					t.Fatal(err)
+				}
+				w.Delete(p)
+			} else {
+				p = p.DeepCopy()
+				p.Status.Phase = corev1.PodSucceeded
+				if disposition == "failed" {
+					p.Status.Phase = corev1.PodFailed
+				}
+				if err := cs.Tracker().Update(corev1.SchemeGroupVersion.WithResource("pods"), p, "ns"); err != nil {
+					t.Fatal(err)
+				}
+				w.Modify(p)
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal("wait did not observe terminal/deleted pod")
 			}
 		})
 	}
 }
 
-func TestWaitForTermination_DeletedEvent(t *testing.T) {
-	p := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(p)
-	w := watch.NewFake()
-	client.PrependWatchReactor("pods", fakeWatchReactor(w))
-
-	go func() {
-		// Unbuffered FakeWatcher channel: Delete blocks until the consumer
-		// reads, so synchronization is automatic.
+func TestWaitForJobPodsTermination_WaitsForAllPods(t *testing.T) {
+	first, second := terminatingJobPod("first"), terminatingJobPod("replacement")
+	cs := fake.NewSimpleClientset(first, second)
+	ready := make(chan *watch.RaceFreeFakeWatcher, 2)
+	cs.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+		w := watch.NewRaceFreeFake()
+		ready <- w
+		return true, w, nil
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), terminationWaitTimeout)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- pod.WaitForJobPodsTermination(ctx, cs, "ns", "job") }()
+	for _, p := range []*corev1.Pod{first, second} {
+		var w *watch.RaceFreeFakeWatcher
+		select {
+		case w = <-ready:
+		case err := <-done:
+			t.Fatalf("returned with active pod %s: %v", p.Name, err)
+		case <-ctx.Done():
+			t.Fatal("wait did not watch remaining pod")
+		}
+		if err := cs.Tracker().Delete(corev1.SchemeGroupVersion.WithResource("pods"), "ns", p.Name); err != nil {
+			t.Fatal(err)
+		}
 		w.Delete(p)
-	}()
-
-	if err := pod.WaitForTermination(context.Background(), client, "default", "test-pod"); err != nil {
-		t.Errorf("expected nil on Deleted event, got: %v", err)
 	}
-}
-
-func TestWaitForTermination_ModifiedToSucceeded(t *testing.T) {
-	p := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default", ResourceVersion: "1"},
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(p)
-	w := watch.NewFake()
-	client.PrependWatchReactor("pods", fakeWatchReactor(w))
-
-	go func() {
-		// Unbuffered FakeWatcher channel: Modify blocks until consumed.
-		modified := p.DeepCopy()
-		modified.ResourceVersion = "2"
-		modified.Status.Phase = corev1.PodSucceeded
-		w.Modify(modified)
-	}()
-
-	if err := pod.WaitForTermination(context.Background(), client, "default", "test-pod"); err != nil {
-		t.Errorf("expected nil on phase=Succeeded, got: %v", err)
-	}
-}
-
-func TestWaitForTermination_WatchClosureRetrySucceeds(t *testing.T) {
-	p := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default", ResourceVersion: "1"},
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(p)
-
-	var attempts atomic.Int32
-	first := watch.NewFake()
-	second := watch.NewFake()
-	client.PrependWatchReactor("pods", func(_ k8stesting.Action) (bool, watch.Interface, error) {
-		n := attempts.Add(1)
-		switch n {
-		case 1:
-			return true, first, nil
-		case 2:
-			return true, second, nil
-		default:
-			return true, watch.NewFake(), nil
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
-
-	// Close the first watcher quickly to trigger the retry path.
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		first.Stop()
-	}()
-	// Send a terminal event on the second watcher after the retry occurs.
-	go func() {
-		time.Sleep(40 * time.Millisecond)
-		modified := p.DeepCopy()
-		modified.ResourceVersion = "2"
-		modified.Status.Phase = corev1.PodFailed
-		second.Modify(modified)
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), terminationWaitTimeout)
-	defer cancel()
-
-	if err := pod.WaitForTermination(ctx, client, "default", "test-pod"); err != nil {
-		t.Errorf("expected nil after watch retry, got: %v", err)
-	}
-	if got := attempts.Load(); got < 2 {
-		t.Errorf("expected at least 2 watch attempts, got %d", got)
+	case <-ctx.Done():
+		t.Fatal("wait did not complete")
 	}
 }
 
-func TestWaitForTermination_WatchClosureRetryFails(t *testing.T) {
-	p := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(p)
-
-	first := watch.NewFake()
-	second := watch.NewFake()
-	var attempts atomic.Int32
-	client.PrependWatchReactor("pods", func(_ k8stesting.Action) (bool, watch.Interface, error) {
-		n := attempts.Add(1)
-		switch n {
-		case 1:
-			return true, first, nil
-		case 2:
-			return true, second, nil
-		default:
-			return true, watch.NewFake(), nil
-		}
-	})
-
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		first.Stop()
-	}()
-	go func() {
-		time.Sleep(30 * time.Millisecond)
-		second.Stop()
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), terminationWaitTimeout)
-	defer cancel()
-
-	err := pod.WaitForTermination(ctx, client, "default", "test-pod")
-	if err == nil {
-		t.Fatal("expected error after both watch attempts close without terminal state")
-	}
-	var se *errors.StructuredError
-	if !stderrors.As(err, &se) {
-		t.Fatalf("error is not StructuredError: %v", err)
-	}
-	if se.Code != errors.ErrCodeUnavailable {
-		t.Errorf("error code = %q, want %q", se.Code, errors.ErrCodeUnavailable)
+func TestWaitForJobPodsTermination_DeadlineAndCancellation(t *testing.T) {
+	for _, timeout := range []bool{false, true} {
+		t.Run(map[bool]string{false: "canceled", true: "deadline"}[timeout], func(t *testing.T) {
+			cs := fake.NewSimpleClientset(terminatingJobPod("pod"))
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			want := errors.ErrCodeCanceled
+			if timeout {
+				var release context.CancelFunc
+				ctx, release = context.WithTimeout(ctx, expiringCtxTimeout)
+				defer release()
+				want = errors.ErrCodeTimeout
+			}
+			cs.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+				if !timeout {
+					cancel()
+				}
+				return true, watch.NewRaceFreeFake(), nil
+			})
+			errorstest.WantReportedCode(t, pod.WaitForJobPodsTermination(ctx, cs, "ns", "job"), want)
+		})
 	}
 }
 
-func TestWaitForTermination_ContextTimeout(t *testing.T) {
-	p := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(p)
-	w := watch.NewFake()
-	client.PrependWatchReactor("pods", fakeWatchReactor(w))
-
-	ctx, cancel := context.WithTimeout(context.Background(), expiringCtxTimeout)
-	defer cancel()
-
-	err := pod.WaitForTermination(ctx, client, "default", "test-pod")
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
-	var se *errors.StructuredError
-	if !stderrors.As(err, &se) {
-		t.Fatalf("error is not StructuredError: %v", err)
-	}
-	if se.Code != errors.ErrCodeTimeout {
-		t.Errorf("error code = %q, want %q", se.Code, errors.ErrCodeTimeout)
+func TestWaitForJobPodsTermination_APIErrors(t *testing.T) {
+	for _, stage := range []string{"list", "watch", "stream", "closed re-list", "expired re-list"} {
+		t.Run(stage, func(t *testing.T) {
+			cs := fake.NewSimpleClientset(terminatingJobPod("pod"))
+			cause := apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "pod", stderrors.New("denied"))
+			lists := 0
+			cs.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+				lists++
+				if stage == "list" || lists > 1 {
+					return true, nil, cause
+				}
+				return false, nil, nil
+			})
+			cs.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+				if stage == "watch" {
+					return true, nil, cause
+				}
+				w := watch.NewRaceFreeFake()
+				switch stage {
+				case "closed re-list":
+					w.Stop()
+				case "expired re-list":
+					w.Error(&metav1.Status{Reason: metav1.StatusReasonExpired, Code: 410})
+				default:
+					w.Error(&cause.ErrStatus)
+				}
+				return true, w, nil
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), terminationWaitTimeout)
+			defer cancel()
+			err := pod.WaitForJobPodsTermination(ctx, cs, "ns", "job")
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+			if !apierrors.IsForbidden(err) {
+				t.Errorf("API error lost: %v", err)
+			}
+		})
 	}
 }
 
-// TestWaitForTermination_ContextCanceled is the operator-abort counterpart to
-// TestWaitForTermination_ContextTimeout: an explicitly canceled context must
-// report ErrCodeCanceled rather than the ErrCodeTimeout the deadline case
-// asserts, pinning the watchUntilTerminal ctx.Done() split.
-func TestWaitForTermination_ContextCanceled(t *testing.T) {
-	p := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+// TestWaitForJobPodsTermination_RelistsExpiredWatch proves a Watch call that
+// itself fails with 410 Expired or Gone re-lists instead of aborting the wait.
+func TestWaitForJobPodsTermination_RelistsExpiredWatch(t *testing.T) {
+	gone := &apierrors.StatusError{ErrStatus: metav1.Status{
+		Status: metav1.StatusFailure, Code: 410, Reason: metav1.StatusReasonGone, Message: "gone",
+	}}
+	for _, expired := range []error{apierrors.NewResourceExpired("too old resource version"), gone} {
+		t.Run(string(apierrors.ReasonForError(expired)), func(t *testing.T) {
+			p := terminatingJobPod("pod")
+			cs := fake.NewSimpleClientset(p)
+			watches := 0
+			cs.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+				watches++
+				if watches == 1 {
+					done := p.DeepCopy()
+					done.Status.Phase = corev1.PodSucceeded
+					if err := cs.Tracker().Update(corev1.SchemeGroupVersion.WithResource("pods"), done, "ns"); err != nil {
+						t.Error(err)
+					}
+					return true, nil, expired
+				}
+				t.Error("watched again after the re-list found every pod terminal")
+				return true, watch.NewRaceFreeFake(), nil
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), terminationWaitTimeout)
+			defer cancel()
+			if err := pod.WaitForJobPodsTermination(ctx, cs, "ns", "job"); err != nil {
+				t.Fatalf("WaitForJobPodsTermination() = %v, want nil after re-list", err)
+			}
+		})
 	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(p)
-	w := watch.NewFake()
-	client.PrependWatchReactor("pods", fakeWatchReactor(w))
+}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := pod.WaitForTermination(ctx, client, "default", "test-pod")
-	if err == nil {
-		t.Fatal("expected error on canceled context")
-	}
-	var se *errors.StructuredError
-	if !stderrors.As(err, &se) {
-		t.Fatalf("error is not StructuredError: %v", err)
-	}
-	if se.Code != errors.ErrCodeCanceled {
-		t.Errorf("error code = %q, want %q", se.Code, errors.ErrCodeCanceled)
+func TestWaitForJobPodsTermination_ResyncsClosedWatch(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{corev1.PodRunning, corev1.PodSucceeded} {
+		t.Run(string(phase), func(t *testing.T) {
+			p := terminatingJobPod("pod")
+			cs := fake.NewSimpleClientset(p)
+			watches := 0
+			cs.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+				watches++
+				w := watch.NewRaceFreeFake()
+				p = p.DeepCopy()
+				p.Status.Phase = phase
+				if watches == 2 {
+					p.Status.Phase = corev1.PodSucceeded
+				}
+				if err := cs.Tracker().Update(corev1.SchemeGroupVersion.WithResource("pods"), p, "ns"); err != nil {
+					t.Error(err)
+				}
+				w.Stop()
+				return true, w, nil
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), terminationWaitTimeout)
+			defer cancel()
+			if err := pod.WaitForJobPodsTermination(ctx, cs, "ns", "job"); err != nil {
+				t.Fatal(err)
+			}
+			want := 1
+			if phase == corev1.PodRunning {
+				want = 2
+			}
+			if watches != want {
+				t.Errorf("watches=%d want %d", watches, want)
+			}
+		})
 	}
 }
 

@@ -254,7 +254,7 @@ components:
   # GKE COS NVIDIA driver installer (issue #1716): Google's cos-gpu-installer
   # DaemonSet as an AICR-managed, values-gated component. Present
   # unconditionally in the gke-cos chain; renders nothing unless the gpuStack
-  # bundle-installer profile value flips installer.enabled true. The
+  # bundle-installer or dra profile value flips installer.enabled true. The
   # DaemonSet carries its own nodeAffinity (GPU nodes without GKE-managed
   # driver labels), so no nodeSelector injection — only accelerated
   # tolerations flow through.
@@ -399,13 +399,15 @@ components:
       # 256Mi so the agent is not OOM-killed mid-reboot on 64K-page arm64 nodes
       # (#3101). v0.20.0 refuses to start on a runtime-required taint key with a
       # DNS prefix or over 53 characters, and stops releasing cordons it did not
-      # place (#3207). Every boundary here carries a transition record.
-      # The legacy skyhook.nvidia.com group, taint key, and
-      # metrics remain served through v0.20.x and are removed in v0.21.0, which
+      # place (#3207). v0.21.0 drains kube-system pods like any other
+      # namespace, honoring any PodDisruptionBudget that covers them, rather
+      # than leaving them to be killed by the reboot (#3694). Every boundary here carries a
+      # transition record. The legacy skyhook.nvidia.com group, taint key, and
+      # metrics remain served through v0.21.x and are removed in v0.22.0, which
       # is not reachable until the remaining skyhook.nvidia.com references in
       # health checks and overlays are migrated.
       # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
-      defaultVersion: v0.20.0
+      defaultVersion: v0.21.0
       defaultNamespace: nodewright
     nodeScheduling:
       nodeCountPaths:
@@ -742,7 +744,8 @@ components:
       # itself — from the gpuStack profile on AKS, GKE-COS, and OKE, at
       # overlay level on Kind (#2181) — so this gate is defense in depth
       # rather than the primary mechanism. GKE
-      # gpuStack=bundle-installer and AKS gpuStack=operator-managed
+      # gpuStack=bundle-installer and gpuStack=dra, and AKS
+      # gpuStack=operator-managed,
       # assign an explicit false: a driver pod exists there for the
       # labeler to detect. Issue #2175.
       - function: CheckNVSentinelDriverLabelDetectable

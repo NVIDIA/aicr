@@ -72,6 +72,9 @@ const (
 	keyMetadata   = "metadata"
 	keyName       = "name"
 	keyNamespace  = "namespace"
+	keySection    = "sectionName"
+	keyPath       = "path"
+	keyPort       = "port"
 	keySpec       = "spec"
 )
 
@@ -117,18 +120,26 @@ const (
 	// waitingReasonCrashLoopBackOff is the kubelet's container waiting reason
 	// for a container that keeps exiting.
 	waitingReasonCrashLoopBackOff = "CrashLoopBackOff"
-	containerNameSleep            = "sleep"
-	gpuClaimName                  = "gpu"
-	statusUnknown                 = "unknown"
-	valueNone                     = "none"
-	deploymentClusterAutoscaler   = "cluster-autoscaler"
-	namespaceDynamoSystem         = "dynamo-system"
+	// eventReasonFailedCreatePodSandBox is the kubelet's event reason for a
+	// pod whose sandbox could not be created; the pod itself stays Pending
+	// with its containers ContainerCreating and no status change, so the
+	// event is the only signal (see sandboxCreateFailure).
+	eventReasonFailedCreatePodSandBox = "FailedCreatePodSandBox"
+	// involvedObjectKindPod is the Event.involvedObject.kind of a pod event.
+	involvedObjectKindPod       = "Pod"
+	containerNameSleep          = "sleep"
+	gpuClaimName                = "gpu"
+	statusUnknown               = "unknown"
+	valueNone                   = "none"
+	deploymentClusterAutoscaler = "cluster-autoscaler"
+	namespaceDynamoSystem       = "dynamo-system"
 )
 
 // Per-check WORK budgets for the conformance checks that create cluster
 // resources needing reconciliation (the two GPU allocation checks, the HPA
-// autoscaling cycle, the AI service metrics stub and the robust-controller
-// TrainJob reconciliation on the Kubeflow path). Each
+// autoscaling cycle, the AI service metrics stub, the robust-controller
+// TrainJob reconciliation on the Kubeflow path and the inference-gateway
+// traffic phase). Each
 // check bounds all of its resource-creating work — allocation-mode discovery,
 // namespace/claim/pod creation, pod waits, log collection, and validation —
 // to a budget, so that inside the catalog timeout (which becomes the check
@@ -152,9 +163,12 @@ const (
 //
 //	dra-support:               3m30s work + 30s cleanup + 60s margin =  5m catalog timeout
 //	secure-accelerator-access: 8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
+//	driver-runtime-management: 8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
 //	pod-autoscaling:          13m30s work + 30s cleanup + 60s margin = 15m catalog timeout
 //	ai-service-metrics:        8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
 //	robust-controller:         6m30s work + 30s cleanup + 60s margin =  8m catalog timeout
+//	inference-gateway:        13m30s work + 30s cleanup + 60s margin = 15m catalog timeout
+//	workload-sandboxing:       8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
 //
 // dra-support can run TWO namespace-creating behavioral subtests in sequence
 // (the MNNVL IMEX channel probe, then the full-GPU DRA probe). The reserve
@@ -199,12 +213,22 @@ const (
 	gpuCheckMinWorkBudget = 30 * time.Second
 
 	// Fixed FALLBACK work budgets, used only when the parent context has no
-	// deadline (standalone/library use — LoadContext always sets one).
-	draSupportWorkBudget       = 3*time.Minute + 30*time.Second
-	secureAccessWorkBudget     = 8*time.Minute + 30*time.Second
-	podAutoscalingWorkBudget   = 13*time.Minute + 30*time.Second
-	aiServiceMetricsWorkBudget = 8*time.Minute + 30*time.Second
-	robustControllerWorkBudget = 6*time.Minute + 30*time.Second
+	// deadline (standalone/library use — LoadContext always sets one). The
+	// inference gateway budget covers the traffic phase that follows the
+	// status checks: backends available (3m), HTTPRoute accepted (2m) and
+	// the probe pod's run (6m) are individual caps under it, not a sum. The
+	// workload-sandboxing budget covers two CPU-only probe pods in sequence,
+	// each bounded by defaults.DRATestPodTimeout; a sandbox runtime (Kata
+	// boots a guest VM) starts slower than runc, so it gets the GPU checks'
+	// budget.
+	draSupportWorkBudget         = 3*time.Minute + 30*time.Second
+	secureAccessWorkBudget       = 8*time.Minute + 30*time.Second
+	driverRuntimeWorkBudget      = 8*time.Minute + 30*time.Second
+	podAutoscalingWorkBudget     = 13*time.Minute + 30*time.Second
+	aiServiceMetricsWorkBudget   = 8*time.Minute + 30*time.Second
+	robustControllerWorkBudget   = 6*time.Minute + 30*time.Second
+	inferenceGatewayWorkBudget   = 13*time.Minute + 30*time.Second
+	workloadSandboxingWorkBudget = 8*time.Minute + 30*time.Second
 )
 
 // gpuCheckWorkBudget derives the work budget for a GPU allocation conformance

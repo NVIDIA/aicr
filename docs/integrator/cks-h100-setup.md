@@ -65,7 +65,7 @@ aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundle \
 
 Use a fresh output directory for each bundle. Setting only
 `crds.enabled=false` does not avoid collisions with the existing controllers,
-webhooks, or cluster-scoped RBAC. The pinned NodeWright v0.20.0 operator
+webhooks, or cluster-scoped RBAC. The pinned NodeWright v0.21.0 operator
 manages self-signed webhook certificates; its chart does not require
 cert-manager. Check the requirements of other workloads before omitting it.
 Apply the same ownership review to existing Prometheus Operator CRDs,
