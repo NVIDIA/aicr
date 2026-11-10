@@ -3478,9 +3478,9 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: ac61e423139e909be14496ff554a928a85999da81829f42fa806935a0a0b7674
-  UPGRADING.md: 805b29bbe92e37a05f13053f6fa4ccc741402f506dca1fd1449a5085f1afb8c3
+  UPGRADING.md: 5e69160b4be67b13a016bf2b46c2fa4e874292cc81d844c9c24dd22d877e62bf
   bundle-info.yaml: 80b3d36d45c9fcc1124670dc37e5d735c24e525786ea6b0fa30077ffab448ed9
-  checksums.txt: a86bfb844b071a1b80cb372e56875a7d81c49040d26f530d956980d7c1a64a15
+  checksums.txt: 775555562ed817a3df4701a9c8060813ea26499cbc899700371d940cf4b1f26e
   data/overlays/stock-render-opt-in.yaml: 28518490ca46ac3ecf1b7cb220cfc55c3c4d3e3f595446b6aab9894f15f80557
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 60bc9db84b4c9ccbacf807ab424ce27099463dbbfbca83aa07db4cf4c69bca0a

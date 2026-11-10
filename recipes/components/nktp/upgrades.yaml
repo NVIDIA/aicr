@@ -31,7 +31,7 @@ transitions:
       moves from oci://ghcr.io/dsx-ai-factory/nvke/charts to the NGC Helm
       repository.
     stepsByDeployer:
-      - deployers: [helmfile, terraform]
+      - deployers: [helmfile, terraform, fleet]
         steps:
           - id: rename-exporter-overrides
             description: >-
@@ -61,12 +61,13 @@ transitions:
               docs/user/component-catalog.md, with CHART=nktp,
               REPO=https://helm.ngc.nvidia.com/nvidia, VERSION=0.2.0,
               EXCLUDE_SUBCHARTS="prometheus-crds opentelemetry-operator", and
-              MANAGER=helm under helmfile or
-              MANAGER=terraform-provider-helm under terraform.
+              MANAGER=helm under helmfile, MANAGER=terraform-provider-helm
+              under terraform, and under fleet the manager that section's
+              managed-fields check reports for the installed CRDs.
             reason: >-
-              Neither deployer applies a changed crds/ directory. 0.2.0 ships
-              the same opentelemetry.io CRDs as 0.1.1-rc.3, so this is a no-op
-              from rc.3, but an earlier build may carry older ones.
+              None of these deployers applies a changed crds/ directory.
+              0.2.0 ships the same opentelemetry.io CRDs as 0.1.1-rc.3, so this
+              is a no-op from rc.3, but an earlier build may carry older ones.
       - steps:
           - id: rename-exporter-overrides
             description: >-
@@ -91,3 +92,4 @@ transitions:
               stay in ImagePullBackOff.
     references:
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#nktp-telemetry-pipeline
+      - https://github.com/dsx-ai-factory/nvke-telemetry-pipeline/tree/main/nktp
