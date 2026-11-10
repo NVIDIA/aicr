@@ -445,16 +445,18 @@ transitions:
       four gpu-health-monitor-dcgm-4.x pods connected to DCGM with 8 GPUs each
       while the dcgm-3.x monitor stayed inactive.
     summary: >-
-      A bundle that sets health-events-analyzer.processingStrategy to
-      EXECUTE_REMEDIATION, the documented way to surface analyzer matches,
-      now cordons and drains nodes. v1.31.0 adds a default fault-quarantine
-      rule set that cordons a node for a fatal health-events-analyzer event
-      (MultipleRemediations, repeated XID 74), where v1.28.0 set only a node
-      condition. It does so wherever a quarantine or remediation step is
-      composed, which the analyzer needs beside the remediation step. Without
-      the override nothing changes: the nvsentinel-health-events-analyzer
-      mixin keeps derived events STORE_ONLY, and fault-quarantine acts only on
-      EXECUTE_REMEDIATION events. Images move to v1.31.0 with no third-party
+      A bundle where health-events-analyzer runs with processingStrategy
+      EXECUTE_REMEDIATION, whether set by --set, inherited from the chart
+      default, set on a rule in its config, or given as UNSPECIFIED, which
+      platform-connectors converts, now cordons and drains nodes. v1.31.0 adds a default
+      fault-quarantine rule set that cordons a node for a fatal
+      health-events-analyzer event (MultipleRemediations, repeated XID 74),
+      where v1.28.0 set only a node condition. It does so wherever a
+      quarantine or remediation step is composed, which the analyzer needs
+      beside the remediation step. With the nvsentinel-health-events-analyzer
+      mixin composed and no override, nothing changes: the mixin keeps derived
+      events STORE_ONLY, and fault-quarantine acts only on EXECUTE_REMEDIATION
+      events. Images move to v1.31.0 with no third-party
       image change, and the HealthEvent CRD gains optional drainDecision and
       remediationDecision status fields. The XID 74 solo rules now read the
       incoming event, and the datastore clients wait up to 300 seconds for
@@ -464,9 +466,11 @@ transitions:
       XID 154 recovery actions that R610 and later drivers print now reset the
       GPU or reboot the node.
     precondition: >-
-      No bundle value or --set sets
-      nv-sentinel:health-events-analyzer.processingStrategy to
-      EXECUTE_REMEDIATION, or you accept that fatal analyzer events cordon and
+      Where health-events-analyzer is deployed, its module-level
+      processingStrategy and the processing_strategy of every enabled rule are
+      neither EXECUTE_REMEDIATION nor UNSPECIFIED (an absent module value is
+      the chart default, EXECUTE_REMEDIATION, and platform-connectors converts
+      UNSPECIFIED to it), or you accept that fatal analyzer events cordon and
       drain nodes from v1.31.0.
     reversible: true
     reversibleNotes: >-
@@ -481,16 +485,26 @@ transitions:
         steps:
           - id: check-analyzer-strategy
             description: >-
-              Search the values and --set flags the bundle was generated with
-              for health-events-analyzer.processingStrategy set to
-              EXECUTE_REMEDIATION. If it is absent, go on. If it is set, either
-              remove it, which keeps the analyzer's events STORE_ONLY as
-              before, or keep it and expect a fatal analyzer event to cordon
-              and drain its node.
+              Where health-events-analyzer is deployed, read the effective
+              strategies from the nv-sentinel values in the bundle: the
+              module-level processingStrategy, and the processing_strategy of
+              each enabled rule in health-events-analyzer.config, which
+              replaces the module value for that rule when it is set. An absent
+              module value is the chart default, EXECUTE_REMEDIATION, not
+              STORE_ONLY: only the nvsentinel-health-events-analyzer mixin sets
+              STORE_ONLY. UNSPECIFIED counts as EXECUTE_REMEDIATION too,
+              because platform-connectors converts it. If the module value or
+              any enabled rule's value is either, keep it and expect a fatal
+              analyzer event to cordon and drain its node, or keep the
+              previous behavior: regenerate the bundle with
+              --set nv-sentinel:health-events-analyzer.processingStrategy=STORE_ONLY
+              and set STORE_ONLY on, or remove, each rule that sets another
+              strategy.
             reason: >-
               The new default rule set cordons for a fatal analyzer event, and
-              fault-quarantine reads only EXECUTE_REMEDIATION events, so the
-              override is what turns a condition-only signal into a drain.
+              fault-quarantine reads only EXECUTE_REMEDIATION events, so that
+              strategy, set or inherited, is what turns a condition-only signal
+              into a drain.
           - id: apply-new-crds
             description: >-
               Apply the v1.31.0 CRDs using the CRD-apply command under
@@ -516,16 +530,26 @@ transitions:
         steps:
           - id: check-analyzer-strategy
             description: >-
-              Search the values and --set flags the bundle was generated with
-              for health-events-analyzer.processingStrategy set to
-              EXECUTE_REMEDIATION. If it is absent, go on. If it is set, either
-              remove it, which keeps the analyzer's events STORE_ONLY as
-              before, or keep it and expect a fatal analyzer event to cordon
-              and drain its node.
+              Where health-events-analyzer is deployed, read the effective
+              strategies from the nv-sentinel values in the bundle: the
+              module-level processingStrategy, and the processing_strategy of
+              each enabled rule in health-events-analyzer.config, which
+              replaces the module value for that rule when it is set. An absent
+              module value is the chart default, EXECUTE_REMEDIATION, not
+              STORE_ONLY: only the nvsentinel-health-events-analyzer mixin sets
+              STORE_ONLY. UNSPECIFIED counts as EXECUTE_REMEDIATION too,
+              because platform-connectors converts it. If the module value or
+              any enabled rule's value is either, keep it and expect a fatal
+              analyzer event to cordon and drain its node, or keep the
+              previous behavior: regenerate the bundle with
+              --set nv-sentinel:health-events-analyzer.processingStrategy=STORE_ONLY
+              and set STORE_ONLY on, or remove, each rule that sets another
+              strategy.
             reason: >-
               The new default rule set cordons for a fatal analyzer event, and
-              fault-quarantine reads only EXECUTE_REMEDIATION events, so the
-              override is what turns a condition-only signal into a drain.
+              fault-quarantine reads only EXECUTE_REMEDIATION events, so that
+              strategy, set or inherited, is what turns a condition-only signal
+              into a drain.
           - id: apply-new-crds
             description: >-
               Apply the v1.31.0 CRDs using the CRD-apply command under
@@ -549,16 +573,26 @@ transitions:
       - steps:
           - id: check-analyzer-strategy
             description: >-
-              Search the values and --set flags the bundle was generated with
-              for health-events-analyzer.processingStrategy set to
-              EXECUTE_REMEDIATION. If it is absent, go on. If it is set, either
-              remove it, which keeps the analyzer's events STORE_ONLY as
-              before, or keep it and expect a fatal analyzer event to cordon
-              and drain its node.
+              Where health-events-analyzer is deployed, read the effective
+              strategies from the nv-sentinel values in the bundle: the
+              module-level processingStrategy, and the processing_strategy of
+              each enabled rule in health-events-analyzer.config, which
+              replaces the module value for that rule when it is set. An absent
+              module value is the chart default, EXECUTE_REMEDIATION, not
+              STORE_ONLY: only the nvsentinel-health-events-analyzer mixin sets
+              STORE_ONLY. UNSPECIFIED counts as EXECUTE_REMEDIATION too,
+              because platform-connectors converts it. If the module value or
+              any enabled rule's value is either, keep it and expect a fatal
+              analyzer event to cordon and drain its node, or keep the
+              previous behavior: regenerate the bundle with
+              --set nv-sentinel:health-events-analyzer.processingStrategy=STORE_ONLY
+              and set STORE_ONLY on, or remove, each rule that sets another
+              strategy.
             reason: >-
               The new default rule set cordons for a fatal analyzer event, and
-              fault-quarantine reads only EXECUTE_REMEDIATION events, so the
-              override is what turns a condition-only signal into a drain.
+              fault-quarantine reads only EXECUTE_REMEDIATION events, so that
+              strategy, set or inherited, is what turns a condition-only signal
+              into a drain.
           - id: apply
             description: >-
               Re-run install.sh (helm), or commit the regenerated bundle and
