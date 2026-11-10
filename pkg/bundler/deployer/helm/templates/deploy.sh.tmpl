@@ -582,7 +582,7 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     # the node label proves nothing about who owns the driver (nothing in
     # this bundle applies it) and only an observed DaemonSet does.
     DRIVER_OWNERSHIP="{{ .DriverOwnership }}"
-    DRIVER_DS_NS=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get daemonset -A --no-headers 2>/dev/null | awk '$2 ~ /^nvidia-driver-daemonset(-|$)/ {print $1; exit}')
+    DRIVER_DS_NS=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get daemonset -A --no-headers 2>/dev/null | awk '!f && $2 ~ /^nvidia-driver-daemonset(-|$)/ {print $1; f=1}')
     MANAGED_NODES=$(kubectl ${KUBECTL_CONN[@]+"${KUBECTL_CONN[@]}"} get nodes -l nvidia.com/gpu.deploy.driver=true -o name 2>/dev/null | wc -l | tr -d ' ')
     if [[ "${DRIVER_OWNERSHIP}" == "unknown" && -z "${DRIVER_DS_NS}" ]]; then
       echo "  no gpu-operator component in this bundle and no gpu-operator driver DaemonSet present (${MANAGED_NODES} node(s) labeled nvidia.com/gpu.deploy.driver=true); driver ownership is external, skipping migration wait"
