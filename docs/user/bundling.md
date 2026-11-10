@@ -40,7 +40,9 @@ aicr bundle --recipe recipe.yaml --deployer argocd \
 `.aicr-stage-*` directory, inside the output directory when it exists and
 beside it when it does not, and reaches the output directory only once it is
 complete. A run that fails while rendering, or is interrupted with Ctrl-C or
-`SIGTERM`, leaves the output directory as it found it.
+`SIGTERM` before the bundle starts moving into place, leaves the output
+directory as it found it. An interrupt that arrives after that does not stop
+the move.
 
 Bundling into a directory that holds an earlier bundle replaces it. Every
 numbered component folder is replaced whatever it holds, and so is a top-level
