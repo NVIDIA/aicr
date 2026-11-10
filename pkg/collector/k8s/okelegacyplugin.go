@@ -35,8 +35,11 @@ const (
 	// nvidia.com/gpu alongside the GPU Operator's plugin (#1327).
 	SubtypeOKELegacyPlugin = "oke-legacy-plugin"
 
-	okeLegacyPluginNamespace = "kube-system"
-	okeLegacyPluginDSName    = "nvidia-gpu-device-plugin"
+	// okeGPUPluginNamespace and okeGPUPluginDSName name the device plugin
+	// DaemonSet both the legacy addon-manager and the NvidiaGpuPlugin
+	// cluster add-on render.
+	okeGPUPluginNamespace = "kube-system"
+	okeGPUPluginDSName    = "nvidia-gpu-device-plugin"
 
 	// okeLegacyAddonManagerLabel/Mode identify a DaemonSet reconciled by the
 	// legacy Kubernetes addon-manager, Oracle's shipping mechanism for the
@@ -104,8 +107,8 @@ func unknownOKELegacyPluginSubtype() measurement.Subtype {
 // desiredNumberScheduled is not an omitempty field in appsv1.DaemonSetStatus,
 // so 0 is a trustworthy "targets nothing" observation, not a missing value.
 func (k *Collector) collectOKELegacyPlugin(ctx context.Context) measurement.Subtype {
-	ds, err := k.ClientSet.AppsV1().DaemonSets(okeLegacyPluginNamespace).
-		Get(ctx, okeLegacyPluginDSName, metav1.GetOptions{})
+	ds, err := k.ClientSet.AppsV1().DaemonSets(okeGPUPluginNamespace).
+		Get(ctx, okeGPUPluginDSName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return okeLegacyPluginSummary{plugin: okeLegacyPluginNone, daemonSet: okeLegacyDSAbsent}.subtype()
@@ -114,7 +117,7 @@ func (k *Collector) collectOKELegacyPlugin(ctx context.Context) measurement.Subt
 		// distinction between "absent" and "could not look" is the whole
 		// point of this reading.
 		slog.Warn("OKE legacy device-plugin collection failed; recording unknown",
-			"namespace", okeLegacyPluginNamespace, "daemonset", okeLegacyPluginDSName, "error", err)
+			"namespace", okeGPUPluginNamespace, "daemonset", okeGPUPluginDSName, "error", err)
 		return unknownOKELegacyPluginSubtype()
 	}
 

@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **58**
-- Unique images: **166**
+- Unique images: **167**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -59,7 +59,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kueue | helm | kueue | 0.19.6 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.1 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.7.0 | 22 |
+| network-operator | helm | nvidia/network-operator | 26.7.0 | 23 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.20.1 | 1 |
@@ -100,8 +100,8 @@ from the component's registry default above.
 | dynamo-platform | 1.5.0 | b300-mk8s-ubuntu-inference-dynamo | 1 |
 | kai-scheduler | v0.17.1 | b300-mk8s-ubuntu-inference-dynamo | 12 |
 | kube-prometheus-stack | 83.7.0 | aks | 8 |
-| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 22 |
-| network-operator | 26.7.1 | vr200-nvke-ubuntu-training | 22 |
+| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 23 |
+| network-operator | 26.7.1 | vr200-nvke-ubuntu-training | 23 |
 
 ## Images by component
 
@@ -291,6 +291,7 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
 - `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
+- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.0@sha256:d3235d1f7be1fe825f23feddd714bc44acd0bad305ca598b365cd134f14ae28e`
 
 ### network-operator-ocp
 
@@ -501,6 +502,7 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
 - `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
+- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.0@sha256:d3235d1f7be1fe825f23feddd714bc44acd0bad305ca598b365cd134f14ae28e`
 
 ### network-operator@26.7.1 (variant)
 
@@ -526,6 +528,7 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
 - `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
+- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.0@sha256:d3235d1f7be1fe825f23feddd714bc44acd0bad305ca598b365cd134f14ae28e`
 
 <!-- END AICR-BOM -->
 

@@ -1611,6 +1611,15 @@ components:
                 means a Percona operator pod AICR did not install runs, with
                 no other PerconaServerMongoDB resources.
               enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
+            rdmaNamespaceMode:
+              type: string
+              description: >
+                The RDMA subsystem's network namespace mode (ib_core
+                netns_mode) observed during snapshot-driven resolution. A
+                bundle whose RDMA attachment does not match it (the rdma CNI
+                needs exclusive, host-device alone needs shared) produces a
+                non-blocking warning.
+              enum: [exclusive, shared, unknown]
         criteria:
           $ref: "#/components/schemas/Criteria"
           description: Original criteria parameters
@@ -1919,6 +1928,7 @@ components:
                   - mariaDBOperatorState
                   - defaultStorageClassState
                   - perconaOperatorState
+                  - rdmaNamespaceMode
                   - selectedProfile
               properties:
                 mariaDBOperatorState:
@@ -1930,6 +1940,9 @@ components:
                 perconaOperatorState:
                   type: string
                   enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
+                rdmaNamespaceMode:
+                  type: string
+                  enum: [exclusive, shared, unknown]
                 excludedOverlays:
                   type: array
                   items:
@@ -2073,6 +2086,7 @@ components:
                       - mariaDBOperatorState
                       - defaultStorageClassState
                       - perconaOperatorState
+                      - rdmaNamespaceMode
                       - selectedProfile
                   not:
                     required: [selectedProfile]
@@ -2086,6 +2100,9 @@ components:
                     perconaOperatorState:
                       type: string
                       enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
+                    rdmaNamespaceMode:
+                      type: string
+                      enum: [exclusive, shared, unknown]
                     excludedOverlays:
                       type: array
                       items:
