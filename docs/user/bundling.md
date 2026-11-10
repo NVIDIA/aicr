@@ -61,7 +61,10 @@ holds anything else, such as a file you added under `data/`, because
 `checksums.txt`, such as one made through the Go library with checksums off,
 is not recognized, so any of its files the new bundle does not write, such as
 a dropped `--data` file, fail the run. Bundle into a new directory, or remove
-the earlier bundle first.
+the earlier bundle first. An `argocd-helm` bundle that omits the GPU Operator
+or the NVIDIA DRA driver also fails, before anything is written, when the
+directory holds that component's output from an earlier bundle. Bundle it
+into a new directory.
 
 A run that is killed outright, for example by `SIGKILL` or the out-of-memory
 killer, cannot clean up after itself. A run that fails while moving the
