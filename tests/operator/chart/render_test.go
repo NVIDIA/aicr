@@ -31,6 +31,7 @@ import (
 	"go.yaml.in/yaml/v4"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -155,13 +156,11 @@ func TestNoArgoCDSettings(t *testing.T) {
 			if o.GetKind() == "ConfigMap" {
 				t.Errorf("%v: ConfigMap %s rendered", set, o.GetName())
 			}
-			if o.GetKind() != "Role" && o.GetKind() != "ClusterRole" {
-				continue
-			}
-			rules, _, _ := unstructured.NestedSlice(o.Object, "rules")
-			for _, r := range rules {
-				if names, _, _ := unstructured.NestedStringSlice(r.(map[string]any), "resourceNames"); slices.Contains(names, "argocd-cm") {
-					t.Errorf("%v: %s %s grants access to argocd-cm", set, o.GetKind(), o.GetName())
+		}
+		for _, r := range decodeKinds[rbacv1.ClusterRole](t, objs, "Role", "ClusterRole") {
+			for _, rule := range r.Rules {
+				if slices.Contains(rule.ResourceNames, "argocd-cm") {
+					t.Errorf("%v: %s %s grants access to argocd-cm", set, r.Kind, r.Name)
 				}
 			}
 		}
@@ -201,16 +200,12 @@ func TestValidationIdentities(t *testing.T) {
 	ctx := ctxFor(t)
 	clusterAdmins := func(objs []unstructured.Unstructured) []string {
 		var subjects []string
-		for _, o := range objs {
-			if o.GetKind() != "ClusterRoleBinding" && o.GetKind() != "RoleBinding" {
+		for _, b := range decodeKinds[rbacv1.ClusterRoleBinding](t, objs, "RoleBinding", "ClusterRoleBinding") {
+			if b.RoleRef.Name != "cluster-admin" {
 				continue
 			}
-			if name, _, _ := unstructured.NestedString(o.Object, "roleRef", "name"); name != "cluster-admin" {
-				continue
-			}
-			list, _, _ := unstructured.NestedSlice(o.Object, "subjects")
-			for _, s := range list {
-				subjects = append(subjects, s.(map[string]any)["name"].(string))
+			for _, s := range b.Subjects {
+				subjects = append(subjects, s.Name)
 			}
 		}
 		sort.Strings(subjects)
@@ -249,14 +244,10 @@ func TestSnapshotNamespaceGrant(t *testing.T) {
 			t.Fatal(out)
 		}
 		var namespaceRules []string
-		for _, o := range objs {
-			if o.GetKind() != "ClusterRole" {
-				continue
-			}
-			rules, _, _ := unstructured.NestedSlice(o.Object, "rules")
-			for _, r := range rules {
-				if slices.Contains(r.(map[string]any)["resources"].([]any), any("namespaces")) {
-					namespaceRules = append(namespaceRules, o.GetName())
+		for _, r := range decodeKinds[rbacv1.ClusterRole](t, objs, "ClusterRole") {
+			for _, rule := range r.Rules {
+				if slices.Contains(rule.Resources, "namespaces") {
+					namespaceRules = append(namespaceRules, r.Name)
 				}
 			}
 		}
@@ -272,22 +263,18 @@ func TestSnapshotNamespaceGrant(t *testing.T) {
 // as aicr-validation to either role, so no binding reuses that name.
 func TestBindingsKeepTheirRoleRef(t *testing.T) {
 	ctx := ctxFor(t)
-	roleRefs := map[string]map[string]any{"ClusterRoleBinding//aicr-validation": nil}
+	roleRefs := map[string]*rbacv1.RoleRef{"ClusterRoleBinding//aicr-validation": nil}
 	for _, version := range []string{"v1.0.0", "v1.1.0"} {
 		objs, out, err := render(ctx, "aicr.version="+version)
 		if err != nil {
 			t.Fatal(out)
 		}
-		for _, o := range objs {
-			if o.GetKind() != "ClusterRoleBinding" && o.GetKind() != "RoleBinding" {
-				continue
+		for _, b := range decodeKinds[rbacv1.ClusterRoleBinding](t, objs, "RoleBinding", "ClusterRoleBinding") {
+			key := b.Kind + "/" + b.Namespace + "/" + b.Name
+			if prev, ok := roleRefs[key]; ok && (prev == nil || *prev != b.RoleRef) {
+				t.Errorf("%s: roleRef %v with %s, %v before", key, b.RoleRef, version, prev)
 			}
-			key := o.GetKind() + "/" + o.GetNamespace() + "/" + o.GetName()
-			ref, _, _ := unstructured.NestedMap(o.Object, "roleRef")
-			if prev, ok := roleRefs[key]; ok && !reflect.DeepEqual(prev, ref) {
-				t.Errorf("%s: roleRef %v with %s, %v before", key, ref, version, prev)
-			}
-			roleRefs[key] = ref
+			roleRefs[key] = &b.RoleRef
 		}
 	}
 }
@@ -301,27 +288,21 @@ func TestRolesStayExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(out)
 	}
-	for _, o := range objs {
-		if o.GetKind() != "ClusterRole" && o.GetKind() != "Role" {
-			continue
-		}
-		for k := range o.GetLabels() {
+	for _, r := range decodeKinds[rbacv1.ClusterRole](t, objs, "Role", "ClusterRole") {
+		for k := range r.Labels {
 			if strings.HasPrefix(k, "rbac.authorization.k8s.io/aggregate-to-") {
-				t.Errorf("%s %s aggregates through %s", o.GetKind(), o.GetName(), k)
+				t.Errorf("%s %s aggregates through %s", r.Kind, r.Name, k)
 			}
 		}
-		rules, _, _ := unstructured.NestedSlice(o.Object, "rules")
-		for _, r := range rules {
-			rule := r.(map[string]any)
-			for _, field := range []string{"apiGroups", "resources", "verbs"} {
-				for _, v := range rule[field].([]any) {
-					s := v.(string)
-					if s == "*" {
-						t.Errorf("%s %s has a wildcard in %s", o.GetKind(), o.GetName(), field)
-					}
-					if field == "verbs" && slices.Contains([]string{"escalate", "bind", "impersonate"}, s) {
-						t.Errorf("%s %s grants %s", o.GetKind(), o.GetName(), s)
-					}
+		for _, rule := range r.Rules {
+			for field, values := range map[string][]string{"apiGroups": rule.APIGroups, "resources": rule.Resources, "verbs": rule.Verbs} {
+				if slices.Contains(values, "*") {
+					t.Errorf("%s %s has a wildcard in %s", r.Kind, r.Name, field)
+				}
+			}
+			for _, verb := range rule.Verbs {
+				if slices.Contains([]string{"escalate", "bind", "impersonate"}, verb) {
+					t.Errorf("%s %s grants %s", r.Kind, r.Name, verb)
 				}
 			}
 		}
