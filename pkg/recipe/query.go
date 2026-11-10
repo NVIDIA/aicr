@@ -50,6 +50,7 @@ func projectObservedStates(metadata map[string]any, m *RecipeResultMetadata) {
 		"mariaDBOperatorState":     m.MariaDBOperatorState,
 		"defaultStorageClassState": m.DefaultStorageClassState,
 		"perconaOperatorState":     m.PerconaOperatorState,
+		"rdmaNamespaceMode":        m.RDMANamespaceMode,
 	} {
 		if value != "" {
 			metadata[key] = value

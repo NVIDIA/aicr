@@ -339,6 +339,31 @@ for _, r := range results {
 }
 ```
 
+**Results and error together.** `ValidateState` can return non-nil
+`results` **together with** a non-nil error, so an `err != nil` check alone
+discards them. When the run is interrupted (`ErrCodeCanceled` for a canceled
+`ctx`, `ErrCodeTimeout` for a deadline), the results hold every completed phase
+plus the partial current phase. Unstarted checks in it are `skipped`, and the
+phase reports a blocking status (`other` unless already `failed`). If
+privileged RBAC revocation also fails after a cancellation, the error is
+`ErrCodeInternal`, wrapping both causes and warning that the cluster-admin
+binding may be orphaned. Other errors, such as a later phase's pre-flight
+rejection, can also arrive alongside the phases completed before it. Partial
+results never mean the run succeeded: inspect both return values, and treat a
+non-nil error as a failed run even when the results look complete.
+
+```go
+results, err := client.ValidateState(valCtx, aksResult, snap,
+	aicr.WithValidationKubeconfig("/path/to/target-kubeconfig"),
+	aicr.WithValidationTimeout(0))
+for _, r := range results { // may be non-empty even when err != nil
+	log.Printf("phase=%s status=%s", r.Phase, r.Status)
+}
+if err != nil {
+	log.Fatalf("validate state: %v", err) // the run did not complete
+}
+```
+
 When `WithValidationKubeconfig` is omitted or passed an empty string,
 `ValidateState` uses the shared default Kubernetes client and its standard
 discovery chain: `KUBECONFIG`, `~/.kube/config`, then in-cluster configuration.
@@ -1128,13 +1153,6 @@ It derives a `defaults.FileReadTimeout`-bounded context internally, so the
 reads stay bounded but the caller cannot cancel them. Prefer the
 context-aware form wherever a `context.Context` is available.
 
-`SummarizeRecipe(rec)` returns the overview `aicr query --summary` prints, as
-an `*aicr.RecipeSummary` (a transparent alias of `pkg/recipe.Summary`):
-identity, criteria, applied overlays, constraints, enabled components in
-deployment order, and the validation checks per phase. It performs no I/O and
-does not hydrate component values. A `nil` `*RecipeResult`, or one without
-internal recipe state, returns `ErrCodeInvalidRequest`.
-
 The **outermost** structured code distinguishes the two failure stages, so a
 caller can shape a response without reimplementing hydrate-then-select:
 `ErrCodeNotFound` means the selector path does not exist, and any other code
@@ -1142,6 +1160,13 @@ caller can shape a response without reimplementing hydrate-then-select:
 `errors.As` on the outermost error rather than `errors.Is` — `Is` walks the
 wrap chain and would match an `ErrCodeNotFound` cause nested inside a
 hydration failure.
+
+`SummarizeRecipe(rec)` returns the overview `aicr query --summary` prints, as
+an `*aicr.RecipeSummary` (a transparent alias of `pkg/recipe.Summary`):
+identity, criteria, applied overlays, constraints, enabled components in
+deployment order, and the validation checks per phase. It performs no I/O and
+does not hydrate component values. A `nil` `*RecipeResult`, or one without
+internal recipe state, returns `ErrCodeInvalidRequest`.
 
 ### Delivering a collected snapshot
 

@@ -60,6 +60,14 @@ recipes:
     sources:
       - slug: 728b071aed7124418b1fa9c7f0521e24
         class: community
+  - id: gb300-nvke-ubuntu-inference-dynamo
+    sources:
+      - slug: c0e6951cd501b85118706a01b76f2bb5
+        class: community
+  - id: gb300-nvke-ubuntu-training-kubeflow
+    sources:
+      - slug: c0e6951cd501b85118706a01b76f2bb5
+        class: community
   - id: h100-aks-ubuntu-inference-dynamo
     sources:
       - slug: 5bf9e82f0e90a11528ac85f4bcb866c8

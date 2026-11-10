@@ -72,7 +72,7 @@ func TestSysctlCollector_Integration(t *testing.T) {
 		t.Fatalf("Collect() failed: %v", err)
 	}
 
-	// Should return measurement with TypeOS and three subtypes
+	// Should return measurement with TypeOS and five subtypes
 	if m == nil {
 		t.Fatal("Expected non-nil measurement")
 		return
@@ -82,8 +82,8 @@ func TestSysctlCollector_Integration(t *testing.T) {
 		t.Errorf("Expected type %s, got %s", measurement.TypeOS, m.Type)
 	}
 
-	if len(m.Subtypes) != 4 {
-		t.Errorf("Expected 4 subtypes (grub, sysctl, kmod, release), got %d", len(m.Subtypes))
+	if len(m.Subtypes) != 5 {
+		t.Errorf("Expected 5 subtypes (grub, sysctl, kmod, kmod-param, release), got %d", len(m.Subtypes))
 		return
 	}
 

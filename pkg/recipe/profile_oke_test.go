@@ -151,8 +151,11 @@ func TestOKEGpuStackProfileResolution(t *testing.T) {
 		wantDriver     bool
 		wantToolkit    bool
 		wantPlugin     bool
-		wantDRARoot    string
-		wantAssume     bool
+		// wantRuntimeClass: gpu-operator operator.runtimeClass, the CRI-O
+		// handler the operands run on.
+		wantRuntimeClass string
+		wantDRARoot      string
+		wantAssume       bool
 		// wantAddonConstraint: the expected K8s.oke-addons.nvidia-gpu-plugin
 		// generation-constraint value for the selected profile value.
 		wantAddonConstraint string
@@ -169,6 +172,7 @@ func TestOKEGpuStackProfileResolution(t *testing.T) {
 			wantAdvertiser:       allocpolicy.AdvertiserExternal,
 			wantDriver:           false,
 			wantToolkit:          false,
+			wantRuntimeClass:     "runc",
 			wantPlugin:           false,
 			wantDRARoot:          "/",
 			wantAssume:           true,
@@ -182,6 +186,7 @@ func TestOKEGpuStackProfileResolution(t *testing.T) {
 			wantAdvertiser:       "",
 			wantDriver:           true,
 			wantToolkit:          true,
+			wantRuntimeClass:     "nvidia",
 			wantPlugin:           true,
 			wantDRARoot:          "/run/nvidia/driver",
 			wantAssume:           false,
@@ -217,17 +222,20 @@ func TestOKEGpuStackProfileResolution(t *testing.T) {
 				"gpu-operator": {
 					"devicePlugin.enabled", "driver.enabled",
 					"driver.useOpenKernelModules", "enabled",
-					"hostPaths.driverInstallDir", "toolkit.enabled",
+					"hostPaths.driverInstallDir", "operator.runtimeClass",
+					"toolkit.enabled",
 				},
 				"nvidia-dra-driver-gpu": {"enabled", "nvidiaDriverRoot"},
 				"nvsentinel": {
 					"janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath",
+					"janitor.config.controllers.gpuReset.resetJob.runtimeClassName",
 					"janitor.config.controllers.gpuReset.serviceManager.name",
 					"janitor.config.controllers.gpuReset.serviceManager.spec.apps",
 					"janitor.config.controllers.gpuReset.serviceManager.spec.namespace",
 					"janitor.config.controllers.gpuReset.serviceManager.spec.restoreTimeout",
 					"janitor.config.controllers.gpuReset.serviceManager.spec.teardownTimeout",
 					"labeler.assumeDriverInstalled",
+					"metadata-collector.runtimeClassName",
 				},
 			}
 			for component, want := range wantOwned {
@@ -256,6 +264,10 @@ func TestOKEGpuStackProfileResolution(t *testing.T) {
 			}
 			if v, ok := nestedBool(gpuValues, "devicePlugin", "enabled"); !ok || v != tt.wantPlugin {
 				t.Errorf("devicePlugin.enabled = %v (set: %v), want %v", v, ok, tt.wantPlugin)
+			}
+			operatorValues, _ := gpuValues["operator"].(map[string]any)
+			if rc, _ := operatorValues["runtimeClass"].(string); rc != tt.wantRuntimeClass {
+				t.Errorf("operator.runtimeClass = %q, want %q", rc, tt.wantRuntimeClass)
 			}
 
 			draValues, err := result.GetValuesForComponentWithContext(t.Context(), "nvidia-dra-driver-gpu")
