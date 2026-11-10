@@ -323,24 +323,30 @@ aicr:
     - ghcr.io/nvidia/aicr-validators/performance:v1.x.y@sha256:<digest>
 ```
 
-For example, from v1.0.0 to v1.1.2, the newest release tested in CI:
+For example, from v1.1.2 to v1.2.0, the newest release tested in CI:
 
 ```yaml
 aicr:
-  version: v1.1.2
-  image: ghcr.io/nvidia/aicr:v1.1.2@sha256:611cbcb8a44b30ccfbbf77a797ed0a8e7fae228c97088a849f70b042709a62fb
+  version: v1.2.0
+  image: ghcr.io/nvidia/aicr:v1.2.0@sha256:5ef145efe98ede9f4da7be3a66304f5fdc95dd31f825295d6a608a39feb0cac9
   validatorImages:
-    - ghcr.io/nvidia/aicr-validators/deployment:v1.1.2@sha256:f9d1cd2843ab0271d7b763c485558c1f3d4b37b984e96ad73e1ce6ae77365928
-    - ghcr.io/nvidia/aicr-validators/conformance:v1.1.2@sha256:ce74905d3df0f6a5d8bb6c7f53e979fdf02e1d778b76817f98d964d9ad913312
-    - ghcr.io/nvidia/aicr-validators/performance:v1.1.2@sha256:2d847aa5e4d0a547a86022eb5a71ec7ad8b5a801906578c77adedcdcb9083d07
+    - ghcr.io/nvidia/aicr-validators/deployment:v1.2.0@sha256:0e697d829916b20698488666d44ecde9429c7d1c6063c5ade425d2f27845ca95
+    - ghcr.io/nvidia/aicr-validators/conformance:v1.2.0@sha256:8930d96f5bf6cd72058d4496558963a9b67383d4ceb776f44cafd1a7f3259913
+    - ghcr.io/nvidia/aicr-validators/performance:v1.2.0@sha256:35f45febe754141b3f9154fc0af3273c5de6c4a9d68da154d4477ef3dd2f4722
 ```
 
-The same chart upgrade moves validation to the v1.1 identities: the launcher
-loses `cluster-admin`, the `aicr-validator` ServiceAccount gains it, and the
-snapshot launcher loses its namespace grant. For
-`h100-eks-ubuntu-training-kubeflow` the new recipe moves gpu-operator and nodewright-operator, which AICR assesses `safe`,
-and nvsentinel, which it assesses `manual` with recorded steps, so the
-rollout needs approval.
+For `h100-eks-ubuntu-training-kubeflow` the new recipe moves
+nvidia-dra-driver-gpu, which AICR assesses `safe`, and nfd, which it assesses
+`manual` with recorded steps, so the rollout needs approval. Its RBAC steps
+apply only when the topology-updater RBAC is managed outside the chart
+(`topologyUpdater.rbac.create=false`). AICR v1.2.0's nfd record has no `apply`
+step, so the rollout does not pause for acknowledgement after nfd is applied:
+if you widened the RBAC, do `narrow-nrt-rbac` yourself once every
+topology-updater Pod runs 0.20.x and you no longer need a rollback path.
+
+From v1.0.x, the same chart upgrade also moves validation to the v1.1
+identities: the launcher loses `cluster-admin`, the `aicr-validator`
+ServiceAccount gains it, and the snapshot launcher loses its namespace grant.
 
 The chart refuses a version outside `>=1.0.0, <2.0.0`, and the operator stops
 on an image that reports a version other than `aicr.version`

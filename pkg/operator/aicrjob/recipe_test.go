@@ -28,8 +28,9 @@ import (
 
 // Golden fixtures were produced by each supported AICR minor's pinned image
 // for the lane criteria (see testdata/<version>/README.md): the lowest
-// supported release and the newest.
-var fixtureVersions = []string{"v1.0.0", "v1.1.2"}
+// supported release, the newest, and v1.1.2, the release the newest's
+// upgrade-check fixtures start from.
+var fixtureVersions = []string{"v1.0.0", "v1.1.2", "v1.2.0"}
 
 // Lane recipe fixtures, the same for every fixture version.
 var laneFixtures = map[string]struct {
