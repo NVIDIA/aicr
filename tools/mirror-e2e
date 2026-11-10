@@ -30,10 +30,11 @@
 #    nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor,
 #    nvsentinel-remediation, nvsentinel-slinky-drainer,
 #    nvsentinel-health-events-analyzer, nvsentinel-event-exporter,
-#    nvsentinel-log-collector and nvsentinel-node-validation mixins composed,
-#    so their mixin-gated images are asserted in every manifest format and the
-#    three small controller images (object monitor, preflight, slurm drain
-#    monitor) are carried through the transfer
+#    nvsentinel-log-collector, nvsentinel-node-validation and
+#    nvsentinel-csp-health-monitor-aws mixins composed, so their mixin-gated
+#    images are asserted in every manifest format and the three small
+#    controller images (object monitor, preflight, slurm drain monitor) are
+#    carried through the transfer
 # 4. Runs `aicr mirror list` in all formats (validates the full pipeline)
 # 5. Trims Hauler/Zarf manifests to public images only (avoids NGC auth)
 # 6. Syncs trimmed manifest via Hauler into the local registry
@@ -157,6 +158,13 @@ NODE_VALIDATION_IMAGES=(
     "nvcr.io/nvidia/cloud-native/dcgm:4.7.0-ubuntu24.04"
 )
 
+# The images the nvsentinel-csp-health-monitor-aws and -gcp mixins pull in
+# (#2620); both turn on the same subchart, so composing one covers them.
+CSP_HEALTH_MONITOR_IMAGES=(
+    "ghcr.io/nvidia/nvsentinel/csp-health-monitor:v1.28.0"
+    "ghcr.io/nvidia/nvsentinel/maintenance-notifier:v1.28.0"
+)
+
 # Every mixin-gated image, asserted in all three `mirror list` formats.
 MIXIN_IMAGES=(
     "${OBJECT_MONITOR_IMAGE}"
@@ -169,6 +177,7 @@ MIXIN_IMAGES=(
     "${EVENT_EXPORTER_IMAGE}"
     "${LOG_COLLECTOR_IMAGES[@]}"
     "${NODE_VALIDATION_IMAGES[@]}"
+    "${CSP_HEALTH_MONITOR_IMAGES[@]}"
 )
 
 # The subset carried through the Hauler sync, Zarf package and registry
@@ -263,7 +272,7 @@ ensure_cluster() {
 }
 
 generate_recipe() {
-    msg "Generating recipe (with the nvsentinel-object-monitor, nvsentinel-preflight, nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor, nvsentinel-remediation, nvsentinel-slinky-drainer, nvsentinel-health-events-analyzer, nvsentinel-event-exporter, nvsentinel-log-collector and nvsentinel-node-validation mixins composed)..."
+    msg "Generating recipe (with the nvsentinel-object-monitor, nvsentinel-preflight, nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor, nvsentinel-remediation, nvsentinel-slinky-drainer, nvsentinel-health-events-analyzer, nvsentinel-event-exporter, nvsentinel-log-collector, nvsentinel-node-validation and nvsentinel-csp-health-monitor-aws mixins composed)..."
     # No --os: the Kind overlay tree is OS-agnostic, and a stated OS that no
     # Kind overlay distinguishes fails criteria coverage (issue #1542).
     #
@@ -272,9 +281,10 @@ generate_recipe() {
     # nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor,
     # nvsentinel-remediation, nvsentinel-slinky-drainer,
     # nvsentinel-health-events-analyzer, nvsentinel-event-exporter,
-    # nvsentinel-log-collector and nvsentinel-node-validation mixins, so every
-    # mixin-gated image is discovered by `mirror list` and asserted in the
-    # generated Hauler and Zarf manifests.
+    # nvsentinel-log-collector, nvsentinel-node-validation and
+    # nvsentinel-csp-health-monitor-aws mixins, so every mixin-gated image is
+    # discovered by `mirror list` and asserted in the generated Hauler and Zarf
+    # manifests.
     # Only the three small controller images are carried through the sync,
     # package and registry verification -- the three preflight check images
     # are 1.7-9.9 GiB each and would exhaust the runner. None of these images
@@ -301,15 +311,17 @@ REGISTRY_EOF
     # the only difference is the composed mixins. An external overlay of the
     # same name replaces its embedded counterpart.
     # nvsentinel-slurm-drain-monitor and nvsentinel-slinky-drainer are composed
-    # on a non-Slurm leaf, and nvsentinel-event-exporter without its sink, only
-    # because this lane never bundles: CheckNVSentinelSlurmDrainMonitorRequiresSlinky,
-    # CheckNVSentinelSlurmCustomDrainCoherent and
-    # CheckNVSentinelEventExporterCoherent would reject them at `aicr bundle`,
-    # but `mirror list` runs no bundle gates. The same holds for
+    # on a non-Slurm leaf, nvsentinel-event-exporter without its sink, and
+    # nvsentinel-csp-health-monitor-aws on a non-EKS one, only because this
+    # lane never bundles: CheckNVSentinelSlurmDrainMonitorRequiresSlinky,
+    # CheckNVSentinelSlurmCustomDrainCoherent,
+    # CheckNVSentinelEventExporterCoherent and
+    # CheckNVSentinelCSPHealthMonitorCoherent would reject them at
+    # `aicr bundle`, but `mirror list` runs no bundle gates. The same holds for
     # nvsentinel-log-collector on Kind, whose driver CheckNVSentinelLogCollectorCoherent
     # cannot reach, and for nvsentinel-node-validation, whose DCGM hostengine
     # CheckNVSentinelNodeValidationCoherent finds disabled on Kind.
-    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor", "nvsentinel-slurm-drain-monitor", "nvsentinel-remediation", "nvsentinel-slinky-drainer", "nvsentinel-health-events-analyzer", "nvsentinel-event-exporter", "nvsentinel-log-collector", "nvsentinel-node-validation"]' \
+    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor", "nvsentinel-slurm-drain-monitor", "nvsentinel-remediation", "nvsentinel-slinky-drainer", "nvsentinel-health-events-analyzer", "nvsentinel-event-exporter", "nvsentinel-log-collector", "nvsentinel-node-validation", "nvsentinel-csp-health-monitor-aws"]' \
         "${ROOT}/recipes/overlays/h100-kind-training.yaml" \
         > "${data_dir}/overlays/h100-kind-training.yaml"
 
@@ -363,6 +375,9 @@ REGISTRY_EOF
     fi
     if ! grep -q "lifecycleManager" "${WORK}/recipe.yaml"; then
         err "nvsentinel-node-validation mixin did not apply -- the recipe carries no lifecycleManager override"
+    fi
+    if ! grep -q "cspHealthMonitor" "${WORK}/recipe.yaml"; then
+        err "nvsentinel-csp-health-monitor-aws mixin did not apply -- the recipe carries no cspHealthMonitor override"
     fi
     msg "Recipe generated at ${WORK}/recipe.yaml"
 }
