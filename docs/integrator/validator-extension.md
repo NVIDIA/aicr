@@ -28,6 +28,14 @@ A validator is any container that follows the exit code contract:
 | `0` | Check passed |
 | `1` | Check failed |
 | `2` | Check skipped |
+| `3` | Interrupted by SIGTERM before reaching a verdict (CTRF `other`) |
+
+Any other exit code, or a container that never terminates, maps to CTRF `other`
+(indeterminate), which blocks like `failed`. A validator that traps SIGTERM
+(Job deadline, eviction, node drain or operator cancellation) should finish its
+cleanup within the pod's 30s termination grace and exit `3`, not `0`, because
+its verdict is incomplete. Validators built on `validators.Run` do this
+automatically.
 
 The container receives:
 

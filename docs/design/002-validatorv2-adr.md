@@ -98,13 +98,17 @@ validators:
 Every validator container:
 1. Reads `/data/snapshot/snapshot.yaml` and `/data/recipe/recipe.yaml` from mounted ConfigMaps
 2. Self-selects: reads the recipe, exits `2` (skip) if not applicable
-3. Exits `0` (pass), `1` (fail), or `2` (skip)
+3. Exits `0` (pass), `1` (fail), `2` (skip), or `3` (SIGTERM interruption, CTRF `other`)
 4. Writes error context to `/dev/termination-log` on failure (exit 1)
 5. Writes evidence to **stdout** (captured in CTRF report)
 6. Writes debug/test logs to **stderr** (not captured in CTRF)
 7. Uses the mounted ServiceAccount (`aicr-validator` with scoped ClusterRole) for K8s API access
 8. For GPU workloads: creates its own Pod on a GPU node (two-level scheduling)
-9. Handles SIGTERM gracefully — writes partial results within `terminationGracePeriodSeconds` (30s)
+9. Cancels the check context on SIGTERM. Cooperative checks run deferred cleanup,
+   then write a bounded interruption message and exit `3`, even if the check returns
+   nil. Cleanup and message flushing are best effort within
+   `terminationGracePeriodSeconds` (30s); blocking or long teardown can still be
+   killed before the message is written.
 
 ### Job Specification
 
@@ -203,6 +207,35 @@ read the terminal Job the controller left behind.
    first and deleted the still-running pod, which is exactly what #2473 reported.
 
 4. **Parent context timeout** (CLI flag): Cancels the entire phase if exceeded.
+
+SIGTERM from deadline enforcement, eviction or drain cancels the in-pod check
+context. Checks must honor cancellation and use fresh, bounded cleanup contexts.
+The grace period is not a guarantee that teardown finishes: existing CRE teardown
+and NCCL namespace/Trainer cleanup can exceed 30s. SIGKILL, OOM and crashes cannot
+run deferred cleanup; an external orphan-resource sweeper is not implemented here.
+
+Operator SIGINT/SIGTERM preserves completed and partial current-phase CTRF results,
+records unstarted checks in that phase as skipped, and returns `ErrCodeCanceled`
+unless privileged RBAC revocation also fails. When no check entry already blocks
+the phase, a synthetic `validation-interrupted` entry with CTRF status `other`
+keeps the report itself from reading as passing. That combined case returns
+`ErrCodeInternal`, joining both causes and warning that the cluster-admin
+binding may be orphaned, without discarding partial results.
+With cleanup enabled, post-wait capture, Job deletion and report persistence
+share one fresh 30s budget once cancellation is observed, with persistence before
+the pod-termination wait. That wait keeps the shared deadline but extends to at
+least Job deletion plus the pod's 30s SIGTERM grace and a 5s delivery margin, so
+the per-run RBAC lifetime covers the pod's full grace. An uninterrupted run keeps
+the caller's context for capture and deletion.
+The existing per-run RBAC/data cleanup has a separate 30s budget (typically about
+35s total cleanup, about 95s plus overhead in the worst case). Partial CLI output
+can use only the remainder of a 95s aggregate deadline recorded on first observed
+cancellation, capped by its existing 30s I/O allowance; it cannot start a further
+window. Normal validation time does not consume this budget. Context deadlines cannot physically interrupt
+arbitrary blocking file/stdout writes. ConfigMap persistence is best effort and
+does not replace the partial return value. Neither interrupted nor fatal cleanup
+paths publish evidence. A second CLI signal restores force-exit behavior and
+can interrupt cleanup or blocked output. `--no-cleanup` continues to opt out of deletion.
 
 On any timeout, the orchestrator always attempts log capture with a fresh
 `context.Background()` context before cleanup, ensuring partial results are never

@@ -425,6 +425,16 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if dir == "" {
 		dir = "."
 	}
+	// After component validations, so a bundle that ships gpu-operator hears
+	// CheckDriverOwnershipCoherence's dynamic-path verdict first; before
+	// copyDataFiles, which a rejection inside Generate would leave behind.
+	if b.Config.Deployer() == config.DeployerArgoCDHelm {
+		if ownershipErr := argocdhelm.ValidateDriverOwnership(
+			ctx, recipeResult, dynamicValues, b.Config.VendorCharts(), dir,
+		); ownershipErr != nil {
+			return nil, ownershipErr
+		}
+	}
 	if dir != "." {
 		if mkdirErr := os.MkdirAll(dir, 0755); mkdirErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
@@ -3850,8 +3860,8 @@ const (
 )
 
 var (
-	gpuOperatorComponentNames = []string{gpuOperatorComponentName, gpuOperatorOCPComponentName}
-	draComponentNames         = []string{draComponentName, "nvidia-dra-driver-gpu-ocp"}
+	gpuOperatorComponentNames = config.GPUOperatorDriverOwnership.ComponentNames
+	draComponentNames         = config.DRADriverOwnership.ComponentNames
 )
 
 func isDRAComponent(name string) bool {
