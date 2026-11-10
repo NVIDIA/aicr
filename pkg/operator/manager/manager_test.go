@@ -16,6 +16,7 @@ package manager
 
 import (
 	"flag"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -66,6 +67,23 @@ func TestBindFlagsOverridesDefaults(t *testing.T) {
 	}
 	if o != want {
 		t.Fatalf("options = %+v, want %+v", o, want)
+	}
+}
+
+// ParseFlags fills the manager options and the installation configuration
+// over their defaults, and reports a bad flag as an invalid request.
+func TestParseFlags(t *testing.T) {
+	t.Parallel()
+	f, err := ParseFlags(flag.NewFlagSet("test", flag.ContinueOnError), []string{"--log-level=warn", "--aicr-version=v1.0.0"})
+	if err != nil || f.Options.LogLevel != slog.LevelWarn || !f.Options.LeaderElection ||
+		f.Config.AICRVersion != "v1.0.0" || f.Config.JobsNamespace != "aicr-jobs" {
+
+		t.Fatalf("ParseFlags() = %+v, %v", f, err)
+	}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	if _, err = ParseFlags(fs, []string{"--log-level=loud"}); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		t.Fatalf("ParseFlags(--log-level=loud) = %v, want INVALID_REQUEST", err)
 	}
 }
 

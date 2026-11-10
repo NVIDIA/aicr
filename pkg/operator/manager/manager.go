@@ -34,6 +34,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
+	"github.com/NVIDIA/aicr/pkg/operator/config"
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 )
@@ -68,6 +69,25 @@ func (o *Options) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", o.LeaderElectionNamespace, "Namespace of the leader-election Lease; defaults to the pod's namespace.")
 	fs.DurationVar(&o.GracefulShutdownTimeout, "graceful-shutdown-timeout", o.GracefulShutdownTimeout, "How long runnables get to stop after shutdown starts.")
 	fs.TextVar(&o.LogLevel, "log-level", o.LogLevel, "Log level: debug, info, warn or error.")
+}
+
+// Flags holds the operator's command-line settings, for the manager process
+// and the installation.
+type Flags struct {
+	Options Options
+	Config  config.Config
+}
+
+// ParseFlags parses args on fs over the defaults. fs may hold other flags,
+// such as --version.
+func ParseFlags(fs *flag.FlagSet, args []string) (Flags, error) {
+	f := Flags{Options: DefaultOptions(), Config: config.Defaults()}
+	f.Options.BindFlags(fs)
+	f.Config.BindFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return f, operrors.Wrap(operrors.ErrCodeInvalidRequest, "parse flags", err)
+	}
+	return f, nil
 }
 
 // Validate rejects options that would leave the process unbounded or

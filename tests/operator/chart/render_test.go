@@ -36,7 +36,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	"github.com/NVIDIA/aicr/pkg/operator/config"
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	"github.com/NVIDIA/aicr/pkg/operator/manager"
 )
@@ -421,28 +420,20 @@ func deploymentArgs(t *testing.T, objs []unstructured.Unstructured) []string {
 	return nil
 }
 
-// operatorFlags is what the operator reads from its arguments.
-type operatorFlags struct {
-	manager manager.Options
-	config  config.Config
-}
-
 // parseOperatorFlags parses the operator Deployment's arguments and
 // validates the result, as the operator does at startup.
-func parseOperatorFlags(t *testing.T, objs []unstructured.Unstructured) (operatorFlags, error) {
+func parseOperatorFlags(t *testing.T, objs []unstructured.Unstructured) (manager.Flags, error) {
 	t.Helper()
-	f := operatorFlags{manager: manager.DefaultOptions(), config: config.Defaults()}
 	fs := flag.NewFlagSet(release, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	f.manager.BindFlags(fs)
-	f.config.BindFlags(fs)
-	if err := fs.Parse(deploymentArgs(t, objs)); err != nil {
+	f, err := manager.ParseFlags(fs, deploymentArgs(t, objs))
+	if err != nil {
 		return f, err
 	}
-	if err := f.manager.Validate(); err != nil {
+	if err = f.Options.Validate(); err != nil {
 		return f, err
 	}
-	return f, f.config.Validate(false)
+	return f, f.Config.Validate(false)
 }
 
 // helm upgrade --reuse-values renders the new chart with the previous
