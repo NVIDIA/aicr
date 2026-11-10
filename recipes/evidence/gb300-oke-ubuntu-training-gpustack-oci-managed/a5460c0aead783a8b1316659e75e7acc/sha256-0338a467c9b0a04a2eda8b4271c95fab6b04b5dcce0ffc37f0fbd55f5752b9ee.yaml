@@ -1,0 +1,13 @@
+attestations:
+  - attestedAt: 2026-11-10T22:42:13Z
+    bundle:
+      digest: sha256:0338a467c9b0a04a2eda8b4271c95fab6b04b5dcce0ffc37f0fbd55f5752b9ee
+      oci: ghcr.io/nvidia/aicr-evidence:gb300-oke-ubuntu-training-gpustack-oci-managed-95a59187166b
+      predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: 1047709+mlsorensen@users.noreply.github.com
+      issuer: https://github.com/login/oauth
+      rekorLogIndex: 193126156
+profile: gpuStack=oci-managed
+recipe: gb300-oke-ubuntu-training-gpustack-oci-managed
+schemaVersion: 1.0.0

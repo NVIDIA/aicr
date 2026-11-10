@@ -98,6 +98,9 @@ community:
   - issuer: https://token.actions.githubusercontent.com
     source: c0e6951cd501b85118706a01b76f2bb5
     label: xdu31
+  - issuer: https://github.com/login/oauth
+    source: a5460c0aead783a8b1316659e75e7acc
+    label: mlsorensen
 
 # Partner: vetted partner organizations. None onboarded yet.
 partner: []
