@@ -57,7 +57,11 @@ as a dropped `--data` file. The earlier bundle's attestation files are
 replaced or removed whatever they hold, because `checksums.txt` cannot list
 the files that sign it. The run fails and changes nothing if the directory
 holds anything else, such as a file you added under `data/`, because
-`checksums.txt` must list the whole tree.
+`checksums.txt` must list the whole tree. An earlier bundle with no
+`checksums.txt`, such as one made through the Go library with checksums off,
+is not recognized, so any of its files the new bundle does not write, such as
+a dropped `--data` file, fail the run. Bundle into a new directory, or remove
+the earlier bundle first.
 
 A run that is killed outright, for example by `SIGKILL` or the out-of-memory
 killer, cannot clean up after itself. A run that fails while moving the
