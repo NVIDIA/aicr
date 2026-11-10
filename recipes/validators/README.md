@@ -76,15 +76,17 @@ Neither constraint applies to `nccl-cre-all-reduce-bw` or
 | `dra-support` | Verify Dynamic Resource Allocation support | 5m |
 | `gang-scheduling` | Verify gang scheduling with KAI scheduler using CPU-only workers | 10m |
 | `accelerator-metrics` | Verify accelerator metrics from DCGM exporter | 5m |
-| `ai-service-metrics` | Verify AI service metrics via Prometheus | 5m |
-| `inference-gateway` | Verify the recipe's inference gateway (Gateway API + Inference Extension) is operational | 5m |
-| `pod-autoscaling` | Verify HPA-driven pod autoscaling with GPU metrics | 10m |
+| `ai-service-metrics` | Verify AI service metrics via Prometheus | 10m |
+| `inference-gateway` | Verify the recipe's inference gateway (Gateway API + Inference Extension) is operational, then drive header-routed and weighted traffic through it from a probe pod | 15m |
+| `pod-autoscaling` | Verify HPA-driven pod autoscaling of accelerator-requesting pods on a per-pod custom metric served by prometheus-adapter (needs two allocatable accelerators) | 15m |
 | `cluster-autoscaling` | Verify cluster autoscaling with Karpenter | 10m |
 | `robust-controller` | Verify AI operator controller, webhooks and CR reconciliation (Kubeflow Trainer reconciles a TrainJob to Complete; Dynamo records observations) | 8m |
 | `secure-accelerator-access` | Verify secure GPU access via DRA or device plugin (no host device mounts); skips on Slinky Slurm recipes, where on GPU-backed leaves slinky-slurm-gpu-access verifies the Slurm path | 10m |
+| `driver-runtime-management` | Verify the accelerator driver and container runtime configuration from a vanilla-image (`ubuntu:22.04`) pod granted one GPU: injected `nvidia-smi`, a functional driver, and a reported version matching the one the platform advertises (DRA `driverVersion` attribute, else the GFD `nvidia.com/cuda.driver-version.full` label; none advertised is a recorded warning); skips on Slinky Slurm recipes | 10m |
 | `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, job submission, GPU execution, and enabled accounting health | 8m |
 | `slinky-slurm-imex-channel` | Verify fixed IMEX resources and distinct channels for concurrent Slinky Slurm jobs | 5m |
 | `slinky-slurm-gpu-access` | Verify a Slinky Slurm job allocated one GPU can use exactly that GPU, and a job with no GPU allocation on the same node cannot open any GPU device | 5m |
+| `workload-sandboxing` | Verify a sandboxed `RuntimeClass` (gVisor, Kata; or the one `AICR_SANDBOX_RUNTIME_CLASS` names) isolates a CPU-only `ubuntu:22.04` probe pod from the host: no host daemon in `/proc`, no readable `/dev/mem` or `/dev/kmem`, no `/etc/kubernetes`, `/var/lib/kubelet` or `/var/log/pods`, no host bridge interface, and a kernel identity distinct from an unsandboxed control pod on the same node; fails with `unmet prerequisite: no sandboxed RuntimeClass` when none exists (never skips) | 10m |
 | `gpu-operator-health` | Verify GPU operator health (conformance diagnostic) | 2m |
 | `platform-health` | Verify platform component health (conformance diagnostic) | 5m |
 

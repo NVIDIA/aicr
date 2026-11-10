@@ -72,14 +72,18 @@ type clusterAutoscalingReport struct {
 //  4. AKS agent pool — records the VMSS-backed agent pool, the status
 //     ConfigMap and recent autoscaler events
 //
-// Only the Karpenter path observes a scale event. The platform paths record
-// observations — autoscaler presence, pool membership, status, events — and
-// drive no scale test, so a passing result there is not behavioral proof:
-// the cluster_autoscaling claim rests on provider documentation (manual
-// attestation) or a configured not-applicable justification, never on these
-// observations alone (#3428). EKS fails when nothing confirmed an autoscaler
-// (no managed node group label, no available Cluster Autoscaler, no status
-// ConfigMap), since a passed result would render the requirement PASSED.
+// Only the Karpenter path observes a scale event, and it observes the
+// scale-up alone. The platform paths record observations — autoscaler
+// presence, pool membership, status, events — and drive no scale test. No
+// passing result of this check is behavioral proof, so every pass carries
+// the observation-only marker (validators.ObservationOnlyExtra): the CNCF
+// aggregation renders cluster_autoscaling OBSERVED rather than PASSED and
+// the MUST is not established by it; the claim rests on provider
+// documentation (manual attestation) or a configured not-applicable
+// justification, never on these observations alone (#3428, #3681). EKS
+// fails when nothing confirmed an autoscaler (no managed node group label,
+// no available Cluster Autoscaler, no status ConfigMap): with no autoscaler
+// in sight there is nothing to observe.
 //
 // A providerID no probe recognizes (bare metal, Kind, KWOK) is a missing
 // probe, recorded as a skip: it says nothing about whether the platform
@@ -235,7 +239,7 @@ func CheckClusterAutoscaling(ctx *validators.Context) error {
 					"Find leftovers from earlier runs with: "+
 					"kubectl get namespaces -o name | grep %s",
 					report.Namespace, clusterAutoTestPrefix))
-			return nil
+			return passAsObservation()
 		}
 		slog.Debug("behavioral validation failed for NodePool",
 			"nodePool", poolName, "error", lastErr)
@@ -278,9 +282,15 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 	// persisted the namespace, or may still be applying it when a single
 	// Delete would see NotFound, so cleanup settles to confirmed absence
 	// within its budget instead of trusting one Delete. The ownership label
-	// is what lets it adopt a namespace that surfaces late; the rest of the
-	// gpuTestRun model (128-bit token) is not ported here.
-	run := &gpuTestRun{token: suffix, namespace: nsName}
+	// is what lets it adopt a namespace that surfaces late, and the image
+	// pull Secret names let copyImagePullSecrets serve the workload image;
+	// the rest of the gpuTestRun model (128-bit token) is not ported here.
+	run := &gpuTestRun{
+		token:              suffix,
+		namespace:          nsName,
+		imagePullSecrets:   validators.ImagePullSecretNames(),
+		validatorNamespace: validators.ValidatorNamespace(),
+	}
 	defer func() { //nolint:contextcheck // cleanup runs on its own bounded context
 		status, cleanupErr := cleanupGPUTestNamespace(clientset, run)
 		if cleanupErr != nil {
@@ -332,6 +342,12 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 		run.nsObserved = true
 		run.nsUID = created.UID
 	}
+	// The workload pod resolves imagePullSecrets only in its own namespace,
+	// so the --image-pull-secret Secrets are copied in before it is created;
+	// a copy failure fails the check rather than letting the pull fail later.
+	if err = copyImagePullSecrets(ctx, clientset, run); err != nil {
+		return nil, err
+	}
 
 	// Baseline: count existing Karpenter nodes for this pool before creating test resources.
 	// This ensures we detect a NEW scale-up, not pre-existing nodes from prior runs.
@@ -346,7 +362,7 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 	slog.Info("baseline Karpenter node count", "pool", nodePoolName, "count", baselineNodeCount)
 
 	// Create Deployment: GPU-requesting pods with Karpenter nodeSelector.
-	deploy := buildClusterAutoTestDeployment(deployName, nsName, nodePoolName)
+	deploy := buildClusterAutoTestDeployment(deployName, nsName, nodePoolName, run.imagePullSecretRefs())
 	if _, createErr := clientset.AppsV1().Deployments(nsName).Create(
 		ctx, deploy, metav1.CreateOptions{}); createErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create cluster autoscaling test deployment", createErr)
@@ -386,8 +402,9 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 
 // buildClusterAutoTestDeployment creates a Deployment that requests GPU resources
 // and targets the discovered Karpenter GPU NodePool. This matches the KWOK autoscaling
-// test manifest (kwok/manifests/karpenter/hpa-gpu-scale-test.yaml).
-func buildClusterAutoTestDeployment(name, namespace, nodePoolName string) *appsv1.Deployment {
+// test manifest (kwok/manifests/karpenter/hpa-gpu-scale-test.yaml). pullSecrets
+// are the run's copied image pull Secrets (gpuTestRun.imagePullSecretRefs).
+func buildClusterAutoTestDeployment(name, namespace, nodePoolName string, pullSecrets []corev1.LocalObjectReference) *appsv1.Deployment {
 	replicas := int32(1)
 	runAsNonRoot := true
 	runAsUser := int64(65534)
@@ -422,6 +439,7 @@ func buildClusterAutoTestDeployment(name, namespace, nodePoolName string) *appsv
 					NodeSelector: map[string]string{
 						karpenterNodePoolLabel: nodePoolName,
 					},
+					ImagePullSecrets: pullSecrets,
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: &runAsNonRoot,
 						RunAsUser:    &runAsUser,
@@ -826,12 +844,24 @@ func autoscalerEventTime(ev *corev1.Event) time.Time {
 	}
 }
 
+// passAsObservation ends a passing path of the check with the
+// observation-only marker on its result, so the aggregation never reads the
+// pass as a demonstration of cluster_autoscaling. A marker that could not be
+// written fails the check instead: the pass would otherwise render PASSED.
+//
+// Errors:
+//   - ErrCodeInternal when the marker could not be written to stdout.
+func passAsObservation() error {
+	return validators.EmitExtra(validators.ObservationOnlyExtra())
+}
+
 // platformObservationText renders the platform path's result artifact. It
 // states what was observed and that no scale event was driven, so the
 // evidence cannot be read as behavioral proof.
 func platformObservationText(platform string, gpuNodes int, pool, autoscaler string) string {
 	return fmt.Sprintf("OBSERVED — %s cluster with %d GPU node(s); %s; %s.\n"+
 		"No scale event was driven or observed by this check. These observations do not by themselves demonstrate cluster_autoscaling: "+
+		"the result is marked observation-only, so the requirement is recorded as observed rather than established; "+
 		"the claim rests on provider documentation (manual attestation), or on a not-applicable justification configured in spec.validate.evidence.cncf.notApplicable.",
 		platform, gpuNodes, pool, autoscaler)
 }
@@ -903,14 +933,13 @@ func checkEKSAutoscaling(ctx *validators.Context) error {
 	pool := fmt.Sprintf("GPU nodes belong to managed node group %q (ASG-backed)", nodeGroupName)
 	// With no managed node group label, no available in-cluster Cluster
 	// Autoscaler and no status ConfigMap, nothing confirmed an autoscaler:
-	// that is a failure, not an observation, because a passed CTRF result
-	// renders cluster_autoscaling PASSED and nothing in the aggregation marks
-	// a result observation-only yet. Definitive absence (every read answered
-	// NotFound) fails NotFound; an unavailable Deployment or a read that
-	// could not land fails with that error's classified code, and the
-	// artifacts above still record it as unread rather than absent. The
-	// remedy for a platform with no workload-driven autoscaler is a
-	// spec.validate.evidence.cncf.notApplicable declaration.
+	// that is a failure, not an observation, since there is no autoscaler to
+	// observe. Definitive absence (every read answered NotFound) fails
+	// NotFound; an unavailable Deployment or a read that could not land
+	// fails with that error's classified code, and the artifacts above still
+	// record it as unread rather than absent. The remedy for a platform with
+	// no workload-driven autoscaler is a spec.validate.evidence.cncf.notApplicable
+	// declaration.
 	nothingConfirmed := nodeGroupName == "" && !caFound && !caStatusFound
 	if nodeGroupName == "" {
 		pool = "GPU nodes carry no managed node group label (eks.amazonaws.com/nodegroup)"
@@ -921,7 +950,7 @@ func checkEKSAutoscaling(ctx *validators.Context) error {
 	recordRawTextArtifact(ctx, "EKS Cluster Autoscaling Observation", "",
 		platformObservationText("EKS", len(gpuNodes.Items), pool, autoscaler))
 	if !nothingConfirmed {
-		return nil
+		return passAsObservation()
 	}
 	const remedy = "declare cluster_autoscaling not applicable in spec.validate.evidence.cncf.notApplicable if the platform has no workload-driven autoscaler"
 	switch {
@@ -1008,7 +1037,7 @@ func checkAKSAutoscaling(ctx *validators.Context) error {
 		platformObservationText("AKS", len(gpuNodes.Items),
 			fmt.Sprintf("GPU nodes belong to VMSS-backed agent pool(s) %q", strings.Join(agentPoolNames, ", ")),
 			autoscaler))
-	return nil
+	return passAsObservation()
 }
 
 // checkGKEAutoscaling validates GKE built-in cluster autoscaler for GPU node pools.
@@ -1074,7 +1103,7 @@ func checkGKEAutoscaling(ctx *validators.Context) error {
 		platformObservationText("GKE", len(gpuNodes.Items),
 			fmt.Sprintf("GPU nodes belong to node pool(s) %s", strings.Join(gkeNodePools(gpuNodes.Items), ", ")),
 			autoscaler))
-	return nil
+	return passAsObservation()
 }
 
 // gkeNodePools returns the sorted distinct cloud.google.com/gke-nodepool

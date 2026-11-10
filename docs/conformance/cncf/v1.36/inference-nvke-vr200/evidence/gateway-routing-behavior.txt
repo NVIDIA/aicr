@@ -1,0 +1,6 @@
+Fri Nov 06 07:29:59 PM UTC 2026
+Header X-Model=blue: blue
+Header X-Model=green: green
+Configured weighted split: blue=80 green=20
+Observed responses: blue=82 green=18 total=100; all HTTP requests succeeded
+GATEWAY_HEADER_ROUTING_PASS

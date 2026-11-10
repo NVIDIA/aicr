@@ -190,13 +190,10 @@ func resolveExistingPrefix(absPath string) (string, error) {
 // validateImageRefsUse rejects --image-refs on a run that will push no
 // evidence bundle, before any cluster work, so the flag is never silently
 // ignored. evidence is the run-mode-filtered recipe-evidence configuration.
-func validateImageRefsUse(imageRefsPath string, cncfSubmission, noCluster bool, evidence *recipeEvidenceConfig) error {
+func validateImageRefsUse(imageRefsPath string, noCluster bool, evidence *recipeEvidenceConfig) error {
 	switch {
 	case imageRefsPath == "":
 		return nil
-	case cncfSubmission:
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"--image-refs cannot be combined with --cncf-submission: that mode pushes no evidence bundle")
 	case noCluster:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"--image-refs cannot be combined with --no-cluster: an offline dry-run pushes no evidence bundle")
@@ -277,7 +274,7 @@ func prepareRecipeEvidence(
 	ctx context.Context,
 	cmd *cli.Command,
 	cfg *aicr.Config,
-	cncfSubmission, noCluster bool,
+	noCluster bool,
 ) (*recipeEvidenceConfig, *imageRefsTarget, error) {
 
 	attOpts, _, err := cfg.EvidenceAttestationOptions()
@@ -290,7 +287,7 @@ func prepareRecipeEvidence(
 	}
 	evidence := evidenceConfigForRunMode(noCluster, built)
 	imageRefsPath := cmd.String(flagImageRefs)
-	if err = validateImageRefsUse(imageRefsPath, cncfSubmission, noCluster, evidence); err != nil {
+	if err = validateImageRefsUse(imageRefsPath, noCluster, evidence); err != nil {
 		return nil, nil, err
 	}
 	if imageRefsPath == "" {

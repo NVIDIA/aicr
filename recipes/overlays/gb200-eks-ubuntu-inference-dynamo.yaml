@@ -99,5 +99,6 @@ spec:
         - gang-scheduling
         - robust-controller
         - secure-accelerator-access
+        - driver-runtime-management
         - pod-autoscaling
         - cluster-autoscaling

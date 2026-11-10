@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -210,7 +211,7 @@ func VerifyServiceAccount(ctx context.Context, clientset kubernetes.Interface, n
 				name, namespace),
 			err)
 	case err != nil:
-		return errors.Wrap(apiErrorCode(ctx, err), fmt.Sprintf("failed to read ServiceAccount %q in namespace %q", name, namespace), err)
+		return errors.Wrap(pod.APIErrorCode(ctx, err), fmt.Sprintf("failed to read ServiceAccount %q in namespace %q", name, namespace), err)
 	}
 	// The validator pod spec leaves token automount to the ServiceAccount, so
 	// a ServiceAccount that disables it yields pods with no credential to
@@ -242,7 +243,7 @@ func VerifyServiceAccount(ctx context.Context, clientset kubernetes.Interface, n
 				"unverified identity", name, namespace),
 			err)
 	case err != nil:
-		return errors.Wrap(apiErrorCode(ctx, err),
+		return errors.Wrap(pod.APIErrorCode(ctx, err),
 			fmt.Sprintf("failed to review the permissions of ServiceAccount %q in namespace %q", name, namespace), err)
 	}
 	if !result.Status.Allowed {
@@ -265,24 +266,6 @@ func VerifyServiceAccount(ctx context.Context, clientset kubernetes.Interface, n
 		"serviceAccount", name,
 		"namespace", namespace)
 	return nil
-}
-
-// apiErrorCode classifies an unexpected apiserver error: a dead context is a
-// cancellation or a timeout, rejected credentials are unauthorized, a network
-// failure is retryable, and anything else is internal.
-func apiErrorCode(ctx context.Context, err error) errors.ErrorCode {
-	switch {
-	case stderrors.Is(ctx.Err(), context.Canceled):
-		return errors.ErrCodeCanceled
-	case ctx.Err() != nil:
-		return errors.ErrCodeTimeout
-	case apierrors.IsUnauthorized(err):
-		return errors.ErrCodeUnauthorized
-	case errors.IsNetworkError(err):
-		return errors.ErrCodeUnavailable
-	default:
-		return errors.ErrCodeInternal
-	}
 }
 
 func applyServiceAccount(ctx context.Context, clientset kubernetes.Interface, namespace, saName string) error {

@@ -491,8 +491,16 @@ type ValidateResolved struct {
 type EvidenceCNCFResolved struct {
 	Dir            string
 	CNCFSubmission bool
-	Features       []string
 	NotApplicable  map[string]string
+
+	// ConformanceVersion is spec.validate.evidence.cncf.conformanceVersion.
+	ConformanceVersion string
+
+	// Vendor is nil when spec.validate.evidence.cncf.vendor is unset.
+	Vendor *EvidenceCNCFVendorSpec
+
+	// Documented is spec.validate.evidence.cncf.documented, copied.
+	Documented map[string]EvidenceCNCFDocumentedSpec
 }
 
 // EvidenceAttestationResolved is the typed view of
@@ -613,10 +621,15 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 		if v.Evidence.CNCF != nil {
 			c := v.Evidence.CNCF
 			out.EvidenceCNCF = &EvidenceCNCFResolved{
-				Dir:            c.Dir,
-				CNCFSubmission: boolPtrOrFalse(c.CNCFSubmission),
-				Features:       slices.Clone(c.Features),
-				NotApplicable:  maps.Clone(c.NotApplicable),
+				Dir:                c.Dir,
+				CNCFSubmission:     boolPtrOrFalse(c.CNCFSubmission),
+				NotApplicable:      maps.Clone(c.NotApplicable),
+				Documented:         cloneDocumented(c.Documented),
+				ConformanceVersion: c.ConformanceVersion,
+			}
+			if c.Vendor != nil {
+				v := *c.Vendor
+				out.EvidenceCNCF.Vendor = &v
 			}
 		}
 		if v.Evidence.Attestation != nil {
@@ -1058,4 +1071,17 @@ func (s *ArgoCDSpec) settings() bundlercfg.ArgoCDSettings {
 		}
 	}
 	return out.Clone()
+}
+
+// cloneDocumented deep-copies the documented map so the resolved view shares
+// no slice with the spec.
+func cloneDocumented(in map[string]EvidenceCNCFDocumentedSpec) map[string]EvidenceCNCFDocumentedSpec {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]EvidenceCNCFDocumentedSpec, len(in))
+	for k, v := range in {
+		out[k] = EvidenceCNCFDocumentedSpec{Evidence: append([]string(nil), v.Evidence...), Notes: v.Notes}
+	}
+	return out
 }

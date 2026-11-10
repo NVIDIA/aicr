@@ -626,7 +626,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "gke-gpu-pools",
-			Usage:    "Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem. Projects each GPU pool's gpuDriverInstallationConfig.gpuDriverVersion into the K8s gke-gpu-pools subtype (Disabled/Installed; mixed or unrecognized driver-version values project a value no profile constraint accepts). Qualifies the GKE bundle-installer gpuStack value's pool-creation requirement beyond its opt-out node label. The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
+			Usage:    "Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem. Projects each GPU pool's gpuDriverInstallationConfig.gpuDriverVersion into the K8s gke-gpu-pools subtype (Disabled/Installed; mixed or unrecognized driver-version values project a value no profile constraint accepts). Qualifies the pool-creation requirement of the GKE bundle-installer and dra gpuStack values beyond their opt-out node label. The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
 			Sources:  cli.EnvVars("AICR_GKE_GPU_POOLS_PATH"),
 			Category: catAgentDeployment,
 		},

@@ -407,7 +407,7 @@ major. No shipped record uses it yet.
 
 Some migrations happen only while a particular range of versions is running.
 Nodewright's rename is one. An operator-side mirror converts Skyhook objects to
-NodeWright in v0.18.0 through v0.20.x, and a release that drops the legacy group
+NodeWright in v0.18.0 through v0.21.x, and a release that drops the legacy group
 would strand any object the mirror never converted. A jump from below the
 window to past it never runs the mirror. Express the window with fields the
 record already has.

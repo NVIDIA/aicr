@@ -454,3 +454,4 @@ spec:
         - gang-scheduling
         - pod-autoscaling
         - secure-accelerator-access
+        - driver-runtime-management

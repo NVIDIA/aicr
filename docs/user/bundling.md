@@ -442,6 +442,42 @@ profile's owned paths are locked. The lock is enforced per surface:
   equals, contains, or is contained by an owned path is rejected at Helm
   render time, even when the value is identical. Key presence alone
   trips the guard.
+- **argocd-helm driver-ownership paths, profiled or not**: independent of
+  any profile, an `argocd-helm` bundle that ships `gpu-operator` or
+  `gpu-operator-ocp` rejects install-time values on `driver.enabled`,
+  `toolkit.enabled` and `hostPaths.driverInstallDir`, and one that ships
+  `nvidia-dra-driver-gpu` or `nvidia-dra-driver-gpu-ocp` rejects
+  `nvidiaDriverRoot`. These paths decide who owns the GPU driver, and
+  bundle-time checks verify them (`CheckDriverOwnershipCoherence`, when the
+  bundle ships a GPU Operator), so an install-time value would bypass that
+  verdict. As above, a key that equals, contains, or is contained by a
+  guarded path trips the guard on presence alone (`false`, `null`, `[]`,
+  a scalar replacing a parent, or an identical value). The guard names
+  the path and remedy; when a scalar replaces the whole component, Helm
+  may report the component template's type error first. Set ownership at
+  bundle time instead (`aicr bundle --set gpuoperator:driver.enabled=...`)
+  so bundle-time ownership checks apply; siblings such as
+  `gpuoperator.driver.version` stay overridable. When the selected profile
+  owns the path (the AKS `gpuStack` profile owns `driver.enabled`,
+  `toolkit.enabled` and `nvidiaDriverRoot`), a bundle-time `--set` is
+  rejected as well, so choose the profile value with
+  `aicr recipe --profile gpuStack=...` instead. A `--dynamic` declaration
+  on a guarded path would stub it into the chart's root `values.yaml`,
+  which the guard rejects on every render, so `aicr bundle` rejects it.
+  The guard lives in `templates/aicr-driver-ownership-lock.yaml`.
+  With `--vendor-charts`, a component's wrapper chart forwards values to the
+  upstream chart under its dependency name, so the guard also rejects the
+  same paths there (for example `gpuoperator.gpu-operator.driver.enabled`, or
+  `dradriver.dra-driver-nvidia-gpu.nvidiaDriverRoot`); siblings such as
+  `gpuoperator.gpu-operator.driver.version` stay overridable.
+  A bundle subset (the REST `bundlers=` filter or the SDK's
+  `config.WithBundlers`) that omits these components carries no guard
+  for them. When regenerating into an existing directory, stale artifacts
+  for an omitted or disabled guarded component are rejected before any
+  output is written, even without checksums; generate into a fresh
+  directory. An existing install that sets these values at install time
+  fails after upgrading; see the
+  [upgrade note](component-catalog.md#gpu-operator-and-nvidia-dra-driver-gpu-argocd-helm-rejects-install-time-driver-ownership-values).
 - **Component presence (the synthetic `enabled` owned path)**: not
   changeable by selecting a different profile value — profile fragments
   cannot assign `enabled`, so no `--profile` choice adds or removes a
@@ -468,7 +504,9 @@ aicr bundle --recipe recipe.yaml \
 The `agentgateway` inference-gateway is **private by default**: with no
 `allowedSourceRanges` override, the bundler scopes the LoadBalancer to private
 RFC1918 ranges so it is not exposed to the public internet. Use the override
-above to admit specific clients (e.g. a corporate VPN). See
+above to admit specific clients (e.g. a corporate VPN). On a cluster with no
+LoadBalancer provider, `--set agentgateway:serviceType=ClusterIP` gives the
+gateway a ClusterIP Service instead, to which source ranges do not apply. See
 [Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
 
 ### Size controllers for large clusters
@@ -958,7 +996,12 @@ a ConfigMap or ClusterRole with no dependents). **Do not** `kubectl delete -f`
 CRD or Namespace manifests from a migration cleanup — deleting a CRD
 garbage-collects every CR of that type cluster-wide (Gateway API / Inference
 Extension CRDs under `agentgateway-crds` are the concrete risk), and deleting a
-Namespace removes everything inside it.
+Namespace removes everything inside it. Those vendored CRDs carry
+`helm.sh/resource-policy: keep` and `argocd.argoproj.io/sync-options:
+Delete=false,Prune=false`. Helm reads `keep` from the release's stored manifest
+when it uninstalls, so once a bundle carrying them has been applied, uninstalling
+or pruning the release or Application that owns them leaves them in place. An
+explicit `kubectl delete` is covered by neither.
 
 ## Gate on component readiness
 

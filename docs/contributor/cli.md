@@ -14,10 +14,20 @@ facade, the same way `pkg/server` handlers are. Crossing this boundary
 will be rejected in review.
 
 `cmd/aicr/main.go` is a one-line entry point that calls
-`cli.Execute()`. `Execute` builds the root command tree, runs it with a
-`signal.NotifyContext` (SIGINT/SIGTERM), and on return calls
+`cli.Execute()`. `Execute` builds the root command tree, runs it with
+the context from `commandSignalContext`, and on return calls
 `os.Exit(errors.ExitCodeFromError(err))`. Handlers never call
 `os.Exit` themselves — they return errors.
+
+`commandSignalContext` wraps `signal.NotifyContext` (SIGINT/SIGTERM): the
+first signal cancels the command's context. It also restores the default
+signal disposition at once, for **every** subcommand. A second SIGINT or
+SIGTERM therefore terminates the process immediately, even while deferred
+cleanup that runs on a fresh context is still in progress (for example the
+snapshot agent's Job and RBAC cleanup, or validator teardown). Such cleanup
+must stay bounded and idempotent, because a second signal can cut it short and
+leave cluster resources behind. This is intentional: an operator can always
+force-exit a command stuck in cleanup.
 
 ## Command Inventory
 
@@ -32,7 +42,7 @@ Subcommands registered in `pkg/cli/root.go` (`Commands:` slice on
 | `recipe list` | `recipe_list.go` | List recipes matching the given criteria. |
 | `recipe sign-catalog` | `recipe_sign_catalog.go` | Sign the recipe catalog. |
 | `recipe verify-catalog` | `recipe_verify_catalog.go` | Verify the signed recipe catalog. |
-| `query` | `query.go` | Extract a single hydrated value from a recipe (`--selector components.gpu-operator.values.driver.version`). |
+| `query` | `query.go`, `query_summary.go` | Extract a hydrated value (`--selector`) or show a recipe overview (`--summary`); resolve criteria or load a saved recipe with `--recipe`. |
 | `bundle` | `bundle.go` | Render per-component deployment artifacts from a recipe via a chosen deployer (`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`, `fleet`). |
 | `verify` | `bundle_verify.go` | Verify a bundle's checksums, attestation signatures, and provenance chain; report the achieved trust level and enforce a `--min-trust-level` / creator / CLI-version policy. |
 | `validate` | `validate.go` | Evaluate recipe constraints against a snapshot or live cluster; optionally emit evidence. |
@@ -143,7 +153,7 @@ packages (`pkg/recipe`, `pkg/bundler`, `pkg/snapshotter`,
 | `ResolveRecipeFromCriteriaWithOptions(ctx, *Criteria, opts...)` | `recipe`, `query`, `mirror` (criteria path) |
 | `ResolveRecipeFromSnapshot(ctx, *Criteria, *Snapshot)` | snapshot fast path (no resolve options) |
 | `ResolveRecipeFromSnapshotWithOptions(ctx, *Criteria, *Snapshot, opts...)` | `recipe --snapshot`, `query --snapshot` — with `WithSnapshotCriteriaRelaxation(stated...)` for the derived-criteria retry |
-| `LoadRecipe(ctx, path, kubeconfig)` | `bundle`, `validate`, `diff` (read a previously emitted recipe file) |
+| `LoadRecipe(ctx, path, kubeconfig)` | `bundle`, `validate`, `diff`, `query --recipe` (read a previously emitted recipe file) |
 | `MakeBundle(ctx, *RecipeResult, BundleOptions)` | `bundle` |
 | `LoadSnapshot(ctx, path, kubeconfig)` | `validate`, `query`, `diff` (read a previously captured snapshot; file, URL, or `cm://` ConfigMap) |
 | `CollectSnapshot(ctx, *AgentConfig)` | `snapshot`, `validate` (Job-mode capture only; local `AICR_AGENT_MODE` collection deploys no Job and stays on `snapshotter.NodeSnapshotter`) |
@@ -161,6 +171,18 @@ Adding business logic in the handler — recipe resolution loops, bundle
 rendering, validator orchestration, OCI pushes — is a boundary
 violation. If the facade is missing the surface you need, add it to
 `pkg/client/v1` first.
+
+**Query summaries.** `query --summary` projects the recipe through
+`aicr.SummarizeRecipe`, which returns an `*aicr.RecipeSummary` (a transparent
+alias of `recipe.Summary`). The projection itself is `recipe.BuildSummary`, a
+pure function in `pkg/recipe/summary.go` that performs no I/O and does not
+modify the recipe. `pkg/cli/query_summary.go` owns only
+presentation: the text view and the YAML/JSON document. Renderer goldens live in
+`pkg/cli/testdata/query-summary-*.golden`; regenerate them with
+`go test ./pkg/cli/ -run TestWriteRecipeSummaryTextGolden -update`. For the
+user-facing rules (flag exclusions, ordering, the summary document, and
+`--recipe` behavior), see the
+[CLI reference](../user/cli-reference.md#recipe-summary).
 
 **What `--snapshot` still owns.** `buildRecipeFromCmdWithConfig` in
 `query.go` derives criteria from the snapshot fingerprint, layers config and

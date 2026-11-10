@@ -107,6 +107,105 @@ is removed in v2.0.0, per the
 **What to do.** Replace each `deployer:<key>` entry with the setting in the
 table, then confirm the bundle is unchanged.
 
+### The `--feature` flag and `evidence.cncf.features` key
+
+**Surface:** CLI, config file, Go SDK ·
+**Deprecated in:** the release that follows v1.2.0 · **Removed in:** the same release (entry moves to Removed when its tag lands)
+
+The `validate` command's `--feature` (`-f`) scoped the sections of the bash evidence
+collector that `--cncf-submission` ran. The collector was deleted when
+`aicr validate --phase conformance` became the only runner for CNCF AI
+conformance ([#3602](https://github.com/NVIDIA/aicr/issues/3602), ADR-007
+amendment): every conformance check the recipe declares runs, so there is no
+section list to scope: the recipe's `validation.conformance.checks` decides
+what runs, `--skip-check` already scopes a CI run by name, and a submission
+run refuses `--skip-check` on purpose. The flag is removed outright (the CLI
+reports it as an unknown flag), a config document that sets
+`spec.validate.evidence.cncf.features` does not load, and the Go SDK refuses a
+non-empty `CNCFCollectOptions.Features` with `INVALID_REQUEST`. The frozen v1
+surface owes notice before a removal; the removal shipped with the collector
+because the behavior the flag selected no longer exists, and it is recorded
+here for that reason.
+
+**What to do.** Drop the flag or key. To write the submission directory, pass
+`--cncf-submission --evidence-dir <dir>` with `spec.validate.evidence.cncf.vendor`
+in `--config`; see
+[CNCF submission evidence](validation.md#cncf-submission-evidence).
+
+### `--evidence-dir` without `--cncf-submission`
+
+**Surface:** CLI, config file ·
+**Deprecated in:** the release that follows v1.2.0 · **Removed in:** the same release (entry moves to Removed when its tag lands)
+
+`--evidence-dir` alone rendered the CNCF evidence pages from a conformance run
+that was not a submission. The ADR-007 amendment makes the two flags require
+each other (evidence is written only for a submission run), so `--evidence-dir`
+without `--cncf-submission`, and `spec.validate.evidence.cncf.dir` without
+`cncfSubmission: true`, are refused with `INVALID_REQUEST`
+([#3602](https://github.com/NVIDIA/aicr/issues/3602)).
+
+**What to do.** Add `--cncf-submission` (or `cncfSubmission: true`). The same
+checks run with the same verdicts; the run additionally adds the requirement
+aggregation to its exit status, see
+[Exit status of a submission run](validation.md#exit-status-of-a-submission-run).
+
+### `--cncf-submission` without `--recipe` or without the conformance phase
+
+**Surface:** CLI, config file ·
+**Deprecated in:** the release that follows v1.2.0 · **Removed in:** the same release (entry moves to Removed when its tag lands)
+
+A submission run used to accept no recipe: the collector detected the
+cluster's capabilities itself. The single runner selects the conformance
+checks from the recipe, so `--cncf-submission` without `--recipe` (or
+`spec.validate.input.recipe`) is refused with `INVALID_REQUEST`, as every
+other validate run already was. It is also refused when the `--phase`
+selection leaves the conformance phase out, since the evidence is rendered
+from that phase's checks and every requirement would otherwise read not
+tested ([#3602](https://github.com/NVIDIA/aicr/issues/3602)).
+
+**What to do.** Pass `--recipe <recipe.yaml>` (the deployed bundle's
+`bundle/recipe.yaml` is the usual input) and `--phase conformance` or
+`--phase all`.
+
+### `Client.CollectCNCFEvidence` argument contract
+
+**Surface:** Go SDK ·
+**Deprecated in:** the release that follows v1.2.0 · **Removed in:** the same release (entry moves to Removed when its tag lands)
+
+The signature is unchanged, and three documented semantics changed with the
+collector's removal ([#3602](https://github.com/NVIDIA/aicr/issues/3602)):
+
+- A nil `*RecipeResult`, documented as optional (the collector then detected
+  the cluster's capabilities), is refused with `ErrCodeInvalidRequest`: the
+  run selects its conformance checks from the recipe.
+- `CNCFCollectOptions.NoCluster`, documented as a test mode that reported
+  every section skipped, is refused with `ErrCodeInvalidRequest`: submission
+  evidence comes from checks that ran on a live cluster. The field is marked
+  `Deprecated`.
+- `CNCFEvidenceFeatures()` returns an empty slice instead of the nine feature
+  names, and is marked `Deprecated` together with
+  `CNCFCollectOptions.Features`, which is refused when non-empty (see the
+  entry above).
+
+The method is now the submission run itself: snapshot, the conformance phase
+the recipe declares, render, and the exit rule of
+`CNCFRequirementAggregate.Outcome`. Its cluster footprint is the CLI's, not
+the kubectl collector's: the snapshot agent runs privileged (hostPID,
+hostNetwork and host mounts for the GPU, SystemD and OS collectors) in
+`CNCFCollectOptions.Namespace` (default `aicr-validation`), and
+`ValidateState` creates per-run RBAC for the validator Jobs, a cluster-admin
+binding by default. A caller that needs a restricted agent or its own
+validator ServiceAccount composes `CollectSnapshot`, `ValidateState`,
+`MergeReports` and `RenderCNCFEvidenceWithResult` (or `WriteCNCFSubmission`)
+directly. `staticcheck`
+reports the deprecated members as `SA1019` at build time.
+
+**What to do.** Pass the recipe from `LoadRecipe` or `ResolveRecipe`; for an
+offline dry-run call `ValidateState` with `WithValidationNoCluster(true)`
+instead; drop `Features` and any use of `CNCFEvidenceFeatures()`. See
+[Go library](../integrator/go-library.md#cncf-ai-conformance-evidence).
+
+
 ## Removed
 
 ### Alpha artifact `apiVersion` values

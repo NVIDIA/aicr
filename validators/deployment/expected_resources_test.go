@@ -292,7 +292,9 @@ func TestCheckExpectedResources_FailsWhenNodewrightCRMissing(t *testing.T) {
 		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}},
 	)
 
+	start := time.Now()
 	err := checkExpectedResources(ctx)
+	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected error when Nodewright CR is missing but CRD is registered")
 		return
@@ -300,6 +302,15 @@ func TestCheckExpectedResources_FailsWhenNodewrightCRMissing(t *testing.T) {
 	if !strings.Contains(err.Error(), "Nodewright tuning: not found (recipe declared it but the cluster has no such CR)") {
 		t.Fatalf("expected recipe-scoped Nodewright not-found failure, got: %v", err)
 		return
+	}
+	// #3703: a declared CR the cluster does not have is terminal, so the
+	// check fails at once with NotFound instead of polling the readiness
+	// budget to a timeout and leaving the chainsaw asserts unevaluated.
+	if !strings.Contains(err.Error(), "manifests were not applied to this cluster") {
+		t.Errorf("error = %v, want the absent-CR diagnosis", err)
+	}
+	if elapsed >= gpuReadinessTimeout {
+		t.Errorf("checkExpectedResources took %v, want a fast failure well under the %v readiness budget", elapsed, gpuReadinessTimeout)
 	}
 }
 
