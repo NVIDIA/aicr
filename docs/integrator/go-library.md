@@ -1377,14 +1377,16 @@ literal and have all three take effect.
 `MakeBundle` renders into a private directory and writes into `OutputDir` only
 once the bundle is complete, so a call that fails while rendering leaves
 `OutputDir` as it found it. An `OutputDir` that holds an earlier bundle is
-replaced, and content that is neither part of it nor named like the new
-bundle's output fails the call. With `config.WithIncludeChecksums(false)`,
-nothing is checked. A top-level entry the new bundle also writes is replaced
+replaced. Every top-level folder named like a component folder, such as
+`001-notes/`, is removed whatever it holds, even when the new bundle does not
+write it, and so are the other leftover entries
+[Output directory](../user/bundling.md#output-directory) lists. Other content
+that is neither part of the earlier bundle nor named like the new bundle's
+output fails the call. With `config.WithIncludeChecksums(false)`, nothing
+else is checked. A top-level entry the new bundle also writes is replaced
 whole, so a directory such as `data/` loses every file the new bundle does
 not write, and other top-level entries are kept. Copy out any file you need
-before reusing `OutputDir`. See
-[Output directory](../user/bundling.md#output-directory) for which entries
-are replaced.
+before reusing `OutputDir`.
 
 To generate a class-partitioned bundle set ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)),
 set `Split` and give `OutputDir` a path that does not exist yet; the set is

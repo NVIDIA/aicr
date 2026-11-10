@@ -45,8 +45,10 @@ directory as it found it. An interrupt that arrives after that does not stop
 the move.
 
 Bundling into a directory that holds an earlier bundle replaces it. Every
-numbered component folder is replaced whatever it holds, and so is a top-level
-file the new bundle also writes, such as `README.md`, along with
+top-level folder named like a component folder, three digits and a hyphen such
+as `001-gpu-operator/`, is replaced or removed whatever it holds, even one you
+created. So is a top-level file the new bundle also writes, such as
+`README.md`, along with
 `provenance.yaml`, `undeploy.sh` and an empty `static/` or `sources/`. Any
 other file, including one under a directory such as `data/`, is replaced or
 removed only when the new bundle writes a file at the same path, or the
