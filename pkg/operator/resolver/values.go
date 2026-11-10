@@ -20,7 +20,7 @@ import (
 	"errors"
 	"io"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 )

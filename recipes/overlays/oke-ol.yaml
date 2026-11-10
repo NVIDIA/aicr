@@ -65,6 +65,36 @@ spec:
               value: cdi-annotations,cdi-cri,volume-mounts
             - name: MOFED_ENABLED
               value: "false"
+        # Device-isolation hardening for the GPU Operator's toolkit under
+        # gpuStack=operator-managed (toolkit.enabled=true there). Inert under
+        # oci-managed, where the toolkit is disabled and the node image's
+        # toolkit is hardened by toolkit-hardening-oke.yaml instead. The
+        # toolkit installer turns these into the config.toml keys.
+        toolkit:
+          env:
+            - name: RUNTIME_CONFIG_SOURCE
+              value: file
+            - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED
+              value: "false"
+            - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS
+              value: "true"
+
+    # Device-isolation hardening for the node image's container toolkit.
+    # OKE's node bootstrap runs that toolkit for every container through an
+    # always-on CRI-O OCI hook, and its default trusts NVIDIA_VISIBLE_DEVICES
+    # from unprivileged containers, so any pod setting it gets every GPU on
+    # the node. nvidia-setup oci-any sets the hardened keys on every GPU node,
+    # taint-gating new nodes until it has, and does nothing on a node without
+    # a host toolkit config. Declared on the OKE root so every OKE recipe
+    # carries it; GB300 adds its tuning manifest alongside it. Requires the
+    # NvidiaGpuPlugin add-on on deviceListStrategy=volume-mounts under
+    # oci-managed (enforced by the profile's constraint below).
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/toolkit-hardening-oke.yaml
+      dependencyRefs:
+        - nodewright-operator
 
     # Prometheus persistent storage (provide --storage-class at bundle time, e.g. oci-bv)
     - name: kube-prometheus-stack
@@ -141,6 +171,10 @@ spec:
       oci-managed:
         advertiser: external
         componentRefs:
+          # OKE's node bootstrap wires GPUs into containers through an
+          # always-on CRI-O OCI hook on the default runc runtime and registers
+          # no nvidia runtime handler, so the operands run on runc, as AKS's
+          # azure-managed value points them at the image's runtime.
           - name: gpu-operator
             overrides:
               driver:
@@ -152,6 +186,7 @@ spec:
                 enabled: false
               hostPaths:
                 driverInstallDir: /run/nvidia/driver
+              operator: {runtimeClass: runc}
           - name: nvidia-dra-driver-gpu
             overrides:
               nvidiaDriverRoot: /
@@ -161,13 +196,14 @@ spec:
             optional: true
             overrides:
               labeler: {assumeDriverInstalled: true}
+              metadata-collector: {runtimeClassName: runc}
               # OKE's add-on advertises the GPUs, so the GPU Operator runs no
               # device plugin for janitor to wait on after a reset.
               janitor:
                 config:
                   controllers:
                     gpuReset:
-                      resetJob: {hostDriverRootPath: /}
+                      resetJob: {runtimeClassName: runc, hostDriverRootPath: /}
                       serviceManager:
                         name: gpu-operator
                         spec:
@@ -217,6 +253,22 @@ spec:
               add-on before qualifying oci-managed. Capture
               the signal with: aicr snapshot --oke-addons <path to
               `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump>.
+          # The node toolkit hardening (toolkit-hardening-oke.yaml) refuses
+          # NVIDIA_VISIBLE_DEVICES from unprivileged containers, so the add-on
+          # must grant GPUs through volume mounts; on its default envvar
+          # strategy, pods would lose the GPUs they were allocated.
+          - name: K8s.oke-gpu-plugin.device-list-strategy
+            value: volume-mounts
+            remediation: >-
+              OKE's NvidiaGpuPlugin add-on does not run with
+              deviceListStrategy=volume-mounts. AICR hardens the node's NVIDIA
+              container toolkit so unprivileged containers cannot claim GPUs
+              through NVIDIA_VISIBLE_DEVICES, which is how the add-on's
+              default envvar strategy hands allocated GPUs to pods. Configure
+              the add-on with `oci ce cluster update-addon --cluster-id
+              <cluster-ocid> --addon-name NvidiaGpuPlugin --configurations
+              '[{"key":"deviceListStrategy","value":"volume-mounts"}]'`, wait
+              for its DaemonSet to roll out, then recapture the snapshot.
       # Bring-your-own driverless image: the GPU Operator installs driver,
       # toolkit, and device plugin; the DRA kubelet plugin reads the driver
       # userspace from the operator install path (TestDriverRootLockstep,
@@ -235,6 +287,7 @@ spec:
                 enabled: true
               hostPaths:
                 driverInstallDir: /run/nvidia/driver
+              operator: {runtimeClass: nvidia}
           - name: nvidia-dra-driver-gpu
             overrides:
               nvidiaDriverRoot: /run/nvidia/driver
@@ -245,11 +298,12 @@ spec:
             optional: true
             overrides:
               labeler: {assumeDriverInstalled: false}
+              metadata-collector: {runtimeClassName: nvidia}
               janitor:
                 config:
                   controllers:
                     gpuReset:
-                      resetJob: {hostDriverRootPath: /run/nvidia/driver}
+                      resetJob: {runtimeClassName: nvidia, hostDriverRootPath: /run/nvidia/driver}
                       serviceManager:
                         name: gpu-operator
                         spec:

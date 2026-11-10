@@ -1153,13 +1153,6 @@ It derives a `defaults.FileReadTimeout`-bounded context internally, so the
 reads stay bounded but the caller cannot cancel them. Prefer the
 context-aware form wherever a `context.Context` is available.
 
-`SummarizeRecipe(rec)` returns the overview `aicr query --summary` prints, as
-an `*aicr.RecipeSummary` (a transparent alias of `pkg/recipe.Summary`):
-identity, criteria, applied overlays, constraints, enabled components in
-deployment order, and the validation checks per phase. It performs no I/O and
-does not hydrate component values. A `nil` `*RecipeResult`, or one without
-internal recipe state, returns `ErrCodeInvalidRequest`.
-
 The **outermost** structured code distinguishes the two failure stages, so a
 caller can shape a response without reimplementing hydrate-then-select:
 `ErrCodeNotFound` means the selector path does not exist, and any other code
@@ -1167,6 +1160,13 @@ caller can shape a response without reimplementing hydrate-then-select:
 `errors.As` on the outermost error rather than `errors.Is` — `Is` walks the
 wrap chain and would match an `ErrCodeNotFound` cause nested inside a
 hydration failure.
+
+`SummarizeRecipe(rec)` returns the overview `aicr query --summary` prints, as
+an `*aicr.RecipeSummary` (a transparent alias of `pkg/recipe.Summary`):
+identity, criteria, applied overlays, constraints, enabled components in
+deployment order, and the validation checks per phase. It performs no I/O and
+does not hydrate component values. A `nil` `*RecipeResult`, or one without
+internal recipe state, returns `ErrCodeInvalidRequest`.
 
 ### Delivering a collected snapshot
 

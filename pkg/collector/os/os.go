@@ -27,11 +27,12 @@ import (
 // - GRUB bootloader parameters from /proc/cmdline
 // - Loaded kernel modules from /proc/modules
 // - Sysctl parameters from /proc/sys
+// - Allowlisted kernel module parameters from /sys/module
 type Collector struct {
 }
 
 // Collect gathers all OS-level configurations and returns them as a single measurement
-// with subtypes: grub, sysctl, kmod, and release.
+// with subtypes: grub, sysctl, kmod, kmod-param, and release.
 // Individual sub-collectors degrade gracefully — if any sub-collector fails,
 // a warning is logged and that subtype is skipped.
 func (c *Collector) Collect(ctx context.Context) (*measurement.Measurement, error) {
@@ -53,6 +54,7 @@ func (c *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		{"grub", c.collectGRUB},
 		{"sysctl", c.collectSysctl},
 		{"kmod", c.collectKMod},
+		{SubtypeKModParam, c.collectKModParam},
 		{"release", c.collectRelease},
 	}
 

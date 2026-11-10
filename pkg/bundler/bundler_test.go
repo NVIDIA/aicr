@@ -1866,6 +1866,7 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 			ManifestFiles: manifests, Overrides: overrides}
 	}
 	hardening := []string{aksToolkitHardeningManifest}
+	okeHardening := []string{okeToolkitHardeningManifest}
 	disableSet := []config.Option{config.WithValueOverrides(map[string]map[string]string{
 		"nodewrightcustomizations": {"enabled": "false"},
 	})}
@@ -1875,6 +1876,7 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 		refs        []recipe.ComponentRef
 		cfgOpts     []config.Option
 		wantWarning string // substring expected in b.warnings; "" = no warning
+		oke         bool   // OKE hardening: the AKS-only accelerator=generic tip must be absent
 	}{
 		{
 			name:        "disabled via --set, azure-managed",
@@ -1946,6 +1948,25 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 			wantWarning: "could not be resolved",
 		},
 		{
+			name:        "OKE disabled via --set, oci-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(okeHardening, nil)},
+			cfgOpts:     disableSet,
+			wantWarning: "disabled via --set",
+			oke:         true,
+		},
+		{
+			name:        "OKE excluded by bundlers filter, oci-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(okeHardening, nil)},
+			cfgOpts:     []config.Option{config.WithBundlers([]string{"gpu-operator"})},
+			wantWarning: "excluded by the bundlers filter",
+			oke:         true,
+		},
+		{
+			name:    "OKE disabled via --set, operator-managed",
+			refs:    []recipe.ComponentRef{gpuOp(true), nwc(okeHardening, nil)},
+			cfgOpts: disableSet,
+		},
+		{
 			name:    "disabled without the hardening manifest",
 			refs:    []recipe.ComponentRef{gpuOp(false), nwc(nil, nil)},
 			cfgOpts: disableSet,
@@ -1981,7 +2002,13 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 				return
 			}
 			joined := strings.Join(b.warnings, "\n")
-			for _, want := range []string{tt.wantWarning, "device-isolation", "accelerator=generic"} {
+			wants := []string{tt.wantWarning, "device-isolation"}
+			if !tt.oke {
+				wants = append(wants, "accelerator=generic")
+			} else if strings.Contains(joined, "accelerator=generic") {
+				t.Errorf("warnings = %v, want no AKS accelerator=generic tip for OKE", b.warnings)
+			}
+			for _, want := range wants {
 				if !strings.Contains(joined, want) {
 					t.Errorf("warnings = %v, want substring %q", b.warnings, want)
 				}

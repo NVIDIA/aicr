@@ -492,6 +492,10 @@ land later; none is implied by Preview alone.
 | `nvke / vr200 / ubuntu / training / kubeflow` | [NVKE VR200 Setup](nvke-vr200-setup.md) | pending: adds Kubeflow Trainer to the training leaf; no evidence collected yet |
 | `nvke / vr200 / ubuntu / inference` | [NVKE VR200 Setup](nvke-vr200-setup.md) | pending: evidence in [#3695](https://github.com/NVIDIA/aicr/pull/3695), being recollected; no external LoadBalancer, so the gateway is in-cluster only |
 | `nvke / vr200 / ubuntu / inference / dynamo` | [NVKE VR200 Setup](nvke-vr200-setup.md) | pending: validated on hardware from this leaf's own bundle in [#3711](https://github.com/NVIDIA/aicr/pull/3711); signed evidence to follow |
+| `nvke / gb300 / ubuntu / training` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: MNNVL measured across two trays with this pairing's runtime; no east-west NIC path |
+| `nvke / gb300 / ubuntu / training / kubeflow` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: adds Kubeflow Trainer to the training leaf; no evidence collected yet |
+| `nvke / gb300 / ubuntu / inference` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: the Dynamo leaf's run covers its components; no external LoadBalancer, so the gateway is in-cluster only |
+| `nvke / gb300 / ubuntu / inference / dynamo` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: validated on hardware from this leaf's own bundle; signed evidence to follow |
 | `eks / h100 / ubuntu / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 | `gke / h100 / cos / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 

@@ -658,7 +658,7 @@ func TestBuildLaneBundle(t *testing.T) {
 // the plan's recipe for upgrade-check and reproduce.
 func TestBuildRecordsTheBundleRecipeForValidation(t *testing.T) {
 	t.Parallel()
-	for _, version := range []string{"v1.0.0", "v1.1.2"} {
+	for _, version := range []string{"v1.0.0", "v1.1.2", "v1.2.0"} {
 		t.Run(version, func(t *testing.T) {
 			t.Parallel()
 			in := buildInput(t)

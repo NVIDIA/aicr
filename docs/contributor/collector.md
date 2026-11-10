@@ -47,7 +47,7 @@ Each subdirectory is one collector; one collector emits one
 |------|---------|-------|-------|
 | GPU | `pkg/collector/gpu` | `TypeGPU` | One subtype: `hardware` (NFD/PCI enumeration; resolves the accelerator SKU from the PCI device ID). Driver-free — no nvidia-smi. Degrades to no subtype when sysfs is unavailable. |
 | Kubernetes | `pkg/collector/k8s` | `TypeK8s` | Server version, image inventory, GPU Operator ClusterPolicy, node-local info, secret-safe Slinky resource topology, official MariaDB Operator API conflict evidence, OKE legacy device-plugin conflict evidence, default StorageClass evidence, and Percona Operator for MongoDB conflict evidence. Uses the singleton `pkg/k8s/client`. |
-| OS | `pkg/collector/os` | `TypeOS` | Subtypes for `release` (`/etc/os-release`), `grub`, `kmod`, `sysctl`. |
+| OS | `pkg/collector/os` | `TypeOS` | Subtypes for `release` (`/etc/os-release`), `grub`, `kmod`, `kmod-param` (allowlisted `/sys/module` parameters), `sysctl`. |
 | SystemD | `pkg/collector/systemd` | `TypeSystemD` | D-Bus probe of configured services. Routes to Talos via factory when `os: talos`. |
 | Topology | `pkg/collector/topology` | `TypeNodeTopology` | Cluster-wide taints and labels across all nodes, in two encodings — lossless `Items` plus the legacy folded `Data` map — see [Cross-cutting topology collector](#cross-cutting-topology-collector). |
 | Network | `pkg/collector/network` | `TypeNetworkTopology` | Ingests an l8k cluster-config (from disk via `ClusterConfigPath`, or live via `DiscoverNetwork`). **Inactive by default** — emits no measurement unless one option is set. `DiscoverNetwork` is read-only and requires a running Network Operator daemon (see note above). |
