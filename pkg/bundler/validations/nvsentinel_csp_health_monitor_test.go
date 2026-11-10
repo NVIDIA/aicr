@@ -175,6 +175,13 @@ func TestCheckNVSentinelCSPHealthMonitorCoherent(t *testing.T) {
 			want:   []string{wantStrategy}},
 		{name: "clusterName empty", recipe: recipeOf(recipe.CriteriaServiceEKS, clusterNamed("aws", "")),
 			want: []string{wantClusterName}},
+		{name: "clusterName null", recipe: func() *recipe.RecipeResult {
+			csp := monitor("aws")
+			toml(csp)["clusterName"] = nil
+			return recipeOf(recipe.CriteriaServiceEKS, csp)
+		}(), want: []string{wantClusterName}},
+		{name: "gcp project null", recipe: recipeOf(recipe.CriteriaServiceGKE, gcpWith("targetProjectId", nil)),
+			want: []string{wantProject}},
 		{name: "clusterName blank", recipe: recipeOf(recipe.CriteriaServiceGKE, clusterNamed("gcp", "  ")),
 			want: []string{wantClusterName}},
 		{name: "clusterName from --set parsed as a number",
@@ -291,6 +298,17 @@ func TestCheckNVSentinelCSPHealthMonitorCoherent(t *testing.T) {
 		{name: "aws poll minimum ignored on gcp",
 			recipe: recipeOf(recipe.CriteriaServiceGKE, with(monitor("gcp"), "configToml",
 				with(toml(monitor("gcp")), "aws", map[string]any{"pollingIntervalSeconds": 1})))},
+		{name: "lambda poll on aws still decoded",
+			recipe: recipeOf(recipe.CriteriaServiceEKS, with(monitor("aws"), "configToml",
+				with(toml(monitor("aws")), "lambda", map[string]any{"pollingIntervalSeconds": 1.5}))),
+			want: []string{wantNotWhole}},
+		{name: "lambda poll with a unit on gcp",
+			recipe: recipeOf(recipe.CriteriaServiceGKE, with(monitor("gcp"), "configToml",
+				with(toml(monitor("gcp")), "lambda", map[string]any{"pollingIntervalSeconds": "45s"}))),
+			want: []string{wantNotWhole}},
+		{name: "lambda poll minimum ignored on aws",
+			recipe: recipeOf(recipe.CriteriaServiceEKS, with(monitor("aws"), "configToml",
+				with(toml(monitor("aws")), "lambda", map[string]any{"pollingIntervalSeconds": 10})))},
 		{name: "aws poll on gcp still decoded",
 			recipe: recipeOf(recipe.CriteriaServiceGKE, with(monitor("gcp"), "configToml",
 				with(toml(monitor("gcp")), "aws", map[string]any{"pollingIntervalSeconds": 1.5}))),

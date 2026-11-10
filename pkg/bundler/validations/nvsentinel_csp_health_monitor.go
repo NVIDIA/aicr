@@ -48,6 +48,7 @@ const (
 	cspMonitorMixinPrefix            = "nvsentinel-csp-health-monitor-"
 	cspMonitorAWS                    = "aws"
 	cspMonitorGCP                    = "gcp"
+	cspMonitorLambda                 = "lambda"
 	cspMonitorStoreOnly              = "STORE_ONLY"
 	cspMonitorMaxWholeNumber         = 1e6
 )
@@ -56,8 +57,9 @@ const (
 // monitor's TOML unquoted, with the minimum the monitor accepts at startup
 // (health-monitors/csp-health-monitor/pkg/config/config.go, NVSentinel
 // v1.28.0). zeroIsDefault marks the ones the monitor replaces with its
-// default when 0. aws and gcp scope the minimum to that provider's poller;
-// the monitor decodes both sections, so either must still be a whole number.
+// default when 0. aws, gcp and lambda scope the minimum to that provider's
+// poller; the monitor decodes all three sections whatever cspName is, so each
+// must still be a whole number.
 var cspMonitorIntervals = []struct {
 	path, provider string
 	min            int64
@@ -69,6 +71,7 @@ var cspMonitorIntervals = []struct {
 	{path: "csp-health-monitor.configToml.nodeReadinessTimeoutMinutes", min: 1, zeroIsDefault: true},
 	{path: "csp-health-monitor.configToml.aws.pollingIntervalSeconds", provider: cspMonitorAWS, min: 30},
 	{path: "csp-health-monitor.configToml.gcp.apiPollingIntervalSeconds", provider: cspMonitorGCP, min: 30},
+	{path: "csp-health-monitor.configToml.lambda.pollingIntervalSeconds", provider: cspMonitorLambda, min: 30},
 }
 
 // cspMonitorAWSHealthRegions are the regions the AWS Health API has an
@@ -234,13 +237,13 @@ func CheckNVSentinelCSPHealthMonitorCoherent(ctx context.Context, componentName 
 // with why it is needed.
 func cspMonitorRequiredString(values map[string]any, path, why string, fail func(string, ...any)) (string, bool) {
 	v, _, valid := resolvedStringValue(values, path)
+	raw, _ := component.GetValueByPath(values, path)
 	switch {
-	case !valid:
-		raw, _ := component.GetValueByPath(values, path)
+	case !valid && raw != nil:
 		fail("%s is %v, not a string: --set parses an all-digit or boolean value as a number or boolean -- pass it "+
 			"as a string: "+
 			"--set-json 'nv-sentinel:%s=\"<value>\"'", path, raw, path)
-	case strings.TrimSpace(v) == "":
+	case raw == nil || strings.TrimSpace(v) == "":
 		fail("%s is empty: %s. It is per cluster, so no recipe sets it: --set nv-sentinel:%s=<value>", path, why, path)
 	default:
 		return v, true
