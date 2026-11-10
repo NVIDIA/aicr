@@ -58,13 +58,14 @@ func TestRunRejectsUnknownFlag(t *testing.T) {
 }
 
 const (
+	aicrImage      = "ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433"
 	validatorImage = "ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790"
 	repository     = "oci://registry.example.com/aicr/cluster"
 )
 
 var installFlags = []string{
 	"--aicr-version=v1.0.0",
-	"--aicr-image=ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433",
+	"--aicr-image=" + aicrImage,
 	"--registry-repository=" + repository,
 }
 
