@@ -129,12 +129,12 @@ declaration default and `aicr validate` has no `--profile` flag:
 RESOURCE_GROUP="my-resource-group"  # AKS only: replace with your cluster's resource group
 CLUSTER="my-cluster"                # replace with your AKS or GKE cluster name
 INTENT="training"                   # replace with training or inference, from the target overlay's criteria
-GPU_STACK="azure-managed"           # replace with the profile to attest: azure-managed or operator-managed (AKS), gke-default or bundle-installer (GKE)
+GPU_STACK="azure-managed"           # replace with the profile to attest: azure-managed or operator-managed (AKS), gke-default, bundle-installer, or dra (GKE)
 # AKS only: capture the pool projection first.
 az aks nodepool list -g "${RESOURCE_GROUP}" --cluster-name "${CLUSTER}" -o json > pools.json
 aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml
 # GKE gke-default: a plain `aicr snapshot -o snapshot.yaml` suffices.
-# GKE bundle-installer: also capture the pool projection.
+# GKE bundle-installer and dra: also capture the pool projection.
 #   gcloud container node-pools list --cluster "${CLUSTER}" --format=json > pools.json
 #   aicr snapshot --gke-gpu-pools pools.json -o snapshot.yaml
 aicr recipe -s snapshot.yaml \
@@ -149,7 +149,8 @@ aicr validate -r recipe.yaml -s snapshot.yaml ... # rest as above
 On AKS, capture the snapshot with the pool projection (resolution fails
 closed without the `K8s.aks-gpu-pools.gpu-driver` reading); on GKE the
 plain snapshot already carries the node labels `gke-default`'s constraint
-reads, but `bundle-installer` also needs the `--gke-gpu-pools` projection
+reads, but `bundle-installer` and `dra` also need the `--gke-gpu-pools`
+projection
 (resolution fails closed without the `K8s.gke-gpu-pools.gpu-driver-installation`
 reading). Then hydrate the recipe with the target leaf's criteria AND the
 profile selection, and validate that recipe. A v2 pointer records its
@@ -159,10 +160,10 @@ pointers) predate profiles and carry no such field: converting one to
 profiled evidence selects the value from the **target cluster** — the
 profile the refreshed evidence is meant to attest — not from anything in
 the legacy pointer. This hydrated-recipe path is the only way to regenerate
-`bundle-installer` evidence (on GKE, validating the raw overlay selects
-the `gke-default` default, whose
-`!gke-no-default-nvidia-gpu-device-plugin` constraint fails against a
-bundle-installer cluster's labeled pools).
+`bundle-installer` or `dra` evidence (on GKE, validating the raw overlay
+selects the `gke-default` default, whose
+`!gke-no-default-nvidia-gpu-device-plugin` constraint fails against those
+values' labeled pools).
 State `--intent` (and `--platform` when the leaf pins one — omit it
 otherwise) explicitly: the snapshot fingerprint supplies service,
 accelerator, and OS, but intent and platform are author-selected and

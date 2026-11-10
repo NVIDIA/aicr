@@ -111,7 +111,7 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"(opt-out label absent) provision the GPU node pools with " +
 				"the GKE-managed driver install (node pool " +
 				"gpu-driver-version=default). With --profile " +
-				"gpuStack=bundle-installer (pools labeled " +
+				"gpuStack=bundle-installer or gpuStack=dra (pools labeled " +
 				"gke-no-default-nvidia-gpu-device-plugin=true and created " +
 				"with gpu-driver-version=disabled) the bundle's " +
 				"gcp-driver-installer component carries the installer " +
