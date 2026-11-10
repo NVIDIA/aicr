@@ -51,9 +51,11 @@ file the new bundle also writes, such as `README.md`, along with
 other file, including one under a directory such as `data/`, is replaced or
 removed only when the new bundle writes a file at the same path, or the
 earlier bundle's `checksums.txt` lists it and its content still matches, such
-as a dropped `--data` file or the attestation files. The run fails and changes
-nothing if the directory holds anything else, such as a file you added under
-`data/`, because `checksums.txt` must list the whole tree.
+as a dropped `--data` file. The earlier bundle's attestation files are
+replaced or removed whatever they hold, because `checksums.txt` cannot list
+the files that sign it. The run fails and changes nothing if the directory
+holds anything else, such as a file you added under `data/`, because
+`checksums.txt` must list the whole tree.
 
 A run that is killed outright, for example by `SIGKILL` or the out-of-memory
 killer, cannot clean up after itself. A run that fails while moving the
