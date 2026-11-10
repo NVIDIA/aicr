@@ -269,6 +269,17 @@ a different chart may have acquired the same CRD, including a chart that does
 not declare `ownsCRDs`. Clearing only the changed component is insufficient.
 If every bound identity matches exactly, preserve the existing ownership policy.
 
+For example, in the [embedded registry at `2ba9496d`][crd-example-registry],
+binding any chart clears ownership for all six owners: `nvsentinel`,
+`psmdb-operator`, `nktp`, `k8s-aibom`, `nvcre` and `gatekeeper`. Only
+`runai-cluster` has an archive digest; every other chart fails the old-digest
+check even if its coordinates remain unchanged. Binding `runai-cluster` also
+counts as a change because its HTTPS repository must become an OCI source.
+Thus even a binding for an unrelated component disables these owners' CRD
+upgrade opt-ins until the base catalog is reviewed and pinned as described
+below. This example assumes the embedded entries have not been replaced by
+an external catalog.
+
 This conservative rule requires no registry fetch or producer attestation.
 It can disable CRD upgrades even for unaffected owners; it does not prove a
 new composition safe. Restoring the policy requires a reviewed base catalog
@@ -412,6 +423,17 @@ The `reference` form writes the scheme-less repository followed by `@` and
 named tag field. The catalog author must verify that the chart uses those
 values as intended. Unsupported image-value layouts require a future typed
 form, not arbitrary string templates.
+
+GPU Operator and Network Operator are outside the initial image-binding
+support with their current catalog values. Their charts split image identity
+across repository, image name and version or tag values. The
+[GPU Operator catalog values][gpu-image-values] contain `driver.version` but
+no corresponding repository/image leaves; the
+[Network Operator catalog values][network-image-values] do not restate those
+image leaves either. Neither supported write form can express these layouts
+against the existing paths. Chart binding remains possible, but does not
+claim to pin the operators' images. Supporting those image layouts requires a
+future typed write form and suitable catalog targets.
 
 ```yaml
 apiVersion: aicr.run/v1beta1
@@ -686,3 +708,6 @@ relocation evidence remain separate from metadata composition.
 [embedded-files]: https://github.com/NVIDIA/aicr/blob/0cf4a65433b55f6cb29370a7645e41496e70593c/recipes/data.go#L21
 [helm-oci-tags]: https://helm.sh/docs/v3/topics/registries/#oci-feature-deprecation-and-behavior-changes-with-v380
 [bundle-data-copy]: https://github.com/NVIDIA/aicr/blob/80388fb35cafec9262bbb6fa066832249b20c0a0/pkg/bundler/bundler.go#L3067
+[crd-example-registry]: https://github.com/NVIDIA/aicr/blob/2ba9496dde063169e1d09f09bcab9e709af1a2cf/recipes/registry.yaml#L1581
+[gpu-image-values]: https://github.com/NVIDIA/aicr/blob/2ba9496dde063169e1d09f09bcab9e709af1a2cf/recipes/components/gpu-operator/values.yaml#L183
+[network-image-values]: https://github.com/NVIDIA/aicr/blob/2ba9496dde063169e1d09f09bcab9e709af1a2cf/recipes/components/network-operator/values.yaml#L16
