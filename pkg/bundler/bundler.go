@@ -110,7 +110,8 @@ const errCtxKeyComponent = "component"
 //	chmod +x deploy.sh
 //	./deploy.sh
 //
-// Thread-safety: DefaultBundler is safe for concurrent use.
+// DefaultBundler is safe for concurrent use by Make calls with different
+// output directories.
 type DefaultBundler struct {
 	// Config provides bundler-specific configuration including value overrides.
 	Config *config.Config
