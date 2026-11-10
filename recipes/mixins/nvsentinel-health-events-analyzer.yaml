@@ -34,7 +34,8 @@
 # healthy event. STORE_ONLY never cordons a node: fault-quarantine acts only on
 # EXECUTE_REMEDIATION events. From chart v1.31.0 its default "Health events
 # analyzer fatal error ruleset" cordons for a fatal analyzer event, so
-# EXECUTE_REMEDIATION would.
+# EXECUTE_REMEDIATION would, unless fault-quarantine.ruleSets replaces the
+# defaults without it.
 #
 # Every rule toggle the pinned chart has is restated, all on, so the rule set
 # is chosen here rather than inherited. TestNVSentinelHealthEventsAnalyzerChartRender,

@@ -445,31 +445,23 @@ transitions:
       four gpu-health-monitor-dcgm-4.x pods connected to DCGM with 8 GPUs each
       while the dcgm-3.x monitor stayed inactive.
     summary: >-
-      Two behavior changes can reach a running cluster. First, a bundle where
-      health-events-analyzer runs with processingStrategy EXECUTE_REMEDIATION,
-      whether set by --set, inherited from the chart default, set on a rule in
-      its config, or given as UNSPECIFIED (which platform-connectors
-      converts), now cordons and drains nodes: v1.31.0 adds a default
-      fault-quarantine rule set that cordons a node for a fatal
-      health-events-analyzer event (MultipleRemediations, repeated XID 74),
-      where v1.28.0 set only a node condition. With the
-      nvsentinel-health-events-analyzer mixin and no override nothing
-      changes: the mixin keeps derived events STORE_ONLY, and fault-quarantine
-      acts only on EXECUTE_REMEDIATION events. Second, where the remediation
-      step is composed and nodes run R610 or later drivers, the
-      syslog-health-monitor now maps the XID 154 recovery actions those
-      drivers print (PF FLR, OS Reboot, Bus Reset, System Reboot) to a GPU
-      reset or a node reboot; v1.28.0 did not recognise the wording and
-      reported CONTACT_SUPPORT. The labeler's default GPU class from v1.30.0
-      needs resource.k8s.io/v1, which Kubernetes 1.32 and 1.33 do not serve;
-      the recipe keeps v1.28.0's classes, so it needs no operator action.
+      From v1.31.0 the chart's default fault-quarantine rule set cordons and
+      drains a node for a fatal health-events-analyzer event
+      (MultipleRemediations, repeated XID 74), where v1.28.0 set only a node
+      condition. It applies where the analyzer's effective processingStrategy
+      is EXECUTE_REMEDIATION and fault-quarantine.ruleSets keeps that rule
+      set; the nvsentinel-health-events-analyzer mixin's STORE_ONLY default is
+      unaffected. Where the remediation step is composed and nodes run R610 or
+      later drivers, XID 154 recovery actions now reset the GPU or reboot the
+      node, which v1.28.0 reported as CONTACT_SUPPORT.
     precondition: >-
       Where health-events-analyzer is deployed, its module-level
       processingStrategy and the processing_strategy of every enabled rule are
       neither EXECUTE_REMEDIATION nor UNSPECIFIED (an absent module value is
       the chart default, EXECUTE_REMEDIATION, and platform-connectors converts
-      UNSPECIFIED to it), or you accept that fatal analyzer events cordon and
-      drain nodes from v1.31.0. Where the remediation step is composed and
+      UNSPECIFIED to it), or fault-quarantine.ruleSets is set without the
+      "Health events analyzer fatal error ruleset", or you accept that fatal
+      analyzer events cordon and drain nodes from v1.31.0. Where the remediation step is composed and
       nodes run R610 or later drivers, you accept that an XID 154 recovery
       action resets the GPU or reboots the node, or you keep
       syslog-health-monitor events out of remediation.
@@ -494,13 +486,19 @@ transitions:
               module value is the chart default, EXECUTE_REMEDIATION, not
               STORE_ONLY: only the nvsentinel-health-events-analyzer mixin sets
               STORE_ONLY. UNSPECIFIED counts as EXECUTE_REMEDIATION too,
-              because platform-connectors converts it. If the module value or
-              any enabled rule's value is either, keep it and expect a fatal
-              analyzer event to cordon and drain its node, or keep the
-              previous behavior: regenerate the bundle with
-              --set nv-sentinel:health-events-analyzer.processingStrategy=STORE_ONLY
-              and set STORE_ONLY on, or remove, each rule that sets another
-              strategy.
+              because platform-connectors converts it. Also read
+              fault-quarantine.ruleSets: when set, it replaces the chart's
+              list, and the v1.31.0 rule set that cordons for a fatal analyzer
+              event applies only while the effective list still contains
+              "Health events analyzer fatal error ruleset". If a strategy
+              above is EXECUTE_REMEDIATION and that rule set is present, a
+              fatal analyzer event cordons and drains its node: accept that,
+              or keep the v1.28.0 condition-only behavior by setting
+              fault-quarantine.ruleSets to the chart's v1.31.0 default list
+              without that rule set (carry every other rule set, since the
+              list replaces the default). Setting STORE_ONLY instead also
+              removes the node condition and the Kubernetes Event that
+              EXECUTE_REMEDIATION set, so alerts that read them stop.
             reason: >-
               The new default rule set cordons for a fatal analyzer event, and
               fault-quarantine reads only EXECUTE_REMEDIATION events, so that
@@ -557,13 +555,19 @@ transitions:
               module value is the chart default, EXECUTE_REMEDIATION, not
               STORE_ONLY: only the nvsentinel-health-events-analyzer mixin sets
               STORE_ONLY. UNSPECIFIED counts as EXECUTE_REMEDIATION too,
-              because platform-connectors converts it. If the module value or
-              any enabled rule's value is either, keep it and expect a fatal
-              analyzer event to cordon and drain its node, or keep the
-              previous behavior: regenerate the bundle with
-              --set nv-sentinel:health-events-analyzer.processingStrategy=STORE_ONLY
-              and set STORE_ONLY on, or remove, each rule that sets another
-              strategy.
+              because platform-connectors converts it. Also read
+              fault-quarantine.ruleSets: when set, it replaces the chart's
+              list, and the v1.31.0 rule set that cordons for a fatal analyzer
+              event applies only while the effective list still contains
+              "Health events analyzer fatal error ruleset". If a strategy
+              above is EXECUTE_REMEDIATION and that rule set is present, a
+              fatal analyzer event cordons and drains its node: accept that,
+              or keep the v1.28.0 condition-only behavior by setting
+              fault-quarantine.ruleSets to the chart's v1.31.0 default list
+              without that rule set (carry every other rule set, since the
+              list replaces the default). Setting STORE_ONLY instead also
+              removes the node condition and the Kubernetes Event that
+              EXECUTE_REMEDIATION set, so alerts that read them stop.
             reason: >-
               The new default rule set cordons for a fatal analyzer event, and
               fault-quarantine reads only EXECUTE_REMEDIATION events, so that
@@ -618,13 +622,19 @@ transitions:
               module value is the chart default, EXECUTE_REMEDIATION, not
               STORE_ONLY: only the nvsentinel-health-events-analyzer mixin sets
               STORE_ONLY. UNSPECIFIED counts as EXECUTE_REMEDIATION too,
-              because platform-connectors converts it. If the module value or
-              any enabled rule's value is either, keep it and expect a fatal
-              analyzer event to cordon and drain its node, or keep the
-              previous behavior: regenerate the bundle with
-              --set nv-sentinel:health-events-analyzer.processingStrategy=STORE_ONLY
-              and set STORE_ONLY on, or remove, each rule that sets another
-              strategy.
+              because platform-connectors converts it. Also read
+              fault-quarantine.ruleSets: when set, it replaces the chart's
+              list, and the v1.31.0 rule set that cordons for a fatal analyzer
+              event applies only while the effective list still contains
+              "Health events analyzer fatal error ruleset". If a strategy
+              above is EXECUTE_REMEDIATION and that rule set is present, a
+              fatal analyzer event cordons and drains its node: accept that,
+              or keep the v1.28.0 condition-only behavior by setting
+              fault-quarantine.ruleSets to the chart's v1.31.0 default list
+              without that rule set (carry every other rule set, since the
+              list replaces the default). Setting STORE_ONLY instead also
+              removes the node condition and the Kubernetes Event that
+              EXECUTE_REMEDIATION set, so alerts that read them stop.
             reason: >-
               The new default rule set cordons for a fatal analyzer event, and
               fault-quarantine reads only EXECUTE_REMEDIATION events, so that
