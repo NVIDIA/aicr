@@ -1397,6 +1397,11 @@ const (
 
 // Log scanner buffer sizes.
 const (
+	// LogReadChunkSize is the read size pod.GetPodLogs drains a completed
+	// pod's log stream with; it bounds one Read, not a line, so no line length
+	// fails the read.
+	LogReadChunkSize = 64 << 10 // 64KiB
+
 	// LogScannerBufferSize is the maximum line size for reading pod logs.
 	// Larger than the default 64KB to handle container runtime line splitting
 	// and long go test -json output events.
@@ -1471,6 +1476,22 @@ const (
 	// upstream, but the result flows into ConfigMaps and rendered reports, so
 	// this bounds it defensively at the source regardless of upstream behavior.
 	ValidatorMaxTerminationMsgBytes = 4096
+
+	// ValidatorLogReadAttempts is how many times the orchestrator reads a
+	// finished validator pod's logs before reporting the result output
+	// unavailable: one read plus one retry, enough for a transient apiserver
+	// or kubelet hiccup and short enough that a dead kubelet does not stall
+	// the phase. A pass whose output could not be read is reported as
+	// `other`, never credited (#3703).
+	ValidatorLogReadAttempts = 2
+
+	// ValidatorLogReadRetryDelay is the pause between those attempts.
+	ValidatorLogReadRetryDelay = 2 * time.Second
+
+	// ImagePullSecretCopyTimeout bounds copying one --image-pull-secret Secret
+	// from the validator namespace into a check's per-run namespace (one Get
+	// and one Create or Update).
+	ImagePullSecretCopyTimeout = 30 * time.Second
 
 	// ValidatorDefaultCPU is the default CPU request/limit for validator containers
 	// when not specified in the catalog entry.

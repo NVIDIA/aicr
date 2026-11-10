@@ -524,7 +524,7 @@ func (s *hpaScenario) deploy(ctx *validators.Context) error {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to create HPA ResourceClaimTemplate", err)
 		}
 	}
-	deployment := buildHPADeployment(ns, s.dra, s.nodeNames, s.tolerations)
+	deployment := buildHPADeployment(ns, s.dra, s.nodeNames, s.tolerations, s.testRun.imagePullSecretRefs())
 	if _, err := s.clientset.AppsV1().Deployments(ns).Create(ctx.Ctx, deployment, metav1.CreateOptions{}); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create HPA workload Deployment", err)
 	}
@@ -1341,7 +1341,7 @@ func buildHPAClaimTemplate(namespace, version string) *unstructured.Unstructured
 // ResourceClaimTemplate; otherwise it requests nvidia.com/gpu: 1 and is
 // pinned to the probe's device-plugin nodes (see secure-accelerator-access).
 // tolerations, when nil, defaults to tolerate-all.
-func buildHPADeployment(namespace string, dra bool, nodeNames []string, tolerations []corev1.Toleration) *appsv1.Deployment {
+func buildHPADeployment(namespace string, dra bool, nodeNames []string, tolerations []corev1.Toleration, pullSecrets []corev1.LocalObjectReference) *appsv1.Deployment {
 	if tolerations == nil {
 		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
 	}
@@ -1373,6 +1373,7 @@ func buildHPADeployment(namespace string, dra bool, nodeNames []string, tolerati
 	}
 	spec := corev1.PodSpec{
 		Tolerations:                   tolerations,
+		ImagePullSecrets:              pullSecrets,
 		TerminationGracePeriodSeconds: ptr.To(hpaTerminationGracePeriod),
 		Volumes: []corev1.Volume{{
 			Name: "metric",

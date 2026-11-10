@@ -106,7 +106,7 @@
 #      lane: hermetically by TestSlurmTopologyHealthCheckClusterStates on every
 #      `make test`, and live by any consumer that runs `aicr validate --phase
 #      deployment` against a full deployment of this recipe.
-#   5. a regression in any of the SEVEN CONFORMANCE CHECKS this lane skips.
+#   5. a regression in any of the EIGHT CONFORMANCE CHECKS this lane skips.
 #      They are named one by one under spec.validate.execution.skipChecks
 #      below, each with the prerequisite it needs and why this lane cannot
 #      supply it. Three checks still run and still gate: gang-scheduling,
@@ -119,7 +119,8 @@
 # validation.conformance.checks list is inherited from kind.yaml and base, so it
 # names checks about the GPU stack this lane does not deploy and about real
 # accelerator hardware this lane does not have. Measured before the narrowing:
-# rc=8 after 184s, 10 validators, 2 passed, 7 failed, 1 skipped.
+# rc=8 after 184s, 10 validators, 2 passed, 7 failed, 1 skipped (the inherited
+# list has since grown by driver-runtime-management, the eighth skip below).
 #
 # The skips are NOT a way of ignoring a failing check. Every one of them is
 # REPORTED as skipped in the CTRF report the signed evidence bundle is rendered
@@ -269,7 +270,7 @@ spec:
       failFast: true
       # The conformance checks this lane cannot satisfy, each with the
       # prerequisite it needs. Six follow from the two excluded components; the
-      # seventh follows from the devices being simulated. See the header for
+      # other two follow from the devices being simulated. See the header for
       # what this costs, and pkg/validator/skip_checks.go for the two guards
       # that keep this list from becoming a way to hide a failure.
       #
@@ -303,8 +304,10 @@ spec:
         # DCGM exporter. Observed logging "DCGM_FI_DEV_GPU_UTIL not yet
         # available, retrying" until it gave up.
         - ai-service-metrics
-        # Needs the external metric dcgm_gpu_power_usage to drive its HPA
-        # behavioral test. Same exporter again.
+        # Scales a GPU-requesting Deployment 1 to 2 on a custom metric served
+        # by prometheus-adapter from the recipe's Prometheus, so it needs two
+        # allocatable accelerators and the metrics stack the excluded
+        # components feed; the simulated devices have neither.
         - pod-autoscaling
         # Runs a CUDA container that must see /dev/nvidia* device nodes and
         # count exactly one usable GPU. The mocked NVML tree supplies
@@ -312,6 +315,15 @@ spec:
         # nvidia container runtime to inject any. This one would fail on the
         # simulated devices even with the whole GPU stack deployed.
         - secure-accelerator-access
+        # Runs a vanilla ubuntu pod that requests one GPU and expects the
+        # container runtime to inject nvidia-smi and the driver library, then
+        # compares the driver version it reports with the node's. Same gap as
+        # above: no nvidia container runtime and no real driver on a
+        # simulated device, so there is nothing to inject or to report. On
+        # this Slurm recipe the check would self-skip (the NodeSet holds every
+        # GPU) before reaching that gap; naming it here records the lane's
+        # reason beside the other seven instead of an in-pod skip.
+        - driver-runtime-management
         # Walks every componentRef in the recipe and asserts its namespace and
         # expected resources are healthy. The recipe still declares the two
         # excluded components, so it reports them absent. This check is the

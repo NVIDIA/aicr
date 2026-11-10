@@ -17,20 +17,26 @@ package validators
 import (
 	"log/slog"
 	"math"
+	"os"
 	"strconv"
+	"strings"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 // Extra keys a check may publish with EmitExtra. Each must have a value
 // validator in pkg/evidence/redact's ctrfExtraAllowlist, or minimal redaction
-// drops it.
+// drops it. The keys the evidence readers consume by name are declared in
+// pkg/validator/ctrf and re-exported here, so the publisher and the readers
+// share one definition.
 const (
 	ExtraKeyNodesValidated = "nodesValidated"
 	ExtraKeyNodesTotal     = "nodesTotal"
 	ExtraKeyNodesFailed    = "nodesFailed"
 	ExtraKeyNodesSkipped   = "nodesSkipped"
-	ExtraKeySkipReason     = "skipReason"
+	ExtraKeySkipReason     = ctrf.ExtraKeySkipReason
 	ExtraKeyRuntimeSource  = "runtimeSource"
 
 	ExtraKeyAchievedGbps  = "achievedGbps"
@@ -63,8 +69,16 @@ const (
 	ExtraKeyDetectedVersion  = "detectedVersion"
 	ExtraKeyVersionSatisfied = "versionSatisfied"
 
-	ExtraKeyObservationOnly = "observationOnly"
+	ExtraKeyObservationOnly = ctrf.ExtraKeyObservationOnly
+	ExtraKeyResultSchema    = ctrf.ExtraKeyResultSchema
 )
+
+// ImagePullSecretsEnv carries the names of the --image-pull-secret Secrets
+// the orchestrator attached to the validator Job, comma-separated, so a check
+// that creates a per-run namespace can copy them there and let its probe pods
+// pull with the same credentials. It is pkg/validator/v1's constant, which
+// forwards it, so the two ends cannot drift.
+const ImagePullSecretsEnv = v1.ImagePullSecretsEnv
 
 // Skip codes published under ExtraKeySkipReason. Each must also be listed in
 // pkg/evidence/redact's ctrfSkipReasons.
@@ -87,13 +101,24 @@ const (
 )
 
 // SkipWithReason publishes code as the skip reason and returns Skip(reason).
-// Only code survives minimal redaction.
+// Only code survives minimal redaction, and the CNCF aggregation reads it as
+// the NOT TESTED reason, so a code that could not be written fails the check
+// instead of skipping it: a skip with no reason would read as an unexplained
+// gap in the evidence.
+//
+// Errors:
+//   - ErrCodeInternal when the skip reason could not be written to stdout.
 func SkipWithReason(code, reason string) error {
-	EmitExtraOrWarn(map[string]string{ExtraKeySkipReason: code})
+	if err := EmitExtra(map[string]string{ExtraKeySkipReason: code}); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to publish the skip reason "+code+" for: "+reason, err)
+	}
 	return Skip(reason)
 }
 
 // EmitExtraOrWarn calls EmitExtra and logs, rather than returns, any error.
+// Use it for informational extras only (counts, measured values, the
+// allocation mode a check exercised); an extra that decides how a result is
+// read goes through EmitExtra with the error returned.
 func EmitExtraOrWarn(extra map[string]string) {
 	if err := EmitExtra(extra); err != nil {
 		slog.Warn("failed to emit validator extra", "error", err)
@@ -132,6 +157,37 @@ func FormatBool(b bool) string { return strconv.FormatBool(b) }
 // observation into a demonstration.
 func ObservationOnlyExtra() map[string]string {
 	return map[string]string{ExtraKeyObservationOnly: FormatBool(true)}
+}
+
+// ResultSchemaExtra returns the Extra stamping the result-contract version
+// this image speaks (ctrf.ResultSchemaVersion). The runner publishes it before
+// the check runs, so every result the orchestrator reads carries it. The CNCF
+// aggregation reads an unmarked pass of an observation-only check as observed
+// with or without it; the stamp only tells it whether to report an image
+// that predates the marker or a marker that went missing (#3703). Emit it
+// with EmitExtra and fail the check when the write fails.
+func ResultSchemaExtra() map[string]string {
+	return map[string]string{ExtraKeyResultSchema: ctrf.ResultSchemaVersion}
+}
+
+// ImagePullSecretNames returns the Secret names ImagePullSecretsEnv carries,
+// trimmed, with empty entries dropped; nil when the variable is unset or
+// names nothing.
+func ImagePullSecretNames() []string {
+	var names []string
+	for entry := range strings.SplitSeq(os.Getenv(ImagePullSecretsEnv), ",") {
+		if name := strings.TrimSpace(entry); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// ValidatorNamespace returns the namespace the validator pod runs in: the
+// mounted ServiceAccount namespace, else AICR_NAMESPACE, else "default". It is
+// the namespace --image-pull-secret Secrets live in.
+func ValidatorNamespace() string {
+	return resolveNamespace()
 }
 
 // GPUAllocationPolicyExtra returns the Extra recording policy as the configured

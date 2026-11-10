@@ -76,7 +76,15 @@ type Config struct {
 	ImageTagOverride string
 	// ComponentRefs are resolved recipe components, used for dependencyAffinity resolution.
 	ComponentRefs []recipe.ComponentRef
+
+	// LogReader reads a finished validator container's stdout. Nil selects
+	// pod.GetPodLogs; tests substitute a reader because envtest runs no
+	// kubelet to serve logs.
+	LogReader PodLogReader
 }
+
+// PodLogReader reads one container's logs; pod.GetPodLogs has this shape.
+type PodLogReader func(ctx context.Context, client kubernetes.Interface, namespace, podName, containerName string) (string, error)
 
 // Deployer manages the lifecycle of a single validator Job.
 type Deployer struct {
