@@ -39,8 +39,8 @@ func gkeCriteria() *Criteria {
 // #1761 rollout PR 3): the gke-cos overlay declares gpuStack with default
 // gke-default (the only value a default-provisioned GKE cluster satisfies
 // — the opt-out label forfeits GKE's managed driver install, so
-// bundle-installer carries the bundle's own gcp-driver-installer) and
-// alternative bundle-installer,
+// bundle-installer and dra carry the bundle's own gcp-driver-installer)
+// and alternatives bundle-installer and dra (#2517),
 // leaves inherit it, the selection is recorded with the advertiser, and
 // the #1755 node-set constraint is carried per value with the correct
 // predicate direction.
@@ -65,6 +65,13 @@ func TestGKEGpuStackProfileResolution(t *testing.T) {
 			name:           "explicit bundle-installer records no advertiser and the positive label predicate",
 			selection:      "gpuStack=bundle-installer",
 			wantValue:      "bundle-installer",
+			wantAdvertiser: "",
+			wantConstraint: "gke-no-default-nvidia-gpu-device-plugin=true",
+		},
+		{
+			name:           "explicit dra records no advertiser and the positive label predicate",
+			selection:      "gpuStack=dra",
+			wantValue:      "dra",
 			wantAdvertiser: "",
 			wantConstraint: "gke-no-default-nvidia-gpu-device-plugin=true",
 		},
@@ -146,6 +153,12 @@ func TestGKEBundleInstallerCarriesPoolCreationConstraint(t *testing.T) {
 			wantPresent:    true,
 			wantConstraint: "Disabled",
 		},
+		{
+			name:           "dra shares the bundle-installer pool shape and carries the same requirement",
+			selection:      "gpuStack=dra",
+			wantPresent:    true,
+			wantConstraint: "Disabled",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -203,9 +216,15 @@ func TestGKEGpuStackHappyPathThroughHydrationGate(t *testing.T) {
 		}
 	}
 	// The closure is never persisted: the artifact's recorded ownership
-	// stays the declaration-derived set.
-	if len(result.Metadata.SelectedProfile.OwnedPaths[allocpolicy.ComponentDRADriver]) != 0 {
-		t.Error("closure paths leaked into persisted ownedPaths")
+	// stays the declaration-derived set. Since the dra value joined the
+	// declaration (#2517), that set genuinely includes the DRA selector
+	// paths — every value assigns them (union totality) — plus the
+	// synthetic presence marker; nothing beyond it may leak in.
+	wantOwned := []string{"enabled", allocpolicy.PathDRAGPUsEnabledOverride, allocpolicy.PathDRAGPUsEnabled}
+	gotOwned := result.Metadata.SelectedProfile.OwnedPaths[allocpolicy.ComponentDRADriver]
+	if !slices.Equal(gotOwned, wantOwned) {
+		t.Errorf("persisted ownedPaths[%s] = %v, want the declaration-derived %v",
+			allocpolicy.ComponentDRADriver, gotOwned, wantOwned)
 	}
 
 	// The recipe-scoped descriptor-identity input (ADR-015 currentness):
@@ -502,5 +521,247 @@ func TestCoherenceGateRejectsAbsentDRAGPUsEnabled(t *testing.T) {
 	}
 	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+	}
+}
+
+// TestGKEDRAHappyPathThroughHydrationGate is the dra (#2517) counterpart of
+// the gke-default happy path: the DRA opt-in tuple — devicePlugin off,
+// resources.gpus.enabled on with the chart-guard waiver — must clear the
+// hydrating coherence gate, carry the profile fragment's values in the
+// hydrated output, and keep the overlay-level values the fragment deep-merges
+// beside (nvidiaDriverRoot).
+func TestGKEDRAHappyPathThroughHydrationGate(t *testing.T) {
+	t.Parallel()
+
+	result, err := NewBuilder().BuildFromCriteriaWithProfile(
+		t.Context(), gkeCriteria(), "gpuStack=dra")
+	if err != nil {
+		t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
+	}
+	if err = result.PrepareAndValidateWithContext(context.Background()); err != nil {
+		t.Fatalf("PrepareAndValidateWithContext() rejected the dra happy path: %v", err)
+	}
+
+	ctx := context.Background()
+	draValues, err := result.GetValuesForComponentWithContext(ctx, allocpolicy.ComponentDRADriver)
+	if err != nil {
+		t.Fatalf("hydrate %s: %v", allocpolicy.ComponentDRADriver, err)
+	}
+	if override, _ := draValues["gpuResourcesEnabledOverride"].(bool); !override {
+		t.Error("hydrated gpuResourcesEnabledOverride is not true")
+	}
+	resources, _ := draValues["resources"].(map[string]any)
+	gpus, _ := resources["gpus"].(map[string]any)
+	if enabled, _ := gpus["enabled"].(bool); !enabled {
+		t.Error("hydrated resources.gpus.enabled is not true")
+	}
+	if root, _ := draValues["nvidiaDriverRoot"].(string); root != "/home/kubernetes/bin/nvidia" {
+		t.Errorf("nvidiaDriverRoot = %q, want the overlay's COS path: the fragment must deep-merge, not replace", root)
+	}
+
+	operatorValues, err := result.GetValuesForComponentWithContext(ctx, allocpolicy.ComponentGPUOperator)
+	if err != nil {
+		t.Fatalf("hydrate %s: %v", allocpolicy.ComponentGPUOperator, err)
+	}
+	plugin, _ := operatorValues["devicePlugin"].(map[string]any)
+	enabled, ok := plugin["enabled"].(bool)
+	if !ok || enabled {
+		t.Errorf("hydrated devicePlugin.enabled = %v, want explicit false", plugin["enabled"])
+	}
+
+	installerValues, err := result.GetValuesForComponentWithContext(ctx, "gcp-driver-installer")
+	if err != nil {
+		t.Fatalf("hydrate gcp-driver-installer: %v", err)
+	}
+	installer, _ := installerValues["installer"].(map[string]any)
+	if on, _ := installer["enabled"].(bool); !on {
+		t.Error("hydrated installer.enabled is not true: dra must ship the bundle-carried driver")
+	}
+
+	// Same closure as the sibling values: the profile owns advertisement,
+	// so the enabled descriptor components join the lock set.
+	entries := result.ClosureDescriptorEntries()
+	got := make([]string, 0, len(entries))
+	for _, e := range entries {
+		got = append(got, e.Component)
+	}
+	want := []string{allocpolicy.ComponentGPUOperator, allocpolicy.ComponentDRADriver}
+	if !slices.Equal(got, want) {
+		t.Errorf("ClosureDescriptorEntries() components = %v, want %v", got, want)
+	}
+}
+
+// TestGKEDRATightensComposedK8sFloor pins the #2643 path going live with the
+// dra value (#2517): the value's own ">= 1.35.0" floor intersects whatever
+// K8s.server.version the composed chain carries, the artifact holds exactly
+// one entry for the name, and the sibling values keep the chain's floor.
+// Criteria-only generation evaluates no constraints, so the tightened floor
+// must land in the artifact regardless.
+func TestGKEDRATightensComposedK8sFloor(t *testing.T) {
+	t.Parallel()
+
+	k8sFloor := func(t *testing.T, result *RecipeResult) string {
+		t.Helper()
+		var values []string
+		for _, c := range result.Constraints {
+			if c.Name == "K8s.server.version" {
+				values = append(values, c.Value)
+			}
+		}
+		if len(values) != 1 {
+			t.Fatalf("artifact carries %d K8s.server.version entries (%v), want exactly 1", len(values), values)
+		}
+		return values[0]
+	}
+
+	tests := []struct {
+		name      string
+		criteria  *Criteria
+		selection string
+		want      string
+	}{
+		{
+			name:      "dra raises the h100 chain floor",
+			criteria:  gkeCriteria(),
+			selection: "gpuStack=dra",
+			want:      ">= 1.35.0",
+		},
+		{
+			name:      "the default selection keeps the chain floor",
+			criteria:  gkeCriteria(),
+			selection: "",
+			want:      ">= 1.32",
+		},
+		{
+			name:      "bundle-installer keeps the chain floor",
+			criteria:  gkeCriteria(),
+			selection: "gpuStack=bundle-installer",
+			want:      ">= 1.32",
+		},
+		{
+			// The gb300 chain's floor is per-GKE-track alternatives. The
+			// dra floor distributes over them: the 1.34 track empties and
+			// drops, the 1.35 track's build minimum survives untouched.
+			name: "dra resolves the gb300 per-track floor to the 1.35 track",
+			criteria: &Criteria{
+				Service:     CriteriaServiceGKE,
+				Accelerator: CriteriaAcceleratorGB300,
+				OS:          CriteriaOSCOS,
+				Intent:      CriteriaIntentTraining,
+			},
+			selection: "gpuStack=dra",
+			want:      ">= 1.35.0-gke.2745000",
+		},
+		{
+			// The runai leaf already states the dra floor (restated at full
+			// precision so the two order); the composition is unchanged.
+			name: "dra leaves the runai leaf floor unchanged",
+			criteria: &Criteria{
+				Service:     CriteriaServiceGKE,
+				Accelerator: CriteriaAcceleratorH100,
+				OS:          CriteriaOSCOS,
+				Intent:      CriteriaIntentTraining,
+				Platform:    CriteriaPlatformRunai,
+			},
+			selection: "gpuStack=dra",
+			want:      ">= 1.35.0",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result, err := NewBuilder().BuildFromCriteriaWithProfile(
+				t.Context(), tt.criteria, tt.selection)
+			if err != nil {
+				t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
+			}
+			if got := k8sFloor(t, result); got != tt.want {
+				t.Errorf("K8s.server.version = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCoherenceGateRejectsDRAIncoherentTuples is the dra-side counterpart of
+// the bundle-installer forgery table: a forged dra artifact that re-enables
+// the operator's device plugin (dual advertisement), drops the chart-guard
+// waiver, or switches whole-GPU DRA back off while the waiver stays must
+// fail PrepareAndValidateWithContext.
+func TestCoherenceGateRejectsDRAIncoherentTuples(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		component string
+		overrides map[string]any
+		wantMsg   string
+	}{
+		{
+			name:      "dual advertisement: the operator plugin re-enabled next to DRA ResourceClaims",
+			component: "gpu-operator",
+			overrides: map[string]any{
+				"devicePlugin": map[string]any{"enabled": true},
+			},
+			wantMsg: "dual advertisement",
+		},
+		{
+			name:      "chart guard: the override waiver dropped while gpus stay enabled",
+			component: allocpolicy.ComponentDRADriver,
+			overrides: map[string]any{
+				allocpolicy.PathDRAGPUsEnabledOverride: false,
+			},
+			wantMsg: "chart install guard",
+		},
+		{
+			// Both the waiver staying behind and the plugin staying off are
+			// wrong here, and the advertiser-less reading is what the shared
+			// evaluator reports first: with gpus off, nothing advertises.
+			name:      "no advertiser: gpus switched off while the plugin stays off",
+			component: allocpolicy.ComponentDRADriver,
+			overrides: map[string]any{
+				"resources": map[string]any{"gpus": map[string]any{"enabled": false}},
+			},
+			wantMsg: "no whole-GPU advertiser",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result, err := NewBuilder().BuildFromCriteriaWithProfile(
+				t.Context(), gkeCriteria(), "gpuStack=dra")
+			if err != nil {
+				t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
+			}
+			ref := result.GetComponentRef(tt.component)
+			if ref == nil {
+				t.Fatalf("%s componentRef missing", tt.component)
+			}
+			if ref.Overrides == nil {
+				ref.Overrides = map[string]any{}
+			}
+			deepMergeForTest(ref.Overrides, tt.overrides)
+
+			err = result.PrepareAndValidateWithContext(context.Background())
+			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Fatalf("PrepareAndValidateWithContext() error = %v, want %q rejection", err, tt.wantMsg)
+			}
+			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+			}
+		})
+	}
+}
+
+// deepMergeForTest merges src into dst recursively so a forged leaf does not
+// clobber sibling keys the fragment assigned on the same map.
+func deepMergeForTest(dst, src map[string]any) {
+	for key, value := range src {
+		if srcMap, ok := value.(map[string]any); ok {
+			if dstMap, ok := dst[key].(map[string]any); ok {
+				deepMergeForTest(dstMap, srcMap)
+				continue
+			}
+		}
+		dst[key] = value
 	}
 }

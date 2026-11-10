@@ -402,7 +402,7 @@ func TestBuildHPADeployment(t *testing.T) {
 	t.Parallel()
 	t.Run("DRA", func(t *testing.T) {
 		t.Parallel()
-		d := buildHPADeployment("ns", true, nil, nil)
+		d := buildHPADeployment("ns", true, nil, nil, nil)
 		spec := d.Spec.Template.Spec
 		if len(spec.ResourceClaims) != 1 || ptr.Deref(spec.ResourceClaims[0].ResourceClaimTemplateName, "") != hpaWorkloadName {
 			t.Fatalf("resourceClaims = %+v, want one claim from template %s", spec.ResourceClaims, hpaWorkloadName)
@@ -424,7 +424,7 @@ func TestBuildHPADeployment(t *testing.T) {
 	t.Run("device plugin", func(t *testing.T) {
 		t.Parallel()
 		tol := []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpEqual, Value: "gpu", Effect: corev1.TaintEffectNoSchedule}}
-		d := buildHPADeployment("ns", false, []string{"node-a", "node-b"}, tol)
+		d := buildHPADeployment("ns", false, []string{"node-a", "node-b"}, tol, nil)
 		spec := d.Spec.Template.Spec
 		if len(spec.ResourceClaims) != 0 {
 			t.Errorf("device-plugin pod must not carry resourceClaims: %+v", spec.ResourceClaims)
@@ -443,7 +443,7 @@ func TestBuildHPADeployment(t *testing.T) {
 	})
 	t.Run("common shape", func(t *testing.T) {
 		t.Parallel()
-		d := buildHPADeployment("ns", false, nil, nil)
+		d := buildHPADeployment("ns", false, nil, nil, nil)
 		if ptr.Deref(d.Spec.Replicas, 0) != hpaMinReplicas {
 			t.Errorf("replicas = %d, want %d", ptr.Deref(d.Spec.Replicas, 0), hpaMinReplicas)
 		}

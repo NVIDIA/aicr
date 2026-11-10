@@ -16,7 +16,10 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,9 +28,11 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
-
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	evidenceindex "github.com/NVIDIA/aicr/pkg/evidence/index"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -144,7 +149,7 @@ func TestQueryCmdFlagsIncludesSelector(t *testing.T) {
 			found[n] = true
 		}
 	}
-	for _, name := range []string{"selector", "profile"} {
+	for _, name := range []string{"selector", "profile", "summary", "recipe", "r"} {
 		if !found[name] {
 			t.Errorf("queryCmdFlags must include --%s flag", name)
 		}
@@ -576,4 +581,494 @@ func TestRecipeAndQueryRejectRepeatedInheritFrom(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestQueryCmdSummary(t *testing.T) {
+	for _, format := range []string{"", "table", "yaml", "json"} {
+		t.Run("format="+format, func(t *testing.T) {
+			args := []string{"query", "--service", "eks", "--accelerator", "h100", "--intent", "training", "--summary"}
+			if format != "" {
+				args = append(args, "--format", format)
+			}
+			output := runQueryValue(t, args...)
+			if !strings.Contains(output, "gpu-operator") {
+				t.Fatalf("summary missing component: %s", output)
+			}
+			if format == "" || format == "table" {
+				for _, section := range []string{"RECIPE SUMMARY", "CRITERIA", "OVERLAYS", "CONSTRAINTS", "COMPONENTS", "VALIDATION"} {
+					if !strings.Contains(output, section) {
+						t.Errorf("summary missing %s: %s", section, output)
+					}
+				}
+			} else if format == "json" && !json.Valid([]byte(output)) {
+				t.Errorf("invalid JSON: %s", output)
+			}
+		})
+	}
+}
+
+func TestQueryCmdFlagCombinations(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"neither selector nor summary", []string{"--service=eks"}, "one of --selector or --summary is required"},
+		{"both selector and summary", []string{"--selector=criteria.service", "--summary"}, "mutually exclusive"},
+		{"empty selector and summary", []string{"--selector=", "--summary"}, "mutually exclusive"},
+		{"repeated recipe", []string{"--recipe=a.yaml", "--recipe=b.yaml", "--summary"}, "can only be specified once"},
+		{"repeated selector", []string{"--selector=a", "--selector=b"}, "can only be specified once"},
+		{"invalid format", []string{"--service=eks", "--summary", "--format=xml"}, "unknown output format"},
+		{"empty recipe", []string{"--recipe=", "--summary"}, "recipe path is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := queryCmd().Run(t.Context(), append([]string{"query"}, tt.args...))
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// TestQueryCmdRecipeFlagPartition fails when a query flag is neither rejected
+// with --recipe (recipeGenerationFlags) nor listed here as valid with it, so a
+// generation flag added to recipeCmdFlags cannot be silently ignored.
+func TestQueryCmdRecipeFlagPartition(t *testing.T) {
+	allowedWithRecipe := map[string]bool{
+		cmdNameRecipe: true, flagSelector: true, flagSummary: true, flagFormat: true,
+		"config": true, "data": true, "kubeconfig": true, "criteria-strict": true, flagRequireEvidence: true,
+	}
+	rejected := make(map[string]bool, len(recipeGenerationFlags))
+	for _, name := range recipeGenerationFlags {
+		rejected[name] = true
+	}
+	declared := map[string]bool{}
+	for _, f := range queryCmdFlags() {
+		name := f.Names()[0]
+		declared[name] = true
+		switch {
+		case rejected[name] && allowedWithRecipe[name]:
+			t.Errorf("--%s is both in recipeGenerationFlags and allowed with --recipe", name)
+		case !rejected[name] && !allowedWithRecipe[name]:
+			t.Errorf("--%s is new: add it to recipeGenerationFlags if it shapes the resolved recipe, "+
+				"or to allowedWithRecipe in this test if it is valid with --recipe", name)
+		}
+	}
+	for _, names := range []map[string]bool{rejected, allowedWithRecipe} {
+		for name := range names {
+			if !declared[name] {
+				t.Errorf("--%s is classified but is not a query flag", name)
+			}
+		}
+	}
+}
+
+func TestQueryCmdRecipeExcludesGenerationFlags(t *testing.T) {
+	// Keep this list independent of recipeGenerationFlags so dropping an entry
+	// from the implementation does not also drop its regression test.
+	flags := []string{
+		"--service=eks", "--accelerator=h100", "--intent=training", "--os=ubuntu", "--platform=kubeflow", "--nodes=1",
+		"--snapshot=missing.yaml", "--profile=gpuStack=operator-managed", "--slurm-accounting-mode=disabled",
+		"--runtime-inventory=disabled", "--gke-tcpxo-interfaces=eth1=gpu-nic-0", "--inherit-from=missing.yaml", "--inherit=namespace",
+	}
+	for _, flag := range flags {
+		t.Run(flag, func(t *testing.T) {
+			err := queryCmd().Run(t.Context(), []string{"query", "--recipe=missing.yaml", "--summary", flag})
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if err == nil || !strings.Contains(err.Error(), "cannot be combined with "+strings.Split(flag, "=")[0]) {
+				t.Errorf("error = %v, want recipe/generation-input conflict", err)
+			}
+		})
+	}
+}
+
+// queryRecipeFixture resolves with the real builder, without freezing shipped
+// component versions in a fixture or test assertion.
+func queryRecipeFixture(t *testing.T) (*aicr.Client, *recipe.RecipeResult, string) {
+	t.Helper()
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	result, err := client.ResolveRecipeFromCriteria(t.Context(), aicr.WrapCriteria(&recipe.Criteria{
+		Service: recipe.CriteriaServiceEKS, Accelerator: recipe.CriteriaAcceleratorH100, Intent: recipe.CriteriaIntentTraining,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := result.Resolved()
+	return client, resolved, writeQueryRecipeFixture(t, resolved)
+}
+
+func writeQueryRecipeFixture(t *testing.T, resolved *recipe.RecipeResult) string {
+	t.Helper()
+	data, err := serializer.MarshalYAMLDeterministic(resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return writeYAML(t, "recipe.yaml", string(data))
+}
+
+func TestQueryCmdRecipe(t *testing.T) {
+	_, _, path := queryRecipeFixture(t)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml")
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+	for _, source := range []string{path, server.URL + "/recipe.yaml"} {
+		for _, selection := range [][]string{{"--summary"}, {"--selector=criteria.service"}, {"--selector="}} {
+			t.Run(source+"/"+selection[0], func(t *testing.T) {
+				output := runQueryValue(t, append([]string{"query", "-r", source}, selection...)...)
+				want := "eks"
+				switch selection[0] {
+				case "--summary":
+					want = "RECIPE SUMMARY"
+				case "--selector=":
+					want = "components:"
+				}
+				if !strings.Contains(output, want) {
+					t.Errorf("output = %s, want %s", output, want)
+				}
+			})
+		}
+	}
+	output := runQueryValue(t, "query", "--service=eks", "--selector=")
+	if !strings.Contains(output, "components:") || !strings.Contains(output, "criteria:") {
+		t.Errorf("empty selector must return the whole recipe: %s", output)
+	}
+}
+
+func TestQueryCmdRecipeLoaderErrors(t *testing.T) {
+	client, _, _ := queryRecipeFixture(t)
+	for _, path := range []string{filepath.Join(t.TempDir(), "missing.yaml"), writeYAML(t, "bad.yaml", "invalid: [")} {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			_, loaderErr := client.LoadRecipe(t.Context(), path, "")
+			if loaderErr == nil {
+				t.Fatal("setup: loader must reject the input")
+			}
+			err := queryCmd().Run(t.Context(), []string{"query", "--recipe", path, "--summary"})
+			errorstest.WantReportedCode(t, err, errorstest.ReportedCode(loaderErr))
+		})
+	}
+}
+
+// TestQueryCmdRecipeRejectsSavedSummary proves a saved summary is not a
+// recipe: its own kind fails the loader's kind gate before the body is
+// decoded, so it neither loads as an empty recipe nor fails with a type error.
+func TestQueryCmdRecipeRejectsSavedSummary(t *testing.T) {
+	_, resolved, path := queryRecipeFixture(t)
+	if resolved.Validation == nil {
+		t.Fatal("setup: the fixture recipe must declare validation checks")
+	}
+	for _, format := range []string{"yaml", "json"} {
+		t.Run(format, func(t *testing.T) {
+			summary := runQueryValue(t, "query", "--recipe", path, "--summary", "--format="+format)
+			if !strings.Contains(summary, "validation") {
+				t.Fatalf("setup: summary must carry validation phases: %s", summary)
+			}
+			saved := writeYAML(t, "summary."+format, summary)
+			for _, selection := range []string{"--summary", "--selector=components"} {
+				err := queryCmd().Run(t.Context(), []string{"query", "--recipe", saved, selection})
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				if err == nil || !strings.Contains(err.Error(), `kind "`+recipe.RecipeSummaryKind+`"`) {
+					t.Errorf("%s: error = %v, want rejection naming kind %q", selection, err, recipe.RecipeSummaryKind)
+				}
+			}
+		})
+	}
+}
+
+func TestQueryCmdUnprofiledSummarySkipsSelectorHydration(t *testing.T) {
+	_, resolved, _ := queryRecipeFixture(t)
+	resolved.ComponentRefs[0].ValuesFile = "components/missing-values-for-summary-test.yaml"
+	path := writeQueryRecipeFixture(t, resolved)
+	if output := runQueryValue(t, "query", "--recipe", path, "--summary"); !strings.Contains(output, "COMPONENTS") {
+		t.Errorf("summary = %s", output)
+	}
+	err := queryCmd().Run(t.Context(), []string{"query", "--recipe", path, "--selector=components"})
+	if err == nil {
+		t.Fatal("selector must hydrate values and reject the missing values file")
+	}
+}
+
+func TestQueryCmdSummaryOmitsDisabledComponents(t *testing.T) {
+	_, resolved, _ := queryRecipeFixture(t)
+	disabled := map[string]string{"cert-manager": "enabled", "nfd": "install"}
+	for name, key := range disabled {
+		ref := resolved.GetComponentRef(name)
+		if ref == nil {
+			t.Fatalf("setup: recipe must contain %s", name)
+		}
+		if ref.Overrides == nil {
+			ref.Overrides = map[string]any{}
+		}
+		ref.Overrides[key] = false
+	}
+	enabled := 0
+	for _, ref := range resolved.ComponentRefs {
+		if ref.IsEnabled() {
+			enabled++
+		}
+	}
+	path := writeQueryRecipeFixture(t, resolved)
+
+	var summary recipe.Summary
+	if err := json.Unmarshal([]byte(runQueryValue(t, "query", "--recipe", path, "--summary", "--format=json")), &summary); err != nil {
+		t.Fatalf("decode summary: %v", err)
+	}
+	if len(summary.Components) != enabled {
+		t.Errorf("summary lists %d components, want the %d enabled ones", len(summary.Components), enabled)
+	}
+	for _, c := range summary.Components {
+		if _, ok := disabled[c.Name]; ok {
+			t.Errorf("summary lists disabled component %s", c.Name)
+		}
+		for _, dep := range c.DependsOn {
+			if _, ok := disabled[dep]; ok {
+				t.Errorf("%s depends on disabled component %s", c.Name, dep)
+			}
+		}
+	}
+
+	text := runQueryValue(t, "query", "--recipe", path, "--summary")
+	if want := fmt.Sprintf("COMPONENTS (%d)", enabled); !strings.Contains(text, want) {
+		t.Errorf("text summary missing %q: %s", want, text)
+	}
+}
+
+func TestQueryCmdRecipeConfig(t *testing.T) {
+	_, _, path := queryRecipeFixture(t)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"service", "    criteria: {service: eks}\n"},
+		{"explicit wildcard", "    criteria: {service: any}\n"},
+		{"accelerator", "    criteria: {accelerator: h100}\n"},
+		{"intent", "    criteria: {intent: training}\n"},
+		{"os", "    criteria: {os: ubuntu}\n"},
+		{"platform", "    criteria: {platform: kubeflow}\n"},
+		{"nodes", "    criteria: {nodes: 2}\n"},
+		{"snapshot", "    input: {snapshot: missing.yaml}\n"},
+		{"profile", "    profile: gpuStack=operator-managed\n"},
+		{"accounting", "    configuration: {slurm: {accounting: {mode: disabled}}}\n"},
+		{"inventory", "    configuration: {runtimeInventory: {mode: disabled}}\n"},
+		{"interfaces", "    configuration:\n      gke:\n        tcpxoInterfaces:\n" +
+			"          - {interfaceName: eth1, network: gpu-nic-0}\n" +
+			"          - {interfaceName: eth2, network: gpu-nic-1}\n" +
+			"          - {interfaceName: eth3, network: gpu-nic-2}\n" +
+			"          - {interfaceName: eth4, network: gpu-nic-3}\n" +
+			"          - {interfaceName: eth5, network: gpu-nic-4}\n" +
+			"          - {interfaceName: eth6, network: gpu-nic-5}\n" +
+			"          - {interfaceName: eth7, network: gpu-nic-6}\n" +
+			"          - {interfaceName: eth8, network: gpu-nic-7}\n"},
+		{"invalid criteria", "    criteria: {service: not-a-service}\n"},
+		{"invalid selection", "    configuration: {runtimeInventory: {mode: not-a-mode}}\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := writeYAML(t, "config.yaml", "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  recipe:\n"+tt.body)
+			err := queryCmd().Run(t.Context(), []string{"query", "--recipe", path, "--summary", "--config", config})
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if !strings.HasPrefix(tt.name, "invalid") && (err == nil || !strings.Contains(err.Error(), "cannot be combined")) {
+				t.Errorf("expected generation-input conflict, got %v", err)
+			}
+		})
+	}
+	for _, format := range []string{"yaml", "json", "table"} {
+		t.Run("output-only config/"+format, func(t *testing.T) {
+			config := writeYAML(t, "config.yaml", "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  recipe:\n    output: {format: "+format+"}\n")
+			output := runQueryValue(t, "query", "--recipe", path, "--summary", "--config", config)
+			want := "apiVersion:"
+			switch format {
+			case "json":
+				want = `"apiVersion":`
+			case "table":
+				want = "RECIPE SUMMARY"
+			}
+			if !strings.Contains(output, want) {
+				t.Errorf("config format ignored: %s", output)
+			}
+			output = runQueryValue(t, "query", "--recipe", path, "--summary", "--config", config, "--format=table")
+			if !strings.Contains(output, "RECIPE SUMMARY") {
+				t.Errorf("explicit format must override config: %s", output)
+			}
+		})
+	}
+}
+
+// TestQueryCmdRecipeRequiresEvidence proves --recipe fails closed under an
+// evidence requirement. A loaded file only names its criteria, profile and
+// leaf overlay, so an edited copy of an attested recipe would otherwise pass
+// the committed-pointer check.
+func TestQueryCmdRecipeRequiresEvidence(t *testing.T) {
+	t.Setenv(evidenceindex.EnvVar, "")
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	result, err := client.ResolveRecipeFromCriteria(t.Context(), aicr.WrapCriteria(&recipe.Criteria{
+		Service: recipe.CriteriaServiceEKS, Accelerator: recipe.CriteriaAcceleratorGB200,
+		OS: recipe.CriteriaOSUbuntu, Intent: recipe.CriteriaIntentTraining,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.RequirePublishedEvidence(t.Context(), result); err != nil {
+		t.Fatalf("setup: gb200-eks-ubuntu-training must carry a committed pointer: %v", err)
+	}
+	edited := result.Resolved()
+	if len(edited.ComponentRefs) == 0 {
+		t.Fatal("setup: attested recipe has no components")
+	}
+	edited.ComponentRefs[0].Version = "v0.0.0-edited"
+	editedPath := writeQueryRecipeFixture(t, edited)
+	missingPath := filepath.Join(t.TempDir(), "missing.yaml")
+	config := writeRequireEvidenceConfig(t, true)
+
+	for _, file := range []struct{ name, path string }{
+		{"edited attested recipe", editedPath},
+		{"unread missing file", missingPath},
+	} {
+		for _, selection := range []string{"--summary", "--selector=criteria.service"} {
+			for _, source := range []string{"flag", "config", "environment"} {
+				t.Run(file.name+"/"+selection+"/"+source, func(t *testing.T) {
+					args := []string{"query", "--recipe", file.path, selection}
+					switch source {
+					case "flag":
+						args = append(args, "--require-evidence")
+					case "config":
+						args = append(args, "--config", config)
+					case "environment":
+						t.Setenv(evidenceindex.EnvVar, "true")
+					}
+					cmd := queryCmd()
+					var output bytes.Buffer
+					cmd.Writer = &output
+					runErr := cmd.Run(t.Context(), args)
+					errorstest.WantReportedCode(t, runErr, errors.ErrCodeInvalidRequest)
+					if runErr == nil || !strings.Contains(runErr.Error(), "--recipe cannot be used while evidence is required") {
+						t.Errorf("expected loaded-recipe evidence rejection, got %v", runErr)
+					}
+					if output.Len() != 0 {
+						t.Errorf("rejected query printed output: %s", output.String())
+					}
+				})
+			}
+		}
+	}
+
+	t.Run("edited attested recipe/no requirement", func(t *testing.T) {
+		if got := runQueryValue(t, "query", "--recipe", editedPath, "--selector=criteria.accelerator"); got != "gb200" {
+			t.Errorf("query without an evidence requirement = %q, want gb200", got)
+		}
+	})
+}
+
+func TestQueryCmdProfiledSummary(t *testing.T) {
+	criteria := &recipe.Criteria{
+		Service: recipe.CriteriaServiceAKS, Accelerator: recipe.CriteriaAcceleratorH100,
+		OS: recipe.CriteriaOSUbuntu, Intent: recipe.CriteriaIntentTraining,
+	}
+	const profile = "gpuStack=operator-managed"
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	result, err := client.ResolveRecipeFromCriteriaWithOptions(t.Context(), aicr.WrapCriteria(criteria), aicr.WithProfile(profile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeQueryRecipeFixture(t, result.Resolved())
+	for _, tt := range []struct {
+		name string
+		args []string
+	}{
+		{"saved profile", []string{"query", "--recipe", path, "--summary"}},
+		{"generated profile", []string{"query", "--service=aks", "--accelerator=h100", "--os=ubuntu", "--intent=training", "--profile=" + profile, "--summary"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			output := runQueryValue(t, tt.args...)
+			if !strings.Contains(output, "Profile:") || !strings.Contains(output, profile) {
+				t.Errorf("summary missing selected profile: %s", output)
+			}
+		})
+	}
+
+	const missingValues = "components/gpu-operator/missing-profile-values.yaml"
+	ref := result.Resolved().GetComponentRef("gpu-operator")
+	if ref == nil {
+		t.Fatal("setup: profiled recipe must contain gpu-operator")
+	}
+	ref.ValuesFile = missingValues
+	invalidPath := writeQueryRecipeFixture(t, result.Resolved())
+	t.Run("saved profile missing locked values", func(t *testing.T) {
+		_, canonicalErr := client.LoadRecipe(t.Context(), invalidPath, "")
+		if canonicalErr == nil || !strings.Contains(canonicalErr.Error(), missingValues) {
+			t.Fatalf("setup: expected canonical loader to reject missing locked values, got %v", canonicalErr)
+		}
+		cmd := queryCmd()
+		var output bytes.Buffer
+		cmd.Writer = &output
+		err := cmd.Run(t.Context(), []string{"query", "--recipe", invalidPath, "--summary"})
+		errorstest.WantReportedCode(t, err, errorstest.ReportedCode(canonicalErr))
+		if err == nil || !strings.Contains(err.Error(), missingValues) || output.Len() != 0 {
+			t.Errorf("summary must preserve loader rejection: error=%v, output=%s", err, output.String())
+		}
+	})
+
+	t.Run("generated profile missing locked values", func(t *testing.T) {
+		dir := t.TempDir()
+		registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"
+		if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(registry), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		overlay := `apiVersion: aicr.run/v1beta1
+kind: RecipeMetadata
+metadata:
+  name: query-profile-missing-values
+spec:
+  base: h100-aks-ubuntu-training
+  criteria:
+    service: aks
+    accelerator: h100
+    os: ubuntu
+    intent: training
+  componentRefs:
+    - name: gpu-operator
+      valuesFile: ` + missingValues + "\n"
+		if err := os.WriteFile(filepath.Join(dir, "overlays", "query-profile-missing-values.yaml"), []byte(overlay), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		external, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(dir)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = external.Close() }()
+		_, canonicalErr := external.ResolveRecipeFromCriteriaWithOptions(t.Context(), aicr.WrapCriteria(criteria), aicr.WithProfile(profile))
+		if canonicalErr == nil || !strings.Contains(canonicalErr.Error(), missingValues) {
+			t.Fatalf("setup: expected canonical resolver to reject missing locked values, got %v", canonicalErr)
+		}
+		cmd := queryCmd()
+		var output bytes.Buffer
+		cmd.Writer = &output
+		err = cmd.Run(t.Context(), []string{"query", "--data", dir, "--service=aks", "--accelerator=h100", "--os=ubuntu", "--intent=training", "--profile=" + profile, "--summary"})
+		errorstest.WantReportedCode(t, err, errorstest.ReportedCode(canonicalErr))
+		if err == nil || !strings.Contains(err.Error(), missingValues) || output.Len() != 0 {
+			t.Errorf("summary must preserve resolver rejection: error=%v, output=%s", err, output.String())
+		}
+	})
 }

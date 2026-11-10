@@ -34,9 +34,12 @@ spec:
   # Dynamic Resource Allocation (DRA) on GKE requires Kubernetes server version >= 1.34
   # AICR compares the -gke.N build suffix numerically, and ranks "X-gke.N" above bare "X", so an
   # exclusive upper bound at a minor excludes that whole GKE track. Per-branch minimums are
-  # expressed as "||" alternatives. Note a compound value cannot participate in profile
-  # constraint tightening (it is reported incomparable), so do not add a profile-level
-  # K8s.server.version on top of one.
+  # expressed as "||" alternatives. A profile value's simple K8s.server.version floor
+  # distributes over the alternatives (each is intersected independently; a track the
+  # floor empties against an exclusive ceiling is dropped — the gpuStack dra value's
+  # ">= 1.35.0" resolves here to the 1.35 track's minimum). A compound profile-side
+  # value still cannot participate, and a floor must be written at a precision that
+  # orders against every alternative (full precision here).
   constraints:
     - name: K8s.server.version
       value: ">= 1.34.3-gke.1318000 < 1.35 || >= 1.35.0-gke.2745000"

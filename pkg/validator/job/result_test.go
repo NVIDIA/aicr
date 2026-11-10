@@ -33,6 +33,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
@@ -69,13 +70,213 @@ func createPodForJob(t *testing.T, ns, jobName string, status corev1.PodStatus) 
 }
 
 // deployTestJob deploys a Job via envtest and returns the Deployer.
+// deployTestJob deploys entry with a log reader that returns no output: envtest
+// runs no kubelet, so the real reader would fail every read and the
+// fail-closed rule would turn every exit-0 result into `other`.
 func deployTestJob(t *testing.T, ns string, entry catalog.ValidatorEntry) *Deployer {
 	t.Helper()
-	d := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: entry})
+	return deployTestJobWithLogs(t, ns, entry, scriptedLogs())
+}
+
+// deployTestJobWithLogs deploys entry with the given log reader.
+func deployTestJobWithLogs(t *testing.T, ns string, entry catalog.ValidatorEntry, logs *logScript) *Deployer {
+	t.Helper()
+	d := NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: entry, LogReader: logs.read})
 	if err := d.DeployJob(context.Background()); err != nil {
 		t.Fatalf("DeployJob() failed: %v", err)
 	}
 	return d
+}
+
+// logResponse is one scripted answer of a fake log reader.
+type logResponse struct {
+	logs string
+	err  error
+}
+
+// logScript answers successive log reads from a script; the last entry
+// repeats once the script runs out. An empty script answers "" with no error.
+// attempts counts the reads made.
+type logScript struct {
+	responses []logResponse
+	attempts  int
+}
+
+func scriptedLogs(responses ...logResponse) *logScript {
+	return &logScript{responses: responses}
+}
+
+func (s *logScript) read(context.Context, kubernetes.Interface, string, string, string) (string, error) {
+	s.attempts++
+	if len(s.responses) == 0 {
+		return "", nil
+	}
+	i := min(s.attempts, len(s.responses)) - 1
+	return s.responses[i].logs, s.responses[i].err
+}
+
+// errLogsUnavailable stands in for the apiserver refusing a log stream.
+var errLogsUnavailable = errors.New(errors.ErrCodeInternal, "failed to get pod logs: the server could not find the requested resource")
+
+func createPassedPod(t *testing.T, ns, jobName, message string) {
+	t.Helper()
+	now := metav1.Now()
+	createPodForJob(t, ns, jobName, corev1.PodStatus{
+		ContainerStatuses: []corev1.ContainerStatus{{
+			Name: ValidatorContainerName,
+			State: corev1.ContainerState{
+				Terminated: &corev1.ContainerStateTerminated{
+					ExitCode:   0,
+					Message:    message,
+					StartedAt:  metav1.NewTime(now.Add(-15 * time.Second)),
+					FinishedAt: now,
+				},
+			},
+		}},
+	})
+}
+
+// TestExtractResultUnreadableOutputFailsClosed is the #3703 acceptance: a
+// passing exit code whose logs cannot be read renders `other`, never
+// `passed`, and the message names the unavailable output and the read error.
+func TestExtractResultUnreadableOutputFailsClosed(t *testing.T) {
+	ns := createUniqueNamespace(t)
+	logs := scriptedLogs(logResponse{err: errLogsUnavailable})
+	d := deployTestJobWithLogs(t, ns, testEntry(), logs)
+	createPassedPod(t, ns, d.JobName(), "all checks passed")
+
+	result := d.ExtractResult(context.Background())
+
+	if result.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
+	}
+	if result.CTRFStatus() != ctrf.StatusOther {
+		t.Errorf("CTRFStatus = %q, want %q", result.CTRFStatus(), ctrf.StatusOther)
+	}
+	for _, want := range []string{"result output unavailable", "after 2 attempt(s)", "could not find the requested resource", "not credited"} {
+		if !strings.Contains(result.TerminationMsg, want) {
+			t.Errorf("TerminationMsg = %q, want substring %q", result.TerminationMsg, want)
+		}
+	}
+	if result.Extra != nil || len(result.Stdout) != 0 {
+		t.Errorf("Extra = %v, Stdout = %v, want none from output that was never read", result.Extra, result.Stdout)
+	}
+	if logs.attempts != defaults.ValidatorLogReadAttempts {
+		t.Errorf("log read attempts = %d, want %d", logs.attempts, defaults.ValidatorLogReadAttempts)
+	}
+}
+
+// TestExtractResultLogReadRetried verifies the one bounded retry: a read
+// that fails once and then succeeds credits the pass with its markers.
+func TestExtractResultLogReadRetried(t *testing.T) {
+	ns := createUniqueNamespace(t)
+	logs := scriptedLogs(
+		logResponse{err: errLogsUnavailable},
+		logResponse{logs: "work\n" + ctrf.ExtraLinePrefix + `{"resultSchema":"1","observationOnly":"true"}` + "\n"},
+	)
+	d := deployTestJobWithLogs(t, ns, testEntry(), logs)
+	createPassedPod(t, ns, d.JobName(), "all checks passed")
+
+	result := d.ExtractResult(context.Background())
+
+	if result.ExitCode != 0 || result.CTRFStatus() != ctrf.StatusPassed {
+		t.Fatalf("ExitCode = %d, status %q, want a credited pass after the retry (message %q)", result.ExitCode, result.CTRFStatus(), result.TerminationMsg)
+	}
+	if result.Extra[ctrf.ExtraKeyResultSchema] != ctrf.ResultSchemaVersion || result.Extra[ctrf.ExtraKeyObservationOnly] != ctrf.ExtraValueTrue {
+		t.Errorf("Extra = %v, want the markers read on the second attempt", result.Extra)
+	}
+	if logs.attempts != 2 {
+		t.Errorf("log read attempts = %d, want 2", logs.attempts)
+	}
+}
+
+// TestExtractResultUnreadableOutputKeepsFailure verifies the rule applies
+// to passes only: a failed exit keeps its exit code and termination message
+// when the logs cannot be read, since its verdict does not rest on them.
+func TestExtractResultUnreadableOutputKeepsFailure(t *testing.T) {
+	ns := createUniqueNamespace(t)
+	d := deployTestJobWithLogs(t, ns, testEntry(), scriptedLogs(logResponse{err: errLogsUnavailable}))
+	now := metav1.Now()
+	createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
+		ContainerStatuses: []corev1.ContainerStatus{{
+			Name: ValidatorContainerName,
+			State: corev1.ContainerState{
+				Terminated: &corev1.ContainerStateTerminated{ExitCode: 1, Message: "GPU count mismatch", StartedAt: now, FinishedAt: now},
+			},
+		}},
+	})
+
+	result := d.ExtractResult(context.Background())
+
+	if result.ExitCode != 1 || result.CTRFStatus() != ctrf.StatusFailed {
+		t.Errorf("ExitCode = %d, status %q, want the failure preserved", result.ExitCode, result.CTRFStatus())
+	}
+	if result.TerminationMsg != "GPU count mismatch" {
+		t.Errorf("TerminationMsg = %q, want the container's own message", result.TerminationMsg)
+	}
+}
+
+// TestHandleTimeoutUnreadableOutput applies the same rule on the timeout
+// path: a container that finished with exit 0 while the wait failed is
+// credited only from output that was read; a failed exit is preserved.
+func TestHandleTimeoutUnreadableOutput(t *testing.T) {
+	tests := []struct {
+		name       string
+		exitCode   int32
+		wantExit   int32
+		wantStatus string
+		wantInMsg  string
+	}{
+		{"exit 0 renders other", 0, -1, ctrf.StatusOther, "result output unavailable"},
+		{"exit 1 is preserved as failed", 1, 1, ctrf.StatusFailed, "killed by deadline"},
+		{"exit 137 is preserved as other", 137, 137, ctrf.StatusOther, "killed by deadline"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := createUniqueNamespace(t)
+			d := deployTestJobWithLogs(t, ns, testEntry(), scriptedLogs(logResponse{err: errLogsUnavailable}))
+			now := metav1.Now()
+			createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name: ValidatorContainerName,
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{ExitCode: tt.exitCode, Message: "killed by deadline", StartedAt: now, FinishedAt: now},
+					},
+				}},
+			})
+
+			result := d.HandleTimeout(context.Background(), context.DeadlineExceeded)
+
+			if result.ExitCode != tt.wantExit || result.CTRFStatus() != tt.wantStatus {
+				t.Errorf("ExitCode = %d, status %q, want %d/%q", result.ExitCode, result.CTRFStatus(), tt.wantExit, tt.wantStatus)
+			}
+			if !strings.Contains(result.TerminationMsg, tt.wantInMsg) {
+				t.Errorf("TerminationMsg = %q, want substring %q", result.TerminationMsg, tt.wantInMsg)
+			}
+		})
+	}
+}
+
+// TestReadValidatorLogsContextDoneSkipsRetry verifies the retry pause is
+// bounded by the context: a context already done returns the first read's
+// error without waiting out the delay.
+func TestReadValidatorLogsContextDoneSkipsRetry(t *testing.T) {
+	logs := scriptedLogs(logResponse{err: errLogsUnavailable})
+	d := NewDeployer(Config{Namespace: "ns", LogReader: logs.read})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	_, attempts, err := d.readValidatorLogs(ctx, "pod")
+	if !stderrors.Is(err, errLogsUnavailable) {
+		t.Errorf("readValidatorLogs() error = %v, want the read error", err)
+	}
+	if logs.attempts != 1 || attempts != 1 {
+		t.Errorf("log read attempts = %d (reported %d), want 1 with a done context", logs.attempts, attempts)
+	}
+	if elapsed := time.Since(start); elapsed >= defaults.ValidatorLogReadRetryDelay {
+		t.Errorf("readValidatorLogs() waited %v, want the pause skipped", elapsed)
+	}
 }
 
 func TestExtractResultTerminatedPass(t *testing.T) {

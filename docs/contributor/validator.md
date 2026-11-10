@@ -88,7 +88,13 @@ every check on one of its proof paths is present and `passed`
 check fails it, `other`, `pending` or absent checks leave it not tested, and a
 check that `passed` with the `observationOnly` marker leaves it observed,
 which does not establish a MUST (`StatusObserved`) unless
-`spec.validate.evidence.cncf.documented` attests it. `Aggregate.Passed` is
+`spec.validate.evidence.cncf.documented` attests it. A check the aggregation
+knows to be observation-only (`v1.IsObservationOnlyCheck`, today
+`cluster-autoscaling`) is observed too when its `passed` result carries no
+marker, whatever its `resultSchema` stamp says: no stamp means the image
+predates the marker, the known version means the marker line was dropped, an
+unknown version means this reader cannot interpret its markers; none of them
+is a demonstration, and `CheckResult.Reason` records which. `Aggregate.Passed` is
 scoped by level: every applicable MUST established (passed, or observed and
 documented), SHOULDs excluded; `NOT APPLICABLE` comes only from
 `spec.validate.evidence.cncf.notApplicable` and only for the conditional
@@ -578,6 +584,20 @@ Any other exit code also maps to CTRF `other`.
 | `/dev/termination-log` | Failure reason (≤ 4096 bytes), written on `return error` |
 | **stdout sentinel lines** | Structured/side-channel data — see [Stdout sentinels](#stdout-sentinels) |
 
+The orchestrator credits a check only from output it actually read. Every
+structured marker rides stdout, so when the pod logs of an exit-`0` result
+cannot be read (`pkg/validator/job.ExtractResult` and `HandleTimeout`, after
+one retry of the read) the result is reported as `other` with the message
+`result output unavailable: ...`, never as `passed`; a `skipped` or `failed`
+exit keeps its verdict, since it does not rest on the output. Before #3703 the
+pass stood with an empty `extra`, and an observation-only check whose logs
+were lost rendered `PASSED`. The read itself (`pkg/k8s/pod.GetPodLogs`) drains
+the stream in chunks rather than lines, so one over-long log line no longer
+fails the whole read as it did under `bufio.Scanner`. On the check side,
+`validators.SkipWithReason` fails the check when its `skipReason` code cannot
+be written, as `EmitExtra` does for the `observationOnly` and `resultSchema`
+markers; `EmitExtraOrWarn` is for informational extras only.
+
 ### Capability applicability contract
 
 A capability-gated conformance/performance check probes a live prerequisite
@@ -654,6 +674,21 @@ Three sentinels exist today, with deliberately different lifecycles:
 | `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseExtraSentinels` (`pkg/validator/job/result.go`) | one JSON object → `TestResult.Extra` (counts / enum codes) | **no** — stripped as transport, not evidence | **yes** — allowlisted keys are published (see below) |
 | `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseExtraSentinels` (same pass) | one JSON object → `TestResult.RuntimeProvenance` (template digests + key paths) | **no** — stripped as transport | **yes** — bounded by `redact.boundRuntimeProvenance` (see "NCCL benchmark runtime provenance") |
 
+The runner (`validators.Run`) emits one `##AICR-EXTRA##` line before the check
+starts, `resultSchema: "1"` (`ctrf.ResultSchemaVersion`): the result-contract
+version this image speaks. The stamp is written before anything else, so a
+result carries it whenever the stamp write succeeded, a skip, a failure or a
+context-load failure included; a stamp that cannot be written fails the check
+(exit 1, no marker), and a pod whose logs the orchestrator could not read
+carries no markers at all and is reported `other`. A `passed` result read
+from its logs therefore carries the stamp unless the image predates it.
+`pkg/evidence/cncf` reads the stamp to word the reason when a check known to
+be observation-only passed without its marker: no stamp, the image predates
+the marker; the known version, the marker line was dropped; an unknown
+version, this reader cannot interpret its markers. In every one of these
+cases the pass is read as an observation, never a demonstration (see
+[Structured evidence that survives redaction](#structured-evidence-that-survives-redaction)).
+
 All are parsed with `strings.CutPrefix` and the parsers are pure, unit-tested
 functions. They are separate channels on purpose: `RESULT:` surfaces live
 metrics to a human watching a run, so it carries unbounded free-form text and is
@@ -681,17 +716,15 @@ CTRF `extra` map (`ctrf.TestResult.Extra`, mirroring the CTRF spec's `extra`
 object) via `validators.EmitExtra`:
 
 ```go
-// Emit failures are non-fatal — warn, but never flip the check's verdict on a
-// failed stdout write (checkNvidiaSMI wraps this as the emitExtraOrWarn helper):
-emit := func(extra map[string]string) {
-    if err := validators.EmitExtra(extra); err != nil {
-        slog.Warn("failed to emit validator extra", "error", err)
-    }
-}
-// Success path — coverage disclosure (counts only, never node names/IPs):
-emit(map[string]string{"nodesValidated": "1", "nodesTotal": "2"})
-// Skip path — reason enum code:
-emit(map[string]string{"skipReason": "no-gpu-nodes"})
+// Informational extras (counts, measured values) are warn-only: a failed
+// stdout write never flips the check's verdict (validators.EmitExtraOrWarn):
+validators.EmitExtraOrWarn(map[string]string{
+    validators.ExtraKeyNodesValidated: "1", validators.ExtraKeyNodesTotal: "2",
+})
+// Skip path: the reason code decides how the aggregation reads the result,
+// so it goes through SkipWithReason, which fails the check when the code
+// cannot be written instead of skipping it unexplained:
+return validators.SkipWithReason(validators.SkipReasonNoGPUNodes, "no GPU nodes found in the cluster")
 ```
 
 **Transport.** `EmitExtra` writes the map to stdout as one
@@ -709,7 +742,11 @@ code and termination log. Provenance travels the same way as
 Keep the human-readable stdout lines too, for `--full` and live output.
 
 Keys, skip codes, and value formatters live in `validators/extra_keys.go`. A
-test there fails when a key has no redaction allowlist entry.
+test there fails when a key has no redaction allowlist entry. The keys the
+evidence readers consume by name (`skipReason`, `observationOnly`,
+`resultSchema`) are declared once in `pkg/validator/ctrf/extra_keys.go` and
+re-exported by `validators`, so `pkg/evidence/cncf` and the validator images
+cannot drift apart; `TestExtraKeysPinned` freezes the strings.
 
 **Low-cardinality + allowlist contract.** `extra` values MUST be low-cardinality
 (`"2"`, `"305.4"`, `"true"`, `"v25.10.1"`, `"no-schedulable-gpu-nodes"`), never
@@ -725,7 +762,7 @@ fails its key's shape (an IP under `nodesTotal`, `305.44` under
 | signed decimal (`+1.8`, `-12.3`) | `passMargin` (percent above or below `thresholdGbps`) |
 | `true` or `false` | `nodeLocal`, `versionSatisfied`, `observationOnly` |
 | `v` plus one to three numeric parts, optional `-alpha`, `-beta`, or `-rc` suffix (`v25.3.0-rc.1`) | `detectedVersion` |
-| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`) |
+| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`), `resultSchema` (the versions a reader knows, today `1`) |
 
 Codes are closed sets rather than a shape regex, because a kebab-case regex
 would still pass an identifier like `customer-prod-cluster`. The `skipReason`
@@ -760,6 +797,7 @@ page are the contract.
 | `check-nvidia-smi` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
 | `cluster-autoscaling`, on every passing path | `observationOnly` |
 | any check, on an in-pod skip | `skipReason` |
+| any check, on every result whose stamp write succeeded (every `passed` and `skipped` result an image that stamps produces) | `resultSchema`, stamped by the runner before the check starts |
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the
   benchmark runs, so a failed run still records its scope. `fabric` appears
@@ -920,7 +958,7 @@ be set from the catalog or a `--data` overlay:
 |----------|--------------|---------|
 | `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
 | `AICR_SANDBOX_RUNTIME_CLASS` | `workload-sandboxing` | Names the sandboxed `RuntimeClass` to test instead of auto-detecting one by the gVisor/Kata keywords (the upstream `-sandbox-runtime-class` flag); a name the cluster has no class for fails the check with `ErrCodeInvalidRequest`. |
-| `AICR_SANDBOX_PROBE_IMAGE` | `workload-sandboxing` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must provide a POSIX `/bin/sh`, `uname`, `cat`, `ls`, `wc`, `head`, `awk` and `tr` for the probe script; the probe pods carry no `imagePullSecrets`, as the other vanilla probes in this package do not, so a mirror that needs credentials must supply them node-side. |
+| `AICR_SANDBOX_PROBE_IMAGE` | `workload-sandboxing` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must provide a POSIX `/bin/sh`, `uname`, `cat`, `ls`, `wc`, `head`, `awk` and `tr` for the probe script; the probe pods carry the `--image-pull-secret` Secrets copied into the per-run namespace, as every probe pod in this package does. |
 | `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
 | `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY` | `inference-gateway` | When truthy, the check fails if the gateway is open to the internet. What is assessed follows the declared `dataPlane`, not whether the controller runs a Service: with `service-endpoints` (the default), the proxy `LoadBalancer`'s `spec.loadBalancerSourceRanges` is empty or includes an any-source CIDR (`0.0.0.0/0` or `::/0`); with `gateway-address`, Service source ranges are not read at all, and the check fails when a Gateway status address is public, or is a `Hostname` or an unspecified address (`0.0.0.0`, `::`) the check cannot classify (a Gateway with no `status.addresses` at all fails the data-plane step in every mode, before exposure is assessed). Default (unset): the open exposure is recorded and warned but the check still passes. Which gateway is assessed, and how, comes from the recipe's inference gateway profile (`pkg/validator/v1.ResolveInferenceGatewayProfile`; see [Declaring the inference gateway](../integrator/data-extension.md#declaring-the-inference-gateway)). |
 | `AICR_NCCL_RUNTIME_IMAGE` | `nccl-all-reduce-bw`, `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls` | Overrides the NCCL launcher/worker image baked into the per-platform TrainingRuntime templates; a malformed reference fails closed in the pod. |
