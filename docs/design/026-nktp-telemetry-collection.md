@@ -49,7 +49,7 @@ NKTP, the NVKE Telemetry Pipeline, is a scalable OpenTelemetry pipeline for
 collecting, processing, and exporting Kubernetes metrics, logs, and traces,
 with sensible defaults and flexible, shareable configuration. It ships as one
 Helm chart:
-[`nktp`](https://github.com/dsx-ai-factory/nvke/tree/main/nktp/deploy/charts/nktp).
+[`nktp`](https://github.com/dsx-ai-factory/nvke-telemetry-pipeline/tree/main/nktp).
 The chart installs the OpenTelemetry (OTel) Operator and a fixed topology of
 collectors, each an `OpenTelemetryCollector` resource.
 
@@ -433,7 +433,7 @@ scale stay unaddressed.
 
 ## References
 
-- [NKTP Helm chart](https://github.com/dsx-ai-factory/nvke/tree/main/nktp/deploy/charts/nktp):
+- [NKTP Helm chart](https://github.com/dsx-ai-factory/nvke-telemetry-pipeline/tree/main/nktp):
   the NVKE Telemetry Pipeline. The qualified release is recorded on the
   implementation pull request.
 - [OpenTelemetry Operator](https://github.com/open-telemetry/opentelemetry-operator)

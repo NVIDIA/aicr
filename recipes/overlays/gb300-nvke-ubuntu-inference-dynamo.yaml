@@ -1,0 +1,72 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# gb300-nvke-ubuntu-inference plus the Dynamo serving platform: the leaf that
+# serves a model, and the one that declares robust-controller.
+# robust_controller_check.go takes its subject from the recipe
+# (kubeflow-trainer, else dynamo-platform, else skip), so the plain inference
+# leaf cannot establish that MUST. Follows vr200-nvke-ubuntu-inference-dynamo.
+#
+# No performance block. gb300-eks-ubuntu-inference-dynamo gates inference-perf
+# on floors measured on EKS; nothing has measured Dynamo serving on NVKE, and a
+# floor from another service would be a claim about a platform this leaf has
+# never run on.
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: gb300-nvke-ubuntu-inference-dynamo
+
+spec:
+  base: gb300-nvke-ubuntu-inference
+
+  criteria:
+    service: nvke
+    accelerator: gb300
+    os: ubuntu
+    intent: inference
+    platform: dynamo
+
+  # Restated from the base: snapshot resolution checks a leaf's own
+  # constraints.
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "26.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 7.0"
+
+  componentRefs:
+    - name: grove
+      type: Helm
+      valuesFile: components/grove/values.yaml
+      dependencyRefs:
+        - prometheus-operator-crds
+    - name: dynamo-platform
+      type: Helm
+      valuesFile: components/dynamo-platform/values.yaml
+      dependencyRefs:
+        - grove
+        - cert-manager
+        - prometheus-operator-crds
+        - gpu-operator
+        - kai-scheduler
+
+  validation:
+    conformance:
+      # Union-merged onto the base's checks.
+      checks:
+        - robust-controller

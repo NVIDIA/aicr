@@ -89,6 +89,15 @@ const (
 	MariaDBOperatorStateUnknown     = "unknown"
 )
 
+// RDMANamespaceMode values recorded in RecipeResult.Metadata.RDMANamespaceMode
+// by snapshot-driven resolution, from the RDMA subsystem's network namespace
+// mode on the snapshot's node (ib_core netns_mode).
+const (
+	RDMANamespaceModeExclusive = "exclusive"
+	RDMANamespaceModeShared    = "shared"
+	RDMANamespaceModeUnknown   = "unknown"
+)
+
 // DefaultStorageClassState values recorded in
 // RecipeResult.Metadata.DefaultStorageClassState by snapshot-driven
 // resolution of a recipe containing the nvsentinel-mongodb component.
@@ -1293,6 +1302,11 @@ type RecipeResultMetadata struct {
 	// nvsentinel-mongodb. Consumed by the bundle-time
 	// CheckNVSentinelDatastorePrerequisites validation.
 	PerconaOperatorState string `json:"perconaOperatorState,omitempty" yaml:"perconaOperatorState,omitempty"`
+
+	// RDMANamespaceMode records the RDMA subsystem's network namespace mode
+	// observed in the snapshot. Consumed by the bundle-time
+	// CheckRDMANamespaceModeCoherent validation.
+	RDMANamespaceMode string `json:"rdmaNamespaceMode,omitempty" yaml:"rdmaNamespaceMode,omitempty"`
 }
 
 // RecipeResult represents the final merged recipe output.
@@ -1509,6 +1523,7 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 	out.Metadata.MariaDBOperatorState = r.Metadata.MariaDBOperatorState
 	out.Metadata.DefaultStorageClassState = r.Metadata.DefaultStorageClassState
 	out.Metadata.PerconaOperatorState = r.Metadata.PerconaOperatorState
+	out.Metadata.RDMANamespaceMode = r.Metadata.RDMANamespaceMode
 	if r.Metadata.SelectedProfile != nil {
 		selected := *r.Metadata.SelectedProfile
 		selected.OwnedPaths = cloneOwnedPaths(r.Metadata.SelectedProfile.OwnedPaths)

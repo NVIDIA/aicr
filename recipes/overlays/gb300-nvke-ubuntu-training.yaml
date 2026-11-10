@@ -1,0 +1,145 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GB300 NVL72 trays on NVKE, at intent training. The nvke root's platform
+# handling with the GB300 node facts: Ubuntu 26.04 on the 7.0 nvidia-64k arm64
+# kernel, and no pre-installed driver.
+#
+# NVLink only. The collective path this leaf qualifies is MNNVL through a
+# ComputeDomain IMEX channel. It ships no east-west stack (network-operator,
+# sriov-ib-networks, rdma-modules) and declares no nccl-all-reduce-bw-net
+# check: gb200-nvke's four IB rails per tray do not describe these trays, and
+# a NET floor nothing has measured would be a placeholder.
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: gb300-nvke-ubuntu-training
+
+spec:
+  base: nvke
+
+  criteria:
+    service: nvke
+    accelerator: gb300
+    os: ubuntu
+    intent: training
+
+  # No os-ubuntu mixin: it pins VERSION_ID 24.04 / kernel >= 6.8, while GB300
+  # on NVKE runs Ubuntu 26.04 on a 7.0.0-*-nvidia-64k arm64 kernel. Restated
+  # from nvke for K8s: snapshot resolution checks a leaf's own constraints, and
+  # >= 1.34 keeps the GA DRA API that ComputeDomain and IMEX need.
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "26.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 7.0"
+
+  componentRefs:
+    # NVKE's node image ships no driver, so GPU Operator installs it. The
+    # registry pin, 580.173.02, publishes no -ubuntu26.04 driver container;
+    # 595.91.07 is the oldest that does. Verified on a GB300 tray: the driver
+    # builds against 7.0.0-1018-nvidia-64k and all four GPUs enumerate.
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - prometheus-operator-crds
+      overrides:
+        gdrcopy:
+          enabled: true
+        driver:
+          enabled: true
+          version: 595.91.07
+        toolkit:
+          enabled: true
+          # NVKE ships containerd 2.3 with a version 3 config.toml, while the
+          # toolkit's default source (`containerd config dump`) reports the
+          # migrated version 4; the drop-in is then rejected and containerd
+          # crash-loops. NVKE platform behaviour, as in gb200-nvke.
+          env:
+            - name: RUNTIME_CONFIG_SOURCE
+              value: file
+            - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED
+              value: "false"
+        devicePlugin:
+          enabled: true
+          # Helm replaces lists: the first two entries restate the component
+          # base. MOFED_ENABLED off because this leaf wires no RDMA path, so
+          # mounting /dev/infiniband into every GPU pod would grant devices
+          # nothing uses.
+          env:
+            - name: DP_DISABLE_HEALTHCHECKS
+              value: "109"
+            - name: DEVICE_LIST_STRATEGY
+              value: cdi-cri,cdi-annotations,volume-mounts
+            - name: MOFED_ENABLED
+              value: "false"
+
+    # Restates the component default: the kubelet plugin finding the driver
+    # where gpu-operator puts it is what makes a ComputeDomain usable, and
+    # without that multi-node NVLink silently does not work.
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        nvidiaDriverRoot: /run/nvidia/driver
+
+    # The component's topology-updater limits already cover these 144-vCPU
+    # trays. No values-nvidia-nics.yaml: its rule is for recipes that ship
+    # network-operator.
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
+  validation:
+    performance:
+      # Measured 2026-11-09 on a 2-node NVKE tenant cluster (2 x 4 GB300,
+      # driver 595.91.07, nvidia-dra-driver-gpu 0.5.1) with this pairing's
+      # runtime, testdata/gb300/nvke/runtime-nvls.yaml: 840.7 GB/s busbw at
+      # 16 GiB, zero mismatches, one NVLS communicator with nvlsRanks 8 and
+      # MNNVL on every rank. One tray alone reaches about 670 GB/s.
+      #
+      # The floor is the one gb300-eks-training and gb300-oke-ubuntu-training
+      # gate the same NVL72 shape on, not the measured value, so a different
+      # tray pairing does not fail spuriously.
+      checks:
+        - nccl-all-reduce-bw-nvls
+      constraints:
+        - name: nccl-all-reduce-bw-nvls
+          value: ">= 700"
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v26.7.0"
+    conformance:
+      # gang-scheduling is a v1.36 MUST and KAI comes from the nvke base; an
+      # undeclared check renders as "not tested". driver-runtime-management
+      # follows the other gb300 leaves.
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - gang-scheduling
+        - driver-runtime-management

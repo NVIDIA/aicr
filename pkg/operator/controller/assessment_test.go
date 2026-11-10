@@ -148,6 +148,33 @@ func TestAssessSteps(t *testing.T) {
 	}
 }
 
+// AICR v1.2.0's nfd record (0.19.0 to 0.20.1) names its deployer step
+// sync-nfd, not apply, so the operator finds no steps after the apply: the
+// upgrade needs approval but does not wait for narrow-nrt-rbac to be
+// acknowledged. This pins that behavior until the record marks its apply step.
+func TestAssessStepsV120NFDRecord(t *testing.T) {
+	t.Parallel()
+	nfd := func(chart string) *plan.Document {
+		return &plan.Document{Releases: []plan.Release{{ID: "nfd", Component: "nfd", TargetNamespace: "node-feature-discovery",
+			Chart:  plan.Chart{Repository: "oci://r/charts/node-feature-discovery", Digest: plan.DigestOf([]byte(chart))},
+			Values: plan.DigestedRef{Digest: plan.DigestOf([]byte("v1"))}}}}
+	}
+	for _, lane := range []string{"eks", "gke"} {
+		t.Run(lane, func(t *testing.T) {
+			t.Parallel()
+			report, err := aicrjob.ParseUpgradeReport(fixture(t, "..", "aicrjob", "testdata", "v1.2.0", "upgrade-check-v1.1.2-to-v1.2.0-"+lane+".json"), "argocd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			steps := []v1alpha1.RolloutStep{{Release: "nfd", Operation: v1alpha1.OperationUpgrade}}
+			approval, err := assessSteps(steps, nfd("0.19.0"), nfd("0.20.1"), report)
+			if err != nil || !approval || steps[0].Assessment != v1alpha1.AssessmentManual || steps[0].PostApplySteps != nil {
+				t.Fatalf("assessSteps() = %v, %v; step %+v", approval, err, steps[0])
+			}
+		})
+	}
+}
+
 // A recipe change runs AICR's upgrade-check before the rollout exists; the
 // report is kept, referenced from the rollout, and decides approval. A
 // blocked verdict stalls without a rollout.

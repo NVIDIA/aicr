@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -66,7 +66,7 @@ func TestAICRVersionRange(t *testing.T) {
 	for _, allow := range []bool{false, true} {
 		for _, v := range versions {
 			_, out, renderErr := render(ctx, "aicr.version="+v, fmt.Sprintf("aicr.allowPrerelease=%t", allow))
-			supported := aicrjob.CheckSupportedVersion(v, allow) == nil
+			supported := aicrjob.CheckSupportedVersion(v) == nil && aicrjob.CheckPrereleaseAllowed(v, allow) == nil
 			switch {
 			case supported && renderErr != nil:
 				t.Errorf("%s, allowPrerelease %t: the operator supports it, the chart fails: %s", v, allow, out)
@@ -385,7 +385,7 @@ func TestDeploymentFlags(t *testing.T) {
 	}
 	args := deploymentArgs(t, objs)
 	for _, want := range []string{
-		"--aicr-version=v1.0.0", "--aicr-image=" + aicrImage, "--operator-namespace=" + operatorNS,
+		"--aicr-version=v1.0.0", "--allow-prerelease-aicr=false", "--aicr-image=" + aicrImage, "--operator-namespace=" + operatorNS,
 		"--jobs-namespace=" + jobsNS, "--discovery-namespace=" + discoveryNS, "--validation-namespace=" + validationNS,
 		"--engine=ArgoCD", "--engine-namespace=" + engineNS, "--engine-project=aicr",
 		"--registry-repository=" + registry, "--registry-auth-provider=aws", "--engine-repo-creds-secret=aicr-registry",

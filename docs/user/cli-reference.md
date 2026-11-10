@@ -120,7 +120,7 @@ aicr snapshot [flags]
 
 **What it captures:**
 - **SystemD Services**: containerd, docker, kubelet configurations
-- **OS Configuration**: grub, kmod, sysctl, release info
+- **OS Configuration**: grub, kmod, kmod-param, sysctl, release info
 - **Kubernetes**: server version, images, ClusterPolicy
 - **GPU**: driver-free PCI/NFD hardware detection — GPU presence, GPU count, accelerator model/SKU (resolved from the PCI device ID), nvidia kernel-module loaded state, and detection source. Does not require the NVIDIA driver or `nvidia-smi`, and does not emit driver version, CUDA version, or MIG settings.
 - **NodeTopology**: node topology (cluster-wide taints and labels across all nodes)
@@ -547,7 +547,7 @@ node shape the resolved recipe targets. See
 
 > **`--service cks` is Preview**, covering H100 and RTX PRO 6000 on Ubuntu for training. Pass the service explicitly, including with a snapshot; CKS auto-detection is not implemented. See [CoreWeave H100 Setup](../integrator/cks-h100-setup.md) and [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md) for provider ownership and qualification gaps.
 
-> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training`, `nvke / gb200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / training`, `nvke / vr200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / inference` and `nvke / vr200 / ubuntu / inference / dynamo` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md) and [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md) for their prerequisites and known gaps. The VR200 coordinates require an `nvidia-bos-64k` kernel, which the recipe's constraints cannot express — check it before deploying.
+> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training`, `nvke / gb200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / training`, `nvke / vr200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / inference`, `nvke / vr200 / ubuntu / inference / dynamo`, `nvke / gb300 / ubuntu / training`, `nvke / gb300 / ubuntu / training / kubeflow`, `nvke / gb300 / ubuntu / inference` and `nvke / gb300 / ubuntu / inference / dynamo` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md), [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md) and [NVKE GB300 Setup](../integrator/nvke-gb300-setup.md) for their prerequisites and known gaps. The VR200 coordinates require an `nvidia-bos-64k` kernel, which the recipe's constraints cannot express — check it before deploying.
 
 > **`--platform runai` is Preview**, covering the `eks / h100 / ubuntu / training / runai` and `gke / h100 / cos / training / runai` coordinates. See [Run:ai cluster](component-catalog.md#runai-cluster) for its per-cluster inputs and known gaps.
 
@@ -1663,7 +1663,8 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 | `0` | All phases passed or were skipped (also returned under `--fail-on-error=false` even when phases report `failed`/`other`). Under `--cncf-submission` also requires every applicable MUST requirement to be established: an all-skipped submission run exits `8`, see [Exit status of a submission run](validation.md#exit-status-of-a-submission-run) |
 | `2` | Invalid input (bad flags, missing recipe), a readiness pre-flight constraint not met, or a declared check that does not resolve to exactly one catalog validator in its phase (unmatched, cross-phase, or duplicate) — these pre-flight gates always fail closed here regardless of `--fail-on-error` |
 | `5` | A structured timeout reached the top-level CLI (recipe/snapshot load, snapshot-agent wait, evidence signing). A per-validator wait deadline becomes a check result instead and exits `8` — see [validation: CI/CD integration](validation.md#cicd-integration) |
-| `8` | One or more phase checks reported `failed` (including a validator Job killed on its `activeDeadlineSeconds`) or `other` (crash/OOM) — when `--fail-on-error` is set; under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error` ([Exit status of a submission run](validation.md#exit-status-of-a-submission-run)) |
+| `8` | One or more phase checks reported `failed` (including a validator Job killed on its `activeDeadlineSeconds`) or `other` (crash/OOM) — when `--fail-on-error` is set; under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error` ([Exit status of a submission run](validation.md#exit-status-of-a-submission-run)). Also returned when operator cancellation coincides with a failed privileged RBAC revocation (the cluster-admin binding may be orphaned); that case is **not** suppressed by `--fail-on-error=false` |
+| `9` | Operator cancellation (first Ctrl-C or SIGTERM, `ErrCodeCanceled`) with privileged cleanup succeeding. Not suppressed by `--fail-on-error=false`. Partial CTRF output is attempted only when at least one phase has results. A signal that arrives after the last phase completed may end in another code — see [validation: interrupted runs](validation.md#cicd-integration) |
 
 ---
 
@@ -2370,13 +2371,13 @@ The `--deployer` flag controls how deployment artifacts are generated:
 |--------|-------------|
 | `helm` | (Default) Generates Helm charts with values for deployment. Supports `--dynamic`. |
 | `argocd` | Generates Argo CD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
-| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All non-profile-owned values overridable at install time via `helm --set`; a profiled recipe ships a lock template that rejects overrides on profile-owned paths. Use `--dynamic` to pre-populate specific paths for components that resolve to remote Helm charts. `--dynamic` naming a local-chart or non-Helm component is rejected (those components bake values at bundle time and have no install-time stub surface). |
+| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. Values are overridable at install time via `helm --set`, except GPU driver-ownership paths (`aicr-driver-ownership-lock` template, emitted whenever the bundle ships `gpu-operator`, `nvidia-dra-driver-gpu`, or their `-ocp` variants) and, for a profiled recipe, profile-owned paths (`aicr-profile-lock` template). Use `--dynamic` to pre-populate specific paths for components that resolve to remote Helm charts. `--dynamic` naming a local-chart or non-Helm component is rejected (those components bake values at bundle time and have no install-time stub surface). |
 | `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Supports `--dynamic` via ConfigMap `valuesFrom`. |
 | `helmfile` | Generates a `helmfile.yaml` release graph driven by the upstream [helmfile](https://helmfile.readthedocs.io/) CLI (`helmfile apply` / `diff` / `destroy`). Supports `--dynamic` via per-release `cluster-values.yaml`. Requires the `helmfile` binary at deploy time. |
 | `terraform` | Generates a Terraform root module (`terraform plan` / `apply` / `destroy`). One module call per component, chaining that component's pre/post/readiness releases inside it; `depends_on` carries the recipe's `dependencyRefs` exactly. Supports `--dynamic` via per-release `cluster-values.yaml`. Does not create a cluster: the `helm` provider is configured from variables, or — with `--terraform-child-module` — by the calling configuration. Helm components only: a recipe with a Kustomize component is rejected. Requires `terraform` or `tofu` at deploy time; the generated module uses no feature newer than Terraform 1.5 and was validated by hand on Terraform 1.16 and OpenTofu 1.13 (no CI runs either). |
 | `fleet` | Generates a [Rancher Fleet](https://fleet.rancher.io/) bundle: by default one `fleet.yaml` per component folder plus a root `gitrepo.yaml`, or with `--fleet-mode helmop` a single `helmops.yaml` with one HelmOp per component. Supports `--dynamic` via per-folder `cluster-values.yaml` (inlined into `helmops.yaml` in HelmOp mode). Clusters opt in with the `aicr.nvidia.com/bundle=<app-name>` label. OCI output (`--output oci://`) is not supported. |
 
-> **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all non-profile-owned values are overridable at install time (a profiled recipe ships a lock template that rejects install-time values on profile-owned paths).
+> **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where values are overridable at install time, except GPU driver-ownership paths and, for a profiled recipe, profile-owned paths, which lock templates reject.
 
 > **Note:** `--dynamic` declarations targeting the GPU allocation-policy keys (`nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride`, `gpu-operator`(`-ocp`) `devicePlugin.enabled`, or those components' `enabled` toggle) are rejected: validators verify the recipe-resolved allocation policy, so its value cannot be deferred to install time. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
 
@@ -2806,7 +2807,7 @@ Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
 
 **Argo CD deployer behavior:**
 
-The `--deployer argocd-helm` generates a Helm chart app-of-apps where all non-profile-owned values are overridable at install time. When the recipe carries a selected profile, `templates/aicr-profile-lock.yaml` fails the install if a value is supplied for a profile-owned path. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml` for components that resolve to remote Helm charts. Local-chart components (Helm with no upstream `Source`, common on OCP overlays) and non-Helm components have no install-time stub surface — `--dynamic` naming them is rejected rather than silently dropped.
+The `--deployer argocd-helm` generates a Helm chart app-of-apps where values are overridable at install time, except two guarded sets. When the recipe carries a selected profile, `templates/aicr-profile-lock.yaml` fails the install if a value is supplied for a profile-owned path. When the bundle ships `gpu-operator`, `gpu-operator-ocp`, `nvidia-dra-driver-gpu` or `nvidia-dra-driver-gpu-ocp`, `templates/aicr-driver-ownership-lock.yaml` fails the install if a value is supplied for a GPU driver-ownership path (`driver.enabled`, `toolkit.enabled`, `hostPaths.driverInstallDir`, `nvidiaDriverRoot`); set those at bundle time with `--set` so bundle-time ownership checks apply, or, for a path the selected profile owns, choose the profile value with `aicr recipe --profile`. Upgrading an install that passes these values at install time needs the steps in the [upgrade note](component-catalog.md#gpu-operator-and-nvidia-dra-driver-gpu-argocd-helm-rejects-install-time-driver-ownership-values). Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml` for components that resolve to remote Helm charts. Local-chart components (Helm with no upstream `Source`, common on OCP overlays) and non-Helm components have no install-time stub surface — `--dynamic` naming them is rejected rather than silently dropped.
 
 ```shell
 helm install aicr-bundle ./bundle \
@@ -2833,13 +2834,13 @@ aicr bundle -r recipe.yaml \
   --dynamic kubeprometheusstack:prometheus.prometheusSpec.externalLabels.cluster \
   -o ./bundles
 
-# Argo CD Helm chart: all non-profile-owned values overridable, --dynamic pre-populates specific paths
+# Argo CD Helm chart: values overridable except guarded ownership paths, --dynamic pre-populates specific paths
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   --dynamic kubeprometheusstack:prometheus.prometheusSpec.externalLabels.cluster \
   -o ./bundles
 
-# Argo CD Helm chart: without --dynamic, non-profile-owned values still overridable via helm --set
+# Argo CD Helm chart: without --dynamic, other values still overridable via helm --set
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   -o ./bundles
@@ -3134,7 +3135,9 @@ Warning: nodewright-customizations is enabled but --accelerated-node-selector is
 Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
 ```
 
-Neither warning is shown when the only nodewright manifest the recipe wires is the AKS toolkit hardening (`toolkit-hardening-aks.yaml`), as in AKS recipes without an accelerator: its package never cordons or drains a node, and it selects GPU nodes by a fixed label rather than `--accelerated-node-selector`.
+Neither warning is shown when the only nodewright manifest the recipe wires is a toolkit hardening manifest (`toolkit-hardening-aks.yaml` or `toolkit-hardening-oke.yaml`), as in AKS recipes without an accelerator and every OKE recipe except GB300: its package never cordons or drains a node, and it selects GPU nodes by a fixed label rather than `--accelerated-node-selector`.
+
+On OKE GB300 recipes the missing selector is an error and no bundle is produced, because their tuning CR reboots every node it matches and makes CRI-O wait for Multus.
 
 **Viewing Validation Warnings:**
 
@@ -4460,6 +4463,17 @@ AICR respects standard environment variables:
 | 7 | Rate limited (client exceeded rate limit) |
 | 8 | Internal error (unexpected failure) |
 | 9 | Operation aborted by the operator (SIGINT/SIGTERM) |
+
+**Interrupts.** The first SIGINT (Ctrl-C) or SIGTERM cancels the running
+command. The command then runs its bounded cleanup, such as deleting
+snapshot-agent or validator Jobs and RBAC, and exits with the code of the
+error it returns: `9` when it reports the cancellation. A signal that arrives
+after the command's main work has already finished may still end in another
+code, including `0`. A second SIGINT or SIGTERM, for any
+subcommand, terminates the process immediately with the default signal
+disposition (the shell typically reports `130` for Ctrl-C and `143` for
+SIGTERM). Cleanup still in progress is cut short and may leave cluster
+resources behind.
 
 ## Common Usage Patterns
 
