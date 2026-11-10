@@ -33,7 +33,8 @@ When the tenant control plane runs on a GB300 tray, keep GPU Operator's
 operands and the DRA kubelet plugin off it. Label the node before deploying:
 
 ```shell
-kubectl label node <control-plane-node> nvidia.com/gpu.deploy.operands=false
+CP_NODE="my-control-plane-node"  # replace with the control plane's node name
+kubectl label node "${CP_NODE}" nvidia.com/gpu.deploy.operands=false
 ```
 
 and generate the bundle with
@@ -44,7 +45,8 @@ kubelet plugin on the workers.
 ## Generating the bundle
 
 ```shell
-aicr snapshot --node-selector kubernetes.io/hostname=<gpu-worker> --privileged -o snapshot.yaml
+GPU_NODE="my-gpu-worker"  # replace with a GPU worker's node name
+aicr snapshot --node-selector "kubernetes.io/hostname=${GPU_NODE}" --privileged -o snapshot.yaml
 aicr recipe --snapshot snapshot.yaml --intent inference --platform dynamo -o recipe.yaml
 aicr bundle -r recipe.yaml -o bundle \
   --accelerated-node-selector nvidia.com/gpu.deploy.driver=true \
