@@ -339,6 +339,31 @@ for _, r := range results {
 }
 ```
 
+**Results and error together.** `ValidateState` can return non-nil
+`results` **together with** a non-nil error, so an `err != nil` check alone
+discards them. When the run is interrupted (`ErrCodeCanceled` for a canceled
+`ctx`, `ErrCodeTimeout` for a deadline), the results hold every completed phase
+plus the partial current phase. Unstarted checks in it are `skipped`, and the
+phase reports a blocking status (`other` unless already `failed`). If
+privileged RBAC revocation also fails after a cancellation, the error is
+`ErrCodeInternal`, wrapping both causes and warning that the cluster-admin
+binding may be orphaned. Other errors, such as a later phase's pre-flight
+rejection, can also arrive alongside the phases completed before it. Partial
+results never mean the run succeeded: inspect both return values, and treat a
+non-nil error as a failed run even when the results look complete.
+
+```go
+results, err := client.ValidateState(valCtx, aksResult, snap,
+	aicr.WithValidationKubeconfig("/path/to/target-kubeconfig"),
+	aicr.WithValidationTimeout(0))
+for _, r := range results { // may be non-empty even when err != nil
+	log.Printf("phase=%s status=%s", r.Phase, r.Status)
+}
+if err != nil {
+	log.Fatalf("validate state: %v", err) // the run did not complete
+}
+```
+
 When `WithValidationKubeconfig` is omitted or passed an empty string,
 `ValidateState` uses the shared default Kubernetes client and its standard
 discovery chain: `KUBECONFIG`, `~/.kube/config`, then in-cluster configuration.

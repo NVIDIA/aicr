@@ -14,10 +14,20 @@ facade, the same way `pkg/server` handlers are. Crossing this boundary
 will be rejected in review.
 
 `cmd/aicr/main.go` is a one-line entry point that calls
-`cli.Execute()`. `Execute` builds the root command tree, runs it with a
-`signal.NotifyContext` (SIGINT/SIGTERM), and on return calls
+`cli.Execute()`. `Execute` builds the root command tree, runs it with
+the context from `commandSignalContext`, and on return calls
 `os.Exit(errors.ExitCodeFromError(err))`. Handlers never call
 `os.Exit` themselves — they return errors.
+
+`commandSignalContext` wraps `signal.NotifyContext` (SIGINT/SIGTERM): the
+first signal cancels the command's context. It also restores the default
+signal disposition at once, for **every** subcommand. A second SIGINT or
+SIGTERM therefore terminates the process immediately, even while deferred
+cleanup that runs on a fresh context is still in progress (for example the
+snapshot agent's Job and RBAC cleanup, or validator teardown). Such cleanup
+must stay bounded and idempotent, because a second signal can cut it short and
+leave cluster resources behind. This is intentional: an operator can always
+force-exit a command stuck in cleanup.
 
 ## Command Inventory
 

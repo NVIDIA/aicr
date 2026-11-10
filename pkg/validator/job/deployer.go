@@ -16,7 +16,6 @@ package job
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -380,32 +379,11 @@ func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration)
 	return nil
 }
 
-// WaitForPodTermination watches the Job's pod until it reaches a terminal
-// state. Prevents RBAC cleanup from racing with in-progress pod operations.
-//
-// Returns the underlying error from pod.WaitForTermination so callers can
-// decide log severity. A nil error means the pod is gone or terminal; a
-// non-nil error means the wait was abandoned (timeout, watch failure, or
-// repeated watch closures) and the cleanup may race with an in-progress pod.
+// WaitForPodTermination waits until all pods of the Job are terminal or absent,
+// including pods in their deletion grace period and overlapping replacements,
+// so per-run RBAC is not revoked while a pod may still use it. The supplied
+// context bounds the entire wait; API failures remain errors. See
+// pod.WaitForJobPodsTermination.
 func (d *Deployer) WaitForPodTermination(ctx context.Context) error {
-	jobPod, err := d.getPodForJob(ctx)
-	if err != nil {
-		// Pod-not-found is the expected steady state once the Job's TTL
-		// controller or foreground-propagation delete has already run.
-		// Anything else (RBAC, transient API failure, timeout) must
-		// propagate so the caller can decide whether to retry or escalate.
-		var sErr *errors.StructuredError
-		if stderrors.As(err, &sErr) && sErr.Code == errors.ErrCodeNotFound {
-			slog.Debug("no pod found, skipping termination wait", "job", d.jobName)
-			return nil
-		}
-		return err
-	}
-
-	if jobPod.Status.Phase == corev1.PodSucceeded || jobPod.Status.Phase == corev1.PodFailed {
-		return nil
-	}
-
-	slog.Debug("waiting for pod termination", "pod", jobPod.Name)
-	return pod.WaitForTermination(ctx, d.config.Clientset, d.config.Namespace, jobPod.Name)
+	return pod.WaitForJobPodsTermination(ctx, d.config.Clientset, d.config.Namespace, d.jobName)
 }
