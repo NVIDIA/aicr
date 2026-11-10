@@ -538,8 +538,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 // break, without writing to outputDir: a dynamic path that intersects a
 // guarded path, whose stub in the root values.yaml the lock would reject on
 // every render, and stale artifacts of a guarded component the bundle omits.
-// Generate runs it for direct callers; the bundler runs it before copying
-// --data files, which a rejection inside Generate would leave behind.
+// Generate runs it for direct callers. The bundler runs it against the real
+// output directory, because Generate writes into a fresh stage.
 func ValidateDriverOwnership(
 	ctx context.Context, result *recipe.RecipeResult, dynamicValues map[string][]string,
 	vendorCharts bool, outputDir string,
@@ -1161,10 +1161,8 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		totalSize += staticSize
 	}
 
-	// Generation writes directly into --output and the directory is not
-	// cleared between runs, so a failed pre-fix run leaves its empty static/
-	// behind. Without this, retrying into that same directory reproduces the
-	// original failure even though nothing new is created.
+	// A Generator called directly can write into a reused output directory,
+	// where an empty static/ from an earlier run fails validateExactTree.
 	if !staticDirReady {
 		if err := removeStaleStaticDir(staticDir); err != nil {
 			return nil, 0, nil, err
@@ -1183,16 +1181,11 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 // an upstream chart.
 //
 // The check matters most before removal, since os.Remove unlinks regular files
-// as readily as it removes empty directories. A pre-existing regular file at
-// this path reaches generation on every route: checksum.ValidateOutputRoot
-// runs first on the DefaultBundler path but permits regular files, rejecting
-// only symlinks and special objects.
+// as readily as it removes empty directories. Lstat rather than Stat
+// additionally rejects a symlink here.
 //
-// Lstat rather than Stat additionally rejects a symlink here. On the
-// DefaultBundler path that is redundant, since ValidateOutputRoot already
-// rejects a symlink anywhere under the output root before any deployer runs;
-// it still holds for a caller that constructs this Generator directly and
-// bypasses that check.
+// Only a Generator called directly can find anything at this path.
+// DefaultBundler generates into a new staging directory.
 //
 // The guarantee stops there. This is a check-then-act on a path, so a symlink
 // planted between this call and the MkdirAll or Remove that follows is not

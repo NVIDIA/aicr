@@ -91,11 +91,7 @@ func TestCollectComponentReadiness(t *testing.T) {
 		"components/gpu-operator/" + readinessFileName: []byte(validReadinessTestYAML),
 	})
 
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
-	if err != nil {
-		t.Fatalf("NewLayeredDataProvider: %v", err)
-	}
+	layered := dataDirProvider(t, tmpData)
 	rr := &recipe.RecipeResult{
 		ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
 	}
@@ -377,10 +373,7 @@ func TestCollectComponentReadiness(t *testing.T) {
 			recipe.RegistryFileName:                        []byte(providertest.EmptyRegistryYAML),
 			"components/gpu-operator/" + readinessFileName: []byte("kind: ConfigMap\n"),
 		})
-		badLayered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: badDir})
-		if err != nil {
-			t.Fatalf("NewLayeredDataProvider: %v", err)
-		}
+		badLayered := dataDirProvider(t, badDir)
 		badRR := &recipe.RecipeResult{
 			ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}},
 		}

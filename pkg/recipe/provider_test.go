@@ -275,6 +275,53 @@ spec:
 	}
 }
 
+func TestLayeredDataProvider_ReadExternalFile(t *testing.T) {
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":          []byte(providertest.EmptyRegistryYAML),
+		"components/x/vals.yaml": []byte("a: 1\n"),
+		"grows.yaml":             []byte("b: 2\n"),
+	})
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{ExternalDir: tmpDir, MaxFileSize: 128})
+	if err != nil {
+		t.Fatalf("failed to create layered provider: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "grows.yaml"), []byte(strings.Repeat("b", 129)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name     string
+		ctx      context.Context
+		path     string
+		want     string
+		wantCode aicrerrors.ErrorCode
+	}{
+		{name: "registry is not merged", ctx: context.Background(), path: "registry.yaml", want: providertest.EmptyRegistryYAML},
+		{name: "nested file", ctx: context.Background(), path: "components/x/vals.yaml", want: "a: 1\n"},
+		{name: "embedded-only file", ctx: context.Background(), path: "overlays/base.yaml", wantCode: aicrerrors.ErrCodeNotFound},
+		{name: "file grown past the limit", ctx: context.Background(), path: "grows.yaml", wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "canceled context", ctx: canceled, path: "registry.yaml", wantCode: aicrerrors.ErrCodeTimeout},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := provider.ReadExternalFile(tt.ctx, tt.path)
+			if tt.wantCode != "" {
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+				return
+			}
+			if err != nil {
+				t.Fatalf("ReadExternalFile: %v", err)
+			}
+			if string(data) != tt.want {
+				t.Errorf("ReadExternalFile(%q) = %q, want %q", tt.path, data, tt.want)
+			}
+		})
+	}
+}
+
 // TestLayeredDataProvider_SecurityChecks tests security validations.
 func TestLayeredDataProvider_SecurityChecks(t *testing.T) {
 	t.Run("rejects symlinks", func(t *testing.T) {

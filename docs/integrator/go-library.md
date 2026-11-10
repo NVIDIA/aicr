@@ -1374,6 +1374,14 @@ caller-supplied regardless of `Config`, which is why the REST `/v1/bundle`
 handler can set `Config` and `OutputDir`/`Timeout` in the same struct
 literal and have all three take effect.
 
+`MakeBundle` renders into a private directory and writes into `OutputDir` only
+once the bundle is complete, so a call that fails while rendering leaves
+`OutputDir` as it found it. An `OutputDir` that holds an earlier bundle is
+replaced, and one that holds anything else fails the call. With
+`config.WithIncludeChecksums(false)`, other top-level entries are kept
+instead. See
+[Output directory](../user/bundling.md#output-directory).
+
 To generate a class-partitioned bundle set ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)),
 set `Split` and give `OutputDir` a path that does not exist yet; the set is
 published there atomically, and the helm deployer is the only one supported:

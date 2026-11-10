@@ -34,6 +34,31 @@ aicr bundle --recipe recipe.yaml --deployer argocd \
   --output ./bundles
 ```
 
+## Output directory
+
+`--output` defaults to the current directory. The bundle renders in a private
+`.aicr-stage-*` directory, inside the output directory when it exists and
+beside it when it does not, and reaches the output directory only once it is
+complete. A run that fails while rendering, or is interrupted with Ctrl-C or
+`SIGTERM`, leaves the output directory as it found it.
+
+Bundling into a directory that holds an earlier bundle replaces it, including
+files the new bundle does not write, such as a dropped `--data` file, a
+component folder, `provenance.yaml` or attestation files. A file counts as
+part of the earlier bundle when that bundle's `checksums.txt` lists it and its
+content still matches. The run fails and changes nothing if the directory
+holds anything else, an edited bundle file included, because `checksums.txt`
+must list the whole tree.
+
+A run that is killed outright, for example by `SIGKILL` or the out-of-memory
+killer, cannot clean up after itself. Neither can a run that fails while
+moving the finished bundle into an existing output directory. Either can leave
+a `.aicr-stage-*` directory behind, and the output directory partly replaced.
+Delete the `.aicr-stage-*` directory and bundle again.
+
+A `--split` set needs a path that does not exist yet. See
+[Split a bundle by class](#split-a-bundle-by-class).
+
 ## Bundle layout
 
 This is the canonical description of what a bundle contains. The trees below
