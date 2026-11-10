@@ -1161,23 +1161,40 @@ interruption into a pass. Normal pass/fail/skip exits remain `0`/`1`/`2`.
 
 Deferred cluster cleanup must use a **fresh, timeout-bounded context**, not the
 canceled check context, and should leave time to flush the termination message
-inside the pod's **30s** termination grace. The cleanup audit found the existing
-cleanup helpers already detach from the check context. Their bounds are not a
-guarantee of completing within grace: `K8sCleanupTimeout` and
-`PreflightCleanupTimeout` each consume up to 30s with no flush margin;
+inside the pod's **60s** termination grace: the 30s cleanup grace
+(`ValidatorCleanupGrace`) plus a 30s result flush margin
+(`ValidatorResultFlushMargin`). The cleanup audit found the existing cleanup
+helpers already detach from the check context. `K8sCleanupTimeout` and
+`PreflightCleanupTimeout` each consume at most the 30s cleanup grace, leaving the
+flush margin intact. Other paths are not guaranteed to complete within grace:
 `cleanupNCCLResources` additionally allows a 5m namespace termination wait,
 `deleteTrainer` has per-resource 30s attempts and retries, inference's nested
 AIPerf/workload cleanups can consume sequential 30s windows, and CRE's
 `teardownCRECertification` allows 10m. These existing paths may be SIGKILLed
-before cleanup returns or the termination message is written. Neither their
-bounds nor the pod grace are increased here. SIGKILL, OOM and crashes cannot
-run defers; an external orphan sweeper remains outside this implementation.
+before cleanup returns or the termination message is written. Their bounds are
+not changed here. SIGKILL, OOM and crashes cannot run defers; an external orphan
+sweeper remains outside this implementation.
+
+The Job's `activeDeadlineSeconds` is the catalog timeout plus
+`ValidatorJobDeadlineHeadroom` (3m = `ValidatorStartupGrace` 2m +
+`ValidatorCleanupGrace` 30s + `ValidatorResultFlushMargin` 30s), and
+`AICR_CHECK_TIMEOUT` stays the bare catalog timeout, so the check's own context
+expires first and a pod that started as late as the startup grace still runs its
+deferred cleanup before the Job deadline. The orchestrator waits
+`v1.WaitEnvelopeFor(timeout)` from the Job's start: the Job deadline plus
+`ValidatorTerminationGracePeriod` (60s) plus `ValidatorTerminationWaitMargin`
+(5s). While it waits, `pod.ObserveJobPods` remembers the last pod whose validator
+container terminated, so `ExtractResult` can report the check's own exit code and
+termination message after the Job controller deletes the pod at the deadline
+(the verdict stays `failed`; the message gains `check reported: …`). The
+arithmetic is pinned in `pkg/defaults/timeouts_test.go` and
+`pkg/validator/catalog/catalog_test.go`; see ADR 002 for the table.
 
 On operator cancellation, the orchestrator uses one fresh 30s deadline for the
 in-flight Job's result capture, deletion and partial CTRF persistence, in that
-order, followed by the pod-termination wait. It does **not** start a fresh 60s
+order, followed by the pod-termination wait. It does **not** start a fresh 90s
 pod wait. Instead, the wait keeps that shared deadline but always extends to at
-least the Job deletion time plus the pod's 30s termination grace
+least the Job deletion time plus the pod's 60s termination grace
 (`ValidatorTerminationGracePeriod`) plus a 5s delivery margin
 (`ValidatorTerminationWaitMargin`). This keeps per-run RBAC alive for the pod's
 full SIGTERM grace, so a cooperative check can finish its in-grace cleanup. The
@@ -1185,7 +1202,7 @@ wait still ends as soon as the Job's pods are terminal or gone. This applies on
 every interrupted path that deletes a Job: the in-flight check, an apply whose
 response was lost, and cancellation during the normal post-deletion wait.
 Per-run RBAC/data teardown keeps its separate 30s deadline. Total cleanup is
-typically about 35s, and about 95s plus normal overhead in the worst case
+typically about 65s, and about 125s plus normal overhead in the worst case
 (capture/deletion/persistence, then the pod's grace, then RBAC/data teardown).
 If privileged RBAC
 revocation also fails, both `ValidatePhase` and `ValidatePhases` return
@@ -1211,7 +1228,7 @@ window.
 `Validator.ValidatePhases` and `Client.ValidateState` return **both** partial
 results and the interruption or privileged-cleanup error. Consumers must inspect
 both. The CLI observes first cancellation at validation entry and records a
-95s aggregate deadline (`validationCancellationBudget`), derived from the phase
+125s aggregate deadline (`validationCancellationBudget`), derived from the phase
 cleanup window, the pod's grace plus margin, and the per-run cleanup window;
 normal validation time does not consume it. Partial CTRF output gets only the
 remaining time, capped by its existing 30s I/O allowance, with no renewed

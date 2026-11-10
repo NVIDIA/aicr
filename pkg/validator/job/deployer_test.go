@@ -18,6 +18,7 @@ import (
 	"context"
 	stderrors "errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1113,7 +1114,7 @@ func TestScanMissingPodAffinityDeps_StopsOnCancellation(t *testing.T) {
 func TestDeployJobAnchorsWaitToObservedJobStart(t *testing.T) {
 	t.Parallel()
 
-	const applyDelay = 90 * time.Second // 30s past defaults.JobEnvelopeMargin
+	const applyDelay = 90 * time.Second
 	entry := testEntry()
 	created := metav1.NewTime(time.Now().Add(-applyDelay).Truncate(time.Second))
 
@@ -1144,19 +1145,21 @@ func TestDeployJobAnchorsWaitToObservedJobStart(t *testing.T) {
 		t.Fatalf("jobStart = %v, want the apply response's creationTimestamp %v", d.jobStart, created.Time)
 	}
 
-	// The wait WaitForCompletion would derive from that origin. Entry timeout
-	// is 2m, so the unrebased budget is 2m+2m30s = 4m30s and the Job deadline
-	// is 2m+3m30s = 5m30s. Rebased onto a 90s-old start the wait is ~3m, and
-	// the whole wait fits inside the Job deadline measured from the same
-	// origin; unrebased it would have ended 90s past that deadline.
+	// The wait WaitForCompletion would derive from that origin. Rebased onto a
+	// 90s-old start the wait ends exactly at WaitEnvelopeFor after the Job's
+	// start: past the Job deadline plus the SIGTERM window, and 90s shorter
+	// than an unrebased wait.
 	now := time.Now()
 	wait := v1.OrchestratorWaitFor(d.jobStart, now, entry.Timeout)
-	budget := entry.Timeout + defaults.ValidatorWaitBuffer
-	if wait >= budget {
-		t.Errorf("derived wait = %v, want less than the unrebased budget %v", wait, budget)
+	envelope := v1.WaitEnvelopeFor(entry.Timeout)
+	if wait >= envelope {
+		t.Errorf("derived wait = %v, want less than the unrebased envelope %v", wait, envelope)
 	}
-	if end, deadline := now.Add(wait), d.jobStart.Add(v1.JobDeadlineFor(entry.Timeout)); !end.Before(deadline) {
-		t.Errorf("orchestrator wait ends at %v, want strictly before the Job deadline at %v", end, deadline)
+	if end, want := now.Add(wait), d.jobStart.Add(envelope); !end.Equal(want) {
+		t.Errorf("orchestrator wait ends at %v, want Job start + envelope = %v", end, want)
+	}
+	if end, floor := now.Add(wait), d.jobStart.Add(v1.JobDeadlineFor(entry.Timeout)+defaults.ValidatorTerminationGracePeriod); end.Before(floor) {
+		t.Errorf("orchestrator wait ends at %v, before the Job deadline plus the SIGTERM window at %v", end, floor)
 	}
 }
 
@@ -1201,5 +1204,59 @@ func TestObservedJobStartPrefersStatusStartTime(t *testing.T) {
 				t.Errorf("observedJobStart() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestWaitForCompletionRemembersTerminatedPod covers the observer wired into
+// WaitForCompletion: a pod seen with a terminated validator container while
+// waiting survives into the deployer even though it is gone by the time the
+// Job reaches its terminal state (the Job controller deleting it on deadline
+// expiry, issue #1632).
+func TestWaitForCompletionRemembersTerminatedPod(t *testing.T) {
+	const jobName = "aicr-gpu-operator-health-abcdef"
+	terminated := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: jobName + "-pod", Namespace: "aicr-validation",
+			Labels: map[string]string{"batch.kubernetes.io/job-name": jobName},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodFailed,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:  ValidatorContainerName,
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 3, Message: "terminated by SIGTERM"}},
+			}},
+		},
+	}
+	failedJob := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: "aicr-validation"},
+		Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{
+			Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: batchv1.JobReasonDeadlineExceeded,
+		}}},
+	}
+
+	cs := fake.NewSimpleClientset(failedJob, terminated)
+	// Hold the Job's terminal Get until the observer has listed pods, so the
+	// pod is seen before the wait returns without relying on timing.
+	listed := make(chan struct{})
+	var once sync.Once
+	cs.PrependReactor("list", "pods", func(clienttesting.Action) (bool, runtime.Object, error) {
+		once.Do(func() { close(listed) })
+		return false, nil, nil
+	})
+	cs.PrependReactor("get", "jobs", func(clienttesting.Action) (bool, runtime.Object, error) {
+		select {
+		case <-listed:
+		case <-time.After(5 * time.Second):
+		}
+		return false, nil, nil
+	})
+
+	d := NewDeployer(Config{Clientset: cs, Namespace: "aicr-validation", Entry: testEntry()})
+	d.jobName = jobName
+	if err := d.WaitForCompletion(t.Context(), time.Minute); err != nil {
+		t.Fatalf("WaitForCompletion() = %v", err)
+	}
+	if d.lastTerminated == nil || d.lastTerminated.Name != terminated.Name {
+		t.Fatalf("lastTerminated = %v, want pod %s", d.lastTerminated, terminated.Name)
 	}
 }

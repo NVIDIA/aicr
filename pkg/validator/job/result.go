@@ -228,6 +228,19 @@ func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error) (exitCo
 	// and the pod-status branch above already bounds its own message the same
 	// way — an unbounded Job condition would be the one way around it.
 	if cond.Reason == batchv1.JobReasonDeadlineExceeded {
+		// The Job controller deletes the pod on deadline expiry, but the
+		// container's terminated status (the check's own SIGTERM result) is
+		// still readable while the pod terminates, or from the last status the
+		// deployer observed. Keep the failed verdict and attach what the check
+		// reported instead of discarding it behind a generic message.
+		if reported, ok := d.reportedTermination(ctx); ok {
+			return validatorExitFailed, boundTerminationMsg(fmt.Sprintf(
+				"validator Job did not complete within its %s Job deadline (check budget %s) (Job condition Failed/%s: %s); check reported: %s",
+				enforcedDeadline(job, d.config.Entry.Timeout), truncateToSeconds(effectiveTimeout(d.config.Entry.Timeout)),
+				cond.Reason, detail, reported),
+				defaults.ValidatorMaxTerminationMsgBytes)
+		}
+
 		// States the observed fact — no pod remains — rather than naming a
 		// cause. ErrCodeNotFound covers a pod deleted by the Job controller on
 		// deadline expiry (the dominant case), one never created at all
@@ -243,6 +256,41 @@ func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error) (exitCo
 	return -1, boundTerminationMsg(fmt.Sprintf("Job %s failed (%s): %s; pod not found: %v",
 		d.jobName, cond.Reason, detail, findErr),
 		defaults.ValidatorMaxTerminationMsgBytes)
+}
+
+// reportedTermination returns what the validator container reported when its
+// pod is no longer returned by getPodForJob: the exit code and termination
+// message from a pod still in its deletion grace window, else from the last
+// terminated pod the deployer observed while waiting. ok is false when neither
+// source has a terminated validator container.
+func (d *Deployer) reportedTermination(ctx context.Context) (string, bool) {
+	termPod := d.terminatedPod(ctx)
+	if termPod == nil {
+		return "", false
+	}
+	cs, found := findContainerStatus(termPod.Status.ContainerStatuses, ValidatorContainerName)
+	if !found || cs.State.Terminated == nil {
+		return "", false
+	}
+	msg := strings.TrimSpace(cs.State.Terminated.Message)
+	if msg == "" {
+		return fmt.Sprintf("exit code %d with no termination message", cs.State.Terminated.ExitCode), true
+	}
+	return fmt.Sprintf("exit code %d: %s", cs.State.Terminated.ExitCode, msg), true
+}
+
+// terminatedPod returns a pod whose validator container has terminated even if
+// getPodForJob skips it because it is being deleted: first from a live List,
+// then from the last pod observed while waiting.
+func (d *Deployer) terminatedPod(ctx context.Context) *corev1.Pod {
+	listed, err := pod.GetTerminatedPodForJob(ctx, d.config.Clientset, d.config.Namespace, d.jobName, ValidatorContainerName)
+	if err == nil {
+		return listed
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		slog.Debug("failed to list terminated pods for Job", "job", d.jobName, "error", err)
+	}
+	return d.lastTerminated
 }
 
 // jobFailedCondition returns the validator Job and its terminal Failed
@@ -354,6 +402,14 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 	// Try to find the pod
 	jobPod, err := d.getPodForJob(ctx)
 	if err != nil {
+		// A pod already being deleted is skipped by getPodForJob; its
+		// terminated container status is still the check's own result.
+		jobPod = d.terminatedPod(ctx)
+		if jobPod != nil {
+			err = nil
+		}
+	}
+	if err != nil {
 		result.ExitCode = -1
 		result.TerminationMsg = fmt.Sprintf("%s (pod never reached running state)",
 			waitFailureMessage(waitCause, effectiveTimeout(d.config.Entry.Timeout)))
@@ -440,21 +496,18 @@ func enforcedDeadline(job *batchv1.Job, configured time.Duration) time.Duration 
 // had no error to thread through.
 //
 // The timeout wording names the actual clock the orchestrator waited on —
-// configured+defaults.ValidatorWaitBuffer, the window WaitForCompletion spans
-// measured from the Job's start time — not just the catalog budget: since
-// #2473 the Job's own activeDeadlineSeconds exceeds the catalog budget by
-// ValidatorJobDeadlineHeadroom, so a hung check now routinely expires this
-// orchestrator wait before the Job deadline, and reporting only the catalog
-// value would understate how long the operator actually waited.
+// v1.WaitEnvelopeFor, the Job deadline plus the SIGTERM window and delivery
+// margin, measured from the Job's start time — not just the catalog budget, so
+// the message does not understate how long the operator actually waited.
 func waitFailureMessage(cause error, configured time.Duration) string {
 	if isCanceledCause(cause) {
 		return "canceled: validation run was interrupted before the validator completed"
 	}
 	if cause == nil || isDeadlineCause(cause) {
 		checkBudget := truncateToSeconds(configured)
-		waitBuffer := truncateToSeconds(defaults.ValidatorWaitBuffer)
-		return fmt.Sprintf("timeout: validator did not complete within %s (check budget %s + orchestrator wait buffer %s)",
-			checkBudget+waitBuffer, checkBudget, waitBuffer)
+		envelope := truncateToSeconds(v1.WaitEnvelopeFor(configured))
+		return fmt.Sprintf("timeout: validator did not complete within %s (check budget %s + Job deadline headroom, SIGTERM window and wait margin %s)",
+			envelope, checkBudget, envelope-checkBudget)
 	}
 	return fmt.Sprintf("validation failed: %v", cause)
 }

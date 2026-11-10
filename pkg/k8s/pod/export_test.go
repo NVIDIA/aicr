@@ -14,5 +14,26 @@
 
 package pod
 
+import (
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+)
+
 // ReadLogStreamForTest exposes readLogStream to the external test package.
 var ReadLogStreamForTest = readLogStream
+
+// LastForTest returns the pod the observer currently holds without stopping it.
+func (o *JobPodObserver) LastForTest() *corev1.Pod {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.last
+}
+
+// SetJobWatchResumeBackoffForTest shortens the watch resume backoff and returns
+// a restore func. Tests using it must not run in parallel.
+func SetJobWatchResumeBackoffForTest(d time.Duration) func() {
+	old := jobWatchResumeBackoff
+	jobWatchResumeBackoff = d
+	return func() { jobWatchResumeBackoff = old }
+}

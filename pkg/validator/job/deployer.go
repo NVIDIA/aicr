@@ -94,6 +94,11 @@ type Deployer struct {
 	// WaitForCompletion anchors its own deadline to it so both clocks share an
 	// origin; zero until DeployJob succeeds.
 	jobStart time.Time
+	// lastTerminated is the last pod observed with a terminated validator
+	// container while WaitForCompletion ran. It survives the Job controller
+	// deleting the pod on activeDeadlineSeconds expiry, when the pod can no
+	// longer be listed.
+	lastTerminated *corev1.Pod
 }
 
 // NewDeployer creates a Deployer for a single validator catalog entry.
@@ -363,13 +368,20 @@ func (d *Deployer) CleanupJob(ctx context.Context) error {
 //
 // The wait is anchored to the Job's observed start time rather than to the
 // moment this method was called, so it and the Job's own activeDeadlineSeconds
-// are measured from the same origin, and v1.OrchestratorWaitFor caps the result
-// short of that deadline. The orchestrator therefore stays the tighter clock
-// for every apply response that arrives while the Job deadline is still more
-// than defaults.ValidatorPreDeadlineMargin away. That function carries the
-// derivation, including what the wait is still good for once it is not.
+// are measured from the same origin. v1.OrchestratorWaitFor extends it past the
+// Job deadline by the pod's SIGTERM window (v1.WaitEnvelopeFor), so a check
+// terminated at the deadline can finish cleanup and report before the run is
+// classified. While waiting, the Job's pods are observed so the check's last
+// terminated status survives the Job controller deleting the pod at the
+// deadline (issue #1632).
 func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration) error {
 	waitTimeout := v1.OrchestratorWaitFor(d.jobStart, time.Now(), timeout)
+	observer := pod.ObserveJobPods(ctx, d.config.Clientset, d.config.Namespace, d.jobName, ValidatorContainerName)
+	defer func() {
+		if last := observer.Stop(); last != nil {
+			d.lastTerminated = last
+		}
+	}()
 	// pod.WaitForJobTerminal already returns structured errors with proper
 	// codes (ErrCodeTimeout, ErrCodeUnavailable, ErrCodeInternal). Propagate
 	// as-is so callers can distinguish retryable from terminal failures.
