@@ -57,9 +57,13 @@ on:
       - 'recipes/mixins/os-ubuntu.yaml'
       - 'recipes/components/cert-manager/**'
       - 'recipes/components/prometheus-operator-crds/**'
-      # Bundling the EKS leaf runs every component's gate, and the drain
-      # scope shapes the nvsentinel values the quarantine step installs.
-      - 'pkg/bundler/validations/**'
+      # The gates the script's bundles exercise: the monitor's own, the
+      # remediation pipeline and shared NVSentinel helpers in checks.go, and
+      # the drain scope, which shapes the nvsentinel values the quarantine
+      # step installs.
+      - 'pkg/bundler/validations/nvsentinel_csp_health_monitor.go'
+      - 'pkg/bundler/validations/checks.go'
+      - 'pkg/bundler/validations/nvsentinel_drain_scope.go'
       - 'pkg/bundler/drainscope/**'
       - 'pkg/bundler/nvsentinel_drain_scope.go'
       - 'tests/e2e/nvsentinel-csp-health-monitor/**'

@@ -393,14 +393,14 @@ jobs:
           - ghcr.io/nvidia/nvsentinel/log-collector
           - ghcr.io/nvidia/nvsentinel/file-server-cleanup
           - ghcr.io/nvidia/nvsentinel/lifecycle-manager
+          - ghcr.io/nvidia/nvsentinel/csp-health-monitor
+          - ghcr.io/nvidia/nvsentinel/maintenance-notifier
           # The nvsentinel-log-collector mixin's file server, at the nvsentinel
           # chart's own pins; its init container's busybox is the AICR pin
           # below. bitnamilegacy is Bitnami's frozen archive and is never
           # patched, so expect findings here.
           - docker.io/bitnamilegacy/nginx
           - quay.io/martinhelmich/prometheus-nginxlog-exporter
-          - ghcr.io/nvidia/nvsentinel/csp-health-monitor
-          - ghcr.io/nvidia/nvsentinel/maintenance-notifier
           # Percona, from the remediation mixins' separately bundled datastore
           # (psmdb-operator, nvsentinel-mongodb). Pinned by AICR, by digest.
           - docker.io/percona/percona-server-mongodb-operator
@@ -486,6 +486,10 @@ jobs:
             tag: v1.28.0
           - image: ghcr.io/nvidia/nvsentinel/lifecycle-manager
             tag: v1.28.0
+          - image: ghcr.io/nvidia/nvsentinel/csp-health-monitor
+            tag: v1.28.0
+          - image: ghcr.io/nvidia/nvsentinel/maintenance-notifier
+            tag: v1.28.0
           # The nvsentinel chart's own pins for the file server's third-party
           # images. The weekly TestNVSentinelLogCollectorChartRender fails if a
           # chart bump moves them; TestLogCollectorImagesPinnedEverywhere then
@@ -494,10 +498,6 @@ jobs:
             tag: 1.27.2-debian-12-r2
           - image: quay.io/martinhelmich/prometheus-nginxlog-exporter
             tag: v1.10.0
-          - image: ghcr.io/nvidia/nvsentinel/csp-health-monitor
-            tag: v1.28.0
-          - image: ghcr.io/nvidia/nvsentinel/maintenance-notifier
-            tag: v1.28.0
           # AICR's own pins in recipes/components/{psmdb-operator,nvsentinel-mongodb};
           # TestRemediationImagesPinnedEverywhere fails if these drift apart.
           - image: docker.io/percona/percona-server-mongodb-operator
