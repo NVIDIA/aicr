@@ -46,10 +46,15 @@ func (d DriverImage) TagPattern() string {
 // Qualify returns the reference the operator pulls on a node matching t. When
 // no single published tag can be named it returns ok=false and the reason.
 // A digest reference is returned unchanged, because the digest already names
-// one image.
+// one image. A reference with neither digest nor tag has no version for the
+// operator to complete, so it is not listed.
 func (d DriverImage) Qualify(t DriverTarget) (ref, reason string, ok bool) {
-	if ParseImageRef(d.Ref).Digest != "" {
+	parsed := ParseImageRef(d.Ref)
+	if parsed.Digest != "" {
 		return d.Ref, "", true
+	}
+	if parsed.Tag == "" {
+		return "", "the descriptor sets no version, so the operator has no tag to complete", false
 	}
 	if d.Precompiled {
 		return "", "precompiled driver tags also name each node's kernel and cannot be listed ahead of time", false

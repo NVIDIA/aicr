@@ -18,15 +18,17 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 
 ## Driver images
 
-The GPU Operator and Network Operator build their driver image tags on each node, so the version in a recipe is not itself a published tag. The GPU driver tag is `<version>-<os><os-version>` (for example `580.173.02-ubuntu24.04`). The DOCA driver tag is `<version>-<os><os-version>-<arch>` (for example `doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`).
+The GPU Operator and Network Operator build their driver image tags on each node, so the version in a recipe is not itself a published tag. The GPU driver tag is `<version>-<os><os-version>` (for example `580.173.02-ubuntu24.04`). The DOCA driver tag is `<version>-<os><os-version>-<arch>` (for example `doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`). The GPU Operator completes the GDRCopy (`gdrdrv`) and GDS (`nvidia-fs`) tags the same way as the GPU driver, for example `gdrdrv:v2.6-ubuntu24.04`.
 
-This list names the tags for the OS version (and, for DOCA, the architecture) that the recipes deploying that driver pin. Tags that also name each node's kernel (a GPU driver with `usePrecompiled: true`, such as the SUSE driver in `rke2-sles`, or a DOCA driver with `forcePrecompiled: true`) are not listed. A DOCA driver with `forcePrecompiled: false` builds from source on the node, so its standard tag is enough. A driver pinned by digest needs no extra tag.
+This list names the tags for the OS version (and, for DOCA, the architecture) that the recipes deploying that driver pin. Tags that also name each node's kernel (a GPU driver with `usePrecompiled: true`, such as the SUSE driver in `rke2-sles`, or a DOCA driver with `forcePrecompiled: true`) are not listed. A DOCA driver with `forcePrecompiled: false` builds from source on the node, so its standard tag is enough. A driver pinned by digest needs no extra tag. GDRCopy and GDS are containers of the operator-managed driver pod, so they are listed only for recipes that enable them and deploy that driver.
+
+The catalog lists the driver version that the default chart render carries. Versions that a leaf recipe pins (such as `595.91.07` and `615.71.09`) are not listed; `aicr mirror list` gives the tags for one recipe.
 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
 - Components: **58**
-- Unique images: **167**
+- Unique images: **168**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -51,7 +53,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-gb200-rdma | manifest | — | — | 2 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.7.2 | 14 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.7.2 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.13 | 1 |
@@ -186,11 +188,12 @@ _No images extracted._
 ### gpu-operator
 
 - `nvcr.io/nvidia/cloud-native/dcgm:4.6.1-1-ubuntu24.04`
-- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6`
+- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu24.04`
+- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu26.04`
 - `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.4`
 - `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.12.1`
 - `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.1`
-- `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4`
+- `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4-ubuntu24.04`
 - `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.5`
 - `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.1`
 - `nvcr.io/nvidia/driver:580.173.02-ubuntu24.04`

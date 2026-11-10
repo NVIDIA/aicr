@@ -16,6 +16,7 @@ package mirror
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -238,6 +239,82 @@ func TestDiscover_QualifiesChartDriverImage(t *testing.T) {
 	}
 }
 
+// TestDiscover_QualifiesGDRCopyAndGDSImages checks that the GDRCopy and GDS
+// images get the node OS tag as the driver does, that each honors its own
+// enabled flag, and that a driver switched off drops both sidecars.
+func TestDiscover_QualifiesGDRCopyAndGDSImages(t *testing.T) {
+	gpuOperator := recipe.ComponentRef{
+		Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia", Version: "v26.7.0",
+	}
+	const policy = `
+kind: ClusterPolicy
+spec:
+  driver:
+    enabled: %s
+    repository: nvcr.io/nvidia
+    image: driver
+    version: 580.173.02
+  gdrcopy:
+    enabled: true
+    repository: nvcr.io/nvidia/cloud-native
+    image: gdrdrv
+    version: v2.6
+  gds:
+    enabled: %s
+    repository: nvcr.io/nvidia/cloud-native
+    image: nvidia-fs
+    version: 2.29.4
+`
+	tests := []struct {
+		name       string
+		driver     string
+		gds        string
+		wantImages []string
+	}{
+		{
+			name:   "gdrcopy on and gds off",
+			driver: "true",
+			gds:    "false",
+			wantImages: []string{
+				"nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu24.04",
+				"nvcr.io/nvidia/driver:580.173.02-ubuntu24.04",
+			},
+		},
+		{
+			name:   "gdrcopy and gds on",
+			driver: "true",
+			gds:    "true",
+			wantImages: []string{
+				"nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu24.04",
+				"nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4-ubuntu24.04",
+				"nvcr.io/nvidia/driver:580.173.02-ubuntu24.04",
+			},
+		},
+		{
+			name:   "driver off drops the sidecars",
+			driver: "false",
+			gds:    "true",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rendered := []byte(fmt.Sprintf(policy, tt.driver, tt.gds))
+			renderer := &helmtest.MockRenderer{Rendered: map[string][]byte{"gpu-operator": rendered}}
+			list, err := NewLister(WithHelmRenderer(renderer)).Discover(context.Background(),
+				driverRecipe(recipe.CriteriaAcceleratorH100, ubuntu2404, gpuOperator))
+			if err != nil {
+				t.Fatalf("Discover() error = %v", err)
+			}
+			if !slices.Equal(list.Images, tt.wantImages) {
+				t.Errorf("Images = %v, want %v", list.Images, tt.wantImages)
+			}
+			if warnings := list.Components[0].Warnings; len(warnings) != 0 {
+				t.Errorf("Warnings = %v, want none", warnings)
+			}
+		})
+	}
+}
+
 func TestDiscover_QualifiesManifestDriverImage(t *testing.T) {
 	const manifestPath = "components/network-operator/manifests/nic-cluster-policy.yaml"
 	ref := recipe.ComponentRef{
@@ -284,5 +361,25 @@ func TestDiscover_QualifiesManifestDriverImage(t *testing.T) {
 				t.Errorf("warning %q does not name the architecture", warnings[0])
 			}
 		})
+	}
+}
+
+// TestQualifyDrivers_TaglessDriverWarns checks that a driver descriptor with
+// no version is named in a warning instead of being listed as a malformed ref.
+func TestQualifyDrivers_TaglessDriverWarns(t *testing.T) {
+	var ci ComponentImages
+	refs := qualifyDrivers(
+		[]bom.DriverImage{{Kind: bom.DriverKindGPU, Ref: "nvcr.io/nvidia/driver"}},
+		bom.DriverTarget{OSID: "ubuntu", OSVersion: "24.04"}, nil, "gpu-operator", &ci)
+	if len(refs) != 0 {
+		t.Errorf("refs = %v, want none", refs)
+	}
+	if len(ci.Warnings) != 1 {
+		t.Fatalf("Warnings = %v, want 1", ci.Warnings)
+	}
+	for _, want := range []string{"nvcr.io/nvidia/driver not listed", "no version"} {
+		if !strings.Contains(ci.Warnings[0], want) {
+			t.Errorf("warning %q does not mention %q", ci.Warnings[0], want)
+		}
 	}
 }

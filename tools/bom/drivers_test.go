@@ -31,15 +31,20 @@ func TestCatalogDriverTargetsQualify(t *testing.T) {
 	ubuntu := bom.DriverTarget{OSID: "ubuntu", OSVersion: "24.04", Arch: bom.ArchAMD64}
 	ubuntuArm := bom.DriverTarget{OSID: "ubuntu", OSVersion: "24.04", Arch: bom.ArchARM64}
 	targets := catalogDriverTargets{
-		chart: map[string]map[string][]bom.DriverTarget{
-			"gpu-operator": {"580.173.02": {ubuntu, ubuntuArm, {OSID: "amzn", OSVersion: "2023"}}},
+		chart: map[string]map[chartSite][]bom.DriverTarget{
+			"gpu-operator": {
+				{"driver", "580.173.02"}: {ubuntu, ubuntuArm, {OSID: "amzn", OSVersion: "2023"}},
+				{"gdrcopy", ""}:          {ubuntu},
+				{"gds", ""}:              {ubuntu},
+			},
 		},
 		manifests: map[string][]bom.DriverTarget{
 			"components/network-operator/manifests/a.yaml": {ubuntu, ubuntuArm},
 			"components/network-operator/manifests/b.yaml": {{OSID: "ubuntu", OSVersion: "24.04"}},
 		},
 	}
-	gpu := bom.DriverImage{Kind: bom.DriverKindGPU, Ref: "nvcr.io/nvidia/driver:580.173.02"}
+	gpu := bom.DriverImage{Kind: bom.DriverKindGPU, Site: "driver", Ref: "nvcr.io/nvidia/driver:580.173.02"}
+	gdrcopy := bom.DriverImage{Kind: bom.DriverKindGPU, Site: "gdrcopy", Ref: "nvcr.io/nvidia/cloud-native/gdrdrv:v2.6"}
 	doca := bom.DriverImage{Kind: bom.DriverKindDOCA, Ref: "nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0"}
 
 	tests := []struct {
@@ -59,7 +64,7 @@ func TestCatalogDriverTargetsQualify(t *testing.T) {
 		{
 			name:         "chart driver version no recipe deploys",
 			component:    "gpu-operator",
-			driver:       bom.DriverImage{Kind: bom.DriverKindGPU, Ref: "nvcr.io/nvidia/driver:999.0"},
+			driver:       bom.DriverImage{Kind: bom.DriverKindGPU, Site: "driver", Ref: "nvcr.io/nvidia/driver:999.0"},
 			wantWarnings: 1,
 		},
 		{
@@ -94,14 +99,32 @@ func TestCatalogDriverTargetsQualify(t *testing.T) {
 			wantImages: []string{"nvcr.io/nvidia/mellanox/doca-driver@" + digest},
 		},
 		{
-			name:      "disabled driver is skipped silently",
+			name:       "gdrcopy at the chart default version gets the leaf OS",
+			component:  "gpu-operator",
+			driver:     gdrcopy,
+			wantImages: []string{"nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu24.04"},
+		},
+		{
+			name:       "descriptor the render disables is listed for the leaves that enable it",
+			component:  "gpu-operator",
+			driver:     bom.DriverImage{Kind: bom.DriverKindGPU, Site: "gds", Ref: "nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4", Disabled: true},
+			wantImages: []string{"nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4-ubuntu24.04"},
+		},
+		{
+			name:      "disabled driver no leaf deploys is skipped silently",
 			component: "gpu-operator",
-			driver:    bom.DriverImage{Kind: bom.DriverKindGPU, Ref: gpu.Ref, Disabled: true},
+			driver:    bom.DriverImage{Kind: bom.DriverKindGPU, Site: "driver", Ref: "nvcr.io/nvidia/driver:999.0", Disabled: true},
+		},
+		{
+			name:      "disabled manifest driver is skipped silently",
+			component: "network-operator",
+			manifest:  "components/network-operator/manifests/a.yaml",
+			driver:    bom.DriverImage{Kind: bom.DriverKindDOCA, Site: "ofedDriver", Ref: doca.Ref, Disabled: true},
 		},
 		{
 			name:         "precompiled driver warns",
 			component:    "gpu-operator",
-			driver:       bom.DriverImage{Kind: bom.DriverKindGPU, Ref: gpu.Ref, Precompiled: true},
+			driver:       bom.DriverImage{Kind: bom.DriverKindGPU, Site: "driver", Ref: gpu.Ref, Precompiled: true},
 			wantWarnings: 1,
 		},
 	}
@@ -149,8 +172,32 @@ func TestLoadCatalogDriverTargetsRepo(t *testing.T) {
 	}
 	ubuntuAMD := bom.DriverTarget{OSID: "ubuntu", OSVersion: "24.04", Arch: bom.ArchAMD64}
 	ubuntuARM := bom.DriverTarget{OSID: "ubuntu", OSVersion: "24.04", Arch: bom.ArchARM64}
-	if got := targets.chart["gpu-operator"]["580.173.02"]; !slices.Contains(got, ubuntuAMD) {
+	if got := targets.chart["gpu-operator"][chartSite{"driver", "580.173.02"}]; !slices.Contains(got, ubuntuAMD) {
 		t.Errorf("gpu-operator 580.173.02 targets = %v, want to include %v", got, ubuntuAMD)
+	}
+	// GDRCopy and GDS keep the chart default version; a leaf that switches the
+	// driver off (amazonlinux) must not contribute its OS.
+	gdrcopy := targets.chart["gpu-operator"][chartSite{key: "gdrcopy"}]
+	if !slices.Contains(gdrcopy, ubuntuAMD) {
+		t.Errorf("gpu-operator gdrcopy targets = %v, want to include %v", gdrcopy, ubuntuAMD)
+	}
+	for _, tgt := range gdrcopy {
+		if tgt.OSID == "amzn" {
+			t.Errorf("gpu-operator gdrcopy targets = %v, want none for amazonlinux (driver off)", gdrcopy)
+		}
+	}
+	if got := targets.chart["gpu-operator"][chartSite{key: "gds"}]; !slices.Contains(got, ubuntuAMD) {
+		t.Errorf("gpu-operator gds targets = %v, want to include %v", got, ubuntuAMD)
+	}
+	// The AKS leaves pin Ubuntu 24.04; some leave the architecture open.
+	aks := targets.manifests["components/network-operator/manifests/nic-cluster-policy-aks.yaml"]
+	if !slices.Contains(aks, ubuntuAMD) {
+		t.Errorf("aks NicClusterPolicy targets = %v, want to include %v", aks, ubuntuAMD)
+	}
+	for _, tgt := range aks {
+		if tgt.OSID != "ubuntu" || tgt.OSVersion != "24.04" {
+			t.Errorf("aks NicClusterPolicy targets = %v, want only ubuntu 24.04", aks)
+		}
 	}
 	if got := targets.manifests["components/network-operator/manifests/nic-cluster-policy-generic-gb300.yaml"]; !slices.Equal(got, []bom.DriverTarget{ubuntuARM}) {
 		t.Errorf("gb300 NicClusterPolicy targets = %v, want [%v]", got, ubuntuARM)
@@ -185,6 +232,11 @@ spec:
     repository: nvcr.io/nvidia
     image: driver
     version: 580.173.02
+  gdrcopy:
+    enabled: true
+    repository: nvcr.io/nvidia/cloud-native
+    image: gdrdrv
+    version: v2.6
 `)}}
 	c := component{
 		Name: "gpu-operator",
@@ -193,7 +245,9 @@ spec:
 	target := bom.DriverTarget{OSID: "ubuntu", OSVersion: "24.04", Arch: bom.ArchARM64}
 
 	resolved := catalogDriverTargets{
-		chart:     map[string]map[string][]bom.DriverTarget{"gpu-operator": {"580.173.02": {target}}},
+		chart: map[string]map[chartSite][]bom.DriverTarget{
+			"gpu-operator": {{"driver", "580.173.02"}: {target}, {key: "gdrcopy"}: {target}},
+		},
 		manifests: map[string][]bom.DriverTarget{"components/gpu-operator/manifests/nic.yaml": {target}},
 	}
 	res, err := surveyComponent(context.Background(), root, c, mock, false, resolved)
@@ -201,6 +255,7 @@ spec:
 		t.Fatalf("surveyComponent() error = %v", err)
 	}
 	want := []string{
+		"nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu24.04",
 		"nvcr.io/nvidia/driver:580.173.02-ubuntu24.04",
 		"nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-ubuntu24.04-arm64",
 	}
@@ -212,7 +267,7 @@ spec:
 	if err != nil {
 		t.Fatalf("surveyComponent() error = %v", err)
 	}
-	if len(res.Images) != 0 || len(res.Warnings) != 2 {
-		t.Errorf("images = %v, warnings = %v; want no images and 2 warnings", res.Images, res.Warnings)
+	if len(res.Images) != 0 || len(res.Warnings) != 3 {
+		t.Errorf("images = %v, warnings = %v; want no images and 3 warnings", res.Images, res.Warnings)
 	}
 }

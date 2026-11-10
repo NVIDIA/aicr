@@ -43,6 +43,9 @@ const (
 	kindNVIDIADriver     = "NVIDIADriver"
 	kindNicClusterPolicy = "NicClusterPolicy"
 	keyDriver            = "driver"
+	keyGDRCopy           = "gdrcopy"
+	keyGDS               = "gds"
+	keyVGPUManager       = "vgpuManager"
 	keySpec              = "spec"
 	keyOFEDDriver        = "ofedDriver"
 	keyUsePrecompiled    = "usePrecompiled"
@@ -125,15 +128,14 @@ func ExtractImagesFromYAML(data []byte) ([]string, error) {
 }
 
 // DriverKind names an operator-built driver image whose tag the operator
-// completes on each node.
+// completes on each node: DriverKindGPU (GPU Operator) as
+// <version>-<os><osVersion>, DriverKindDOCA (Network Operator OFED driver) as
+// <version>-<os><osVersion>-<arch>.
 type DriverKind string
 
 // DriverKind values.
 const (
-	// DriverKindGPU is the GPU Operator driver: <version>-<os><osVersion>.
-	DriverKindGPU DriverKind = "gpu"
-	// DriverKindDOCA is the Network Operator OFED driver:
-	// <version>-<os><osVersion>-<arch>.
+	DriverKindGPU  DriverKind = "gpu"
 	DriverKindDOCA DriverKind = "doca"
 )
 
@@ -142,9 +144,10 @@ const (
 // pullable image unless it carries a digest; see Qualify.
 type DriverImage struct {
 	Kind        DriverKind
+	Site        string // chart values key of the descriptor: driver, gdrcopy, gds, vgpuManager (GPU) or ofedDriver (DOCA)
 	Ref         string
 	Precompiled bool // usePrecompiled (GPU) or forcePrecompiled (DOCA) is true
-	Disabled    bool // the descriptor's sibling enabled is false
+	Disabled    bool // the descriptor's sibling enabled is false, or a GDRCopy/GDS sidecar of a driver that is off
 }
 
 // ImageSet is the result of ExtractImageSetFromYAML.
@@ -158,11 +161,14 @@ type ImageSet struct {
 
 // ExtractImageSetFromYAML extracts images as ExtractImagesFromYAML does, but
 // keeps driver descriptors apart from the rest. A descriptor is a driver when
-// its document kind and parent key match: ClusterPolicy spec.driver and
-// NVIDIADriver spec (GPU Operator), NicClusterPolicy spec.ofedDriver (Network
+// its document kind and parent key match: ClusterPolicy spec.driver,
+// spec.gdrcopy, spec.gds and spec.vgpuManager, NVIDIADriver spec, spec.gdrcopy
+// and spec.gds (GPU Operator), NicClusterPolicy spec.ofedDriver (Network
 // Operator). Those operators append the node OS (and, for DOCA, the
 // architecture) to the version, so the descriptor's own reference is not an
-// image that exists in the registry.
+// image that exists in the registry. GDRCopy and GDS run as containers of the
+// driver pod, so a ClusterPolicy with spec.driver.enabled=false marks them
+// Disabled.
 func ExtractImageSetFromYAML(data []byte) (ImageSet, error) {
 	data = stripHelmTemplates(data)
 	x := &extraction{seen: map[string]struct{}{}}
@@ -176,6 +182,7 @@ func ExtractImageSetFromYAML(data []byte) (ImageSet, error) {
 			return ImageSet{}, errors.Wrap(errors.ErrCodeInvalidRequest, "decode yaml", err)
 		}
 		x.kind = documentKind(&node)
+		x.driverOff = x.kind == kindClusterPolicy && clusterPolicyDriverOff(&node)
 		if err := walkForImages(&node, "", x); err != nil {
 			return ImageSet{}, err
 		}
@@ -190,11 +197,13 @@ func ExtractImageSetFromYAML(data []byte) (ImageSet, error) {
 }
 
 // extraction accumulates the results of one walk. kind is the `kind` of the
-// document being walked.
+// document being walked and driverOff reports that it is a ClusterPolicy with
+// spec.driver.enabled=false.
 type extraction struct {
-	seen    map[string]struct{}
-	drivers []DriverImage
-	kind    string
+	seen      map[string]struct{}
+	drivers   []DriverImage
+	kind      string
+	driverOff bool
 }
 
 func (x *extraction) addDriver(d DriverImage) {
@@ -211,8 +220,12 @@ func documentKind(doc *yaml.Node) string {
 	return mappingScalar(doc.Content[0], "kind")
 }
 
-// mappingScalar returns the trimmed scalar value of key in mapping n, or "".
-func mappingScalar(n *yaml.Node, key string) string {
+// mappingValue returns the value node of key in mapping n, following an
+// alias, or nil.
+func mappingValue(n *yaml.Node, key string) *yaml.Node {
+	if n == nil {
+		return nil
+	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if n.Content[i].Value != key {
 			continue
@@ -221,24 +234,53 @@ func mappingScalar(n *yaml.Node, key string) string {
 		if v.Kind == yaml.AliasNode && v.Alias != nil {
 			v = v.Alias
 		}
-		if v.Kind == yaml.ScalarNode {
-			return strings.TrimSpace(v.Value)
-		}
+		return v
+	}
+	return nil
+}
+
+// mappingScalar returns the trimmed scalar value of key in mapping n, or "".
+func mappingScalar(n *yaml.Node, key string) string {
+	if v := mappingValue(n, key); v != nil && v.Kind == yaml.ScalarNode {
+		return strings.TrimSpace(v.Value)
 	}
 	return ""
 }
 
-// driverKindFor reports whether a descriptor under parentKey in a document of
-// the given kind is an operator-built driver image.
-func driverKindFor(kind, parentKey string) (DriverKind, bool) {
-	switch {
-	case kind == kindClusterPolicy && parentKey == keyDriver,
-		kind == kindNVIDIADriver && parentKey == keySpec:
-		return DriverKindGPU, true
-	case kind == kindNicClusterPolicy && parentKey == keyOFEDDriver:
-		return DriverKindDOCA, true
+// clusterPolicyDriverOff reports whether the ClusterPolicy document doc sets
+// spec.driver.enabled to false.
+func clusterPolicyDriverOff(doc *yaml.Node) bool {
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return false
 	}
-	return "", false
+	driver := mappingValue(mappingValue(doc.Content[0], keySpec), keyDriver)
+	return driver != nil && strings.EqualFold(mappingScalar(driver, keyEnabled), "false")
+}
+
+// driverKindFor reports whether a descriptor under parentKey in a document of
+// the given kind is an operator-built driver image, and which chart values key
+// (site) it is written under. The GPU Operator completes the GDRCopy, GDS and
+// vGPU Manager tags with the node OS exactly as it does the driver tag.
+func driverKindFor(kind, parentKey string) (driverKind DriverKind, site string, ok bool) {
+	switch kind {
+	case kindClusterPolicy:
+		switch parentKey {
+		case keyDriver, keyGDRCopy, keyGDS, keyVGPUManager:
+			return DriverKindGPU, parentKey, true
+		}
+	case kindNVIDIADriver:
+		switch parentKey {
+		case keySpec:
+			return DriverKindGPU, keyDriver, true
+		case keyGDRCopy, keyGDS:
+			return DriverKindGPU, parentKey, true
+		}
+	case kindNicClusterPolicy:
+		if parentKey == keyOFEDDriver {
+			return DriverKindDOCA, keyOFEDDriver, true
+		}
+	}
+	return "", "", false
 }
 
 func walkForImages(n *yaml.Node, parentKey string, x *extraction) error {
@@ -312,8 +354,8 @@ func walkForImages(n *yaml.Node, parentKey string, x *extraction) error {
 				return err
 			}
 			if isLikelyImage(withDigest) {
-				if driverKind, ok := driverKindFor(x.kind, parentKey); ok {
-					x.addDriver(newDriverImage(driverKind, withDigest, n))
+				if driverKind, site, ok := driverKindFor(x.kind, parentKey); ok {
+					x.addDriver(newDriverImage(driverKind, site, withDigest, n, x.driverOff))
 				} else {
 					x.seen[withDigest] = struct{}{}
 				}
@@ -368,17 +410,21 @@ func walkEmbeddedYAMLScalar(n *yaml.Node, x *extraction) error {
 	return nil
 }
 
-// newDriverImage builds the DriverImage for the CRD-style mapping n.
-func newDriverImage(kind DriverKind, ref string, n *yaml.Node) DriverImage {
+// newDriverImage builds the DriverImage for the CRD-style mapping n found at
+// site. driverOff marks the GDRCopy and GDS sidecars Disabled, because they
+// are containers of a driver pod that is not deployed.
+func newDriverImage(kind DriverKind, site, ref string, n *yaml.Node, driverOff bool) DriverImage {
 	precompiledKey := keyUsePrecompiled
 	if kind == DriverKindDOCA {
 		precompiledKey = keyForcePrecompiled
 	}
 	return DriverImage{
 		Kind:        kind,
+		Site:        site,
 		Ref:         ref,
 		Precompiled: strings.EqualFold(mappingScalar(n, precompiledKey), "true"),
-		Disabled:    strings.EqualFold(mappingScalar(n, keyEnabled), "false"),
+		Disabled: strings.EqualFold(mappingScalar(n, keyEnabled), "false") ||
+			(driverOff && (site == keyGDRCopy || site == keyGDS)),
 	}
 }
 

@@ -261,18 +261,24 @@ aicr mirror list --recipe recipe.yaml \
   --set gpuoperator:driver.version=570.86.16
 ```
 
-The GPU and DOCA driver images are listed with the tag the operator pulls on a
-node: `<version>-<os><os-version>` for the GPU driver (for example
-`570.86.16-ubuntu24.04`) and `<version>-<os><os-version>-<arch>` for the DOCA
+The GPU driver, GDRCopy, GDS and DOCA driver images are listed with the tag the
+operator pulls on a node: `<version>-<os><os-version>` for the GPU driver,
+GDRCopy (`gdrdrv`) and GDS (`nvidia-fs`) (for example `570.86.16-ubuntu24.04`
+and `v2.6-ubuntu24.04`) and `<version>-<os><os-version>-<arch>` for the DOCA
 driver. `mirror list` reads the OS from the recipe's `OS.release.ID` and
 `OS.release.VERSION_ID` constraints (`ubuntu` and `rhel` are supported) and the
 DOCA architecture from the accelerator (`gb200`, `gb300`, and `vr200` are
 `arm64`; other accelerators are `amd64`). A driver whose tag cannot be resolved
 for the recipe is not listed. This happens when the recipe does not pin one OS,
-the OS has no known tag pattern, the accelerator is `any`, or the driver is
-precompiled (its tags also name the node kernel). That driver is named in the
-component's `warnings` instead, so mirror the tag for your nodes yourself. A
-driver switched off with `driver.enabled=false` is not listed.
+the OS has no known tag pattern, the accelerator is `any` (DOCA driver only),
+or the driver is precompiled (its tags also name the node kernel). That driver is named in the
+component's `warnings` instead, so mirror the tag for your nodes yourself. The
+Hauler and Zarf formats carry no warnings, so there the driver is simply absent
+while the command still exits 0 (the warning is also logged to stderr). Run the
+YAML or JSON format first to see which driver tags you must add. A
+driver switched off with `driver.enabled=false` is not listed, and neither are
+its GDRCopy and GDS containers. GDRCopy and GDS also follow their own `enabled`
+flag.
 
 The override key format is `component:path.to.field=value`, where the component
 name matches either the component name in the recipe or its `valueOverrideKeys`
@@ -294,7 +300,8 @@ generate the deployment-specific manifest for a specific deployment.
 
 > **Completeness caveat:** discovery is best-effort, not all-or-nothing. A
 > per-component failure to load values, render the chart (`helm template`), or
-> extract images from a manifest is **non-fatal** — the component's images are
+> extract images from a manifest, or a driver tag the recipe does not determine
+> (see above), is **non-fatal** — the component's images are
 > omitted and the failure is recorded as a warning, but the command still
 > exits 0. The YAML and JSON outputs carry these warnings in a `warnings`
 > field; the Hauler and Zarf outputs **omit them entirely**. Treat a

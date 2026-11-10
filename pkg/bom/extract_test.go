@@ -963,7 +963,7 @@ spec:
     version: v1.18.0
 `,
 			wantImages:  []string{"nvcr.io/nvidia/k8s/container-toolkit:v1.18.0"},
-			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Ref: "nvcr.io/nvidia/driver:580.105.08"}},
+			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Site: "driver", Ref: "nvcr.io/nvidia/driver:580.105.08"}},
 		},
 		{
 			name: "ClusterPolicy driver switched off and precompiled",
@@ -976,7 +976,7 @@ spec:
     image: driver
     version: "580"
 `,
-			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Ref: "nvcr.io/nvidia/driver:580", Precompiled: true, Disabled: true}},
+			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Site: "driver", Ref: "nvcr.io/nvidia/driver:580", Precompiled: true, Disabled: true}},
 		},
 		{
 			name: "NVIDIADriver spec",
@@ -987,7 +987,7 @@ spec:
   version: 595.91.07
   usePrecompiled: false
 `,
-			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Ref: "nvcr.io/nvidia/driver:595.91.07"}},
+			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Site: "driver", Ref: "nvcr.io/nvidia/driver:595.91.07"}},
 		},
 		{
 			name: "NicClusterPolicy ofedDriver",
@@ -1005,7 +1005,7 @@ spec:
 `,
 			wantImages: []string{"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.1.0"},
 			wantDrivers: []DriverImage{{
-				Kind: DriverKindDOCA, Ref: "nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2", Precompiled: true,
+				Kind: DriverKindDOCA, Site: "ofedDriver", Ref: "nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2", Precompiled: true,
 			}},
 		},
 		{
@@ -1017,7 +1017,93 @@ spec:
     image: doca-driver
     version: ` + digest + `
 `,
-			wantDrivers: []DriverImage{{Kind: DriverKindDOCA, Ref: "nvcr.io/nvidia/mellanox/doca-driver@" + digest}},
+			wantDrivers: []DriverImage{{Kind: DriverKindDOCA, Site: "ofedDriver", Ref: "nvcr.io/nvidia/mellanox/doca-driver@" + digest}},
+		},
+		{
+			name: "ClusterPolicy gdrcopy and gds are drivers that honor their own enabled",
+			in: `kind: ClusterPolicy
+spec:
+  driver:
+    repository: nvcr.io/nvidia
+    image: driver
+    version: 580.105.08
+  gdrcopy:
+    enabled: true
+    repository: nvcr.io/nvidia/cloud-native
+    image: gdrdrv
+    version: v2.6
+  gds:
+    enabled: false
+    repository: nvcr.io/nvidia/cloud-native
+    image: nvidia-fs
+    version: 2.29.4
+`,
+			wantDrivers: []DriverImage{
+				{Kind: DriverKindGPU, Site: "gdrcopy", Ref: "nvcr.io/nvidia/cloud-native/gdrdrv:v2.6"},
+				{Kind: DriverKindGPU, Site: "gds", Ref: "nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4", Disabled: true},
+				{Kind: DriverKindGPU, Site: "driver", Ref: "nvcr.io/nvidia/driver:580.105.08"},
+			},
+		},
+		{
+			name: "ClusterPolicy driver off disables the gdrcopy and gds sidecars",
+			in: `kind: ClusterPolicy
+spec:
+  driver:
+    enabled: false
+    repository: nvcr.io/nvidia
+    image: driver
+    version: 580.105.08
+  gdrcopy:
+    enabled: true
+    repository: nvcr.io/nvidia/cloud-native
+    image: gdrdrv
+    version: v2.6
+  gds:
+    enabled: true
+    repository: nvcr.io/nvidia/cloud-native
+    image: nvidia-fs
+    version: 2.29.4
+  vgpuManager:
+    enabled: true
+    repository: nvcr.io/nvidia
+    image: vgpu-manager
+    version: "550.1"
+`,
+			wantDrivers: []DriverImage{
+				{Kind: DriverKindGPU, Site: "gdrcopy", Ref: "nvcr.io/nvidia/cloud-native/gdrdrv:v2.6", Disabled: true},
+				{Kind: DriverKindGPU, Site: "gds", Ref: "nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4", Disabled: true},
+				{Kind: DriverKindGPU, Site: "driver", Ref: "nvcr.io/nvidia/driver:580.105.08", Disabled: true},
+				{Kind: DriverKindGPU, Site: "vgpuManager", Ref: "nvcr.io/nvidia/vgpu-manager:550.1"},
+			},
+		},
+		{
+			name: "NVIDIADriver spec.gdrcopy is a driver",
+			in: `kind: NVIDIADriver
+spec:
+  repository: nvcr.io/nvidia
+  image: driver
+  version: 595.91.07
+  gdrcopy:
+    enabled: true
+    repository: nvcr.io/nvidia/cloud-native
+    image: gdrdrv
+    version: v2.6
+`,
+			wantDrivers: []DriverImage{
+				{Kind: DriverKindGPU, Site: "gdrcopy", Ref: "nvcr.io/nvidia/cloud-native/gdrdrv:v2.6"},
+				{Kind: DriverKindGPU, Site: "driver", Ref: "nvcr.io/nvidia/driver:595.91.07"},
+			},
+		},
+		{
+			name: "gdrcopy under another kind is a plain image",
+			in: `kind: ConfigMap
+spec:
+  gdrcopy:
+    repository: nvcr.io/nvidia/cloud-native
+    image: gdrdrv
+    version: v2.6
+`,
+			wantImages: []string{"nvcr.io/nvidia/cloud-native/gdrdrv:v2.6"},
 		},
 		{
 			name: "ofedDriver under another kind is a plain image",
@@ -1053,7 +1139,7 @@ data:
         image: doca-driver
         version: doca3.2.0
 `,
-			wantDrivers: []DriverImage{{Kind: DriverKindDOCA, Ref: "nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0"}},
+			wantDrivers: []DriverImage{{Kind: DriverKindDOCA, Site: "ofedDriver", Ref: "nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0"}},
 		},
 		{
 			name: "multi-document input resolves kind per document",
@@ -1072,7 +1158,7 @@ spec:
     version: 1.0.0
 `,
 			wantImages:  []string{"nvcr.io/nvidia/driver:1.0.0"},
-			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Ref: "nvcr.io/nvidia/driver:580.105.08"}},
+			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Site: "driver", Ref: "nvcr.io/nvidia/driver:580.105.08"}},
 		},
 	}
 	for _, tt := range tests {
