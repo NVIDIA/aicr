@@ -1231,6 +1231,18 @@ func TestNVKENVLSRuntimeMatchesOKE(t *testing.T) {
 	}
 }
 
+// TestGB300NVKENVLSRuntimeMatchesGB200 enforces the "identical to
+// gb200/nvke" contract in the header of testdata/gb300/nvke/runtime-nvls.yaml,
+// the wiring the gb300-nvke training floor was measured with.
+func TestGB300NVKENVLSRuntimeMatchesGB200(t *testing.T) {
+	gb200 := readTemplateBody(t, filepath.Join("testdata", "gb200", "nvke", "runtime-nvls.yaml"))
+	gb300 := readTemplateBody(t, filepath.Join("testdata", "gb300", "nvke", "runtime-nvls.yaml"))
+	if gb200 != gb300 {
+		t.Errorf("testdata/gb300/nvke/runtime-nvls.yaml diverged from the GB200 NVKE NVLS template "+
+			"(comparing bodies after stripping leading comment headers).\nGB200:\n%s\nGB300:\n%s", gb200, gb300)
+	}
+}
+
 // TestNVKENetRuntimeRequestsEveryRail pins the NVKE NET runtime to the fabric
 // the gb200-nvke leaves build: each worker requests one VF on every rail and
 // attaches the matching SriovIBNetwork, in rail order, so multus names them
