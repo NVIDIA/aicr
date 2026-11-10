@@ -57,12 +57,15 @@ func TestRunRejectsUnknownFlag(t *testing.T) {
 	}
 }
 
-const validatorImage = "ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790"
+const (
+	validatorImage = "ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790"
+	repository     = "oci://registry.example.com/aicr/cluster"
+)
 
 var installFlags = []string{
 	"--aicr-version=v1.0.0",
 	"--aicr-image=ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433",
-	"--registry-repository=oci://registry.example.com/aicr/cluster",
+	"--registry-repository=" + repository,
 }
 
 // startArgs runs the manager without leader election, metrics or a fixed
@@ -138,7 +141,7 @@ func TestCredentialProviders(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "test")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
 	cfg := config.Defaults()
-	cfg.RegistryRepository = "oci://registry.example.com/aicr/cluster"
+	cfg.RegistryRepository = repository
 	cfg.RegistryCredentialsSecret = "registry-auth"
 	provider, refresher, err := credentials(context.Background(), nil, nil, &cfg)
 	if err != nil || refresher != nil {
@@ -158,7 +161,7 @@ func TestCredentialProviders(t *testing.T) {
 	if p, ok := provider.(*registry.ECRProvider); !ok || p.Host != "123456789012.dkr.ecr.us-west-2.amazonaws.com" {
 		t.Fatalf("aws provider = %+v", provider)
 	}
-	cfg.RegistryRepository = "oci://registry.example.com/aicr/cluster"
+	cfg.RegistryRepository = repository
 	if _, _, err = credentials(context.Background(), nil, nil, &cfg); err == nil {
 		t.Fatal("the aws provider accepted a registry that is not ECR")
 	}

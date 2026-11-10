@@ -1858,7 +1858,7 @@ func TestEngineAvailableNamesAFailingTokenMint(t *testing.T) {
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "argocd", Name: "aicr-registry-mint-failing", Labels: map[string]string{"argocd.argoproj.io/secret-type": "repo-creds"}},
-		StringData: map[string]string{"type": "oci", "url": "oci://" + ecrHost + "/aicr/cluster"},
+		StringData: map[string]string{"type": "oci", "url": ecrRepository},
 	}
 	if err := k8s.Create(ctx, secret); err != nil {
 		t.Fatal(err)
