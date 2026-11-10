@@ -322,9 +322,9 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		// OKE GB300 is the same NVL72 shape as OKE GB200 — see
 		// testdata/gb300/oke/runtime-nvls.yaml.
 		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
-		// NVKE carries both NVL72 generations, each with its own runtime —
-		// see testdata/{gb200,vr200}/nvke/runtime-nvls.yaml.
-		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorVR200},
+		// NVKE carries three NVL72 generations, each with its own runtime —
+		// see testdata/{gb200,gb300,vr200}/nvke/runtime-nvls.yaml.
+		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300, recipe.CriteriaAcceleratorVR200},
 		recipe.CriteriaServiceGKE:  {recipe.CriteriaAcceleratorGB200},
 		// VR200 NVL72 on bare-metal RKE2: MNNVL across the IMEX domain, same
 		// shape as GB200 but with its own runtime (NGC pytorch image, distinct
