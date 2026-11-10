@@ -3257,8 +3257,9 @@ An existing install can still be carrying such a value without passing it
 again:
 
 - `helm upgrade --reuse-values` (or `--reset-then-reuse-values`) reapplies the
-  values supplied to the previous release, so the upgrade fails on a value an
-  earlier install set. `helm get values <release>` lists them.
+  values supplied to the previous release, and so does a plain `helm upgrade`
+  that passes no values, so the upgrade fails on a value an earlier install
+  set. `helm get values <release>` lists them.
 - The bundle's parent Application forwards the values given to `helm install`
   (its `helm.valuesObject`), and a root Application you maintain yourself
   (`deployer.includeRootApp=false`) carries its own `helm` values or
@@ -3270,7 +3271,7 @@ upgrade, move each ownership value to bundle time and regenerate:
 `aicr bundle --set gpuoperator:driver.enabled=...`, or, when the recipe's
 selected profile owns the path (the AKS `gpuStack` profile), regenerate the
 recipe with `aicr recipe --profile gpuStack=...`. Then drop the value from the
-install: upgrade without `--reuse-values`, passing the values you still need
+install: upgrade with `--reset-values`, passing the values you still need
 explicitly, and remove it from any Application that sets it.
 
 ### `nvidia-dra-driver-gpu`: `0.5.0` to `0.5.1`
