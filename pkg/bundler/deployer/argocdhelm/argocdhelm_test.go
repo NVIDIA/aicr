@@ -16,6 +16,7 @@ package argocdhelm
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -37,6 +38,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat/localformattest"
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -365,6 +367,11 @@ func TestGenerate_ProfileLockTemplate(t *testing.T) {
 				if (err != nil) != tt.wantErr {
 					t.Fatalf("helm template error = %v, wantErr %v\noutput:\n%s", err, tt.wantErr, out)
 				}
+				// The driver-ownership lock rejects driver.enabled too. Helm
+				// executes templates in reverse lexical order within a
+				// directory and stops at the first failure (sortTemplates in
+				// helm.sh/helm/v4 pkg/engine), so aicr-profile-lock.yaml always
+				// reports before aicr-driver-ownership-lock.yaml.
 				if tt.wantErr && !strings.Contains(string(out), "intersects profile-owned path") {
 					t.Fatalf("helm template error does not name profile intersection:\n%s", out)
 				}
@@ -508,19 +515,835 @@ func TestGenerate_ProfileLockTemplate(t *testing.T) {
 	})
 }
 
-func TestHasGeneratedProfileLockHeader_BoundedRead(t *testing.T) {
-	readPastHeader := errors.New("read past profile lock header")
-	reader := io.MultiReader(
-		strings.NewReader(profileLockTemplateHeader),
-		iotest.ErrReader(readPastHeader),
-	)
-
-	generated, err := hasGeneratedProfileLockHeader(reader)
-	if err != nil {
-		t.Fatalf("hasGeneratedProfileLockHeader() error = %v", err)
+func TestGenerate_ProfileLockTemplateBytes(t *testing.T) {
+	result := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{Name: "gpu-operator", Namespace: "g", Chart: "gpu-operator", Version: "v25.3.3", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia"},
+		{Name: "nvidia-dra-driver-gpu", Namespace: "n", Chart: "nvidia-dra-driver-gpu", Version: "v25.3.0", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia"},
+	})
+	result.APIVersion = recipe.RecipeProfileAPIVersion
+	result.Metadata.SelectedProfile = &recipe.SelectedProfile{
+		Name: "gpuStack", Value: "gke-default", Advertiser: allocpolicy.AdvertiserExternal,
+		OwnedPaths: map[string][]string{
+			"gpu-operator": {allocpolicy.PathDevicePluginEnabled, "driver.enabled", "enabled"},
+		},
 	}
-	if !generated {
-		t.Fatal("hasGeneratedProfileLockHeader() = false, want true")
+	g := &Generator{
+		RecipeResult: result,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {}, "nvidia-dra-driver-gpu": {},
+		},
+		Version: "v0.0.0-test",
+	}
+	outputDir := t.TempDir()
+	if _, err := g.Generate(t.Context(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	// Captured from nvidia/main at 54f9e67d6, including the allocation-policy closure.
+	const wantHash = "51955a9a8191bce9556105d283d16282d26aa4562889646ce720e99d439fcac7"
+	guard := readBundleFile(t, outputDir, "templates/"+profileLockTemplateName+".yaml")
+	if got := fmt.Sprintf("%x", sha256.Sum256(guard)); got != wantHash {
+		t.Fatalf("profile lock bytes changed: sha256 = %s, want %s\n%s", got, wantHash, guard)
+	}
+}
+
+// driverOwnershipGuardCase is one family member's bundle shape and the
+// install-time overrides the driver-ownership lock must accept or reject.
+type driverOwnershipGuardCase struct {
+	component   string
+	overrideKey string
+	// paths are the guarded leaf paths the guard file must name.
+	paths []string
+	// failing are --set/--set-json/--set-string arguments (flag, value) that
+	// touch a guarded leaf or replace one of its ancestors.
+	failing [][2]string
+	// passing are sibling overrides that must keep rendering.
+	passing [][2]string
+}
+
+func driverOwnershipGuardCases() []driverOwnershipGuardCase {
+	gpuOperator := func(component, key string) driverOwnershipGuardCase {
+		return driverOwnershipGuardCase{
+			component:   component,
+			overrideKey: key,
+			paths:       []string{"driver.enabled", "toolkit.enabled", "hostPaths.driverInstallDir"},
+			failing: [][2]string{
+				{"--set", key + ".driver.enabled=true"},
+				{"--set", key + ".driver.enabled=false"},
+				{"--set", key + ".toolkit.enabled=false"},
+				{"--set", key + ".hostPaths.driverInstallDir=/x"},
+				{"--set-json", key + ".driver.enabled=null"},
+				{"--set-json", key + ".driver.enabled=[]"},
+				{"--set-string", key + ".driver=blocked"},
+				{"--set-string", key + ".hostPaths=blocked"},
+				{"--set-string", key + ".toolkit=blocked"},
+				{"--set-json", key + ".driver=null"},
+				{"--set-json", key + ".toolkit=null"},
+				{"--set-json", key + ".hostPaths=null"},
+				{"--set-json", key + "=null"},
+				{"--set-json", key + ".driver.enabled={\"nested\":true}"},
+			},
+			passing: [][2]string{
+				{"--set", key + ".driver.version=580"},
+				{"--set", key + ".toolkit.version=x"},
+				{"--set", key + ".hostPaths.rootFS=/host"},
+			},
+		}
+	}
+	draDriver := func(component, key string) driverOwnershipGuardCase {
+		return driverOwnershipGuardCase{
+			component:   component,
+			overrideKey: key,
+			paths:       []string{"nvidiaDriverRoot"},
+			failing: [][2]string{
+				{"--set", key + ".nvidiaDriverRoot=/x"},
+				{"--set-json", key + ".nvidiaDriverRoot=null"},
+				{"--set-json", key + ".nvidiaDriverRoot=[]"},
+				{"--set-json", key + "=null"},
+			},
+			passing: [][2]string{
+				{"--set", key + ".image.tag=v1"},
+			},
+		}
+	}
+	return []driverOwnershipGuardCase{
+		gpuOperator("gpu-operator", "gpuoperator"),
+		gpuOperator("gpu-operator-ocp", "gpuoperatorocp"),
+		draDriver("nvidia-dra-driver-gpu", "dradriver"),
+		draDriver("nvidia-dra-driver-gpu-ocp", "dradriverocp"),
+	}
+}
+
+func driverOwnershipGenerator(component string) *Generator {
+	return &Generator{
+		RecipeResult: newRecipeResult("v1.0.0", []recipe.ComponentRef{{
+			Name: component, Namespace: component, Chart: component,
+			Version: "v25.3.3", Type: recipe.ComponentTypeHelm,
+			Source: "https://helm.ngc.nvidia.com/nvidia",
+		}}),
+		ComponentValues: map[string]map[string]any{component: {}},
+		Version:         "v0.0.0-test",
+	}
+}
+
+func TestGenerate_DriverOwnershipLockTemplate(t *testing.T) {
+	lockRel := filepath.Join("templates", driverOwnershipLockTemplateName+".yaml")
+
+	t.Run("guard names every leaf of each family member", func(t *testing.T) {
+		for _, tc := range driverOwnershipGuardCases() {
+			t.Run(tc.component, func(t *testing.T) {
+				outputDir := t.TempDir()
+				output, err := driverOwnershipGenerator(tc.component).Generate(t.Context(), outputDir)
+				if err != nil {
+					t.Fatalf("Generate() error = %v", err)
+				}
+				guard, err := os.ReadFile(filepath.Join(outputDir, lockRel))
+				if err != nil {
+					t.Fatalf("read driver-ownership guard: %v", err)
+				}
+				if !strings.HasPrefix(string(guard), driverOwnershipLockTemplateHeader) {
+					t.Fatalf("guard does not start with the generated header:\n%s", guard)
+				}
+				for _, p := range tc.paths {
+					if !strings.Contains(string(guard), "driver-ownership path "+tc.component+"."+p+";") {
+						t.Errorf("guard does not name %s.%s:\n%s", tc.component, p, guard)
+					}
+				}
+				if !slices.Contains(output.Files, filepath.Join(outputDir, lockRel)) {
+					t.Errorf("output.Files does not list the guard: %v", output.Files)
+				}
+			})
+		}
+	})
+
+	t.Run("no guard without a guarded component", func(t *testing.T) {
+		tests := []struct {
+			name string
+			gen  *Generator
+		}{
+			{"no components", &Generator{RecipeResult: newRecipeResult("v1.0.0", nil)}},
+			{"unrelated component only", driverOwnershipGenerator("cert-manager")},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				outputDir := t.TempDir()
+				if _, err := tt.gen.Generate(t.Context(), outputDir); err != nil {
+					t.Fatalf("Generate() error = %v", err)
+				}
+				if _, err := os.Stat(filepath.Join(outputDir, lockRel)); !os.IsNotExist(err) {
+					t.Fatalf("guard stat error = %v, want not-exist", err)
+				}
+			})
+		}
+	})
+
+	// Generate emits an Application for a disabled ref too, so the guard keys
+	// on presence. The bundler drops disabled refs before calling Generate.
+	t.Run("guarded component disabled keeps its guard", func(t *testing.T) {
+		outputDir := t.TempDir()
+		g := driverOwnershipGenerator("gpu-operator")
+		g.RecipeResult.ComponentRefs[0].Overrides = map[string]any{"enabled": false}
+		if _, err := g.Generate(t.Context(), outputDir); err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		readBundleFile(t, outputDir, "templates/gpu-operator.yaml")
+		guard := readBundleFile(t, outputDir, lockRel)
+		if !strings.Contains(string(guard), "driver-ownership path gpu-operator.driver.enabled;") {
+			t.Fatalf("disabled component's Application is unguarded:\n%s", guard)
+		}
+	})
+
+	t.Run("stale generated guard alone is removed", func(t *testing.T) {
+		outputDir := t.TempDir()
+		templatesDir := filepath.Join(outputDir, "templates")
+		if err := os.MkdirAll(templatesDir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if _, _, err := driverOwnershipGenerator("gpu-operator").writeDriverOwnershipLockTemplate(templatesDir, nil, nil); err != nil {
+			t.Fatalf("write guard: %v", err)
+		}
+		if _, err := driverOwnershipGenerator("cert-manager").Generate(t.Context(), outputDir); err != nil {
+			t.Fatalf("regeneration error = %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(outputDir, lockRel)); !os.IsNotExist(err) {
+			t.Fatalf("stale guard stat error = %v, want not-exist", err)
+		}
+	})
+
+	t.Run("profiled bundle keeps both guards", func(t *testing.T) {
+		outputDir := t.TempDir()
+		g := driverOwnershipGenerator("gpu-operator")
+		g.RecipeResult.APIVersion = recipe.RecipeProfileAPIVersion
+		g.RecipeResult.Metadata.SelectedProfile = &recipe.SelectedProfile{
+			Name: "gpuStack", Value: "driver-installed",
+			OwnedPaths: map[string][]string{"gpu-operator": {"driver.enabled", "enabled"}},
+		}
+		if _, err := g.Generate(t.Context(), outputDir); err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		for _, name := range []string{profileLockTemplateName, driverOwnershipLockTemplateName} {
+			if _, err := os.Stat(filepath.Join(outputDir, "templates", name+".yaml")); err != nil {
+				t.Errorf("%s stat error = %v", name, err)
+			}
+		}
+	})
+}
+
+func TestGenerate_DriverOwnershipRegeneration(t *testing.T) {
+	for _, tc := range driverOwnershipGuardCases() {
+		for _, checksums := range []bool{false, true} {
+			for _, replacement := range []string{"omitted", "disabled"} {
+				t.Run(fmt.Sprintf("%s/checksums=%v/%s", tc.component, checksums, replacement), func(t *testing.T) {
+					outputDir := t.TempDir()
+					g := driverOwnershipGenerator(tc.component)
+					g.IncludeChecksums = checksums
+					if _, err := g.Generate(t.Context(), outputDir); err != nil {
+						t.Fatalf("initial Generate() error = %v", err)
+					}
+					guardPath := "templates/" + driverOwnershipLockTemplateName + ".yaml"
+					appPath := "templates/" + tc.component + ".yaml"
+					guard := readBundleFile(t, outputDir, guardPath)
+					app := readBundleFile(t, outputDir, appPath)
+					values := readBundleFile(t, outputDir, "values.yaml")
+
+					// A disabled ref still emits its Application, so its guard
+					// is regenerated and reuse of the directory is safe.
+					if replacement == "disabled" {
+						next := driverOwnershipGenerator(tc.component)
+						next.IncludeChecksums = checksums
+						next.RecipeResult.ComponentRefs[0].Overrides = map[string]any{"enabled": false}
+						if _, err := next.Generate(t.Context(), outputDir); err != nil {
+							t.Fatalf("disabled regeneration error = %v", err)
+						}
+						readBundleFile(t, outputDir, appPath)
+						if got := readBundleFile(t, outputDir, guardPath); string(got) != string(guard) {
+							t.Errorf("disabled regeneration changed the guard:\n%s", got)
+						}
+						return
+					}
+
+					next := driverOwnershipGenerator("cert-manager")
+					next.IncludeChecksums = checksums
+					_, err := next.Generate(t.Context(), outputDir)
+					if err == nil {
+						t.Fatal("regeneration accepted stale component output without its guard")
+					}
+					errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+					if !strings.Contains(err.Error(), "fresh output directory") {
+						t.Fatalf("error lacks regeneration remedy: %v", err)
+					}
+					for path, want := range map[string][]byte{guardPath: guard, appPath: app, "values.yaml": values} {
+						if got := readBundleFile(t, outputDir, path); string(got) != string(want) {
+							t.Errorf("failed regeneration mutated %s", path)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestGenerate_DriverOwnershipRejectsStaleArtifacts(t *testing.T) {
+	for _, artifact := range []string{
+		"templates/gpu-operator.yaml",
+		"templates/gpu-operator-pre.yaml",
+		"templates/gpu-operator-post.yaml",
+		"templates/gpu-operator-readiness.yaml",
+		"static/gpu-operator.yaml",
+		"001-gpu-operator/Chart.yaml",
+		"002-gpu-operator-pre/Chart.yaml",
+	} {
+		t.Run(artifact, func(t *testing.T) {
+			outputDir := t.TempDir()
+			artifactPath := filepath.Join(outputDir, artifact)
+			if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			const sentinel = "prior artifact must survive\n"
+			if err := os.WriteFile(artifactPath, []byte(sentinel), 0o600); err != nil {
+				t.Fatalf("write prior artifact: %v", err)
+			}
+			_, err := driverOwnershipGenerator("cert-manager").Generate(t.Context(), outputDir)
+			if err == nil {
+				t.Fatal("Generate() accepted stale ownership artifact")
+			}
+			errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+			if got := readBundleFile(t, outputDir, artifact); string(got) != sentinel {
+				t.Fatalf("Generate() mutated prior artifact: %s", got)
+			}
+		})
+	}
+}
+
+// TestGenerate_DriverOwnershipRejectsDynamicPaths covers a direct caller: a
+// dynamic path is stubbed into the root values.yaml, so one that intersects a
+// guarded path would ship a chart the lock rejects on every render.
+func TestGenerate_DriverOwnershipRejectsDynamicPaths(t *testing.T) {
+	tests := []struct {
+		name      string
+		component string
+		path      string
+		vendored  bool
+		disabled  bool
+		wantErr   bool
+	}{
+		{name: "guarded leaf", component: "nvidia-dra-driver-gpu", path: "nvidiaDriverRoot", wantErr: true},
+		{name: "guarded ancestor", component: "gpu-operator", path: "driver", wantErr: true},
+		{name: "guarded descendant", component: "gpu-operator", path: "hostPaths.driverInstallDir.x", wantErr: true},
+		{name: "disabled ref is still emitted", component: "gpu-operator-ocp", path: "toolkit.enabled", disabled: true, wantErr: true},
+		{name: "vendored dependency path", component: "nvidia-dra-driver-gpu", path: "dra-driver-nvidia-gpu.nvidiaDriverRoot", vendored: true, wantErr: true},
+		{name: "dependency path without vendoring", component: "nvidia-dra-driver-gpu", path: "dra-driver-nvidia-gpu.nvidiaDriverRoot"},
+		{name: "sibling", component: "gpu-operator", path: "driver.version"},
+		{name: "vendored sibling", component: "nvidia-dra-driver-gpu", path: "dra-driver-nvidia-gpu.image.tag", vendored: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := filepath.Join(t.TempDir(), "bundle")
+			g := driverOwnershipGenerator(tt.component)
+			g.DynamicValues = map[string][]string{tt.component: {tt.path}}
+			if tt.vendored {
+				g.RecipeResult.ComponentRefs[0].Chart = "dra-driver-nvidia-gpu"
+				g.VendorCharts = true
+				g.Puller = localformattest.StubPuller{}
+			}
+			if tt.disabled {
+				g.RecipeResult.ComponentRefs[0].Overrides = map[string]any{"enabled": false}
+			}
+			_, err := g.Generate(t.Context(), outputDir)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("Generate() error = %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Generate() accepted a dynamic driver-ownership path")
+			}
+			errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+			if !strings.Contains(err.Error(), "install-time path "+tt.component+"."+tt.path+" intersects driver-ownership path") ||
+				!strings.Contains(err.Error(), "so bundle-time ownership checks apply") {
+
+				t.Fatalf("error lacks path or remedy: %v", err)
+			}
+			if _, statErr := os.Stat(outputDir); !os.IsNotExist(statErr) {
+				t.Fatalf("rejected Generate() created output: %v", statErr)
+			}
+		})
+	}
+}
+
+// TestDriverOwnershipRemedy covers the remedy the guard and the dynamic-path
+// rejection give: a profile-owned path is chosen with aicr recipe --profile,
+// since enforceOwnedPaths rejects a bundle-time --set on it.
+func TestDriverOwnershipRemedy(t *testing.T) {
+	profiled := driverOwnershipGenerator("gpu-operator").RecipeResult
+	profiled.Metadata.SelectedProfile = &recipe.SelectedProfile{
+		Name: "gpuStack", Value: "azure-managed",
+		OwnedPaths: map[string][]string{"gpu-operator": {"driver.enabled", "enabled"}},
+	}
+	tests := []struct {
+		name   string
+		result *recipe.RecipeResult
+		path   string
+		want   string
+		not    string
+	}{
+		{
+			name: "unprofiled", result: driverOwnershipGenerator("gpu-operator").RecipeResult, path: "driver.enabled",
+			want: "set driver ownership at bundle time (aicr bundle --set gpuoperator:driver.enabled=...) so bundle-time ownership checks apply",
+		},
+		{
+			name: "profile-owned", result: profiled, path: "driver.enabled",
+			want: "the selected profile gpuStack=azure-managed owns it, so choose the profile value at recipe time (aicr recipe --profile gpuStack=...)",
+			not:  "aicr bundle --set",
+		},
+		{
+			name: "profiled but not owned", result: profiled, path: "hostPaths.driverInstallDir",
+			want: "aicr bundle --set gpuoperator:hostPaths.driverInstallDir=...",
+			not:  "aicr recipe --profile",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := driverOwnershipRemedy(tt.result, "gpu-operator", "gpuoperator", tt.path)
+			if !strings.Contains(got, tt.want) || (tt.not != "" && strings.Contains(got, tt.not)) {
+				t.Fatalf("driverOwnershipRemedy() = %q, want %q without %q", got, tt.want, tt.not)
+			}
+		})
+	}
+}
+
+// TestGenerate_DriverOwnershipLockProfiledRemedy proves the rendered guard
+// carries the profile remedy for a profile-owned path and the bundle-time one
+// for the rest.
+func TestGenerate_DriverOwnershipLockProfiledRemedy(t *testing.T) {
+	outputDir := t.TempDir()
+	g := driverOwnershipGenerator("gpu-operator")
+	g.RecipeResult.APIVersion = recipe.RecipeProfileAPIVersion
+	g.RecipeResult.Metadata.SelectedProfile = &recipe.SelectedProfile{
+		Name: "gpuStack", Value: "azure-managed",
+		OwnedPaths: map[string][]string{"gpu-operator": {"driver.enabled", "enabled"}},
+	}
+	if _, err := g.Generate(t.Context(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	guard := string(readBundleFile(t, outputDir, "templates/"+driverOwnershipLockTemplateName+".yaml"))
+	for _, want := range []string{
+		"driver-ownership path gpu-operator.driver.enabled; the selected profile gpuStack=azure-managed owns it, so choose the profile value at recipe time (aicr recipe --profile gpuStack=...)",
+		"driver-ownership path gpu-operator.toolkit.enabled; set driver ownership at bundle time (aicr bundle --set gpuoperator:toolkit.enabled=...)",
+	} {
+		if !strings.Contains(guard, want) {
+			t.Errorf("guard lacks %q:\n%s", want, guard)
+		}
+	}
+	if strings.Contains(guard, "aicr bundle --set gpuoperator:driver.enabled") {
+		t.Errorf("guard prescribes a bundle-time --set on a profile-owned path:\n%s", guard)
+	}
+}
+
+func TestWriteDriverOwnershipLockTemplateRejectsUnownedExistingFile(t *testing.T) {
+	templatesDir := t.TempDir()
+	guardPath := filepath.Join(templatesDir, driverOwnershipLockTemplateName+".yaml")
+	const sentinel = "user-owned template\n"
+	if err := os.WriteFile(guardPath, []byte(sentinel), 0o600); err != nil {
+		t.Fatalf("write user-owned template: %v", err)
+	}
+
+	_, _, err := driverOwnershipGenerator("gpu-operator").writeDriverOwnershipLockTemplate(templatesDir, nil, nil)
+	if err == nil {
+		t.Fatal("writeDriverOwnershipLockTemplate() accepted a user-owned template collision")
+	}
+	errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+	got, readErr := os.ReadFile(guardPath)
+	if readErr != nil {
+		t.Fatalf("read user-owned template: %v", readErr)
+	}
+	if string(got) != sentinel {
+		t.Fatalf("user-owned template = %q, want unchanged %q", got, sentinel)
+	}
+
+	// Without a guarded component the same unowned file is left alone.
+	if _, _, err := driverOwnershipGenerator("cert-manager").writeDriverOwnershipLockTemplate(templatesDir, nil, nil); err != nil {
+		t.Fatalf("writeDriverOwnershipLockTemplate() without guarded component error = %v", err)
+	}
+	got, readErr = os.ReadFile(guardPath)
+	if readErr != nil {
+		t.Fatalf("read user-owned template: %v", readErr)
+	}
+	if string(got) != sentinel {
+		t.Fatalf("user-owned template = %q, want unchanged %q", got, sentinel)
+	}
+}
+
+func TestGenerate_RejectsComponentNamedLikeDriverOwnershipLock(t *testing.T) {
+	outputDir := t.TempDir()
+	g := &Generator{
+		RecipeResult: newRecipeResult("v1.0.0", []recipe.ComponentRef{
+			{
+				Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator",
+				Version: "v25.3.3", Type: recipe.ComponentTypeHelm,
+				Source: "https://helm.ngc.nvidia.com/nvidia",
+			},
+			{
+				Name: driverOwnershipLockTemplateName, Namespace: "x", Chart: "x",
+				Version: "v1.0.0", Type: recipe.ComponentTypeHelm,
+				Source: "https://example.test/charts",
+			},
+		}),
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}, driverOwnershipLockTemplateName: {}},
+		Version:         "v0.0.0-test",
+	}
+	dataDir := t.TempDir()
+	registry := `apiVersion: aicr.run/v1beta1
+kind: ComponentRegistry
+components:
+  - name: aicr-driver-ownership-lock
+    displayName: Collision
+    valueOverrideKeys: [ownershiplock]
+    helm:
+      defaultRepository: https://example.test/charts
+      defaultChart: x
+      defaultVersion: v1.0.0
+`
+	if err := os.WriteFile(filepath.Join(dataDir, "registry.yaml"), []byte(registry), 0o600); err != nil {
+		t.Fatalf("write registry: %v", err)
+	}
+	provider, err := recipe.NewLayeredDataProvider(
+		recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""),
+		recipe.LayeredProviderConfig{ExternalDir: dataDir},
+	)
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+	g.RecipeResult.BindDataProvider(provider)
+	_, err = g.Generate(t.Context(), outputDir)
+	if err == nil || !strings.Contains(err.Error(), "collides with a deployer-owned template") {
+		t.Fatalf("Generate() error = %v, want template collision rejection", err)
+	}
+	errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+	guard := readBundleFile(t, outputDir, "templates/"+driverOwnershipLockTemplateName+".yaml")
+	if !strings.HasPrefix(string(guard), driverOwnershipLockTemplateHeader) {
+		t.Fatalf("component replaced the guard: %s", guard)
+	}
+}
+
+func TestHelmTemplate_DriverOwnershipLock(t *testing.T) {
+	helmtest.RequireBinary(t)
+
+	const wantMessage = "install-time value intersects driver-ownership path"
+	lockTemplateRel := filepath.Join("templates", driverOwnershipLockTemplateName+".yaml")
+	for _, tc := range driverOwnershipGuardCases() {
+		t.Run(tc.component, func(t *testing.T) {
+			outputDir := t.TempDir()
+			g := driverOwnershipGenerator(tc.component)
+			values := map[string]any{}
+			for _, p := range tc.paths {
+				var value any = "/run/nvidia/driver"
+				if strings.HasSuffix(p, ".enabled") {
+					value = true
+				}
+				component.SetValueByPath(values, p, value)
+			}
+			g.ComponentValues[tc.component] = values
+			if _, err := g.Generate(t.Context(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			var rootValues map[string]any
+			if err := yaml.Unmarshal(readBundleFile(t, outputDir, "values.yaml"), &rootValues); err != nil {
+				t.Fatalf("parse root values: %v", err)
+			}
+			if _, present := rootValues[tc.overrideKey]; present {
+				t.Fatalf("static ownership values leaked into root values: %v", rootValues)
+			}
+
+			render := func(t *testing.T, extraArgs ...string) (string, error) {
+				t.Helper()
+				cmdCtx, cancel := context.WithTimeout(t.Context(), helmTemplateTimeout)
+				defer cancel()
+				args := append([]string{
+					"template", "test-release", outputDir,
+					"--set", "repoURL=oci://example.test/aicr",
+				}, extraArgs...)
+				out, err := exec.CommandContext(cmdCtx, "helm", args...).CombinedOutput() //nolint:gosec // controlled test arguments
+				return string(out), err
+			}
+
+			t.Run("no overrides renders", func(t *testing.T) {
+				if out, err := render(t); err != nil {
+					t.Fatalf("helm template error = %v\noutput:\n%s", err, out)
+				}
+			})
+			// Replacing the whole component with a scalar also breaks the
+			// component's own template, which Helm reports instead: it executes
+			// templates in reverse lexical order within a directory and stops at
+			// the first failure (sortTemplates in helm.sh/helm/v4 pkg/engine), so
+			// templates/<component>.yaml runs before
+			// templates/aicr-driver-ownership-lock.yaml. A chart holding only the
+			// guard proves the guard itself rejects it.
+			t.Run("guard alone rejects scalar component", func(t *testing.T) {
+				guardOnly := t.TempDir()
+				if err := os.MkdirAll(filepath.Join(guardOnly, "templates"), 0o755); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				guard, err := os.ReadFile(filepath.Join(outputDir, lockTemplateRel))
+				if err != nil {
+					t.Fatalf("read guard: %v", err)
+				}
+				if err = os.WriteFile(filepath.Join(guardOnly, "templates", "guard.yaml"), guard, 0o600); err != nil {
+					t.Fatalf("write guard: %v", err)
+				}
+				chart := "apiVersion: v2\nname: guard-only\nversion: 0.0.1\n"
+				if err = os.WriteFile(filepath.Join(guardOnly, "Chart.yaml"), []byte(chart), 0o600); err != nil {
+					t.Fatalf("write Chart.yaml: %v", err)
+				}
+				cmdCtx, cancel := context.WithTimeout(t.Context(), helmTemplateTimeout)
+				defer cancel()
+				out, err := exec.CommandContext(cmdCtx, "helm", "template", "guard-only", guardOnly, //nolint:gosec // controlled test arguments
+					"--set-string", tc.overrideKey+"=blocked").CombinedOutput()
+				if err == nil || !strings.Contains(string(out), wantMessage+" "+tc.component+"."+tc.paths[0]+";") ||
+					!strings.Contains(string(out), "so bundle-time ownership checks apply") {
+
+					t.Fatalf("guard-only helm template error = %v, want %q\noutput:\n%s", err, wantMessage, out)
+				}
+			})
+			t.Run("full chart rejects scalar component", func(t *testing.T) {
+				if out, err := render(t, "--set-string", tc.overrideKey+"=blocked"); err == nil {
+					t.Fatalf("helm template accepted a scalar component\noutput:\n%s", out)
+				}
+			})
+			t.Run("generated values.yaml renders", func(t *testing.T) {
+				if out, err := render(t, "-f", filepath.Join(outputDir, "values.yaml")); err != nil {
+					t.Fatalf("helm template error = %v\noutput:\n%s", err, out)
+				}
+			})
+			for _, override := range tc.passing {
+				t.Run("sibling "+override[1], func(t *testing.T) {
+					if out, err := render(t, override[0], override[1]); err != nil {
+						t.Fatalf("helm template error = %v\noutput:\n%s", err, out)
+					}
+				})
+			}
+			for _, override := range tc.failing {
+				t.Run("rejects "+override[0]+" "+override[1], func(t *testing.T) {
+					out, err := render(t, override[0], override[1])
+					if err == nil {
+						t.Fatalf("helm template accepted %s %s\noutput:\n%s", override[0], override[1], out)
+					}
+					if !strings.Contains(out, wantMessage+" "+tc.component+".") ||
+						!strings.Contains(out, "set driver ownership at bundle time") {
+
+						t.Fatalf("helm template error does not carry the guard message:\n%s", out)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestHelmTemplate_DriverOwnershipLockDynamicSiblings(t *testing.T) {
+	helmtest.RequireBinary(t)
+
+	for _, tc := range driverOwnershipGuardCases() {
+		t.Run(tc.component, func(t *testing.T) {
+			outputDir := t.TempDir()
+			g := driverOwnershipGenerator(tc.component)
+			g.DynamicValues = map[string][]string{}
+			for _, override := range tc.passing {
+				assignment, value, _ := strings.Cut(override[1], "=")
+				valuePath := strings.TrimPrefix(assignment, tc.overrideKey+".")
+				g.DynamicValues[tc.component] = append(g.DynamicValues[tc.component], valuePath)
+				component.SetValueByPath(g.ComponentValues[tc.component], valuePath, value)
+			}
+			if _, err := g.Generate(t.Context(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			defaults := readBundleFile(t, outputDir, "values.yaml")
+			var root map[string]any
+			if err := yaml.Unmarshal(defaults, &root); err != nil {
+				t.Fatalf("parse root defaults: %v", err)
+			}
+			for _, path := range tc.paths {
+				if _, present := component.GetValueByPath(root, tc.overrideKey+"."+path); present {
+					t.Fatalf("guarded path %s leaked into root defaults", path)
+				}
+			}
+			render := func(t *testing.T, args ...string) (string, error) {
+				t.Helper()
+				ctx, cancel := context.WithTimeout(t.Context(), helmTemplateTimeout)
+				defer cancel()
+				args = append([]string{"template", "test", outputDir, "--set", "repoURL=oci://example.test/aicr"}, args...)
+				out, err := exec.CommandContext(ctx, "helm", args...).CombinedOutput() //nolint:gosec // controlled test arguments
+				return string(out), err
+			}
+			passing := append([][2]string{{}, {"-f", filepath.Join(outputDir, "values.yaml")}}, tc.passing...)
+			for index, args := range passing {
+				t.Run(fmt.Sprintf("allowed/%d", index), func(t *testing.T) {
+					var extra []string
+					if args[0] != "" {
+						extra = args[:]
+					}
+					if out, err := render(t, extra...); err != nil {
+						t.Fatalf("helm template error = %v\n%s", err, out)
+					}
+				})
+			}
+			ancestors := []string{tc.overrideKey}
+			for _, path := range tc.paths {
+				if parent, _, nested := strings.Cut(path, "."); nested {
+					ancestors = append(ancestors, tc.overrideKey+"."+parent)
+				}
+			}
+			for _, ancestor := range ancestors {
+				t.Run("null/"+ancestor, func(t *testing.T) {
+					out, err := render(t, "--set-json", ancestor+"=null")
+					if err == nil || !strings.Contains(out, "install-time value intersects driver-ownership path "+tc.component+".") ||
+						!strings.Contains(out, "set driver ownership at bundle time") {
+
+						t.Fatalf("null ancestor not rejected with ownership remedy: err=%v\n%s", err, out)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestHelmTemplate_DriverOwnershipLockVendored covers --vendor-charts: the
+// child Application installs a wrapper chart that forwards values to the
+// upstream chart only under its dependency name, so the guarded paths must be
+// rejected under <key>.<dependency> as well. The DRA charts are not named
+// after their components, which proves the name comes from the wrapper.
+func TestHelmTemplate_DriverOwnershipLockVendored(t *testing.T) {
+	helmtest.RequireBinary(t)
+
+	dependencies := map[string]string{
+		"gpu-operator":              "gpu-operator",
+		"gpu-operator-ocp":          "gpu-operator",
+		"nvidia-dra-driver-gpu":     "dra-driver-nvidia-gpu",
+		"nvidia-dra-driver-gpu-ocp": "dra-driver-nvidia-gpu",
+	}
+	for _, tc := range driverOwnershipGuardCases() {
+		dependency := dependencies[tc.component]
+		nest := func(override [2]string) [2]string {
+			return [2]string{override[0], tc.overrideKey + "." + dependency + strings.TrimPrefix(override[1], tc.overrideKey)}
+		}
+		// A dynamic sibling under the dependency puts its ancestors in the root
+		// defaults, where Helm coalescing erases a null instead of rendering it.
+		for _, dynamic := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/dynamic=%v", tc.component, dynamic), func(t *testing.T) {
+				outputDir := t.TempDir()
+				g := driverOwnershipGenerator(tc.component)
+				g.RecipeResult.ComponentRefs[0].Chart = dependency
+				g.VendorCharts = true
+				g.Puller = localformattest.StubPuller{}
+				if dynamic {
+					assignment, _, _ := strings.Cut(nest(tc.passing[0])[1], "=")
+					g.DynamicValues = map[string][]string{
+						tc.component: {strings.TrimPrefix(assignment, tc.overrideKey+".")},
+					}
+				}
+				if _, err := g.Generate(t.Context(), outputDir); err != nil {
+					t.Fatalf("Generate() error = %v", err)
+				}
+				wrapper := readBundleFile(t, outputDir, "001-"+tc.component+"/Chart.yaml")
+				if !strings.Contains(string(wrapper), "- name: "+dependency+"\n") {
+					t.Fatalf("wrapper does not declare dependency %q:\n%s", dependency, wrapper)
+				}
+
+				render := func(t *testing.T, args ...string) (string, error) {
+					t.Helper()
+					ctx, cancel := context.WithTimeout(t.Context(), helmTemplateTimeout)
+					defer cancel()
+					args = append([]string{"template", "test", outputDir, "--set", "repoURL=oci://example.test/aicr"}, args...)
+					out, err := exec.CommandContext(ctx, "helm", args...).CombinedOutput() //nolint:gosec // controlled test arguments
+					return string(out), err
+				}
+				passing := make([][2]string, 0, 1+len(tc.passing))
+				passing = append(passing, [2]string{"-f", filepath.Join(outputDir, "values.yaml")})
+				for _, override := range tc.passing {
+					passing = append(passing, nest(override))
+				}
+				for _, override := range passing {
+					t.Run("accepts "+override[1], func(t *testing.T) {
+						if out, err := render(t, override[0], override[1]); err != nil {
+							t.Fatalf("helm template error = %v\n%s", err, out)
+						}
+					})
+				}
+				failing := make([][2]string, 0, 1+len(tc.failing))
+				failing = append(failing, [2]string{"--set-string", tc.overrideKey + "." + dependency + "=blocked"})
+				for _, override := range tc.failing {
+					failing = append(failing, nest(override))
+				}
+				for _, override := range failing {
+					t.Run("rejects "+override[0]+" "+override[1], func(t *testing.T) {
+						out, err := render(t, override[0], override[1])
+						if err == nil || !strings.Contains(out, "install-time value intersects driver-ownership path "+tc.component+".") ||
+							!strings.Contains(out, "set driver ownership at bundle time") {
+
+							t.Fatalf("nested override not rejected with ownership remedy: err=%v\n%s", err, out)
+						}
+					})
+				}
+			})
+		}
+	}
+}
+
+// TestGenerate_DriverOwnershipLockBytesNonVendored pins the guard of a bundle
+// without --vendor-charts: it guards only <key>.<path>, and its bytes match
+// those generated before vendored guards existed except for the remedy text.
+func TestGenerate_DriverOwnershipLockBytesNonVendored(t *testing.T) {
+	charts := [][2]string{
+		{"gpu-operator", "gpu-operator"},
+		{"gpu-operator-ocp", "gpu-operator"},
+		{"nvidia-dra-driver-gpu", "dra-driver-nvidia-gpu"},
+		{"nvidia-dra-driver-gpu-ocp", "dra-driver-nvidia-gpu"},
+	}
+	refs := make([]recipe.ComponentRef, 0, len(charts))
+	values := map[string]map[string]any{}
+	for _, ref := range charts {
+		refs = append(refs, recipe.ComponentRef{
+			Name: ref[0], Namespace: ref[0], Chart: ref[1], Version: "v25.3.3",
+			Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia",
+		})
+		values[ref[0]] = map[string]any{}
+	}
+	g := &Generator{
+		RecipeResult:    newRecipeResult("v1.0.0", refs),
+		ComponentValues: values,
+		Version:         "v0.0.0-test",
+	}
+	outputDir := t.TempDir()
+	if _, err := g.Generate(t.Context(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	// be29d0c80's bytes (sha256 300a2eba...), before vendored dependency
+	// guards were added, with the remedy "so CheckDriverOwnershipCoherence can
+	// verify it" reworded to "so bundle-time ownership checks apply".
+	const wantHash = "cb4b9e7c66a7c90b873dd450b7f722a18bd37b365157baa3eed54fbed262e3d6"
+	guard := readBundleFile(t, outputDir, "templates/"+driverOwnershipLockTemplateName+".yaml")
+	if strings.Contains(string(guard), "aicrDriverVendored") {
+		t.Fatalf("non-vendored bundle guards a dependency path:\n%s", guard)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(guard)); got != wantHash {
+		t.Fatalf("non-vendored driver-ownership lock bytes changed: sha256 = %s, want %s\n%s", got, wantHash, guard)
+	}
+}
+
+func TestHasGeneratedGuardHeader_BoundedRead(t *testing.T) {
+	for _, header := range []string{profileLockTemplateHeader, driverOwnershipLockTemplateHeader} {
+		readPastHeader := errors.New("read past guard header")
+		reader := io.MultiReader(
+			strings.NewReader(header),
+			iotest.ErrReader(readPastHeader),
+		)
+
+		generated, err := hasGeneratedGuardHeader(reader, header)
+		if err != nil {
+			t.Fatalf("hasGeneratedGuardHeader() error = %v", err)
+		}
+		if !generated {
+			t.Fatal("hasGeneratedGuardHeader() = false, want true")
+		}
 	}
 }
 
@@ -595,7 +1418,7 @@ spec:
 	}
 
 	_, _, err := transformApplication(
-		srcDir, templatesDir, folderName, componentName, "profilelock", true,
+		srcDir, templatesDir, folderName, componentName, "profilelock", []string{profileLockTemplateName},
 	)
 	if err == nil {
 		t.Fatal("transformApplication() error = nil, want collision rejection")
