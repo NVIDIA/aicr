@@ -202,6 +202,7 @@ spec:
 ## Driver Installer
 
 `a4x-highgpu-4g` recipes generated with `--profile gpuStack=bundle-installer`
+or `--profile gpuStack=dra`
 (see [GKE GPU Setup](gke-gpu-setup.md#alternative-let-the-bundle-own-the-gpu-stack))
 get the driver from the bundle's `gcp-driver-installer` component — Google's
 cos-gpu-installer DaemonSet, deployed and versioned by AICR alongside the

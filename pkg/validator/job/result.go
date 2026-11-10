@@ -108,16 +108,64 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		result.TerminationMsg = "container still running after wait completed"
 	}
 
-	// Capture stdout from pod logs (explicit container name)
-	logs, logErr := pod.GetPodLogs(ctx, d.config.Clientset, d.config.Namespace, jobPod.Name, ValidatorContainerName)
-	if logErr != nil {
-		slog.Warn("failed to capture pod logs", "pod", jobPod.Name, "error", logErr)
-		// Not fatal — we still have exit code and termination message
-	} else if logs != "" {
+	d.captureValidatorOutput(ctx, jobPod.Name, result)
+	return result
+}
+
+// captureValidatorOutput reads the validator container's stdout into result
+// and applies the fail-closed rule of #3703: a check is credited only from
+// output the orchestrator actually read. Every structured marker a check
+// emits (skipReason, the coverage counts, observationOnly, resultSchema)
+// rides stdout, so an exit-0 result whose logs could not be read is a pass
+// the orchestrator cannot vouch for; it is reported as `other` with the read
+// error, in the shape missingPodOutcome uses for a vanished pod, never as a
+// clean pass. A result that already failed keeps its exit code and
+// termination message, since the verdict does not depend on the output; the
+// read error is logged.
+func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, result *ctrf.ValidatorResult) {
+	logs, attempts, logErr := d.readValidatorLogs(ctx, podName)
+	switch {
+	case logErr != nil && result.ExitCode == 0:
+		result.ExitCode = -1
+		result.TerminationMsg = boundTerminationMsg(fmt.Sprintf(
+			"result output unavailable: logs of pod %s could not be read after %d attempt(s), so the check's passing exit code is not credited: %v",
+			podName, attempts, logErr), defaults.ValidatorMaxTerminationMsgBytes)
+	case logErr != nil:
+		slog.Warn("failed to capture pod logs", "pod", podName, "error", logErr)
+	case logs != "":
 		result.Extra, result.RuntimeProvenance, result.Stdout = processValidatorLogs(logs)
 	}
+}
 
-	return result
+// readValidatorLogs reads the validator container's logs, retrying once
+// after ValidatorLogReadRetryDelay so a transient apiserver or kubelet error
+// does not by itself turn a pass into an unreadable result. The pause is cut
+// short by ctx; a context already done returns the last read error. attempts
+// is how many reads were made, so the message reports what happened rather
+// than the configured maximum.
+func (d *Deployer) readValidatorLogs(ctx context.Context, podName string) (logs string, attempts int, err error) {
+	read := d.config.LogReader
+	if read == nil {
+		read = pod.GetPodLogs
+	}
+	var lastErr error
+	for attempts = 1; attempts <= defaults.ValidatorLogReadAttempts; attempts++ {
+		logs, err := read(ctx, d.config.Clientset, d.config.Namespace, podName, ValidatorContainerName)
+		if err == nil {
+			return logs, attempts, nil
+		}
+		lastErr = err
+		if attempts == defaults.ValidatorLogReadAttempts {
+			break
+		}
+		slog.Warn("failed to read validator pod logs; retrying", "pod", podName, "attempt", attempts, "error", err)
+		select {
+		case <-ctx.Done():
+			return "", attempts, lastErr
+		case <-time.After(defaults.ValidatorLogReadRetryDelay):
+		}
+	}
+	return "", min(attempts, defaults.ValidatorLogReadAttempts), lastErr
 }
 
 // missingPodOutcome classifies an ExtractResult run whose Job pod could not be
@@ -294,8 +342,9 @@ func parseExtraSentinels(logs string) (cleaned string, extra map[string]string, 
 // ErrCodeTimeout) renders the "timeout: validator did not complete within
 // <configured>" wording, while any other cause (e.g. an infra/unavailable
 // error) renders "validation failed: <cause>" so a mid-run infra failure is
-// not misreported as the full catalog timeout (see issue #1966). A nil
-// waitCause is treated as a timeout for backward compatibility.
+// not misreported as the full catalog timeout (see issue #1966). A cause
+// carrying ErrCodeCanceled renders as an interrupted run. A nil waitCause is
+// treated as a timeout for backward compatibility.
 func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.ValidatorResult {
 	result := &ctrf.ValidatorResult{
 		Name:  d.config.Entry.Name,
@@ -306,7 +355,8 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 	jobPod, err := d.getPodForJob(ctx)
 	if err != nil {
 		result.ExitCode = -1
-		result.TerminationMsg = "pod never reached running state"
+		result.TerminationMsg = fmt.Sprintf("%s (pod never reached running state)",
+			waitFailureMessage(waitCause, effectiveTimeout(d.config.Entry.Timeout)))
 		return result
 	}
 
@@ -322,13 +372,6 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 		return result
 	}
 
-	// Try to get logs from "validator" container. Parse and strip the Extra
-	// sentinel here too: a check that emits coverage counts before hitting the
-	// timeout still yields structured evidence.
-	if logs, logErr := pod.GetPodLogs(ctx, d.config.Clientset, d.config.Namespace, jobPod.Name, ValidatorContainerName); logErr == nil && logs != "" {
-		result.Extra, result.RuntimeProvenance, result.Stdout = processValidatorLogs(logs)
-	}
-
 	if cs.State.Terminated != nil {
 		result.ExitCode = cs.State.Terminated.ExitCode
 		result.TerminationMsg = boundTerminationMsg(cs.State.Terminated.Message, defaults.ValidatorMaxTerminationMsgBytes)
@@ -339,6 +382,12 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 		result.ExitCode = -1
 		result.TerminationMsg = waitFailureMessage(waitCause, effectiveTimeout(d.config.Entry.Timeout))
 	}
+
+	// Read the logs here too: a check that emits coverage counts before
+	// hitting the timeout still yields structured evidence, and a container
+	// that did finish with exit 0 while the wait failed is credited only from
+	// output that was read, as on the normal path.
+	d.captureValidatorOutput(ctx, jobPod.Name, result)
 
 	return result
 }
@@ -398,6 +447,9 @@ func enforcedDeadline(job *batchv1.Job, configured time.Duration) time.Duration 
 // orchestrator wait before the Job deadline, and reporting only the catalog
 // value would understate how long the operator actually waited.
 func waitFailureMessage(cause error, configured time.Duration) string {
+	if isCanceledCause(cause) {
+		return "canceled: validation run was interrupted before the validator completed"
+	}
 	if cause == nil || isDeadlineCause(cause) {
 		checkBudget := truncateToSeconds(configured)
 		waitBuffer := truncateToSeconds(defaults.ValidatorWaitBuffer)
@@ -405,6 +457,15 @@ func waitFailureMessage(cause error, configured time.Duration) string {
 			checkBudget+waitBuffer, checkBudget, waitBuffer)
 	}
 	return fmt.Sprintf("validation failed: %v", cause)
+}
+
+// isCanceledCause reports whether cancellation appears anywhere in err's chain,
+// as the stdlib sentinel or a StructuredError carrying ErrCodeCanceled. An abort
+// landing in WaitForJobTerminal's initial Get or Watch is wrapped as
+// ErrCodeInternal, so the outermost code alone would call it a validation
+// failure. A deadline expiry carries neither and still renders as a timeout.
+func isCanceledCause(err error) bool {
+	return stderrors.Is(err, context.Canceled) || stderrors.Is(err, errors.New(errors.ErrCodeCanceled, ""))
 }
 
 // isDeadlineCause reports whether err represents a genuine context-deadline

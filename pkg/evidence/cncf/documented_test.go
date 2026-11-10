@@ -34,6 +34,8 @@ func TestAggregateSubmissionDocumented(t *testing.T) {
 		name            string
 		tests           []ctrf.TestResult
 		documented      map[string]Documentation
+		notApplicable   map[string]string
+		requirement     string // defaults to cluster_autoscaling
 		wantStatus      RequirementStatus
 		wantEstablished bool
 		wantDocumented  bool
@@ -56,9 +58,13 @@ func TestAggregateSubmissionDocumented(t *testing.T) {
 			wantReasonHas: "observed, not demonstrated",
 		},
 		{
+			// cluster-autoscaling can only be observed, so the passed case
+			// uses a behavioral requirement and covers the observed MUST.
 			name:            "passed ignores documentation",
 			tests:           allMustsPassed,
-			documented:      map[string]Documentation{"cluster_autoscaling": doc},
+			requirement:     "gang_scheduling",
+			notApplicable:   map[string]string{"cluster_autoscaling": "fixed-size cluster"},
+			documented:      map[string]Documentation{"gang_scheduling": doc},
 			wantStatus:      StatusPassed,
 			wantEstablished: true,
 			wantPassed:      true,
@@ -80,11 +86,15 @@ func TestAggregateSubmissionDocumented(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			agg, err := AggregateSubmission(Version137, reportOf(tt.tests...), AggregateOptions{Documented: tt.documented})
+			agg, err := AggregateSubmission(Version137, reportOf(tt.tests...), AggregateOptions{Documented: tt.documented, NotApplicable: tt.notApplicable})
 			if err != nil {
 				t.Fatalf("AggregateSubmission() = %v", err)
 			}
-			r := agg.Requirement("cluster_autoscaling")
+			requirement := tt.requirement
+			if requirement == "" {
+				requirement = "cluster_autoscaling"
+			}
+			r := agg.Requirement(requirement)
 			if r.Status != tt.wantStatus {
 				t.Errorf("Status = %s, want %s", r.Status, tt.wantStatus)
 			}
@@ -119,7 +129,8 @@ func TestAggregateSubmissionRefusesMalformedDocumented(t *testing.T) {
 func TestAggregateSubmissionDocumentedShould(t *testing.T) {
 	observedDriver := &ctrf.TestResult{Name: "driver-runtime-management", Status: "passed", Extra: observationOnly}
 	agg, err := AggregateSubmission(Version137, reportOf(append(allMustsPassed, *observedDriver)...), AggregateOptions{
-		Documented: map[string]Documentation{"driver_runtime_management": {Evidence: []string{"https://vendor.example/docs/drivers"}, Notes: "Drivers are reconciled by the GPU Operator."}},
+		Documented:    map[string]Documentation{"driver_runtime_management": {Evidence: []string{"https://vendor.example/docs/drivers"}, Notes: "Drivers are reconciled by the GPU Operator."}},
+		NotApplicable: map[string]string{"cluster_autoscaling": "fixed-size cluster"},
 	})
 	if err != nil {
 		t.Fatal(err)

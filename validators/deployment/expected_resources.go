@@ -179,6 +179,12 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 	var lastErr error
 	for {
 		lastErr = probe()
+		// A terminal probe error names a state no further polling repairs; it
+		// ends the wait at once instead of being retried until the budget
+		// runs out and every queued chainsaw assert goes unevaluated (#3703).
+		if terminal, ok := stderrors.AsType[*terminalProbeError](lastErr); ok {
+			return terminal.err
+		}
 		if lastErr == nil {
 			if stableSince.IsZero() {
 				stableSince = time.Now()
@@ -216,6 +222,14 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 
 	return timedOut(lastErr)
 }
+
+// terminalProbeError wraps a readiness-probe error that no amount of polling
+// repairs (a declared CR the cluster does not have); pollUntilStable returns
+// its err immediately instead of retrying it to the deadline.
+type terminalProbeError struct{ err error }
+
+func (e *terminalProbeError) Error() string { return e.err.Error() }
+func (e *terminalProbeError) Unwrap() error { return e.err }
 
 // checkExpectedResources verifies that all expected Kubernetes resources declared
 // in the validation's componentRefs exist and are healthy in the live cluster.
@@ -809,11 +823,11 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 			// calls to N independent read-only K8s APIs → fan-out with
 			// errgroup") rather than paying both round-trips serially every
 			// poll iteration.
-			var statusFailures, taintFailures []string
+			var statusFailures, missing, taintFailures []string
 			var taintErr error
 			g := new(errgroup.Group)
 			g.Go(func() error {
-				statusFailures = nodewrightStatusFailures(ctx, dynClient, gvr, expectedNames)
+				statusFailures, missing = nodewrightStatusFailures(ctx, dynClient, gvr, expectedNames)
 				return nil
 			})
 			g.Go(func() error {
@@ -822,6 +836,23 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 			})
 			_ = g.Wait()
 			complete = len(expectedNames) - len(statusFailures)
+
+			// A declared CR the cluster does not have means the deployment is
+			// incomplete, not "not ready yet". The CRs come from the
+			// manifest-only nodewright-customizations component, which the
+			// GitOps deployers sync in a later wave than the operator, so a
+			// run started mid-sync can see the CRD served and the CRs still
+			// absent; this phase is documented to start after every wave has
+			// synced (docs/user/validation.md), and once it has, no poll will
+			// find a missing CR and waiting the whole budget only costs the
+			// chainsaw asserts their evaluation. The check fails now rather
+			// than poll, since a poll would mask a sync gap. CRs that exist
+			// keep being waited on.
+			if len(missing) > 0 {
+				return &terminalProbeError{err: errors.New(errors.ErrCodeNotFound, fmt.Sprintf(
+					"%s; %d of %d declared Nodewright CR(s) absent, so the recipe's %s manifests were not applied to this cluster and waiting cannot change that",
+					strings.Join(missing, "; "), len(missing), len(expectedNames), ref.Name))}
+			}
 
 			if taintErr != nil {
 				// A transient node-list failure (e.g. an apiserver hiccup while
@@ -935,19 +966,22 @@ func legacySkyhookAllowed(ctx *validators.Context) (allowed bool, pin string) {
 
 // nodewrightStatusFailures does one pass over the expected Nodewright CRs and
 // returns a human-readable failure string for each that is missing, unreadable,
-// or not yet status.status == "complete". An empty slice means all are complete.
+// or not yet status.status == "complete"; an empty slice means all are
+// complete. missing repeats the entries of CRs the cluster does not have at
+// all (a definitive NotFound), which the caller treats as terminal.
 //
 // The per-name Gets are independent read-only calls, so they fan out
 // concurrently (errgroup) and each keeps its own ResourceVerificationTimeout;
 // results are written to a fixed-index slice to preserve deterministic order.
-func nodewrightStatusFailures(ctx *validators.Context, dynClient dynamic.Interface, gvr schema.GroupVersionResource, expectedNames []string) []string {
+func nodewrightStatusFailures(ctx *validators.Context, dynClient dynamic.Interface, gvr schema.GroupVersionResource, expectedNames []string) (failures, missing []string) {
 	results := make([]string, len(expectedNames))
+	absent := make([]bool, len(expectedNames))
 	g, gctx := errgroup.WithContext(ctx.Ctx)
 	for i, name := range expectedNames {
 		g.Go(func() error {
 			verifyCtx, cancel := context.WithTimeout(gctx, defaults.ResourceVerificationTimeout)
 			defer cancel()
-			results[i] = nodewrightStatusFailure(verifyCtx, dynClient, gvr, name)
+			results[i], absent[i] = nodewrightStatusFailure(verifyCtx, dynClient, gvr, name)
 			return nil
 		})
 	}
@@ -955,24 +989,29 @@ func nodewrightStatusFailures(ctx *validators.Context, dynClient dynamic.Interfa
 	// only blocks until every Get completes.
 	_ = g.Wait()
 
-	failures := make([]string, 0, len(results))
-	for _, r := range results {
+	failures = make([]string, 0, len(results))
+	for i, r := range results {
 		if r != "" {
 			failures = append(failures, r)
 		}
+		if absent[i] {
+			missing = append(missing, r)
+		}
 	}
-	return failures
+	return failures, missing
 }
 
 // nodewrightStatusFailure checks one Nodewright CR and returns a failure string,
-// or "" when it is present and status.status == "complete".
-func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interface, gvr schema.GroupVersionResource, name string) string {
+// or "" when it is present and status.status == "complete". missing is true
+// only for a definitive NotFound; a Get that failed otherwise is unreadable,
+// not absent, and stays retryable.
+func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interface, gvr schema.GroupVersionResource, name string) (failure string, missing bool) {
 	sk, getErr := dynClient.Resource(gvr).Get(verifyCtx, name, metav1.GetOptions{})
 	if getErr != nil {
 		if apierrors.IsNotFound(getErr) {
-			return fmt.Sprintf("Nodewright %s: not found (recipe declared it but the cluster has no such CR)", name)
+			return fmt.Sprintf("Nodewright %s: not found (recipe declared it but the cluster has no such CR)", name), true
 		}
-		return fmt.Sprintf("Nodewright %s: failed to get: %v", name, getErr)
+		return fmt.Sprintf("Nodewright %s: failed to get: %v", name, getErr), false
 	}
 	// Reject a CR that is on its way out even when it still reports complete.
 	// Nodewright uses a deletion finalizer, so an expected CR can sit
@@ -985,19 +1024,19 @@ func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interf
 	// per-name check is the only gate that binds liveness to the CR the recipe
 	// actually declared.
 	if sk.GetDeletionTimestamp() != nil {
-		return fmt.Sprintf("Nodewright %s: terminating (deletionTimestamp set)", name)
+		return fmt.Sprintf("Nodewright %s: terminating (deletionTimestamp set)", name), false
 	}
 	status, found, statusErr := unstructured.NestedString(sk.Object, "status", "status")
 	if statusErr != nil {
-		return fmt.Sprintf("Nodewright %s: failed to read status.status: %v", name, statusErr)
+		return fmt.Sprintf("Nodewright %s: failed to read status.status: %v", name, statusErr), false
 	}
 	if !found {
-		return fmt.Sprintf("Nodewright %s: missing status.status", name)
+		return fmt.Sprintf("Nodewright %s: missing status.status", name), false
 	}
 	if status != nodewrightCompleteState {
-		return fmt.Sprintf("Nodewright %s: status=%s (want %s)", name, status, nodewrightCompleteState)
+		return fmt.Sprintf("Nodewright %s: status=%s (want %s)", name, status, nodewrightCompleteState), false
 	}
-	return ""
+	return "", false
 }
 
 // nodewrightController returns the operator's controller-manager Deployment in

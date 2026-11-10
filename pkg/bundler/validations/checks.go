@@ -656,7 +656,7 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"(opt-out label absent) provision the GPU node pools with " +
 				"the GKE-managed driver install (node pool " +
 				"gpu-driver-version=default). With --profile " +
-				"gpuStack=bundle-installer (pools labeled " +
+				"gpuStack=bundle-installer or gpuStack=dra (pools labeled " +
 				"gke-no-default-nvidia-gpu-device-plugin=true and created " +
 				"with gpu-driver-version=disabled) the bundle's " +
 				"gcp-driver-installer component supplies the driver with a " +
@@ -1452,6 +1452,12 @@ const nvsentinelDriverLabelPath = "labeler.assumeDriverInstalled"
 // labeler detects, so the label gate below must not reject this value.
 const gkeBundleInstallerProfileValue = "bundle-installer"
 
+// gkeDRAProfileValue is the GKE gpuStack value that advertises whole GPUs
+// through DRA ResourceClaims (issue #2517). It is the bundle-installer
+// pool shape with a different advertiser: the same gcp-driver-installer
+// component supplies the driver, so the labeler sees the same driver pods.
+const gkeDRAProfileValue = "dra"
+
 // gpuStackProfileName is the ADR-015 configuration-profile name that
 // selects who installs the GPU driver on AKS and GKE.
 const gpuStackProfileName = "gpuStack"
@@ -1575,21 +1581,22 @@ func nvsentinelAssumesDriverInstalled(values map[string]any) bool {
 // labeler recognizes exists on this recipe's platform even though the GPU
 // Operator installs no driver.
 //
-// One shipping configuration qualifies: GKE COS with
-// --profile gpuStack=bundle-installer, whose bundle-carried installer is
-// Google's standalone nvidia-driver-installer DaemonSet on pools created
-// with gpu-driver-version=disabled (recipes/overlays/gke-cos.yaml), the
-// bundle's gcp-driver-installer component carries the cos-gpu-installer
-// DaemonSet. The labeler's driver-pod detection sees those pods, so the
-// driver.installed label IS applied and the gate below must stay silent.
+// Two shipping configurations qualify, both GKE COS on pools created with
+// gpu-driver-version=disabled (recipes/overlays/gke-cos.yaml):
+// --profile gpuStack=bundle-installer and --profile gpuStack=dra. In both,
+// the bundle's gcp-driver-installer component carries the
+// cos-gpu-installer DaemonSet (Google's standalone nvidia-driver-installer
+// shape); the two values differ only in who advertises whole GPUs. The
+// labeler's driver-pod detection sees those pods, so the driver.installed
+// label IS applied and the gate below must stay silent.
 // The sibling value gke-default bakes the driver into the node at pool
 // creation, so no driver pod exists there — that value is affected.
 //
 // The exemption is scoped to GKE COS recipes, not to the profile
 // identifier alone: profile names are not reserved, and an external
 // --data overlay on any service can declare a gpuStack profile whose
-// value happens to be named bundle-installer — with no installer
-// DaemonSet ever deploying. Fail closed on anything but the one shape
+// value happens to be named bundle-installer or dra — with no installer
+// DaemonSet ever deploying. Fail closed on anything but the shapes
 // the embedded catalog documents (recipes/overlays/gke-cos.yaml); a
 // recipe without criteria stays blocked for the same reason.
 func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
@@ -1600,10 +1607,10 @@ func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
 		return false
 	}
 	selected := recipeResult.Metadata.SelectedProfile
-	if selected == nil {
+	if selected == nil || selected.Name != gpuStackProfileName {
 		return false
 	}
-	return selected.Name == gpuStackProfileName && selected.Value == gkeBundleInstallerProfileValue
+	return selected.Value == gkeBundleInstallerProfileValue || selected.Value == gkeDRAProfileValue
 }
 
 // NVSENTINEL GATE POLICY — what an nvsentinel gate means when parts of
@@ -1661,7 +1668,8 @@ func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
 //     --set/--set-json overrides), so the documented
 //     GPU-Operator-managed override set clears the gate,
 //   - no other driver pod source the labeler recognizes exists
-//     (labelerObservesDriverPod — GKE gpuStack=bundle-installer), and
+//     (labelerObservesDriverPod — GKE gpuStack=bundle-installer or
+//     gpuStack=dra), and
 //   - labeler.assumeDriverInstalled is not truthy in nvsentinel's
 //     effective values.
 //

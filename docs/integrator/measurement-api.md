@@ -478,10 +478,10 @@ Interpretation is fail-closed: `Disabled` is the only value a declared
 `gpuStack` profile constraint accepts. `Installed`, `NotConfigured`,
 `NotInstalled`, `Mixed`, and `Unknown(value)` all match no constraint, so
 profile-qualified resolution fails closed with the observed value as the
-actual. Only the `bundle-installer` value declares a
+actual. Only the `bundle-installer` and `dra` values declare a
 constraint on this reading. The default `gke-default` value resolves from
 the `NodeTopology.gpu-nodes.label` opt-out label alone and never requires
-this projection. When `bundle-installer` is selected and the subtype or the
+this projection. When `bundle-installer` or `dra` is selected and the subtype or the
 `gpu-driver-installation` key is absent (no `--gke-gpu-pools` dump, or a
 dump with no GPU pools), constraint evaluation reports the reading
 unavailable and fails closed rather than guessing a mode.

@@ -107,16 +107,17 @@ const (
 
 // readmeData is the README.md template input.
 type readmeData struct {
-	Vendor       Vendor
-	Version      Version
-	Platform     Platform
-	Tool         Tool
-	GeneratedAt  time.Time
-	Rows         []productRow
-	Supporting   []RequirementResult
-	Rewritten    []exportedTest
-	HasArtifacts bool
-	Validator    struct {
+	Vendor          Vendor
+	Version         Version
+	VersionExplicit bool
+	Platform        Platform
+	Tool            Tool
+	GeneratedAt     time.Time
+	Rows            []productRow
+	Supporting      []RequirementResult
+	Rewritten       []exportedTest
+	HasArtifacts    bool
+	Validator       struct {
 		Repository string
 		Path       string
 		Commit     string
@@ -139,15 +140,16 @@ var parsedReadmeTemplate = template.Must(template.New("readme").Funcs(templateFu
 // applied.
 func renderReadme(r *readmeInputs, state validationState) ([]byte, error) {
 	data := readmeData{
-		Vendor:       r.in.Vendor,
-		Version:      r.agg.Version,
-		Platform:     r.in.Platform,
-		Tool:         r.in.Tool,
-		GeneratedAt:  r.in.Now,
-		Rows:         r.rows,
-		Supporting:   r.supporting,
-		HasArtifacts: len(r.exported) > 0,
-		Validation:   state,
+		Vendor:          r.in.Vendor,
+		Version:         r.agg.Version,
+		VersionExplicit: r.in.VersionExplicit,
+		Platform:        r.in.Platform,
+		Tool:            r.in.Tool,
+		GeneratedAt:     r.in.Now,
+		Rows:            r.rows,
+		Supporting:      r.supporting,
+		HasArtifacts:    len(r.exported) > 0,
+		Validation:      state,
 	}
 	for _, e := range r.exported {
 		if e.Rewritten {
@@ -181,7 +183,7 @@ applicable, or public documentation attesting a requirement the run only
 observed); none was typed into this file.
 
 - **Generated:** {{ .GeneratedAt.Format "2006-01-02T15:04:05Z" }}
-- **Checklist:** {{ .Version }} (` + "`docs/AIConformance-{{ trimV .Version }}.yaml`" + ` in cncf/k8s-ai-conformance)
+- **Checklist:** {{ .Version }} (` + "`docs/AIConformance-{{ trimV .Version }}.yaml`" + ` in cncf/k8s-ai-conformance){{ if .VersionExplicit }}, selected explicitly by the submitter rather than derived from the cluster's Kubernetes minor{{ end }}
 - **AICR:** {{ .Tool.Version }}{{ if .Tool.Commit }} (commit ` + "`{{ .Tool.Commit }}`" + `){{ end }}
 - **Recipe:** ` + "`{{ .Platform.Recipe.Name }}`" + `{{ if .Platform.Recipe.Version }} (recipe data {{ .Platform.Recipe.Version }}){{ end }}
 - **Product:** [{{ .Vendor.WebsiteURL }}]({{ .Vendor.WebsiteURL }}), documentation [{{ .Vendor.DocumentationURL }}]({{ .Vendor.DocumentationURL }})
