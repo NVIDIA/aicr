@@ -62,7 +62,9 @@ killer, cannot clean up after itself. A run that fails while moving the
 finished bundle into an existing output directory keeps what it has not moved
 yet, and its error names the directory holding it. Either can leave
 a `.aicr-stage-*` directory behind, and the output directory partly replaced.
-Delete the `.aicr-stage-*` directory and bundle again.
+Delete the `.aicr-stage-*` directory and bundle again. If that run reports an
+unexpected file, the partial replacement removed the `checksums.txt` that
+listed it, so bundle into a new directory instead.
 
 A `--split` set needs a path that does not exist yet. See
 [Split a bundle by class](#split-a-bundle-by-class).
