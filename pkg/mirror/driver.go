@@ -32,8 +32,8 @@ const (
 
 // DriverTargetForRecipe derives the node OS and architecture an operator
 // completes driver tags for. The OS comes from the recipe's exact
-// OS.release.ID and OS.release.VERSION_ID constraints; a missing or ranged
-// constraint leaves its field empty and adds an explanatory note. The
+// OS.release.ID and OS.release.VERSION_ID constraints; a missing, ranged or
+// compound constraint leaves its field empty and adds an explanatory note. The
 // architecture follows from the accelerator criterion and stays empty when the
 // accelerator does not determine it.
 func DriverTargetForRecipe(rec *recipe.RecipeResult) (bom.DriverTarget, []string) {
@@ -50,17 +50,20 @@ func DriverTargetForRecipe(rec *recipe.RecipeResult) (bom.DriverTarget, []string
 	return target, notes
 }
 
-// exactConstraint returns the value of the named constraint when it is an
-// exact match (no operator, or ==). Otherwise it returns an empty value and a
-// note naming what the recipe has instead.
+// exactConstraint returns the value of the named constraint when it is a
+// single exact match (no operator, or ==). Otherwise it returns an empty value
+// and a note naming what the recipe has instead.
 func exactConstraint(constraints []recipe.Constraint, name string) (value, note string) {
 	for _, c := range constraints {
 		if c.Name != name {
 			continue
 		}
-		parsed, err := expr.ParseConstraintExpression(c.Value)
-		if err == nil && (parsed.Operator == expr.OperatorExact || parsed.Operator == expr.OperatorEQ) {
-			return parsed.Value, ""
+		parsed, err := expr.ParseCompoundConstraint(c.Value)
+		if err == nil && len(parsed.Alternatives) == 1 && len(parsed.Alternatives[0]) == 1 {
+			term := parsed.Alternatives[0][0]
+			if term.Operator == expr.OperatorExact || term.Operator == expr.OperatorEQ {
+				return term.Value, ""
+			}
 		}
 		return "", fmt.Sprintf("%s is %q", name, c.Value)
 	}

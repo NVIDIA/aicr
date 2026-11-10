@@ -67,6 +67,46 @@ func TestDriverTargetForRecipe(t *testing.T) {
 			wantNoteHas: `OS.release.VERSION_ID is ">= 15.7"`,
 		},
 		{
+			name: "or-compound version with operators is not pinned",
+			rec: &recipe.RecipeResult{
+				Constraints: osPins("ubuntu", "== 24.04 || == 22.04"),
+				Criteria:    &recipe.Criteria{Accelerator: recipe.CriteriaAcceleratorH100},
+			},
+			want:        bom.DriverTarget{OSID: "ubuntu", Arch: bom.ArchAMD64},
+			wantNotes:   1,
+			wantNoteHas: `OS.release.VERSION_ID is "== 24.04 || == 22.04"`,
+		},
+		{
+			name: "or-compound version without operators is not pinned",
+			rec: &recipe.RecipeResult{
+				Constraints: osPins("ubuntu", "24.04 || 22.04"),
+				Criteria:    &recipe.Criteria{Accelerator: recipe.CriteriaAcceleratorH100},
+			},
+			want:        bom.DriverTarget{OSID: "ubuntu", Arch: bom.ArchAMD64},
+			wantNotes:   1,
+			wantNoteHas: `OS.release.VERSION_ID is "24.04 || 22.04"`,
+		},
+		{
+			name: "and-compound version is not pinned",
+			rec: &recipe.RecipeResult{
+				Constraints: osPins("ubuntu", ">= 22.04 <= 24.04"),
+				Criteria:    &recipe.Criteria{Accelerator: recipe.CriteriaAcceleratorH100},
+			},
+			want:        bom.DriverTarget{OSID: "ubuntu", Arch: bom.ArchAMD64},
+			wantNotes:   1,
+			wantNoteHas: `OS.release.VERSION_ID is ">= 22.04 <= 24.04"`,
+		},
+		{
+			name: "or-compound id is not pinned",
+			rec: &recipe.RecipeResult{
+				Constraints: osPins("ubuntu || rhel", "24.04"),
+				Criteria:    &recipe.Criteria{Accelerator: recipe.CriteriaAcceleratorH100},
+			},
+			want:        bom.DriverTarget{OSVersion: "24.04", Arch: bom.ArchAMD64},
+			wantNotes:   1,
+			wantNoteHas: `OS.release.ID is "ubuntu || rhel"`,
+		},
+		{
 			name: "id only (talos)",
 			rec: &recipe.RecipeResult{
 				Constraints: []recipe.Constraint{{Name: osIDConstraintName, Value: "talos"}},

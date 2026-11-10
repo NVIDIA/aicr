@@ -14,7 +14,10 @@
 
 package bom
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Node CPU architectures that DOCA driver tags are published for.
 const (
@@ -23,7 +26,8 @@ const (
 )
 
 // qualifiedDriverOSIDs is the set of node OS IDs (the os-release ID) for which
-// driver tags of the form <version>-<id><versionID> are known to be published.
+// driver tags of the form <version>-<id><versionID> are known to be published
+// (GPU tags for rhel carry only the major version).
 var qualifiedDriverOSIDs = map[string]struct{}{"ubuntu": {}, "rhel": {}}
 
 // DriverTarget is the node OS and architecture an operator completes a driver
@@ -65,7 +69,12 @@ func (d DriverImage) Qualify(t DriverTarget) (ref, reason string, ok bool) {
 	if _, known := qualifiedDriverOSIDs[t.OSID]; !known {
 		return "", fmt.Sprintf("no published driver tag pattern is known for OS %q", t.OSID), false
 	}
-	ref = d.Ref + "-" + t.OSID + t.OSVersion
+	osVersion := t.OSVersion
+	if d.Kind == DriverKindGPU && t.OSID == "rhel" {
+		// The GPU Operator tags RHEL images with the major version only (rhel9).
+		osVersion, _, _ = strings.Cut(osVersion, ".")
+	}
+	ref = d.Ref + "-" + t.OSID + osVersion
 	if d.Kind != DriverKindDOCA {
 		return ref, "", true
 	}

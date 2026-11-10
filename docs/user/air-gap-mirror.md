@@ -261,13 +261,15 @@ aicr mirror list --recipe recipe.yaml \
   --set gpuoperator:driver.version=570.86.16
 ```
 
-The GPU driver, GDRCopy, GDS and DOCA driver images are listed with the tag the
-operator pulls on a node: `<version>-<os><os-version>` for the GPU driver,
-GDRCopy (`gdrdrv`) and GDS (`nvidia-fs`) (for example `570.86.16-ubuntu24.04`
-and `v2.6-ubuntu24.04`) and `<version>-<os><os-version>-<arch>` for the DOCA
+The GPU driver, GDRCopy, GDS, vGPU Manager and DOCA driver images are listed
+with the tag the operator pulls on a node: `<version>-<os><os-version>` for the
+GPU driver, GDRCopy (`gdrdrv`), GDS (`nvidia-fs`) and vGPU Manager
+(`vgpuManager`, when enabled) (for example `570.86.16-ubuntu24.04` and
+`v2.6-ubuntu24.04`) and `<version>-<os><os-version>-<arch>` for the DOCA
 driver. `mirror list` reads the OS from the recipe's `OS.release.ID` and
-`OS.release.VERSION_ID` constraints (`ubuntu` and `rhel` are supported) and the
-DOCA architecture from the accelerator (`gb200`, `gb300`, and `vr200` are
+`OS.release.VERSION_ID` constraints (`ubuntu` and `rhel` are supported; for
+`rhel` the GPU Operator tags use only the major version, for example
+`580.173.02-rhel9`) and the DOCA architecture from the accelerator (`gb200`, `gb300`, and `vr200` are
 `arm64`; other accelerators are `amd64`). A driver whose tag cannot be resolved
 for the recipe is not listed. This happens when the recipe does not pin one OS,
 the OS has no known tag pattern, the accelerator is `any` (DOCA driver only),
@@ -301,10 +303,10 @@ generate the deployment-specific manifest for a specific deployment.
 > **Completeness caveat:** discovery is best-effort, not all-or-nothing. A
 > per-component failure to load values, render the chart (`helm template`), or
 > extract images from a manifest, or a driver tag the recipe does not determine
-> (see above), is **non-fatal** — the component's images are
-> omitted and the failure is recorded as a warning, but the command still
-> exits 0. The YAML and JSON outputs carry these warnings in a `warnings`
-> field; the Hauler and Zarf outputs **omit them entirely**. Treat a
+> (see above), is **non-fatal** — the component's images (for an undetermined
+> driver tag, only that driver image) are omitted and the failure is recorded
+> as a warning, but the command still exits 0. The YAML and JSON outputs carry
+> these warnings in a `warnings` field; the Hauler and Zarf outputs **omit them entirely**. Treat a
 > tool-specific manifest as authoritative only after confirming the YAML/JSON
 > run reported no warnings — otherwise the mirrored set may be silently
 > incomplete. Invalid members in a recognized mapping-valued `image` or

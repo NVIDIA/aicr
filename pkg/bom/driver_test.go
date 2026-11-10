@@ -33,7 +33,12 @@ func TestDriverImageQualify(t *testing.T) {
 		wantReason string // substring; empty when ok
 	}{
 		{"gpu ubuntu", gpu, ubuntu, "nvcr.io/nvidia/driver:580.173.02-ubuntu24.04", ""},
-		{"gpu rhel", gpu, DriverTarget{OSID: "rhel", OSVersion: "9.4"}, "nvcr.io/nvidia/driver:580.173.02-rhel9.4", ""},
+		{"gpu rhel", gpu, DriverTarget{OSID: "rhel", OSVersion: "9.4"}, "nvcr.io/nvidia/driver:580.173.02-rhel9", ""},
+		{"gpu rhel major only", gpu, DriverTarget{OSID: "rhel", OSVersion: "9"}, "nvcr.io/nvidia/driver:580.173.02-rhel9", ""},
+		{"gdrcopy rhel", DriverImage{Kind: DriverKindGPU, Ref: "nvcr.io/nvidia/cloud-native/gdrdrv:v2.6"},
+			DriverTarget{OSID: "rhel", OSVersion: "9.4"}, "nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-rhel9", ""},
+		{"doca rhel keeps full version", doca, DriverTarget{OSID: "rhel", OSVersion: "9.4", Arch: ArchAMD64},
+			"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-rhel9.4-amd64", ""},
 		{"gpu ignores arch", gpu, DriverTarget{OSID: "ubuntu", OSVersion: "24.04", Arch: ArchARM64},
 			"nvcr.io/nvidia/driver:580.173.02-ubuntu24.04", ""},
 		{"doca amd64", doca, DriverTarget{OSID: "ubuntu", OSVersion: "24.04", Arch: ArchAMD64},
