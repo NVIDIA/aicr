@@ -1223,7 +1223,7 @@ The analyzer skips source events that are `STORE_ONLY`. Every remediation step s
 
 **Derived events are `STORE_ONLY`.** The mixin sets `health-events-analyzer.processingStrategy: STORE_ONLY`, as a first step to observe what the rules match. Derived events are written to the datastore and counted in the analyzer's `rule_matched_total{rule_name,node_name}` metric, which the chart's PodMonitor scrapes. The platform connector sets no node condition and creates no Kubernetes Event for them. The analyzer cordons nothing at `STORE_ONLY`: `fault-quarantine` acts only on `EXECUTE_REMEDIATION` events. From v1.31.0 the chart's default `Health events analyzer fatal error ruleset` cordons the node for a fatal analyzer event, so moving the strategy to `EXECUTE_REMEDIATION` makes `MultipleRemediations` and the XID 74 events cordon it.
 
-To surface matches on the node, pass `--set nv-sentinel:health-events-analyzer.processingStrategy=EXECUTE_REMEDIATION` at bundle time. The mixin owns that path, so setting it in a leaf overlay is rejected as a collision. A fatal derived event then sets a node condition named after the rule, and a non-fatal one creates a Kubernetes Event.
+To surface matches on the node, pass `--set nv-sentinel:health-events-analyzer.processingStrategy=EXECUTE_REMEDIATION` at bundle time. The mixin owns that path, so setting it in a leaf overlay is rejected as a collision. A fatal derived event then sets a node condition named after the rule, and a non-fatal one creates a Kubernetes Event. With a quarantine or remediation step composed, which the analyzer needs beside the remediation step, a fatal derived event from v1.31.0 also cordons the node and starts a drain; before v1.31.0 it set the condition only. Check this override before upgrading a cluster that already sets it.
 
 **Node conditions do not clear themselves.** The analyzer never publishes a healthy event, so a condition it sets, `MultipleRemediations` included, stays on the node until an operator removes it. After the hardware is fixed, remove it:
 
@@ -1234,6 +1234,8 @@ kubectl get node "${NODE}" -o json | \
   jq --arg rule "${RULE}" '.status.conditions |= map(select(.type != $rule))' | \
   kubectl replace -f - --subresource=status
 ```
+
+Removing the condition does not release the node. Where a fatal derived event cordoned it (v1.31.0 and later, with a quarantine or remediation step composed), the quarantine and the cordon stay until NVSentinel gets a healthy event for the fault, and the analyzer never sends one. Once the node is safe to return, release it with `kubectl uncordon "${NODE}"`, which cancels the quarantine as described under **Failure behavior and recovery** in [Graded Remediation](#graded-remediation). Check the hardware first, because the uncordon puts the node back in service.
 
 **Resources and privileges.** One replica on a system node, requesting and limited to 1 CPU and 1Gi. With a MongoDB datastore the chart runs it as root (`runAsUser: 0`), and it has a namespaced Role to read and write its own `resume-control` ConfigMap. It publishes through the platform-connector socket; the chart admits its service account for events about any node. For each unhealthy event the analyzer receives, it runs one datastore query per enabled rule whose `when` condition matches the event. `MultipleRemediations` has no `when`, so it queries on every event, and the datastore load grows with the event rate.
 
