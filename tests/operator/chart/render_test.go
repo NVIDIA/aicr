@@ -130,6 +130,9 @@ func TestLayoutChecks(t *testing.T) {
 		{"unknown value", operatorNS, []string{"aicr.gateImage=x"}, "gateImage"},
 		{"validation without validator images", operatorNS, []string{"aicr.validatorImages=null"}, "needs aicr.validatorImages"},
 		{"mutable validator image", operatorNS, []string{"aicr.validatorImages[0]=ghcr.io/nvidia/aicr-validators/deployment:latest"}, "/aicr/validatorImages/0"},
+		{"validator repository pinned twice", operatorNS, []string{"aicr.validatorImages[0]=" + validatorImage, "aicr.validatorImages[1]=" + otherValidatorTag},
+			"pins the validator repository ghcr.io/nvidia/aicr-validators/deployment twice"},
+		{"aws provider outside ECR", operatorNS, []string{"registry.repository=oci://ghcr.io/nvidia/aicr"}, "a private Amazon ECR registry"},
 		{"signing key without validation", operatorNS, []string{"aicr.version=v1.1.0", "validation.enabled=false", "validation.signingKey=" + signingKey}, "needs validation.enabled"},
 		{"signing key not a KMS key", operatorNS, []string{"aicr.version=v1.1.0", "validation.signingKey=file:///cosign.key"}, "key URI"},
 		{"signing key on AICR v1.0.x", operatorNS, []string{"validation.signingKey=" + signingKey}, "needs AICR v1.1.0"},
@@ -355,7 +358,7 @@ func TestDeploymentFlags(t *testing.T) {
 		"--registry-repository=" + registry, "--registry-auth-provider=aws", "--engine-repo-creds-secret=aicr-registry",
 		"--development-bypass-approvals=true", "--snapshot-agent-requests=cpu=1",
 		"--component-namespaces=gpu-operator,cert-manager,kube-system", "--validation-enabled=true",
-		"--validator-images=ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790",
+		"--validator-images=" + validatorImage,
 		"--validation-signing-key=", "--validation-transparency-log=true",
 	} {
 		if !slices.Contains(args, want) {
@@ -405,6 +408,13 @@ func TestOperatorPodRuntime(t *testing.T) {
 // signingKey is a KMS key URI that signs evidence.
 const signingKey = "awskms:///alias/aicr-evidence"
 
+// otherValidatorTag pins validatorImage's repository at a second tag, and
+// untaggedValidator is validatorImage without its tag.
+var (
+	otherValidatorTag = strings.Replace(validatorImage, "@", ".1@", 1)
+	untaggedValidator = regexp.MustCompile(`:[^:/@]+@`).ReplaceAllString(validatorImage, "@")
+)
+
 // deploymentArgs returns the operator container's arguments.
 func deploymentArgs(t *testing.T, objs []unstructured.Unstructured) []string {
 	t.Helper()
@@ -434,6 +444,51 @@ func parseOperatorFlags(t *testing.T, objs []unstructured.Unstructured) (manager
 		return f, err
 	}
 	return f, f.Config.Validate(false)
+}
+
+// The chart renders only configurations the operator starts with. Each case
+// probes one of the operator's startup checks.
+func TestRenderedConfigurationsStart(t *testing.T) {
+	ctx := ctxFor(t)
+	cases := []struct {
+		name  string
+		files []string
+		set   []string
+	}{
+		{"defaults", nil, nil},
+		{"in-cluster registry", []string{inClusterValuesFile}, nil},
+		{"validation disabled", nil, []string{"validation.enabled=false"}},
+		{"validator image without a tag", nil, []string{"aicr.validatorImages[0]=" + untaggedValidator}},
+		{"validator repository pinned twice", nil, []string{"aicr.validatorImages[0]=" + validatorImage, "aicr.validatorImages[1]=" + otherValidatorTag}},
+		{"signing key", nil, []string{"aicr.version=v1.1.0", "validation.signingKey=" + signingKey}},
+		{"no AICR version", nil, []string{"aicr.version="}},
+		{"aws provider with a registry outside ECR", nil, []string{"registry.repository=oci://ghcr.io/nvidia/aicr"}},
+		{"aws provider without a repo-creds Secret", nil, []string{"registry.auth.repoCredsSecret="}},
+		{"static provider", nil, []string{"registry.auth.provider=static", "registry.auth.staticSecretRef=x"}},
+		{"anonymous static provider", nil, []string{"registry.auth.provider=static"}},
+		{"unknown provider", nil, []string{"registry.auth.provider=gcp"}},
+		{"no jobs namespace", nil, []string{"namespaces.jobs="}},
+		{"no discovery namespace", nil, []string{"namespaces.discovery="}},
+		{"no validation namespace", nil, []string{"namespaces.validation="}},
+		{"no engine namespace", nil, []string{"engine.namespace="}},
+		{"no engine project", nil, []string{"engine.project="}},
+	}
+	rendered := 0
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			objs, _, err := renderFiles(ctx, chartDir, operatorNS, append([]string{valuesFile}, tc.files...), tc.set...)
+			if err != nil {
+				return
+			}
+			rendered++
+			if _, err = parseOperatorFlags(t, objs); err != nil {
+				t.Errorf("the chart renders, the operator refuses to start: %v", err)
+			}
+		})
+	}
+	if rendered == 0 {
+		t.Error("no case rendered")
+	}
 }
 
 // helm upgrade --reuse-values renders the new chart with the previous

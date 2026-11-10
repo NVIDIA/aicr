@@ -47,16 +47,17 @@ import (
 )
 
 const (
-	release      = "aicr-operator"
-	operatorNS   = "aicr-system"
-	engineNS     = "argocd"
-	jobsNS       = "aicr-jobs"
-	discoveryNS  = "aicr-discovery"
-	validationNS = "aicr-validation"
-	operatorUser = "system:serviceaccount:" + operatorNS + ":aicr-operator"
-	aicrImage    = "ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433"
-	registry     = "oci://123456789012.dkr.ecr.us-west-2.amazonaws.com/aicr/cluster"
-	helmTimeout  = 2 * time.Minute
+	release        = "aicr-operator"
+	operatorNS     = "aicr-system"
+	engineNS       = "argocd"
+	jobsNS         = "aicr-jobs"
+	discoveryNS    = "aicr-discovery"
+	validationNS   = "aicr-validation"
+	operatorUser   = "system:serviceaccount:" + operatorNS + ":aicr-operator"
+	aicrImage      = "ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433"
+	validatorImage = "ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790"
+	registry       = "oci://123456789012.dkr.ecr.us-west-2.amazonaws.com/aicr/cluster"
+	helmTimeout    = 2 * time.Minute
 )
 
 var (
