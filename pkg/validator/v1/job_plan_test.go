@@ -16,6 +16,7 @@ package v1
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1637,6 +1638,61 @@ func TestBuildJobPlan_ForwardsDriverRuntimeImageEnv(t *testing.T) {
 	t.Run("env-name literal locked", func(t *testing.T) {
 		if driverRuntimeImageEnv != "AICR_DRIVER_RUNTIME_IMAGE" {
 			t.Errorf("driverRuntimeImageEnv = %q, want AICR_DRIVER_RUNTIME_IMAGE (keep in sync with the pod-side const)", driverRuntimeImageEnv)
+		}
+	})
+}
+
+// TestBuildJobPlan_ForwardsImagePullSecretNames verifies the
+// --image-pull-secret names reach every validator pod as one env var, so a
+// check that creates a per-run namespace can copy the Secrets there, and that
+// a catalog-pinned value cannot supply them.
+func TestBuildJobPlan_ForwardsImagePullSecretNames(t *testing.T) {
+	values := func(entry ValidatorEntry, secrets []string) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", secrets, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == ImagePullSecretsEnv {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+	conformance := ValidatorEntry{Name: DriverRuntimeManagementCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+	deployment := ValidatorEntry{Name: "gpu-operator-health", Phase: "deployment", Image: "img:v1", Timeout: time.Minute}
+
+	tests := []struct {
+		name    string
+		entry   ValidatorEntry
+		secrets []string
+		want    []string
+	}{
+		{"one name forwarded", conformance, []string{"regcred"}, []string{"regcred"}},
+		{"several names joined in order", conformance, []string{"regcred", "mirror-cred"}, []string{"regcred,mirror-cred"}},
+		{"blank entries dropped", conformance, []string{" regcred ", "", "  "}, []string{"regcred"}},
+		{"none omitted", conformance, nil, nil},
+		{"only blank omitted", conformance, []string{""}, nil},
+		{"forwarded to every phase, the names are not a credential", deployment, []string{"regcred"}, []string{"regcred"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := values(tt.entry, tt.secrets); !slices.Equal(got, tt.want) {
+				t.Errorf("%s env = %v, want %v", ImagePullSecretsEnv, got, tt.want)
+			}
+		})
+	}
+	t.Run("catalog value cannot name the Secrets", func(t *testing.T) {
+		pinned := conformance
+		pinned.Env = []EnvVar{{Name: ImagePullSecretsEnv, Value: "regcred"}}
+		if got := values(pinned, nil); len(got) != 0 {
+			t.Errorf("%s env = %v, want none (the catalog must not name pull Secrets)", ImagePullSecretsEnv, got)
+		}
+	})
+	t.Run("env-name literal locked", func(t *testing.T) {
+		if ImagePullSecretsEnv != "AICR_IMAGE_PULL_SECRETS" {
+			t.Errorf("ImagePullSecretsEnv = %q, want AICR_IMAGE_PULL_SECRETS (keep in sync with validators.ImagePullSecretsEnv)", ImagePullSecretsEnv)
 		}
 	})
 }

@@ -259,12 +259,13 @@ func (c *Client) WriteCNCFSubmission(ctx context.Context, report *ctrf.Report, d
 	defer cancel()
 
 	res, err := cncf.WriteSubmission(ctx, dir, cncf.SubmissionInput{
-		Report:   report,
-		Version:  version,
-		Options:  cncf.AggregateOptions{NotApplicable: opts.NotApplicable, Documented: toInternalDocumented(opts.Documented)},
-		Vendor:   toInternalVendor(opts.Vendor),
-		Platform: cncfPlatform(snap, rec),
-		Tool:     cncf.Tool{Version: c.version, Commit: opts.Commit},
+		Report:          report,
+		Version:         version,
+		VersionExplicit: opts.ConformanceVersion != "",
+		Options:         cncf.AggregateOptions{NotApplicable: opts.NotApplicable, Documented: toInternalDocumented(opts.Documented)},
+		Vendor:          toInternalVendor(opts.Vendor),
+		Platform:        cncfPlatform(snap, rec),
+		Tool:            cncf.Tool{Version: c.version, Commit: opts.Commit},
 	})
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "CNCF submission failed")
