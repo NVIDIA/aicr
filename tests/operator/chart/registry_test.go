@@ -47,7 +47,7 @@ const (
 // renderInCluster renders the chart with the in-cluster registry.
 func renderInCluster(ctx context.Context, t *testing.T, set ...string) []unstructured.Unstructured {
 	t.Helper()
-	objs, out, err := renderFiles(ctx, operatorNS, []string{valuesFile, inClusterValuesFile}, set...)
+	objs, out, err := renderFiles(ctx, chartDir, operatorNS, []string{valuesFile, inClusterValuesFile}, set...)
 	if err != nil {
 		t.Fatal(out)
 	}

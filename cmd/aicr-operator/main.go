@@ -55,7 +55,6 @@ func run(args []string) error {
 	fs := flag.NewFlagSet("aicr-operator", flag.ContinueOnError)
 	opts.BindFlags(fs)
 	cfg.BindFlags(fs)
-	logLevel := fs.String("log-level", "info", "Log level: debug, info, warn or error.")
 	showVersion := fs.Bool("version", false, "Print the version and exit.")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -67,11 +66,7 @@ func run(args []string) error {
 		return nil
 	}
 
-	var level slog.Level
-	if err := level.UnmarshalText([]byte(*logLevel)); err != nil {
-		return fmt.Errorf("invalid --log-level %q: %w", *logLevel, err)
-	}
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: opts.LogLevel}))
 	slog.SetDefault(logger)
 	ctrl.SetLogger(logr.FromSlogHandler(logger.Handler()))
 

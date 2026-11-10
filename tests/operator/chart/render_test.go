@@ -16,7 +16,9 @@ package chart
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -34,7 +36,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
+	"github.com/NVIDIA/aicr/pkg/operator/config"
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
+	"github.com/NVIDIA/aicr/pkg/operator/manager"
 )
 
 // The chart renders exactly the AICR versions the operator supports, and
@@ -92,31 +96,12 @@ func TestAICRVersionRange(t *testing.T) {
 		if err != nil {
 			t.Fatal(out)
 		}
-		if args := managerArgs(t, objs); !slices.Contains(args, "--allow-prerelease-aicr=true") ||
+		if args := deploymentArgs(t, objs); !slices.Contains(args, "--allow-prerelease-aicr=true") ||
 			!slices.Contains(args, "--aicr-version=v1.3.0-rc.1") {
 
 			t.Errorf("operator args %v do not carry the prerelease and its opt-in", args)
 		}
 	}
-}
-
-// managerArgs returns the operator container's arguments.
-func managerArgs(t *testing.T, objs []unstructured.Unstructured) []string {
-	t.Helper()
-	for _, o := range objs {
-		if o.GetKind() != "Deployment" || o.GetName() != release {
-			continue
-		}
-		containers, _, _ := unstructured.NestedSlice(o.Object, "spec", "template", "spec", "containers")
-		for _, c := range containers {
-			if c := c.(map[string]any); c["name"] == "manager" {
-				args, _, _ := unstructured.NestedStringSlice(c, "args")
-				return args
-			}
-		}
-	}
-	t.Fatal("no operator Deployment rendered")
-	return nil
 }
 
 // Layouts the chart cannot install fail at render time.
@@ -447,29 +432,121 @@ func TestOperatorPodRuntime(t *testing.T) {
 // signingKey is a KMS key URI that signs evidence.
 const signingKey = "awskms:///alias/aicr-evidence"
 
+// deploymentArgs returns the operator container's arguments.
 func deploymentArgs(t *testing.T, objs []unstructured.Unstructured) []string {
 	t.Helper()
-	d := find(t, objs, "Deployment", "aicr-operator")
+	d := find(t, objs, "Deployment", release)
 	containers, _, _ := unstructured.NestedSlice(d.Object, "spec", "template", "spec", "containers")
-	raw := containers[0].(map[string]any)["args"].([]any)
-	args := make([]string, 0, len(raw))
-	for _, a := range raw {
-		args = append(args, a.(string))
+	for _, c := range containers {
+		if c, ok := c.(map[string]any); ok && c["name"] == "manager" {
+			args, _, _ := unstructured.NestedStringSlice(c, "args")
+			return args
+		}
 	}
-	return args
+	t.Fatal("the operator Deployment has no manager container")
+	return nil
 }
 
-// The chart README's values table covers every key in values.yaml, and names
-// no key the chart does not have; a row covers the keys nested under it.
-func TestValuesReferenceIsComplete(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(chartDir, "values.yaml"))
+// operatorFlags is what the operator reads from its arguments.
+type operatorFlags struct {
+	manager manager.Options
+	config  config.Config
+}
+
+// parseOperatorFlags parses the operator Deployment's arguments and
+// validates the result, as the operator does at startup.
+func parseOperatorFlags(t *testing.T, objs []unstructured.Unstructured) (operatorFlags, error) {
+	t.Helper()
+	f := operatorFlags{manager: manager.DefaultOptions(), config: config.Defaults()}
+	fs := flag.NewFlagSet(release, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	f.manager.BindFlags(fs)
+	f.config.BindFlags(fs)
+	if err := fs.Parse(deploymentArgs(t, objs)); err != nil {
+		return f, err
+	}
+	if err := f.manager.Validate(); err != nil {
+		return f, err
+	}
+	return f, f.config.Validate(false)
+}
+
+// helm upgrade --reuse-values renders the new chart with the previous
+// release's chart defaults in place of its own, so a key added since is
+// missing from both those defaults and the release's values. With any one
+// key missing, the chart fails naming it, or configures the operator as the
+// key's default does.
+func TestValuesFromAnEarlierChart(t *testing.T) {
+	ctx := ctxFor(t)
+	chartValues := filepath.Join(chartDir, "values.yaml")
+	for _, key := range valueKeys(readValues(t, chartValues)) {
+		t.Run(key, func(t *testing.T) {
+			dir := t.TempDir()
+			earlier := filepath.Join(dir, release)
+			if err := os.CopyFS(earlier, os.DirFS(chartDir)); err != nil {
+				t.Fatal(err)
+			}
+			copyValuesWithout(t, chartValues, filepath.Join(earlier, "values.yaml"), key)
+			user := filepath.Join(dir, "user.yaml")
+			copyValuesWithout(t, valuesFile, user, key)
+
+			objs, out, err := renderFiles(ctx, earlier, operatorNS, []string{user})
+			if err != nil {
+				if leaf := key[strings.LastIndex(key, ".")+1:]; !strings.Contains(out, leaf) {
+					t.Errorf("the render fails without naming %s: %s", key, out)
+				}
+				return
+			}
+			got, err := parseOperatorFlags(t, objs)
+			if err != nil {
+				t.Fatalf("the operator rejects its arguments: %v", err)
+			}
+			if objs, out, err = renderFiles(ctx, chartDir, operatorNS, []string{user}); err != nil {
+				t.Fatalf("renders without %s, fails with its default: %s", key, out)
+			}
+			want, err := parseOperatorFlags(t, objs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("operator configuration without %s:\n%+v\nwith its default:\n%+v", key, got, want)
+			}
+		})
+	}
+}
+
+// readValues parses the values file at path.
+func readValues(t *testing.T, path string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var values map[string]any
+	values := map[string]any{}
 	if err = yaml.Unmarshal(raw, &values); err != nil {
 		t.Fatal(err)
 	}
+	return values
+}
+
+// copyValuesWithout writes the values file src to dst with key, a dotted
+// path, removed.
+func copyValuesWithout(t *testing.T, src, dst, key string) {
+	t.Helper()
+	values := readValues(t, src)
+	unstructured.RemoveNestedField(values, strings.Split(key, ".")...)
+	raw, err := yaml.Marshal(values)
+	if err == nil {
+		err = os.WriteFile(dst, raw, 0o600)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// valueKeys returns the dotted path of every leaf in values, sorted. An empty
+// map is a leaf.
+func valueKeys(values map[string]any) []string {
 	var keys []string
 	var walk func(prefix string, m map[string]any)
 	walk = func(prefix string, m map[string]any) {
@@ -482,6 +559,14 @@ func TestValuesReferenceIsComplete(t *testing.T) {
 		}
 	}
 	walk("", values)
+	sort.Strings(keys)
+	return keys
+}
+
+// The chart README's values table covers every key in values.yaml, and names
+// no key the chart does not have. A row covers the keys nested under it.
+func TestValuesReferenceIsComplete(t *testing.T) {
+	keys := valueKeys(readValues(t, filepath.Join(chartDir, "values.yaml")))
 
 	readme, err := os.ReadFile(filepath.Join(chartDir, "README.md"))
 	if err != nil {

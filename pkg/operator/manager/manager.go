@@ -19,6 +19,7 @@ package manager
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -44,6 +45,7 @@ type Options struct {
 	LeaderElection          bool
 	LeaderElectionNamespace string
 	GracefulShutdownTimeout time.Duration
+	LogLevel                slog.Level
 }
 
 // DefaultOptions returns the options used when no flag overrides them.
@@ -54,6 +56,7 @@ func DefaultOptions() Options {
 		HealthProbeBindAddress:  defaults.HealthProbeBindAddress,
 		LeaderElection:          true,
 		GracefulShutdownTimeout: defaults.GracefulShutdownTimeout,
+		LogLevel:                slog.LevelInfo,
 	}
 }
 
@@ -64,6 +67,7 @@ func (o *Options) BindFlags(fs *flag.FlagSet) {
 	fs.BoolVar(&o.LeaderElection, "leader-elect", o.LeaderElection, "Enable leader election; disable only for a single local replica.")
 	fs.StringVar(&o.LeaderElectionNamespace, "leader-election-namespace", o.LeaderElectionNamespace, "Namespace of the leader-election Lease; defaults to the pod's namespace.")
 	fs.DurationVar(&o.GracefulShutdownTimeout, "graceful-shutdown-timeout", o.GracefulShutdownTimeout, "How long runnables get to stop after shutdown starts.")
+	fs.TextVar(&o.LogLevel, "log-level", o.LogLevel, "Log level: debug, info, warn or error.")
 }
 
 // Validate rejects options that would leave the process unbounded or

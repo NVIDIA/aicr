@@ -44,7 +44,7 @@ func TestRunPrintsVersion(t *testing.T) {
 func TestRunRejectsInvalidLogLevel(t *testing.T) {
 	isolate(t)
 	err := run([]string{"--log-level=loud"})
-	if err == nil || !strings.Contains(err.Error(), "--log-level") {
+	if err == nil || !strings.Contains(err.Error(), "-log-level") {
 		t.Fatalf("run(--log-level=loud) = %v, want a log-level error", err)
 	}
 }

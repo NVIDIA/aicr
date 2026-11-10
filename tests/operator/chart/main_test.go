@@ -167,13 +167,13 @@ func render(ctx context.Context, set ...string) ([]unstructured.Unstructured, st
 
 // renderIn renders as render does, with ns as the release namespace.
 func renderIn(ctx context.Context, ns string, set ...string) ([]unstructured.Unstructured, string, error) {
-	return renderFiles(ctx, ns, []string{valuesFile}, set...)
+	return renderFiles(ctx, chartDir, ns, []string{valuesFile}, set...)
 }
 
-// renderFiles renders as renderIn does, with the given values files.
-func renderFiles(ctx context.Context, ns string, files []string, set ...string) ([]unstructured.Unstructured, string, error) {
+// renderFiles renders chart as renderIn does, with the given values files.
+func renderFiles(ctx context.Context, chart, ns string, files []string, set ...string) ([]unstructured.Unstructured, string, error) {
 	args := make([]string, 0, 5+2*len(files)+2*len(set))
-	args = append(args, "template", release, chartDir, "--namespace", ns)
+	args = append(args, "template", release, chart, "--namespace", ns)
 	for _, f := range files {
 		args = append(args, "-f", f)
 	}

@@ -16,6 +16,7 @@ package manager
 
 import (
 	"flag"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,7 @@ func TestBindFlagsOverridesDefaults(t *testing.T) {
 		"--leader-elect=false",
 		"--leader-election-namespace=aicr-system",
 		"--graceful-shutdown-timeout=5s",
+		"--log-level=debug",
 	})
 	if err != nil {
 		t.Fatalf("Parse() = %v", err)
@@ -60,6 +62,7 @@ func TestBindFlagsOverridesDefaults(t *testing.T) {
 		LeaderElection:          false,
 		LeaderElectionNamespace: "aicr-system",
 		GracefulShutdownTimeout: 5 * time.Second,
+		LogLevel:                slog.LevelDebug,
 	}
 	if o != want {
 		t.Fatalf("options = %+v, want %+v", o, want)
