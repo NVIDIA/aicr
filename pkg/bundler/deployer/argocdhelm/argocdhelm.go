@@ -359,9 +359,6 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if err := bundlercfg.ValidateAppName(g.AppName); err != nil {
 		return nil, err
 	}
-	// Validate NamePrefix itself here, not only as part of the composed child
-	// names checked after the base generation, so zero-folder recipes still
-	// reject a malformed prefix.
 	if err := bundlercfg.ValidateNamePrefix(g.NamePrefix); err != nil {
 		return nil, err
 	}
@@ -416,13 +413,16 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// default. The inner app-of-apps.yaml is discarded, so the only
 		// observable effect is a correct collision baseline.
 		AppName: cmp.Or(g.AppName, DefaultAppName),
-		// Forward CascadeDelete and SyncRetry too: child finalizers and
-		// syncPolicy.retry survive the YAML round-trip in
-		// transformApplication untouched. NamePrefix /
-		// DestinationServer / Project are NOT forwarded — those fields
-		// are rewritten into `.Values.deployer.*` template expressions
-		// during transform, so forwarding would bake values the rewrite
-		// then discards.
+		// The inner generator checks every child name, with the baked
+		// NamePrefix default composed in, against AppName. transformApplication
+		// rebuilds metadata.name from a `.Values.deployer.namePrefix`
+		// expression, so the baked prefix does not reach the chart. The
+		// rendered template guard covers install-time overrides.
+		NamePrefix: g.NamePrefix,
+		// Child finalizers and syncPolicy.retry survive the YAML round-trip
+		// in transformApplication untouched. DestinationServer and Project
+		// are left unset because the transform rewrites them into
+		// `.Values.deployer.*` expressions.
 		CascadeDelete: g.CascadeDelete,
 		SyncRetry:     g.SyncRetry,
 	}
@@ -432,17 +432,6 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// PropagateOrWrap keeps the delegate's code, so a chart digest
 		// mismatch reports CONFLICT here as it does under the argocd deployer.
 		return nil, errors.PropagateOrWrap(genErr, errors.ErrCodeInternal, "failed to generate base Argo CD output")
-	}
-
-	// The baked NamePrefix default composes into every child template, so
-	// validate it against the emitted releases before outputDir exists. The
-	// rendered template guard covers install-time deployer.namePrefix overrides.
-	releases := make([]string, 0, len(baseOut.Releases))
-	for _, r := range baseOut.Releases {
-		releases = append(releases, r.Name)
-	}
-	if nameErr := argocd.ValidateChildAppNames(g.NamePrefix, cmp.Or(g.AppName, DefaultAppName), releases); nameErr != nil {
-		return nil, nameErr
 	}
 
 	// Step 2: Create Helm chart output structure
@@ -1783,9 +1772,9 @@ func transformApplication(
 }
 
 // childNameGuard returns the Helm template guard block prepended to every
-// child Application template. The bundle-time argocd.ValidateChildAppNames
-// call in Generate covers baked NamePrefix values, but install-time `--set
-// deployer.namePrefix=...` bypasses them — these guards fail `helm
+// child Application template. The delegated argocd.Generator checks child
+// names with the baked NamePrefix at bundle time, but install-time `--set
+// deployer.namePrefix=...` bypasses that check. These guards fail `helm
 // template`/`helm install` when the composed child name exceeds Helm's
 // release-name cap (Argo CD uses the Application name as the Helm release
 // name) or collides with the parent Application's name. The guard lines
