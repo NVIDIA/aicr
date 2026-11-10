@@ -173,8 +173,10 @@ func removeCascades(ctx context.Context, t *testing.T, active string) {
 	t.Helper()
 	base := getRuntime(ctx, t).Spec.Overrides
 	// The topology updater needs kubelet pod resources, which kind does not
-	// serve; it is not what this test is about.
-	setOverrides(ctx, t, base, override(nfdRelease, "enabled", "true"), override(nfdRelease, "topologyUpdater.enable", "false"))
+	// serve; it is not what this test is about. From AICR v1.2.0, NFD renders a
+	// PodMonitor, whose CRD comes from prometheus-operator-crds, disabled here.
+	setOverrides(ctx, t, base, override(nfdRelease, "enabled", "true"), override(nfdRelease, "topologyUpdater.enable", "false"),
+		override(nfdRelease, "prometheus.enable", "false"))
 	added := waitRolledOut(ctx, t, active)
 	if deployments(ctx, t, nfdNamespace) == 0 || crdGone(ctx, t, nfdCRD) {
 		t.Fatal("node-feature-discovery rolled out without its Deployments or CRDs")

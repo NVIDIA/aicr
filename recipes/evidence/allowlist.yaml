@@ -95,6 +95,9 @@ community:
   - issuer: https://github.com/login/oauth
     source: 1d70c50bfd60eaaf472544f2a3cf2b8b
     label: mchmarny
+  - issuer: https://token.actions.githubusercontent.com
+    source: c0e6951cd501b85118706a01b76f2bb5
+    label: xdu31
 
 # Partner: vetted partner organizations. None onboarded yet.
 partner: []

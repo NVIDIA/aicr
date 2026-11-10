@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -34,10 +35,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// overrideValueFalse is the string form of a disabled `--set <key>:enabled=false`
-// override — value overrides are collected as strings, so booleans arrive as
-// their string literal.
-const overrideValueFalse = "false"
+// overrideValueFalse and overrideValueTrue are the string forms of boolean
+// `--set` overrides — value overrides are collected as strings, so booleans
+// arrive as their string literal.
+const (
+	overrideValueFalse = "false"
+	overrideValueTrue  = "true"
+)
 
 // logKeyComponent is the shared structured-logging / error-context key
 // naming the component a validation message or error is about.
@@ -51,12 +55,15 @@ func init() {
 	registerCheck("CheckWorkloadSelectorMissing", CheckWorkloadSelectorMissing)
 	registerCheck("CheckAcceleratedSelectorMissing", CheckAcceleratedSelectorMissing)
 	registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
+	registerCheck("CheckNetworkOperatorEnabled", CheckNetworkOperatorEnabled)
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
 	registerCheck("CheckNodewrightRuntimeRequiredTaintKey", CheckNodewrightRuntimeRequiredTaintKey)
 	registerCheck("CheckGB300HostKernelGranule", CheckGB300HostKernelGranule)
 	registerCheck("CheckNPDNotDuplicatingProviderNPD", CheckNPDNotDuplicatingProviderNPD)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
 	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
+	registerCheck("CheckRDMANamespaceModeCoherent", CheckRDMANamespaceModeCoherent)
+	registerCheck("CheckRDMANamespaceModeEvidence", CheckRDMANamespaceModeEvidence)
 	registerCheck("CheckGKETCPXOInterfacesCoherence", CheckGKETCPXOInterfacesCoherence)
 	registerCheck("CheckNVSentinelDriverLabelDetectable", CheckNVSentinelDriverLabelDetectable)
 	registerCheck("CheckNVSentinelRuntimeClassCoherence", CheckNVSentinelRuntimeClassCoherence)
@@ -123,7 +130,9 @@ func CheckWorkloadSelectorMissing(ctx context.Context, componentName string, rec
 // CheckAcceleratedSelectorMissing checks if accelerated-node-selector is missing when conditions are met.
 // This is a generic check that can be used by any component. A component that
 // renders only nodewrightNoInterruptManifests is skipped: those manifests
-// select nodes by a fixed label and ignore the accelerated-node selector.
+// select nodes by a fixed label and ignore the accelerated-node selector. A
+// disabled component renders nothing that a selector would scope, so it is
+// skipped too.
 func CheckAcceleratedSelectorMissing(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
 	if bundlerConfig == nil {
 		return nil, nil
@@ -136,6 +145,10 @@ func CheckAcceleratedSelectorMissing(ctx context.Context, componentName string, 
 
 	// Check conditions (e.g., intent: [training, inference])
 	if !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+
+	if componentDisabled(ref, bundlerConfig, componentOverrideKeys(componentName, recipeResult.DataProvider())) {
 		return nil, nil
 	}
 
@@ -218,6 +231,7 @@ var nodewrightCustomizationsOverrideAliases = []string{"nodewrightcustomizations
 // does, so a new or custom manifest is checked until it is listed here.
 var nodewrightNoInterruptManifests = []string{
 	"components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml",
+	"components/nodewright-customizations/manifests/toolkit-hardening-oke.yaml",
 }
 
 // rendersOnlyNoInterruptPackages reports whether every manifest ref wires is
@@ -510,20 +524,40 @@ func CheckHostMofedWithoutNetworkOperator(ctx context.Context, componentName str
 	return []string{msg}, nil
 }
 
+// networkOperatorComponent is the canonical name of the network-operator
+// component.
+const networkOperatorComponent = "network-operator"
+
+// CheckNetworkOperatorEnabled reports when componentName is in the bundle but
+// network-operator is not: absent from the recipe, disabled there, or disabled
+// with --set (any registered override key and boolean spelling). The registry
+// entry's message says why the component needs it.
+func CheckNetworkOperatorEnabled(_ context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil || componentDisabled(ref, bundlerConfig, componentOverrideKeys(componentName, recipeResult.DataProvider())) {
+		return nil, nil
+	}
+	netop := recipeResult.GetComponentRef(networkOperatorComponent)
+	if netop != nil && !componentDisabled(netop, bundlerConfig, componentOverrideKeys(networkOperatorComponent, recipeResult.DataProvider())) {
+		return nil, nil
+	}
+	return []string{fmt.Sprintf("%s is in the bundle but %s is not", componentName, networkOperatorComponent)}, nil
+}
+
 // draDriverComponentName is the CANONICAL ComponentRef.Name used by the
 // recipe registry for the NVIDIA DRA GPU driver. Kept in sync with
 // recipes/registry.yaml. Used only in log/error message text below —
 // for actual component lookups, use resolveDRAComponentRef, which also
 // matches the OCP variant (see draDriverComponentNames).
-const draDriverComponentName = "nvidia-dra-driver-gpu"
+const draDriverComponentName = allocpolicy.ComponentDRADriver
 
 // draDriverComponentNames are every registry-level component name that
-// represents the NVIDIA DRA GPU driver, canonical plus OCP variant. This
-// package cannot import pkg/bundler (dependency cycle — see
-// componentOverrideKeys godoc for the same constraint elsewhere in this
-// file), so this list is a local duplicate of pkg/bundler's
-// draComponentNames; keep both in sync.
-var draDriverComponentNames = []string{draDriverComponentName, "nvidia-dra-driver-gpu-ocp"}
+// represents the NVIDIA DRA GPU driver, canonical plus OCP variant, from
+// config.DRADriverOwnership.
+var draDriverComponentNames = config.DRADriverOwnership.ComponentNames
 
 // resolveDRAComponentRef looks up the DRA driver's ComponentRef by
 // trying every known name variant in turn. recipeResult.GetComponentRef
@@ -1131,7 +1165,7 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 	// paths in the caller: a dynamic DRA driver root escapes Rule 2 at
 	// bundle time.
 	draDynMsgs := dynamicOwnershipViolations(bundlerConfig, draRef.Name, draKeys,
-		[]string{"nvidiaDriverRoot"})
+		config.DRADriverOwnership.Paths)
 	msgs = append(msgs, draDynMsgs...)
 	draValues, draErr := effectiveComponentValues(ctx, recipeResult, bundlerConfig, draRef.Name, draKeys, "driver-ownership coherence")
 	if draErr != nil {
@@ -1271,7 +1305,7 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 	// declarations are rejected up front — before values resolution, so
 	// the rejection fires even when resolution itself fails.
 	if dynMsgs := dynamicOwnershipViolations(bundlerConfig, componentName, gpuOpKeys,
-		[]string{"driver.enabled", "toolkit.enabled", "hostPaths.driverInstallDir"}); len(dynMsgs) > 0 {
+		config.GPUOperatorDriverOwnership.Paths); len(dynMsgs) > 0 {
 		for _, msg := range dynMsgs {
 			slog.Warn(msg, logKeyComponent, componentName)
 		}
@@ -1430,13 +1464,9 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 
 // gpuOperatorComponentNames are the registry-level component names that
 // carry GPU Operator driver-ownership values (the canonical chart and its
-// OCP variant). This package cannot import pkg/bundler (dependency cycle
-// — see draDriverComponentNames above for the identical constraint and
-// the agreed keep-in-sync disposition), so this list is a local
-// duplicate of pkg/bundler's gpuOperatorComponentNames; it also mirrors
-// the pair that registers CheckDriverOwnershipCoherence in
-// recipes/registry.yaml. Keep all three in sync.
-var gpuOperatorComponentNames = []string{"gpu-operator", "gpu-operator-ocp"}
+// OCP variant), from config.GPUOperatorDriverOwnership. They mirror the pair
+// that registers CheckDriverOwnershipCoherence in recipes/registry.yaml.
+var gpuOperatorComponentNames = config.GPUOperatorDriverOwnership.ComponentNames
 
 // nvsentinelAssumeDriverInstalledOverrideSet is the documented
 // bundle-time override that makes the NVSentinel labeler apply

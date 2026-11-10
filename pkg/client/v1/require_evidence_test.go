@@ -64,6 +64,19 @@ func TestPublishedEvidenceRequired(t *testing.T) {
 	}
 }
 
+// TestRequireEvidenceEnvVarEnablesCheck proves RequireEvidenceEnvVar names the
+// variable PublishedEvidenceRequired reads.
+func TestRequireEvidenceEnvVarEnablesCheck(t *testing.T) {
+	t.Setenv(aicr.RequireEvidenceEnvVar, "on")
+	got, err := aicr.PublishedEvidenceRequired("", false)
+	if err != nil {
+		t.Fatalf("PublishedEvidenceRequired: %v", err)
+	}
+	if !got {
+		t.Fatalf("%s=on did not enable the evidence check", aicr.RequireEvidenceEnvVar)
+	}
+}
+
 func TestRequirePublishedEvidenceNilResult(t *testing.T) {
 	err := (*aicr.Client)(nil).RequirePublishedEvidence(t.Context(), nil)
 	if errorstest.ReportedCode(err) != errors.ErrCodeInternal {

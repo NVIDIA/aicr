@@ -669,6 +669,7 @@ func TestComponentRegistry_Validations(t *testing.T) {
 	// Verify specific validations exist
 	foundWorkloadSelector := false
 	foundAcceleratedSelector := false
+	foundOKEGB300AcceleratedSelector := false
 	for _, v := range validations {
 		if v.Function == "CheckWorkloadSelectorMissing" {
 			foundWorkloadSelector = true
@@ -686,6 +687,18 @@ func TestComponentRegistry_Validations(t *testing.T) {
 			if v.Message == "" {
 				t.Error("CheckWorkloadSelectorMissing should have a message")
 			}
+		}
+		// The OKE GB300 entry is blocking and keyed on service + accelerator
+		// rather than intent; the general entry below stays advisory.
+		if v.Function == "CheckAcceleratedSelectorMissing" && v.Conditions["service"] != nil {
+			foundOKEGB300AcceleratedSelector = true
+			if v.Severity != "error" {
+				t.Errorf("OKE GB300 CheckAcceleratedSelectorMissing should have severity 'error', got %q", v.Severity)
+			}
+			if !slices.Equal(v.Conditions["service"], []string{"oke"}) || !slices.Equal(v.Conditions["accelerator"], []string{"gb300"}) {
+				t.Errorf("OKE GB300 CheckAcceleratedSelectorMissing conditions = %v, want service [oke] and accelerator [gb300]", v.Conditions)
+			}
+			continue
 		}
 		if v.Function == "CheckAcceleratedSelectorMissing" {
 			foundAcceleratedSelector = true
@@ -715,6 +728,9 @@ func TestComponentRegistry_Validations(t *testing.T) {
 
 	if !foundWorkloadSelector {
 		t.Error("nodewright-customizations should have CheckWorkloadSelectorMissing validation")
+	}
+	if !foundOKEGB300AcceleratedSelector {
+		t.Error("nodewright-customizations should have a blocking OKE GB300 CheckAcceleratedSelectorMissing validation")
 	}
 	if !foundAcceleratedSelector {
 		t.Error("nodewright-customizations should have CheckAcceleratedSelectorMissing validation")

@@ -305,6 +305,10 @@ func createRuntimeWith(ctx context.Context, t *testing.T, mutate func(*v1alpha1.
 			overrides = append(overrides, v1alpha1.Override{Component: c, Path: "enabled", Value: apiextensionsv1.JSON{Raw: []byte("false")}})
 		}
 	}
+	// From AICR v1.2.0, cert-manager renders a ServiceMonitor, whose CRD comes
+	// from prometheus-operator-crds, disabled above. Earlier releases already
+	// default it to false.
+	overrides = append(overrides, v1alpha1.Override{Component: release, Path: "prometheus.servicemonitor.enabled", Value: apiextensionsv1.JSON{Raw: []byte("false")}})
 	rt := &v1alpha1.ClusterRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.SingletonName},
 		Spec: v1alpha1.ClusterRuntimeSpec{

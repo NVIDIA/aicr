@@ -416,8 +416,8 @@ observed lifecycle state as the actual. When the subtype is absent (no
 and fails closed rather than guessing an ownership mode.
 
 The OKE recipes that deploy `network-operator` (`gb200-oke-training`,
-`l40s-oke-training`, and their descendants) declare
-`K8s.oke-addons.nvidia-network-operator: absent`. Any other reading,
+`l40s-oke-training`, their descendants, and `gb300-oke-ubuntu-training`)
+declare `K8s.oke-addons.nvidia-network-operator: absent`. Any other reading,
 including a missing one, fails snapshot-based recipe generation and the
 `aicr validate` pre-flight, because the add-on and AICR's `network-operator`
 would both reconcile the same `NicClusterPolicy`. Criteria-only generation
@@ -534,6 +534,57 @@ is absent entirely (a snapshot from an older aicr), constraint evaluation
 reports the reading unavailable and fails closed.
 
 The constraint path is `K8s.oke-legacy-plugin.nvidia-gpu-device-plugin`.
+
+## K8s oke-gpu-plugin shape
+
+`K8s.oke-gpu-plugin` records how OKE's `NvidiaGpuPlugin` add-on hands
+allocated GPUs to containers: the device-list strategy of the
+`nvidia-gpu-device-plugin` DaemonSet the add-on renders into `kube-system`.
+The add-on's configuration is not in `oci ce cluster list-addons` (the source
+of `oke-addons`), so this is a cluster collector reading from the same
+read-only `apps/daemonsets` get as `oke-legacy-plugin`.
+
+```yaml
+type: K8s
+subtypes:
+  - subtype: oke-gpu-plugin
+    data:
+      device-list-strategy: volume-mounts
+```
+
+`device-list-strategy` (`string`) is the strategy the device plugin container
+runs with: the `--device-list-strategy` flag on its command or args, else its
+`DEVICE_LIST_STRATEGY` env var, else `envvar` (the plugin default). It reads
+`absent` when the DaemonSet does not exist and `unknown` when the API could
+not be consulted, including a snapshot taken without cluster access. Always
+emitted.
+
+The `gpuStack` `oci-managed` value requires `volume-mounts`: AICR hardens the
+node image's container toolkit so unprivileged containers cannot claim GPUs
+through `NVIDIA_VISIBLE_DEVICES`, which is how the add-on's default `envvar`
+strategy hands allocated GPUs to pods. Every other reading, `absent` and
+`unknown` included, fails the constraint closed. When the subtype is absent
+entirely (a snapshot from an older aicr), constraint evaluation reports the
+reading unavailable and fails closed.
+
+The constraint path is `K8s.oke-gpu-plugin.device-list-strategy`.
+
+## OS kmod-param shape
+
+`OS.kmod-param` holds allowlisted kernel module parameters, read from
+`/sys/module`, which a container sees for the host kernel without a host mount.
+Keys are the parameter's path and values its trimmed contents. A parameter
+whose module is not loaded is left out, so a constraint on it reads as
+unavailable.
+
+| Key | Values |
+|---|---|
+| `/sys/module/ib_core/parameters/netns_mode` | `N` (exclusive RDMA network namespace mode) or `Y` (shared) |
+
+Snapshot-driven recipe resolution records the `netns_mode` reading as
+`metadata.rdmaNamespaceMode` (`exclusive`, `shared`, or `unknown`), which
+`aicr bundle` compares with the recipe's RDMA attachment. The subtype is not
+kept in minimal evidence.
 
 ## NodeTopology shape
 

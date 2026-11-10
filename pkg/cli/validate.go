@@ -508,6 +508,51 @@ type validationConfig struct {
 	imageRefs *imageRefsTarget
 }
 
+// validationCancellationBudget covers the shared phase cleanup window, the pod
+// termination wait that keeps per-run RBAC alive through the validator pod's
+// SIGTERM grace, and the separate privileged RBAC/data teardown window.
+// Partial output cannot renew it.
+const validationCancellationBudget = 2*defaults.K8sCleanupTimeout +
+	defaults.ValidatorTerminationGracePeriod + defaults.ValidatorTerminationWaitMargin
+
+type validationCancellation struct {
+	deadline time.Time
+	done     chan struct{}
+	stop     func() bool
+}
+
+func observeValidationCancellation(ctx context.Context, now func() time.Time) *validationCancellation {
+	c := &validationCancellation{done: make(chan struct{})}
+	c.stop = context.AfterFunc(ctx, func() {
+		c.deadline = now().Add(validationCancellationBudget)
+		close(c.done)
+	})
+	return c
+}
+
+// release stops a pending callback or joins one already started. Closing done
+// on the stopped path also makes repeated release safe.
+func (c *validationCancellation) release() {
+	if c.stop() {
+		close(c.done)
+	} else {
+		<-c.done
+	}
+}
+
+func (c *validationCancellation) outputContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline := time.Now().Add(defaults.K8sCleanupTimeout)
+	if ctx.Err() != nil {
+		// Cancellation can precede callback startup; join before reading its
+		// deadline rather than granting output a new cleanup window.
+		<-c.done
+		if c.deadline.Before(deadline) {
+			deadline = c.deadline
+		}
+	}
+	return context.WithDeadline(context.WithoutCancel(ctx), deadline)
+}
+
 // runValidation runs validation using the container-per-validator engine.
 //
 // The validator run is driven through the aicr.Client facade (ValidateState),
@@ -523,7 +568,25 @@ func runValidation(
 	cfg validationConfig,
 ) error {
 
+	cancellation := observeValidationCancellation(ctx, time.Now)
+	defer cancellation.release()
+
 	slog.Info("running validation", "phases", cfg.phases)
+
+	// Two submission pre-flights run here, with the snapshot loaded or
+	// captured and before any validator Job: the cluster's Kubernetes minor
+	// must match a carried checklist exactly unless
+	// spec.validate.evidence.cncf.conformanceVersion names one (a submission
+	// certifies one minor; the write repeats the check as the backstop), and
+	// the recipe's conformance checks must be able to establish every
+	// applicable MUST. Both fail in seconds where the verdict after the run
+	// would fail in minutes.
+	if err := cncfSubmissionPreflight(client, snap, cfg); err != nil {
+		return err
+	}
+	if err := cncfRecipeCoveragePreflight(client, rec, snap, cfg); err != nil {
+		return err
+	}
 
 	// Generated once CLI-side, before either snapshot source ran (see
 	// validateCmd's Action), rather than letting the validator auto-generate
@@ -580,9 +643,67 @@ func runValidation(
 		opts = append(opts, aicr.WithValidationSkipChecks(cfg.skipChecks...))
 	}
 
-	results, err := client.ValidateState(ctx, rec, snap, opts...)
-	if err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "validation failed")
+	results, validationErr := client.ValidateState(ctx, rec, snap, opts...)
+	return finishValidation(ctx, cancellation, client, rec, snap, cfg, results, validationErr)
+}
+
+// isValidationInterruption reports whether a ValidateState error is an operator
+// interruption, including one whose privileged RBAC revocation also failed.
+// Only those errors carry partial results that the CLI persists as CTRF output.
+func isValidationInterruption(err error) bool {
+	return stderrors.Is(err, context.Canceled) || stderrors.Is(err, errors.New(errors.ErrCodeCanceled, ""))
+}
+
+// newOutputWriter is a variable only so tests can expire the partial-output
+// budget after the writer has created (and truncated) a file output.
+var newOutputWriter = serializer.NewFileWriterOrStdoutWithKubeconfig
+
+// logCleanupDisabled tells the operator which validator resources a
+// --cleanup=false run kept and how to inspect and remove them.
+func logCleanupDisabled(cfg validationConfig) {
+	kept := "Jobs and RBAC"
+	if cfg.validatorServiceAccountName != "" {
+		kept = "Jobs and ConfigMaps"
+	}
+	slog.Info("cleanup disabled - validator "+kept+" kept for debugging",
+		"namespace", cfg.validationNamespace,
+		"runID", cfg.runID)
+	slog.Info("to inspect Job logs: kubectl logs -l " + labels.RunID + "=" + cfg.runID + " -n " + cfg.validationNamespace)
+	slog.Info("to list Jobs: kubectl get jobs -n " + cfg.validationNamespace)
+	slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
+}
+
+func finishValidation(
+	ctx context.Context,
+	cancellation *validationCancellation,
+	client *aicr.Client,
+	rec *aicr.RecipeResult,
+	snap *aicr.Snapshot,
+	cfg validationConfig,
+	results []*aicr.PhaseResult,
+	validationErr error,
+) error {
+
+	interrupted := isValidationInterruption(validationErr)
+	if validationErr != nil && (len(results) == 0 || !interrupted) {
+		msg := "validation failed"
+		if interrupted {
+			msg = "validation interrupted"
+		}
+		return errors.PropagateOrWrap(validationErr, errors.ErrCodeInternal, msg)
+	}
+	if validationErr != nil {
+		// Persist partial output, but never continue signing/pushing evidence
+		// after cancellation or replace the interruption with an output error.
+		// The budget is checked only before the writer exists: creating a file
+		// output truncates it, so abandoning it afterwards would leave it empty.
+		outputCtx, cancel := cancellation.outputContext(ctx)
+		defer cancel()
+		ctx = outputCtx
+		if ctx.Err() != nil {
+			slog.Warn("partial CTRF output budget exhausted", "error", ctx.Err())
+			return validationErr
+		}
 	}
 
 	// Merge the per-phase CTRF reports into a single combined report via the
@@ -592,8 +713,12 @@ func runValidation(
 
 	// Serialize combined report; thread kubeconfig so ConfigMap writes
 	// target the same cluster used for snapshot/recipe reads.
-	ser, serErr := serializer.NewFileWriterOrStdoutWithKubeconfig(cfg.outFormat, cfg.output, cfg.kubeconfig)
+	ser, serErr := newOutputWriter(cfg.outFormat, cfg.output, cfg.kubeconfig)
 	if serErr != nil {
+		if validationErr != nil {
+			slog.Warn("failed to create partial CTRF writer", "error", serErr)
+			return validationErr
+		}
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", serErr)
 	}
 	defer func() {
@@ -605,6 +730,10 @@ func runValidation(
 	}()
 
 	if writeErr := ser.Serialize(ctx, combined); writeErr != nil {
+		if validationErr != nil {
+			slog.Warn("failed to serialize partial CTRF report", "error", writeErr)
+			return validationErr
+		}
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize CTRF report", writeErr)
 	}
 
@@ -628,26 +757,20 @@ func runValidation(
 		}
 	}
 
-	// If cleanup is disabled, provide helpful debugging info
 	if !cfg.cleanup {
-		kept := "Jobs and RBAC"
-		if cfg.validatorServiceAccountName != "" {
-			kept = "Jobs and ConfigMaps"
-		}
-		slog.Info("cleanup disabled - validator "+kept+" kept for debugging",
-			"namespace", cfg.validationNamespace,
-			"runID", runID)
-		slog.Info("to inspect Job logs: kubectl logs -l " + labels.RunID + "=" + runID + " -n " + cfg.validationNamespace)
-		slog.Info("to list Jobs: kubectl get jobs -n " + cfg.validationNamespace)
-		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
+		logCleanupDisabled(cfg)
+	}
+
+	if validationErr != nil {
+		return validationErr
 	}
 
 	// Write the submission directory when requested. The checklist version
-	// follows the validated cluster's Kubernetes minor. A minor this build
-	// carries no checklist for renders against the nearest carried one and the
-	// facade warns: below v1.35 against v1.35, above the newest against the
-	// latest (cncf.NearestVersion). An explicit version flag is a follow-up
-	// to #3606.
+	// is the cluster's exact Kubernetes minor, which the pre-flight above
+	// already required a carried checklist for, or the one
+	// spec.validate.evidence.cncf.conformanceVersion names; the write refuses
+	// an uncarried minor again as the backstop, and the README records the
+	// checklist used and whether it was named explicitly.
 	//
 	// The exit rule of a submission run is CNCFRequirementAggregate.Outcome,
 	// shared with the SDK: a failed or crashed check fails the run as it does
@@ -1448,6 +1571,78 @@ func validateClient(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, evi
 		return nil, err
 	}
 	return client, nil
+}
+
+// cncfSubmissionPreflight is the submission's version pre-flight once the
+// snapshot is in hand: the cluster's Kubernetes minor must match a carried
+// checklist exactly unless spec.validate.evidence.cncf.conformanceVersion
+// names one (ValidateCNCFSubmissionOptions, which also re-checks the
+// declarations, the vendor and the directory). A plain run is not checked.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when cfg.cncfSubmission is set and the vendor is
+//     missing, the minor has no carried checklist and no explicit version is
+//     set, or the options fail ValidateCNCFSubmissionOptions.
+func cncfSubmissionPreflight(client *aicr.Client, snap *aicr.Snapshot, cfg validationConfig) error {
+	if !cfg.cncfSubmission {
+		return nil
+	}
+	if cfg.cncfVendor == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--cncf-submission requires spec.validate.evidence.cncf.vendor in --config (PRODUCT.yaml carries its fields)")
+	}
+	return client.ValidateCNCFSubmissionOptions(aicr.CNCFSubmissionOptions{
+		ConformanceVersion: cfg.cncfConformanceVersion,
+		KubernetesVersion:  snap.KubernetesVersion(),
+		NotApplicable:      cfg.cncfNotApplicable,
+		Documented:         cfg.cncfDocumented,
+		Vendor:             *cfg.cncfVendor,
+	}, cfg.evidenceDir)
+}
+
+// cncfRecipeCoveragePreflight compares the recipe's conformance checks with
+// the proof paths the selected checklist expects for every applicable MUST.
+// A submission run that cannot establish a MUST is refused here, before any
+// validator Job, rather than failing on the verdict after every check ran;
+// a plain run that includes the conformance phase only logs the gaps, since
+// its result is not a submission; on such a run an uncarried cluster minor
+// falls back to the nearest carried checklist with a warning and the gaps
+// are judged against it. Only an explicit conformanceVersion that does not
+// parse leaves nothing to compare against, and that is logged instead.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when cfg.cncfSubmission is set and the recipe
+//     cannot establish one or more applicable MUSTs.
+func cncfRecipeCoveragePreflight(client *aicr.Client, rec *aicr.RecipeResult, snap *aicr.Snapshot, cfg validationConfig) error {
+	runsConformance := cfg.phases == nil || slices.Contains(facadePhases(cfg.phases), aicr.PhaseConformance)
+	if !cfg.cncfSubmission && !runsConformance {
+		return nil
+	}
+	err := client.ValidateCNCFRecipeCoverage(rec, cfg.renderCNCFOptions(snap))
+	switch {
+	case err == nil:
+		return nil
+	case cfg.cncfSubmission:
+		return err
+	default:
+		slog.Warn("the recipe's conformance checks would not establish every applicable MUST of the CNCF checklist; "+
+			"this run is not a submission, so it proceeds", "error", err)
+		return nil
+	}
+}
+
+// renderCNCFOptions are the render inputs of a submission run: the
+// snapshot's Kubernetes version selects the checklist unless the config's
+// conformanceVersion does, and notApplicable carries through.
+func (cfg validationConfig) renderCNCFOptions(snap *aicr.Snapshot) aicr.RenderCNCFEvidenceOptions {
+	opts := aicr.RenderCNCFEvidenceOptions{
+		ConformanceVersion: cfg.cncfConformanceVersion,
+		NotApplicable:      cfg.cncfNotApplicable,
+	}
+	if snap != nil {
+		opts.KubernetesVersion = snap.KubernetesVersion()
+	}
+	return opts
 }
 
 // logRequirementAggregate reports the CNCF requirement aggregation of a

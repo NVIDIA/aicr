@@ -361,8 +361,9 @@ func buildDriverRuntimeProbePod(run *gpuTestRun, image string, tolerations []cor
 		Command: []string{posixShell, "-c", driverRuntimeProbeScript},
 	}
 	spec := corev1.PodSpec{
-		RestartPolicy: corev1.RestartPolicyNever,
-		Tolerations:   tolerations,
+		RestartPolicy:    corev1.RestartPolicyNever,
+		Tolerations:      tolerations,
+		ImagePullSecrets: run.imagePullSecretRefs(),
 	}
 	if useDRA {
 		spec.ResourceClaims = []corev1.PodResourceClaim{{
