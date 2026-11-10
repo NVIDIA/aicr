@@ -495,6 +495,12 @@ nvsentinel-maintenance-request-e2e: ## Live Kind test: a MaintenanceRequest cord
 	echo "Running nvsentinel-maintenance-request mixin e2e test..."; \
 	tests/e2e/nvsentinel-maintenance-request/run.sh
 
+.PHONY: nvsentinel-csp-health-monitor-e2e
+nvsentinel-csp-health-monitor-e2e: ## Live Kind test: nvsentinel-csp-health-monitor-aws deploys STORE_ONLY with its IRSA annotation, a maintenance event is recorded without quarantining the node, and the gate refuses incomplete bundles and EXECUTE_REMEDIATION (#2620)
+	@set -e; \
+	echo "Running nvsentinel-csp-health-monitor mixins e2e test..."; \
+	tests/e2e/nvsentinel-csp-health-monitor/run.sh
+
 .PHONY: npd-nvsentinel-object-monitor-e2e
 npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
 	@set -e; \

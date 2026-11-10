@@ -393,7 +393,8 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`, `os-amazonlinux`, `o
 `nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
 `nvsentinel-quarantine`, `nvsentinel-remediation`, `nvsentinel-slinky-drainer`,
 `nvsentinel-health-events-analyzer`, `nvsentinel-event-exporter`, `nvsentinel-datastore-eks`, `nvsentinel-log-collector`,
-`nvsentinel-node-validation`, `nvsentinel-external-remediation`, `nvsentinel-maintenance-request`, `npd`.
+`nvsentinel-node-validation`, `nvsentinel-external-remediation`, `nvsentinel-maintenance-request`,
+`nvsentinel-csp-health-monitor-aws`, `nvsentinel-csp-health-monitor-gcp`, `npd`.
 
 The OS-scoped mixins (`os-ubuntu`, `os-talos`, `os-amazonlinux`, `os-sles`) are
 mutually exclusive:
