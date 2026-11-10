@@ -15,7 +15,8 @@
 # NVSentinel's slinky-drainer plugin: reconciles the DrainRequests node-drainer
 # creates in customDrain mode against Slinky, so a quarantined Slurm node is
 # drained through Slurm instead of by pod eviction. Vendored from NVSentinel
-# v1.30.0 (plugins/slinky-drainer/config/{rbac,manager}, commit 13ba7f453e10),
+# v1.30.0 (plugins/slinky-drainer/config/{rbac,manager}, commit 13ba7f453e10;
+# unchanged in v1.31.0 apart from go.mod),
 # which ships the plugin only as Kustomize. Differences from upstream:
 #
 #   - namespace is the release namespace, which must be NVSentinel's: the

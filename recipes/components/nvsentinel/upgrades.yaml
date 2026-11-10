@@ -445,33 +445,34 @@ transitions:
       four gpu-health-monitor-dcgm-4.x pods connected to DCGM with 8 GPUs each
       while the dcgm-3.x monitor stayed inactive.
     summary: >-
-      A bundle where health-events-analyzer runs with processingStrategy
-      EXECUTE_REMEDIATION, whether set by --set, inherited from the chart
-      default, set on a rule in its config, or given as UNSPECIFIED, which
-      platform-connectors converts, now cordons and drains nodes. v1.31.0 adds a default
+      Two behavior changes can reach a running cluster. First, a bundle where
+      health-events-analyzer runs with processingStrategy EXECUTE_REMEDIATION,
+      whether set by --set, inherited from the chart default, set on a rule in
+      its config, or given as UNSPECIFIED (which platform-connectors
+      converts), now cordons and drains nodes: v1.31.0 adds a default
       fault-quarantine rule set that cordons a node for a fatal
       health-events-analyzer event (MultipleRemediations, repeated XID 74),
-      where v1.28.0 set only a node condition. It does so wherever a
-      quarantine or remediation step is composed, which the analyzer needs
-      beside the remediation step. With the nvsentinel-health-events-analyzer
-      mixin composed and no override, nothing changes: the mixin keeps derived
-      events STORE_ONLY, and fault-quarantine acts only on EXECUTE_REMEDIATION
-      events. Images move to v1.31.0 with no third-party
-      image change, and the HealthEvent CRD gains optional drainDecision and
-      remediationDecision status fields. The XID 74 solo rules now read the
-      incoming event, and the datastore clients wait up to 300 seconds for
-      MongoDB, not 30. The labeler's default GPU class from v1.30.0 needs
-      resource.k8s.io/v1, so it breaks the labeler on Kubernetes 1.32 and
-      1.33; the recipe keeps v1.28.0's classes. Where fault-remediation runs,
-      XID 154 recovery actions that R610 and later drivers print now reset the
-      GPU or reboot the node.
+      where v1.28.0 set only a node condition. With the
+      nvsentinel-health-events-analyzer mixin and no override nothing
+      changes: the mixin keeps derived events STORE_ONLY, and fault-quarantine
+      acts only on EXECUTE_REMEDIATION events. Second, where the remediation
+      step is composed and nodes run R610 or later drivers, the
+      syslog-health-monitor now maps the XID 154 recovery actions those
+      drivers print (PF FLR, OS Reboot, Bus Reset, System Reboot) to a GPU
+      reset or a node reboot; v1.28.0 did not recognise the wording and
+      reported CONTACT_SUPPORT. The labeler's default GPU class from v1.30.0
+      needs resource.k8s.io/v1, which Kubernetes 1.32 and 1.33 do not serve;
+      the recipe keeps v1.28.0's classes, so it needs no operator action.
     precondition: >-
       Where health-events-analyzer is deployed, its module-level
       processingStrategy and the processing_strategy of every enabled rule are
       neither EXECUTE_REMEDIATION nor UNSPECIFIED (an absent module value is
       the chart default, EXECUTE_REMEDIATION, and platform-connectors converts
       UNSPECIFIED to it), or you accept that fatal analyzer events cordon and
-      drain nodes from v1.31.0.
+      drain nodes from v1.31.0. Where the remediation step is composed and
+      nodes run R610 or later drivers, you accept that an XID 154 recovery
+      action resets the GPU or reboots the node, or you keep
+      syslog-health-monitor events out of remediation.
     reversible: true
     reversibleNotes: >-
       helm rollback to the previous revision restores the previous workloads;
@@ -505,6 +506,24 @@ transitions:
               fault-quarantine reads only EXECUTE_REMEDIATION events, so that
               strategy, set or inherited, is what turns a condition-only signal
               into a drain.
+          - id: check-xid-154-actions
+            description: >-
+              Where the nvsentinel-remediation step is composed and any node
+              runs an R610 or later driver, expect an XID 154 recovery action
+              (PF FLR, OS Reboot, Bus Reset or System Reboot) to reset that
+              GPU or reboot the node, where v1.28.0 cordoned and drained the
+              node for the fatal event and repaired nothing. No setting
+              restores that: the monitor's action mapping has no per-XID
+              switch. To stop syslog events from acting at all, regenerate the
+              bundle with
+              --set nv-sentinel:syslog-health-monitor.processingStrategy=STORE_ONLY,
+              which also stops their cordon and drain, and read the
+              processingStrategy of each NIC pattern in the monitor's config,
+              because a pattern's own value replaces the module's.
+            reason: >-
+              v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,
+              which fault-remediation acts on; v1.28.0 mapped them to
+              CONTACT_SUPPORT, which it does not.
           - id: apply-new-crds
             description: >-
               Apply the v1.31.0 CRDs using the CRD-apply command under
@@ -550,6 +569,24 @@ transitions:
               fault-quarantine reads only EXECUTE_REMEDIATION events, so that
               strategy, set or inherited, is what turns a condition-only signal
               into a drain.
+          - id: check-xid-154-actions
+            description: >-
+              Where the nvsentinel-remediation step is composed and any node
+              runs an R610 or later driver, expect an XID 154 recovery action
+              (PF FLR, OS Reboot, Bus Reset or System Reboot) to reset that
+              GPU or reboot the node, where v1.28.0 cordoned and drained the
+              node for the fatal event and repaired nothing. No setting
+              restores that: the monitor's action mapping has no per-XID
+              switch. To stop syslog events from acting at all, regenerate the
+              bundle with
+              --set nv-sentinel:syslog-health-monitor.processingStrategy=STORE_ONLY,
+              which also stops their cordon and drain, and read the
+              processingStrategy of each NIC pattern in the monitor's config,
+              because a pattern's own value replaces the module's.
+            reason: >-
+              v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,
+              which fault-remediation acts on; v1.28.0 mapped them to
+              CONTACT_SUPPORT, which it does not.
           - id: apply-new-crds
             description: >-
               Apply the v1.31.0 CRDs using the CRD-apply command under
@@ -593,6 +630,24 @@ transitions:
               fault-quarantine reads only EXECUTE_REMEDIATION events, so that
               strategy, set or inherited, is what turns a condition-only signal
               into a drain.
+          - id: check-xid-154-actions
+            description: >-
+              Where the nvsentinel-remediation step is composed and any node
+              runs an R610 or later driver, expect an XID 154 recovery action
+              (PF FLR, OS Reboot, Bus Reset or System Reboot) to reset that
+              GPU or reboot the node, where v1.28.0 cordoned and drained the
+              node for the fatal event and repaired nothing. No setting
+              restores that: the monitor's action mapping has no per-XID
+              switch. To stop syslog events from acting at all, regenerate the
+              bundle with
+              --set nv-sentinel:syslog-health-monitor.processingStrategy=STORE_ONLY,
+              which also stops their cordon and drain, and read the
+              processingStrategy of each NIC pattern in the monitor's config,
+              because a pattern's own value replaces the module's.
+            reason: >-
+              v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,
+              which fault-remediation acts on; v1.28.0 mapped them to
+              CONTACT_SUPPORT, which it does not.
           - id: apply
             description: >-
               Re-run install.sh (helm), or commit the regenerated bundle and

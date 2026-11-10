@@ -417,10 +417,21 @@ func podDrainPolicyViolations(componentName, path string, i int, fields map[stri
 	return errs
 }
 
+// indirectOwnerKinds maps the built-in kinds that own pods only through
+// another controller to the kind that owns them directly. node-drainer
+// compares ownerKinds with the pod's controller reference and follows no
+// further, so these never match. Kinds outside the map pass, because a custom
+// controller can own pods directly.
+var indirectOwnerKinds = map[string]string{
+	"Deployment": "ReplicaSet",
+	"CronJob":    "Job",
+}
+
 // ownerKindViolations reports a podDrainPolicies entry's ownerKinds that
-// node-drainer refuses at startup: a value that is not a list, or a kind that
-// is empty or padded with whitespace. It returns whether the policy matches on
-// owners at all, which an absent or empty list does not.
+// node-drainer refuses at startup (a value that is not a list, or a kind that
+// is empty or padded with whitespace) and a built-in kind that never owns a pod
+// directly. It returns whether the policy matches on owners at all, which an
+// absent or empty list does not.
 func ownerKindViolations(path string, i int, fields map[string]any, fail func(format string, args ...any)) bool {
 	raw, set := fields["ownerKinds"]
 	if !set || raw == nil {
@@ -436,6 +447,11 @@ func ownerKindViolations(path string, i int, fields map[string]any, fail func(fo
 		if !isString || kind == "" || strings.TrimSpace(kind) != kind {
 			fail("%s[%d].ownerKinds[%d] is %v, want a controller kind such as StatefulSet, so node-drainer refuses "+
 				"to start", path, i, j, describe(entry, true))
+			continue
+		}
+		if direct, indirect := indirectOwnerKinds[kind]; indirect {
+			fail("%s[%d].ownerKinds[%d] is %q, which is never a pod's direct controller, so the entry matches no pod; "+
+				"use %s", path, i, j, kind, direct)
 		}
 	}
 	return len(kinds) > 0

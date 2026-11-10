@@ -16,9 +16,12 @@ package validations
 
 import (
 	"context"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -78,5 +81,52 @@ func TestNVSentinelLabelerReadsNoResourceSlices(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+var labelerClassName = regexp.MustCompile(`(?m)^\s*\[\[classes\]\]\s*\n\s*name = "([^"]+)"`)
+
+// TestNVSentinelLabelerChartRendersLabelClasses fails when the chart does not
+// render the label-based classes the values set, for example because a later
+// chart moves labeler.expectedDeviceCounts and ignores the key: the values
+// test above then still passes while the labeler falls back to its default
+// class and stalls on Kubernetes 1.32 and 1.33.
+//
+// Pulls the chart over the network, so it is excluded from `make test` (always
+// -short). Run on demand:
+// `go test ./pkg/bundler/validations/... -run TestNVSentinelLabelerChartRendersLabelClasses`.
+func TestNVSentinelLabelerChartRendersLabelClasses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live chart-render integration test in short mode")
+	}
+	helmtest.RequireBinary(t)
+
+	store, err := recipe.LoadMetadataStoreFor(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("LoadMetadataStoreFor: %v", err)
+	}
+	out := renderNVSentinel(t, nvsentinelRenderedValues(t, store, "nvsentinel-observability"))
+
+	_, config, found := strings.Cut(out, "expected-device-counts.toml: |")
+	if !found {
+		t.Fatal("the chart rendered no expected-device-counts.toml, so the labeler tracks no device counts")
+	}
+	if doc, _, split := strings.Cut(config, "\n---"); split {
+		config = doc
+	}
+
+	matches := labelerClassName.FindAllStringSubmatch(config, -1)
+	names := make([]string, 0, len(matches))
+	for _, m := range matches {
+		names = append(names, m[1])
+	}
+	slices.Sort(names)
+	if want := []string{"gpu", "nic"}; !slices.Equal(names, want) {
+		t.Errorf("rendered labeler classes = %v, want %v", names, want)
+	}
+	for _, banned := range []string{"sources", "resourceSlices"} {
+		if strings.Contains(config, banned) {
+			t.Errorf("rendered labeler config contains %q, which reads ResourceSlices", banned)
+		}
 	}
 }

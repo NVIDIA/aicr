@@ -80,9 +80,9 @@ a100-aks-ubuntu-training-kubeflow:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 8de6b1c5556f2095047553994df3ae88465e3c3a36ed59c9fcebf40da271cde7
-  UPGRADING.md: c8d74dab36204d5586685ae09fffdf68cbd11042bd2f52acc6de89fe4171777b
+  UPGRADING.md: d6a78d6cc623038a4ada4f91fca15aa24549616298bfec2ad90ce8e63a9b9365
   bundle-info.yaml: ce3f70b9565bef8f93ad320ab0e5619f4c3260fcc0d6b23f5c032523cf49fed2
-  checksums.txt: 882e6c3e275713107c2fd63c6c1471aa1e3cd5bf66bfecab302d8499d04acf99
+  checksums.txt: 99c736883120ef1cf73967e05211dcccc66c8cdb5f1fb586336f2d682f2190c2
   deploy.sh: cfb12fbb4315ebaadd1378f55f81e866e9f5faaa909b57e569bab1c0ce558c0b
   recipe.yaml: 4c02517f5f2955886200096c7368d81d160d81c68609c3fe04e46f21aa5524e3
 a100-any:
@@ -132,9 +132,9 @@ a100-any:
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 1a578512f614e55c4e1c73ece9f855093b08af2451268184bc86110ede5dccce
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 69f1d5215a029e0e8b0e90ba9c506bc787a0b3fb38dbaac176875a53cffc2b2e
-  checksums.txt: b40f0a46d8a4d3df00f879392fca08ebdf1f44ee7d1e124793d6a1e9be5ffee6
+  checksums.txt: cc74ed26e50d67ef7f118ad483604be638f462678e72fda7c66c55e8725b55cb
   deploy.sh: 6e6f3b5734d630439ae7a775d7324344c01ac84558d1b972ede2e7d1487c6baa
   recipe.yaml: aee2a2d1ef40ed7d1da7fef8122dba884c8f85c70e2d436ea288de25151284dd
 a100-eks-ubuntu-training-kubeflow:
@@ -206,9 +206,9 @@ a100-eks-ubuntu-training-kubeflow:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 26a0d83394e16728d435eab7b8382b7565f92f79887dfc311b389fd56ed791ae
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 013413fc39b4136c45a5d4c11f157f608f5f87027439dfbfd902bddf40abefd3
-  checksums.txt: b4b2ab8d6ace2f49822b0f9bb04b72f1d0ba815d4a562c5bb5bfc177530c7de9
+  checksums.txt: 3fd5fa7c65208ee6fb60617fd242fdf3f6c466237228a39f4eb7de3bde8ba2be
   deploy.sh: e04b675e4130095efb3feb8ecdb4510bbb60d345dafc039fb9da261e37e9ffdf
   recipe.yaml: 441f7615821853d91532d66626dbbf603bfa0cbe5681653d816ce47118f864c6
 a100-gke-cos-training-kubeflow:
@@ -281,9 +281,9 @@ a100-gke-cos-training-kubeflow:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 8f26940ef89762f336b0e2a44e1b319bf112b83de57378d8a4fb63dd42e2213a
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: e0216a387f6ed77f890dd6be7e0689e3cb22e5d13167c6e09a9e6513f7d91034
-  checksums.txt: afcb17826b0aeebfdb5043fb352e5086747611984e91e12d0f7ea4dbad33cb57
+  checksums.txt: 5238cc7bfb0cf887b08b5ee49f890790cc491f33307629fb690c72f90d2a8e48
   deploy.sh: 50736743f1a6091c2dcb82baedfed99d4ae2f5bfe3325f7e7ab89995353f81bd
   recipe.yaml: 586679ce8706c98713ef870e4bf7f436ee933a4e5089500f662e20d40017385c
 a100-oke-ubuntu-training-kubeflow:
@@ -347,9 +347,9 @@ a100-oke-ubuntu-training-kubeflow:
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: c5522f3a3bcc9b0aadb01cf24d72db6dabf3b20e80a71794988563fbd9d3eaa7
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 25f06676f290ac8eed976c5b1257d5d56014a8193dfae1b64785e9b3f65fb908
-  checksums.txt: 5c40b10024a0421c3b00ff7f311467faf68d7009854063db0670adbf2fb9ebbc
+  checksums.txt: 69283c2ce8dd7972ac94df772315a2cd808935526c0e3081bc2cbc31eb56e302
   deploy.sh: c5fe781b8c7a167d044048c06da0a13bec9ed065500aafab5b890e6486babba3
   recipe.yaml: 6d79a04542814679fc98064742bcd5bf2c547485ef8fc23fa2d9aeb0e690d8f8
 aks-ubuntu:
@@ -415,9 +415,9 @@ aks-ubuntu:
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 9bc2fa865e954ee5b75502203478638c768379d7c9087f2479aa7996b2e962d2
-  UPGRADING.md: c8d74dab36204d5586685ae09fffdf68cbd11042bd2f52acc6de89fe4171777b
+  UPGRADING.md: d6a78d6cc623038a4ada4f91fca15aa24549616298bfec2ad90ce8e63a9b9365
   bundle-info.yaml: 6070281409b32c545902d8f3495fe9a572290a75ad50f7037a496277000d751e
-  checksums.txt: 3333335b99ee83a6dec88520668fe4eaf4aaa2fbb3e342123984ce0bf40705b2
+  checksums.txt: 5ad2dc70b9e49a359973b7704abbe42f2b16176863faf8a2e77d6772b5de6870
   deploy.sh: 75313648e42a588aed9e312fd7931149ff4db47f76a1d649cb88dd6c7c27aa5a
   recipe.yaml: 5586828e900856e85c9951439915fac5b886a1c8a1a58f678b52e76e3a2ae3c6
 b200-any:
@@ -467,9 +467,9 @@ b200-any:
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: f8910a71ee22cd7bc8faaf0e9b31ac747c39b1f32aac474d3b4c09a14e55461c
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 41741b3bdc605c55966fc6b9bf0bc6c50d72d35440edc9aafbd95253defc9962
-  checksums.txt: 8ea49d68cde92b33b7649b9d7ab1f6b1a12998fe76232f328ed14b50fae5dae2
+  checksums.txt: 531523b64a9128b6edee9b304100e576576c885fd92245eda6f5ec2769d03098
   deploy.sh: 6e6f3b5734d630439ae7a775d7324344c01ac84558d1b972ede2e7d1487c6baa
   recipe.yaml: 2b666f25e1d1411257ce30b8c865e143a6def65baa5f3e8f8596a69f4f8bc2b2
 b200-gke-cos-inference-dynamo:
@@ -560,9 +560,9 @@ b200-gke-cos-inference-dynamo:
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: ee90e43a16c3748fd9bac7d89e80db644e733667251e159317a741a1ddbfeaf7
-  UPGRADING.md: c4e6947bd56fd0832a144c045971fe87f4e1ce31c185f4c9d828344bbe949b2d
+  UPGRADING.md: 4a584315485fdb0602a81c84113df5e7c770c012bd0110574c919b1a3a2cf625
   bundle-info.yaml: d7edc61dbebfba169fca7d3e5e1613e01886d6aff7d1200c989ee4e01f5a2f9a
-  checksums.txt: 634457f3fa2e54b8c48cdaad978239fc5fe5e21224682171905b52b2c5feb242
+  checksums.txt: b9b59b89bdbb3737112ae452069b202dfc0c791ca4bccf59b9b658fb1d954e4a
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: 90bbbf2e851551f785a7798e5343775f1d050ccbde5efae36d5102a62478aed1
 b200-gke-cos-training-kubeflow:
@@ -635,9 +635,9 @@ b200-gke-cos-training-kubeflow:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 69f563c531200c6c1a89acfc34eb32bd63b69d41a614a86e32ae1750965117c7
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 98b1bad972f371e789fc6e0742d94330aa5de84d0d1ac2cd8a3852c11e2f9d87
-  checksums.txt: 5562b399d9f5aecb2e86df38a4d0845a480184ee9042cc968a04c238701743b3
+  checksums.txt: f7145a13f4aa2a4755cf7927993f1ea0668bb3d84f985f5d0a0e5eafd06395ee
   deploy.sh: 50736743f1a6091c2dcb82baedfed99d4ae2f5bfe3325f7e7ab89995353f81bd
   recipe.yaml: 8ca261367324390563120dede2a32166ed04aa1d40a87a80b3a9224b8db545be
 b300-mk8s-ubuntu-inference-dynamo:
@@ -751,9 +751,9 @@ bcm-inference:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 01084dbc53ce4cc2b0df42282f0c5353144321c8f8d97316f8612e9faa0aa226
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 0a368d3f4822cf6a50d033bb5122fb8c62007e4fe6b075c48c96424a56882cac
-  checksums.txt: 455afc1b0f19aac8f9e80a8e2c548d317d0246df323fb4f91d3a3a288685b2b3
+  checksums.txt: a03a3c53b3be9a5c913ad94a30fd617124b32075ed47db808922ef31c12f9221
   deploy.sh: 7fa5853c62bb89311e349a172bf81202b6b19fc1e044952c14ce299a4903211d
   recipe.yaml: dd7c3e301616b37bf4fb3d912db2fb4a60f9e921cb74ddba8b133eb444439d4a
 eks-ubuntu:
@@ -811,9 +811,9 @@ eks-ubuntu:
   013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   013-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: ddef78560abc27692d2e6cdbd9396f08948e6adde45fc9a9a40c8bf7e57dc678
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 4cd2e2a8e779618853df7b4a1dc0d42f1b6fd1ecc4e71137c1b393057da35eb8
-  checksums.txt: 467509d9d939aef0dff86241fed0bb22200e5d75a781b93b189ce11b6503146e
+  checksums.txt: ceec5c4ba999ce5b4e6ee4aeec7fcf71afb2b3aefd50cc8690b93b88a4121b4e
   deploy.sh: f1cdf9f4016a6b9eecad305408fec1bbcdd72c38ec0a816d5e6d4b7facc030d1
   recipe.yaml: e2da907590c9197044c97f86e5722cc298f21eee28ca95ef3cc281f0c4948686
 gb200-any:
@@ -863,9 +863,9 @@ gb200-any:
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: e791aab593c144d0147ce74f2066aaacdd46925ecbc5e881b81d8ef6bb82be9d
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 7c926c3aab56d6787ac3e6a4e8a30981caa3af71588df2966d201b7651aefb85
-  checksums.txt: 1dffe872d90ac31bb9c74ca2cc8c0ccb5b64a2919c6fc38505ccf0db10ef76a5
+  checksums.txt: 7d211319d5cfcc853088f82991c401c22c574830b705aa3661183d75206842bf
   deploy.sh: 6e6f3b5734d630439ae7a775d7324344c01ac84558d1b972ede2e7d1487c6baa
   recipe.yaml: 13490a33758b94660a2603b22200abb9727e245d3b72ddb24b311c2678b4c4be
 gb200-eks-amazonlinux-inference:
@@ -947,9 +947,9 @@ gb200-eks-amazonlinux-inference:
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: a52630bed7415488a2b0f5f8be60bdc961ae6e52525d13606a97e57c3eedc8e1
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: d8f0cd4560034f0ac48764695e26bfb927795f80378dfab1a90d0d4889b664c2
-  checksums.txt: 9659a172c39e97af21a1bbb2803c2cee6bbe7d0bc784975974dc757ca3cb30c0
+  checksums.txt: e8f11618a4ce6a904f84c917444f24f745ae1b372d1fd09d56144a2ec0f4b766
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: 14bccad82a6f4f95c0f58a5c7414aee641b3d2bad8c29e212a3f279056e8ec3a
 gb200-eks-ubuntu-inference-dynamo:
@@ -1044,9 +1044,9 @@ gb200-eks-ubuntu-inference-dynamo:
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   021-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: c2689169194758296126baf55bf13da6f0b7d950cb6857f8836337d835daeecd
-  UPGRADING.md: c4e6947bd56fd0832a144c045971fe87f4e1ce31c185f4c9d828344bbe949b2d
+  UPGRADING.md: 4a584315485fdb0602a81c84113df5e7c770c012bd0110574c919b1a3a2cf625
   bundle-info.yaml: 46c534fb9474ef98c2814d5f8c08e4946a6bb745d994b36ff75186a7ee2bc376
-  checksums.txt: bc51d6c43401f47ba0840d09789569183966d0fe5d1aea4a2e07b1c548fd07ba
+  checksums.txt: 4baee0e67ad49fb4e74593bfca59494304d6d5184c19a989c3adb12336fc8a54
   deploy.sh: 3959fc5810868ccacc85f59d575441096be6d232b62267d5476a65855794a8e4
   recipe.yaml: 67a8d3af14db6268e20443ed4a9c22ab82a0f3b52692ea6b0c3b047700afcc1e
 gb200-eks-ubuntu-training-kubeflow:
@@ -1123,9 +1123,9 @@ gb200-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 83a72f272b0b1ec3b22d6f741c2909280bc4336f5d5a125b6d12534688ec9ad7
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 9be6b66d5a526520aec4ec2aefe3ecc66214d11cfeaa6f81335d04a1642a5207
-  checksums.txt: 22ef2206cadebc9fb9866b6ed682ef0739393c1b3d2c02ccbb5598f2e92de582
+  checksums.txt: d6c59a0a7164467fa8fec7e9cf7c6cf997ec78d6d50be5771ad96ba060c9cc3f
   deploy.sh: e04b675e4130095efb3feb8ecdb4510bbb60d345dafc039fb9da261e37e9ffdf
   recipe.yaml: 558030794fe66780f9cb3605e4d643972120d6dce2d784cda98cc30543689283
 gb200-eks-ubuntu-training-slurm:
@@ -1211,9 +1211,9 @@ gb200-eks-ubuntu-training-slurm:
   019-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   019-slinky-slurm/values.yaml: 3a2dd1888df27899c573b67f06a75fc8eff8cb4ae9f0efd681c0fa09b57c0117
   README.md: 302a0b4668c2ac4bcfad4114ff1bbe03cc39316efedf790fa2b2ca522bd7eaab
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: d6e34a5244f14f167c859142456fd4abeccf32c63eca899e52f9067b4019bdb3
-  checksums.txt: 88c629e1fa1cd69b2ca3ba9f98255cd8388995a04da24221fa61e78be3a6f84f
+  checksums.txt: 74c0ed00433bdeb6c04adb60050039c6ea2b5452acb2d68d001b46c3885d4685
   deploy.sh: 9d859b82d95d611dc5d29b57fa46cce4acb3e8374b77975f35b0cdbc54a40c47
   recipe.yaml: 6b1d44524ed82f0795926397e555304ef387b9f2bae5f23fa42008134e4464f5
 gb200-gke-cos-inference-dynamo:
@@ -1315,9 +1315,9 @@ gb200-gke-cos-inference-dynamo:
   022-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   022-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 2b4bc5ab69235455cde51f4725cb9818b9d3aaf1157cc1293e4c722e472f7cbd
-  UPGRADING.md: c4e6947bd56fd0832a144c045971fe87f4e1ce31c185f4c9d828344bbe949b2d
+  UPGRADING.md: 4a584315485fdb0602a81c84113df5e7c770c012bd0110574c919b1a3a2cf625
   bundle-info.yaml: 4bea2478628422c1e481b00e6e26b79466bfec513e1d10e06388720bb1ec945b
-  checksums.txt: 780cf011baeb25869351459cb780d5ef0aa781a1a807649dc1ce7b7ba771ccc7
+  checksums.txt: 0ab8f25928732308e6bab2253ed82be8b47e3b2574f801b1a123681cfa7f2565
   deploy.sh: 169ebed142cd9adf4392755b843629729d2d26e0cfd613dfce97b816b1069827
   recipe.yaml: 52c7e8dd6b4c627383e7893faeb18bb1825c264399eb6c5a0f191a05068f9ab4
 gb200-gke-cos-training-kubeflow:
@@ -1397,9 +1397,9 @@ gb200-gke-cos-training-kubeflow:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 8fa8d9afd66285af37207be9fe6e6423c0715e968fca9718d817459bd7cda7a0
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 6ad2bfdcee98aeba613fc69292306537b3624343a664374cd7831b240ddd9790
-  checksums.txt: 030c28b5644fc1e2647a8568303210de282f7d4bca7ba821fff7407d488899c4
+  checksums.txt: 0aa36cd1a93ba6e6230e297a3faa6c0396dd0514aa0116afe9e9735a730742b2
   deploy.sh: 4fa420735f0c5403b7e2bb44e37f180f928c157aab09355d29be499cdffb27d2
   recipe.yaml: f9abe91fe8aad7d1704ac5980a47627ea4b9f29a08c3f05c668dd60fd070e4dd
 gb200-gke-cos-training-slurm:
@@ -1487,9 +1487,9 @@ gb200-gke-cos-training-slurm:
   019-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   019-slinky-slurm/values.yaml: 3a2dd1888df27899c573b67f06a75fc8eff8cb4ae9f0efd681c0fa09b57c0117
   README.md: 3a49c7bdbfc0ef2877e7fb419df45e242474a9e52ae49b52efbc46997d38c5f6
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 9415f1f1781d2fff52d5fa069986c85ae73ba5f9febbdf6b2e17d5f92dbf13c4
-  checksums.txt: 23e43e5b9cdb1384c9574b39f655f7fc36fa6ef868a2dec571a99f6722a9b483
+  checksums.txt: b76b9709919f6ac65f03ac7077a069299a46e5ed69068c0847a21a5fbb92b870
   deploy.sh: d54909f4d258435a4f5a944a2624c6ab0adf954532cebb9c8c27321f08d0d0bc
   recipe.yaml: 45a5a7a5e605b5805c1ce64d1827f4fd361ce18ed8423441a04e739bf4b6e2a4
 gb200-nvke-ubuntu-inference-dynamo:
@@ -1651,9 +1651,9 @@ gb200-nvke-ubuntu-training-kubeflow:
   018-sriov-ib-networks/templates/nvke-gb200.yaml: 1d78efb71cf8ecff1e40e37775d37270e9a3d9515fc23c5686ba590d611a454f
   018-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: 3382e4a8cd14a6e405e8708fa4ed2d486e5f6b60e9b0efba812fbd0a57e24aae
-  UPGRADING.md: c8d74dab36204d5586685ae09fffdf68cbd11042bd2f52acc6de89fe4171777b
+  UPGRADING.md: d6a78d6cc623038a4ada4f91fca15aa24549616298bfec2ad90ce8e63a9b9365
   bundle-info.yaml: 1404564035f41b4ed94863a78ff8f2e89e9760eb8b4e0a8533cfa4c7bf3f54b4
-  checksums.txt: 45a51a0bdbf3b045cf7fecfceaaa0251868d892c9d7cf244dc43e84320700867
+  checksums.txt: ffb9435e6dadfcd27216cfcbf788c075ef34b57cc1e4664d0a6fe1a5bf40aecd
   deploy.sh: 3afb553b3a4cb9783f81b971a78a90b37fcd469b7587aa2c56f49aff4e8a8f72
   recipe.yaml: 3320fbcb58f5ee93de4e85d99d5cfdc90e1cd36565a86de39cbba6bd5145a2dc
 gb200-oke-ubuntu-inference-dynamo:
@@ -1735,9 +1735,9 @@ gb200-oke-ubuntu-inference-dynamo:
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 384c76ab2225f8b8eed91397df895b255d40d344df852486f21fe9c24709656c
-  UPGRADING.md: c4e6947bd56fd0832a144c045971fe87f4e1ce31c185f4c9d828344bbe949b2d
+  UPGRADING.md: 4a584315485fdb0602a81c84113df5e7c770c012bd0110574c919b1a3a2cf625
   bundle-info.yaml: c4ff6a15f2676ea76e3a95d5f5ccaa1220e5a666b9a10a423f1e77f9474c3c4a
-  checksums.txt: eea22013443cf060346a18f115b83c3a709e9060298967dcf1ee231a901837f3
+  checksums.txt: e2913f074e10ccbbf1895366aea1efbff4a353db8225779600e73d995aaad6a5
   deploy.sh: 0d2ad4ff56102247a58ce5d8191728631c6e789f965890a596fd95613e0be07b
   recipe.yaml: 3d05b8507702c9abe9aeac71b637706c13ac747f63490fbeabfc4d67d9de73c3
 gb200-oke-ubuntu-training-kubeflow:
@@ -1815,9 +1815,9 @@ gb200-oke-ubuntu-training-kubeflow:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: a57121a19a1b898928461cbfed92bdca91a718f08e5c0fcb70744b9e0a4916eb
-  UPGRADING.md: c8d74dab36204d5586685ae09fffdf68cbd11042bd2f52acc6de89fe4171777b
+  UPGRADING.md: d6a78d6cc623038a4ada4f91fca15aa24549616298bfec2ad90ce8e63a9b9365
   bundle-info.yaml: ad1ef1a64ec76528ee78d0b41dd0f4c8102b527287f16191dfb77e72b862ea72
-  checksums.txt: 210e11b7587bf4185987d0694401e2df6a083bb877e522da842a9fe8454cd8c6
+  checksums.txt: 0131c268cd3b09a08c39ff814c80d79194d70b0a11d08058ea1c0b173f9b9ae0
   deploy.sh: 791197141dc520cd0c453383d127de3875726277b432e606b3a734479f34aa28
   recipe.yaml: 97538e8b5f39774fd7f801358f7a732e568fbd2a7a8e65c4fc67661823b02881
 gb300-any:
@@ -1867,9 +1867,9 @@ gb300-any:
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 47bb95ef7b6f10b6ac1f6326806ed13408db7a824d7e639fc57643e159964026
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: d2947001e4158f61ea1865b0d0779b8ba47d6ad297584d114795a9468bfbf015
-  checksums.txt: 8fe1d6ba0162835981665cc981d83eaf15aa249caca7b7dab03d9abe804b9387
+  checksums.txt: 675689d704cad99a4dc3cf456ac2af4ae5b9e5986362a307d2beb27f3bffa0ed
   deploy.sh: 6e6f3b5734d630439ae7a775d7324344c01ac84558d1b972ede2e7d1487c6baa
   recipe.yaml: 40d87370b5f42be63da905ba6813c64de8d438ca55aa0f4205600ad0d8ff9977
 gb300-eks-amazonlinux-inference:
@@ -1951,9 +1951,9 @@ gb300-eks-amazonlinux-inference:
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 4e05b3114bce076c16d43f2a6e97a7874264db421db1c5b89e0969ffdaab34f9
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: aa746ba1282945910a2bf1183afc468d6eb35ab4c8b6da60909e030123ba52a8
-  checksums.txt: 4ef04f50018cd1aeaf090283d5f1a0eebb6ec8cd607a23fd2dd5e7debb6eb2e3
+  checksums.txt: 66242933ee5607ee42079c921aa0ea4a87ad9e7bd249226cb6f79bc94c7ebbc5
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: fa491737c9d2709d16eb514c29da41f0c0af281de86d48a846075d4c462abfa0
 gb300-eks-ubuntu-inference-dynamo:
@@ -2048,9 +2048,9 @@ gb300-eks-ubuntu-inference-dynamo:
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   021-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 7c0bfc5b8e3faa195e6efe6193df84b5f812a614544d506f6015fdd024681506
-  UPGRADING.md: c4e6947bd56fd0832a144c045971fe87f4e1ce31c185f4c9d828344bbe949b2d
+  UPGRADING.md: 4a584315485fdb0602a81c84113df5e7c770c012bd0110574c919b1a3a2cf625
   bundle-info.yaml: 56329a518efaea1b3f47fb3ff8f325208d241806950939ca74d26f5d92781968
-  checksums.txt: d3c5d79300a1407430705baa38c8e5377f315ef22fa7e29d1173025d09ae6e0e
+  checksums.txt: 2542870ddbaadae01929670f71184005f9790c3127d2eb0fd65c829df5add761
   deploy.sh: 3959fc5810868ccacc85f59d575441096be6d232b62267d5476a65855794a8e4
   recipe.yaml: 4a6f17943b516aaa3f5fc347c42ea8ae0725e138127c0067ded99f736d8454b4
 gb300-eks-ubuntu-training-kubeflow:
@@ -2127,9 +2127,9 @@ gb300-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: af56006dde8d556f81363a6d8a4440e93091661dcdf3af5eaa3fff6ac30e700b
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: d911047355dfb2cc42b18c55bad716673a11c07e4d4931a838a37a1e9fbb91fe
-  checksums.txt: 9f1c4f2f6e9b994d9ade405d9dc7774bef3fc3e3f9c0b763447da82ce109d704
+  checksums.txt: de704822e792812a38fef2e944e61c589ccdaf3647b5afeef5e05a548156fece
   deploy.sh: e04b675e4130095efb3feb8ecdb4510bbb60d345dafc039fb9da261e37e9ffdf
   recipe.yaml: da32bdd4e0d84f6ff6b687789d6e4ee6fd85f2084d9b9af1cd210f93e9c89bf5
 gb300-eks-ubuntu-training-slurm:
@@ -2215,9 +2215,9 @@ gb300-eks-ubuntu-training-slurm:
   019-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   019-slinky-slurm/values.yaml: 7156ebcc98d8c91ea1f3792ccbf7c21dfc612ad2652909d3d626f5499e4eb16f
   README.md: 648b3b20bfc15e5219f28686237248711a1f4eacf837982ed8bcd5b1269d4f2a
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 2b5a4f041c83400b02e067bbb513a677772bf1b1ff61b90157fe4df04b4228a6
-  checksums.txt: 56d4bfe24643b17854c0c192deef445685f458ed33875bb040957734d368fe15
+  checksums.txt: 6b54c6adddecc9becf69c09f884274f5ea148fcb1881cb7d346cde33af01cf27
   deploy.sh: 9d859b82d95d611dc5d29b57fa46cce4acb3e8374b77975f35b0cdbc54a40c47
   recipe.yaml: 576c8c62ebf71e0202d4c8a6dab77581f2f4ba364046948dfbb2126c6864db00
 gb300-generic-ubuntu-training:
@@ -2281,9 +2281,9 @@ gb300-generic-ubuntu-training:
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: bd3d65fe0fc6023094c43e70c2d57751171d52792eb7deaaf60a7ca58fc7d58f
-  UPGRADING.md: c8d74dab36204d5586685ae09fffdf68cbd11042bd2f52acc6de89fe4171777b
+  UPGRADING.md: d6a78d6cc623038a4ada4f91fca15aa24549616298bfec2ad90ce8e63a9b9365
   bundle-info.yaml: f7398ab05aa1d98037957cfd5a875fe26becc396fcb7dbd57e05849493c6ca28
-  checksums.txt: 01e499f290a37a38dff1958634fce23171794bb2b21119a61e82b78a9daa1eae
+  checksums.txt: 6b9a88305ef0a319253954f7270654c85774f70637220840abc554be47d7e6d6
   deploy.sh: d0a0170e345a293b892da6adfbcf18ad668679eaec2c9829e35dc85acb163063
   recipe.yaml: a4de5023386744366c2b7fea7375a7ced72e0447a08eea6cb7bf6950ff7ef78d
 gb300-gke-cos-inference-dynamo:
@@ -2374,9 +2374,9 @@ gb300-gke-cos-inference-dynamo:
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 10c48abe3a9da4948697f1b0a85664965a89b0c3660e539190f8e7d291330222
-  UPGRADING.md: c4e6947bd56fd0832a144c045971fe87f4e1ce31c185f4c9d828344bbe949b2d
+  UPGRADING.md: 4a584315485fdb0602a81c84113df5e7c770c012bd0110574c919b1a3a2cf625
   bundle-info.yaml: 4f3bd4054354a9be20cfe9cd4ccceac636de64e0c63066d934b23039cda76de3
-  checksums.txt: 807c65c386aaf7fa01e61830527a1af6df48bae0b88de358b157ecb8531669de
+  checksums.txt: 73fbc252eaf84db57d9ccce14ae571b8f14c7ec7e952e7bd4e0d49a352245792
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: 29ffe56c729ff469c7c2daed11c5de379e55de7a00cb7b062b63e1451f09062e
 gb300-gke-cos-training-kubeflow:
@@ -2449,9 +2449,9 @@ gb300-gke-cos-training-kubeflow:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 63254b233a326974f761bcb59923ff3416472067b3850fee403194214c95d2d2
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 4d70fe0f9ca76d3308a52e4b5ccd15a5025769f8324ce161242114a5cb458644
-  checksums.txt: b954b268f2cf623412b53d8bce4f24ababe179cd403bce6036fb614357fd4c96
+  checksums.txt: 4889c69d4355313e2947204ef8a0133818b775ec73cdc1091784ae04ba456c6a
   deploy.sh: 50736743f1a6091c2dcb82baedfed99d4ae2f5bfe3325f7e7ab89995353f81bd
   recipe.yaml: fc7edd8a49a0949b7c10f73f15313b972df6503f71f72694cdaa72771e7c51ea
 gb300-nvke-ubuntu-inference-dynamo:
@@ -2528,9 +2528,9 @@ gb300-nvke-ubuntu-inference-dynamo:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: f84ec44c4d6fd18c42a39688ae62a3e864810607f22b30cc16d30966b7518649
-  UPGRADING.md: c4e6947bd56fd0832a144c045971fe87f4e1ce31c185f4c9d828344bbe949b2d
+  UPGRADING.md: 4a584315485fdb0602a81c84113df5e7c770c012bd0110574c919b1a3a2cf625
   bundle-info.yaml: fd3f2cd8b1ed672bb59d14f9de6a5f0bbcfb3e2cf7a8d62bcbfae2a20136b2d3
-  checksums.txt: 6cff48cb7d9be453516afef5bd719a7d5406908698576c4afd6db3973b395087
+  checksums.txt: 2d2d74922ad4b99f9b1170e0b4ec05c717e030046772e22c04a096f135cffffe
   deploy.sh: 6afc61322581830d1c33ecce94a979bec614c59e94538849be47ae9833244072
   recipe.yaml: 7616b2fa4237ef05ad4c09d249bd9c51786c7c3e6954a2719e392abaebf4b8a6
 gb300-nvke-ubuntu-training-kubeflow:
@@ -2589,9 +2589,9 @@ gb300-nvke-ubuntu-training-kubeflow:
   013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   013-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: a1b22321e41604353e636ce19c6cf74175bc69c4de976217c3a9453d9491db56
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: cc87f7086769bc5fc545fcc2fa9ab1d739288afbf4fc5a980ee5f3d1dd88aa37
-  checksums.txt: 3a144ff236387db4a8b4e28917b67f302760506de73cc2a0dbde9224558f2185
+  checksums.txt: e8ad1c7001c58ad2894902e7f066dd7ceec29f2c3d6d2129fed1a26c67aceda8
   deploy.sh: 2b46e8ad329fbf70ef09f80f60cbca81bfde2153dcd5d2c7d4da30d92a06a2ac
   recipe.yaml: 02d6f6630f0cc58ac11dc978794aca07a79911d2f7fbb27f37c06b620107e78b
 gb300-oke-ubuntu-training:
@@ -2657,9 +2657,9 @@ gb300-oke-ubuntu-training:
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 07b1cd5f4e22adfe6a498c2d3719a462074ff8dd149249c7aefc99671fdcad3a
-  UPGRADING.md: c8d74dab36204d5586685ae09fffdf68cbd11042bd2f52acc6de89fe4171777b
+  UPGRADING.md: d6a78d6cc623038a4ada4f91fca15aa24549616298bfec2ad90ce8e63a9b9365
   bundle-info.yaml: 055781e20da2cfa99ddd7c197f8b8d80788a80b0f8534656f8903b892c23ba18
-  checksums.txt: 5f533efa044aa293fcd1779e566a97538d16e2ee6e41a5c53cdcf2c8dfd7a26a
+  checksums.txt: fdf406958cbc37bf151dc0f1ac6ff8cc4df8c514b279f211866831052cbb1e99
   deploy.sh: 55317137b5c10c4af050542242fa0362a9a1f994202905ef49dd926fa7df2a53
   recipe.yaml: 2fbac5c3e98183de1ec9daea8028bb08d64888951cd6d651cc7a3a6e97cfe480
 h100-aks-ubuntu-inference-dynamo:
@@ -2753,9 +2753,9 @@ h100-aks-ubuntu-inference-dynamo:
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: fd2cf044d0d3643b793ce52e52e94e8be499788e7fa2906d44c88995916e1615
-  UPGRADING.md: 83152033eb910f326f6607431646dfad82621e2cc8a48dc54222ac26ada37c4d
+  UPGRADING.md: 525ff53407ea77eaa72f1c98a0bae8f203afab27811a8d2f107034f5e0d43539
   bundle-info.yaml: d49e174f590ec8ef935d10e421d8f6d8907de760e6da8224947426457da7c52d
-  checksums.txt: 94cddad6b520c977bf0e4fa2948635c93c000948552de81367a247938e1d6713
+  checksums.txt: e8060121e8cbb04eb93e0a2c3624fcf123b73e422b63bfeb75ddac146b3bb8b6
   deploy.sh: 1a78677ffdf4ba1f861de19dbb30bffaab64b77aa62b48a87bd929a564bce55a
   recipe.yaml: aaac2ee4ca3080f493b33788bbb2f72e0010abdaa9b0279d8c94ad35b8803b09
 h100-aks-ubuntu-training-kubeflow:
@@ -2831,9 +2831,9 @@ h100-aks-ubuntu-training-kubeflow:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 62d61e649a48bd1b99a3c1c195c2b0280b6008046cf3bf8802024e7ed335aff0
-  UPGRADING.md: c8d74dab36204d5586685ae09fffdf68cbd11042bd2f52acc6de89fe4171777b
+  UPGRADING.md: d6a78d6cc623038a4ada4f91fca15aa24549616298bfec2ad90ce8e63a9b9365
   bundle-info.yaml: 5927ce484ee020fc0d2c50fd6b0a5e3aafa5ac9b2693b1a3deb1af70144e9b84
-  checksums.txt: bdd33a31ce1ac9f875774a039ed95947bcb2b3f215cd85de9ca357c8e6492e74
+  checksums.txt: 994c5f10d470f48b8e0b82ed0092be5ea46df7b446cf4a33fe7a32aa8777c0d6
   deploy.sh: cfb12fbb4315ebaadd1378f55f81e866e9f5faaa909b57e569bab1c0ce558c0b
   recipe.yaml: 502ca994d44e95affe99ab02d778cd1e6a282edf2aa7ca42b2ada4fe8bed6e13
 h100-aks-ubuntu-training-slurm:
@@ -2917,9 +2917,9 @@ h100-aks-ubuntu-training-slurm:
   018-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   018-slinky-slurm/values.yaml: efd9525d04fb69ffea430a76aae43654b7ac9ab8970fcff9f32dbf9b01c06de5
   README.md: 3bacad716ee8b82fff45534c4002f9b51ed9ab177ccb131dc25985b4ce529534
-  UPGRADING.md: c8d74dab36204d5586685ae09fffdf68cbd11042bd2f52acc6de89fe4171777b
+  UPGRADING.md: d6a78d6cc623038a4ada4f91fca15aa24549616298bfec2ad90ce8e63a9b9365
   bundle-info.yaml: 2aec9d75b1659c06ed1e118171b2ac8d67859b2453b653d1228cacc771db309e
-  checksums.txt: 03fe1329b71589338a7cd6f725bc82183a94ddf4dabda30bf62f907816fc1fcb
+  checksums.txt: aa2dd6997eb32c509915423c2a220c42612c9c44ec817c52515eec0195c916be
   deploy.sh: 8d85df5a2b5665074cf1efa1980f5b1de87dc8be91f8c6c7ae5132aef410cabc
   recipe.yaml: 76212ac820f77f51b204cd20b785c003303a95693b86275d042b151ed5b7b5c8
 h100-any:
@@ -2969,9 +2969,9 @@ h100-any:
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: a52b653d566e74f51cbd57b8c729628dd557d4fbb188e0a89a0f45005dcc48e8
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: df5d5d6bb63a59749ae6ffda5a958e6742ab33f5d60819e1db008c4d311f691c
-  checksums.txt: eb63a7b2181d6ed44dd2f94e347ef05abd7af1a5b6d21f07ec62090cc7b54b87
+  checksums.txt: 4df1d8d215dc40497b38f40c7061b0f846b047e0a14f012295570dee89d0169b
   deploy.sh: 6e6f3b5734d630439ae7a775d7324344c01ac84558d1b972ede2e7d1487c6baa
   recipe.yaml: abe6e34a7b7eb764682cd4d72c90a2e0b321a336303fe45e3542c18ee96e0592
 h100-bcm-ubuntu-training-kubeflow:
@@ -3035,9 +3035,9 @@ h100-bcm-ubuntu-training-kubeflow:
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: a469c89afcde426804d61890932ff0080d623a62ffff91ff13f94110958909a2
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: f278360005a40321ac11401eecc4a848c5d7156012a15ab9c84d4f6a4ec060fe
-  checksums.txt: 8a6af83e91643c442a2f2505f68b17f0cc8086c4e2a6bbda446e8eacf2306843
+  checksums.txt: 4d874bd3342e5728d46b9489d4e1475d4af5d64ac0e92a5de6c6913e598bae49
   deploy.sh: 87e9db8ae5dbd48aa645c0cc77fbb2259b67577642c09ecdea79c1c481433db5
   recipe.yaml: 58ec336ccb8d50b8acd86a02bdd610030b89fe1fd7df5274e1094b959cb65f06
 h100-cks-ubuntu-training:
@@ -3145,9 +3145,9 @@ h100-eks-amazonlinux-inference:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: c8866814b7ac79533149a8d8feb1c756edf334abd8321c21284781baf77cc08e
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 2cb5b4d222508ce1209c175b5acd690851e9b4a30b2261447a6d4e618d23245f
-  checksums.txt: 4d67e29d0571ee7383313fc2a70e3a2c0e32192aa707804e0c3e23aaac78443e
+  checksums.txt: 1b731ac8adffb432e8dc9ef2105c133e7146a962c28f7781e7b63043674c4019
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: e61f4649941d65ab831bef6d2a91a614aa418bdfb19e9a2cab5748ff39643255
 h100-eks-ubuntu-inference-dynamo:
@@ -3237,9 +3237,9 @@ h100-eks-ubuntu-inference-dynamo:
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: afb567744cc2976d9dacdcbe15a88787bfef9187c6937cdb27f1896405733d0b
-  UPGRADING.md: c4e6947bd56fd0832a144c045971fe87f4e1ce31c185f4c9d828344bbe949b2d
+  UPGRADING.md: 4a584315485fdb0602a81c84113df5e7c770c012bd0110574c919b1a3a2cf625
   bundle-info.yaml: 892e0be18fcb95bae1a3b7ed7f898885d949c41d905ed5f8e5c1eb9a568247a0
-  checksums.txt: 1be7e51952534fff9ecc592a82a23790b4b53d91f2db4fbb8200d6998ab7e848
+  checksums.txt: 2534e7b1e5331219b1453953da71b7e0ce7d3454e259e8e27a02bbaaa5ec4219
   deploy.sh: 3959fc5810868ccacc85f59d575441096be6d232b62267d5476a65855794a8e4
   recipe.yaml: 08a3e6b6ced07392f21bd6f1af59dcb12ec8c644283fe17becc93de08ce1aeb5
 h100-eks-ubuntu-inference-nim:
@@ -3325,9 +3325,9 @@ h100-eks-ubuntu-inference-nim:
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: fe37472bbd3daef04ad4d0927788f2575cee780fb0607e9754468f2aba3c8299
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: cc3c94b03a01e2ae611ae84cbf39241c0283cb01460657006b81407f1b64b88a
-  checksums.txt: f2b7c0db49036a9542965d9f2335f4b70084e95102833c47498a158dab079ee7
+  checksums.txt: ee3dbe3edb0e16960327f9349f5be4513bf8f79534f266739bae91c4723d834a
   deploy.sh: b3f9fab16a2f2eba39adf6fcaab0adb9cfb86a263b9c25f121c31c7eacd29075
   recipe.yaml: 9f7c81c9c035932ef049ada2b74bf37bd5a4fa346f8703abcc02e3803f4d8b06
 h100-eks-ubuntu-training-kubeflow:
@@ -3399,9 +3399,9 @@ h100-eks-ubuntu-training-kubeflow:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 2fac64c11ce2910c331c9ef4c77712f45f083f1fe2f143d99c4c62842931885f
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 8694d737fbf6cce7e061cbda5c22c65b17b58e608d7de4e9d9b734f9ab583c87
-  checksums.txt: 6531d9c44ba457a566f542e0703189fea73fd2000cec802f58c67ab3375e4084
+  checksums.txt: 363153b70d7ad40f5b419f5f23b9aa9cb2e3516ccaaf31162553a0c18c6473c5
   deploy.sh: e04b675e4130095efb3feb8ecdb4510bbb60d345dafc039fb9da261e37e9ffdf
   recipe.yaml: 76329401d3b3e238be3aa9714a0ef544347f69f6c16ab123f1fa373c5f27f440
 h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
@@ -3478,9 +3478,9 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: c3ea07d87b27034e84f452c9549c6e5420ffc0c60e5b5c92e72516f108655b0f
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: d13074c12fe83807d18d93f23a79305ce5a986f8eec4edefc9ba82aaf8957e3e
-  checksums.txt: 98401be7d8d38ff2994ab28fe5374c6d31922834c4df5a1c1312a518ef88cdbf
+  checksums.txt: 7a423b2ec7d1d89a3daeac84d7fd50e5410a64e46bb025eee319e86a1765c045
   deploy.sh: d6d450c5501e4562345634b46f7d7577da908967b814a1b19715b880e6fa62ad
   recipe.yaml: b251fe42ce3a55de103c1b09ed7aef74fdf0927aa2eabd1c2e74f369a6a0170d
 h100-eks-ubuntu-training-kubeflow+nktp:
@@ -3557,9 +3557,9 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: b068e851e325b48d54067bb844746e3f4d7ddba5a833dd8360812de0e5e37aab
-  UPGRADING.md: 8fe72f7c39ded0b5457fe74005c611a4d93214c2da0a42b2e00cb525b01b98aa
+  UPGRADING.md: 76ce049cd2aaf0f33312db901c410978ba63ed0b83b1663a14fa9bf7972b1f3d
   bundle-info.yaml: b75dee114b2cb4c60004b977c73cf46a1f7ce60a1411078954a7481a90fbcf25
-  checksums.txt: 4d1ac7856353e825471d4003725f2d2f8524fde3fa1a88f7ba83d66f4621fc01
+  checksums.txt: bf262e720845d3bbc8f2bf7343a5cde5fdeac3e33362974135b235a397d69e27
   data/overlays/stock-render-opt-in.yaml: 28518490ca46ac3ecf1b7cb220cfc55c3c4d3e3f595446b6aab9894f15f80557
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
@@ -3647,9 +3647,9 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 934647c6fd9104183c738cfd8ca69bb1b7692d90772758968d78c4c8c3571968
-  UPGRADING.md: 9f3e566181719306d76a9bf60609b9a67a88c1d27edf96587609570cbdfd17a9
+  UPGRADING.md: 806df08002151fd96c28835fa708a4e13913250cc61bc813a121ad25610107a4
   bundle-info.yaml: b4977249a2a62797abae8f4a3e38cab79102ee4d8961875e67939103be5be91f
-  checksums.txt: 48b5ea65d3521a383490cd1dfe5fd324f655c4413c48d963689fa2c64288a691
+  checksums.txt: 206aeed19e3c9b08b1c0377b328b984676829f19fc8a0fa817591d3927fbc67a
   data/overlays/stock-render-opt-in.yaml: 100a230e36a3fe11b9678bb4ad0dcd59fe8ae0a51534814dace25056bb9a2ba3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 84f28e2388ced082c50bbc52c7a5625fa6b5d25c351b615e67f931854ac29984
@@ -3730,9 +3730,9 @@ h100-eks-ubuntu-training-kueue:
   017-kueue-post/templates/topology-tiers-3.yaml: b5bb53f7c4dcbedb14332f5309913fe5252db2756081ddbea64d2148be4331d7
   017-kueue-post/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
   README.md: d1a198c00581694fae62133a6ddb49137ee15b304db93b89bd38353e913edb22
-  UPGRADING.md: 94572671251f08510480f38f63d3e8da2fa7396e68bb066405e19abebe4d2989
+  UPGRADING.md: 275118e467f27bb1801f8a960a5dcfc631a162246e625d188157aa371f5bc1c2
   bundle-info.yaml: 46550dbbeadcaee49cec8678fc145f6824797504165cca3ee32fbf620e4e1bdd
-  checksums.txt: 442fd6b6b0d49d77594fd4a07aeb53f1a0f800baffb1b787565def1c1ba1375c
+  checksums.txt: 650ebfb0c4d8ef1d2381899c33c51f68af0a8b6ae269d87ef2aa4e5085e7acf3
   deploy.sh: 00f2c0ea16593203c2490463e0206deea3e05faf1d230fd80255f86d266fcde7
   recipe.yaml: c9983411bf6b6814a53c41187a20e840a6881fb6f59f4fc9b554d98bedd2c5ea
 h100-eks-ubuntu-training-runai:
@@ -3795,9 +3795,9 @@ h100-eks-ubuntu-training-runai:
   014-runai-cluster/upstream.env: 32bf794239f10502521638e5656b03d196066a4d8b242a0b0e0ec210004baa83
   014-runai-cluster/values.yaml: e2ac7f29d744958609a2b841608d3de4fc3b4dceb05bab12118976fb23c9a403
   README.md: bf382770a5fe3de4261ae106b07e0f7adc01b63de1ffadebd8b88be59dcab00b
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 4cc52d6874911f1729101bf0d01745c4b6a1bf5c14e69bcd1ee326412ab391d5
-  checksums.txt: 942f279fb1696399bfe487ba6dfac0bbfc9f167a13ff4c0a7ff3500a22a49e5e
+  checksums.txt: 6ee9dfcb443305d715631b1bad058c7b4373e615c08b25b6509b467ad0003497
   deploy.sh: 8c6d9cb8b1e09e0f7d16e6aa16f5f1df2e1fd075794ce1758d5828a082392494
   recipe.yaml: 6e3b5a6dd20d1d9b50793b7ab130a753578864f9ce6c014d9c784338bbfc1015
 h100-eks-ubuntu-training-slurm:
@@ -3877,9 +3877,9 @@ h100-eks-ubuntu-training-slurm:
   018-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   018-slinky-slurm/values.yaml: efd9525d04fb69ffea430a76aae43654b7ac9ab8970fcff9f32dbf9b01c06de5
   README.md: 0ea9ec95af4e86df82f9bb82e87b63358d3da1f5b8fe0ae5682e342698e5e8e6
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: cf7fdb869e22656e55ac0ae54b95bc28b48227613ce299cdefe7d32327e71aa9
-  checksums.txt: ddfa0de86b017018dc7d9d4101656dc896bab60109175da7aaab92e064ee9913
+  checksums.txt: 94cb7d23375d1b186acea9f099ed06ab0ae61ec296906727c3c9231c504cb275
   deploy.sh: 9d859b82d95d611dc5d29b57fa46cce4acb3e8374b77975f35b0cdbc54a40c47
   recipe.yaml: 739df51f6df0d5bf0c251a0c65e85fe585fad7bc4989ad6d29a43799bf407d89
 h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
@@ -3954,13 +3954,13 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   017-slinky-drainer-crds/Chart.yaml: 69af9ba1e9687c19a73ad71a0ac1bce5fb07ba922e8ef835208d56ec8d3b8057
   017-slinky-drainer-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-drainer-crds/install.sh: ad754dece702e4bfca1dd40e4a100e8c945728e2350e8445f8dca041d5023c0a
-  017-slinky-drainer-crds/templates/drainrequest-crd.yaml: 770b1e7ca2d13d0b4c3409a02617fbfdb9b5b8adee7c9c642c377b9b1b93108c
+  017-slinky-drainer-crds/templates/drainrequest-crd.yaml: 1d98e631a6e73fe6968a17c70cecf591da38ed6cd7d5739013d7ab9b7a183c1a
   017-slinky-drainer-crds/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-drainer/Chart.yaml: ca1b06f7fb040e015a568efc29322adf7da4daa2548cf6005b70ff04e4723322
   018-slinky-drainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-drainer/install.sh: 707e3b1792cee4fc6bc8e41e05f036547d68ec5bcd38687623dbb7dedc625c7f
   018-slinky-drainer/templates/drain-template.yaml: 4735a243715d0d4b3f269952cd71194877854a0d5430586c24c10c9bdccc80fa
-  018-slinky-drainer/templates/slinky-drainer.yaml: 01479408f57a8096b60fedc625ed222266f89917949fec7c20603ea1873036a7
+  018-slinky-drainer/templates/slinky-drainer.yaml: dbc427cbd7069456c4ff3cfe84aa98340f1ec65faedd0708f1585baba8d987d8
   018-slinky-drainer/values.yaml: ec4621b4f2d611e4c336fb91c1a0a01fb475234a90e6fa99370fa0c2b8f5d5f8
   019-nvsentinel/apply-crds.sh: fb49c9bf7cadd9719c047c71db55af605156b4ff53d5728566ebd6d6d0cae706
   019-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -3985,9 +3985,9 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   023-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   023-slinky-slurm/values.yaml: 24b4418eae1e7dec15ae641661f5a21b925dd268b28304b18ad7639269e288a2
   README.md: f4f6c3254d2cfdc98d64ee15ee4c4e3ef2674eb1ec8b86a0e3f7abcb80eebf9c
-  UPGRADING.md: bb97ca47de08b98874736fde5cb93b18fc3f3586ec37ce2daa7d302fbbdead39
+  UPGRADING.md: 596fd70e97feec46801e08cca15840bc3065133e2b244c67700b56614d4baaf9
   bundle-info.yaml: f476d9291c0245b9ba139f5c25f60003bbf82613100c49a1db382d6eaa5a3de5
-  checksums.txt: 1b0ab52781293ef394355bf3fd49ed4dbf6a362114b67902cd0f7e77e1073b75
+  checksums.txt: be46c331c8d20209ac2cbe051b07ad6594909f52d27d7ecfcb616662d43b60bf
   data/overlays/stock-render-opt-in.yaml: 328e7217055d4c00c950d690a1579830a95456e9953214a1ec0803416edaaaf3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 596e7b6afde6d3f239e0477c55f389bb47ef22edc50e3a395b7da7707fcc89d3
@@ -4081,9 +4081,9 @@ h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   021-slinky-slurm/upstream.env: d6d98698e039f356ddd432950fc6550524f2621d0f12f9a1fa2a27b53f578643
   021-slinky-slurm/values.yaml: b97df3268a17dd1b4d1d963c6e003ab30b6b5ead510207f2a1476140143f6ea8
   README.md: db46738bb7fe2684778b1df13f27f10d26680c1f98ed92d6c7978856a7201028
-  UPGRADING.md: b9b6b61f7e2594b4d62ec05db707cc322d0bcc785d53f8d284d8d45681d977a2
+  UPGRADING.md: ac8c5774f1f0cd9692aac8c6a1a89b5e016d40fdcfb1453d9660159888cf5847
   bundle-info.yaml: 145ee21915c74ffc7c31e5cca3988b9ae823dd4f55f40b17035fe9e69534b310
-  checksums.txt: 37f36022af46d616f860224202cc086cfbdc90b05737af9178f55d8718cf5d1e
+  checksums.txt: 20cd263ae2bcff69e9914d213df9af0b2a630db372a1703c12b751321a81c630
   deploy.sh: bebc8d50be3cdcb9f179e748b837e7644b39718cc10560ffbe4dea6effa96a70
   recipe.yaml: 570055d4109c373d774bdfeffb3f261cd4aa938781cdceda1d72945849c6775d
 h100-gke-cos-inference-dynamo:
@@ -4179,9 +4179,9 @@ h100-gke-cos-inference-dynamo:
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   021-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 1facdd19811c6ba08ecb35a837b7fb368f13c2bc74636b514953dfcc708cbe29
-  UPGRADING.md: 1031f75e761f33ee6b747988795642363a505aff09004ce89587d2a6031efa5d
+  UPGRADING.md: 818d4861a41e7f0be7ced42750a9368b6b2a2ccf6a3020dd315fe6649651f870
   bundle-info.yaml: 9c6dbfce4d0a4957c913d6e9bdb483a45dfccc531bf097cfd0e9e9c49aa48999
-  checksums.txt: 7445a8f42f5eb7e145e7b1b5b17b377a3b723a3710db1155402756c8648056af
+  checksums.txt: 235de3eefd228cfba0de65eafcbc0baef02747e49bf074915e24459230f81aa8
   deploy.sh: 34d9d6c33e26fe690cb388ba01ea383b3444fa18c63e525c83f143f5c41f613e
   recipe.yaml: bf57d775fec3bd41e9f54c387f217dd7d884596c0ddc73ad34b7b661fa0e12a5
 h100-gke-cos-training-kubeflow:
@@ -4261,9 +4261,9 @@ h100-gke-cos-training-kubeflow:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 8ecd5e4eec6ace4d4af2f386c4ae47f2f790257eb1efd17747131ff0b257a87a
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: c295d2426d29a7e26ca4450e13e63ab1222b3e968655d6faad1a29d4427a6571
-  checksums.txt: 357195652557118d5d459e95e67682f9d97dd5c4636b08d51d3091667b20f7a5
+  checksums.txt: 3f63a2534d379df803e4e5951f275accce6e2afd16066e4f8ae6e046569c688e
   deploy.sh: 0f6a2c61ae21d657eacbd33dcbdb5224b6148dbd42c8182f6dd56d7d06c9be8a
   recipe.yaml: 8ab2a23c0a132c624460d85c1ff3e4050b4c50cf3ff902793fc0060732840194
 h100-gke-cos-training-kubeflow+gpustack-dra:
@@ -4344,9 +4344,9 @@ h100-gke-cos-training-kubeflow+gpustack-dra:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 8ee645e32419f3b3bdc5b474e75fccf8c52ad0a577392e0ca4f679bfb39c2846
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 6994806a0e41f6db007a28ad0b51efc081f582b793681a2f82bcc4a3de1e8bf7
-  checksums.txt: 1336d57140c58c6e27be5a9bbcaeecfc0d8618c88dd6aa4fc598a425eeccf833
+  checksums.txt: a888f2bc2061c2332d09eb08ee4b9133ebde03ead7d5479514cdf69a2e6d7154
   deploy.sh: 0f6a2c61ae21d657eacbd33dcbdb5224b6148dbd42c8182f6dd56d7d06c9be8a
   recipe.yaml: 394e31c1d848a3af3ef4f430c7098baea519d50eaf849c103c56175ca150e9bc
 h100-gke-cos-training-kueue:
@@ -4432,9 +4432,9 @@ h100-gke-cos-training-kueue:
   018-kueue-post/templates/topology-tiers-3.yaml: b5bb53f7c4dcbedb14332f5309913fe5252db2756081ddbea64d2148be4331d7
   018-kueue-post/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
   README.md: 297a061aafa56857e5e94bcee9842a8007d507c06951654d5eb6cf4118d5b1f1
-  UPGRADING.md: 94572671251f08510480f38f63d3e8da2fa7396e68bb066405e19abebe4d2989
+  UPGRADING.md: 275118e467f27bb1801f8a960a5dcfc631a162246e625d188157aa371f5bc1c2
   bundle-info.yaml: fca030b8cb01eff5fe2c2fc5b468c727536d7e3d9a6d341cd0fe2b52ac73ac61
-  checksums.txt: e26d46b95385b0585698fa5aebfe52cf5c60747d95571ca1101b2cdfc62e9978
+  checksums.txt: 5096c15c49de8a08bc698648186f1f16ecb0adf05489322d876c3d68802adabf
   deploy.sh: 70e0b277ed17dfc69744f487905b679d1f9f3820bf647248e87f2e0e95493f8a
   recipe.yaml: 32b592b12cedfa6f07c95b0c97a550236f245cc8b6632acd769cec14ca486b9e
 h100-gke-cos-training-runai:
@@ -4504,9 +4504,9 @@ h100-gke-cos-training-runai:
   015-runai-cluster/upstream.env: 32bf794239f10502521638e5656b03d196066a4d8b242a0b0e0ec210004baa83
   015-runai-cluster/values.yaml: e2ac7f29d744958609a2b841608d3de4fc3b4dceb05bab12118976fb23c9a403
   README.md: e6fc9188b9d8b63339ccf3e6abc278a1701f75de19a01727cc674d7854001c58
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 1381801f1a00ad41c22149c75b4adf259f705d5267f8bcd7da7caaf7bf891017
-  checksums.txt: 3d23225e1aab4b52f47261377ece34cdfada7171c994a9abe68bb9be4c867a85
+  checksums.txt: f0805da1c572144de6a6841859ef30dcd029e24459738ec3c0530f5c4ffdb6d9
   deploy.sh: a9fb1515dec641940a3052983794633cbf58ff2564761b4d1add990138620eca
   recipe.yaml: 3ad3f1621e8d3d642b2c9e1a9d856feb34e65cbab977070c1edd3a19ad2c1f5e
 h100-gke-cos-training-slurm:
@@ -4597,9 +4597,9 @@ h100-gke-cos-training-slurm:
   020-slinky-topograph/upstream.env: dda993ee795d95551c98e5e1f97587c6cf1e2c5a722f61fb90726a097788cfba
   020-slinky-topograph/values.yaml: f11e2c423e180afd7141528eabed1ea9f0c1a81839f9b8218e194b7a61726bdb
   README.md: aee2cb8f0e28311ebecef36c1cb9ae4ea264e2a4cd083d9fd33232866f508b8d
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 10f20e1ebd27ee2ea050727c2df58a6df422b269d3a9deb0b2e152b016e936fd
-  checksums.txt: 7d0345037f095a9a34e3bf7e122d3a0395443e4d88a704dffff33f8a419486ff
+  checksums.txt: 93cd37dfbb3cea6d90e4bd83d9930684a3a4d2b7b74ff9a70c06cd31977aad73
   deploy.sh: 3c91727718e2f0d106a7dd220171cdb28fda16113de7394a668c62fa9388a197
   recipe.yaml: 97255a5f4bedd293b8ee282a7c82659ad60e5485dd2f0391d9764c1fe51a67ad
 h100-kind-inference-dynamo:
@@ -4680,9 +4680,9 @@ h100-kind-inference-dynamo:
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 289c838fb76a85b7d956eddb41a0315b51e97581e2f443219f7bee8f1f566645
-  UPGRADING.md: 83152033eb910f326f6607431646dfad82621e2cc8a48dc54222ac26ada37c4d
+  UPGRADING.md: 525ff53407ea77eaa72f1c98a0bae8f203afab27811a8d2f107034f5e0d43539
   bundle-info.yaml: 84ce6e27814b077dd6eeec084ec5cf093408fc399b7a6d599ecbaf32a02259f4
-  checksums.txt: c41d1aa1bd52ddea18fd47a58ceb4fbf6ee262d31035f6111f669945630fde5d
+  checksums.txt: 262afdb8627310e6d15d4b9af8df525f8cf36ed32197d547b1ecf62b0d47f2ac
   deploy.sh: fc332287efdf91cc0ea399c6b5227ed2bb2fac9577a14311a44f24646cd09ad2
   recipe.yaml: 5baa81a8f9f3edeb41b29697097a94bde3fb2487fc08cdcaf8a652a11182d66c
 h100-kind-training-kubeflow:
@@ -4745,9 +4745,9 @@ h100-kind-training-kubeflow:
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 2bdb6068fb32f3d28e394018f9db72161d3850e49d151d3a2c9a8530a26ff3a9
-  UPGRADING.md: c8d74dab36204d5586685ae09fffdf68cbd11042bd2f52acc6de89fe4171777b
+  UPGRADING.md: d6a78d6cc623038a4ada4f91fca15aa24549616298bfec2ad90ce8e63a9b9365
   bundle-info.yaml: 051b440c79086125ce980e8719090e9a074cedea0824a4804980c849ca24f88a
-  checksums.txt: cce96335e7fa2177566b31c241bce47b341c5fee9f8c9d0f955af9ec58788852
+  checksums.txt: 5abea27061f9c6b85ab0040fa7040d3d56394f65f386cc8a91c7fb9ab8f841af
   deploy.sh: 585028988d2cdbd7fad24e6a6aa04e416399fb8c675ac560c1ea2cf01e76def6
   recipe.yaml: 9d9663ad807220ba48627d180f5bf907b6befd2016c6ec05c34a3a1456908f1b
 h100-kind-training-kueue:
@@ -4817,9 +4817,9 @@ h100-kind-training-kueue:
   015-kueue-post/templates/topology-accelerator.yaml: 1ca4ffa711704422d5ec1796cac645bfc0e10d0b1538e2d48c22013300609ea9
   015-kueue-post/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
   README.md: d1883bfab457074491bbc7567fe55842dc4151de1e237abd80cd8941c7d0e3a2
-  UPGRADING.md: 0e24a1f1efa813e97e4457fbf23c811a8315cf627f04f748d4cf9c6fc12b21dc
+  UPGRADING.md: 9094b0f430d76b6c50c0cc22ed75fc36935d52866ba5ba83cefb55b738295da7
   bundle-info.yaml: 9c47e4a9166cbe0975ec6ee41a83d57f937f1be12d4889f9e0cdd64531d38f83
-  checksums.txt: b061c0020c15c095266455f74aa12310354651f0d29f59ecf3b7a3887b686082
+  checksums.txt: 2ce317cbf2dd24e3e2ef636b4c8d9c0677c07cf889fec302b1f9a2feea0e6fc2
   deploy.sh: 706a8d58c6b713b9376215029a49a213fc943bdecab7cd7d4ea7d7ef2d86e692
   recipe.yaml: f272279d6698abf09013fd9aeb53013c08cbd4505d4765f4af039b24124e2e07
 h100-kind-training-slurm:
@@ -4894,9 +4894,9 @@ h100-kind-training-slurm:
   017-slinky-topograph/upstream.env: dda993ee795d95551c98e5e1f97587c6cf1e2c5a722f61fb90726a097788cfba
   017-slinky-topograph/values.yaml: c9015074818102d8727cfd38e96941c5c285175852fa71f81182c4323f751e05
   README.md: edb6f13662559cdd93507edd17817ee560dba5265e81349fc6a44f18f8f1ec95
-  UPGRADING.md: c8d74dab36204d5586685ae09fffdf68cbd11042bd2f52acc6de89fe4171777b
+  UPGRADING.md: d6a78d6cc623038a4ada4f91fca15aa24549616298bfec2ad90ce8e63a9b9365
   bundle-info.yaml: 26b3e98a09a616aa7a9593b922021730fff833d6a15f1141a0de8f85760aed0e
-  checksums.txt: 5d93b5c8a18043af8ee64bd534801b939583ccb271c685f4dc2d76f648218759
+  checksums.txt: 0846b4dabd3468163c867dd90e2363f3f8b6a150d99619f3893ce9c21826785f
   deploy.sh: cd7ccfe96441d0d0a17d9b7ef13f18e2938613e70854fc367a7bd8e64039019c
   recipe.yaml: 444ecbaccb07246c2589f2e0bca5b81fbbbd4d42c701af827473fced23db1b49
 h200-any:
@@ -4946,9 +4946,9 @@ h200-any:
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: f019c3361ca79b353c5845891de3ef82aceeff4b75fae3e3082fb1bc0a209fc6
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 27ec679eed7aef60896f4389291953ff380b14e0386aa9420e98372bb3c29124
-  checksums.txt: d7cd36330e1d63daf460acc1406c6ad327995a45758af1b3aadcd6b8f68ba882
+  checksums.txt: fb15593b135a77a49895c7d7113e1ab1cbb7498438ebf46027e342caec1b86cc
   deploy.sh: 6e6f3b5734d630439ae7a775d7324344c01ac84558d1b972ede2e7d1487c6baa
   recipe.yaml: fc8b0325c9776265922f1ba2f3fa71d8f31e1716ad49e897e8ffe3262cb91f2c
 h200-eks-inference:
@@ -5030,9 +5030,9 @@ h200-eks-inference:
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: dd252fea72f20828f45721f86d9920133794973828c8353df62a249ad9992251
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 664e1674aa561147fa7b23669ddfac8da3db99b83d801f9451ed1d350ec87f06
-  checksums.txt: 1c9b9906f5c3b02a7a1249368251196c200b1184bf640b37a8a133749f0330ee
+  checksums.txt: 8eacdba0d07d4fa9ae3d2c29e4bd64b26349a1fffd7f78fddd34bf8e70fe7aa9
   deploy.sh: d24463c80f667dc815817624d68ca0583487a6ee519000cd06bb9549424892f7
   recipe.yaml: 5a558447eca313ce77fc6bca35fa580d7fe694b1b5693043a4b699506ed92616
 h200-eks-training-kubeflow:
@@ -5104,9 +5104,9 @@ h200-eks-training-kubeflow:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 4ee4f157ace02038e4003fec005b87cdd4a2bb61fcfd8589148ae38495d736f4
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 645b685c4d6945171984c7227ac3b562637a1ec8d95dbc99d564998a8547e287
-  checksums.txt: d5187d2b1410eb0ce7208980dcc6be7a4ccd71f7de2ac348c2c245dc1eb9e30c
+  checksums.txt: ecc7f7a6f86853c2cf2352bc6288361f39419202e92be9833da2232a072251bb
   deploy.sh: e04b675e4130095efb3feb8ecdb4510bbb60d345dafc039fb9da261e37e9ffdf
   recipe.yaml: 8ffc75aaa182e635f815724573add7a3389000bbea45bd789d5aef82bc8d999b
 h200-k0s-ubuntu-training:
@@ -5156,9 +5156,9 @@ h200-k0s-ubuntu-training:
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 07673f547009fae3375785a378db4263f4b94514573528d6a8b9f0a50a826fe6
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 1467b2717b362707a9831f9006ee6f33203d1404594687285a734ea4a87e09f2
-  checksums.txt: 160c01c3abe85d9d6c872a7be252baf373c46dac7b3d25634f435155012da6c0
+  checksums.txt: 6e68f407bc53c10a02b7411ee6c453bf122a9769d619f4f5ece98ae298d79257
   deploy.sh: cc316b6457856fa5913d4da2b95e9345278177c284e554a8c45072f3aabad4bd
   recipe.yaml: c5066167ae3f9f0d0d118abe97318b46b161aaa850d81f0817a9fc327764e86c
 l40-any:
@@ -5208,9 +5208,9 @@ l40-any:
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 5f6a054bd883078179d735942092d0df9da9ea887b148169b6986c5addb19dd6
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: bc931791d47fd40def24ab694e167846deba9a3e1dde64a23a0138c51ced5fc7
-  checksums.txt: e7cda412b05303909ef3f71711573f43ddfc39f6d56c2401488f0387ac1df9a8
+  checksums.txt: 539e2b481ff4990f3278559fc9e3c6b994c5ee4d7b81c57a6fe553133b44b61f
   deploy.sh: 6e6f3b5734d630439ae7a775d7324344c01ac84558d1b972ede2e7d1487c6baa
   recipe.yaml: d61f46ce15ba56723557169b9a1c61a62db9bb6d8c80c8c28b406c22e4120a22
 l40s-any:
@@ -5260,9 +5260,9 @@ l40s-any:
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 7317a23993b99e12f5f603d778bc32a975aea68309d633b70d71b525919f6a74
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: bc9e623700be70e6f841d0fa121851f00b21bd92e57751998254afbde119e431
-  checksums.txt: c4981f1fd18aef962b66f126f114875b098f634d565a893d1dfd061756ee9b59
+  checksums.txt: fb11e52ed939b5d2a9e5b89e4a67c8eb310ad12507f837cb2892817c1d7a89ad
   deploy.sh: 6e6f3b5734d630439ae7a775d7324344c01ac84558d1b972ede2e7d1487c6baa
   recipe.yaml: 196b38aaa5fd499ccbb9b83842a18955d299077a8335f1e5b7a508e5e12a45ec
 l40s-oke-inference:
@@ -5336,9 +5336,9 @@ l40s-oke-inference:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 9bb072ed59d0fb01ca287c2c0aa3ffa57614bafc59a51b6deeeeed94d2b71baf
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 4dda5074574f2541f284646d74d403a7438a2385ef6916597ed5abe83a519347
-  checksums.txt: e335d669d8764b6cf3d34d02936f2daee686873cc21c11d9b58860b4bf2520ec
+  checksums.txt: 2d933d2ce3bee9a7f4cb0626f5c59ab996f8287399d3b9621c11d779851b5702
   deploy.sh: f43f7421dee56ff6677e500ef194cdecdd114d49d6558fa82de390f8452e0538
   recipe.yaml: 09c19275f08e5e93985fd9b046dc230eb6ffde752fce735b3ff77227114989ce
 l40s-oke-training-kubeflow:
@@ -5411,9 +5411,9 @@ l40s-oke-training-kubeflow:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 084c3344b4ef3c6dda47dc78be3e016646c174191a98f8d8296d445b908aa1e4
-  UPGRADING.md: c8d74dab36204d5586685ae09fffdf68cbd11042bd2f52acc6de89fe4171777b
+  UPGRADING.md: d6a78d6cc623038a4ada4f91fca15aa24549616298bfec2ad90ce8e63a9b9365
   bundle-info.yaml: add6db849460475b2dab044187475057673f66e6b7204e67d39d72d99cbf3513
-  checksums.txt: 43769d0804ed72d26a9d199ed1de3b6a90c63375918bb444b8f75dd9f750e5c4
+  checksums.txt: 54b7d1a5de9a31f385a0017b4dfc45041b3949e3e7adc36c7c56093259475fa2
   deploy.sh: 791197141dc520cd0c453383d127de3875726277b432e606b3a734479f34aa28
   recipe.yaml: c901875038ac3bc95473190ca4729963f3891408d95714c2f5662e498c256e67
 monitoring-hpa:
@@ -5463,9 +5463,9 @@ monitoring-hpa:
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 7bb6af5068fed9be31d4089e75e75816ef09cc702e71396e11c52beda0584bfd
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: c1e507e549904df597e3a28e6b341aaf585773df15ea2e28844086cae89626d4
-  checksums.txt: ab79ce65940ef71b8b829bf823afb456205122815f97db3c521110e65dcf7b4f
+  checksums.txt: 84b123d0f8dc38303d67fba912081ff2638feb5813bbdb5b89533e20d1190587
   deploy.sh: 6e6f3b5734d630439ae7a775d7324344c01ac84558d1b972ede2e7d1487c6baa
   recipe.yaml: 8bb1017b7dad5c695ab51e0148f63a3baa9387c1ca1215c9462afddac70b3c95
 ocp-inference-nim:
@@ -5679,9 +5679,9 @@ rke2-sles:
   012-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   012-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 68bc1abe15cddb4f0467630483efbaca70136fb727646e9457913ec76a69f00d
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: ec5f865983f9efd411ca2fc3ec9149674540812095de714c2d394aa534bf90e5
-  checksums.txt: 43e339b6c2311f1e7a2f0b079f2d5e51cf4305da04bfaa837a0b41725bda243b
+  checksums.txt: dda0f013bcf24959c12b7423e977694b704657b9c8440ef9fd348a9366af2218
   deploy.sh: a466eaa1759123258e9f510d8cd201260d9f0b4995d9c996688238d6abac93a0
   recipe.yaml: 2c47bda576bdcb93f889adfeb2e02296103b4cfb1314f65112b09bdcfa82997e
 rtx-pro-6000-any:
@@ -5731,9 +5731,9 @@ rtx-pro-6000-any:
   011-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   011-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: ed874d0204fb0dcca9f7a46a15baf1a35d05b93d28d9a287545f350b6ef932df
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 7b439c9ddef68127801bac65383d7366c43834e94504d887d17f32788f5f51fb
-  checksums.txt: 91d6d6ca496e20725387bb67c4fbb91c1036db0a4e147b03d51274e2b6268c5e
+  checksums.txt: c7c38c5765d1a95e980d8ac24eae61f66ebd720a5b9cecfbe6c03228aeb1d182
   deploy.sh: 6e6f3b5734d630439ae7a775d7324344c01ac84558d1b972ede2e7d1487c6baa
   recipe.yaml: efc7de2deac75a6305c97f6995bdbe0289196180b570a2e6279a4477628959c9
 rtx-pro-6000-cks-ubuntu-training:
@@ -5841,9 +5841,9 @@ rtx-pro-6000-eks-amazonlinux-inference:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: c41dc923cd3fa741009f46d0ba85b4d3741dfc5df8d297fbb224689ab84a28c6
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 3898d938e243befe27ed2851d4ebda4a7f9713e7c3af2deaf0e51e5e01e91770
-  checksums.txt: f4513064d0f995b14ee0abd8e7deb123d3af49c56ad571d4b5bdffb7c10ec09a
+  checksums.txt: ed9f7c813f868b3aab2b8baec5646b527ed018ed9f1f09e864496de04e29a974
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: 606fc51d16f016cbe7e02ba3349cb9c9f99b12a670f1a442389b80c04569b647
 rtx-pro-6000-eks-ubuntu-inference-dynamo:
@@ -5933,9 +5933,9 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 865bfd4afa53d4af064949a3ffbb8ff2de09ec35b1a5815e7ac8a8bf3eca2cf5
-  UPGRADING.md: c4e6947bd56fd0832a144c045971fe87f4e1ce31c185f4c9d828344bbe949b2d
+  UPGRADING.md: 4a584315485fdb0602a81c84113df5e7c770c012bd0110574c919b1a3a2cf625
   bundle-info.yaml: 5d71c2d2ac83164f2435e746aedf1a2fdff9f1d8da90ecca1497ecc54e210c33
-  checksums.txt: ad67e6359196cf26ebd3a760c6295243dabfb54a5c226be00efa7b953597f303
+  checksums.txt: f6efed9159027306b6c50dfc425fe7957f3fd2f759bb14be2a873d3991d5b18b
   deploy.sh: 3959fc5810868ccacc85f59d575441096be6d232b62267d5476a65855794a8e4
   recipe.yaml: 1c47517ad3fff0ae39a2bbe89dc63d0ee59b04075b6ca5fdbd5d033bb082cb9b
 rtx-pro-6000-eks-ubuntu-inference-nim:
@@ -6021,9 +6021,9 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: e057b277956f7979acd62d40fb629abaf9dc9c1f100159310d620c29ab8b6193
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 931933506146f2537524b0286fe691c5452cab432ebe5f314be07b55a39aa496
-  checksums.txt: e706d941b67e68154640c04ac7c87dc3d8ce13c25cd1d093090f973191303605
+  checksums.txt: 0a0ebf0abc5abdcdf3400f7aea18917584aaca6aef5afe1386d3ac670f511184
   deploy.sh: b3f9fab16a2f2eba39adf6fcaab0adb9cfb86a263b9c25f121c31c7eacd29075
   recipe.yaml: 31b427cf2a35bfb0dae0e41b349cac2ce2ddb1b18638a6532a8b7917bab90404
 rtx-pro-6000-eks-ubuntu-training-kubeflow:
@@ -6095,9 +6095,9 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 8929355494272db95a2d1b344beb0c4e40b55b2ec0a05c74c74e04113c173264
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 06a29a79396241c5eab2daa08d9fc0d3b6df65264b8663247153a79e6bcd9dd8
-  checksums.txt: 00c4f78fe0b285771b101d6a7fa1cf2d86c8751bf0a083aef6e77f936501776b
+  checksums.txt: 22343f78d3eceb4fa4e40c6168764d604eb6b7571c661fad7f7aa210a112b39f
   deploy.sh: e04b675e4130095efb3feb8ecdb4510bbb60d345dafc039fb9da261e37e9ffdf
   recipe.yaml: e8f57c4edbb1764f0663bbb1c948929cbcda3250668a2faa3283d62c5d445a20
 rtx-pro-6000-lke-ubuntu-inference:
@@ -6166,9 +6166,9 @@ rtx-pro-6000-lke-ubuntu-inference:
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   015-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 9e88ece88469968beeec599b475e2139406fbfc38e706815e8df19f2539004d1
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 96929c7f18314b265aee218bee7a6ca0346c5755d672a3610cc759350a8176ec
-  checksums.txt: 58cf13d57757a465a1e292f307bd8219659c0b13a567de10d137b5db3236cd05
+  checksums.txt: 344ecda82cdd50e40370b02b9ca6036db502735b641a4fd618d07c6be8bab383
   deploy.sh: 49d525ddd078ed165ad0c17da3038b968d1f118418c1e01cc4596b6859cfef74
   recipe.yaml: 5aaa866e63219a67446353be80812c7f946850034953e4b4d13fb3a3b03ea0c1
 rtx-pro-6000-lke-ubuntu-training-kubeflow:
@@ -6227,9 +6227,9 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   013-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   013-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 85c59b2c03532234df57c58229ab78d7cfabf96766b06c37bc497adac2dc1347
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: 5b2b794a6173c048086cfd29eb75d1da67f0f737595f9f1a26a8a9f07dd9f24e
-  checksums.txt: e5ec90225b5a60fe9f30269bdf3c7e14401ae6ff80b06bd299fc9628510145ed
+  checksums.txt: cad2490ea18db90d16caa0529d53dee7bca122464f52e3133c764af4d6b9dc5e
   deploy.sh: 2b46e8ad329fbf70ef09f80f60cbca81bfde2153dcd5d2c7d4da30d92a06a2ac
   recipe.yaml: f8ecf328dfac211299e7a18c29ca6de5489eeab4c5597da37c77a80278ab26de
 vr200-nvke-ubuntu-inference-dynamo:
@@ -6306,9 +6306,9 @@ vr200-nvke-ubuntu-inference-dynamo:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 60714ca79db9f8f0826e7262dabb5538972981e4b8649a42d70f40f1ecbcb4d7
-  UPGRADING.md: c4e6947bd56fd0832a144c045971fe87f4e1ce31c185f4c9d828344bbe949b2d
+  UPGRADING.md: 4a584315485fdb0602a81c84113df5e7c770c012bd0110574c919b1a3a2cf625
   bundle-info.yaml: 79e844bf55078f2c4590589a68b50e2389d81d4ba91793613fac169dd5510a05
-  checksums.txt: 61fe16c87bb3b8c86dbdc975533829787b7b363146e17e5ff99f52a5ed7cad40
+  checksums.txt: 386c1a5ee6485ec9792f7f3961b6b79f905304f5f144de4c3511d1b17f853aa1
   deploy.sh: 6afc61322581830d1c33ecce94a979bec614c59e94538849be47ae9833244072
   recipe.yaml: 452dff6e777724370b9016b90520be8209e538240d4b47beda8a89c4a19cdc34
 vr200-nvke-ubuntu-training-kubeflow:
@@ -6381,9 +6381,9 @@ vr200-nvke-ubuntu-training-kubeflow:
   016-sriov-ib-networks/templates/nvke-vr200.yaml: f1f98e74ff094c8a3ff6a5a501bfef10207ff92694ee9698f23a1b5f2088aba3
   016-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: f4dc808dafeb28da965ab98d6329b59d4183eac7b7e85b3876a0750dfd58fddd
-  UPGRADING.md: 00b98d8f19b684bee3fdbf2029f3d01e0568ce0492bcdd63a7feaf962e951a35
+  UPGRADING.md: e4e0b7c3581855b4931accee3833fb0fceabbb824750daf5206bd4bed047739a
   bundle-info.yaml: b10680cdf8c7791a8c862c1dcd0eccdc2d9b7c12d3330b6d073daf55cc443a0a
-  checksums.txt: 0a58a6a734a16e406c1abb5fad5f85188317f995ca96b439a06977dd3544f282
+  checksums.txt: d7c17324ebb1154aa931c9f25ba023516da44fb132d1a76559ed0875fd68638b
   deploy.sh: 3c5a6b915cd218b5b3c6f89b53b01a4891cb5110255d387bcca8ac2ab2d1c145
   recipe.yaml: 5f79160f945d42a3e51acc1dc280b90b1f2325bd7a06323d9848dd2c8b22f338
 vr200-rke2-ubuntu-inference-dynamo:
@@ -6471,9 +6471,9 @@ vr200-rke2-ubuntu-inference-dynamo:
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 44895e578cd27b0fd4f1c216b229418d90b168fbbd7bc7a0d10935d400ff983f
-  UPGRADING.md: c4e6947bd56fd0832a144c045971fe87f4e1ce31c185f4c9d828344bbe949b2d
+  UPGRADING.md: 4a584315485fdb0602a81c84113df5e7c770c012bd0110574c919b1a3a2cf625
   bundle-info.yaml: f35a5aa2a4223d966cc0dad9efb964846550495c1d297d5cd96c7854dcc2472a
-  checksums.txt: c623fd9a47a9d622467d1ac5b0765932bcbdd4a6daabe56be33865367326675f
+  checksums.txt: 9b98164969c9920b84dd4052b3a1cbe09254d9e642fb6970c69f45b5eeaa2c0a
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: 15c4844c9b1e89b8854b8b099d6afc71be177264851673bf0f95aeee62eae622
 vr200-rke2-ubuntu-training-kubeflow:
@@ -6542,8 +6542,8 @@ vr200-rke2-ubuntu-training-kubeflow:
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   015-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 8b5f22a3483ecc7394c33d0e8c06602beac6218d03408d2766d51873b36463fb
-  UPGRADING.md: c73e56c360a6ad23edf870c4b9182aa1191a2a82e315b49a4dbcba379024e9e9
+  UPGRADING.md: e7a5e37d335409e49bbadfcfd21907fd22c1b5cafa152920217da57f2b29b881
   bundle-info.yaml: d9e5eec18f5b33a9a945e5db4fdc28dada81c5eabfdb94e1af37e0a09c04eb20
-  checksums.txt: 6f56604fb8655cb6823609eb98cfe09d545820d43153a5ec2fbbdb2afb5d3782
+  checksums.txt: 90f05ec6465247c25bc51561ea489fd06740b82915e9995ab359b9abbef1aab1
   deploy.sh: 50736743f1a6091c2dcb82baedfed99d4ae2f5bfe3325f7e7ab89995353f81bd
   recipe.yaml: 8359e83d9da6751ae1deefb0e4fbef6900298756c227159d8725e6da43c6fcc8

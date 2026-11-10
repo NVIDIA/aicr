@@ -277,6 +277,19 @@ func TestCheckNVSentinelDrainScopeCoherent(t *testing.T) {
 			recipeResult: sentinel(true, set("podDrainPolicies", []any{
 				map[string]any{"name": "w", "mode": "AllowCompletion", "podSelector": "a=b", "ownerKinds": "StatefulSet"}})),
 			wantBlocked: `podDrainPolicies[0].ownerKinds is "StatefulSet", want a list of controller kinds`},
+		{name: "podDrainPolicies ownerKinds Deployment → blocked, names ReplicaSet",
+			recipeResult: sentinel(true, set("podDrainPolicies", []any{
+				map[string]any{"name": "w", "mode": "AllowCompletion", "ownerKinds": []any{"Deployment"}}})),
+			wantBlocked: `podDrainPolicies[0].ownerKinds[0] is "Deployment", which is never a pod's direct controller`},
+		{name: "podDrainPolicies ownerKinds CronJob → blocked, names Job",
+			recipeResult: sentinel(true, set("podDrainPolicies", []any{
+				map[string]any{"name": "w", "mode": "AllowCompletion", "podSelector": "a=b",
+					"ownerKinds": []any{"StatefulSet", "CronJob"}}})),
+			wantBlocked: `podDrainPolicies[0].ownerKinds[1] is "CronJob", which is never a pod's direct controller`},
+		{name: "podDrainPolicies ownerKinds ReplicaSet, Job and a custom controller → passes",
+			recipeResult: sentinel(true, set("podDrainPolicies", []any{
+				map[string]any{"name": "w", "mode": "AllowCompletion",
+					"ownerKinds": []any{"ReplicaSet", "Job", "LeaderWorkerSet"}}}))},
 		{name: "podDrainPolicies selector not a string → blocked",
 			recipeResult: sentinel(true, set("podDrainPolicies", []any{map[string]any{"name": "w", "podSelector": 3, "mode": "Immediate"}})),
 			wantBlocked:  "podDrainPolicies[0].podSelector is 3, want a label selector string"},
