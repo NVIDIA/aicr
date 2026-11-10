@@ -261,6 +261,19 @@ aicr mirror list --recipe recipe.yaml \
   --set gpuoperator:driver.version=570.86.16
 ```
 
+The GPU and DOCA driver images are listed with the tag the operator pulls on a
+node: `<version>-<os><os-version>` for the GPU driver (for example
+`570.86.16-ubuntu24.04`) and `<version>-<os><os-version>-<arch>` for the DOCA
+driver. `mirror list` reads the OS from the recipe's `OS.release.ID` and
+`OS.release.VERSION_ID` constraints (`ubuntu` and `rhel` are supported) and the
+DOCA architecture from the accelerator (`gb200`, `gb300`, and `vr200` are
+`arm64`; other accelerators are `amd64`). A driver whose tag cannot be resolved
+for the recipe is not listed. This happens when the recipe does not pin one OS,
+the OS has no known tag pattern, the accelerator is `any`, or the driver is
+precompiled (its tags also name the node kernel). That driver is named in the
+component's `warnings` instead, so mirror the tag for your nodes yourself. A
+driver switched off with `driver.enabled=false` is not listed.
+
 The override key format is `component:path.to.field=value`, where the component
 name matches either the component name in the recipe or its `valueOverrideKeys`
 alias from the registry (e.g., `gpuoperator` for `gpu-operator`).

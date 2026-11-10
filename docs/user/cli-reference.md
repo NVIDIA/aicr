@@ -3737,7 +3737,10 @@ the recipe was resolved with `--data <dir>`, both values and manifests are read
 through the overlay so overlay-shadowed paths take precedence over embedded.
 Recognized mapping-valued image descriptors with null, empty, or non-scalar
 members are rejected so the command cannot succeed with a known-incomplete
-image set.
+image set. GPU and DOCA driver images are listed with the OS-qualified tag the
+operator pulls on a node; a driver whose tag the recipe does not determine is
+named in the component's `warnings` instead (see
+[Air-Gapped Mirroring](air-gap-mirror.md#overriding-component-values)).
 
 For an end-to-end walkthrough covering Hauler and Zarf workflows, see
 [Air-Gapped Mirroring](air-gap-mirror.md).

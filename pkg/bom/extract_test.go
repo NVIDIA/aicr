@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -937,5 +938,182 @@ func TestIsLikelyImage(t *testing.T) {
 		if got := isLikelyImage(in); got != want {
 			t.Errorf("isLikelyImage(%q) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+func TestExtractImageSetFromYAML_Drivers(t *testing.T) {
+	const digest = "sha256:9a831bfdf85f313b1f5749b7c9b2673bb8fff18b4ff768c9242dabaa4468e449"
+	tests := []struct {
+		name        string
+		in          string
+		wantImages  []string
+		wantDrivers []DriverImage
+	}{
+		{
+			name: "ClusterPolicy spec.driver",
+			in: `kind: ClusterPolicy
+spec:
+  driver:
+    repository: nvcr.io/nvidia
+    image: driver
+    version: 580.105.08
+  toolkit:
+    repository: nvcr.io/nvidia/k8s
+    image: container-toolkit
+    version: v1.18.0
+`,
+			wantImages:  []string{"nvcr.io/nvidia/k8s/container-toolkit:v1.18.0"},
+			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Ref: "nvcr.io/nvidia/driver:580.105.08"}},
+		},
+		{
+			name: "ClusterPolicy driver switched off and precompiled",
+			in: `kind: ClusterPolicy
+spec:
+  driver:
+    enabled: false
+    usePrecompiled: true
+    repository: nvcr.io/nvidia
+    image: driver
+    version: "580"
+`,
+			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Ref: "nvcr.io/nvidia/driver:580", Precompiled: true, Disabled: true}},
+		},
+		{
+			name: "NVIDIADriver spec",
+			in: `kind: NVIDIADriver
+spec:
+  repository: nvcr.io/nvidia
+  image: driver
+  version: 595.91.07
+  usePrecompiled: false
+`,
+			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Ref: "nvcr.io/nvidia/driver:595.91.07"}},
+		},
+		{
+			name: "NicClusterPolicy ofedDriver",
+			in: `kind: NicClusterPolicy
+spec:
+  ofedDriver:
+    repository: nvcr.io/nvidia/mellanox
+    image: doca-driver
+    version: doca3.2.0-25.10-1.2.8.0-2
+    forcePrecompiled: true
+  rdmaSharedDevicePlugin:
+    repository: nvcr.io/nvidia/mellanox
+    image: k8s-rdma-shared-dev-plugin
+    version: network-operator-v26.1.0
+`,
+			wantImages: []string{"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.1.0"},
+			wantDrivers: []DriverImage{{
+				Kind: DriverKindDOCA, Ref: "nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2", Precompiled: true,
+			}},
+		},
+		{
+			name: "digest version keeps the digest reference",
+			in: `kind: NicClusterPolicy
+spec:
+  ofedDriver:
+    repository: nvcr.io/nvidia/mellanox
+    image: doca-driver
+    version: ` + digest + `
+`,
+			wantDrivers: []DriverImage{{Kind: DriverKindDOCA, Ref: "nvcr.io/nvidia/mellanox/doca-driver@" + digest}},
+		},
+		{
+			name: "ofedDriver under another kind is a plain image",
+			in: `kind: ConfigMap
+spec:
+  ofedDriver:
+    repository: nvcr.io/nvidia/mellanox
+    image: doca-driver
+    version: doca3.2.0
+`,
+			wantImages: []string{"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0"},
+		},
+		{
+			name: "driver key under another kind is a plain image",
+			in: `kind: Deployment
+spec:
+  driver:
+    repository: nvcr.io/nvidia
+    image: driver
+    version: 580.105.08
+`,
+			wantImages: []string{"nvcr.io/nvidia/driver:580.105.08"},
+		},
+		{
+			name: "NicClusterPolicy embedded in a ConfigMap",
+			in: `kind: ConfigMap
+data:
+  policy.yaml: |
+    kind: NicClusterPolicy
+    spec:
+      ofedDriver:
+        repository: nvcr.io/nvidia/mellanox
+        image: doca-driver
+        version: doca3.2.0
+`,
+			wantDrivers: []DriverImage{{Kind: DriverKindDOCA, Ref: "nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0"}},
+		},
+		{
+			name: "multi-document input resolves kind per document",
+			in: `kind: ClusterPolicy
+spec:
+  driver:
+    repository: nvcr.io/nvidia
+    image: driver
+    version: 580.105.08
+---
+kind: Deployment
+spec:
+  driver:
+    repository: nvcr.io/nvidia
+    image: driver
+    version: 1.0.0
+`,
+			wantImages:  []string{"nvcr.io/nvidia/driver:1.0.0"},
+			wantDrivers: []DriverImage{{Kind: DriverKindGPU, Ref: "nvcr.io/nvidia/driver:580.105.08"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, err := ExtractImageSetFromYAML([]byte(tt.in))
+			if err != nil {
+				t.Fatalf("ExtractImageSetFromYAML() error = %v", err)
+			}
+			if !reflect.DeepEqual(set.Images, append([]string{}, tt.wantImages...)) {
+				t.Errorf("Images = %v, want %v", set.Images, tt.wantImages)
+			}
+			if !reflect.DeepEqual(set.Drivers, tt.wantDrivers) {
+				t.Errorf("Drivers = %+v, want %+v", set.Drivers, tt.wantDrivers)
+			}
+
+			// The legacy entry point keeps returning the raw policy references.
+			legacy, err := ExtractImagesFromYAML([]byte(tt.in))
+			if err != nil {
+				t.Fatalf("ExtractImagesFromYAML() error = %v", err)
+			}
+			want := append([]string{}, tt.wantImages...)
+			for _, d := range tt.wantDrivers {
+				want = append(want, d.Ref)
+			}
+			sort.Strings(want)
+			if !reflect.DeepEqual(legacy, want) {
+				t.Errorf("ExtractImagesFromYAML() = %v, want %v", legacy, want)
+			}
+		})
+	}
+}
+
+func TestExtractImageSetFromYAML_InvalidDescriptor(t *testing.T) {
+	_, err := ExtractImageSetFromYAML([]byte(`kind: NicClusterPolicy
+spec:
+  ofedDriver:
+    repository: nvcr.io/nvidia/mellanox
+    image: doca-driver
+    version: sha256:not-a-digest
+`))
+	if !IsInvalidStructuredImageDescriptor(err) {
+		t.Errorf("ExtractImageSetFromYAML() error = %v, want invalid structured image descriptor", err)
 	}
 }
