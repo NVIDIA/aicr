@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -324,31 +325,6 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	return output, nil
 }
 
-// buildComponentDataList builds a sorted list of ComponentData from the recipe.
-// It validates that all component names are safe for use as directory names.
-// driverOwnership reports who installs the NVIDIA driver for this
-// bundle. Checks both gpu-operator component names since only one is
-// ever enabled in a given recipe (see pkg/bundler/bundler.go's
-// gpuOperatorComponentNames for the canonical list this mirrors).
-//
-// Unknown is a distinct state, not a synonym for host-managed: a bundle
-// carrying no gpu-operator component at all (a bundlers filter, or
-// --set gpuoperator:enabled=false) says nothing about who owns the
-// driver, and calling that host-managed would skip the migration wait
-// against an externally managed one.
-// gpuOperatorComponentName and gpuOperatorOCPComponentName are this
-// package's copy of the canonical/OCP gpu-operator component names (a
-// 4th duplicate alongside pkg/bundler/bundler.go, pkg/bundler/validations
-// /checks.go, and their override-key constants — this package cannot
-// import pkg/bundler due to the dependency cycle noted at
-// componentOverrideKeys' godoc equivalent). Named here, rather than an
-// inline literal, so a `grep gpuOperatorOCPComponentName` across the repo
-// surfaces every copy that needs updating together.
-const (
-	gpuOperatorComponentName    = "gpu-operator"
-	gpuOperatorOCPComponentName = "gpu-operator-ocp"
-)
-
 // Values of ComponentData.DriverOwnership. deploy.sh.tmpl compares
 // against these spellings, so they are pinned by
 // TestGenerate_DeployScript_DRARestartGatedOnDriverOwnership rather than
@@ -359,9 +335,19 @@ const (
 	driverOwnershipUnknown  = "unknown"
 )
 
+// driverOwnership reports who installs the NVIDIA driver for this
+// bundle. Checks every gpu-operator component name, from
+// config.GPUOperatorDriverOwnership, since only one is ever enabled in a
+// given recipe.
+//
+// Unknown is a distinct state, not a synonym for host-managed: a bundle
+// carrying no gpu-operator component at all (a bundlers filter, or
+// --set gpuoperator:enabled=false) says nothing about who owns the
+// driver, and calling that host-managed would skip the migration wait
+// against an externally managed one.
 func (g *Generator) driverOwnership() string {
 	operatorPresent := false
-	for _, name := range []string{gpuOperatorComponentName, gpuOperatorOCPComponentName} {
+	for _, name := range config.GPUOperatorDriverOwnership.ComponentNames {
 		values, ok := g.ComponentValues[name]
 		if !ok {
 			continue
@@ -386,9 +372,8 @@ func (g *Generator) driverOwnership() string {
 // gpu-operator) because the chart interpolates the value unquoted into
 // the ClusterPolicy and YAML re-types it at install time.
 //
-// Duplicates pkg/bundler/bundler.go's identically named function, for
-// the same dependency-cycle reason as the component-name constants
-// above.
+// Duplicates pkg/bundler/bundler.go's identically named function: this
+// package cannot import pkg/bundler, which imports it.
 func gpuOperatorDriverEnabled(values map[string]any) bool {
 	driver, isMap := values["driver"].(map[string]any)
 	if !isMap {
@@ -398,6 +383,8 @@ func gpuOperatorDriverEnabled(values map[string]any) bool {
 	return !isBool || enabled
 }
 
+// buildComponentDataList builds a sorted list of ComponentData from the recipe.
+// It validates that all component names are safe for use as directory names.
 // Only the fields consumed by the orchestration templates are populated.
 func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 	// Sort by deployment order

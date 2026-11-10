@@ -2371,13 +2371,13 @@ The `--deployer` flag controls how deployment artifacts are generated:
 |--------|-------------|
 | `helm` | (Default) Generates Helm charts with values for deployment. Supports `--dynamic`. |
 | `argocd` | Generates Argo CD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
-| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All non-profile-owned values overridable at install time via `helm --set`; a profiled recipe ships a lock template that rejects overrides on profile-owned paths. Use `--dynamic` to pre-populate specific paths for components that resolve to remote Helm charts. `--dynamic` naming a local-chart or non-Helm component is rejected (those components bake values at bundle time and have no install-time stub surface). |
+| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. Values are overridable at install time via `helm --set`, except GPU driver-ownership paths (`aicr-driver-ownership-lock` template, emitted whenever the bundle ships `gpu-operator`, `nvidia-dra-driver-gpu`, or their `-ocp` variants) and, for a profiled recipe, profile-owned paths (`aicr-profile-lock` template). Use `--dynamic` to pre-populate specific paths for components that resolve to remote Helm charts. `--dynamic` naming a local-chart or non-Helm component is rejected (those components bake values at bundle time and have no install-time stub surface). |
 | `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Supports `--dynamic` via ConfigMap `valuesFrom`. |
 | `helmfile` | Generates a `helmfile.yaml` release graph driven by the upstream [helmfile](https://helmfile.readthedocs.io/) CLI (`helmfile apply` / `diff` / `destroy`). Supports `--dynamic` via per-release `cluster-values.yaml`. Requires the `helmfile` binary at deploy time. |
 | `terraform` | Generates a Terraform root module (`terraform plan` / `apply` / `destroy`). One module call per component, chaining that component's pre/post/readiness releases inside it; `depends_on` carries the recipe's `dependencyRefs` exactly. Supports `--dynamic` via per-release `cluster-values.yaml`. Does not create a cluster: the `helm` provider is configured from variables, or — with `--terraform-child-module` — by the calling configuration. Helm components only: a recipe with a Kustomize component is rejected. Requires `terraform` or `tofu` at deploy time; the generated module uses no feature newer than Terraform 1.5 and was validated by hand on Terraform 1.16 and OpenTofu 1.13 (no CI runs either). |
 | `fleet` | Generates a [Rancher Fleet](https://fleet.rancher.io/) bundle: by default one `fleet.yaml` per component folder plus a root `gitrepo.yaml`, or with `--fleet-mode helmop` a single `helmops.yaml` with one HelmOp per component. Supports `--dynamic` via per-folder `cluster-values.yaml` (inlined into `helmops.yaml` in HelmOp mode). Clusters opt in with the `aicr.nvidia.com/bundle=<app-name>` label. OCI output (`--output oci://`) is not supported. |
 
-> **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all non-profile-owned values are overridable at install time (a profiled recipe ships a lock template that rejects install-time values on profile-owned paths).
+> **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where values are overridable at install time, except GPU driver-ownership paths and, for a profiled recipe, profile-owned paths, which lock templates reject.
 
 > **Note:** `--dynamic` declarations targeting the GPU allocation-policy keys (`nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride`, `gpu-operator`(`-ocp`) `devicePlugin.enabled`, or those components' `enabled` toggle) are rejected: validators verify the recipe-resolved allocation policy, so its value cannot be deferred to install time. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
 
@@ -2807,7 +2807,7 @@ Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
 
 **Argo CD deployer behavior:**
 
-The `--deployer argocd-helm` generates a Helm chart app-of-apps where all non-profile-owned values are overridable at install time. When the recipe carries a selected profile, `templates/aicr-profile-lock.yaml` fails the install if a value is supplied for a profile-owned path. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml` for components that resolve to remote Helm charts. Local-chart components (Helm with no upstream `Source`, common on OCP overlays) and non-Helm components have no install-time stub surface — `--dynamic` naming them is rejected rather than silently dropped.
+The `--deployer argocd-helm` generates a Helm chart app-of-apps where values are overridable at install time, except two guarded sets. When the recipe carries a selected profile, `templates/aicr-profile-lock.yaml` fails the install if a value is supplied for a profile-owned path. When the bundle ships `gpu-operator`, `gpu-operator-ocp`, `nvidia-dra-driver-gpu` or `nvidia-dra-driver-gpu-ocp`, `templates/aicr-driver-ownership-lock.yaml` fails the install if a value is supplied for a GPU driver-ownership path (`driver.enabled`, `toolkit.enabled`, `hostPaths.driverInstallDir`, `nvidiaDriverRoot`); set those at bundle time with `--set` so bundle-time ownership checks apply, or, for a path the selected profile owns, choose the profile value with `aicr recipe --profile`. Upgrading an install that passes these values at install time needs the steps in the [upgrade note](component-catalog.md#gpu-operator-and-nvidia-dra-driver-gpu-argocd-helm-rejects-install-time-driver-ownership-values). Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml` for components that resolve to remote Helm charts. Local-chart components (Helm with no upstream `Source`, common on OCP overlays) and non-Helm components have no install-time stub surface — `--dynamic` naming them is rejected rather than silently dropped.
 
 ```shell
 helm install aicr-bundle ./bundle \
@@ -2834,13 +2834,13 @@ aicr bundle -r recipe.yaml \
   --dynamic kubeprometheusstack:prometheus.prometheusSpec.externalLabels.cluster \
   -o ./bundles
 
-# Argo CD Helm chart: all non-profile-owned values overridable, --dynamic pre-populates specific paths
+# Argo CD Helm chart: values overridable except guarded ownership paths, --dynamic pre-populates specific paths
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   --dynamic kubeprometheusstack:prometheus.prometheusSpec.externalLabels.cluster \
   -o ./bundles
 
-# Argo CD Helm chart: without --dynamic, non-profile-owned values still overridable via helm --set
+# Argo CD Helm chart: without --dynamic, other values still overridable via helm --set
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   -o ./bundles
