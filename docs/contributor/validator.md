@@ -536,7 +536,10 @@ Two things differ in a Project namespace because the check does not own it.
 `--image-pull-secret` Secrets are not copied there, since the Project's users
 could read them: the test pods only reference them by name, so a private
 probe image needs a Secret of the same name already in the Project namespace.
-And a run killed before its cleanup leaves its pods and PodGroups behind,
+And no namespace delete sweeps up after the check, so it confirms its pods
+and PodGroups are gone and fails, even when both phases passed, if any remain
+that are not already being deleted. A run killed before its cleanup still
+leaves its pods and PodGroups behind,
 where `tools/cleanup` does not look (it sweeps the `gang-scheduling-test-`
 namespace prefix); the negative-phase pods stay `Pending` against the
 Project's quota until deleted. Every pod and PodGroup the check creates

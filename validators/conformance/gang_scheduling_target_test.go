@@ -380,6 +380,181 @@ func TestCleanupGangTestResourcesLeavesRunaiProjectNamespace(t *testing.T) {
 	}
 }
 
+// runaiCleanupRun returns a Run:ai-target run with two negative members.
+func runaiCleanupRun(t *testing.T) *gangTestRun {
+	t.Helper()
+	target := runaiGangTarget(testRunaiProjectNamespace)
+	target.queue = testRunaiQueue
+	run, err := newGangTestRun(target)
+	if err != nil {
+		t.Fatalf("newGangTestRun: %v", err)
+	}
+	run.setNegativeShape(gangNegativeShape{Members: 2})
+	return run
+}
+
+// TestConfirmGangResourcesGone: in a Project namespace nothing subsumes the
+// pod and PodGroup deletes, so a resource that outlives them is reported, and
+// only an accepted deletion still Terminating is tolerated.
+func TestConfirmGangResourcesGone(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		seedPod     func(run *gangTestRun) *corev1.Pod
+		seedGroup   bool
+		failPodGets bool
+		canceled    bool
+		wantErrHas  []string
+	}{
+		{name: "nothing left"},
+		{
+			name:       "pod left",
+			seedPod:    func(run *gangTestRun) *corev1.Pod { return buildGangNegativePod(run, 1, nil) },
+			wantErrHas: []string{"left in namespace " + testRunaiProjectNamespace, "pod/gang-neg-worker-"},
+		},
+		{
+			name:       "PodGroup left",
+			seedGroup:  true,
+			wantErrHas: []string{"left in namespace " + testRunaiProjectNamespace, "podgroup/gang-neg-group-"},
+		},
+		{
+			name: "pod Terminating is an accepted deletion",
+			seedPod: func(run *gangTestRun) *corev1.Pod {
+				pod := buildGangTestPod(run, 0, nil)
+				now := metav1.Now()
+				pod.DeletionTimestamp = &now
+				pod.Finalizers = []string{"example.com/hold"}
+				return pod
+			},
+		},
+		{
+			name:        "pod unreadable",
+			failPodGets: true,
+			wantErrHas:  []string{"pod/gang-worker-", "unreadable"},
+		},
+		{
+			name:       "budget spent before any read",
+			canceled:   true,
+			wantErrHas: []string{"could not be checked"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			run := runaiCleanupRun(t)
+			var objs []runtime.Object
+			if tt.seedPod != nil {
+				objs = append(objs, tt.seedPod(run))
+			}
+			clientset := k8sfake.NewSimpleClientset(objs...)
+			if tt.failPodGets {
+				clientset.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, k8serrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "", stderrors.New("denied"))
+				})
+			}
+			dynClient := newGangDynamicFake(t)
+			if tt.seedGroup {
+				if _, err := dynClient.Resource(podGroupGVR).Namespace(run.namespace).Create(
+					context.Background(), buildNegativePodGroup(run), metav1.CreateOptions{}); err != nil {
+					t.Fatalf("seed PodGroup: %v", err)
+				}
+			}
+			podNames := append(append([]string{}, run.pods[:]...), run.negPods...)
+			ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+			defer cancel()
+			if tt.canceled {
+				cancel()
+			}
+
+			err := confirmGangResourcesGone(ctx, clientset, dynClient, run, podNames)
+			if len(tt.wantErrHas) == 0 {
+				if err != nil {
+					t.Fatalf("confirmGangResourcesGone() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("confirmGangResourcesGone() = nil, want an error mentioning %q", tt.wantErrHas)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+			for _, want := range tt.wantErrHas {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// TestGangCleanupArtifact: a failed cleanup is never recorded as a success,
+// and a Project namespace is never described as a namespace deletion.
+func TestGangCleanupArtifact(t *testing.T) {
+	t.Parallel()
+	kaiRun, err := newGangTestRun(kaiGangTarget())
+	if err != nil {
+		t.Fatalf("newGangTestRun: %v", err)
+	}
+	runaiRun := runaiCleanupRun(t)
+	cleanupErr := errors.New(errors.ErrCodeInternal, "boom")
+	tests := []struct {
+		name           string
+		run            *gangTestRun
+		cleanupErr     error
+		wantEquivalent string
+		wantResultHas  []string
+		wantResultNot  []string
+	}{
+		{
+			name:           "owned namespace deleted",
+			run:            kaiRun,
+			wantEquivalent: "kubectl delete namespace " + kaiRun.namespace,
+			wantResultHas:  []string{"Deleted gang test pods, PodGroups, and the " + kaiRun.namespace + " namespace."},
+			wantResultNot:  []string{"FAILED"},
+		},
+		{
+			name:           "owned namespace deletion failed",
+			run:            kaiRun,
+			cleanupErr:     cleanupErr,
+			wantEquivalent: "kubectl delete namespace " + kaiRun.namespace,
+			wantResultHas:  []string{"namespace deletion FAILED", "tools/cleanup", "boom"},
+		},
+		{
+			name:           "Project namespace cleaned",
+			run:            runaiRun,
+			wantEquivalent: "kubectl delete pods,podgroups -n " + testRunaiProjectNamespace + " -l " + gangPhaseLabel,
+			wantResultHas:  []string{"Deleted gang test pods and PodGroups", "left in place"},
+			wantResultNot:  []string{"FAILED"},
+		},
+		{
+			name:           "Project namespace residue",
+			run:            runaiRun,
+			cleanupErr:     cleanupErr,
+			wantEquivalent: "kubectl delete pods,podgroups -n " + testRunaiProjectNamespace + " -l " + gangPhaseLabel,
+			wantResultHas:  []string{"Run:ai Project namespace " + testRunaiProjectNamespace + " FAILED", "boom"},
+			wantResultNot:  []string{"namespace deletion", "tools/cleanup", "Deleted gang test pods"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			equivalent, result := gangCleanupArtifact(tt.run, tt.cleanupErr)
+			if !strings.HasPrefix(equivalent, tt.wantEquivalent) {
+				t.Errorf("equivalent = %q, want prefix %q", equivalent, tt.wantEquivalent)
+			}
+			for _, want := range tt.wantResultHas {
+				if !strings.Contains(result, want) {
+					t.Errorf("result %q does not mention %q", result, want)
+				}
+			}
+			for _, not := range tt.wantResultNot {
+				if strings.Contains(result, not) {
+					t.Errorf("result %q must not mention %q", result, not)
+				}
+			}
+		})
+	}
+}
+
 func availableDeployment(namespace, name string) *appsv1.Deployment {
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},

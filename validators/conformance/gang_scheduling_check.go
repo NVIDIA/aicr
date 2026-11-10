@@ -553,24 +553,10 @@ func CheckGangScheduling(ctx *validators.Context) (err error) {
 	defer func() { //nolint:contextcheck // Fresh context: parent may be canceled during cleanup
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cleanupCancel()
-		nsErr := cleanupGangTestResources(cleanupCtx, ctx.Clientset, dynClient, run)
-		result := fmt.Sprintf("Deleted gang test pods, PodGroups, and the %s namespace.", run.namespace)
-		equivalent := fmt.Sprintf("kubectl delete namespace %s --ignore-not-found", run.namespace)
-		if !run.ownsNamespace {
-			result = fmt.Sprintf(
-				"Deleted gang test pods and PodGroups; the Run:ai Project namespace %s is not owned by the check and was left in place.",
-				run.namespace)
-			equivalent = fmt.Sprintf("kubectl delete pods,podgroups -n %s -l %s", run.namespace, gangPhaseLabel)
-		}
-		if nsErr != nil {
-			// Report the real outcome: a failed namespace delete leaves residue,
-			// so don't record a false success (tools/cleanup is the backstop).
-			result = fmt.Sprintf(
-				"Deleted gang test pods and PodGroups; namespace deletion FAILED (residue may remain, rerun tools/cleanup): %v",
-				nsErr)
-		}
+		cleanupErr := cleanupGangTestResources(cleanupCtx, ctx.Clientset, dynClient, run)
+		equivalent, result := gangCleanupArtifact(run, cleanupErr)
 		recordRawTextArtifact(ctx, "Delete test namespace", equivalent, result)
-		err = failOnGangCleanup(err, nsErr)
+		err = failOnGangCleanup(err, cleanupErr)
 	}()
 
 	if run.ownsNamespace {
@@ -638,19 +624,46 @@ func createGangTestNamespace(ctx context.Context, clientset kubernetes.Interface
 	})
 }
 
+// gangCleanupArtifact returns the equivalent command and the outcome text of
+// the cleanup artifact. A failed cleanup is reported as such rather than as a
+// success: in the run's own namespace tools/cleanup is the backstop, in a
+// Run:ai Project namespace only the equivalent command is.
+func gangCleanupArtifact(run *gangTestRun, cleanupErr error) (equivalent, result string) {
+	if !run.ownsNamespace {
+		equivalent = fmt.Sprintf("kubectl delete pods,podgroups -n %s -l %s", run.namespace, gangPhaseLabel)
+		if cleanupErr != nil {
+			return equivalent, fmt.Sprintf(
+				"Cleanup of gang test pods and PodGroups in the Run:ai Project namespace %s FAILED (residue remains, remove it with the command above): %v",
+				run.namespace, cleanupErr)
+		}
+		return equivalent, fmt.Sprintf(
+			"Deleted gang test pods and PodGroups; the Run:ai Project namespace %s is not owned by the check and was left in place.",
+			run.namespace)
+	}
+	equivalent = fmt.Sprintf("kubectl delete namespace %s --ignore-not-found", run.namespace)
+	if cleanupErr != nil {
+		return equivalent, fmt.Sprintf(
+			"Deleted gang test pods and PodGroups; namespace deletion FAILED (residue may remain, rerun tools/cleanup): %v",
+			cleanupErr)
+	}
+	return equivalent, fmt.Sprintf("Deleted gang test pods, PodGroups, and the %s namespace.", run.namespace)
+}
+
 // failOnGangCleanup is the check's final verdict once cleanup ran: a run that
-// passed but could not delete its namespace fails, as every other per-run
-// namespace check does (cleanupGPUTestNamespace), so a PASS never stands over
-// a leaked namespace and its pods; a run that already failed keeps its own
-// error, and the cleanup failure stays in the artifact.
+// passed but could not delete its namespace, or its pods and PodGroups in a
+// namespace it does not own, fails, as every other per-run namespace check
+// does (cleanupGPUTestNamespace), so a PASS never stands over leaked test
+// resources; a run that already failed keeps its own error, and the cleanup
+// failure stays in the artifact.
 //
 // Errors:
-//   - ErrCodeInternal wrapping nsErr when err is nil and nsErr is not.
-func failOnGangCleanup(err, nsErr error) error {
-	if err != nil || nsErr == nil {
+//   - ErrCodeInternal wrapping cleanupErr when err is nil and cleanupErr is
+//     not.
+func failOnGangCleanup(err, cleanupErr error) error {
+	if err != nil || cleanupErr == nil {
 		return err
 	}
-	return errors.Wrap(errors.ErrCodeInternal, "gang scheduling test namespace cleanup failed after a passing run", nsErr)
+	return errors.Wrap(errors.ErrCodeInternal, "gang scheduling test cleanup failed after a passing run", cleanupErr)
 }
 
 // wrapGangPhase names the failed phase in the CTRF message while keeping the
@@ -1359,11 +1372,11 @@ func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) (*
 }
 
 // cleanupGangTestResources tears down both phases' pods and PodGroups and,
-// when the run owns it, the namespace, best-effort. It returns the namespace
-// deletion error (nil on success, and nil for a Run:ai Project namespace the
-// check does not own) so the caller can record the true outcome instead of a
-// false success; pod/PodGroup deletes stay best-effort as the namespace
-// delete subsumes them.
+// when the run owns it, the namespace. It returns what was left behind so the
+// caller can record the true outcome instead of a false success: the
+// namespace deletion error when the run owns the namespace, whose delete
+// subsumes the best-effort pod and PodGroup deletes, and otherwise the error
+// of confirmGangResourcesGone.
 func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *gangTestRun) error {
 	podNames := make([]string, 0, gangMinMembers+len(run.negPods))
 	podNames = append(podNames, run.pods[:]...)
@@ -1393,9 +1406,14 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 		_ = k8s.IgnoreNotFound(dynClient.Resource(podGroupGVR).Namespace(run.namespace).Delete(
 			ctx, group, metav1.DeleteOptions{}))
 	}
-	// A Run:ai Project namespace belongs to the Project, not to this run.
+	// A Run:ai Project namespace belongs to the Project, not to this run, so
+	// no namespace delete follows to subsume the deletes above. The fresh
+	// deadline keeps a stuck wait above from starving the confirmation.
 	if !run.ownsNamespace {
-		return nil
+		confirmCtx, confirmCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+		defer confirmCancel()
+		//nolint:contextcheck // fresh deadline, as for the namespace teardown below
+		return confirmGangResourcesGone(confirmCtx, clientset, dynClient, run, podNames)
 	}
 	// Delete the namespace so a cluster reset leaves no residue. Pods and the
 	// PodGroups are already gone, so this is a single bounded (background
@@ -1419,6 +1437,69 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 	// an error only when the namespace is still present and not Terminating.
 	//nolint:contextcheck // same fresh deadline as the Delete above, so a stuck wait earlier cannot starve the confirmation
 	return confirmGangNamespaceGone(nsCtx, clientset, run.namespace)
+}
+
+// confirmGangResourcesGone polls until none of the run's pods and PodGroups
+// remains in run.namespace or ctx ends. A resource whose deletion was
+// accepted but is still Terminating when the budget ends is not a leak, as
+// for the namespace in confirmGangNamespaceGone.
+//
+// Errors:
+//   - ErrCodeInternal when the budget ends with a pod or PodGroup present and
+//     not Terminating, or unreadable, or before any of them could be read.
+func confirmGangResourcesGone(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *gangTestRun, podNames []string) error {
+	var left, terminating []string
+	observed := false
+	pollErr := wait.PollUntilContextCancel(ctx, defaults.PodPollInterval, true, func(c context.Context) (bool, error) {
+		var curLeft, curTerminating []string
+		observe := func(kind, name string, obj metav1.Object, err error) {
+			switch {
+			case apierrors.IsNotFound(err):
+				// gone
+			case err != nil:
+				curLeft = append(curLeft, fmt.Sprintf("%s/%s (unreadable: %v)", kind, name, err))
+			case obj.GetDeletionTimestamp() != nil:
+				curTerminating = append(curTerminating, kind+"/"+name)
+			default:
+				curLeft = append(curLeft, kind+"/"+name)
+			}
+		}
+		for _, name := range podNames {
+			if c.Err() != nil {
+				return false, nil
+			}
+			pod, err := clientset.CoreV1().Pods(run.namespace).Get(c, name, metav1.GetOptions{})
+			observe("pod", name, pod, err)
+		}
+		for _, group := range []string{run.groupName, run.negGroupName} {
+			if c.Err() != nil {
+				return false, nil
+			}
+			pg, err := dynClient.Resource(podGroupGVR).Namespace(run.namespace).Get(c, group, metav1.GetOptions{})
+			observe("podgroup", group, pg, err)
+		}
+		// A sweep cut off by the poll deadline is not an observation; keep
+		// the last complete one for the verdict.
+		if c.Err() != nil {
+			return false, nil
+		}
+		left, terminating, observed = curLeft, curTerminating, true
+		return len(curLeft)+len(curTerminating) == 0, nil
+	})
+	if pollErr == nil {
+		return nil
+	}
+	if !observed {
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
+			"gang test pods and PodGroups in namespace %s could not be checked within the cleanup budget", run.namespace), pollErr)
+	}
+	if len(left) > 0 {
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+			"gang test resources left in namespace %s, which the check does not own: %s", run.namespace, strings.Join(left, ", ")))
+	}
+	slog.Warn("gang test resource deletion accepted but not confirmed within the cleanup budget",
+		"namespace", run.namespace, "resources", terminating)
+	return nil
 }
 
 // confirmGangNamespaceGone polls until the namespace is absent or ctx ends.
