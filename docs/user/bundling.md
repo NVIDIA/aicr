@@ -42,15 +42,16 @@ beside it when it does not, and reaches the output directory only once it is
 complete. A run that fails while rendering, or is interrupted with Ctrl-C or
 `SIGTERM`, leaves the output directory as it found it.
 
-Bundling into a directory that holds an earlier bundle replaces it. A
-top-level entry the new bundle also writes, such as `README.md` or `data/`, is
-replaced whatever it holds, and so is every numbered component folder, along
-with `provenance.yaml`, `undeploy.sh` and an empty `static/` or `sources/`.
-Any other file is removed only when the earlier bundle's `checksums.txt` lists
-it and its content still matches, such as a dropped `--data` file or the
-attestation files. The run fails and changes nothing if the directory holds
-anything else, an edited file under a dropped `data/` included, because
-`checksums.txt` must list the whole tree.
+Bundling into a directory that holds an earlier bundle replaces it. Every
+numbered component folder is replaced whatever it holds, and so is a top-level
+file the new bundle also writes, such as `README.md`, along with
+`provenance.yaml`, `undeploy.sh` and an empty `static/` or `sources/`. Any
+other file, including one under a directory such as `data/`, is replaced or
+removed only when the new bundle writes a file at the same path, or the
+earlier bundle's `checksums.txt` lists it and its content still matches, such
+as a dropped `--data` file or the attestation files. The run fails and changes
+nothing if the directory holds anything else, such as a file you added under
+`data/`, because `checksums.txt` must list the whole tree.
 
 A run that is killed outright, for example by `SIGKILL` or the out-of-memory
 killer, cannot clean up after itself. A run that fails while moving the
