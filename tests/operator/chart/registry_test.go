@@ -16,7 +16,6 @@ package chart
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"sort"
 	"strings"
@@ -30,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -57,11 +57,7 @@ func renderInCluster(ctx context.Context, t *testing.T, set ...string) []unstruc
 // decode converts a rendered object into a typed one.
 func decode(t *testing.T, u *unstructured.Unstructured, into any) {
 	t.Helper()
-	raw, err := u.MarshalJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = json.Unmarshal(raw, into); err != nil {
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, into); err != nil {
 		t.Fatal(err)
 	}
 }

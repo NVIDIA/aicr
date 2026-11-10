@@ -15,7 +15,6 @@
 package chart
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -403,14 +402,8 @@ func TestOperatorPodRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(out)
 	}
-	raw, err := find(t, objs, "Deployment", "aicr-operator").MarshalJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
 	d := &appsv1.Deployment{}
-	if err = json.Unmarshal(raw, d); err != nil {
-		t.Fatal(err)
-	}
+	decode(t, find(t, objs, "Deployment", release), d)
 	pod := d.Spec.Template.Spec
 	if g := pod.TerminationGracePeriodSeconds; g == nil || time.Duration(*g)*time.Second <= defaults.GracefulShutdownTimeout {
 		t.Errorf("terminationGracePeriodSeconds %v is not above the %s graceful shutdown", g, defaults.GracefulShutdownTimeout)
