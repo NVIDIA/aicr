@@ -80,7 +80,7 @@ func TestDriverImageQualify(t *testing.T) {
 }
 
 func TestDriverImageTagPattern(t *testing.T) {
-	if got := (DriverImage{Kind: DriverKindGPU}).TagPattern(); got != "<version>-<os><os-version>" {
+	if got := (DriverImage{Kind: DriverKindGPU}).TagPattern(); got != "<version>-<os><os-version> (rhel: major version only, e.g. -rhel9)" {
 		t.Errorf("GPU TagPattern() = %q", got)
 	}
 	if got := (DriverImage{Kind: DriverKindDOCA}).TagPattern(); got != "<version>-<os><os-version>-<arch>" {

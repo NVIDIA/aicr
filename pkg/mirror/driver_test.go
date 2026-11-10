@@ -404,6 +404,27 @@ func TestDiscover_QualifiesManifestDriverImage(t *testing.T) {
 	}
 }
 
+// TestQualifyDrivers_RHELGPUDriverWarningNamesMajorVersionTag checks that the
+// warning for an unresolved RHEL GPU driver tells the user the operator tags
+// RHEL images with the major version only, so they do not mirror -rhel9.4.
+func TestQualifyDrivers_RHELGPUDriverWarningNamesMajorVersionTag(t *testing.T) {
+	var ci ComponentImages
+	refs := qualifyDrivers(
+		[]bom.DriverImage{{Kind: bom.DriverKindGPU, Ref: "nvcr.io/nvidia/driver:580.173.02"}},
+		bom.DriverTarget{OSID: "rhel"}, nil, "gpu-operator", &ci)
+	if len(refs) != 0 {
+		t.Errorf("refs = %v, want none", refs)
+	}
+	if len(ci.Warnings) != 1 {
+		t.Fatalf("Warnings = %v, want 1", ci.Warnings)
+	}
+	for _, want := range []string{"nvcr.io/nvidia/driver:580.173.02 not listed", "rhel: major version only, e.g. -rhel9"} {
+		if !strings.Contains(ci.Warnings[0], want) {
+			t.Errorf("warning %q does not mention %q", ci.Warnings[0], want)
+		}
+	}
+}
+
 // TestQualifyDrivers_TaglessDriverWarns checks that a driver descriptor with
 // no version is named in a warning instead of being listed as a malformed ref.
 func TestQualifyDrivers_TaglessDriverWarns(t *testing.T) {

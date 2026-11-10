@@ -44,7 +44,7 @@ func (d DriverImage) TagPattern() string {
 	if d.Kind == DriverKindDOCA {
 		return "<version>-<os><os-version>-<arch>"
 	}
-	return "<version>-<os><os-version>"
+	return "<version>-<os><os-version> (rhel: major version only, e.g. -rhel9)"
 }
 
 // Qualify returns the reference the operator pulls on a node matching t. When
