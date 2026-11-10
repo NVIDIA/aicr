@@ -29,10 +29,11 @@ const fullPrecision = 3
 type TightenOutcome int
 
 const (
-	// TightenIncomparable means the pair is not a bounded version range on
-	// both sides — an exact match, an equality or inequality term, an OR
-	// alternative, or a value the version parser cannot read. Callers must
-	// not merge these: "stricter" is undefined for them.
+	// TightenIncomparable means the pair is not intersectable — an exact
+	// match, an equality or inequality term, an OR alternative on the
+	// candidate side (or inside one of the existing expression's
+	// alternatives), or a value the version parser cannot read. Callers
+	// must not merge these: "stricter" is undefined for them.
 	TightenIncomparable TightenOutcome = iota
 
 	// TightenUnchanged means the candidate admits everything the existing
@@ -62,37 +63,127 @@ const (
 // combined expression together with how it relates to existing.
 //
 // Only bounded version ranges intersect: every term on both sides must use
-// >=, >, <=, or < and neither side may carry an OR alternative. That covers
-// the version floors and ceilings recipes actually compose (">= 1.34.1
+// >=, >, <=, or < and the candidate may not carry an OR alternative. That
+// covers the version floors and ceilings recipes actually compose (">= 1.34.1
 // < 1.36.0" tightened by ">= 1.35" yields ">= 1.35 < 1.36.0") while leaving
 // predicates whose values do not order — the node-set label constraints,
 // exact matches, "!=", and same-direction bounds written at different
 // precisions — reported as TightenIncomparable so the caller keeps rejecting
 // them rather than silently merging a contradiction.
 //
+// The existing expression MAY carry OR alternatives (the per-GKE-track
+// floors some overlays state, ">= 1.34.3-gke.N < 1.35 || >= 1.35.0-gke.M"):
+// intersection distributes over union, so the candidate intersects each
+// alternative independently, an alternative the candidate empties is
+// dropped, and the survivors are rejoined. Every alternative must
+// intersect cleanly — one precision mismatch or non-range alternative
+// rejects the whole expression, so distribution never weakens the
+// fail-closed rejections above. All alternatives dropped is
+// TightenUnsatisfiable, same as an emptied single range.
+//
+// A drop is exact only when the emptied alternative admits nothing the
+// candidate admits at ANY precision. pkg/version compares at the lower of
+// two precisions, so a coarse reading can straddle a pair that is disjoint
+// at full precision ("1.35" satisfies both ">= 1.35.2" and "<= 1.35.0") —
+// a single emptied range fails closed as TightenUnsatisfiable and nothing
+// merges, but a dropped alternative would silently exclude that reading
+// from the survivors. Dropping is therefore allowed only when the
+// intersection's ceiling is EXCLUSIVE: a reading passing an exclusive
+// ceiling compares strictly below it at whatever precision applies, and
+// the floor sits at or above that ceiling, so no straddling reading
+// exists. An alternative emptied against an inclusive ceiling is refused
+// as TightenIncomparable instead — the intersection cannot be restated
+// exactly, so the caller keeps rejecting the pair.
+//
 // The returned expression is written in the same grammar it was parsed from
-// (a single AND clause), so it round-trips through ParseCompoundConstraint.
+// (AND clauses, "||"-joined when more than one survives), so it round-trips
+// through ParseCompoundConstraint.
 func Tighten(existing, candidate string) (string, TightenOutcome) {
-	existingLower, existingUpper, ok := versionBounds(existing)
-	if !ok {
+	compound, err := ParseCompoundConstraint(existing)
+	if err != nil {
 		return "", TightenIncomparable
 	}
 	candidateLower, candidateUpper, ok := versionBounds(candidate)
 	if !ok {
 		return "", TightenIncomparable
 	}
+	if len(compound.Alternatives) > 1 {
+		return tightenAlternatives(existing, compound.Alternatives, candidateLower, candidateUpper)
+	}
+	existingLower, existingUpper, ok := clauseBounds(compound.Alternatives[0])
+	if !ok {
+		return "", TightenIncomparable
+	}
+	value, outcome, _ := tightenClause(existing, existingLower, existingUpper, candidateLower, candidateUpper)
+	return value, outcome
+}
 
+// tightenAlternatives distributes the candidate range over the existing
+// expression's OR alternatives. Dropping an emptied alternative narrows even
+// when every survivor is untouched: the dropped track admitted versions the
+// intersection does not. An alternative emptied against an inclusive
+// ceiling is refused rather than dropped (see Tighten).
+func tightenAlternatives(existing string, alternatives [][]ParsedConstraint, candidateLower, candidateUpper *bound) (string, TightenOutcome) {
+	kept := make([]string, 0, len(alternatives))
+	narrowed := false
+	for _, terms := range alternatives {
+		altLower, altUpper, ok := clauseBounds(terms)
+		if !ok {
+			return "", TightenIncomparable
+		}
+		merged, outcome, upper := tightenClause(clauseString(terms), altLower, altUpper, candidateLower, candidateUpper)
+		switch outcome {
+		case TightenUnchanged:
+			kept = append(kept, merged)
+		case TightenNarrowed:
+			kept = append(kept, merged)
+			narrowed = true
+		case TightenUnsatisfiable:
+			if upper == nil || upper.inclusive() {
+				return "", TightenIncomparable
+			}
+			narrowed = true
+		case TightenPrecisionMismatch, TightenIncomparable:
+			return "", outcome
+		default:
+			return "", TightenIncomparable
+		}
+	}
+	if len(kept) == 0 {
+		return "", TightenUnsatisfiable
+	}
+	if !narrowed {
+		return existing, TightenUnchanged
+	}
+	return strings.Join(kept, " || "), TightenNarrowed
+}
+
+// clauseString restates one AND clause in the grammar it was parsed from.
+func clauseString(terms []ParsedConstraint) string {
+	parts := make([]string, 0, len(terms))
+	for i := range terms {
+		parts = append(parts, terms[i].String())
+	}
+	return strings.Join(parts, " ")
+}
+
+// tightenClause intersects one AND clause of the existing expression with
+// the candidate's bounds. existing is the clause's own text, returned
+// verbatim on TightenUnchanged. The intersection's ceiling is returned
+// alongside so tightenAlternatives can tell whether an emptied
+// alternative's emptiness is witness-free (exclusive ceiling) or not.
+func tightenClause(existing string, existingLower, existingUpper, candidateLower, candidateUpper *bound) (string, TightenOutcome, *bound) {
 	lower, lowerNarrowed, ok := strongerBound(existingLower, candidateLower)
 	if !ok {
-		return "", TightenPrecisionMismatch
+		return "", TightenPrecisionMismatch, nil
 	}
 	upper, upperNarrowed, ok := strongerBound(existingUpper, candidateUpper)
 	if !ok {
-		return "", TightenPrecisionMismatch
+		return "", TightenPrecisionMismatch, nil
 	}
 
 	if !boundsSatisfiable(lower, upper) {
-		return "", TightenUnsatisfiable
+		return "", TightenUnsatisfiable, upper
 	}
 
 	terms := make([]string, 0, 4)
@@ -103,9 +194,9 @@ func Tighten(existing, candidate string) (string, TightenOutcome) {
 	// bound came from the composition. Reporting Unchanged there would drop
 	// the profile's own restriction.
 	if !lowerNarrowed && !upperNarrowed && !lowerKept && !upperKept {
-		return existing, TightenUnchanged
+		return existing, TightenUnchanged, upper
 	}
-	return strings.Join(terms, " "), TightenNarrowed
+	return strings.Join(terms, " "), TightenNarrowed, upper
 }
 
 // appendBound writes the winning bound and, where dropping the loser could
@@ -187,8 +278,13 @@ func versionBounds(expression string) (lower, upper *bound, ok bool) {
 	if err != nil || len(compound.Alternatives) != 1 {
 		return nil, nil, false
 	}
+	return clauseBounds(compound.Alternatives[0])
+}
 
-	for _, term := range compound.Alternatives[0] {
+// clauseBounds reduces one parsed AND clause to at most one lower and one
+// upper bound, under the same refusals as versionBounds.
+func clauseBounds(terms []ParsedConstraint) (lower, upper *bound, ok bool) {
+	for _, term := range terms {
 		parsed, err := version.ParseVersion(term.Value)
 		if err != nil {
 			return nil, nil, false

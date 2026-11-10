@@ -131,6 +131,7 @@ ALIASES
             echo 'GenericAlias|github.com/NVIDIA/aicr/pkg/bundler/result|Result'
         fi
         echo 'OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions'
+        echo 'RecipeSummary|github.com/NVIDIA/aicr/pkg/recipe|Summary'
         echo 'UpgradeReport|github.com/NVIDIA/aicr/pkg/upgrade|Report'
         exit 0
     fi
@@ -782,6 +783,7 @@ type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
 type UpgradeReport = upgrade.Report
 type CNCFRequirementAggregate = cncf.Aggregate
+type RecipeSummary = recipe.Summary
 EOF
         cat >"${internal_fixture}/pkg/upgrade/upgrade.go" <<'EOF'
 package upgrade
@@ -827,6 +829,7 @@ EOF
 package recipe
 
 type CriteriaRegistry struct{}
+type Summary struct{}
 EOF
         cat >"${internal_fixture}/internal/sdkcontract/contract.go" <<'EOF'
 package sdkcontract
@@ -932,6 +935,7 @@ type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
 type UpgradeReport = upgrade.Report
 type CNCFRequirementAggregate = cncf.Aggregate
+type RecipeSummary = recipe.Summary
 EOF
         cat >"${deleted_target_fixture}/pkg/upgrade/upgrade.go" <<'EOF'
 package upgrade
@@ -981,6 +985,7 @@ EOF
 package recipe
 
 type CriteriaRegistry struct{}
+type Summary struct{}
 EOF
 
         git -C "${deleted_target_fixture}" init -q -b main
@@ -1013,6 +1018,7 @@ type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
 type UpgradeReport = upgrade.Report
 type CNCFRequirementAggregate = cncf.Aggregate
+type RecipeSummary = recipe.Summary
 EOF
         rm "${deleted_target_fixture}/pkg/legacyconfig/config.go"
     ); then

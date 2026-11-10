@@ -339,6 +339,9 @@ func TestWriteCNCFSubmissionExplicitVersion(t *testing.T) {
 	if !strings.Contains(string(readme), "**Checklist:** v1.37") {
 		t.Errorf("README does not record the explicit checklist:\n%s", readme)
 	}
+	if !strings.Contains(string(readme), "selected explicitly by the submitter") {
+		t.Errorf("README does not say the checklist was selected explicitly (#3703):\n%s", readme)
+	}
 }
 
 // A validator that cannot start surfaces as unavailable through the facade.

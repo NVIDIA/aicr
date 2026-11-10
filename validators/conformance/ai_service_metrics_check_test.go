@@ -549,7 +549,7 @@ func TestAIMetricsScenarioPreflight(t *testing.T) {
 // selects the Service by app label and carries the release label.
 func TestBuildAIMetricsWorkload(t *testing.T) {
 	t.Parallel()
-	pod, svc := buildAIMetricsWorkload("ns", "run123", time.Minute, nil)
+	pod, svc := buildAIMetricsWorkload("ns", "run123", time.Minute, nil, nil)
 	c := pod.Spec.Containers[0]
 	if _, has := c.Resources.Limits[corev1.ResourceName(resourceNVIDIAGPU)]; has || len(pod.Spec.ResourceClaims) != 0 {
 		t.Error("the stub must not request an accelerator")
@@ -599,7 +599,7 @@ func TestBuildAIMetricsWorkloadTolerations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			pod, _ := buildAIMetricsWorkload("ns", "run123", time.Minute, tt.tolerations)
+			pod, _ := buildAIMetricsWorkload("ns", "run123", time.Minute, tt.tolerations, nil)
 			if !reflect.DeepEqual(pod.Spec.Tolerations, tt.want) {
 				t.Errorf("tolerations = %+v, want %+v", pod.Spec.Tolerations, tt.want)
 			}

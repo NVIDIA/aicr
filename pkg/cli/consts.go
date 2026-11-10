@@ -35,6 +35,7 @@ const (
 	flagIntent              = "intent"
 	flagOS                  = "os"
 	flagPlatform            = "platform"
+	flagNodes               = "nodes"
 	flagProfile             = "profile"
 	flagRequireEvidence     = "require-evidence"
 	flagSlurmAccountingMode = "slurm-accounting-mode"

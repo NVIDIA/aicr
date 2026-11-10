@@ -94,6 +94,7 @@ func TestStability_RecipeResolution(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, string) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromCriteriaWithProfile)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromCriteriaWithOptions)
 	requireSignature[func(string, bool) (bool, error)](aicr.PublishedEvidenceRequired)
+	const _ string = aicr.RequireEvidenceEnvVar
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult) error]((*aicr.Client).RequirePublishedEvidence)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, *aicr.Snapshot) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromSnapshot)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, *aicr.Snapshot, string) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromSnapshotWithProfile)
@@ -711,4 +712,10 @@ func TestStability_Query(t *testing.T) {
 	requireSignature[func(*aicr.RecipeResult, string) (any, error)](aicr.SelectFromRecipe)
 	requireSignature[func(context.Context, *aicr.RecipeResult, string) (any, error)](aicr.SelectFromRecipeWithContext)
 	requireSignature[func(*recipe.RecipeResult) *aicr.RecipeResult](aicr.WrapResolved)
+	requireSignature[func(*aicr.RecipeResult) (*aicr.RecipeSummary, error)](aicr.SummarizeRecipe)
+
+	// RecipeSummary is a transparent alias; pin its target so a retype is a
+	// compile error, as in TestStability_TypesAndAliases.
+	//nolint:staticcheck // QF1011: explicit type pins the alias's target type.
+	var _ *recipe.Summary = (*aicr.RecipeSummary)(nil)
 }

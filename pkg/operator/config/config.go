@@ -230,6 +230,12 @@ func (c *Config) Validate(development bool) error {
 	if err := c.validateValidation(); err != nil {
 		return err
 	}
+	if err := aicrjob.CheckDeclaredVersion(c.AICRVersion); err != nil {
+		return err
+	}
+	if err := aicrjob.CheckPrereleaseAllowed(c.AICRVersion, c.AllowPrereleaseAICR); err != nil {
+		return err
+	}
 	// An out-of-range aicr.version is not refused here: the resolver reports
 	// it as a Stalled runtime with reason AICRVersionMismatch.
 	repo, err := registry.ParseRepository(c.RegistryRepository)

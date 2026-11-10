@@ -47,6 +47,14 @@ const (
 	// kubeflow-trainer release ships and the upstream
 	// TestRobustCRDControllerOperation reconciles against.
 	trainJobDefaultRuntime = "torch-distributed"
+	// trainJobPatchManager is the spec.runtimePatches manager AICR writes:
+	// Trainer requires a domain-prefixed path and keys the patch list by it.
+	trainJobPatchManager = "aicr.nvidia.com/conformance"
+	// trainJobNodeReplicatedJob is the replicated Job of the default runtime
+	// whose pod template the image pull Secret patch targets.
+	trainJobNodeReplicatedJob = "node"
+	// keyTemplate is the template key at each level of a runtime patch.
+	keyTemplate = "template"
 	// robustTrainJobName is the valid TrainJob created in the per-run test
 	// namespace for the reconciliation case.
 	robustTrainJobName = robustTestPrefix + "trainjob"
@@ -315,7 +323,10 @@ func requireCRDEstablished(ctx context.Context, dynClient dynamic.Interface, crd
 // v2.2. That is the chosen design: the probe exercises the runtime as a user's
 // bare TrainJob would, so a bundle generated without the accelerated
 // toleration surfaces here as a Timeout verdict naming the Pending pod and
-// its Unschedulable reason.
+// its Unschedulable reason. The one runtimePatches entry it carries, and only
+// when --image-pull-secret named Secrets, sets imagePullSecrets on the node
+// pod template, since the Secrets copied into the per-run namespace are
+// reachable from the pod only through that field.
 //
 // The return is NAMED so the deferred namespace cleanup can fail an
 // otherwise-passing check when it terminally fails; a primary error is always
@@ -351,7 +362,7 @@ func reconcileKubeflowTrainJob(ctx *validators.Context, dynClient dynamic.Interf
 		return err
 	}
 
-	tj := buildValidTrainJob(run.namespace)
+	tj := buildValidTrainJob(run.namespace, run.imagePullSecretRefs())
 	recordObjectYAMLArtifact(ctx, "TrainJob reconciliation: apply test manifest",
 		fmt.Sprintf("kubectl apply -n %s -f <valid trainjob>", run.namespace), tj.Object)
 	if _, err = dynClient.Resource(trainJobGVR).Namespace(run.namespace).Create(ctx.Ctx, tj, metav1.CreateOptions{}); err != nil {
@@ -466,8 +477,27 @@ func recordTrainJobPods(ctx *validators.Context, namespace string) string {
 // the default ClusterTrainingRuntime, runs one node and requests no
 // accelerator. The trainer image and command override the runtime's PyTorch
 // container with the small probe image and a command that exits 0, so the
-// reconciliation reaches Complete without a GPU or a large image pull.
-func buildValidTrainJob(namespace string) *unstructured.Unstructured {
+// reconciliation reaches Complete without a GPU or a large image pull. When
+// pullSecrets is non-empty, a spec.runtimePatches entry sets them as the
+// imagePullSecrets of the node pod template (trainJobPodSpecPatch).
+func buildValidTrainJob(namespace string, pullSecrets []corev1.LocalObjectReference) *unstructured.Unstructured {
+	spec := map[string]any{
+		"runtimeRef": map[string]any{
+			keyName:    trainJobDefaultRuntime,
+			"apiGroup": apiGroupTrainer,
+			keyKind:    "ClusterTrainingRuntime",
+		},
+		"trainer": map[string]any{
+			"numNodes": int64(1),
+			"image":    defaults.ProbeImage,
+			"command":  []any{"sh", "-c", "echo 'robust-controller: TrainJob reconciled'"},
+		},
+	}
+	if len(pullSecrets) > 0 {
+		spec["runtimePatches"] = []any{trainJobPodSpecPatch(map[string]any{
+			"imagePullSecrets": localObjectReferences(pullSecrets),
+		})}
+	}
 	return &unstructured.Unstructured{
 		Object: map[string]any{
 			keyAPIVersion: apiGroupTrainer + "/" + versionV1alpha1,
@@ -476,20 +506,46 @@ func buildValidTrainJob(namespace string) *unstructured.Unstructured {
 				keyName:      robustTrainJobName,
 				keyNamespace: namespace,
 			},
-			keySpec: map[string]any{
-				"runtimeRef": map[string]any{
-					keyName:    trainJobDefaultRuntime,
-					"apiGroup": apiGroupTrainer,
-					keyKind:    "ClusterTrainingRuntime",
-				},
-				"trainer": map[string]any{
-					"numNodes": int64(1),
-					"image":    defaults.ProbeImage,
-					"command":  []any{"sh", "-c", "echo 'robust-controller: TrainJob reconciled'"},
+			keySpec: spec,
+		},
+	}
+}
+
+// trainJobPodSpecPatch wraps podSpec, the pod-spec fields to patch, in the
+// Trainer v2.2 spec.runtimePatches shape addressing the default runtime's
+// node Job: runtimePatches[].trainingRuntimeSpec.template.spec.replicatedJobs
+// [name=node].template.spec.template.spec. The entry is keyed by
+// trainJobPatchManager, as Trainer requires.
+func trainJobPodSpecPatch(podSpec map[string]any) map[string]any {
+	return map[string]any{
+		"manager": trainJobPatchManager,
+		"trainingRuntimeSpec": map[string]any{
+			keyTemplate: map[string]any{
+				keySpec: map[string]any{
+					"replicatedJobs": []any{map[string]any{
+						keyName: trainJobNodeReplicatedJob,
+						keyTemplate: map[string]any{
+							keySpec: map[string]any{
+								keyTemplate: map[string]any{
+									keySpec: podSpec,
+								},
+							},
+						},
+					}},
 				},
 			},
 		},
 	}
+}
+
+// localObjectReferences renders refs as the unstructured form of a
+// []corev1.LocalObjectReference.
+func localObjectReferences(refs []corev1.LocalObjectReference) []any {
+	out := make([]any, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, map[string]any{keyName: ref.Name})
+	}
+	return out
 }
 
 // waitForTrainJobReconciled polls the TrainJob (robustTrainJobName) until Complete=True (done),
