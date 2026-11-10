@@ -29,14 +29,14 @@ const nktpLGTMEnabledPath = "otel-lgtm.enabled"
 
 // nktpLGTMEndpoints are the endpoints of NKTP's five backend exporters, the
 // three gateways, the watchdog, and the watchdog's sidecar, whose chart
-// default is otel-lgtm (chart 0.1.1-rc.3). The other collectors export to
+// default is otel-lgtm (chart 0.2.0). The other collectors export to
 // these.
 var nktpLGTMEndpoints = []string{
-	"gateway_metrics.otelcol.config.exporters.otlp.endpoint",
-	"gateway_logs.otelcol.config.exporters.otlp.endpoint",
-	"gateway_traces.otelcol.config.exporters.otlp.endpoint",
-	"watchdog.otelcol.config.exporters.otlp.endpoint",
-	"watchdog.sidecar.otelcol.config.exporters.otlp.endpoint",
+	"gateway_metrics.otelcol.config.exporters.otlp_grpc.endpoint",
+	"gateway_logs.otelcol.config.exporters.otlp_grpc.endpoint",
+	"gateway_traces.otelcol.config.exporters.otlp_grpc.endpoint",
+	"watchdog.otelcol.config.exporters.otlp_grpc.endpoint",
+	"watchdog.sidecar.otelcol.config.exporters.otlp_grpc.endpoint",
 }
 
 // CheckNKTPExportersHaveBackend blocks a bundle that disables NKTP's bundled
