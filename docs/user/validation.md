@@ -17,8 +17,30 @@ For the architectural view of how snapshot + recipe flow into the validator, see
 | `conformance` | Does the cluster support workload-specific capabilities (DRA, gang scheduling, autoscaling, ...)? | Before opening the cluster to real workloads |
 | `performance` | Does the cluster hit expected bandwidth / throughput thresholds? | After components are ready; before going to production |
 
+Under a GitOps deployer (Argo CD, Flux, Fleet), start `aicr validate --phase
+deployment` only after the sync of every wave has completed, not while it is
+still progressing. The phase treats a declared resource the cluster lacks as a
+deployment that was not applied, not as one that is not ready yet: a Nodewright
+CR the recipe declares (shipped by `nodewright-customizations`, which syncs in
+a later wave than the operator) that is absent fails `expected-resources`
+immediately instead of waiting for the sync to deliver it.
+
 Readiness pre-flight constraints (K8s version, OS, kernel) run implicitly before
-any phase. If pre-flight fails, no validator Jobs are deployed.
+any phase. If pre-flight fails, no validator Jobs are deployed. A submission run
+(`--cncf-submission`) adds two pre-flights of its own once the snapshot is
+loaded or captured and before any validator Job: the cluster's Kubernetes minor
+must match a carried checklist exactly (1.34 and 1.38 are refused alike, since
+a submission certifies one minor) unless
+`spec.validate.evidence.cncf.conformanceVersion` names one, which the
+submission README then records as selected explicitly; and the recipe's
+`validation.conformance.checks` must declare a complete proof path for every
+applicable MUST of that checklist (`secure-accelerator-access` or the Slinky
+Slurm alternative `slinky-slurm-gpu-access`; a conditional MUST declared under
+`spec.validate.evidence.cncf.notApplicable` is not required). A recipe that
+cannot establish a MUST is refused with `INVALID_REQUEST` naming the
+requirements and the checks that would close each gap, since no run of it can
+establish the submission. A plain run that includes the conformance phase logs
+the same gaps as a warning and proceeds.
 
 ## The workflow
 
@@ -1507,12 +1529,68 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 | `2` | Invalid input or request (`ErrCodeInvalidRequest`) — bad CLI flag, malformed argument, a validator rejecting a recipe value (e.g., an inference constraint that uses the wrong comparator direction), or a **readiness pre-flight** constraint not met. The readiness gate always fails closed with this code, even under `--fail-on-error=false` |
 | `5` | A structured `ErrCodeTimeout` reached the top-level CLI — for example while loading the recipe or snapshot, waiting on the snapshot-agent Job, or signing evidence under `--emit-attestation --push` (which runs after the checks). A per-validator wait deadline does **not** reach this code: `runPhase` converts that error into a check result, so it surfaces as exit `8` (see note 2) |
 | `6` | A structured `ErrCodeUnavailable` reached the top-level CLI; under `--cncf-submission`, the pinned upstream validator could not start because the CNCF landscape was unreachable ([Exit status of a submission run](#exit-status-of-a-submission-run)) |
-| `8` | One or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false`. Under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error`, and a submission write, redaction or upstream-validator failure ([Exit status of a submission run](#exit-status-of-a-submission-run)). |
+| `8` | A privileged RBAC revocation failed after operator cancellation (`ErrCodeInternal`; not suppressed by `--fail-on-error=false`), **or** one or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Only the result-driven phase exits are suppressed by `--fail-on-error=false`. Under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error`, and a submission write, redaction or upstream-validator failure ([Exit status of a submission run](#exit-status-of-a-submission-run)). |
+| `9` | Operator interrupted the CLI with Ctrl-C or SIGTERM (`ErrCodeCanceled`) before the last validation phase completed, and privileged cleanup did not fail. Not suppressed by `--fail-on-error=false`; completed checks and the partial current phase are retained, and CTRF output is attempted once at least one phase has results. A signal that arrives after the last phase completed takes the normal completion path instead (see **Interrupted runs** below) |
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
 > 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` normally reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. One narrow exception remains — the CLI waits the catalog timeout plus `ValidatorWaitBuffer` (2m30s) for the Job to become terminal — measured from the Job's observed start time (`status.startTime` when the apiserver has stamped it, otherwise `creationTimestamp`, which is never later and so only ever ends the wait earlier), so it shares an origin with the Job's clock — a window that is deliberately shorter than the Job's own `activeDeadlineSeconds` (catalog timeout plus `ValidatorJobDeadlineHeadroom`, 3m30s), so a validator whose pod is still running when the CLI's wait expires exhausts the wait before the deadline condition is ever stamped. Such a run falls back to the CLI-wait path and still reports `other`.
 > 2. Exit 5 is narrower than it sounds. A timeout **inside** a check's own logic (DynamoGraphDeployment not ready, inference endpoint never healthy, AIPerf Job pod-wait deadline) surfaces as a failed phase, not as a structured `ErrCodeTimeout`, so the CLI exits **8**. So does a per-validator wait deadline: `runPhase` hands that error to the timeout handler and records the outcome as a check result rather than propagating it, which is the same path the wait-exhaustion exception in note 1 takes. The rule, rather than a list of sources: exit 5 applies whenever an `ErrCodeTimeout` reaches the top-level CLI. A timeout that is converted into a check result instead — whether raised inside a check or by a per-validator wait — surfaces as exit 8.
+
+**Interrupted runs.** The first Ctrl-C or SIGTERM cancels validation and, with
+cleanup enabled, deletes the in-flight validator Job using a fresh context.
+Completed verdicts and the partial current phase are retained; unstarted checks
+in that phase say `not run: validation canceled` and later phases do not start.
+The interrupted phase is blocking (`other` unless already `failed`), and so is
+its CTRF report. When no check entry already records the interruption, for
+example because the signal landed between checks or between phases, the report
+gains a `validation-interrupted` entry with status `other`, so `summary.other`
+is non-zero. CTRF output is still attempted once at least one phase has
+results, even if the cluster's report ConfigMap cannot be written. A signal
+that arrives before any phase has results, for example during cluster
+preparation, writes no CTRF output. Partial output is written only for an
+interruption. Any other error (for example a later phase's pre-flight failure,
+or a privileged RBAC revocation failure after every phase completed) writes no
+CTRF output, as before.
+Cleanup typically takes about 35s, and about 95s plus overhead in the worst
+case. One shared 30s window covers result capture, Job deletion and report
+persistence. The wait for the validator pod to terminate then covers the pod's
+full 30s SIGTERM grace from Job deletion (plus a 5s margin), so the validator's
+RBAC stays in place while a cooperative check cleans up. The existing 30s
+per-run RBAC/data teardown window follows. The CLI records this 95s aggregate
+deadline when cancellation is first observed, not when validation starts.
+Partial output uses only the time remaining before that deadline (and at most
+its existing 30s I/O cap), never a further cleanup window. If no time remains,
+the in-memory results and original error are retained without starting output.
+These limits are cooperative: an arbitrary file/stdout writer is not physically
+interruptible just because it receives a context. A second Ctrl-C or SIGTERM
+force-terminates the CLI and can leave resources behind. `--no-cleanup`
+continues to leave them intentionally.
+
+Exit `9` applies only when the signal arrives before the last phase completed.
+A signal that arrives after that, for example during the final per-run RBAC/data
+teardown or while evidence is rendered, signed or pushed, takes the normal
+completion path on a canceled context. The run may then exit `0`, `8` or another
+code, depending on what that work returns.
+
+If cancellation coincides with a **privileged RBAC revocation failure**, the
+returned error is instead `ErrCodeInternal` (CLI exit `8`), explicitly warning
+that the cluster-admin binding may be orphaned. Both cancellation and cleanup
+causes are preserved; check and revoke the potentially orphaned binding
+manually. Partial CTRF output is still attempted within the same remaining
+budget. Neither ordinary cancellation nor this combined failure renders, signs
+or pushes conformance/recipe evidence.
+
+When **the validator pod itself** receives SIGTERM (deadline, eviction or drain),
+a cooperative check runs deferred cleanup, writes a SIGTERM interruption message
+and exits `3`, mapped to CTRF `other` rather than a completed failure verdict.
+This container exit is distinct from the CLI's exit `9` on operator cancellation.
+It remains blocking (normally CLI exit `8`), including when the check returns
+nil after cancellation. The pod's 30s grace is best effort: blocking checks,
+long cleanup, SIGKILL, OOM or a crash may prevent a termination message, and a
+missing pod with a terminal Job deadline condition still uses the Job-level
+`failed` classification described above. No external orphan-resource sweeper
+is provided.
 
 Scripts that gate on validation outcome should treat **any non-zero code** as
 failure rather than branching on specific values, and should additionally
@@ -1594,10 +1672,9 @@ Common reasons and their cause:
 
 The check (CNCF `driver_runtime_management`, SHOULD at v1.37 and MUST at v1.38)
 runs a pod from a vanilla `ubuntu:22.04` image that requests one GPU, and reads
-the driver from inside it. The probe pod carries no `imagePullSecrets`
-(`--image-pull-secret` reaches the validator Job, not the per-run namespace),
-so a mirror of the probe image that needs credentials must supply them
-node-side, through the container runtime's registry configuration. Its artifacts (`Driver runtime probe pod logs`,
+the driver from inside it. The probe pod carries the
+`--image-pull-secret` Secrets, copied into its per-run namespace (see the
+image note below). Its artifacts (`Driver runtime probe pod logs`,
 `Advertised driver version`, `Driver runtime compatibility`) name the failing
 step:
 
@@ -1618,7 +1695,21 @@ the full reference of your copy or of another vanilla OS image. It must ship no
 accelerator driver or tools, and it must provide what the probe script runs on:
 a POSIX `/bin/sh`, `head` and `tr` (`timeout` is used when present). A
 distroless image cannot run the probe; mirroring the Ubuntu image is the
-simplest choice.
+simplest choice. When the mirror needs credentials, `--image-pull-secret`
+covers the probe too: every conformance check that creates a per-run namespace
+copies the named Secrets from the validator namespace into it and attaches
+them to its probe pods, and the copies are deleted with the namespace. A
+Secret the flag names but the validator namespace lacks fails the check with
+`NotFound` before any probe is created.
+
+A probe pod whose `RuntimeClass` names a handler the node's container runtime
+does not serve stays `Pending` with `ContainerCreating` and no status change;
+the checks read the kubelet's `FailedCreatePodSandBox` event (the containerd
+message `no runtime for "..." is configured` naming the handler, a missing
+runtime handler, or a shim binary not found) and fail within seconds with
+`stuck: FailedCreatePodSandBox: ...`
+instead of waiting out the pod timeout. A sandbox failure from network setup
+is transient and is not treated this way.
 
 ### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus unreachable"
 
@@ -1683,7 +1774,8 @@ failing step:
 | `unmet prerequisite: no sandboxed RuntimeClass` | Auto-detection found no `RuntimeClass` whose name or handler contains `gvisor`, `runsc`, `kata` (the AKS `kata-mshv-vm-isolation` class matches), `sandboxed`, `quark` or `krun`. A sandboxed class may still exist under another name; the check never skips or records N/A for this | Provide a sandbox runtime (which one AICR recipes ship, and on which pool, is the pending decision in #3615), or set `AICR_SANDBOX_RUNTIME_CLASS=<name>` when the cluster has one under another name |
 | `AICR_SANDBOX_RUNTIME_CLASS names RuntimeClass "...", which does not exist on this cluster` | The override names a class the cluster does not have | Fix the name (`kubectl get runtimeclass`) or unset the variable to auto-detect |
 | `kernel identity: the sandboxed pod observes the same kernel identity` | Every kernel identity field both pods reported (release, version, boot id) matched, or neither pod reported a comparable field. With matching fields the pods share the host kernel: the class's handler maps to a runc-like runtime | Read the identity values in both probe log artifacts. If no field was comparable, find out why the probes could not read them; otherwise check that the containerd runtime configuration maps the handler to the sandbox binary |
-| `sandboxed probe pod did not complete in time` with `status=ContainerCreating` | The pod was bound to a node but its sandbox never started: the handler is not configured, or its binary is missing, on that node (`FailedCreatePodSandBox` events), or the node is cordoned or NotReady | Check that the `RuntimeClass` `scheduling.nodeSelector` selects only nodes with the sandbox runtime installed, and read the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs |
+| `sandboxed probe pod stuck: FailedCreatePodSandBox: ... no runtime for "<handler>" is configured` (or a missing runtime handler or shim binary) | The pod was bound to a node whose container runtime does not serve the class's handler; the check reads the kubelet's `FailedCreatePodSandBox` event and fails within seconds instead of waiting out the pod timeout | Check that the `RuntimeClass` `scheduling.nodeSelector` selects only nodes with the sandbox runtime installed, and that the handler name matches the runtime's configuration on those nodes |
+| `sandboxed probe pod did not complete in time` with `status=ContainerCreating` | The pod was bound to a node but its sandbox never started for a reason the fast failure above does not recognise, or the node is cordoned or NotReady | Read the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs |
 | `process isolation:`, `kernel and memory isolation:`, `filesystem isolation:` or `network isolation:` | The named probe saw host state inside the sandbox (a host daemon in `/proc`, a readable `/dev/mem`, a host path such as `/var/lib/kubelet`, a bridge such as `cni0`); the probe logs artifact shows what it saw | The sandbox shares that host namespace or mount; correct the runtime configuration |
 | `sandboxed probe pod stuck:` or `unsandboxed control pod stuck:` | The pod could not pull its image or be scheduled (`Unschedulable`); for the sandboxed pod, usually a `RuntimeClass` `scheduling.nodeSelector` that no node satisfies | Inspect the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs; for mirrors see the image note below |
 
@@ -1695,10 +1787,9 @@ the full reference of your copy or of another vanilla OS image. It must
 provide what the probe script runs on: a POSIX `/bin/sh`, `uname`, `cat`,
 `ls`, `wc`, `head`, `awk` and `tr`. A distroless image cannot run the probe;
 mirroring the Ubuntu image is the simplest choice. The two probe pods carry
-no `imagePullSecrets` (`--image-pull-secret` reaches the validator Job, not
-the per-run namespace, the same as for the other vanilla probe images), so a
-mirror that needs credentials must supply them node-side, through the
-container runtime's registry configuration.
+the `--image-pull-secret` Secrets, copied into the per-run namespace as for
+the other probe pods (see the `driver-runtime-management` note above), so a
+mirror that needs credentials is served the same way as the validator image.
 
 ### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus did not load the ServiceMonitor/PodMonitor"
 

@@ -120,12 +120,19 @@ const (
 	// waitingReasonCrashLoopBackOff is the kubelet's container waiting reason
 	// for a container that keeps exiting.
 	waitingReasonCrashLoopBackOff = "CrashLoopBackOff"
-	containerNameSleep            = "sleep"
-	gpuClaimName                  = "gpu"
-	statusUnknown                 = "unknown"
-	valueNone                     = "none"
-	deploymentClusterAutoscaler   = "cluster-autoscaler"
-	namespaceDynamoSystem         = "dynamo-system"
+	// eventReasonFailedCreatePodSandBox is the kubelet's event reason for a
+	// pod whose sandbox could not be created; the pod itself stays Pending
+	// with its containers ContainerCreating and no status change, so the
+	// event is the only signal (see sandboxCreateFailure).
+	eventReasonFailedCreatePodSandBox = "FailedCreatePodSandBox"
+	// involvedObjectKindPod is the Event.involvedObject.kind of a pod event.
+	involvedObjectKindPod       = "Pod"
+	containerNameSleep          = "sleep"
+	gpuClaimName                = "gpu"
+	statusUnknown               = "unknown"
+	valueNone                   = "none"
+	deploymentClusterAutoscaler = "cluster-autoscaler"
+	namespaceDynamoSystem       = "dynamo-system"
 )
 
 // Per-check WORK budgets for the conformance checks that create cluster

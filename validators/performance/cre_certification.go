@@ -65,9 +65,8 @@ const (
 
 	// Stamped on every Certification AICR submits, because the names carry a
 	// nonce and nothing else identifies them. A validator pod that dies
-	// mid-run (eviction, OOM kill, Job deleted under it) never runs its
-	// deferred teardown — validators do not handle SIGTERM — and without this
-	// label no later run could find what it left holding the GPUs.
+	// mid-run (SIGKILL, OOM, or crash) may never run its deferred teardown.
+	// Without this label no later run could find what it left holding the GPUs.
 	creLabelManagedBy = "app.kubernetes.io/managed-by"
 	creManagedByAICR  = "aicr-validator"
 )

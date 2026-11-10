@@ -2482,7 +2482,13 @@ func (c *Client) PreflightValidatorServiceAccount(ctx context.Context, opts ...V
 // snapshot, runs the selected validation phases (by default
 // PhaseDeployment, PhaseConformance, PhasePerformance) in order, and
 // returns one PhaseResult per phase run. Pass WithValidationPhases to
-// restrict the run to a subset.
+// restrict the run to a subset. On interruption, the returned results include
+// completed checks and the partial current phase alongside ErrCodeCanceled
+// (operator abort) or ErrCodeTimeout (deadline). If privileged RBAC revocation
+// also fails after an operator abort, ErrCodeInternal preserves both causes and
+// warns that the cluster-admin binding may be orphaned. Other errors may also
+// arrive with the results of phases completed before them. Callers must inspect
+// both results and error; partial results do not mean the run succeeded.
 //
 // recipe must come from a prior Client.ResolveRecipe call on this
 // Client — it carries the unexported internal recipe state needed to
@@ -2656,10 +2662,7 @@ func (c *Client) ValidateState(
 		return nil, err
 	}
 	results, err := v.ValidatePhases(ctx, internalPhases, validationInput, toInternalSnapshot(snap))
-	if err != nil {
-		return nil, err
-	}
-	return fromInternalPhaseResults(results), nil
+	return fromInternalPhaseResults(results), err
 }
 
 // loadManifestFiles concatenates the recipe-attached ManifestFiles for

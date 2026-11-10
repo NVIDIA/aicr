@@ -1685,6 +1685,51 @@ func TestWrapResolvedIsQueryable(t *testing.T) {
 	}
 }
 
+// TestSummarizeRecipe pins the facade summary to pkg/recipe.BuildSummary, and
+// its rejection of a result that carries no internal recipe state.
+func TestSummarizeRecipe(t *testing.T) {
+	t.Parallel()
+
+	resolved := &recipe.RecipeResult{
+		APIVersion:      "aicr.run/v1",
+		Kind:            recipe.RecipeResultKind,
+		Criteria:        &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+		ComponentRefs:   []recipe.ComponentRef{{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Version: "v1.0.0"}},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+	want, err := recipe.BuildSummary(resolved)
+	if err != nil {
+		t.Fatalf("BuildSummary: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		result  *aicr.RecipeResult
+		want    *aicr.RecipeSummary
+		wantErr bool
+	}{
+		{name: "wrapped recipe", result: aicr.WrapResolved(resolved), want: want},
+		{name: "nil result", wantErr: true},
+		{name: "no internal state", result: &aicr.RecipeResult{}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := aicr.SummarizeRecipe(tt.result)
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+				return
+			}
+			if err != nil {
+				t.Fatalf("SummarizeRecipe: %v", err)
+			}
+			if len(got.Components) != 1 || !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("SummarizeRecipe = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 // componentNames extracts a slice of component names from a
 // RecipeResult, suitable for error-message diagnostics. Keeps the
 // assertion logic above readable.

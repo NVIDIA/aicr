@@ -31,10 +31,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// jobWatchResumeBackoff paces each watch re-establishment in rewatchJob. It is
-// a package var (not the constant directly) only so tests can drop it to a
-// negligible value and exercise the resume path without a real sleep;
-// production code never reassigns it.
+// jobWatchResumeBackoff paces each watch re-establishment in resumeJobWatch and
+// WaitForJobPodsTermination. It is a package var (not the constant directly)
+// only so tests can drop it to a negligible value and exercise the resume path
+// without a real sleep; production code never reassigns it.
 var jobWatchResumeBackoff = defaults.K8sJobWatchResumeBackoff
 
 // jobWatchResumeJitterFactor spreads the resume backoff by up to +20% so that

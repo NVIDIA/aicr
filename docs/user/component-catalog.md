@@ -227,7 +227,7 @@ The inverse mismatch (no NVIDIA driver loaded on the sampled GPU node while the 
 
 - **On AKS (profiled), a pool reading that mismatches the SELECTED value fails closed at resolution.** Selection comes from `--profile` (or the `azure-managed` default); the `K8s.aks-gpu-pools.gpu-driver` reading then verifies it before any driver-state post-processing. Pools reading `None` fail the azure-managed default but **qualify `--profile gpuStack=operator-managed` — rerun with that selection against the same snapshot; no pool change or recapture is needed**. `Mixed` and `Managed` reject either selection naming the observed state — fix the pools and recapture; a *missing* reading (snapshot captured without `--aks-gpu-pools`) rejects with "reading unavailable" — recapture with the pool dump (see the [AKS GPU Operator-managed profile](../integrator/aks-gpu-setup.md#alternative-let-gpu-operator-manage-the-driver)).
 - **On AKS (profiled), Install-mode pools whose sampled node has no driver loaded still enter the record-and-gate flow.** Pool mode is the ownership contract, not live state: `gpu-driver: Install` satisfies the azure-managed constraint even while a failed AKS driver install or a mid-reimage node samples no loaded driver. Resolution succeeds, records `metadata.gpuDriverState: absent`, and the bundle-time `CheckDriverOwnershipCoherence` gate blocks `aicr bundle` with the AKS remedy (repair the pools and recapture, or switch pools to `--gpu-driver none`, recapture, and regenerate with `--profile gpuStack=operator-managed`). The driver-ownership paths are profile-owned, so the pre-profile per-path `--set` override tuple is rejected at bundle time.
-- **On families without a profile (and legacy pre-profile AKS artifacts), every inverse mismatch takes that same warn-record-gate path**: resolution logs a warning, records `metadata.gpuDriverState: absent` in the recipe, and the bundle-time `CheckDriverOwnershipCoherence` validation blocks `aicr bundle` ([#1757](https://github.com/NVIDIA/aicr/issues/1757)) unless the values are flipped to operator-managed mode or the GPU pools are reprovisioned with the platform's default driver install and re-snapshotted. Ownership overrides are bundle-time flags there, so resolution itself cannot fail hard without cutting off the supported override path — bundle generation is the first point where the final effective values are known.
+- **On families without a profile (and legacy pre-profile AKS artifacts), every inverse mismatch takes that same warn-record-gate path**: resolution logs a warning, records `metadata.gpuDriverState: absent` in the recipe, and the bundle-time `CheckDriverOwnershipCoherence` validation blocks `aicr bundle` ([#1757](https://github.com/NVIDIA/aicr/issues/1757)) unless the values are flipped to operator-managed mode or the GPU pools are reprovisioned with the platform's default driver install and re-snapshotted. Ownership overrides are bundle-time flags there, so resolution itself cannot fail hard without cutting off the supported override path — bundle generation is the first point where the final effective values are known. They are bundle-time only: an `argocd-helm` bundle rejects install-time values on the ownership paths at Helm render time (see [Override values](bundling.md#override-values)).
 
 One per-OS limitation is intentionally out of the check's scope: the check verifies value *coherence* (driver ownership and driver-root lockstep), not per-OS install capability. On GKE COS node images a deliberate `--set gpuoperator:driver.enabled=true` clears the gate — the values are internally coherent — but the GPU Operator cannot install a driver on COS, so the deployment fails at deploy time, where the `gpu-operator-health` conformance-phase check is the backstop. The check's GKE remedy therefore points COS clusters at the GKE-managed driver install (`gpu-driver-version`) rather than the override tuple.
 
@@ -3240,6 +3240,38 @@ certified `v26.7` channel, whose v26.7.1 bundle ships the same
 also installs `computedomains` from its chart. This pairing has not yet been
 verified on a live OpenShift cluster; see
 [NVIDIA/aicr#2969](https://github.com/NVIDIA/aicr/issues/2969).
+
+### `gpu-operator` and `nvidia-dra-driver-gpu`: argocd-helm rejects install-time driver-ownership values
+
+An `argocd-helm` bundle that ships `gpu-operator`, `nvidia-dra-driver-gpu` or
+their `-ocp` variants now carries `templates/aicr-driver-ownership-lock.yaml`.
+The chart fails to render when an install-time value touches `driver.enabled`,
+`toolkit.enabled` or `hostPaths.driverInstallDir` under `gpuoperator`
+(`gpuoperatorocp`), or `nvidiaDriverRoot` under `dradriver` (`dradriverocp`),
+including a parent of one of these keys, a `null`, or a value identical to the
+bundled one (see [Override values](bundling.md#override-values)). Earlier
+bundles accepted these values. Sibling values such as
+`gpuoperator.driver.version` are unaffected.
+
+An existing install can still be carrying such a value without passing it
+again:
+
+- `helm upgrade --reuse-values` (or `--reset-then-reuse-values`) reapplies the
+  values supplied to the previous release, so the upgrade fails on a value an
+  earlier install set. `helm get values <release>` lists them.
+- The bundle's parent Application forwards the values given to `helm install`
+  (its `helm.valuesObject`), and a root Application you maintain yourself
+  (`deployer.includeRootApp=false`) carries its own `helm` values or
+  parameters. Argo CD renders the new chart version with them, and the sync
+  fails with the same message.
+
+A failed render applies nothing, so the running release is unchanged. To
+upgrade, move each ownership value to bundle time and regenerate:
+`aicr bundle --set gpuoperator:driver.enabled=...`, or, when the recipe's
+selected profile owns the path (the AKS `gpuStack` profile), regenerate the
+recipe with `aicr recipe --profile gpuStack=...`. Then drop the value from the
+install: upgrade without `--reuse-values`, passing the values you still need
+explicitly, and remove it from any Application that sets it.
 
 ### `nvidia-dra-driver-gpu`: `0.5.0` to `0.5.1`
 

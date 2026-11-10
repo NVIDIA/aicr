@@ -114,10 +114,15 @@ func skipMsgNCCLNoProfile(target ncclBenchmarkTarget, variant ncclVariant) strin
 const ncclBandwidthFloorFraction = 0.9
 
 // ncclSkip publishes code as the skipReason and returns msg, which must be a
-// "skipped"-prefixed result string.
-func ncclSkip(msg, code string) string {
-	validators.EmitExtraOrWarn(map[string]string{validators.ExtraKeySkipReason: code})
-	return msg
+// "skipped"-prefixed result string, in the (result, skipped, err) shape its
+// callers return. The skip reason is what the aggregation reads as the NOT
+// TESTED reason, so a code that could not be written fails the check
+// (ErrCodeInternal) instead of skipping it unexplained.
+func ncclSkip(msg, code string) (string, bool, error) {
+	if err := validators.EmitExtra(map[string]string{validators.ExtraKeySkipReason: code}); err != nil {
+		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to publish the skip reason "+code, err)
+	}
+	return msg, true, nil
 }
 
 // ncclPublishedFabric returns EFA for the NET variant on the baked-in EKS
@@ -398,7 +403,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Skip unless the validation targets a supported service + accelerator combination.
 	if ctx.ValidationInput == nil {
 		slog.Info("Skipping NCCL All Reduce bandwidth validation: no validation")
-		return ncclSkip(skipMsgNCCLNoInput, validators.SkipReasonNoValidationInput), true, nil
+		return ncclSkip(skipMsgNCCLNoInput, validators.SkipReasonNoValidationInput)
 	}
 
 	service := ctx.ValidationInput.Criteria.Service
@@ -461,9 +466,9 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 			// The profile itself is valid (resolveNCCLBenchmarkProfile fails
 			// closed on unknown pairs); it just doesn't implement this variant
 			// — e.g. gb200/eks covers net and nvls but not the default check.
-			return ncclSkip(skipMsgNCCLNoProfile(target, variant), validators.SkipReasonProfileLacksVariant), true, nil
+			return ncclSkip(skipMsgNCCLNoProfile(target, variant), validators.SkipReasonProfileLacksVariant)
 		}
-		return ncclSkip(skipMsgNCCLNotImplemented, validators.SkipReasonUnsupportedTarget), true, nil
+		return ncclSkip(skipMsgNCCLNotImplemented, validators.SkipReasonUnsupportedTarget)
 	}
 
 	// Extract threshold from constraint
