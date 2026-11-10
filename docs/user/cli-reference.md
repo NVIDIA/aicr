@@ -530,7 +530,7 @@ Generate recipes using direct system parameters:
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--criteria-strict` | | bool | Reject criteria values not in the embedded OSS catalog; ignores values registered from `--data`. Also honored via `AICR_CRITERIA_STRICT=1` or `spec.recipe.criteriaStrict: true` in `--config`. Intended for OSS CI gates. |
-| `--require-evidence` | | bool | Fail when the resolved recipe has no committed evidence pointer. The check is offline presence for the resolved id, including the selected profile value. It does not verify a signature or contact a registry. A pointer on a base id does not cover a profiled resolve. Resolving with external data (`--data` or `spec.recipe.data`) fails, even when the leaf overlay is still the embedded one. Also honored via `AICR_REQUIRE_EVIDENCE` (`1`, `true`, `yes`, `on`) or `spec.recipe.requireEvidence: true` in `--config`. Any one of the three enables it. An explicit false does not turn off an environment value that is already on. Applies to `aicr recipe` and `aicr query`. |
+| `--require-evidence` | | bool | Fail when the resolved recipe has no committed evidence pointer. The check is offline presence for the resolved id, including the selected profile value. It does not verify a signature or contact a registry. A pointer on a base id does not cover a profiled resolve. Resolving with external data (`--data` or `spec.recipe.data`) fails, even when the leaf overlay is still the embedded one. Also honored via `AICR_REQUIRE_EVIDENCE` (`1`, `true`, `yes`, `on`) or `spec.recipe.requireEvidence: true` in `--config`. Any one of the three enables it. An explicit false does not turn off an environment value that is already on. Applies to `aicr recipe` and `aicr query`; `aicr query --recipe` is rejected while it is on. |
 
 **Accelerator values name a GPU model, not a machine type.** A provider
 usually offers several machine types for the same GPU, and the machine type —
@@ -993,9 +993,14 @@ catalog verified
 
 ### aicr query
 
-Query a specific value from the fully hydrated recipe configuration. Resolves a recipe
-from criteria (same as `aicr recipe`), merges all base, overlay, and inline value
-overrides, then extracts the value at the given dot-path selector.
+Query a specific value from the fully hydrated recipe configuration, or print a concise
+recipe overview with `--summary`. Resolve a recipe from criteria (same as `aicr recipe`),
+or load a previously generated recipe with `--recipe` / `-r` (file path, HTTP/HTTPS URL,
+or `cm://namespace/name` ConfigMap URI; use `--kubeconfig` for the latter).
+Selectors merge all base, overlay, and inline values before extracting the given dot-path.
+Summaries skip the selector's additional full values hydration. Loading or generating
+a profiled recipe still runs the canonical profile-coherence checks, which read locked
+component values and may fail if a values file is missing or invalid.
 
 Because `aicr query` resolves criteria the same way `aicr recipe` does, it is subject
 to the same coverage post-condition: a stated `service`/`accelerator`/`intent`/`os`/`platform`
@@ -1007,6 +1012,8 @@ cannot read a value from a recipe that `aicr recipe --require-evidence` would re
 **Synopsis:**
 ```text
 aicr query --selector <path> [flags]
+aicr query --summary [flags]
+aicr query --recipe <path-or-uri> (--selector <path> | --summary) [flags]
 ```
 
 **Flags:**
@@ -1015,7 +1022,107 @@ All `aicr recipe` flags except `--output` are supported (query always prints to 
 
 | Flag | Type | Description |
 |------|------|-------------|
-| `--selector` | string | **Required.** Dot-path to the configuration value to extract |
+| `--selector` | string | Required unless `--summary` is set. Dot-path to extract; `--selector ''` selects the whole hydrated recipe |
+| `--summary` | bool | Print identity, criteria, overlays, constraints, components, and validation checks. Text table by default; `--format table\|yaml\|json` selects the representation |
+| `--recipe`, `-r` | string | Load a previously generated recipe from a file path, HTTP/HTTPS URL, or `cm://namespace/name` instead of generating one |
+
+Exactly one of `--selector` or `--summary` is required. They are mutually exclusive,
+including an explicitly empty selector. `--recipe` cannot be combined with generation
+inputs: `--service`, `--accelerator` / `--gpu`, `--intent`, `--os`, `--platform`, `--nodes`,
+`--snapshot`, `--profile`, `--slurm-accounting-mode`, `--runtime-inventory`,
+`--gke-tcpxo-interfaces`, `--inherit-from`, or `--inherit`. The same rule applies to
+criteria, snapshot input, profile, and configuration selections in `spec.recipe` of
+`--config`. Data source and output format settings in the config remain usable.
+`--recipe` is rejected with `INVALID_REQUEST` while evidence is required by
+`--require-evidence`, `spec.recipe.requireEvidence`, or `AICR_REQUIRE_EVIDENCE`, before
+the file is read and for both selectors and summaries. A committed pointer attests the
+embedded catalog resolve, and a loaded file only names its criteria, profile, and leaf
+overlay; an edited file or one generated with `--data` could name an attested leaf.
+Query by criteria instead to keep the evidence check.
+
+#### Recipe Summary
+
+```shell
+# Summarize an embedded recipe without additional selector hydration
+aicr query --service eks --accelerator h100 --intent training --summary
+
+# Inspect a saved recipe, or emit a structured summary
+aicr query --recipe recipe.yaml --summary
+aicr query -r recipe.yaml --summary --format json
+
+# Select from a saved recipe (hydrates component values)
+aicr query -r recipe.yaml --selector criteria.service
+```
+
+Example output from the embedded EKS H100 training recipe (a point-in-time sample;
+versions and component membership are illustrative and change with the catalog):
+
+```text
+RECIPE SUMMARY
+API Version:  aicr.run/v1
+Kind:         RecipeResult
+Version:      dev
+GPU Driver:   unknown
+
+CRITERIA
+  Service:      eks
+  Accelerator:  h100
+  Intent:       training
+  OS:           any
+  Platform:     any
+
+OVERLAYS
+  Applied:  base, monitoring-hpa, h100-any, eks, eks-training, h100-eks-training
+
+CONSTRAINTS
+  K8s.server.version  >= 1.32.4
+
+COMPONENTS (15)
+NAME                           TYPE  VERSION  NAMESPACE               DEPENDS ON
+aws-efa                        Helm  v0.5.29  kube-system             -
+nodewright-operator            Helm  v0.20.0  nodewright              -
+nodewright-customizations      Helm  -        nodewright              nodewright-operator
+prometheus-operator-crds       Helm  28.0.1   monitoring              -
+aws-ebs-csi-driver             Helm  2.59.0   kube-system             prometheus-operator-crds
+cert-manager                   Helm  v1.20.2  cert-manager            prometheus-operator-crds
+kube-prometheus-stack          Helm  84.4.0   monitoring              prometheus-operator-crds
+k8s-ephemeral-storage-metrics  Helm  1.19.2   monitoring              kube-prometheus-stack,prometheus-operator-crds
+nfd                            Helm  0.20.1   node-feature-discovery  prometheus-operator-crds
+gpu-operator                   Helm  v26.7.2  gpu-operator            nfd,cert-manager,prometheus-operator-crds,nodewright-customizations
+dra-node-labeler               Helm  -        gpu-operator            gpu-operator
+kai-scheduler                  Helm  v0.16.9  kai-scheduler           gpu-operator
+nvidia-dra-driver-gpu          Helm  0.5.1    nvidia-dra-driver       gpu-operator,dra-node-labeler
+nvsentinel                     Helm  v1.28.0  nvsentinel              cert-manager,gpu-operator,prometheus-operator-crds
+prometheus-adapter             Helm  5.3.0    monitoring              kube-prometheus-stack
+
+VALIDATION
+  Deployment:   operator-health, expected-resources, gpu-operator-version, check-nvidia-smi
+  Conformance:  platform-health, gpu-operator-health, dra-support, accelerator-metrics, ai-service-metrics, gang-scheduling, pod-autoscaling, cluster-autoscaling, secure-accelerator-access
+  Performance:  nccl-all-reduce-bw
+```
+
+`API Version` and `Kind` are the summarized recipe's header.
+`GPU Driver` is the snapshot-observed state recorded in recipe metadata:
+`preinstalled`, `absent`, or `unknown` when none was recorded. It is not inferred
+from the presence of a GPU operator. A selected profile appears as `name=value`.
+Components follow deployment order, with enabled references not listed there appended in
+recipe order; the VERSION column shows Helm chart versions or Kustomize tags.
+Components disabled with `enabled: false` or `install: false` are not deployed, so they
+are left out of the table and the `COMPONENTS (n)` count, and dependencies on them are
+dropped from DEPENDS ON. `--selector components` still lists every component, including
+disabled ones.
+Constraints and applied overlays keep recipe order. Validation phases always appear
+in run order: readiness, then deployment, conformance, performance as `aicr validate`
+runs them, omitting phases without checks. Empty sections and empty table cells use
+`-`; a recipe with no components still shows the component table header. Unspecified
+criteria display as `any`.
+`--format yaml` and `--format json` emit the typed summary document rather than the
+full recipe, with empty optional fields omitted. The document has its own header,
+`apiVersion: aicr.run/v1beta1` and `kind: RecipeSummary`, and carries the summarized
+recipe's header under `source.apiVersion` and `source.kind`. A summary is output only:
+`--recipe`, `aicr bundle --recipe`, and other recipe inputs reject it by kind.
+`--format table` selects the text view explicitly. A format from
+`spec.recipe.output.format` is honored too.
 
 #### Selector Syntax
 
@@ -4336,7 +4443,7 @@ AICR respects standard environment variables:
 | `AICR_REQUESTS` | Default for `aicr snapshot --requests`. Comma-separated `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. | unset |
 | `AICR_LIMITS` | Default for `aicr snapshot --limits`. Comma-separated `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when this list does not already contain that key — explicit `nvidia.com/gpu=N` wins. | unset |
 | `AICR_CRITERIA_STRICT` | When set to `1` / `true` / `yes` / `on`, equivalent to `--criteria-strict` on every `aicr recipe` invocation: rejects criteria values not in the embedded OSS catalog regardless of `--data` contributions. Intended for OSS CI gates; `make qualify` exports it automatically for the unit-test step. | unset |
-| `AICR_REQUIRE_EVIDENCE` | When set to `1` / `true` / `yes` / `on`, equivalent to `--require-evidence` on `aicr recipe` and `aicr query`: reject a resolved recipe with no committed evidence pointer. Resolving with `--data` fails the check. A false spelling (`0`, `false`, `no`, `off`) does not turn the check off when the flag or config already enables it, and an unrecognized value does not enable it. Does not affect `aicr bundle` or `aicr mirror`. The `aicrd` process honors the same variable on `/v1/recipe` and `/v1/query`. | unset |
+| `AICR_REQUIRE_EVIDENCE` | When set to `1` / `true` / `yes` / `on`, equivalent to `--require-evidence` on `aicr recipe` and `aicr query`: reject a resolved recipe with no committed evidence pointer. Resolving with `--data` fails the check, and `aicr query --recipe` is rejected. A false spelling (`0`, `false`, `no`, `off`) does not turn the check off when the flag or config already enables it, and an unrecognized value does not enable it. Does not affect `aicr bundle` or `aicr mirror`. The `aicrd` process honors the same variable on `/v1/recipe` and `/v1/query`. | unset |
 | `NO_COLOR` | Suppress ANSI color codes in CLI logger output (de-facto standard, see [no-color.org](https://no-color.org/)) | unset |
 
 ## Exit Codes
