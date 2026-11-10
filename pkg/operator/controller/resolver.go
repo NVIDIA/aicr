@@ -186,7 +186,7 @@ func (r *ResolverReconciler) stages() *stages {
 }
 
 func (r *ResolverReconciler) resolve(ctx context.Context, rt *v1alpha1.ClusterRuntime) (*resolution, error) {
-	if err := aicrjob.CheckSupportedVersion(r.Config.AICRVersion, r.Config.AllowPrereleaseAICR); err != nil {
+	if err := checkAICRVersion(r.Config); err != nil {
 		return nil, err
 	}
 	waiting := waitingFor(rt)
@@ -313,6 +313,15 @@ func (r *ResolverReconciler) recipeRun(rt *v1alpha1.ClusterRuntime, input string
 		}
 	}
 	return run
+}
+
+// checkAICRVersion rejects an unsupported declared AICR version, or a
+// prerelease without the opt-in.
+func checkAICRVersion(c *config.Config) error {
+	if err := aicrjob.CheckSupportedVersion(c.AICRVersion); err != nil {
+		return err
+	}
+	return aicrjob.CheckPrereleaseAllowed(c.AICRVersion, c.AllowPrereleaseAICR)
 }
 
 // recordCriteria reports the criteria a recipe run resolved with.

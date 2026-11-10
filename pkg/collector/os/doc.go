@@ -20,7 +20,7 @@
 //
 // # Collected Data
 //
-// The collector returns a measurement with 4 subtypes:
+// The collector returns a measurement with 5 subtypes:
 //
 // 1. grub - Boot loader configuration:
 //   - intel_iommu, amd_iommu: IOMMU settings for device passthrough
@@ -41,7 +41,12 @@
 //   - Module parameters
 //   - Dependency information
 //
-// 4. release - OS identification:
+// 4. kmod-param - Allowlisted kernel module parameters, keyed by
+// /sys/module path:
+//   - /sys/module/ib_core/parameters/netns_mode: RDMA network namespace
+//     mode (Y shared, N exclusive); absent when ib_core is not loaded
+//
+// 5. release - OS identification:
 //   - ID: OS identifier (ubuntu, rhel, etc.)
 //   - VERSION_ID: OS version (24.04, 9, etc.)
 //   - PRETTY_NAME: Human-readable name

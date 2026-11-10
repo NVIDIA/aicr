@@ -1460,6 +1460,14 @@ const (
 	// results within this window.
 	ValidatorTerminationGracePeriod = 30 * time.Second
 
+	// ValidatorTerminationWaitMargin extends an interrupted run's pod
+	// termination wait past ValidatorTerminationGracePeriod, counted from the
+	// moment the validator Job's deletion returns. It covers the lag before the
+	// kubelet delivers SIGTERM and before the pod's terminal status is visible,
+	// so per-run RBAC is not revoked while a cooperative check is still running
+	// its in-grace cleanup. It is a delivery margin, not a work budget.
+	ValidatorTerminationWaitMargin = 5 * time.Second
+
 	// ValidatorMaxStdoutLines is the maximum number of stdout lines captured
 	// per validator. Lines beyond this are truncated (keeping the last N lines)
 	// to prevent ConfigMap overflow.

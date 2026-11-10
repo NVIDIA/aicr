@@ -355,6 +355,9 @@
         "perconaOperatorState": {
           "type": "string"
         },
+        "rdmaNamespaceMode": {
+          "type": "string"
+        },
         "selectedProfile": {
           "type": "object",
           "properties": {

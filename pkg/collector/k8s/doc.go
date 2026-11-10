@@ -65,12 +65,14 @@
 //
 // 7. oke-legacy-plugin - OKE legacy NVIDIA device-plugin conflict evidence
 //
-// 8. default-storage-class - StorageClasses annotated as the cluster default:
+// 8. oke-gpu-plugin - device-list strategy of OKE's NvidiaGpuPlugin add-on DaemonSet
+//
+// 9. default-storage-class - StorageClasses annotated as the cluster default:
 //   - collection-state: present, multiple, absent, or unknown
 //   - default-count and the sorted, comma-joined default-classes names
 //   - No provisioner health or capacity inference
 //
-// 9. percona-server-mongodb - Percona Operator for MongoDB conflict evidence:
+// 10. percona-server-mongodb - Percona Operator for MongoDB conflict evidence:
 //   - psmdb.percona.com API-group and exact-resource availability
 //   - Presence of PerconaServerMongoDB custom resources other than AICR's own
 //     nvsentinel/nvsentinel-mongodb

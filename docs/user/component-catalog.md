@@ -227,7 +227,7 @@ The inverse mismatch (no NVIDIA driver loaded on the sampled GPU node while the 
 
 - **On AKS (profiled), a pool reading that mismatches the SELECTED value fails closed at resolution.** Selection comes from `--profile` (or the `azure-managed` default); the `K8s.aks-gpu-pools.gpu-driver` reading then verifies it before any driver-state post-processing. Pools reading `None` fail the azure-managed default but **qualify `--profile gpuStack=operator-managed` — rerun with that selection against the same snapshot; no pool change or recapture is needed**. `Mixed` and `Managed` reject either selection naming the observed state — fix the pools and recapture; a *missing* reading (snapshot captured without `--aks-gpu-pools`) rejects with "reading unavailable" — recapture with the pool dump (see the [AKS GPU Operator-managed profile](../integrator/aks-gpu-setup.md#alternative-let-gpu-operator-manage-the-driver)).
 - **On AKS (profiled), Install-mode pools whose sampled node has no driver loaded still enter the record-and-gate flow.** Pool mode is the ownership contract, not live state: `gpu-driver: Install` satisfies the azure-managed constraint even while a failed AKS driver install or a mid-reimage node samples no loaded driver. Resolution succeeds, records `metadata.gpuDriverState: absent`, and the bundle-time `CheckDriverOwnershipCoherence` gate blocks `aicr bundle` with the AKS remedy (repair the pools and recapture, or switch pools to `--gpu-driver none`, recapture, and regenerate with `--profile gpuStack=operator-managed`). The driver-ownership paths are profile-owned, so the pre-profile per-path `--set` override tuple is rejected at bundle time.
-- **On families without a profile (and legacy pre-profile AKS artifacts), every inverse mismatch takes that same warn-record-gate path**: resolution logs a warning, records `metadata.gpuDriverState: absent` in the recipe, and the bundle-time `CheckDriverOwnershipCoherence` validation blocks `aicr bundle` ([#1757](https://github.com/NVIDIA/aicr/issues/1757)) unless the values are flipped to operator-managed mode or the GPU pools are reprovisioned with the platform's default driver install and re-snapshotted. Ownership overrides are bundle-time flags there, so resolution itself cannot fail hard without cutting off the supported override path — bundle generation is the first point where the final effective values are known.
+- **On families without a profile (and legacy pre-profile AKS artifacts), every inverse mismatch takes that same warn-record-gate path**: resolution logs a warning, records `metadata.gpuDriverState: absent` in the recipe, and the bundle-time `CheckDriverOwnershipCoherence` validation blocks `aicr bundle` ([#1757](https://github.com/NVIDIA/aicr/issues/1757)) unless the values are flipped to operator-managed mode or the GPU pools are reprovisioned with the platform's default driver install and re-snapshotted. Ownership overrides are bundle-time flags there, so resolution itself cannot fail hard without cutting off the supported override path — bundle generation is the first point where the final effective values are known. They are bundle-time only: an `argocd-helm` bundle rejects install-time values on the ownership paths at Helm render time (see [Override values](bundling.md#override-values)).
 
 One per-OS limitation is intentionally out of the check's scope: the check verifies value *coherence* (driver ownership and driver-root lockstep), not per-OS install capability. On GKE COS node images a deliberate `--set gpuoperator:driver.enabled=true` clears the gate — the values are internally coherent — but the GPU Operator cannot install a driver on COS, so the deployment fails at deploy time, where the `gpu-operator-health` conformance-phase check is the backstop. The check's GKE remedy therefore points COS clusters at the GKE-managed driver install (`gpu-driver-version`) rather than the override tuple.
 
@@ -430,7 +430,7 @@ AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration:
 
 Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nvcreCertificationMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.28.0`, the version pinned in `recipes/registry.yaml`.
 
-Two entries above are turned back on by AICR's shipped recipes: `nicHealthMonitor` on AKS and OKE (see [NIC and fabric fault detection](#nic-and-fabric-fault-detection)), and `slurmDrainMonitor` on every `platform: slurm` recipe (see [Slurm Drain Monitor](#slurm-drain-monitor)). The remediation components are turned on only by the opt-in [remediation steps](#graded-remediation), which bring their own datastore rather than `mongodbStore`, `healthEventsAnalyzer` only by the opt-in [analyzer mixin](#health-events-analyzer), `eventExporter` only by the opt-in [event exporter mixin](#health-event-export), `inclusterFileServer` only by the opt-in [log collector mixin](#diagnostics-capture), and `lifecycleManager` only by the opt-in [node validation mixin](#node-validation).
+Two entries above are turned back on by AICR's shipped recipes: `nicHealthMonitor` on AKS and OKE (see [NIC and fabric fault detection](#nic-and-fabric-fault-detection)), and `slurmDrainMonitor` on every `platform: slurm` recipe (see [Slurm Drain Monitor](#slurm-drain-monitor)). The remediation components are turned on only by the opt-in [remediation steps](#graded-remediation), which bring their own datastore rather than `mongodbStore`, `healthEventsAnalyzer` only by the opt-in [analyzer mixin](#health-events-analyzer), `eventExporter` only by the opt-in [event exporter mixin](#health-event-export), `inclusterFileServer` only by the opt-in [log collector mixin](#diagnostics-capture), `lifecycleManager` only by the opt-in [node validation mixin](#node-validation), and `cspHealthMonitor` only by the opt-in [CSP Health Monitor mixins](#cloud-maintenance-events).
 
 **The practical effect.** A stock AICR bundle surfaces GPU faults; it does not act on them. A node that needs a reboot is reported, not rebooted, and an operator intervenes. That is deliberate: `janitor` can reboot or terminate nodes, and enabling it without the operator having chosen to is not a safe default.
 
@@ -944,8 +944,8 @@ The reset Job runs `nvidia-smi` by chrooting into the host's driver root, so whe
 | GPU Operator installs the driver (EKS except os=amazonlinux, BCM, LKE, OCP, k0s, generic) | `/run/nvidia/driver` (chart default) | `nvidia` (chart default) | — |
 | AKS `gpuStack=azure-managed` (default) | `/` | `nvidia-container-runtime` | the `gpuStack` profile |
 | AKS `gpuStack=operator-managed` | `/run/nvidia/driver` | `nvidia` | the `gpuStack` profile |
-| OKE `gpuStack=oci-managed` (default) | `/` | `nvidia` (chart default) | the `gpuStack` profile |
-| OKE `gpuStack=operator-managed` | `/run/nvidia/driver` | `nvidia` (chart default) | the `gpuStack` profile |
+| OKE `gpuStack=oci-managed` (default) | `/` | `runc` | the `gpuStack` profile |
+| OKE `gpuStack=operator-managed` | `/run/nvidia/driver` | `nvidia` | the `gpuStack` profile |
 | EKS `os=amazonlinux` leaves (require the NVIDIA AL2023 AMI) | `/` | `nvidia` (chart default) | the leaf overlay |
 | Kind (nvkind), H200 k0s | `/` | `nvidia` (chart default) | the overlay |
 | RKE2 (CDI with NRI) | `/` on VR200, the chart default elsewhere | none (`""`) | the `rke2` and VR200 overlays |
@@ -1504,6 +1504,74 @@ The CRD is not removed; delete it by hand once no request remains, if you want i
 
 **What is qualified.** The render test pins the controller, its socket mount, both webhooks and the rule set its events match against the chart. The Kind e2e (`tests/e2e/nvsentinel-maintenance-request/`) creates a request and checks the node is cordoned and drained, deletes it and checks the node is uncordoned, and checks that a request for a missing node or with a past `startTime` is rejected. A KWOK lane bundles and deploys the mixin with the remediation step.
 
+### Cloud Maintenance Events
+
+NVSentinel's CSP Health Monitor reads the cloud provider's scheduled-maintenance notices and publishes a health event for each affected node ahead of the window. AICR runs it `STORE_ONLY`: the events are recorded in the datastore and no node is quarantined for them (see **Why events are only stored**). It polls the AWS Health API on EKS and Compute Engine's upcoming-maintenance audit log entries on GKE; a `maintenance-notifier` sidecar publishes the event `triggerQuarantineWorkflowTimeLimitMinutes` before the window opens. Two mixins enable it, one per cloud, and no shipped recipe composes either, because each needs cloud identity AICR does not create. Both need the datastore, so compose one with a [remediation step](#graded-remediation):
+
+```yaml
+# your-leaf-overlay.yaml (an EKS leaf)
+spec:
+  mixins:
+    - nvsentinel-quarantine
+    - nvsentinel-csp-health-monitor-aws
+```
+
+**Platforms.**
+
+| Platform | Mixin | Status |
+|---|---|---|
+| EKS | `nvsentinel-csp-health-monitor-aws` | available `STORE_ONLY`; `us-east-1` and `us-east-2` clusters only (see **AWS regions**); the AWS Health API needs a Business, Enterprise On-Ramp or Enterprise support plan |
+| GKE | `nvsentinel-csp-health-monitor-gcp` | available `STORE_ONLY` |
+| Every other service | — | not supported: the gate accepts `aws` only on `eks` and `gcp` only on `gke` |
+
+**What it sees.** On AWS it polls scheduled EC2 maintenance: network, power and reboot maintenance on instances and dedicated hosts, and UltraServer maintenance. It does not poll instance retirement or scheduled stops. On GKE it reads Compute Engine's `upcomingMaintenance` audit log entries. A notice is published only while its window is still ahead, so one the monitor first sees after the window starts, including one posted while the monitor was down, is never published. Notices posted before the monitor first runs are not read: it starts from the time it starts, keeping its place per `clusterName`, so renaming the cluster starts it over. When you enable it, check the provider's console for maintenance already scheduled.
+
+**AWS regions.** The AWS Health API has endpoints only in `us-east-1` and `us-east-2` (commercial partition), and NVSentinel v1.28.0 uses the one `aws.region` value both to reach the API and to filter events by region, so the gate accepts only those two `aws.region` values. It cannot see the cluster's actual region: a cluster elsewhere that sets one of them reads that region's events and silently gets none of its own. `us-east-1` is AWS's active endpoint; `us-east-2` is passive, and [AWS documents](https://docs.aws.amazon.com/general/latest/gr/awshealth.html) that its data may not be current, so a `us-east-2` cluster can see notices late.
+
+**Per-cluster values come from the bundle command.** The cluster name and cloud identity differ per cluster, so neither mixin sets them and `CheckNVSentinelCSPHealthMonitorCoherent` fails the bundle until they are passed. On EKS:
+
+```shell
+aicr bundle -r recipe.yaml -o ./bundle \
+  --system-node-selector nodeGroup=system \
+  --set nv-sentinel:csp-health-monitor.configToml.clusterName=gpu-train-1 \
+  --set-json 'nv-sentinel:csp-health-monitor.configToml.aws.accountId="012345678901"' \
+  --set nv-sentinel:csp-health-monitor.configToml.aws.region=us-east-1
+```
+
+`--system-node-selector` is required by the remediation step's datastore. Pass `accountId` through `--set-json` as a quoted string: `--set` reads the twelve digits as a number, which drops a leading zero, and the gate rejects it. On GKE:
+
+```shell
+aicr bundle -r recipe.yaml -o ./bundle \
+  --system-node-selector nodeGroup=system \
+  --set nv-sentinel:csp-health-monitor.configToml.clusterName=gpu-train-1 \
+  --set nv-sentinel:csp-health-monitor.configToml.gcp.targetProjectId=my-project \
+  --set nv-sentinel:csp-health-monitor.configToml.gcp.gcpServiceAccountName=nvsentinel-csp \
+  --set 'nv-sentinel:csp-health-monitor.configToml.gcp.logFilter=logName="projects/my-project/logs/cloudaudit.googleapis.com%2Fsystem_event" AND protoPayload.methodName="compute.instances.upcomingMaintenance"'
+```
+
+**Cloud identity is the operator's to create.** AICR renders the ServiceAccount annotation that binds the pod to a cloud identity; it creates no IAM role or service account.
+
+- **EKS (IRSA).** An IAM role trusted by the cluster's OIDC provider for the `nvsentinel/csp-health-monitor` ServiceAccount, allowing `health:DescribeEvents`, `health:DescribeAffectedEntities` and `health:DescribeEventDetails`. The annotation names `<clusterName>-nvsentinel-health-monitor-assume-role-policy` unless `csp-health-monitor.configToml.aws.iamRoleName` names another role; pass the role's name, not its ARN; a role created with a path takes the path as a prefix, without its leading `/` (`teams/nvsentinel-csp`), and the path may use any printable ASCII that IAM allows in one. IAM role names are at most 64 characters, so with the default name the cluster name must be 19 characters or fewer; the gate rejects a longer one. Without a qualifying support plan every call returns `SubscriptionRequiredException`. The pod restarts only when its config changes, and `iamRoleName` is not part of it, so after changing `iamRoleName` run `kubectl -n nvsentinel rollout restart deployment/csp-health-monitor`.
+- **GKE (Workload Identity).** A Google service account `<gcpServiceAccountName>@<targetProjectId>.iam.gserviceaccount.com` (pass only the part before the `@`) holding `logging.logEntries.list` on the project, with `roles/iam.workloadIdentityUser` granted to `<cluster-project>.svc.id.goog[nvsentinel/csp-health-monitor]`, where `<cluster-project>` is the project that owns the GKE cluster's workload identity pool.
+
+Upstream's [IAM guide](https://github.com/NVIDIA/NVSentinel/blob/v1.28.0/docs/csp-health-monitor-iam.md) has the commands for both; its `AWS_REGION` does not change which `aws.region` the gate accepts (see **AWS regions**).
+
+**Bundle-time gates.** `CheckNVSentinelCSPHealthMonitorCoherent` blocks a bundle whose `cspName` is not `aws` on an `eks` recipe or `gcp` on a `gke` recipe; whose `processingStrategy` is not `STORE_ONLY`, `--set` at bundle time included (see **Why events are only stored**); with a blank `clusterName`, which the monitor refuses at startup when empty; with a timing value that is not a whole number below 1,000,000, or is below the monitor's minimum, which crash-loops it (10 for `maintenanceEventPollIntervalSeconds` and 1 for the three minute values, where 0 takes the default for each of these four; 30 for the active cloud's poll interval, `aws.pollingIntervalSeconds` or `gcp.apiPollingIntervalSeconds`, where 0 is not accepted; the other providers' intervals, `lambda.pollingIntervalSeconds` included, need only be whole numbers); on AWS, without a 12-digit string `accountId`, with an `aws.region` other than `us-east-1` or `us-east-2`, with an IRSA role name that is not a valid IAM role name, or, without `iamRoleName`, with a `/` in `clusterName`; and on GCP, without `targetProjectId`, or without `logFilter`, which the monitor joins into every query, or with a `gcpServiceAccountName` that is not a service account ID. It rejects `--dynamic` on `global.cspHealthMonitor.enabled`, and with the monitor on, also on any `csp-health-monitor` value. `CheckNVSentinelRemediationPipelineCoherent` applies the remediation steps' datastore rules. Neither gate can confirm that the IAM role or service account exists, that the AWS account has a support plan, or that `aws.region` is the cluster's own region (see **AWS regions**); the first two surface on the first poll.
+
+**Why events are only stored.** Both mixins set `csp-health-monitor.processingStrategy: STORE_ONLY`, and the gate rejects any other value, so `fault-quarantine`, which reads only `EXECUTE_REMEDIATION` events, never acts on a maintenance event: no node is cordoned or drained for maintenance. Acting on them is not safe at NVSentinel v1.28.0. `fault-quarantine` keys a quarantine by the publishing agent, check, node and instance, among other fields, never by notice, so two maintenance notices for one instance share one hold, and the first to complete releases the node while the other's maintenance is still to come. A notice stored under `STORE_ONLY` that completes after a switch to `EXECUTE_REMEDIATION` releases a hold that a newer notice set, the same way. Either way the node is uncordoned during maintenance. Quarantining for maintenance therefore waits on an upstream change that keeps every outstanding hold until its own notice ends; until then the mixins record upcoming maintenance and do not protect workloads from it. The e2e's execution scenarios (`CSP_EXECUTION_SCENARIOS=true`) reproduce both cases and must pass before the gate allows `EXECUTE_REMEDIATION`.
+
+**Lead time.** The notifier publishes a maintenance event on its first check (every `maintenanceEventPollIntervalSeconds`, 60) within `triggerQuarantineWorkflowTimeLimitMinutes` of the window's start; the mixins state the chart's 30 minutes. Under `STORE_ONLY` it decides only when the event is recorded. The mixins own every value they set, `global.cspHealthMonitor.enabled`, `cspName`, `processingStrategy` and `triggerQuarantineWorkflowTimeLimitMinutes`, so setting any of them in a leaf overlay is rejected as a collision.
+
+**After the window.** On AWS the maintenance counts as ended when the monitor sees the event closed, up to one `aws.pollingIntervalSeconds` after AWS closes it, and `postMaintenanceHealthyDelayMinutes` (15) later the notifier records a healthy event if the node is Ready. On GKE a notice the provider cancels is recorded as healthy on the notifier's next check once the node is Ready, without the post-maintenance delay. If the node is not Ready, the notifier checks again on each of its checks and gives up `nodeReadinessTimeoutMinutes` (60) after its first not-Ready check, logging an alert and marking the event `NODE_READINESS_TIMEOUT`.
+
+**Stopping.** Regenerate the bundle without the mixin and redeploy: the subchart and its ServiceAccount are removed, and stored events stay in the datastore. Because the gate admits only `STORE_ONLY`, `fault-quarantine` has consumed no event from the monitor, so no node holds a maintenance quarantine and none needs releasing.
+
+**Resources and privileges.** One replica on a system node, with two containers: the monitor (1 CPU and 1Gi limit) and the `maintenance-notifier` sidecar (500m and 512Mi limit). With a MongoDB datastore the chart runs the `maintenance-notifier` as root (`runAsUser: 0`), and the pod mounts the node's `/var/run/nvsentinel` to publish through the platform connector's socket. Its ClusterRole only reads Nodes. Outside the cluster it reads the provider's maintenance API with the identity above, and changes nothing in the cloud account. Adding or removing either mixin restarts the `platform-connectors` DaemonSet's pod on every node, because the monitor's ServiceAccount joins or leaves the identities allowed to report about other nodes; node-local monitors cannot publish while a node's pod restarts.
+
+**What is qualified.** The render tests pin both images, `STORE_ONLY` and each cloud's workload identity annotation against the chart. A KWOK lane bundles and deploys the aws mixin on an EKS leaf and the gcp mixin on a GKE leaf. The Kind e2e (`tests/e2e/nvsentinel-csp-health-monitor/`) checks four of the gate's refusals (missing per-cluster values, a numeric `accountId`, a non-EKS recipe, `EXECUTE_REMEDIATION`) and that the aws mixin deploys `STORE_ONLY` with its IRSA annotation and keeps running without a cloud identity. It then writes maintenance events into the datastore in place of the AWS poller and checks that an event inside the lead time and its completion are published and stored and give the node no `CSPMaintenance` quarantine.
+
+**Deployment validation.** The registry's `nvsentinel` check asserts that the `csp-health-monitor` Deployment is fully rolled out wherever it renders, and passes where it does not. A missing or untrusted cloud identity does not stop the rollout: the monitor logs the failure on each poll, so check `kubectl -n nvsentinel logs deploy/csp-health-monitor -c csp-health-monitor` after enabling it.
+
 ## NVSentinel on Provider-Installed-Driver Platforms
 
 The recipes configure NVSentinel for you on every platform that needs it. This section explains what they set and why, so the values are recognizable in a generated bundle and the failure signatures are diagnosable if they ever reappear.
@@ -1564,6 +1632,13 @@ The AKS `gpuStack` profile now owns these names — `gpu-operator.operator.runti
 | AKS profile value | `operator.runtimeClass` | `metadata-collector.runtimeClassName` | janitor `resetJob.runtimeClassName` |
 |---|---|---|---|
 | `azure-managed` (default) | `nvidia-container-runtime` | `nvidia-container-runtime` | `nvidia-container-runtime` |
+| `operator-managed` | `nvidia` | `nvidia` | `nvidia` |
+
+The OKE `gpuStack` profile owns the same three names. Oracle's GPU node images register no `nvidia` runtime handler; OKE's node bootstrap runs the image's container toolkit for every container through a CRI-O hook on the default `runc` runtime, so `oci-managed` points all three at `runc`:
+
+| OKE profile value | `operator.runtimeClass` | `metadata-collector.runtimeClassName` | janitor `resetJob.runtimeClassName` |
+|---|---|---|---|
+| `oci-managed` (default) | `runc` | `runc` | `runc` |
 | `operator-managed` | `nvidia` | `nvidia` | `nvidia` |
 
 Every other platform leaves `operator.runtimeClass` at the shared chart default `nvidia`, so no side needs a value. The exception is RKE2: its GPU Operator runs CDI with the NRI plugin, which registers no RuntimeClass.
@@ -3233,6 +3308,39 @@ certified `v26.7` channel, whose v26.7.1 bundle ships the same
 also installs `computedomains` from its chart. This pairing has not yet been
 verified on a live OpenShift cluster; see
 [NVIDIA/aicr#2969](https://github.com/NVIDIA/aicr/issues/2969).
+
+### `gpu-operator` and `nvidia-dra-driver-gpu`: argocd-helm rejects install-time driver-ownership values
+
+An `argocd-helm` bundle that ships `gpu-operator`, `nvidia-dra-driver-gpu` or
+their `-ocp` variants now carries `templates/aicr-driver-ownership-lock.yaml`.
+The chart fails to render when an install-time value touches `driver.enabled`,
+`toolkit.enabled` or `hostPaths.driverInstallDir` under `gpuoperator`
+(`gpuoperatorocp`), or `nvidiaDriverRoot` under `dradriver` (`dradriverocp`),
+including a parent of one of these keys, a `null`, or a value identical to the
+bundled one (see [Override values](bundling.md#override-values)). Earlier
+bundles accepted these values. Sibling values such as
+`gpuoperator.driver.version` are unaffected.
+
+An existing install can still be carrying such a value without passing it
+again:
+
+- `helm upgrade --reuse-values` (or `--reset-then-reuse-values`) reapplies the
+  values supplied to the previous release, and so does a plain `helm upgrade`
+  that passes no values, so the upgrade fails on a value an earlier install
+  set. `helm get values <release>` lists them.
+- The bundle's parent Application forwards the values given to `helm install`
+  (its `helm.valuesObject`), and a root Application you maintain yourself
+  (`deployer.includeRootApp=false`) carries its own `helm` values or
+  parameters. Argo CD renders the new chart version with them, and the sync
+  fails with the same message.
+
+A failed render applies nothing, so the running release is unchanged. To
+upgrade, move each ownership value to bundle time and regenerate:
+`aicr bundle --set gpuoperator:driver.enabled=...`, or, when the recipe's
+selected profile owns the path (the AKS `gpuStack` profile), regenerate the
+recipe with `aicr recipe --profile gpuStack=...`. Then drop the value from the
+install: upgrade with `--reset-values`, passing the values you still need
+explicitly, and remove it from any Application that sets it.
 
 ### `nvidia-dra-driver-gpu`: `0.5.0` to `0.5.1`
 
