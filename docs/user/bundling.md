@@ -53,8 +53,9 @@ anything else, an edited file under a dropped `data/` included, because
 `checksums.txt` must list the whole tree.
 
 A run that is killed outright, for example by `SIGKILL` or the out-of-memory
-killer, cannot clean up after itself. Neither can a run that fails while
-moving the finished bundle into an existing output directory. Either can leave
+killer, cannot clean up after itself. A run that fails while moving the
+finished bundle into an existing output directory keeps what it has not moved
+yet, and its error names the directory holding it. Either can leave
 a `.aicr-stage-*` directory behind, and the output directory partly replaced.
 Delete the `.aicr-stage-*` directory and bundle again.
 

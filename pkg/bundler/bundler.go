@@ -607,15 +607,24 @@ func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.In
 
 	for _, name := range replaced {
 		if rmErr := os.RemoveAll(filepath.Join(s.dir, name)); rmErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to remove %s from %s", name, s.dir), rmErr)
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
+				"failed to remove %s from %s, leaving the bundle in %s", name, s.dir, s.keep()), rmErr)
 		}
 	}
 	for _, name := range names {
 		if mvErr := renameNoReplace(filepath.Join(s.path, name), filepath.Join(s.dir, name)); mvErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to move %s into %s", name, s.dir), mvErr)
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
+				"failed to move %s into %s, leaving the rest of the bundle in %s", name, s.dir, s.keep()), mvErr)
 		}
 	}
 	return nil
+}
+
+// keep stops discard from removing the stage and returns its path.
+func (s *bundleStage) keep() string {
+	kept := s.path
+	s.path = ""
+	return kept
 }
 
 // isStaleOutput reports whether e, a top-level entry of dir, is output an

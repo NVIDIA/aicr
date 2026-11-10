@@ -697,6 +697,44 @@ func TestBundleStagePublish_ExistingDir(t *testing.T) {
 	}
 }
 
+func TestBundleStagePublish_KeepsStageOnFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root removes files from a read-only directory")
+	}
+	dir := t.TempDir()
+	locked := filepath.Join(dir, "001-old", "locked")
+	if err := os.MkdirAll(locked, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "v.yaml"), []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0755) })
+
+	s, err := stageBundle(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("stageBundle: %v", err)
+	}
+	stage := s.path
+	if err = os.WriteFile(filepath.Join(stage, "README.md"), []byte("new"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	pubErr := s.publish(t.Context(), nil)
+	s.discard()
+
+	errorstest.WantReportedCode(t, pubErr, errors.ErrCodeInternal)
+	if pubErr == nil || !strings.Contains(pubErr.Error(), stage) {
+		t.Errorf("publish error = %v, want it to name the stage %s", pubErr, stage)
+	}
+	if _, statErr := os.Stat(filepath.Join(stage, "README.md")); statErr != nil {
+		t.Errorf("failed publish removed the staged bundle: %v", statErr)
+	}
+}
+
 func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
 	// helm and helmfile ignore the repo URL; the GitOps deployers need one.
 	tests := allDeployerCases()
