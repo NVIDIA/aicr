@@ -83,8 +83,11 @@ func TestNoOrphanedTuningManifests(t *testing.T) {
 
 func TestSelectTuningManifest(t *testing.T) {
 	const (
-		tuningManifest = nwcManifestsDir + "tuning.yaml"
-		otherComponent = "components/gpu-operator/manifests/dcgm-exporter.yaml"
+		tuningManifest    = nwcManifestsDir + "tuning.yaml"
+		okeTuningManifest = nwcManifestsDir + "tuning-oke-gb300.yaml"
+		otherComponent    = "components/gpu-operator/manifests/dcgm-exporter.yaml"
+		aksHardening      = nwcManifestsDir + "toolkit-hardening-aks.yaml"
+		okeHardening      = nwcManifestsDir + "toolkit-hardening-oke.yaml"
 	)
 	tests := []struct {
 		name  string
@@ -94,9 +97,11 @@ func TestSelectTuningManifest(t *testing.T) {
 		{"none", nil, ""},
 		{"other component only", []string{otherComponent}, ""},
 		{"tuning only", []string{tuningManifest}, tuningManifest},
-		{"toolkit hardening only", []string{aksToolkitHardeningManifest}, aksToolkitHardeningManifest},
-		{"leaf manifest after hardening", []string{aksToolkitHardeningManifest, tuningManifest}, tuningManifest},
-		{"leaf manifest before hardening", []string{tuningManifest, aksToolkitHardeningManifest}, tuningManifest},
+		{"toolkit hardening only", []string{aksHardening}, aksHardening},
+		{"leaf manifest after hardening", []string{aksHardening, tuningManifest}, tuningManifest},
+		{"leaf manifest before hardening", []string{tuningManifest, aksHardening}, tuningManifest},
+		{"OKE toolkit hardening only", []string{okeHardening}, okeHardening},
+		{"OKE leaf manifest after hardening", []string{okeHardening, okeTuningManifest}, okeTuningManifest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

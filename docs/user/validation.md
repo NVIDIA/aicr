@@ -106,8 +106,8 @@ is installed on the cluster.
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE (GPUDirect TCPXO), H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE and NVKE) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB300 + EKS, and VR200 + NVKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE, the per-rail SR-IOV VFs (`nvidia.com/sriov_resource_rail_<n>`) on NVKE, over InfiniBand for GB200 and RoCE v2 for VR200 — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the Grace Blackwell combinations — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, generic), VR200 + RKE2, and VR200 + NVKE. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE and NVKE), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE and NVKE) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB300 + EKS, GB300 + OKE, and VR200 + NVKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS; on OKE, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) for GB200 and RoCE over SR-IOV VFs (`nvidia.com/mlnxnics` VFs attached through the `rdma-net` network) for GB300; on NVKE, the per-rail SR-IOV VFs (`nvidia.com/sriov_resource_rail_<n>`), over InfiniBand for GB200 and RoCE v2 for VR200 — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the GB200 combinations and GB300 + EKS — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, OKE, generic), VR200 + RKE2, and VR200 + NVKE. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE GB200 and NVKE, RoCE on OKE GB300), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -177,6 +177,15 @@ On OKE, `-net` exercises the NVL72 rack's InfiniBand east-west fabric
 `rdmaSharedDevicePlugin` NicClusterPolicy) over NCCL's built-in IB/verbs
 transport — no EFA plumbing is involved. Both variants were validated
 end to end on a `BM.GPU.GB200.4` NVL72 rack.
+
+The GB300/OKE training recipe enables `-net` and `-nvls` with `>= 300` /
+`>= 700` GB/s floors. Its `-net` runs NCCL's built-in IB/verbs transport over
+RoCE: each worker pod requests the node's four SR-IOV VFs
+(`nvidia.com/mlnxnics`) and attaches them through the recipe's `rdma-net`
+network, and NCCL reads the node topology that `nvidia-tuned` writes to
+`/etc/nccl/topo.xml`. On `BM.GPU.GB300.4` nodes with NCCL 2.29.2, the 16 GiB bus
+bandwidth measured 363 GB/s (NET) and 836 GB/s (NVLS) on 2 nodes, and 376 GB/s
+and 909 GB/s on 4.
 
 ```bash
 # Capture snapshot, generate training recipe, validate the performance phase.
@@ -255,7 +264,9 @@ catches that on its own — it fails on a `Using network Socket` banner rather
 than reporting a figure — so the preflight exists to fail fast, naming the
 driver, instead of after a full benchmark run.
 
-The preflight covers every NET fabric: EFA on EKS and built-in IB/verbs on OKE and NVKE.
+The preflight covers EFA on EKS and built-in IB/verbs on OKE and NVKE for
+GB200, and EFA on EKS for GB300. GB300 on OKE (RoCE) ships R595 in the node
+image and is not preflighted.
 
 **Before R595** — which includes `580.173.02`, the version AICR pins — the
 driver must be loaded with `NVreg_GrdmaPciTopoCheckOverride=1`. Without it the
@@ -357,7 +368,7 @@ is passed it replaces the automatic filters rather than narrowing them.
 
 Valid profiles are the pairs in the applicability table above: `b200/any`,
 `gb200/any`, `gb200/eks`, `gb200/gke`, `gb200/nvke`, `gb200/oke`, `gb300/eks`, `gb300/generic`,
-`h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/nvke`, `vr200/rke2`. A
+`gb300/oke`, `h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/nvke`, `vr200/rke2`. A
 malformed or unknown value **fails** the check rather than silently skipping
 it. A valid profile that doesn't implement a requested variant (e.g.
 `gb200/eks` with the auto-detect `nccl-all-reduce-bw` check) skips just that

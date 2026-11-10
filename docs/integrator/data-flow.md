@@ -30,6 +30,7 @@ Each stage transforms input data into a different format:
 **OS Configuration:**
 - **grub**: `/proc/cmdline` - Boot parameters
 - **kmod**: `/proc/modules` - Loaded kernel modules
+- **kmod-param**: `/sys/module/<module>/parameters/<name>` - Allowlisted kernel module parameters, keyed by path; currently `ib_core`'s `netns_mode` (RDMA network namespace mode). A parameter whose module is not loaded is left out.
 - **sysctl**: `/proc/sys/**/*` - Kernel runtime parameters, except `/proc/sys/net` and entries whose read does real work in the kernel or takes a lock for a value nobody tunes (for example `vm/stat_refresh` and `kernel/ftrace_enabled`)
 - **release**: `/etc/os-release` - OS identification
 
@@ -47,6 +48,9 @@ Each `/proc` read (sysctl, `/proc/cmdline`, `/proc/modules`) is abandoned if it 
 - **oke-legacy-plugin**: OKE's legacy addon-manager `nvidia-gpu-device-plugin`
   DaemonSet in `kube-system` (device-plugin conflict evidence: `none`,
   `active`, or `unknown`)
+- **oke-gpu-plugin**: the device-list strategy of OKE's `NvidiaGpuPlugin`
+  add-on DaemonSet in `kube-system` (`volume-mounts`, another strategy,
+  `absent`, or `unknown`)
 - **default-storage-class**: StorageClasses annotated as the cluster default
   (`present`, `multiple`, `absent`, or `unknown`; no provisioner health)
 - **percona-server-mongodb**: Percona Operator for MongoDB conflict evidence
@@ -94,7 +98,8 @@ Each `/proc` read (sysctl, `/proc/cmdline`, `/proc/modules`) is abandoned if it 
 │   │       └─ data: map[string]Reading                   │
 │   │                                                     │
 │   ├─ OS                                                 │
-│   │   └─ subtypes: [grub, kmod, sysctl, release]        │
+│   │   └─ subtypes: [grub, kmod, kmod-param, sysctl,     │
+│   │                 release]                          │
 │   │       └─ data: map[string]Reading                   │
 │   │                                                     │
 │   ├─ K8s                                                │

@@ -1493,6 +1493,11 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	if applyErr := applyNVSentinelDatastoreState(ctx, internal, internalSnap); applyErr != nil {
 		return nil, applyErr
 	}
+	// The RDMA namespace mode is evidence only; CheckRDMANamespaceModeCoherent
+	// compares it with the bundle's RDMA attachment.
+	if applyErr := applyRDMANamespaceMode(ctx, internal, internalSnap); applyErr != nil {
+		return nil, applyErr
+	}
 	// Last write to the refs before the facade projection, so the emitted
 	// recipe and the Components view agree on where each component lives.
 	if resolveCfg.inheritFrom != "" {

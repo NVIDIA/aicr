@@ -120,7 +120,7 @@ aicr snapshot [flags]
 
 **What it captures:**
 - **SystemD Services**: containerd, docker, kubelet configurations
-- **OS Configuration**: grub, kmod, sysctl, release info
+- **OS Configuration**: grub, kmod, kmod-param, sysctl, release info
 - **Kubernetes**: server version, images, ClusterPolicy
 - **GPU**: driver-free PCI/NFD hardware detection — GPU presence, GPU count, accelerator model/SKU (resolved from the PCI device ID), nvidia kernel-module loaded state, and detection source. Does not require the NVIDIA driver or `nvidia-smi`, and does not emit driver version, CUDA version, or MIG settings.
 - **NodeTopology**: node topology (cluster-wide taints and labels across all nodes)
@@ -3135,7 +3135,9 @@ Warning: nodewright-customizations is enabled but --accelerated-node-selector is
 Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
 ```
 
-Neither warning is shown when the only nodewright manifest the recipe wires is the AKS toolkit hardening (`toolkit-hardening-aks.yaml`), as in AKS recipes without an accelerator: its package never cordons or drains a node, and it selects GPU nodes by a fixed label rather than `--accelerated-node-selector`.
+Neither warning is shown when the only nodewright manifest the recipe wires is a toolkit hardening manifest (`toolkit-hardening-aks.yaml` or `toolkit-hardening-oke.yaml`), as in AKS recipes without an accelerator and every OKE recipe except GB300: its package never cordons or drains a node, and it selects GPU nodes by a fixed label rather than `--accelerated-node-selector`.
+
+On OKE GB300 recipes the missing selector is an error and no bundle is produced, because their tuning CR reboots every node it matches and makes CRI-O wait for Multus.
 
 **Viewing Validation Warnings:**
 

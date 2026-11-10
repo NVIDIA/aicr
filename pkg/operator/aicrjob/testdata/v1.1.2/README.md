@@ -21,5 +21,5 @@ Notes:
   the same commit. Against v1.0.0, `RecipeResult` only adds enum values and
   optional fields; `Snapshot` is unchanged.
 - No snapshot fixture: the operator's snapshot parsing is unchanged, and the
-  v1.0.0 captures still cover it. `make operator-e2e` takes a real v1.1.2
-  snapshot on kind.
+  v1.0.0 captures still cover it. While v1.1.2 was the newest release in
+  `operator.aicr_e2e`, `make operator-e2e` took a real v1.1.2 snapshot on kind.

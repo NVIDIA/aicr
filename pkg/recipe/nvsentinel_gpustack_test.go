@@ -103,8 +103,9 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 				OS:          CriteriaOSOracleLinux,
 				Intent:      CriteriaIntentTraining,
 			},
-			profile:    "gpuStack=oci-managed",
-			wantAssume: ptr(true),
+			profile:          "gpuStack=oci-managed",
+			wantAssume:       ptr(true),
+			wantRuntimeClass: "runc",
 		},
 		{
 			name: "OKE operator-managed: the operator's driver pod is the evidence",
@@ -114,8 +115,9 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 				OS:          CriteriaOSOracleLinux,
 				Intent:      CriteriaIntentTraining,
 			},
-			profile:    "gpuStack=operator-managed",
-			wantAssume: ptr(false),
+			profile:          "gpuStack=operator-managed",
+			wantAssume:       ptr(false),
+			wantRuntimeClass: "nvidia",
 		},
 		{
 			name: "Kind: nvkind host-installs the driver (overlay-level, no profile)",
@@ -434,12 +436,14 @@ func TestOKENVSentinelValueIsProfileOwned(t *testing.T) {
 	owned := selected.OwnedPaths[nvsentinelComponent]
 	wantOwned := []string{
 		"janitor.config.controllers.gpuReset.resetJob.hostDriverRootPath",
+		"janitor.config.controllers.gpuReset.resetJob.runtimeClassName",
 		"janitor.config.controllers.gpuReset.serviceManager.name",
 		"janitor.config.controllers.gpuReset.serviceManager.spec.apps",
 		"janitor.config.controllers.gpuReset.serviceManager.spec.namespace",
 		"janitor.config.controllers.gpuReset.serviceManager.spec.restoreTimeout",
 		"janitor.config.controllers.gpuReset.serviceManager.spec.teardownTimeout",
 		"labeler.assumeDriverInstalled",
+		"metadata-collector.runtimeClassName",
 	}
 	if !slices.Equal(owned, wantOwned) {
 		t.Fatalf("ownedPaths[nvsentinel] = %v, want %v", owned, wantOwned)
