@@ -17,8 +17,10 @@ package pod_test
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -132,4 +134,39 @@ func TestGetPodLogs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestReadLogStreamLongLine pins #3703: a line longer than any scanner
+// buffer must not fail the read, or an exit-0 result loses every structured
+// marker that follows it and the orchestrator reports its output unavailable.
+func TestReadLogStreamLongLine(t *testing.T) {
+	longLine := strings.Repeat("x", defaults.LogScannerBufferSize+1)
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"over-long line keeps the marker after it", longLine + "\n##AICR-EXTRA## {\"resultSchema\":\"1\"}\n", longLine + "\n##AICR-EXTRA## {\"resultSchema\":\"1\"}\n"},
+		{"unterminated last line is terminated", "a\nb", "a\nb\n"},
+		{"empty stream", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := pod.ReadLogStreamForTest(context.Background(), strings.NewReader(tt.in))
+			if err != nil {
+				t.Fatalf("readLogStream() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("readLogStream() = %d bytes, want %d bytes (%q...)", len(got), len(tt.want), tt.want[:min(len(tt.want), 40)])
+			}
+		})
+	}
+	t.Run("done context stops the read", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := pod.ReadLogStreamForTest(ctx, strings.NewReader("a\n"))
+		if err == nil {
+			t.Fatal("readLogStream() with a done context returned no error")
+		}
+	})
 }

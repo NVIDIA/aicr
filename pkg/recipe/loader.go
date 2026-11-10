@@ -69,6 +69,35 @@ func LoadFromFileWithProviderProfile(
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 			fmt.Sprintf("failed to load recipe from %q", path))
 	}
+	// Decode the header alone first, so a document of another kind whose
+	// fields collide with RecipeResult's (a RecipeSummary's validation list,
+	// for example) is reported by kind rather than as a type mismatch.
+	headerReader, err := serializer.NewReader(sourceFormat, bytes.NewReader(sourceData))
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("failed to create recipe reader for %q", path))
+	}
+	var sourceHeader struct {
+		Kind string `json:"kind" yaml:"kind"`
+	}
+	if deserializeErr := headerReader.Deserialize(&sourceHeader); deserializeErr != nil {
+		return nil, errors.PropagateOrWrap(deserializeErr, errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("failed to load recipe from %q", path))
+	}
+
+	// Reject a wrong kind before the version gate. A RecipeMixin or
+	// ComponentRegistry handed to --recipe carries a perfectly valid
+	// apiVersion for its own track, so gating on version first would answer a
+	// question the user did not ask ("v1beta1 is unsupported") and hide the one
+	// they need ("this is not a RecipeResult"). RecipeMetadata is exempt: it is
+	// a legitimate input that auto-hydrates below.
+	if kind := sourceHeader.Kind; kind != "" && kind != RecipeResultKind && kind != RecipeMetadataKind {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("recipe file has kind %q, but %q is required; "+
+				"run \"aicr recipe\" to generate a hydrated RecipeResult first",
+				kind, RecipeResultKind))
+	}
+
 	sourceReader, err := serializer.NewReader(sourceFormat, bytes.NewReader(sourceData))
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
@@ -86,19 +115,6 @@ func LoadFromFileWithProviderProfile(
 	// RecipeMetadata overlay input would slip past the gate below (the
 	// hydrated RecipeResult always carries a supported version).
 	inputAPIVersion := rec.APIVersion
-
-	// Reject a wrong kind before the version gate. A RecipeMixin or
-	// ComponentRegistry handed to --recipe carries a perfectly valid
-	// apiVersion for its own track, so gating on version first would answer a
-	// question the user did not ask ("v1beta1 is unsupported") and hide the one
-	// they need ("this is not a RecipeResult"). RecipeMetadata is exempt: it is
-	// a legitimate input that auto-hydrates below.
-	if rec.Kind != "" && rec.Kind != RecipeResultKind && rec.Kind != RecipeMetadataKind {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("recipe file has kind %q, but %q is required; "+
-				"run \"aicr recipe\" to generate a hydrated RecipeResult first",
-				rec.Kind, RecipeResultKind))
-	}
 
 	// Reject an artifact stamped with an apiVersion this build does not
 	// understand before an overlay can trigger provider-backed hydration.

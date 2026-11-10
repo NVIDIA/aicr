@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/allocpolicy"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -515,15 +516,12 @@ func CheckHostMofedWithoutNetworkOperator(ctx context.Context, componentName str
 // recipes/registry.yaml. Used only in log/error message text below —
 // for actual component lookups, use resolveDRAComponentRef, which also
 // matches the OCP variant (see draDriverComponentNames).
-const draDriverComponentName = "nvidia-dra-driver-gpu"
+const draDriverComponentName = allocpolicy.ComponentDRADriver
 
 // draDriverComponentNames are every registry-level component name that
-// represents the NVIDIA DRA GPU driver, canonical plus OCP variant. This
-// package cannot import pkg/bundler (dependency cycle — see
-// componentOverrideKeys godoc for the same constraint elsewhere in this
-// file), so this list is a local duplicate of pkg/bundler's
-// draComponentNames; keep both in sync.
-var draDriverComponentNames = []string{draDriverComponentName, "nvidia-dra-driver-gpu-ocp"}
+// represents the NVIDIA DRA GPU driver, canonical plus OCP variant, from
+// config.DRADriverOwnership.
+var draDriverComponentNames = config.DRADriverOwnership.ComponentNames
 
 // resolveDRAComponentRef looks up the DRA driver's ComponentRef by
 // trying every known name variant in turn. recipeResult.GetComponentRef
@@ -1131,7 +1129,7 @@ func draLockstepViolations(ctx context.Context, recipeResult *recipe.RecipeResul
 	// paths in the caller: a dynamic DRA driver root escapes Rule 2 at
 	// bundle time.
 	draDynMsgs := dynamicOwnershipViolations(bundlerConfig, draRef.Name, draKeys,
-		[]string{"nvidiaDriverRoot"})
+		config.DRADriverOwnership.Paths)
 	msgs = append(msgs, draDynMsgs...)
 	draValues, draErr := effectiveComponentValues(ctx, recipeResult, bundlerConfig, draRef.Name, draKeys, "driver-ownership coherence")
 	if draErr != nil {
@@ -1271,7 +1269,7 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 	// declarations are rejected up front — before values resolution, so
 	// the rejection fires even when resolution itself fails.
 	if dynMsgs := dynamicOwnershipViolations(bundlerConfig, componentName, gpuOpKeys,
-		[]string{"driver.enabled", "toolkit.enabled", "hostPaths.driverInstallDir"}); len(dynMsgs) > 0 {
+		config.GPUOperatorDriverOwnership.Paths); len(dynMsgs) > 0 {
 		for _, msg := range dynMsgs {
 			slog.Warn(msg, logKeyComponent, componentName)
 		}
@@ -1430,13 +1428,9 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 
 // gpuOperatorComponentNames are the registry-level component names that
 // carry GPU Operator driver-ownership values (the canonical chart and its
-// OCP variant). This package cannot import pkg/bundler (dependency cycle
-// — see draDriverComponentNames above for the identical constraint and
-// the agreed keep-in-sync disposition), so this list is a local
-// duplicate of pkg/bundler's gpuOperatorComponentNames; it also mirrors
-// the pair that registers CheckDriverOwnershipCoherence in
-// recipes/registry.yaml. Keep all three in sync.
-var gpuOperatorComponentNames = []string{"gpu-operator", "gpu-operator-ocp"}
+// OCP variant), from config.GPUOperatorDriverOwnership. They mirror the pair
+// that registers CheckDriverOwnershipCoherence in recipes/registry.yaml.
+var gpuOperatorComponentNames = config.GPUOperatorDriverOwnership.ComponentNames
 
 // nvsentinelAssumeDriverInstalledOverrideSet is the documented
 // bundle-time override that makes the NVSentinel labeler apply

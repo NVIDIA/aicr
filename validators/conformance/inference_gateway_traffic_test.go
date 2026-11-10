@@ -278,7 +278,7 @@ func TestGatewayTrafficPodsHonorTolerations(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			deploy, svc := buildGatewayTrafficBackend("ns", gatewayTrafficPrimary, tt.in)
+			deploy, svc := buildGatewayTrafficBackend("ns", gatewayTrafficPrimary, tt.in, nil)
 			if got := deploy.Spec.Template.Spec.Tolerations; fmt.Sprint(got) != fmt.Sprint(tt.want) {
 				t.Errorf("backend tolerations = %v, want %v", got, tt.want)
 			}

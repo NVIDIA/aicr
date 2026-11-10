@@ -248,6 +248,16 @@ type CNCFCollectOptions struct {
 	// `aicr validate --namespace`. Empty means defaults.ValidationNamespace.
 	Namespace string
 
+	// ConformanceVersion names the checklist the submission certifies against
+	// ("v1.37"), the CLI's spec.validate.evidence.cncf.conformanceVersion and
+	// CNCFSubmissionOptions.ConformanceVersion. Empty follows the cluster's
+	// Kubernetes minor exactly: a submission run (Vendor set) whose minor no
+	// carried checklist matches is refused after the snapshot and before any
+	// validator Job, so this is the deliberate override for such a cluster.
+	// The evidence-pages render (no Vendor) keeps its nearest-checklist
+	// fallback.
+	ConformanceVersion string
+
 	// NotApplicable declares conditional MUST requirements not applicable,
 	// keyed by upstream id with the justification as value, exactly as
 	// RenderCNCFEvidenceOptions.NotApplicable and the CLI's
@@ -360,6 +370,45 @@ func (c *Client) ValidateCNCFEvidenceOptions(opts RenderCNCFEvidenceOptions) err
 		return err
 	}
 	return cncf.ValidateDocumented(version, toInternalDocumented(opts.Documented), opts.NotApplicable)
+}
+
+// ValidateCNCFRecipeCoverage checks, before a submission run, that rec
+// declares a complete proof path for every applicable MUST of the checklist
+// opts selects (resolved as RenderCNCFEvidenceWithResult will, with
+// opts.NotApplicable removing the requirements it declares): a recipe that
+// does not cannot establish the submission whatever its checks find, so the
+// run is refused before any validator Job rather than failing after them.
+// The check list is rec's spec.validation.conformance.checks; a recipe with
+// none declares nothing.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client or rec is nil, rec has no
+//     internal recipe state, opts does not resolve (see
+//     ValidateCNCFEvidenceOptions), or the recipe cannot establish one or
+//     more applicable MUSTs; the message names each requirement and the
+//     checks that would close its gap.
+func (c *Client) ValidateCNCFRecipeCoverage(rec *RecipeResult, opts RenderCNCFEvidenceOptions) error {
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if rec == nil || rec.internal == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"recipe is required: the conformance checks a submission runs are selected from it")
+	}
+	version, err := resolveConformanceVersion(opts)
+	if err != nil {
+		return err
+	}
+	return cncf.ValidateRecipeCoverage(version, recipeConformanceChecks(rec), opts.NotApplicable)
+}
+
+// recipeConformanceChecks returns rec's declared conformance checks, nil
+// when the recipe declares no conformance phase.
+func recipeConformanceChecks(rec *RecipeResult) []string {
+	if rec == nil || rec.internal == nil || rec.internal.Validation == nil || rec.internal.Validation.Conformance == nil {
+		return nil
+	}
+	return rec.internal.Validation.Conformance.Checks
 }
 
 // RenderCNCFEvidence writes CNCF AI Conformance evidence markdown (one file
@@ -559,11 +608,15 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 	// Pre-flight against the latest carried checklist, as the CLI does, so a
 	// bad key fails here rather than after every validator Job; the render
 	// repeats the check against the selected version.
-	if err := c.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{NotApplicable: opts.NotApplicable, Documented: opts.Documented}); err != nil {
+	if err := c.ValidateCNCFEvidenceOptions(RenderCNCFEvidenceOptions{
+		ConformanceVersion: opts.ConformanceVersion, NotApplicable: opts.NotApplicable, Documented: opts.Documented,
+	}); err != nil {
 		return err
 	}
 	if opts.Vendor != nil {
-		if err := c.ValidateCNCFSubmissionOptions(CNCFSubmissionOptions{Vendor: *opts.Vendor, NotApplicable: opts.NotApplicable, Documented: opts.Documented}, opts.Dir); err != nil {
+		if err := c.ValidateCNCFSubmissionOptions(CNCFSubmissionOptions{
+			ConformanceVersion: opts.ConformanceVersion, Vendor: *opts.Vendor, NotApplicable: opts.NotApplicable, Documented: opts.Documented,
+		}, opts.Dir); err != nil {
 			return err
 		}
 	}
@@ -594,24 +647,39 @@ func (c *Client) CollectCNCFEvidence(ctx context.Context, rec *RecipeResult, opt
 	}
 	slog.Info("starting CNCF submission run", "evidenceDir", dir, "recipe", rec.Name, "namespace", namespace)
 	return runCNCFSubmission(ctx, c, rec, cncfSubmissionInputs{
-		dir:           dir,
-		kubeconfig:    kubeconfig,
-		namespace:     namespace,
-		notApplicable: opts.NotApplicable,
-		documented:    opts.Documented,
-		vendor:        opts.Vendor,
+		dir:                dir,
+		kubeconfig:         kubeconfig,
+		namespace:          namespace,
+		conformanceVersion: opts.ConformanceVersion,
+		notApplicable:      opts.NotApplicable,
+		documented:         opts.Documented,
+		vendor:             opts.Vendor,
 	})
 }
 
 // cncfSubmissionInputs are CollectCNCFEvidence's resolved inputs: absolute
 // paths and the defaulted namespace.
 type cncfSubmissionInputs struct {
-	dir           string
-	kubeconfig    string
-	namespace     string
-	notApplicable map[string]string
-	documented    map[string]CNCFDocumentation
-	vendor        *CNCFVendor
+	dir                string
+	kubeconfig         string
+	namespace          string
+	conformanceVersion string
+	notApplicable      map[string]string
+	documented         map[string]CNCFDocumentation
+	vendor             *CNCFVendor
+}
+
+// submissionOptions are the write and pre-flight options of a submission
+// run: the explicit checklist when one was named, else the snapshot's
+// Kubernetes version, with the declarations and the vendor carried through.
+func (in cncfSubmissionInputs) submissionOptions(snap *Snapshot) CNCFSubmissionOptions {
+	return CNCFSubmissionOptions{
+		ConformanceVersion: in.conformanceVersion,
+		KubernetesVersion:  snap.KubernetesVersion(),
+		NotApplicable:      in.notApplicable,
+		Documented:         in.documented,
+		Vendor:             *in.vendor,
+	}
 }
 
 // cncfSubmissionRunner is the slice of Client that runCNCFSubmission
@@ -623,13 +691,22 @@ type cncfSubmissionRunner interface {
 	MergeReports(results []*PhaseResult) *ctrf.Report
 	RenderCNCFEvidenceWithResult(ctx context.Context, report *ctrf.Report, dir string, opts RenderCNCFEvidenceOptions) (*CNCFRequirementAggregate, error)
 	WriteCNCFSubmission(ctx context.Context, report *ctrf.Report, dir string, snap *Snapshot, rec *RecipeResult, opts CNCFSubmissionOptions) (*CNCFSubmissionResult, error)
+	ValidateCNCFSubmissionOptions(opts CNCFSubmissionOptions, dir string) error
+	ValidateCNCFRecipeCoverage(rec *RecipeResult, opts RenderCNCFEvidenceOptions) error
 }
 
 var _ cncfSubmissionRunner = (*Client)(nil)
 
-// runCNCFSubmission is the submission run: snapshot, conformance phase,
-// merge, render, verdict. Every stage's error propagates as that stage
-// reports it.
+// runCNCFSubmission is the submission run: snapshot, pre-flights, conformance
+// phase, merge, render, verdict. Every stage's error propagates as that stage
+// reports it. With a vendor, two pre-flights run between the snapshot and the
+// validator Jobs, exactly as `aicr validate --cncf-submission` runs them: the
+// snapshot's Kubernetes version must match a carried checklist
+// (ValidateCNCFSubmissionOptions; a submission certifies the cluster's exact
+// minor, so an uncarried one is refused here unless in.conformanceVersion
+// names a checklist), and the recipe must be able to establish every
+// applicable MUST (ValidateCNCFRecipeCoverage). The write repeats the version
+// check as the fail-closed backstop (#3703).
 func runCNCFSubmission(ctx context.Context, r cncfSubmissionRunner, rec *RecipeResult, in cncfSubmissionInputs) error {
 	// Privileged as `aicr validate` deploys it: the GPU, SystemD and OS
 	// collectors the conformance snapshot needs do not run restricted.
@@ -642,6 +719,24 @@ func runCNCFSubmission(ctx context.Context, r cncfSubmissionRunner, rec *RecipeR
 	if err != nil {
 		return err
 	}
+	if in.vendor != nil {
+		if preflightErr := r.ValidateCNCFSubmissionOptions(in.submissionOptions(snap), in.dir); preflightErr != nil {
+			return preflightErr
+		}
+	}
+	// The recipe must be able to establish every applicable MUST of the
+	// selected checklist, as the CLI requires: a submission (vendor set) that
+	// cannot is refused here, before any validator Job; the pages render
+	// only logs the gaps, since its result is not a submission.
+	if coverageErr := r.ValidateCNCFRecipeCoverage(rec, RenderCNCFEvidenceOptions{
+		ConformanceVersion: in.conformanceVersion, KubernetesVersion: snap.KubernetesVersion(), NotApplicable: in.notApplicable,
+	}); coverageErr != nil {
+		if in.vendor != nil {
+			return coverageErr
+		}
+		slog.Warn("the recipe's conformance checks would not establish every applicable MUST of the CNCF checklist; "+
+			"this run renders evidence pages, not a submission, so it proceeds", "error", coverageErr)
+	}
 	results, err := r.ValidateState(ctx, rec, snap,
 		WithValidationKubeconfig(in.kubeconfig),
 		WithValidationNamespace(in.namespace),
@@ -652,12 +747,7 @@ func runCNCFSubmission(ctx context.Context, r cncfSubmissionRunner, rec *RecipeR
 	report := r.MergeReports(results)
 	var agg *CNCFRequirementAggregate
 	if in.vendor != nil {
-		res, err := r.WriteCNCFSubmission(ctx, report, in.dir, snap, rec, CNCFSubmissionOptions{
-			KubernetesVersion: snap.KubernetesVersion(),
-			NotApplicable:     in.notApplicable,
-			Documented:        in.documented,
-			Vendor:            *in.vendor,
-		})
+		res, err := r.WriteCNCFSubmission(ctx, report, in.dir, snap, rec, in.submissionOptions(snap))
 		if err != nil {
 			return err
 		}
@@ -665,9 +755,10 @@ func runCNCFSubmission(ctx context.Context, r cncfSubmissionRunner, rec *RecipeR
 	} else {
 		var err error
 		agg, err = r.RenderCNCFEvidenceWithResult(ctx, report, in.dir, RenderCNCFEvidenceOptions{
-			KubernetesVersion: snap.KubernetesVersion(),
-			NotApplicable:     in.notApplicable,
-			Documented:        in.documented,
+			ConformanceVersion: in.conformanceVersion,
+			KubernetesVersion:  snap.KubernetesVersion(),
+			NotApplicable:      in.notApplicable,
+			Documented:         in.documented,
 		})
 		if err != nil {
 			return err

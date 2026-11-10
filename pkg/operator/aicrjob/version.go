@@ -46,7 +46,7 @@ func SupportsV11(version string) bool {
 // major.minor.patch that version-gated behavior compares. It is empty for a
 // version that is not semantic.
 func Core(version string) string {
-	c := semver.Canonical(normalize(version))
+	c := semver.Canonical(version)
 	c = strings.TrimSuffix(c, semver.Build(c))
 	return strings.TrimSuffix(c, semver.Prerelease(c))
 }
@@ -57,26 +57,12 @@ const (
 	ReasonArtifactUnsupported = "AICRArtifactUnsupported"
 )
 
-// CheckSupportedVersion rejects an AICR version that is not vX.Y.Z with an
-// optional prerelease, one outside the supported range, and a prerelease
-// unless allowPrerelease, the operator's explicit opt-in. A prerelease is in
+// CheckSupportedVersion rejects an AICR version that CheckDeclaredVersion
+// rejects or whose release is outside the supported range. A prerelease is in
 // range when the release it precedes is.
-func CheckSupportedVersion(version string, allowPrerelease bool) error {
-	if err := checkVersion(version); err != nil {
+func CheckSupportedVersion(version string) error {
+	if err := CheckDeclaredVersion(version); err != nil {
 		return err
-	}
-	if semver.Prerelease(version) != "" && !allowPrerelease {
-		return versionError(fmt.Sprintf(
-			"AICR version %s is a prerelease; the operator runs one only with aicr.allowPrerelease", version))
-	}
-	return nil
-}
-
-// checkVersion rejects a version that is not vX.Y.Z with an optional
-// prerelease, or whose release is outside the supported range.
-func checkVersion(version string) error {
-	if !semver.IsValid(version) || semver.Canonical(version) != version {
-		return versionError(fmt.Sprintf("AICR version %q is not a release or prerelease version", version))
 	}
 	if core := Core(version); semver.Compare(core, MinAICRVersion) < 0 || semver.Compare(core, ExclusiveMaxAICRVersion) >= 0 {
 		return versionError(fmt.Sprintf("AICR version %s is outside >=1.0.0, <2.0.0", version))
@@ -84,20 +70,36 @@ func checkVersion(version string) error {
 	return nil
 }
 
+// CheckDeclaredVersion rejects an AICR version that is not vX.Y.Z with an
+// optional prerelease.
+func CheckDeclaredVersion(version string) error {
+	if !semver.IsValid(version) || semver.Canonical(version) != version {
+		return versionError(fmt.Sprintf("AICR version %q is not vX.Y.Z with an optional prerelease", version))
+	}
+	return nil
+}
+
+// CheckPrereleaseAllowed rejects a prerelease AICR version unless allowed is
+// true. It does not check the format.
+func CheckPrereleaseAllowed(version string, allowed bool) error {
+	if semver.Prerelease(version) != "" && !allowed {
+		return versionError(fmt.Sprintf("AICR version %s is a prerelease and needs aicr.allowPrerelease", version))
+	}
+	return nil
+}
+
 // CheckArtifactVersion is the version gate: the version an AICR artifact
 // reports must equal the declared aicr.version exactly, and an artifact
 // without a version is rejected. A mismatch writes nothing to the engine and
-// stalls with AICRVersionMismatch. It accepts a prerelease: the resolver
-// enforces the opt-in with CheckSupportedVersion before it resolves, so no
-// rollout starts on a prerelease without it.
+// stalls with AICRVersionMismatch.
 func CheckArtifactVersion(declared, reported string) error {
-	if err := checkVersion(declared); err != nil {
+	if err := CheckSupportedVersion(declared); err != nil {
 		return err
 	}
 	if reported == "" {
 		return versionError("AICR artifact carries no release version")
 	}
-	if normalize(reported) != normalize(declared) {
+	if normalize(reported) != declared {
 		return versionError(fmt.Sprintf("AICR artifact reports %s, but aicr.version is %s", reported, declared))
 	}
 	return nil

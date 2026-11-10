@@ -422,7 +422,7 @@ func (s *aiMetricsScenario) verdictSummary(err error) string {
 func (s *aiMetricsScenario) deploy(ctx *validators.Context) error {
 	start := time.Now()
 	ns := s.testRun.namespace
-	pod, svc := buildAIMetricsWorkload(ns, s.runID, s.collectionTimeout, s.tolerations)
+	pod, svc := buildAIMetricsWorkload(ns, s.runID, s.collectionTimeout, s.tolerations, s.testRun.imagePullSecretRefs())
 	if _, err := s.clientset.CoreV1().Pods(ns).Create(ctx.Ctx, pod, metav1.CreateOptions{}); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create metrics stub pod", err)
 	}
@@ -697,7 +697,7 @@ func parsePromSingleSample(body []byte) (value float64, found bool, err error) {
 // activeDeadlineSeconds caps its lifetime past the check's longest path so a
 // leaked pod ends on its own. tolerations, when nil, defaults to tolerate-all
 // so the stub schedules on all-tainted clusters.
-func buildAIMetricsWorkload(ns, runID string, collectionTimeout time.Duration, tolerations []corev1.Toleration) (*corev1.Pod, *corev1.Service) {
+func buildAIMetricsWorkload(ns, runID string, collectionTimeout time.Duration, tolerations []corev1.Toleration, pullSecrets []corev1.LocalObjectReference) (*corev1.Pod, *corev1.Service) {
 	if tolerations == nil {
 		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
 	}
@@ -710,6 +710,7 @@ func buildAIMetricsWorkload(ns, runID string, collectionTimeout time.Duration, t
 			RestartPolicy:         corev1.RestartPolicyNever,
 			ActiveDeadlineSeconds: ptr.To(int64(lifetime / time.Second)),
 			Tolerations:           tolerations,
+			ImagePullSecrets:      pullSecrets,
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsNonRoot:   ptr.To(true),
 				RunAsUser:      ptr.To(int64(65534)),
