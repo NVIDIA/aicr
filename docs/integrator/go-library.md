@@ -253,8 +253,8 @@ reported as no drift.
 // role from a
 // `gcloud container node-pools list --cluster <cluster> --format=json`
 // dump, merged as the K8s.gke-gpu-pools.gpu-driver-installation reading.
-// It's required only when resolving the GKE `bundle-installer` gpuStack
-// value from a snapshot. The default `gke-default` value needs no pool
+// It's required only when resolving the GKE `bundle-installer` or `dra`
+// gpuStack value from a snapshot. The default `gke-default` value needs no pool
 // dump.
 // Give the Job-backed snapshot its own deadline: contexts cap the
 // configured timeouts from the parent side, so reusing the 30-second
@@ -287,7 +287,7 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Cleanup:         true,
 	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
 	OKEAddonsPath:   "/path/to/oke-addons.json",    // OKE only
-	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer only
+	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer and dra only
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
@@ -655,7 +655,16 @@ return res.Aggregate.Outcome(report, true)
   writes the evidence pages under `opts.Dir` against the checklist of the
   cluster's Kubernetes minor, or, when `opts.Vendor` is set,
   `WriteCNCFSubmission` writes the complete submission directory there
-  instead (`opts.Documented` applies either way). Each stage keeps its own bound (the snapshot its 5-minute
+  instead (`opts.Documented` applies either way). With a vendor, the
+  snapshot's Kubernetes version is checked against the carried checklists
+  (`ValidateCNCFSubmissionOptions`) between the snapshot and the validator
+  run: a submission certifies the cluster's exact minor, so a minor no
+  carried checklist matches (1.34 or 1.38 alike) is refused with
+  `ErrCodeInvalidRequest` before any validator Job unless
+  `opts.ConformanceVersion` names a checklist (`"v1.37"`), which is then
+  carried into the write and recorded in the README as selected explicitly;
+  the write repeats the check as the backstop. The pages render keeps its
+  nearest-checklist fallback. Each stage keeps its own bound (the snapshot its 5-minute
   budget plus grace, the run the 75-minute `ValidateState` default), and
   `opts.Kubeconfig` and `opts.Namespace` (default `aicr-validation`, as
   `aicr validate --namespace`) apply to both the agent and the validator
@@ -683,8 +692,9 @@ return res.Aggregate.Outcome(report, true)
 
 ```go
 err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
-	Dir:           "./cncf-evidence",
-	NotApplicable: map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"},
+	Dir:                "./cncf-evidence",
+	NotApplicable:      map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"},
+	ConformanceVersion: "", // empty: the cluster's exact minor must be a carried checklist
 })
 ```
 
@@ -696,8 +706,9 @@ or earlier either; `RenderCNCFEvidenceWithResult`,
 `WriteCNCFSubmission`, `ValidateCNCFSubmissionOptions`, `CNCFSubmissionOptions`,
 `CNCFSubmissionResult`, `CNCFVendor`, `CNCFDocumentation`,
 `RenderCNCFEvidenceOptions.Documented`, `CNCFEvidenceOptions.Vendor`,
-`CNCFEvidenceOptions.Documented`, `CNCFCollectOptions.Vendor` and
-`CNCFCollectOptions.Documented` are not in v1.2.0 or earlier.
+`CNCFEvidenceOptions.Documented`, `CNCFCollectOptions.Vendor`,
+`CNCFCollectOptions.Documented`, `CNCFCollectOptions.ConformanceVersion` and
+`ValidateCNCFRecipeCoverage` are not in v1.2.0 or earlier.
 
 ## Recipe sources
 

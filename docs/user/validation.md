@@ -17,8 +17,30 @@ For the architectural view of how snapshot + recipe flow into the validator, see
 | `conformance` | Does the cluster support workload-specific capabilities (DRA, gang scheduling, autoscaling, ...)? | Before opening the cluster to real workloads |
 | `performance` | Does the cluster hit expected bandwidth / throughput thresholds? | After components are ready; before going to production |
 
+Under a GitOps deployer (Argo CD, Flux, Fleet), start `aicr validate --phase
+deployment` only after the sync of every wave has completed, not while it is
+still progressing. The phase treats a declared resource the cluster lacks as a
+deployment that was not applied, not as one that is not ready yet: a Nodewright
+CR the recipe declares (shipped by `nodewright-customizations`, which syncs in
+a later wave than the operator) that is absent fails `expected-resources`
+immediately instead of waiting for the sync to deliver it.
+
 Readiness pre-flight constraints (K8s version, OS, kernel) run implicitly before
-any phase. If pre-flight fails, no validator Jobs are deployed.
+any phase. If pre-flight fails, no validator Jobs are deployed. A submission run
+(`--cncf-submission`) adds two pre-flights of its own once the snapshot is
+loaded or captured and before any validator Job: the cluster's Kubernetes minor
+must match a carried checklist exactly (1.34 and 1.38 are refused alike, since
+a submission certifies one minor) unless
+`spec.validate.evidence.cncf.conformanceVersion` names one, which the
+submission README then records as selected explicitly; and the recipe's
+`validation.conformance.checks` must declare a complete proof path for every
+applicable MUST of that checklist (`secure-accelerator-access` or the Slinky
+Slurm alternative `slinky-slurm-gpu-access`; a conditional MUST declared under
+`spec.validate.evidence.cncf.notApplicable` is not required). A recipe that
+cannot establish a MUST is refused with `INVALID_REQUEST` naming the
+requirements and the checks that would close each gap, since no run of it can
+establish the submission. A plain run that includes the conformance phase logs
+the same gaps as a warning and proceeds.
 
 ## The workflow
 
@@ -61,7 +83,7 @@ a component the bundler enabled at bundle time is not checked.
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
 - Effectively cluster-admin for the identity running `aicr validate`. Each run creates a ServiceAccount for its validator Jobs and binds it to the built-in `cluster-admin` ClusterRole through a per-run `aicr-validator-<run-id>` ClusterRoleBinding, and Kubernetes RBAC only lets you bind a role whose permissions you already hold. The run deletes the binding at cleanup; `--no-cleanup` leaves it active until you delete it yourself. AICR creates its own `aicr-validation` namespace on first run. To run without that grant, have an administrator provision the ServiceAccount instead; see [Running under a pre-provisioned ServiceAccount](#running-under-a-pre-provisioned-serviceaccount).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
-- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate with no cap set, from the flag, `AICR_MAX_NODES_PER_ENTRY`, or `spec.snapshot.execution.maxNodesPerEntry`; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` additionally re-evaluates `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so the value fails closed. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
+- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` and `dra` require every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin — or, under `dra`, the NVIDIA DRA driver's ResourceSlices — is the sole whole-GPU advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate with no cap set, from the flag, `AICR_MAX_NODES_PER_ENTRY`, or `spec.snapshot.execution.maxNodesPerEntry`; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` and `dra` additionally re-evaluate `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so those values fail closed. `dra` also re-evaluates its own `K8s.server.version >= 1.35.0` floor. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
 - **`NodeTopology.gpu-nodes.label` readiness constraints outside GKE** (including bare metal and `--data` services): GPU nodes are those the GPU Operator labels `nvidia.com/gpu.present=true`, so capture the snapshot after it is running. A snapshot with no such node fails readiness closed (exit 2), and GPU nodes it has not labeled are not checked.
 
 ## Training performance validation
@@ -872,7 +894,13 @@ waiver would disarm the upstream chart's install-guard tripwire).
 
 Stock recipes ship the production default: `gpus.enabled=false`,
 `gpuResourcesEnabledOverride=false`, and `devicePlugin.enabled=true`; the
-experimental DRA opt-in flips all three together in a recipe overlay.
+experimental DRA opt-in flips all three together in a recipe overlay. On
+GKE-COS the `gpuStack=dra` profile value
+([#2517](https://github.com/NVIDIA/aicr/issues/2517)) is the stock selection
+of exactly that opt-in tuple — the one stock selection resolving
+`dra-resource-claim`, still experimental pending the #1327 graduation
+checklist ([#3282](https://github.com/NVIDIA/aicr/issues/3282)); see
+[GKE GPU Setup](../integrator/gke-gpu-setup.md#alternative-dra-resourceclaims-as-the-advertiser-experimental).
 
 **Upgrading a cluster from the dual-advertised (pre-flip) configuration:**
 applying the flipped bundle does not drain existing workloads — a running
@@ -1577,10 +1605,9 @@ Common reasons and their cause:
 
 The check (CNCF `driver_runtime_management`, SHOULD at v1.37 and MUST at v1.38)
 runs a pod from a vanilla `ubuntu:22.04` image that requests one GPU, and reads
-the driver from inside it. The probe pod carries no `imagePullSecrets`
-(`--image-pull-secret` reaches the validator Job, not the per-run namespace),
-so a mirror of the probe image that needs credentials must supply them
-node-side, through the container runtime's registry configuration. Its artifacts (`Driver runtime probe pod logs`,
+the driver from inside it. The probe pod carries the
+`--image-pull-secret` Secrets, copied into its per-run namespace (see the
+image note below). Its artifacts (`Driver runtime probe pod logs`,
 `Advertised driver version`, `Driver runtime compatibility`) name the failing
 step:
 
@@ -1601,7 +1628,21 @@ the full reference of your copy or of another vanilla OS image. It must ship no
 accelerator driver or tools, and it must provide what the probe script runs on:
 a POSIX `/bin/sh`, `head` and `tr` (`timeout` is used when present). A
 distroless image cannot run the probe; mirroring the Ubuntu image is the
-simplest choice.
+simplest choice. When the mirror needs credentials, `--image-pull-secret`
+covers the probe too: every conformance check that creates a per-run namespace
+copies the named Secrets from the validator namespace into it and attaches
+them to its probe pods, and the copies are deleted with the namespace. A
+Secret the flag names but the validator namespace lacks fails the check with
+`NotFound` before any probe is created.
+
+A probe pod whose `RuntimeClass` names a handler the node's container runtime
+does not serve stays `Pending` with `ContainerCreating` and no status change;
+the checks read the kubelet's `FailedCreatePodSandBox` event (the containerd
+message `no runtime for "..." is configured` naming the handler, a missing
+runtime handler, or a shim binary not found) and fail within seconds with
+`stuck: FailedCreatePodSandBox: ...`
+instead of waiting out the pod timeout. A sandbox failure from network setup
+is transient and is not treated this way.
 
 ### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus unreachable"
 
@@ -1666,7 +1707,8 @@ failing step:
 | `unmet prerequisite: no sandboxed RuntimeClass` | Auto-detection found no `RuntimeClass` whose name or handler contains `gvisor`, `runsc`, `kata` (the AKS `kata-mshv-vm-isolation` class matches), `sandboxed`, `quark` or `krun`. A sandboxed class may still exist under another name; the check never skips or records N/A for this | Provide a sandbox runtime (which one AICR recipes ship, and on which pool, is the pending decision in #3615), or set `AICR_SANDBOX_RUNTIME_CLASS=<name>` when the cluster has one under another name |
 | `AICR_SANDBOX_RUNTIME_CLASS names RuntimeClass "...", which does not exist on this cluster` | The override names a class the cluster does not have | Fix the name (`kubectl get runtimeclass`) or unset the variable to auto-detect |
 | `kernel identity: the sandboxed pod observes the same kernel identity` | Every kernel identity field both pods reported (release, version, boot id) matched, or neither pod reported a comparable field. With matching fields the pods share the host kernel: the class's handler maps to a runc-like runtime | Read the identity values in both probe log artifacts. If no field was comparable, find out why the probes could not read them; otherwise check that the containerd runtime configuration maps the handler to the sandbox binary |
-| `sandboxed probe pod did not complete in time` with `status=ContainerCreating` | The pod was bound to a node but its sandbox never started: the handler is not configured, or its binary is missing, on that node (`FailedCreatePodSandBox` events), or the node is cordoned or NotReady | Check that the `RuntimeClass` `scheduling.nodeSelector` selects only nodes with the sandbox runtime installed, and read the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs |
+| `sandboxed probe pod stuck: FailedCreatePodSandBox: ... no runtime for "<handler>" is configured` (or a missing runtime handler or shim binary) | The pod was bound to a node whose container runtime does not serve the class's handler; the check reads the kubelet's `FailedCreatePodSandBox` event and fails within seconds instead of waiting out the pod timeout | Check that the `RuntimeClass` `scheduling.nodeSelector` selects only nodes with the sandbox runtime installed, and that the handler name matches the runtime's configuration on those nodes |
+| `sandboxed probe pod did not complete in time` with `status=ContainerCreating` | The pod was bound to a node but its sandbox never started for a reason the fast failure above does not recognise, or the node is cordoned or NotReady | Read the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs |
 | `process isolation:`, `kernel and memory isolation:`, `filesystem isolation:` or `network isolation:` | The named probe saw host state inside the sandbox (a host daemon in `/proc`, a readable `/dev/mem`, a host path such as `/var/lib/kubelet`, a bridge such as `cni0`); the probe logs artifact shows what it saw | The sandbox shares that host namespace or mount; correct the runtime configuration |
 | `sandboxed probe pod stuck:` or `unsandboxed control pod stuck:` | The pod could not pull its image or be scheduled (`Unschedulable`); for the sandboxed pod, usually a `RuntimeClass` `scheduling.nodeSelector` that no node satisfies | Inspect the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs; for mirrors see the image note below |
 
@@ -1678,10 +1720,9 @@ the full reference of your copy or of another vanilla OS image. It must
 provide what the probe script runs on: a POSIX `/bin/sh`, `uname`, `cat`,
 `ls`, `wc`, `head`, `awk` and `tr`. A distroless image cannot run the probe;
 mirroring the Ubuntu image is the simplest choice. The two probe pods carry
-no `imagePullSecrets` (`--image-pull-secret` reaches the validator Job, not
-the per-run namespace, the same as for the other vanilla probe images), so a
-mirror that needs credentials must supply them node-side, through the
-container runtime's registry configuration.
+the `--image-pull-secret` Secrets, copied into the per-run namespace as for
+the other probe pods (see the `driver-runtime-management` note above), so a
+mirror that needs credentials is served the same way as the validator image.
 
 ### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus did not load the ServiceMonitor/PodMonitor"
 

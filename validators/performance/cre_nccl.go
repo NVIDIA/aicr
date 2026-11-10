@@ -42,7 +42,7 @@ func validateCRENcclAllReduceBw(
 ) (actual string, passed bool, err error) {
 
 	if ctx.ValidationInput == nil {
-		return ncclSkip(skipMsgNCCLNoInput, validators.SkipReasonNoValidationInput), true, nil
+		return ncclSkip(skipMsgNCCLNoInput, validators.SkipReasonNoValidationInput)
 	}
 	service := ctx.ValidationInput.Criteria.Service
 	accelerator := ctx.ValidationInput.Criteria.Accelerator
@@ -57,7 +57,7 @@ func validateCRENcclAllReduceBw(
 	entry, qualified := lookupCREQualification(checkNameCRENCCLAllReduceBW, service, accelerator)
 	if !qualified {
 		return ncclSkip(fmt.Sprintf("skipped - %s is not qualified on %s × %s", checkNameCRENCCLAllReduceBW, service, accelerator),
-			validators.SkipReasonUnsupportedTarget), true, nil
+			validators.SkipReasonUnsupportedTarget)
 	}
 
 	gpuConfig, err := determineGPUConfig(ctx, service, accelerator, ctx.NodeSelector)
