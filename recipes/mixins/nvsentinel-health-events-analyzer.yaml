@@ -31,8 +31,10 @@
 # rule_matched_total, but platform-connectors sets no node condition and no
 # Kubernetes Event for them. EXECUTE_REMEDIATION would set a node condition
 # named after the rule, which the analyzer never clears, since it publishes no
-# healthy event. Neither strategy cordons a node: none of fault-quarantine's
-# rule sets matches the analyzer's events.
+# healthy event. STORE_ONLY never cordons a node: fault-quarantine acts only on
+# EXECUTE_REMEDIATION events. From chart v1.31.0 its default "Health events
+# analyzer fatal error ruleset" cordons for a fatal analyzer event, so
+# EXECUTE_REMEDIATION would.
 #
 # Every rule toggle the pinned chart has is restated, all on, so the rule set
 # is chosen here rather than inherited. TestNVSentinelHealthEventsAnalyzerChartRender,

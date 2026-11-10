@@ -446,50 +446,50 @@ jobs:
           # TestCSPHealthMonitorImagesPinnedEverywhere fail if these drift
           # apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/preflight
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
-            tag: v1.28.0
+            tag: v1.31.0
             large: true
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
-            tag: v1.28.0
+            tag: v1.31.0
             large: true
           - image: ghcr.io/nvidia/nvsentinel/nic-health-monitor
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/slurm-drain-monitor
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/fault-quarantine
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/node-drainer
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/fault-remediation
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/janitor
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/janitor-provider
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/gpu-reset
-            tag: v1.28.0
+            tag: v1.31.0
           # Pinned by digest in recipes/components/slinky-drainer/manifests.
           - image: ghcr.io/nvidia/nvsentinel/slinky-drainer
-            tag: v1.28.0@sha256:bf6ccaf1d6c035aa5f86e70a929dc6d9a18c5c05b10104d23c69aacff35bcb14
+            tag: v1.31.0@sha256:d839d35cc25f6ffa22c016a3a38eeeb98a3ef91a3eb32326d728b3c3fa10e646
           - image: ghcr.io/nvidia/nvsentinel/health-events-analyzer
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/event-exporter
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/log-collector
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/file-server-cleanup
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/lifecycle-manager
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/csp-health-monitor
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/maintenance-notifier
-            tag: v1.28.0
+            tag: v1.31.0
           # The nvsentinel chart's own pins for the file server's third-party
           # images. The weekly TestNVSentinelLogCollectorChartRender fails if a
           # chart bump moves them; TestLogCollectorImagesPinnedEverywhere then

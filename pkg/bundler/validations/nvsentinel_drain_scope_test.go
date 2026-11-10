@@ -244,7 +244,39 @@ func TestCheckNVSentinelDrainScopeCoherent(t *testing.T) {
 			wantBlocked:  `podDrainPolicies[0].podSelector "role in (" is not a valid label selector`},
 		{name: "podDrainPolicies empty selector → blocked",
 			recipeResult: sentinel(true, set("podDrainPolicies", []any{policy("workers", "", " ")})),
-			wantBlocked:  "podDrainPolicies[0].podSelector is unset"},
+			wantBlocked:  "podDrainPolicies[0].podSelector and ownerKinds are both unset"},
+		{name: "podDrainPolicies empty selector and empty ownerKinds → blocked",
+			recipeResult: sentinel(true, set("podDrainPolicies", []any{
+				map[string]any{"name": "w", "mode": "Immediate", "ownerKinds": []any{}}})),
+			wantBlocked: "podDrainPolicies[0].podSelector and ownerKinds are both unset"},
+		{name: "podDrainPolicies ownerKinds without a selector → passes",
+			recipeResult: sentinel(true, set("podDrainPolicies", []any{
+				map[string]any{"name": "w", "mode": "AllowCompletion", "ownerKinds": []any{"StatefulSet"}}}))},
+		{name: "podDrainPolicies ownerKinds with a selector → passes",
+			recipeResult: sentinel(true, set("podDrainPolicies", []any{
+				map[string]any{"name": "w", "mode": "AllowCompletion", "podSelector": "app=a",
+					"ownerKinds": []any{"StatefulSet", "Job"}}}))},
+		{name: "podDrainPolicies ownerKinds with an invalid selector → blocked",
+			recipeResult: sentinel(true, set("podDrainPolicies", []any{
+				map[string]any{"name": "w", "mode": "AllowCompletion", "podSelector": "role in (",
+					"ownerKinds": []any{"StatefulSet"}}})),
+			wantBlocked: `podDrainPolicies[0].podSelector "role in (" is not a valid label selector`},
+		{name: "podDrainPolicies ownerKinds kind padded with whitespace → blocked",
+			recipeResult: sentinel(true, set("podDrainPolicies", []any{
+				map[string]any{"name": "w", "mode": "AllowCompletion", "ownerKinds": []any{"StatefulSet", " Job"}}})),
+			wantBlocked: `podDrainPolicies[0].ownerKinds[1] is " Job"`},
+		{name: "podDrainPolicies ownerKinds empty kind → blocked",
+			recipeResult: sentinel(true, set("podDrainPolicies", []any{
+				map[string]any{"name": "w", "mode": "AllowCompletion", "podSelector": "a=b", "ownerKinds": []any{""}}})),
+			wantBlocked: `podDrainPolicies[0].ownerKinds[0] is ""`},
+		{name: "podDrainPolicies ownerKinds kind not a string → blocked",
+			recipeResult: sentinel(true, set("podDrainPolicies", []any{
+				map[string]any{"name": "w", "mode": "AllowCompletion", "ownerKinds": []any{3}}})),
+			wantBlocked: "podDrainPolicies[0].ownerKinds[0] is 3"},
+		{name: "podDrainPolicies ownerKinds not a list → blocked",
+			recipeResult: sentinel(true, set("podDrainPolicies", []any{
+				map[string]any{"name": "w", "mode": "AllowCompletion", "podSelector": "a=b", "ownerKinds": "StatefulSet"}})),
+			wantBlocked: `podDrainPolicies[0].ownerKinds is "StatefulSet", want a list of controller kinds`},
 		{name: "podDrainPolicies selector not a string → blocked",
 			recipeResult: sentinel(true, set("podDrainPolicies", []any{map[string]any{"name": "w", "podSelector": 3, "mode": "Immediate"}})),
 			wantBlocked:  "podDrainPolicies[0].podSelector is 3, want a label selector string"},

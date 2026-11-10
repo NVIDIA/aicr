@@ -414,3 +414,62 @@ transitions:
       - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.28.0
       - https://github.com/NVIDIA/NVSentinel/pull/1989
       - https://github.com/NVIDIA/NVSentinel/blob/v1.28.0/docs/configuration/fault-quarantine.md
+  - from: ">=1.28.0 <1.31.0"
+    to: "1.31.0"
+    verdict: safe
+    verifiedBy: >-
+      Upstream v1.29.0, v1.30.0 and v1.31.0 release notes, the v1.28.0 to
+      v1.31.0 source compare, and helm template of the v1.30.0 and v1.31.0
+      charts on 2026-11-10 with the nvsentinel values AICR hydrates for the
+      base chain, for each nvsentinel mixin alone and for the remediation
+      compositions: the renders differ only in image tags, the new default
+      fault-quarantine rule set for health-events-analyzer events, the XID 74
+      rules in the analyzer, a get on daemonsets for janitor and on nodes/pods
+      for metadata-collector, and the removal of the
+      MONGODB_PING_TIMEOUT_TOTAL_SECONDS pin; the rendered image set is
+      unchanged apart from the tag. The v1.28.0 to v1.30.0 renders were
+      compared on 2026-11-02 with the same method: image tags, a LOG_LEVEL env
+      var, the XID 45 exclusion, and metadata-collector's
+      --pod-mapper-enabled=true (its previous behavior). The chart's default
+      labeler GPU class reads gpu.nvidia.com ResourceSlices, which makes the
+      labeler wait on a resource.k8s.io/v1 informer that Kubernetes 1.32 and
+      1.33 never serve and skip every node reconcile, so the recipe pins
+      v1.28.0's classes; on Kind 1.33.1 the chart's default labeler failed to
+      list ResourceSlices and the pinned classes restored driver-label
+      recovery and NIC tracking. Live on 2026-11-10 against the v1.31.0
+      chart: six nvsentinel Kind e2e lanes (post-remediation-validation,
+      external-remediation, maintenance-request, remediation, object-monitor,
+      health-events-analyzer) and two KWOK recipes passed, the pinned
+      labeler classes passed on Kubernetes 1.32 through 1.36, and the
+      simulated-GPU UAT lane installed the h100-training-slurm bundle with all
+      four gpu-health-monitor-dcgm-4.x pods connected to DCGM with 8 GPUs each
+      while the dcgm-3.x monitor stayed inactive.
+    summary: >-
+      Images move to v1.31.0 with no third-party image change and no CRD schema
+      change AICR depends on (HealthEvent gains optional drainDecision and
+      remediationDecision status fields). AICR renders its values against the
+      new chart rather than reusing the previous release's, so the chart's new
+      defaults reach the bundle: fault-quarantine gains a rule set that
+      cordons a node for a fatal health-events-analyzer event, but
+      fault-quarantine's change stream passes only EXECUTE_REMEDIATION events
+      and the nvsentinel-health-events-analyzer mixin keeps the analyzer's
+      derived events STORE_ONLY, so the rule set matches nothing until an
+      operator moves them to EXECUTE_REMEDIATION; the XID 74 solo rules read
+      the incoming event, not the node's stored events; and the datastore
+      clients wait up to 300 seconds for MongoDB, not 30. The labeler's default GPU class
+      from v1.30.0, which needs resource.k8s.io/v1 and so breaks the labeler
+      on Kubernetes 1.32 and 1.33, does not reach the bundle: the recipe keeps
+      v1.28.0's classes. Where fault-remediation runs, XID 154 recovery
+      actions that R610 and later drivers print now reset the GPU or reboot
+      the node.
+    reversible: true
+    reversibleNotes: >-
+      helm rollback to the previous revision restores the previous workloads;
+      the HealthEvent CRD only gains optional status fields, and the other
+      CRDs differ only in an annotation. This rests on the chart diff; the
+      rollback itself was not exercised.
+    references:
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.29.0
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.30.0
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.31.0
+      - https://github.com/NVIDIA/NVSentinel/blob/v1.31.0/docs/deprecations/gpu-health-monitor-dcgm-3-support-removal.md
