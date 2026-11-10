@@ -45,7 +45,8 @@ kubelet plugin on the workers.
 ## Generating the bundle
 
 ```shell
-GPU_NODE="my-gpu-worker"  # replace with a GPU worker's node name
+# List the label values with: kubectl get nodes -L kubernetes.io/hostname
+GPU_NODE="my-gpu-worker"  # replace with a GPU worker's kubernetes.io/hostname label value
 aicr snapshot --node-selector "kubernetes.io/hostname=${GPU_NODE}" --privileged -o snapshot.yaml
 aicr recipe --snapshot snapshot.yaml --intent inference --platform dynamo -o recipe.yaml
 aicr bundle -r recipe.yaml -o bundle \
