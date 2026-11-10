@@ -53,3 +53,86 @@ node-exporter:
 # only on a platform that ships none.
 metrics-server:
   enabled: false
+
+# Persistent sending queues are off: the gateways and watchdog keep their
+# queues in memory, as in 0.1.1-rc.3. NKTP's queue claims sit in a
+# volumeClaimTemplates list that storageClassPaths cannot address, so
+# --storage-class cannot reach them, and on a cluster with no default
+# StorageClass the collectors would stay Pending. An overlay that turns them
+# on restores each collector's queue extension, storage, mount, and
+# volumeClaimTemplates, with its own storageClassName. volumeMounts is NKTP's
+# list without the queue mount, so re-copy it on a chart bump.
+gateway_metrics:
+  kubernetes:
+    volumeClaimTemplates: []
+    volumeMounts:
+      - name: internal-tls-server
+        mountPath: /etc/nktp/internal-tls/server
+        readOnly: true
+  otelcol:
+    config:
+      extensions:
+        file_storage/queue: null
+      exporters:
+        otlp_grpc:
+          sending_queue:
+            storage: null
+      service:
+        extensions: [health_check]
+
+gateway_logs:
+  kubernetes:
+    volumeClaimTemplates: []
+    volumeMounts:
+      - name: internal-tls-server
+        mountPath: /etc/nktp/internal-tls/server
+        readOnly: true
+  otelcol:
+    config:
+      extensions:
+        file_storage/queue: null
+      exporters:
+        otlp_grpc:
+          sending_queue:
+            storage: null
+      service:
+        extensions: [health_check]
+
+gateway_traces:
+  kubernetes:
+    volumeClaimTemplates: []
+    volumeMounts:
+      - name: internal-tls-server
+        mountPath: /etc/nktp/internal-tls/server
+        readOnly: true
+  otelcol:
+    config:
+      extensions:
+        file_storage/queue: null
+      exporters:
+        otlp_grpc:
+          sending_queue:
+            storage: null
+      service:
+        extensions: [health_check]
+
+watchdog:
+  kubernetes:
+    volumeClaimTemplates: []
+    volumeMounts:
+      - name: internal-tls-server
+        mountPath: /etc/nktp/internal-tls/server
+        readOnly: true
+  otelcol:
+    config:
+      extensions:
+        file_storage/queue: null
+      exporters:
+        otlp_grpc:
+          sending_queue:
+            storage: null
+            # NKTP's persistent default is 82MiB per signal; in memory, keep
+            # rc.3's 8MiB, sized against the watchdog's 1Gi limit.
+            queue_size: 8388608
+      service:
+        extensions: [health_check]

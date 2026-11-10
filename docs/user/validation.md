@@ -107,7 +107,7 @@ is installed on the cluster.
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE (GPUDirect TCPXO), H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
 | `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE and NVKE) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB300 + EKS, GB300 + OKE, and VR200 + NVKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS; on OKE, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) for GB200 and RoCE over SR-IOV VFs (`nvidia.com/mlnxnics` VFs attached through the `rdma-net` network) for GB300; on NVKE, the per-rail SR-IOV VFs (`nvidia.com/sriov_resource_rail_<n>`), over InfiniBand for GB200 and RoCE v2 for VR200 — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the GB200 combinations and GB300 + EKS — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, OKE, generic), VR200 + RKE2, and VR200 + NVKE. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE GB200 and NVKE, RoCE on OKE GB300), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, OKE, NVKE, generic), VR200 + RKE2, and VR200 + NVKE. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE GB200 and NVKE, RoCE on OKE GB300), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -368,7 +368,7 @@ is passed it replaces the automatic filters rather than narrowing them.
 
 Valid profiles are the pairs in the applicability table above: `b200/any`,
 `gb200/any`, `gb200/eks`, `gb200/gke`, `gb200/nvke`, `gb200/oke`, `gb300/eks`, `gb300/generic`,
-`gb300/oke`, `h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/nvke`, `vr200/rke2`. A
+`gb300/nvke`, `gb300/oke`, `h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/nvke`, `vr200/rke2`. A
 malformed or unknown value **fails** the check rather than silently skipping
 it. A valid profile that doesn't implement a requested variant (e.g.
 `gb200/eks` with the auto-detect `nccl-all-reduce-bw` check) skips just that
