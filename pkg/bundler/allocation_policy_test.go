@@ -192,6 +192,11 @@ func TestEnforceAllocationPolicyOverrides(t *testing.T) {
 			if !strings.Contains(joined, tt.wantWarning) || !strings.Contains(joined, "deprecated") {
 				t.Errorf("warnings = %v, want a deprecation warning naming %q", r.warnings, tt.wantWarning)
 			}
+			for _, w := range r.warnings {
+				if !strings.HasPrefix(w, "Warning: ") {
+					t.Errorf("warning %q lacks the %q prefix used by other bundle warnings", w, "Warning: ")
+				}
+			}
 		})
 	}
 }

@@ -113,7 +113,7 @@ func (r *bundleRun) enforceAllocationPolicyOverrides(provider recipe.DataProvide
 				"deprecated: bundle-time override of GPU allocation-policy key(s) %s on component %q — the allocation policy validators verify is resolved from the recipe, so a bundle-time change will be reported as recipe/cluster drift; move the allocation mode to a recipe overlay (issue #1327)",
 				strings.Join(staticPaths, ", "), component)
 			slog.Warn(warning)
-			r.warnings = append(r.warnings, warning)
+			r.appendWarning(warning)
 		}
 	}
 	return nil
