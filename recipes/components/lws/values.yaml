@@ -1,0 +1,37 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# LeaderWorkerSet Helm values (chart 0.10.0)
+# Runs a leader pod and its workers as one replicated unit, the workload
+# primitive for multi-node inference serving. Opt-in: no stock recipe
+# references this component (ADR-024).
+#
+# Chart defaults stand for everything else, deliberately:
+# - enableCertManager stays false. The controller rotates its own webhook
+#   certificate, so the component needs no cert-manager dependency.
+# - enablePrometheus stays false. Turning it on renders a ServiceMonitor,
+#   which needs the prometheus-operator CRDs installed first.
+# - gangSchedulingManagement stays empty. It makes LWS create a scheduler's
+#   PodGroups itself, and at 0.10.0 the only provider is volcano. KAI
+#   Scheduler needs no provider: it groups each leader with its workers
+#   itself, for pods that name it as their scheduler.
+# - No fullnameOverride. The health check, and Run:ai's LWS detection, look
+#   for the Deployment lws-controller-manager.
+
+# Same convention as kueue for system controllers: tolerate every taint so
+# the controller can land on tainted system pools. Bundle-time
+# --system-node-selector and --system-node-toleration write the same top-level
+# paths (registry nodeScheduling).
+tolerations:
+  - operator: Exists

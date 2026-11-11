@@ -1556,6 +1556,36 @@ components:
         tolerationPaths:
           - controllerManager.tolerations
 
+  # LeaderWorkerSet (ADR-024): registered so a custom overlay can opt in, but
+  # referenced by no stock overlay or mixin. TestLWSRegisteredWithoutOverlay
+  # keeps it that way until an adopting recipe amends the ADR.
+  #
+  # No ownsCRDs: the LeaderWorkerSet CRD uses spec.conversion.strategy:
+  # Webhook, which the ownsCRDs audit excludes. A pin bump therefore needs the
+  # manual CRD step on every deployer except argocd and argocd-helm.
+  - name: lws
+    displayName: LeaderWorkerSet
+    class: ops
+    valueOverrideKeys:
+      - lws
+      - leaderworkerset
+    healthCheck:
+      assertFile: checks/lws/health-check.yaml
+    helm:
+      defaultRepository: oci://registry.k8s.io/lws/charts
+      defaultChart: lws
+      # renovate: datasource=docker depName=registry.k8s.io/lws/charts/lws
+      defaultVersion: "0.10.0"
+      # Not a free choice: the chart's CRD names lws-system, not the release
+      # namespace, as its conversion webhook Service's namespace.
+      defaultNamespace: lws-system
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations
+
   - name: kubeflow-trainer
     displayName: kubeflow-trainer
     class: ops
