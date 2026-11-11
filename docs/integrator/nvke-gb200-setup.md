@@ -330,8 +330,7 @@ LoadBalancer, generate the bundle with `--set agentgateway:serviceType=ClusterIP
 applies unchanged.
 
 ```shell
-GPU_NODE="my-gpu-worker"  # replace with a GPU worker's kubernetes.io/hostname label value
-aicr snapshot --node-selector "kubernetes.io/hostname=${GPU_NODE}" --privileged \
+aicr snapshot --node-selector kubernetes.io/hostname='<gpu-node>' --privileged \
   --output snapshot.yaml
 aicr recipe --snapshot snapshot.yaml --intent inference --platform dynamo --output recipe.yaml
 aicr bundle --recipe recipe.yaml --set agentgateway:serviceType=ClusterIP --output bundle
