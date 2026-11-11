@@ -498,7 +498,10 @@ transitions:
               without that rule set (carry every other rule set, since the
               list replaces the default). Setting STORE_ONLY instead also
               removes the node condition and the Kubernetes Event that
-              EXECUTE_REMEDIATION set, so alerts that read them stop.
+              EXECUTE_REMEDIATION set, so alerts that read them stop; set it
+              at the module level and change or remove every enabled rule's
+              own processing_strategy: EXECUTE_REMEDIATION, because a rule
+              that keeps it still cordons and drains.
             reason: >-
               The new default rule set cordons for a fatal analyzer event, and
               fault-quarantine reads only EXECUTE_REMEDIATION events, so that
@@ -567,7 +570,10 @@ transitions:
               without that rule set (carry every other rule set, since the
               list replaces the default). Setting STORE_ONLY instead also
               removes the node condition and the Kubernetes Event that
-              EXECUTE_REMEDIATION set, so alerts that read them stop.
+              EXECUTE_REMEDIATION set, so alerts that read them stop; set it
+              at the module level and change or remove every enabled rule's
+              own processing_strategy: EXECUTE_REMEDIATION, because a rule
+              that keeps it still cordons and drains.
             reason: >-
               The new default rule set cordons for a fatal analyzer event, and
               fault-quarantine reads only EXECUTE_REMEDIATION events, so that
@@ -634,7 +640,10 @@ transitions:
               without that rule set (carry every other rule set, since the
               list replaces the default). Setting STORE_ONLY instead also
               removes the node condition and the Kubernetes Event that
-              EXECUTE_REMEDIATION set, so alerts that read them stop.
+              EXECUTE_REMEDIATION set, so alerts that read them stop; set it
+              at the module level and change or remove every enabled rule's
+              own processing_strategy: EXECUTE_REMEDIATION, because a rule
+              that keeps it still cordons and drains.
             reason: >-
               The new default rule set cordons for a fatal analyzer event, and
               fault-quarantine reads only EXECUTE_REMEDIATION events, so that
