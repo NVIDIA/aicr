@@ -121,7 +121,7 @@
 //	reg := registry.NewFromGlobal(cfg)
 //	bundlers := reg.GetAll()
 //
-//	// Concurrent Make calls need different output directories.
+//	// Concurrent Make calls need output directories that do not overlap.
 //	for bundleType, b := range bundlers {
 //	    go b.Make(ctx, recipe, filepath.Join(outputDir, string(bundleType)))
 //	}
