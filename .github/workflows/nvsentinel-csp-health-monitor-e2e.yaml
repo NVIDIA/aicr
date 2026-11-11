@@ -22,7 +22,7 @@
 # events into the datastore in place of the AWS poller and checks an event and
 # its completion are recorded without quarantining the node. The execution
 # scenarios (CSP_EXECUTION_SCENARIOS=true) are not run here: two of them fail
-# at NVSentinel v1.28.0 by design, documenting why the gate refuses
+# at NVSentinel v1.31.0 by design, documenting why the gate refuses
 # EXECUTE_REMEDIATION.
 # Not wired into `make qualify`: it needs a Kind cluster.
 #
