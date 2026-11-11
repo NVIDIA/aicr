@@ -138,7 +138,7 @@ Today every committed pointer is `community`, published from a contributor fork 
 | a100-oke-ubuntu-training-kubeflow | oke | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:11 | pending | — |
 | gb200-oke-ubuntu-inference-dynamo | oke | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:12 | pending | — |
 | gb200-oke-ubuntu-training-kubeflow | oke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:11 | pending | — |
-| gb300-oke-ubuntu-training | oke | gb300 | ubuntu | training | — | pass | R:0 D:4 P:2 C:9 | pending | — |
+| gb300-oke-ubuntu-training | oke | gb300 | ubuntu | training | — | pass | R:0 D:4 P:2 C:9 | pending | community |
 | l40s-oke-inference | oke | l40s | ol | inference | — | pass | R:0 D:4 P:0 C:10 | pending | — |
 | l40s-oke-training-kubeflow | oke | l40s | ol | training | kubeflow | pass | R:0 D:4 P:0 C:11 | pending | — |
 | rke2-sles | rke2 | — | sles | — | — | pass | R:0 D:0 P:0 C:4 | pending | — |
