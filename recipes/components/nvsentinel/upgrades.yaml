@@ -445,15 +445,14 @@ transitions:
       four gpu-health-monitor-dcgm-4.x pods connected to DCGM with 8 GPUs each
       while the dcgm-3.x monitor stayed inactive.
     summary: >-
-      From v1.31.0 the chart's default fault-quarantine rule set cordons and
-      drains a node for a fatal health-events-analyzer event
-      (MultipleRemediations, repeated XID 74), where v1.28.0 set only a node
-      condition. It applies where the analyzer's effective processingStrategy
-      is EXECUTE_REMEDIATION and fault-quarantine.ruleSets keeps that rule
-      set; the nvsentinel-health-events-analyzer mixin's STORE_ONLY default is
-      unaffected. Where the remediation step is composed and nodes run R610 or
-      later drivers, XID 154 recovery actions now reset the GPU or reboot the
-      node, which v1.28.0 reported as CONTACT_SUPPORT.
+      Three changes need operator action. A fatal health-events-analyzer event
+      now cordons and drains its node through a new default fault-quarantine
+      rule set, where v1.28.0 set only a node condition; it applies when the
+      analyzer's effective processingStrategy is EXECUTE_REMEDIATION. With the
+      remediation step and R610 or later drivers, XID 154 recovery actions now
+      reset the GPU or reboot the node, where v1.28.0 reported
+      CONTACT_SUPPORT. A custom generic-provider rebootImage without sh and
+      cat no longer reboots nodes.
     precondition: >-
       Where health-events-analyzer is deployed, its module-level
       processingStrategy and the processing_strategy of every enabled rule are
@@ -464,7 +463,9 @@ transitions:
       analyzer events cordon and drain nodes from v1.31.0. Where the remediation step is composed and
       nodes run R610 or later drivers, you accept that an XID 154 recovery
       action resets the GPU or reboots the node, or you keep
-      syslog-health-monitor events out of remediation.
+      syslog-health-monitor events out of remediation. Where
+      janitor-provider.csp.generic.rebootImage is a custom image, it contains
+      sh and cat.
     reversible: true
     reversibleNotes: >-
       helm rollback to the previous revision restores the previous workloads;
@@ -525,6 +526,21 @@ transitions:
               v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,
               which fault-remediation acts on; v1.28.0 mapped them to
               CONTACT_SUPPORT, which it does not.
+          - id: check-reboot-image
+            description: >-
+              Where the nvsentinel-remediation step is composed with
+              janitor-provider.csp.provider: generic, read
+              janitor-provider.csp.generic.rebootImage in the bundle. The
+              shipped BusyBox image is compatible. A custom image must contain
+              sh and cat: the v1.31.0 reboot Job first reads the host boot ID
+              with cat and refuses to reboot when it cannot, which v1.28.0 did
+              not do. Check the image with kubectl run reboot-image-check
+              --rm -i --restart=Never --image=<image> -- sh -c 'cat
+              /proc/sys/kernel/random/boot_id'.
+            reason: >-
+              A reboot image without cat makes every reboot Job exit non-zero
+              before it reboots, so RESTART_VM and RESTART_BM repairs never
+              reboot the node.
           - id: apply-new-crds
             description: >-
               Apply the v1.31.0 CRDs using the CRD-apply command under
@@ -597,6 +613,21 @@ transitions:
               v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,
               which fault-remediation acts on; v1.28.0 mapped them to
               CONTACT_SUPPORT, which it does not.
+          - id: check-reboot-image
+            description: >-
+              Where the nvsentinel-remediation step is composed with
+              janitor-provider.csp.provider: generic, read
+              janitor-provider.csp.generic.rebootImage in the bundle. The
+              shipped BusyBox image is compatible. A custom image must contain
+              sh and cat: the v1.31.0 reboot Job first reads the host boot ID
+              with cat and refuses to reboot when it cannot, which v1.28.0 did
+              not do. Check the image with kubectl run reboot-image-check
+              --rm -i --restart=Never --image=<image> -- sh -c 'cat
+              /proc/sys/kernel/random/boot_id'.
+            reason: >-
+              A reboot image without cat makes every reboot Job exit non-zero
+              before it reboots, so RESTART_VM and RESTART_BM repairs never
+              reboot the node.
           - id: apply-new-crds
             description: >-
               Apply the v1.31.0 CRDs using the CRD-apply command under
@@ -667,6 +698,21 @@ transitions:
               v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,
               which fault-remediation acts on; v1.28.0 mapped them to
               CONTACT_SUPPORT, which it does not.
+          - id: check-reboot-image
+            description: >-
+              Where the nvsentinel-remediation step is composed with
+              janitor-provider.csp.provider: generic, read
+              janitor-provider.csp.generic.rebootImage in the bundle. The
+              shipped BusyBox image is compatible. A custom image must contain
+              sh and cat: the v1.31.0 reboot Job first reads the host boot ID
+              with cat and refuses to reboot when it cannot, which v1.28.0 did
+              not do. Check the image with kubectl run reboot-image-check
+              --rm -i --restart=Never --image=<image> -- sh -c 'cat
+              /proc/sys/kernel/random/boot_id'.
+            reason: >-
+              A reboot image without cat makes every reboot Job exit non-zero
+              before it reboots, so RESTART_VM and RESTART_BM repairs never
+              reboot the node.
           - id: apply
             description: >-
               Re-run install.sh (helm), or commit the regenerated bundle and
