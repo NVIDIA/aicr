@@ -508,6 +508,30 @@ func TestDeclaredCoverageCompact(t *testing.T) {
 	}
 }
 
+func TestComputeComboProfile(t *testing.T) {
+	entry := recipe.CatalogEntry{Name: "leaf", Criteria: &recipe.Criteria{Service: recipe.CriteriaServiceAKS}}
+	profiled := &recipe.RecipeResult{Metadata: recipe.RecipeResultMetadata{
+		SelectedProfile: &recipe.SelectedProfile{Name: "gpuStack", Value: "azure-managed"},
+	}}
+	tests := []struct {
+		name   string
+		result *recipe.RecipeResult
+		err    error
+		want   string
+	}{
+		{"profiled resolve records name=value", profiled, nil, "gpuStack=azure-managed"},
+		{"unprofiled resolve is empty", &recipe.RecipeResult{}, nil, ""},
+		{"failed resolve is empty", profiled, errors.New(errors.ErrCodeNotFound, "missing"), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := computeCombo(entry, tt.result, tt.err).Profile; got != tt.want {
+				t.Errorf("Profile = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestComputeEmbeddedCatalog resolves the real embedded catalog: every leaf
 // must carry a resolves dimension and a status consistent with the rollup of
 // its dimensions, and at least one leaf must resolve cleanly. Cleanly-resolved
