@@ -40,6 +40,12 @@ const terminalPodFieldSelector = "status.phase!=Pending,status.phase!=Running"
 // whole wait.
 const jobObserverMaxBackoff = 30 * time.Second
 
+// jobObserverHealthyWatch is how long an established watch must stay open
+// without delivering an event to count as healthy. A watch that is established
+// and then dies sooner (an immediate error event or close) is a failure, so the
+// retry delay keeps growing instead of resetting every time Watch succeeds.
+const jobObserverHealthyWatch = 10 * time.Second
+
 // JobPodObserver watches the pods of a Job and remembers the last one whose
 // named container was seen Terminated, including the final object carried by a
 // DELETED event. When the Job controller deletes a pod on activeDeadlineSeconds
@@ -105,23 +111,42 @@ func (o *JobPodObserver) run(ctx context.Context, client kubernetes.Interface, n
 			failures++
 			continue
 		}
-		failures = 0
-		o.consume(ctx, w, jobName, containerName)
+		started := time.Now()
+		events := o.consume(ctx, w, jobName, containerName)
 		w.Stop()
+		healthy := watchWasHealthy(events, time.Since(started))
+		if healthy {
+			failures = 0
+		}
 		o.backoff(ctx, failures)
+		if !healthy {
+			failures++
+		}
 	}
 }
 
-// consume records events until the watch ends or ctx is done.
-func (o *JobPodObserver) consume(ctx context.Context, w watch.Interface, jobName, containerName string) {
+// watchWasHealthy reports whether a watch that has ended made meaningful
+// progress: it delivered at least one event, or it stayed open for
+// jobObserverHealthyWatch (a healthy idle watch). Only then does the failure
+// streak reset.
+func watchWasHealthy(events int, open time.Duration) bool {
+	return events > 0 || open >= jobObserverHealthyWatch
+}
+
+// consume records events until the watch ends or ctx is done. It returns the
+// number of events delivered before the watch ended, not counting the error
+// event that ends it.
+func (o *JobPodObserver) consume(ctx context.Context, w watch.Interface, jobName, containerName string) int {
+	events := 0
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return events
 		case event, ok := <-w.ResultChan():
 			if !ok || event.Type == watch.Error {
-				return
+				return events
 			}
+			events++
 			if p, isPod := event.Object.(*corev1.Pod); isPod {
 				o.record(p, jobName, containerName)
 			}

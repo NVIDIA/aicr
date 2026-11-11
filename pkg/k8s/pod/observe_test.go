@@ -17,7 +17,9 @@ package pod_test
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
@@ -216,4 +218,80 @@ func TestObserverRetryDelay(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWatchWasHealthy(t *testing.T) {
+	healthyIdle := pod.JobObserverHealthyWatchForTest
+
+	tests := []struct {
+		name   string
+		events int
+		open   time.Duration
+		want   bool
+	}{
+		{"immediate end without events is a failure", 0, 0, false},
+		{"end just under the threshold is a failure", 0, healthyIdle - time.Nanosecond, false},
+		{"idle watch open past the threshold is healthy", 0, healthyIdle, true},
+		{"one event then immediate close is progress", 1, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pod.WatchWasHealthyForTest(tt.events, tt.open); got != tt.want {
+				t.Errorf("watchWasHealthy(%d, %v) = %v, want %v", tt.events, tt.open, got, tt.want)
+			}
+		})
+	}
+}
+
+// watchesOpenedWhenEnding counts how many watches the observer opens in a
+// virtual minute when every watch ends as soon as it is established, after
+// delivering the given events. It uses the production 2s base delay, so it
+// must not run in parallel.
+func watchesOpenedWhenEnding(t *testing.T, events ...watch.Event) int32 {
+	t.Helper()
+	defer pod.SetJobWatchResumeBackoffForTest(2 * time.Second)()
+	var opened atomic.Int32
+	synctest.Test(t, func(t *testing.T) {
+		cs := fake.NewSimpleClientset()
+		cs.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+			opened.Add(1)
+			w := watch.NewFakeWithChanSize(len(events)+1, false)
+			for _, e := range events {
+				w.Action(e.Type, e.Object)
+			}
+			w.Stop()
+			return true, w, nil
+		})
+		o := pod.ObserveJobPods(t.Context(), cs, "ns", "job", "validator")
+		time.Sleep(time.Minute)
+		o.Stop()
+	})
+	return opened.Load()
+}
+
+// TestJobPodObserverImmediateWatchEndKeepsBackingOff covers a watch that is
+// established and then ends at once: the retry delay must keep growing rather
+// than reset each time Watch succeeds.
+func TestJobPodObserverImmediateWatchEndKeepsBackingOff(t *testing.T) {
+	t.Run("immediate error event backs off", func(t *testing.T) {
+		errEvent := watch.Event{Type: watch.Error, Object: &apierrors.NewResourceExpired("too old resource version").ErrStatus}
+		// With delays of ~2s, 4s, 8s, 16s, 30s a virtual minute opens about 5
+		// watches; a delay stuck at ~2s would open about 25.
+		if got := watchesOpenedWhenEnding(t, errEvent); got > 8 {
+			t.Errorf("watches opened in a virtual minute = %d, want the retry delay to grow (<= 8)", got)
+		}
+	})
+
+	t.Run("immediate close backs off", func(t *testing.T) {
+		if got := watchesOpenedWhenEnding(t); got > 8 {
+			t.Errorf("watches opened in a virtual minute = %d, want the retry delay to grow (<= 8)", got)
+		}
+	})
+
+	t.Run("event then close resets and stays at the base delay", func(t *testing.T) {
+		podEvent := watch.Event{Type: watch.Added, Object: observedPod("a", corev1.ContainerState{Running: &corev1.ContainerStateRunning{}})}
+		if got := watchesOpenedWhenEnding(t, podEvent); got < 20 {
+			t.Errorf("watches opened in a virtual minute = %d, want the base delay each time (>= 20)", got)
+		}
+	})
 }

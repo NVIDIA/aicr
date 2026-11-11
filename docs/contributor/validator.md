@@ -1193,9 +1193,12 @@ arithmetic is pinned in `pkg/defaults/timeouts_test.go` and
 The client facade's `ValidationOperationTimeout` cap (75m) covers a check only
 while its catalog timeout `c` satisfies `c + 6m05s < 75m`, that is
 `c < 68m55s`: the envelope (`c` + 4m05s) plus the 30s result capture and the 90s
-pod termination wait. The embedded catalog's longest check (65m) fits. A `--data`
-catalog override above that ceiling, run through the facade without its own
-deadline, reaches the facade cap before the check reports its verdict.
+pod termination wait. The embedded catalog's longest check (65m) fits. The 75m is
+a total budget shared with snapshot and setup work and any earlier checks in the
+same run, so `c < 68m55s` is a necessary per-check condition, not a guarantee the
+check fits in the remaining budget. A `--data` catalog override above that
+ceiling, run through the facade without its own deadline, reaches the facade cap
+before the check reports its verdict.
 
 On operator cancellation, the orchestrator uses one fresh 30s deadline for the
 in-flight Job's result capture, deletion and partial CTRF persistence, in that

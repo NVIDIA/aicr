@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -1258,5 +1259,120 @@ func TestWaitForCompletionRemembersTerminatedPod(t *testing.T) {
 	}
 	if d.lastTerminated == nil || d.lastTerminated.Name != terminated.Name {
 		t.Fatalf("lastTerminated = %v, want pod %s", d.lastTerminated, terminated.Name)
+	}
+}
+
+// TestWaitForCompletionRebasesOntoJobStartTime covers a Job whose controller
+// stamps status.startTime after the apply response was read, so the wait first
+// runs from the creationTimestamp fallback. When that wait expires the Job is
+// re-read: a later start time whose envelope has not passed resumes the wait
+// (issue #1632), anything else leaves the timeout as is.
+func TestWaitForCompletionRebasesOntoJobStartTime(t *testing.T) {
+	const (
+		jobName   = "aicr-gpu-operator-health-abcdef"
+		namespace = "aicr-validation"
+		timeout   = time.Minute
+	)
+	envelope := v1.WaitEnvelopeFor(timeout)
+
+	tests := []struct {
+		name string
+		// jobStartAge is how long before the wait begins the deployer's origin
+		// (the creationTimestamp fallback) lies.
+		jobStartAge time.Duration
+		// startTime returns the status.startTime the Job carries when the wait
+		// first expires, given the deployer's origin; nil leaves it unset.
+		startTime func(origin time.Time) *time.Time
+		// completeAfter, when set, completes the Job that long after the wait
+		// begins.
+		completeAfter time.Duration
+		wantTimeout   bool
+	}{
+		{
+			name: "later start time with envelope remaining resumes the wait",
+			startTime: func(origin time.Time) *time.Time {
+				started := origin.Add(2 * time.Minute)
+				return &started
+			},
+			completeAfter: envelope + time.Minute,
+		},
+		{
+			name:        "start time still absent times out",
+			startTime:   func(time.Time) *time.Time { return nil },
+			wantTimeout: true,
+		},
+		{
+			name:        "start time not later than the origin times out",
+			startTime:   func(origin time.Time) *time.Time { return &origin },
+			wantTimeout: true,
+		},
+		{
+			name:        "start time whose envelope has passed times out",
+			jobStartAge: 10 * time.Minute,
+			startTime: func(origin time.Time) *time.Time {
+				started := origin.Add(time.Minute)
+				return &started
+			},
+			wantTimeout: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				begin := time.Now()
+				origin := begin.Add(-tt.jobStartAge)
+				cs := fake.NewSimpleClientset(&batchv1.Job{
+					ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: namespace},
+				})
+				d := NewDeployer(Config{Clientset: cs, Namespace: namespace, Entry: testEntry()})
+				d.jobName = jobName
+				d.jobStart = origin
+
+				// Stamp the start time after the wait has begun, as the Job
+				// controller would, but before the first wait expires.
+				stamped := make(chan struct{})
+				go func() {
+					defer close(stamped)
+					time.Sleep(time.Second)
+					job, err := cs.BatchV1().Jobs(namespace).Get(t.Context(), jobName, metav1.GetOptions{})
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					if started := tt.startTime(origin); started != nil {
+						job.Status.StartTime = &metav1.Time{Time: *started}
+					}
+					if _, err := cs.BatchV1().Jobs(namespace).Update(t.Context(), job, metav1.UpdateOptions{}); err != nil {
+						t.Error(err)
+						return
+					}
+					if tt.completeAfter == 0 {
+						return
+					}
+					time.Sleep(tt.completeAfter - time.Second)
+					job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+					if _, err := cs.BatchV1().Jobs(namespace).Update(t.Context(), job, metav1.UpdateOptions{}); err != nil {
+						t.Error(err)
+					}
+				}()
+
+				err := d.WaitForCompletion(t.Context(), timeout)
+				<-stamped
+				elapsed := time.Since(begin)
+
+				if tt.wantTimeout {
+					if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeTimeout, "")) {
+						t.Fatalf("WaitForCompletion() = %v, want a timeout error", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("WaitForCompletion() = %v, want nil after resuming", err)
+				}
+				if elapsed <= envelope {
+					t.Errorf("wait ended after %v, want it to outlast the creationTimestamp envelope %v", elapsed, envelope)
+				}
+			})
+		})
 	}
 }

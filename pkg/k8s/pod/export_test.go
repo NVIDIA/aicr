@@ -44,3 +44,11 @@ var ObserverRetryDelayForTest = observerRetryDelay
 
 // JobObserverMaxBackoffForTest is the cap on the observer's retry delay.
 const JobObserverMaxBackoffForTest = jobObserverMaxBackoff
+
+// WatchWasHealthyForTest exposes watchWasHealthy and its threshold to the
+// external test package.
+var WatchWasHealthyForTest = watchWasHealthy
+
+// JobObserverHealthyWatchForTest is how long an idle watch must stay open to
+// count as healthy.
+const JobObserverHealthyWatchForTest = jobObserverHealthyWatch
