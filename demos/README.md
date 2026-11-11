@@ -31,7 +31,7 @@ needs one only for its snapshot step.
 | [private-signing.md](private-signing.md) | Private/enterprise signing & verification (self-hosted Sigstore, KMS-backed, headless OIDC) |
 | [examples/CUJ2-Test-Report.md](examples/CUJ2-Test-Report.md) | Dated historical capture (2026-03-13) of a CUJ2 inference run — example test report, not a runbook |
 
-## Recorded Demos: KubeCon NA 2026
+## KubeCon NA 2026: Presentation and Demos
 
 Recordings from the KubeCon + CloudNativeCon North America 2026 talk *One Recipe,
 Five Clouds, One Query: Portable GPU Configuration with a Queryable Audit Layer*,
