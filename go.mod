@@ -24,7 +24,7 @@ require (
 	github.com/prometheus/client_golang v1.25.0
 	github.com/sigstore/protobuf-specs v0.5.2
 	github.com/sigstore/rekor-monitor v0.0.0-20261102142904-679a7031962b
-	github.com/sigstore/sigstore v1.11.2
+	github.com/sigstore/sigstore v1.11.3
 	github.com/sigstore/sigstore-go v1.4.0
 	github.com/sigstore/sigstore/pkg/signature/kms/aws v1.11.3
 	github.com/sigstore/sigstore/pkg/signature/kms/azure v1.11.2
