@@ -85,6 +85,7 @@ func TestJobPodObserver(t *testing.T) {
 			return false, nil, nil
 		})
 		o := pod.ObserveJobPods(t.Context(), cs, "ns", "job", "validator")
+		defer o.Stop()
 		select {
 		case <-listed:
 		case <-time.After(5 * time.Second):

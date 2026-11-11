@@ -35,8 +35,9 @@ const terminalPodFieldSelector = "status.phase!=Pending,status.phase!=Running"
 
 // jobObserverMaxBackoff caps the growth of the retry delay while the observer's
 // List or Watch keeps failing, so a persistent failure (an RBAC gap, an
-// unavailable apiserver) costs a request every half minute rather than every
-// jobWatchResumeBackoff for the whole wait.
+// unavailable apiserver) costs a request roughly every half minute (up to
+// ~36s once jitter is applied) rather than every jobWatchResumeBackoff for the
+// whole wait.
 const jobObserverMaxBackoff = 30 * time.Second
 
 // JobPodObserver watches the pods of a Job and remembers the last one whose
