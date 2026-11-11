@@ -35,6 +35,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -307,6 +309,9 @@ func TestNewGangTestRunTarget(t *testing.T) {
 				if pod.Namespace != run.namespace {
 					t.Errorf("pod %d namespace = %q, want %q", i, pod.Namespace, run.namespace)
 				}
+				if got := pod.Labels[gpuTestRunLabel]; got != run.suffix {
+					t.Errorf("pod %d label %s = %q, want the run suffix %q", i, gpuTestRunLabel, got, run.suffix)
+				}
 			}
 			wantPhase := []string{gangPhasePositive, gangPhaseNegative}
 			for i, pg := range []*unstructured.Unstructured{buildPodGroup(run), buildNegativePodGroup(run)} {
@@ -319,6 +324,9 @@ func TestNewGangTestRunTarget(t *testing.T) {
 				}
 				if got := pg.GetLabels()[gangPhaseLabel]; got != wantPhase[i] {
 					t.Errorf("PodGroup %s label %s = %q, want %q", pg.GetName(), gangPhaseLabel, got, wantPhase[i])
+				}
+				if got := pg.GetLabels()[gpuTestRunLabel]; got != run.suffix {
+					t.Errorf("PodGroup %s label %s = %q, want the run suffix %q", pg.GetName(), gpuTestRunLabel, got, run.suffix)
 				}
 			}
 		})
@@ -496,10 +504,17 @@ func TestGangCleanupArtifact(t *testing.T) {
 	}
 	runaiRun := runaiCleanupRun(t)
 	cleanupErr := errors.New(errors.ErrCodeInternal, "boom")
+	projectEquivalent := "kubectl delete pods,podgroups.scheduling.run.ai -n " + testRunaiProjectNamespace +
+		" -l " + gpuTestRunLabel + "=" + runaiRun.suffix
+	const (
+		ownedTitle   = "Delete test namespace"
+		projectTitle = "Delete test pods and PodGroups"
+	)
 	tests := []struct {
 		name           string
 		run            *gangTestRun
 		cleanupErr     error
+		wantTitle      string
 		wantEquivalent string
 		wantResultHas  []string
 		wantResultNot  []string
@@ -507,6 +522,7 @@ func TestGangCleanupArtifact(t *testing.T) {
 		{
 			name:           "owned namespace deleted",
 			run:            kaiRun,
+			wantTitle:      ownedTitle,
 			wantEquivalent: "kubectl delete namespace " + kaiRun.namespace,
 			wantResultHas:  []string{"Deleted gang test pods, PodGroups, and the " + kaiRun.namespace + " namespace."},
 			wantResultNot:  []string{"FAILED"},
@@ -515,13 +531,15 @@ func TestGangCleanupArtifact(t *testing.T) {
 			name:           "owned namespace deletion failed",
 			run:            kaiRun,
 			cleanupErr:     cleanupErr,
+			wantTitle:      ownedTitle,
 			wantEquivalent: "kubectl delete namespace " + kaiRun.namespace,
 			wantResultHas:  []string{"namespace deletion FAILED", "tools/cleanup", "boom"},
 		},
 		{
 			name:           "Project namespace cleaned",
 			run:            runaiRun,
-			wantEquivalent: "kubectl delete pods,podgroups -n " + testRunaiProjectNamespace + " -l " + gangPhaseLabel,
+			wantTitle:      projectTitle,
+			wantEquivalent: projectEquivalent,
 			wantResultHas:  []string{"Deleted gang test pods and PodGroups", "left in place"},
 			wantResultNot:  []string{"FAILED"},
 		},
@@ -529,7 +547,8 @@ func TestGangCleanupArtifact(t *testing.T) {
 			name:           "Project namespace residue",
 			run:            runaiRun,
 			cleanupErr:     cleanupErr,
-			wantEquivalent: "kubectl delete pods,podgroups -n " + testRunaiProjectNamespace + " -l " + gangPhaseLabel,
+			wantTitle:      projectTitle,
+			wantEquivalent: projectEquivalent,
 			wantResultHas:  []string{"Run:ai Project namespace " + testRunaiProjectNamespace + " FAILED", "boom"},
 			wantResultNot:  []string{"namespace deletion", "tools/cleanup", "Deleted gang test pods"},
 		},
@@ -537,7 +556,10 @@ func TestGangCleanupArtifact(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			equivalent, result := gangCleanupArtifact(tt.run, tt.cleanupErr)
+			title, equivalent, result := gangCleanupArtifact(tt.run, tt.cleanupErr)
+			if title != tt.wantTitle {
+				t.Errorf("title = %q, want %q", title, tt.wantTitle)
+			}
 			if !strings.HasPrefix(equivalent, tt.wantEquivalent) {
 				t.Errorf("equivalent = %q, want prefix %q", equivalent, tt.wantEquivalent)
 			}
@@ -550,6 +572,237 @@ func TestGangCleanupArtifact(t *testing.T) {
 				if strings.Contains(result, not) {
 					t.Errorf("result %q must not mention %q", result, not)
 				}
+			}
+		})
+	}
+}
+
+// ctxCheckingDynamic fails a PodGroup delete issued on a context that has
+// already ended, as client-go's REST client does and the fake does not.
+type ctxCheckingDynamic struct{ dynamic.Interface }
+
+func (d ctxCheckingDynamic) Resource(gvr schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
+	return ctxCheckingResource{d.Interface.Resource(gvr)}
+}
+
+type ctxCheckingResource struct {
+	dynamic.NamespaceableResourceInterface
+}
+
+func (r ctxCheckingResource) Namespace(ns string) dynamic.ResourceInterface {
+	return ctxCheckingNamespaced{r.NamespaceableResourceInterface.Namespace(ns)}
+}
+
+type ctxCheckingNamespaced struct{ dynamic.ResourceInterface }
+
+func (r ctxCheckingNamespaced) Delete(ctx context.Context, name string, opts metav1.DeleteOptions, subresources ...string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.ResourceInterface.Delete(ctx, name, opts, subresources...)
+}
+
+// TestCleanupGangTestResourcesDeletesPodGroupsOnSpentContext: the pod wait can
+// use up the caller's cleanup context, and in a Project namespace nothing but
+// these deletes removes the PodGroups, so they must not ride on that context.
+func TestCleanupGangTestResourcesDeletesPodGroupsOnSpentContext(t *testing.T) {
+	t.Parallel()
+	run := runaiCleanupRun(t)
+	clientset := k8sfake.NewSimpleClientset()
+	fake := newGangDynamicFake(t)
+	for _, pg := range []*unstructured.Unstructured{buildPodGroup(run), buildNegativePodGroup(run)} {
+		if _, err := fake.Resource(podGroupGVR).Namespace(run.namespace).Create(context.Background(), pg, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("seed PodGroup %s: %v", pg.GetName(), err)
+		}
+	}
+	spent, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := cleanupGangTestResources(spent, clientset, ctxCheckingDynamic{fake}, run); err != nil {
+		t.Fatalf("cleanupGangTestResources on a spent context: %v", err)
+	}
+	for _, group := range []string{run.groupName, run.negGroupName} {
+		if _, err := fake.Resource(podGroupGVR).Namespace(run.namespace).Get(context.Background(), group, metav1.GetOptions{}); !k8serrors.IsNotFound(err) {
+			t.Errorf("PodGroup %s left in the Project namespace (Get returned %v)", group, err)
+		}
+	}
+}
+
+// TestGangNegativeWindowIgnoresOtherRunsInProject: a Project namespace is
+// shared, so another validation's negative members, or the Pending ones an
+// interrupted run left behind, sit beside this run's. They carry the same
+// phase label; only the run label keeps them out of this run's window.
+func TestGangNegativeWindowIgnoresOtherRunsInProject(t *testing.T) {
+	t.Parallel()
+	other, mine := runaiCleanupRun(t), runaiCleanupRun(t)
+	if other.suffix == mine.suffix {
+		t.Fatal("two runs drew the same suffix")
+	}
+	objs := make([]runtime.Object, 0, len(other.negPods)+len(mine.negPods))
+	for i := range other.negPods {
+		pod := buildGangNegativePod(other, i, nil)
+		pod.Status.Phase = corev1.PodPending
+		objs = append(objs, pod)
+	}
+	// A member of the other run that bound must not fail this one either.
+	objs[0].(*corev1.Pod).Spec.NodeName = "node-a"
+	for i := range mine.negPods {
+		pod := buildGangNegativePod(mine, i, nil)
+		pod.Status.Phase = corev1.PodPending
+		objs = append(objs, pod)
+	}
+	clientset := k8sfake.NewSimpleClientset(objs...)
+	const window = 300 * time.Millisecond
+
+	obs, err := holdGangNegativeWindow(context.Background(), clientset, mine.namespace,
+		mine.phaseSelector(gangPhaseNegative), mine.negPods, window)
+	if err != nil {
+		t.Fatalf("this run's window failed on another run's pods: %v", err)
+	}
+	if len(obs.Pods) != len(mine.negPods) {
+		t.Errorf("observed %d pods, want this run's %d", len(obs.Pods), len(mine.negPods))
+	}
+
+	// The phase label alone sees both runs, which is the failure this guards.
+	if _, err := holdGangNegativeWindow(context.Background(), clientset, mine.namespace,
+		gangPhaseSelector(gangPhaseNegative), mine.negPods, window); err == nil {
+		t.Error("a phase-only selector passed with another run's pods present; the fixture no longer reproduces the collision")
+	}
+}
+
+// runaiCheckFixture is a cluster on which CheckGangScheduling reaches its
+// functional test on the Run:ai target: the scheduler Deployments and a shard
+// in runai, the two CRDs, and a forwarded image pull Secret in the validator
+// namespace. project, when non-nil, is the Project namespace.
+func runaiCheckFixture(t *testing.T, project *corev1.Namespace) (*validators.Context, *k8sfake.Clientset, *dynamicfake.FakeDynamicClient) {
+	t.Helper()
+	t.Setenv(defaults.EnvRunaiProjectNamespace, testRunaiProjectNamespace)
+	t.Setenv(validators.ImagePullSecretsEnv, "regcred")
+
+	objs := []runtime.Object{
+		availableDeployment(runaiNamespace, runaiSchedulerShardPrefix+"default"),
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "regcred", Namespace: validators.ValidatorNamespace()},
+			Type:       corev1.SecretTypeDockerConfigJson,
+			Data:       map[string][]byte{corev1.DockerConfigJsonKey: []byte("{}")},
+		},
+	}
+	for _, name := range runaiSchedulerDeployments {
+		objs = append(objs, availableDeployment(runaiNamespace, name))
+	}
+	if project != nil {
+		objs = append(objs, project)
+	}
+	vctx, clientset := gangContext(runaiRecipe(), objs...)
+
+	crdGVR := schema.GroupVersionResource{Group: apiGroupAPIExtensions, Version: "v1", Resource: resourceCRDs}
+	crd := func(name string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			keyAPIVersion: apiGroupAPIExtensions + "/v1",
+			keyKind:       "CustomResourceDefinition",
+			keyMetadata:   map[string]any{keyName: name},
+		}}
+	}
+	dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{
+			podGroupGVR: "PodGroupList",
+			crdGVR:      "CustomResourceDefinitionList",
+		},
+		crd("queues.scheduling.run.ai"), crd("podgroups.scheduling.run.ai"))
+	vctx.DynamicClient = dynClient
+	return vctx, clientset, dynClient
+}
+
+// TestCheckGangSchedulingRunaiProject drives the whole check on the Run:ai
+// target up to its first test pod, which the fixture refuses so the run ends
+// there. By then the check has decided everything that differs in a Project
+// namespace it does not own: it reads the queue from the namespace, creates no
+// namespace, and copies no image pull Secret where the Project's users could
+// read it or where one they pre-created would be overwritten.
+func TestCheckGangSchedulingRunaiProject(t *testing.T) {
+	labelled := func(labels map[string]string) *corev1.Namespace {
+		return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testRunaiProjectNamespace, Labels: labels}}
+	}
+	tests := []struct {
+		name          string
+		project       *corev1.Namespace
+		wantErrCode   errors.ErrorCode
+		wantErrHas    string
+		wantPodGroups int
+	}{
+		{
+			name:          "Project namespace: queue from its label, nothing created around it",
+			project:       labelled(map[string]string{runaiQueueLabel: testRunaiQueue}),
+			wantErrCode:   errors.ErrCodeInternal,
+			wantErrHas:    "positive phase failed",
+			wantPodGroups: 1,
+		},
+		{
+			name:        "Project namespace missing",
+			wantErrCode: errors.ErrCodeInvalidRequest,
+			wantErrHas:  "not found",
+		},
+		{
+			name:        "namespace without the queue label",
+			project:     labelled(nil),
+			wantErrCode: errors.ErrCodeInvalidRequest,
+			wantErrHas:  runaiQueueLabel,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vctx, clientset, dynClient := runaiCheckFixture(t, tt.project)
+			clientset.PrependReactor("create", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, stderrors.New("pod creation refused by the fixture")
+			})
+			var created []*unstructured.Unstructured
+			dynClient.PrependReactor("create", "podgroups", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				if create, ok := action.(k8stesting.CreateAction); ok {
+					if pg, ok := create.GetObject().(*unstructured.Unstructured); ok {
+						created = append(created, pg.DeepCopy())
+					}
+				}
+				return false, nil, nil
+			})
+
+			err := CheckGangScheduling(vctx)
+			if err == nil || validators.IsSkip(err) {
+				t.Fatalf("CheckGangScheduling() = %v, want a failure with code %s", err, tt.wantErrCode)
+			}
+			errorstest.WantReportedCode(t, err, tt.wantErrCode)
+			if !strings.Contains(err.Error(), tt.wantErrHas) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.wantErrHas)
+			}
+
+			if len(created) != tt.wantPodGroups {
+				t.Fatalf("PodGroups created = %d, want %d", len(created), tt.wantPodGroups)
+			}
+			for _, pg := range created {
+				if pg.GetNamespace() != testRunaiProjectNamespace {
+					t.Errorf("PodGroup %s created in %q, want the Project namespace", pg.GetName(), pg.GetNamespace())
+				}
+				if queue, _, _ := unstructured.NestedString(pg.Object, keySpec, "queue"); queue != testRunaiQueue {
+					t.Errorf("PodGroup %s queue = %q, want %q from the namespace's %s label", pg.GetName(), queue, testRunaiQueue, runaiQueueLabel)
+				}
+			}
+			for _, action := range clientset.Actions() {
+				if action.GetVerb() != "create" && action.GetVerb() != "update" {
+					continue
+				}
+				switch action.GetResource().Resource {
+				case "namespaces":
+					t.Errorf("the check issued %s on a namespace; it must not create the Project namespace", action.GetVerb())
+				case "secrets":
+					t.Errorf("the check issued %s on a Secret in %q; image pull Secrets must not be copied into the Project namespace",
+						action.GetVerb(), action.GetNamespace())
+				}
+			}
+			secrets, listErr := clientset.CoreV1().Secrets(testRunaiProjectNamespace).List(context.Background(), metav1.ListOptions{})
+			if listErr != nil {
+				t.Fatalf("list Secrets: %v", listErr)
+			}
+			if len(secrets.Items) != 0 {
+				t.Errorf("%d Secret(s) in the Project namespace, want none", len(secrets.Items))
 			}
 		})
 	}
@@ -733,8 +986,9 @@ func TestCheckGangSchedulingApplicability(t *testing.T) {
 
 // TestRunGangPositivePhaseRunaiTarget runs the positive phase in a Run:ai
 // Project namespace: the members request runai-scheduler, join the Project's
-// queue, and no namespace is created. Forwarded image pull Secrets are
-// referenced by the members but not copied into the Project namespace.
+// queue, and reference the forwarded image pull Secrets. That the check
+// neither creates the namespace nor copies those Secrets into it is asserted
+// where that is decided, in TestCheckGangSchedulingRunaiProject.
 func TestRunGangPositivePhaseRunaiTarget(t *testing.T) {
 	t.Setenv(validators.ImagePullSecretsEnv, "regcred")
 	target := runaiGangTarget(testRunaiProjectNamespace)
@@ -769,15 +1023,5 @@ func TestRunGangPositivePhaseRunaiTarget(t *testing.T) {
 		if refs := pod.Spec.ImagePullSecrets; len(refs) != 1 || refs[0].Name != "regcred" {
 			t.Errorf("%s imagePullSecrets = %v, want the forwarded regcred reference", pod.Name, refs)
 		}
-	}
-	secrets, listErr := clientset.CoreV1().Secrets(testRunaiProjectNamespace).List(context.Background(), metav1.ListOptions{})
-	if listErr != nil {
-		t.Fatalf("list Secrets: %v", listErr)
-	}
-	if len(secrets.Items) != 0 {
-		t.Errorf("no Secret may be copied into the Project namespace; found %d", len(secrets.Items))
-	}
-	if _, err := clientset.CoreV1().Namespaces().Get(context.Background(), testRunaiProjectNamespace, metav1.GetOptions{}); !k8serrors.IsNotFound(err) {
-		t.Errorf("the check must not create the Project namespace; Get returned %v", err)
 	}
 }

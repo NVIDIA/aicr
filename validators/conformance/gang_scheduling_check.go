@@ -41,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -50,6 +51,11 @@ const (
 	gangNegativePodPrefix   = "gang-neg-worker-"
 	gangNegativeGroupPrefix = "gang-neg-group-"
 	gangMinMembers          = 2
+
+	// gangTerminationGracePeriod bounds how long a deleted member lingers. A
+	// negative member that bound runs sleep as PID 1, which ignores SIGTERM,
+	// so under the default 30s it would outlive the cleanup's pod wait.
+	gangTerminationGracePeriod int64 = 5
 
 	// gangNegativeMaxMembers caps the non-fitting PodGroup. The member CPU
 	// request is sized so that the group cannot fit whatever the count, so the
@@ -63,7 +69,8 @@ const (
 	gangWorkerMemoryRequest = "128Mi"
 
 	// gangPhaseLabel marks which phase a test pod or PodGroup belongs to; its
-	// values are gangPhasePositive and gangPhaseNegative.
+	// values are gangPhasePositive and gangPhaseNegative. gpuTestRunLabel,
+	// carrying the run's suffix, marks which run.
 	gangPhaseLabel    = "gang-scheduling.aicr.nvidia.com/phase"
 	gangPhasePositive = "positive"
 	gangPhaseNegative = "negative"
@@ -554,8 +561,8 @@ func CheckGangScheduling(ctx *validators.Context) (err error) {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cleanupCancel()
 		cleanupErr := cleanupGangTestResources(cleanupCtx, ctx.Clientset, dynClient, run)
-		equivalent, result := gangCleanupArtifact(run, cleanupErr)
-		recordRawTextArtifact(ctx, "Delete test namespace", equivalent, result)
+		title, equivalent, result := gangCleanupArtifact(run, cleanupErr)
+		recordRawTextArtifact(ctx, title, equivalent, result)
 		err = failOnGangCleanup(err, cleanupErr)
 	}()
 
@@ -624,29 +631,34 @@ func createGangTestNamespace(ctx context.Context, clientset kubernetes.Interface
 	})
 }
 
-// gangCleanupArtifact returns the equivalent command and the outcome text of
-// the cleanup artifact. A failed cleanup is reported as such rather than as a
-// success: in the run's own namespace tools/cleanup is the backstop, in a
-// Run:ai Project namespace only the equivalent command is.
-func gangCleanupArtifact(run *gangTestRun, cleanupErr error) (equivalent, result string) {
+// gangCleanupArtifact returns the title, the equivalent command and the
+// outcome text of the cleanup artifact. A failed cleanup is reported as such
+// rather than as a success: in the run's own namespace tools/cleanup is the
+// backstop, in a Run:ai Project namespace only the equivalent command is.
+// That command names the PodGroup resource in full because another PodGroup
+// CRD (scheduler-plugins, Volcano) makes the short name ambiguous.
+func gangCleanupArtifact(run *gangTestRun, cleanupErr error) (title, equivalent, result string) {
 	if !run.ownsNamespace {
-		equivalent = fmt.Sprintf("kubectl delete pods,podgroups -n %s -l %s", run.namespace, gangPhaseLabel)
+		title = "Delete test pods and PodGroups"
+		equivalent = fmt.Sprintf("kubectl delete pods,%s.%s -n %s -l %s",
+			podGroupGVR.Resource, podGroupGVR.Group, run.namespace, run.runSelector())
 		if cleanupErr != nil {
-			return equivalent, fmt.Sprintf(
+			return title, equivalent, fmt.Sprintf(
 				"Cleanup of gang test pods and PodGroups in the Run:ai Project namespace %s FAILED (residue remains, remove it with the command above): %v",
 				run.namespace, cleanupErr)
 		}
-		return equivalent, fmt.Sprintf(
+		return title, equivalent, fmt.Sprintf(
 			"Deleted gang test pods and PodGroups; the Run:ai Project namespace %s is not owned by the check and was left in place.",
 			run.namespace)
 	}
+	title = "Delete test namespace"
 	equivalent = fmt.Sprintf("kubectl delete namespace %s --ignore-not-found", run.namespace)
 	if cleanupErr != nil {
-		return equivalent, fmt.Sprintf(
+		return title, equivalent, fmt.Sprintf(
 			"Deleted gang test pods and PodGroups; namespace deletion FAILED (residue may remain, rerun tools/cleanup): %v",
 			cleanupErr)
 	}
-	return equivalent, fmt.Sprintf("Deleted gang test pods, PodGroups, and the %s namespace.", run.namespace)
+	return title, equivalent, fmt.Sprintf("Deleted gang test pods, PodGroups, and the %s namespace.", run.namespace)
 }
 
 // failOnGangCleanup is the check's final verdict once cleanup ran: a run that
@@ -733,7 +745,7 @@ func runGangNegativePhase(ctx *validators.Context, dynClient dynamic.Interface, 
 		return "", err
 	}
 
-	selector := gangPhaseSelector(gangPhaseNegative)
+	selector := run.phaseSelector(gangPhaseNegative)
 	observation, windowErr := holdGangNegativeWindow(ctx.Ctx, ctx.Clientset, run.namespace, selector, run.negPods, window)
 
 	// Record the binding state and PodGroup status whatever the window saw, so
@@ -810,6 +822,19 @@ func nodeIsReady(node *corev1.Node) bool {
 
 func gangPhaseSelector(phase string) string {
 	return gangPhaseLabel + "=" + phase
+}
+
+// phaseSelector selects this run's members of one phase. The run label is
+// what keeps a second validation of the same Run:ai Project, or the Pending
+// members an interrupted one left there, out of this run's view: the phase
+// label alone is shared by every run in the namespace.
+func (run *gangTestRun) phaseSelector(phase string) string {
+	return gangPhaseSelector(phase) + "," + run.runSelector()
+}
+
+// runSelector selects every pod and PodGroup this run created.
+func (run *gangTestRun) runSelector() string {
+	return gpuTestRunLabel + "=" + run.suffix
 }
 
 // gangBoundPodViolation reports why a pod breaks the all-or-nothing contract:
@@ -1053,7 +1078,7 @@ func evaluateGangRefusal(pg *unstructured.Unstructured, minMember int) (string, 
 
 func collectGangNegativeArtifacts(ctx *validators.Context, dynClient dynamic.Interface, run *gangTestRun, obs gangNegativeObservation, window time.Duration) {
 	pods, listErr := ctx.Clientset.CoreV1().Pods(run.namespace).List(ctx.Ctx, metav1.ListOptions{
-		LabelSelector: gangPhaseSelector(gangPhaseNegative),
+		LabelSelector: run.phaseSelector(gangPhaseNegative),
 	})
 	var b strings.Builder
 	fmt.Fprintf(&b, "Verification window: %s (watch events: %d)\n", window, obs.Events)
@@ -1077,7 +1102,7 @@ func collectGangNegativeArtifacts(ctx *validators.Context, dynClient dynamic.Int
 		}
 	}
 	recordRawTextArtifact(ctx, "Negative phase: pod binding state",
-		fmt.Sprintf("kubectl get pods -n %s -l %s -o wide", run.namespace, gangPhaseSelector(gangPhaseNegative)),
+		fmt.Sprintf("kubectl get pods -n %s -l %s -o wide", run.namespace, run.phaseSelector(gangPhaseNegative)),
 		b.String())
 
 	pg, getErr := dynClient.Resource(podGroupGVR).Namespace(run.namespace).Get(ctx.Ctx, run.negGroupName, metav1.GetOptions{})
@@ -1140,7 +1165,7 @@ func collectGangTestArtifacts(ctx *validators.Context, dynClient dynamic.Interfa
 			gangReport.LatestScheduled.Format(time.RFC3339))
 	}
 	recordRawTextArtifact(ctx, "Positive phase: pod status",
-		fmt.Sprintf("kubectl get pods -n %s -l %s -o wide", run.namespace, gangPhaseSelector(gangPhasePositive)),
+		fmt.Sprintf("kubectl get pods -n %s -l %s -o wide", run.namespace, run.phaseSelector(gangPhasePositive)),
 		gangResults.String())
 
 	// Worker logs.
@@ -1402,9 +1427,16 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 			}
 			return true, nil
 		})
+	// The wait above can spend all of ctx on a pod that is slow to go, and a
+	// delete issued on an expired context is never sent. In a namespace the
+	// run does not own nothing else removes the PodGroups, so they get their
+	// own deadline.
+	groupCtx, groupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+	defer groupCancel()
 	for _, group := range []string{run.groupName, run.negGroupName} {
+		//nolint:contextcheck // fresh deadline so a stuck pod wait cannot starve the PodGroup deletes
 		_ = k8s.IgnoreNotFound(dynClient.Resource(podGroupGVR).Namespace(run.namespace).Delete(
-			ctx, group, metav1.DeleteOptions{}))
+			groupCtx, group, metav1.DeleteOptions{}))
 	}
 	// A Run:ai Project namespace belongs to the Project, not to this run, so
 	// no namespace delete follows to subsume the deletes above. The fresh
@@ -1542,29 +1574,32 @@ func confirmGangNamespaceGone(ctx context.Context, clientset kubernetes.Interfac
 
 // buildPodGroup returns the unstructured PodGroup for the positive case.
 func buildPodGroup(run *gangTestRun) *unstructured.Unstructured {
-	return newPodGroup(run.namespace, run.groupName, run.queue, gangPhasePositive, gangMinMembers)
+	return newPodGroup(run, run.groupName, gangPhasePositive, gangMinMembers)
 }
 
 // buildNegativePodGroup returns the unstructured PodGroup for the negative case.
 func buildNegativePodGroup(run *gangTestRun) *unstructured.Unstructured {
-	return newPodGroup(run.namespace, run.negGroupName, run.queue, gangPhaseNegative, run.negShape.Members)
+	return newPodGroup(run, run.negGroupName, gangPhaseNegative, run.negShape.Members)
 }
 
-// newPodGroup labels the PodGroup with gangPhaseLabel like its members, so
-// one selector finds everything a run left in a namespace it does not own.
-func newPodGroup(namespace, name, queue, phase string, minMember int) *unstructured.Unstructured {
+// newPodGroup labels the PodGroup like its members, so one selector finds
+// everything a run, or every run, left in a namespace it does not own.
+func newPodGroup(run *gangTestRun, name, phase string, minMember int) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]any{
 			keyAPIVersion: "scheduling.run.ai/v2alpha2",
 			keyKind:       "PodGroup",
 			keyMetadata: map[string]any{
 				keyName:      name,
-				keyNamespace: namespace,
-				"labels":     map[string]any{gangPhaseLabel: phase},
+				keyNamespace: run.namespace,
+				"labels": map[string]any{
+					gangPhaseLabel:  phase,
+					gpuTestRunLabel: run.suffix,
+				},
 			},
 			keySpec: map[string]any{
 				"minMember": int64(minMember),
-				"queue":     queue,
+				"queue":     run.queue,
 			},
 		},
 	}
@@ -1609,13 +1644,15 @@ func newGangMemberPod(run *gangTestRun, name, groupName, phase string, command [
 				podGroupNameLabel: groupName,
 				podGroupIDLabel:   groupName,
 				gangPhaseLabel:    phase,
+				gpuTestRunLabel:   run.suffix,
 			},
 		},
 		Spec: corev1.PodSpec{
-			ImagePullSecrets: run.imagePullSecretRefs(),
-			SchedulerName:    run.schedulerName,
-			RestartPolicy:    corev1.RestartPolicyNever,
-			Tolerations:      tolerations,
+			ImagePullSecrets:              run.imagePullSecretRefs(),
+			SchedulerName:                 run.schedulerName,
+			RestartPolicy:                 corev1.RestartPolicyNever,
+			TerminationGracePeriodSeconds: ptr.To(gangTerminationGracePeriod),
+			Tolerations:                   tolerations,
 			Containers: []corev1.Container{
 				{
 					Name:    "worker",

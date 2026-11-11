@@ -543,8 +543,11 @@ leaves its pods and PodGroups behind,
 where `tools/cleanup` does not look (it sweeps the `gang-scheduling-test-`
 namespace prefix); the negative-phase pods stay `Pending` against the
 Project's quota until deleted. Every pod and PodGroup the check creates
-carries the `gang-scheduling.aicr.nvidia.com/phase` label, so remove them
-with:
+carries two labels: `aicr.run/gpu-test-run`, set to the run's suffix, which
+scopes each phase's observation and the check's own cleanup to that run, so a
+second validation of the same Project or an earlier run's leftovers cannot
+fail a healthy scheduler; and `gang-scheduling.aicr.nvidia.com/phase`, which
+every run shares. Remove the leftovers of all runs with:
 
 ```shell
 PROJECT_NAMESPACE="runai-team-a"  # replace with your Run:ai Project namespace
