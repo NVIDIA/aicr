@@ -117,8 +117,8 @@ func TestRegistryPinsAreRenovateTracked(t *testing.T) {
 		}
 	}
 
-	if tracked != 41 {
-		t.Errorf("tracked chart pins = %d, want 41; update this count and the spec deliberately", tracked)
+	if tracked != 42 {
+		t.Errorf("tracked chart pins = %d, want 42; update this count and the spec deliberately", tracked)
 	}
 
 	// report.go joins Renovate's lookups by DepName alone (lookups[p.DepName]),
