@@ -95,10 +95,7 @@ func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool
 		if err != nil {
 			return nil, err
 		}
-		data = input
-		if !externalOnly {
-			data, err = mergeStaticProfilePatch(ctx, path, dataDir, input)
-		}
+		data, err = mergeStaticProfilePatch(ctx, path, dataDir, input, externalOnly)
 		if err != nil {
 			add(path, "spec.profile", err)
 			return diagnostics, nil
@@ -178,8 +175,8 @@ func readStaticInput(path string) ([]byte, error) {
 	return data, nil
 }
 
-func mergeStaticProfilePatch(ctx context.Context, path, dataDir string, data []byte) ([]byte, error) {
-	if dataDir == "" {
+func mergeStaticProfilePatch(ctx context.Context, path, dataDir string, data []byte, externalOnly bool) ([]byte, error) {
+	if externalOnly || dataDir == "" {
 		return data, nil
 	}
 	inputPath, err := filepath.Abs(path)

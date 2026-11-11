@@ -41,9 +41,9 @@ func TestExternalOnlyProviderNeverReadsEmbedded(t *testing.T) {
 	t.Cleanup(func() { EvictCachedStore(dp); EvictCachedRegistry(dp); EvictCachedCriteriaRegistry(dp) })
 	for name, want := range files {
 		t.Run(name, func(t *testing.T) {
-			got, err := dp.ReadFile(t.Context(), name)
-			if err != nil || string(got) != string(want) {
-				t.Fatalf("read %s: %q, %v", name, got, err)
+			got, readErr := dp.ReadFile(t.Context(), name)
+			if readErr != nil || string(got) != string(want) {
+				t.Fatalf("read %s: %q, %v", name, got, readErr)
 			}
 			if dp.Source(name) != CatalogSourceExternal {
 				t.Fatalf("source %s", dp.Source(name))
@@ -51,16 +51,16 @@ func TestExternalOnlyProviderNeverReadsEmbedded(t *testing.T) {
 		})
 	}
 	seen := map[string]bool{}
-	if err := dp.WalkDir(t.Context(), "", func(name string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	if walkErr := dp.WalkDir(t.Context(), "", func(name string, entry fs.DirEntry, entryErr error) error {
+		if entryErr != nil {
+			return entryErr
 		}
 		if !entry.IsDir() {
 			seen[name] = true
 		}
 		return nil
-	}); err != nil {
-		t.Fatal(err)
+	}); walkErr != nil {
+		t.Fatal(walkErr)
 	}
 	if len(seen) != len(files) {
 		t.Fatalf("walk returned %v", seen)
@@ -80,8 +80,8 @@ func TestExternalOnlyProviderNeverReadsEmbedded(t *testing.T) {
 		t.Fatalf("embedded registry leaked: %v", registry.Names())
 	}
 	for _, name := range []string{"components/gpu-operator/missing.yaml", "overlays/h100-eks-ubuntu-training.yaml", "checks/missing/health-check.yaml"} {
-		if _, err := dp.ReadFile(t.Context(), name); err == nil || !strings.Contains(err.Error(), name) {
-			t.Fatalf("missing %s: %v", name, err)
+		if _, readErr := dp.ReadFile(t.Context(), name); readErr == nil || !strings.Contains(readErr.Error(), name) {
+			t.Fatalf("missing %s: %v", name, readErr)
 		}
 	}
 }
