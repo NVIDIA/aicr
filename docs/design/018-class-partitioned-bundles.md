@@ -401,12 +401,13 @@ spirit of the existing deployment-order guard tests. Prerequisites are
 declared as edges, including the storage a core component's volumes
 need.
 
-Two opt-in NVSentinel mixins declare edges from `core` to `ops`:
-`nvsentinel-preflight` (`nvsentinel` → `kai-scheduler`) and
-`nvsentinel-slinky-drainer` (`nvsentinel` → `slinky-drainer` and its
+Three opt-in NVSentinel mixins declare edges from `core` to `ops`:
+`nvsentinel-preflight` (`nvsentinel` → `kai-scheduler`), its Run:ai
+companion `nvsentinel-preflight-runai` (`nvsentinel` → `runai-cluster`)
+and `nvsentinel-slinky-drainer` (`nvsentinel` → `slinky-drainer` and its
 CRDs). They are composed only onto operators' own leaf overlays, so no
 catalog recipe carries them and the guard does not see them. Under the
-embedded classification, recipes that compose either mixin cannot use
+embedded classification, recipes that compose any of them cannot use
 `--split` in v1: partition validation rejects the edge at bundle time.
 The check is on the edge, not the mixin name, so an external registry
 that places both ends in compatible classes (for example `kai-scheduler`

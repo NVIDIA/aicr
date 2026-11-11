@@ -563,6 +563,16 @@ spec:
     - nvsentinel-preflight
 ```
 
+On a leaf that declares `runai-cluster` (the `platform=runai` leaves), compose `nvsentinel-preflight-runai` as well. The preflight controller exits until the PodGroup CRD exists, and on those leaves `runai-cluster` installs it; the companion mixin orders `nvsentinel` after `runai-cluster`, and the bundle gate fails without it:
+
+```yaml
+# your-runai-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-preflight
+    - nvsentinel-preflight-runai
+```
+
 The catalog-registration rule described under [Audit Logging and Tracing](#audit-logging-and-tracing) applies here too: the overlay must be in the resolved catalog — committed to `recipes/overlays/`, or placed at `<dir>/overlays/` and loaded with `--data <dir>`. Passing the file directly to `aicr bundle -r` or `aicr validate -r` hydrates it from `spec.criteria` alone and never reads `spec.mixins`, so the mixin cannot compose that way; AICR rejects the load with `INVALID_REQUEST`, naming the mixins that were dropped, rather than shipping a bundle without them. The "has no effect if `nvsentinel` is disabled by the chain" caveat applies equally, as does the allowlist mechanism — `nvsentinel`'s `mixinSafeOverridePaths` entry names each `preflight.*` leaf path this mixin may set, and anything outside it fails at compose time.
 
 **Two gates, not one.** Adopting the mixin only deploys the webhook. Nothing is injected until you also label the namespaces whose pods should be checked:
@@ -2825,9 +2835,14 @@ Run:ai Project namespace you name with `AICR_RUNAI_PROJECT_NAMESPACE` in the
 shell running `aicr validate`. Create that Project in the control plane with
 an explicit CPU and memory quota first (a Project without one gets zero and
 nothing schedules); the check fails, rather than skips, when the variable is
-unset or the namespace is not a Project namespace. The `nvsentinel-preflight`
+unset or the namespace is not a Project namespace. The check does not copy
+`--image-pull-secret` Secrets into the Project namespace, so a private probe
+image needs a Secret of the same name already there; without it the check
+fails with "gang test pods did not complete". The `nvsentinel-preflight`
 mixin accepts `runai-cluster` as the provider of the PodGroup CRD its bundle
-gate requires. Run:ai's support matrix covers Kubernetes 1.35 through 1.37,
+gate requires; compose `nvsentinel-preflight-runai` with it so that
+`nvsentinel` installs after `runai-cluster` (see
+[Preflight Checks](#preflight-checks)). Run:ai's support matrix covers Kubernetes 1.35 through 1.37,
 and the leaves carry that floor.
 
 **Prerequisites the health check expects.** The check asserts the

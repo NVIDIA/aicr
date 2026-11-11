@@ -15,6 +15,7 @@
 package validations
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
@@ -111,6 +112,13 @@ func TestCheckNVSentinelPreflightGangSchedulerRequired(t *testing.T) {
 		return recipe.ComponentRef{Name: "runai-cluster", Overrides: overrides}
 	}
 	disabled := map[string]any{"enabled": false}
+	// orderedAfter is nvsentinel with preflight on and the dependencyRefs the
+	// composed mixins leave on it.
+	orderedAfter := func(deps ...string) recipe.ComponentRef {
+		ref := sentinel(preflightOn("scheduling.run.ai"))
+		ref.DependencyRefs = deps
+		return ref
+	}
 	result := func(refs ...recipe.ComponentRef) *recipe.RecipeResult {
 		return &recipe.RecipeResult{ComponentRefs: refs}
 	}
@@ -120,29 +128,68 @@ func TestCheckNVSentinelPreflightGangSchedulerRequired(t *testing.T) {
 		recipeResult  *recipe.RecipeResult
 		bundlerConfig *config.Config
 		wantBlocked   bool
+		wantErrHas    string
 	}{
 		{
 			name:         "nil recipe result -> skipped",
 			recipeResult: nil,
 		},
 		{
-			// The shipped Run:ai leaf shape.
-			name:         "preflight on, KAI GVR, runai-cluster enabled with kai disabled -> passes",
-			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), kai(disabled), runai(nil)),
+			// The shipped Run:ai leaf with nvsentinel-preflight and
+			// nvsentinel-preflight-runai composed.
+			name:         "runai-cluster enabled with kai disabled, ordered after runai-cluster -> passes",
+			recipeResult: result(orderedAfter("kai-scheduler", "runai-cluster"), kai(disabled), runai(nil)),
 		},
 		{
-			name:         "preflight on, KAI GVR, runai-cluster enabled and kai absent -> passes",
+			// nvsentinel-preflight alone on a Run:ai leaf: its kai-scheduler
+			// edge is pruned, so nvsentinel installs before the CRD exists.
+			name:         "runai-cluster enabled with kai disabled, ordered after kai only -> blocked",
+			recipeResult: result(orderedAfter("kai-scheduler"), kai(disabled), runai(nil)),
+			wantBlocked:  true,
+			wantErrHas:   "nothing orders nvsentinel after runai-cluster",
+		},
+		{
+			name:         "runai-cluster enabled and kai absent, ordered after runai-cluster -> passes",
+			recipeResult: result(orderedAfter("runai-cluster"), runai(nil)),
+		},
+		{
+			name:         "runai-cluster enabled and kai absent, no ordering edge -> blocked",
 			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), runai(nil)),
+			wantBlocked:  true,
+			wantErrHas:   "nvsentinel-preflight-runai",
+		},
+		{
+			// The provider loop must not stop at a disabled runai-cluster.
+			name:         "kai enabled with runai-cluster disabled -> passes",
+			recipeResult: result(orderedAfter("kai-scheduler"), kai(nil), runai(disabled)),
+		},
+		{
+			// Preflight switched on by values alone, without the mixin's edge,
+			// keeps passing on kai-scheduler as it did before the ordering rule.
+			name:         "kai enabled, no ordering edge -> passes",
+			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), kai(nil)),
+		},
+		{
+			name:         "both providers enabled, no ordering edge -> passes",
+			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), kai(nil), runai(nil)),
 		},
 		{
 			name:         "preflight on, KAI GVR, both providers disabled -> blocked",
 			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), kai(disabled), runai(disabled)),
 			wantBlocked:  true,
+			wantErrHas:   "kai-scheduler and runai-cluster are disabled",
+		},
+		{
+			name:         "preflight on, KAI GVR, no provider declared -> blocked",
+			recipeResult: result(sentinel(preflightOn("scheduling.run.ai"))),
+			wantBlocked:  true,
+			wantErrHas:   "neither kai-scheduler nor runai-cluster is in the recipe",
 		},
 		{
 			name:         "preflight on, KAI GVR, runai-cluster alone but disabled -> blocked",
 			recipeResult: result(sentinel(preflightOn("scheduling.run.ai")), runai(disabled)),
 			wantBlocked:  true,
+			wantErrHas:   "runai-cluster is disabled",
 		},
 		{
 			name:         "preflight on, KAI GVR, runai-cluster disabled by --set -> blocked",
@@ -324,6 +371,11 @@ func TestCheckNVSentinelPreflightGangSchedulerRequired(t *testing.T) {
 			gotBlocked := len(warnings) > 0 || len(errs) > 0
 			if gotBlocked != tt.wantBlocked {
 				t.Errorf("blocked = %v (warnings=%v errs=%v), want %v", gotBlocked, warnings, errs, tt.wantBlocked)
+			}
+			if tt.wantErrHas != "" {
+				if len(errs) != 1 || !strings.Contains(errs[0].Error(), tt.wantErrHas) {
+					t.Errorf("errs = %v, want one error mentioning %q", errs, tt.wantErrHas)
+				}
 			}
 		})
 	}
