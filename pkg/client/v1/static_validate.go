@@ -40,7 +40,13 @@ func ValidateRecipeCatalog(ctx context.Context, path, dataDir string) ([]RecipeD
 // ValidateRecipeCatalogDirectory validates a complete catalog directory without
 // embedded fallback, so missing working-tree references remain errors.
 func ValidateRecipeCatalogDirectory(ctx context.Context, dataDir string) ([]RecipeDiagnostic, error) {
-	return validateRecipeCatalog(ctx, "", dataDir, true)
+	return ValidateExternalRecipeCatalog(ctx, "", dataDir)
+}
+
+// ValidateExternalRecipeCatalog validates a file or, for an empty path, the
+// complete external catalog without reading embedded catalog data.
+func ValidateExternalRecipeCatalog(ctx context.Context, path, dataDir string) ([]RecipeDiagnostic, error) {
+	return validateRecipeCatalog(ctx, path, dataDir, true)
 }
 
 func validateRecipeCatalog(ctx context.Context, path, dataDir string, externalOnly bool) ([]RecipeDiagnostic, error) {
@@ -50,7 +56,7 @@ func validateRecipeCatalog(ctx context.Context, path, dataDir string, externalOn
 	var diagnostics []recipe.StaticDiagnostic
 	var err error
 	if externalOnly {
-		diagnostics, err = recipe.ValidateStaticDirectory(ctx, dataDir)
+		diagnostics, err = recipe.ValidateStaticExternal(ctx, path, dataDir)
 	} else {
 		diagnostics, err = recipe.ValidateStatic(ctx, path, dataDir)
 	}

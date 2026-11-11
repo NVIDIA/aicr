@@ -111,6 +111,7 @@ type SnapshotExecutionSpec struct {
 
 // RecipeSpec captures the inputs to `aicr recipe`.
 type RecipeSpec struct {
+	ExternalOnly  bool                     `yaml:"externalOnly,omitempty" json:"externalOnly,omitempty"`
 	Criteria      *CriteriaSpec            `yaml:"criteria,omitempty" json:"criteria,omitempty"`
 	Configuration *RecipeConfigurationSpec `yaml:"configuration,omitempty" json:"configuration,omitempty"`
 	Input         *RecipeInputSpec         `yaml:"input,omitempty" json:"input,omitempty"`

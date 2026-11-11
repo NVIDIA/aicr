@@ -28,7 +28,8 @@ The first command checks the named file with `recipes` as its reference
 catalog. The second checks only the working-tree catalog and emits JSON
 diagnostics for CI, without filling missing files or registry entries from the
 embedded catalog. Omit `--external-only` when validating an extension layered
-on the embedded catalog. Current checks emit error diagnostics; errors cause
+on the embedded catalog. The flag also works with a positional file to check
+its references against only the external catalog. Current checks emit error diagnostics; errors cause
 a non-zero exit status.
 
 For pre-commit, install a local hook such as:

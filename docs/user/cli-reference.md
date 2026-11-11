@@ -448,6 +448,7 @@ Generate recipes using an `AICRConfig` document. The same file format also drive
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
+| `--external-only` | | bool | Use only `--data`, without embedded catalog merging or fallback |
 
 The config file uses a Kubernetes-style envelope:
 
@@ -529,6 +530,7 @@ Generate recipes using direct system parameters:
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
+| `--external-only` | | bool | Use only `--data`, without embedded catalog merging or fallback |
 | `--criteria-strict` | | bool | Reject criteria values not in the embedded OSS catalog; ignores values registered from `--data`. Also honored via `AICR_CRITERIA_STRICT=1` or `spec.recipe.criteriaStrict: true` in `--config`. Intended for OSS CI gates. |
 | `--require-evidence` | | bool | Fail when the resolved recipe has no committed evidence pointer. The check is offline presence for the resolved id, including the selected profile value. It does not verify a signature or contact a registry. A pointer on a base id does not cover a profiled resolve. Resolving with external data (`--data` or `spec.recipe.data`) fails, even when the leaf overlay is still the embedded one. Also honored via `AICR_REQUIRE_EVIDENCE` (`1`, `true`, `yes`, `on`) or `spec.recipe.requireEvidence: true` in `--config`. Any one of the three enables it. An explicit false does not turn off an environment value that is already on. Applies to `aicr recipe` and `aicr query`; `aicr query --recipe` is rejected while it is on. |
 
@@ -799,8 +801,9 @@ aicr recipe validate [--data DIR] [--external-only] [--format text|json] [FILE]
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
+| `--config` | | string | | AICRConfig path or URL; `spec.recipe.data` and `spec.recipe.externalOnly` select the catalog |
 | `--data` | | string | | Catalog directory used to resolve references; required when no FILE is given |
-| `--external-only` | | bool | false | Validate the complete external catalog without embedded fallback; requires `--data` and no FILE |
+| `--external-only` | | bool | false | Validate the file or complete external catalog without embedded fallback; requires `--data` |
 | `--format` | | string | text | Output format: `text` or `json` |
 
 **Examples:**
@@ -845,7 +848,9 @@ aicr recipe list [flags]
 | `--os` | | string | | Filter by worker-node OS (e.g. ubuntu, rhel, cos) |
 | `--platform` | | string | | Filter by platform/framework type (e.g. dynamo, kubeflow, nim) |
 | `--format` | `-t` | string | table | Output format: json, yaml, table |
+| `--config` | | string | | AICRConfig path or URL; `spec.recipe.data` and `spec.recipe.externalOnly` select the catalog |
 | `--data` | | string | | External data directory to include alongside embedded overlays |
+| `--external-only` | | bool | false | Use only `--data`, without embedded catalog merging or fallback |
 | `--no-health` | `--skip-health` | bool | false | Skip per-leaf structural-health computation; render only the enumeration columns/fields |
 
 Filter flags narrow the output to overlays whose criteria carry that exact value.
@@ -1290,6 +1295,7 @@ aicr validate [flags]
 | `--signing-config` | | string | | Sign the evidence bundle with a custom Sigstore signing config JSON instead of the default Rekor v2 config. The file is read and parsed before anything runs. Mutually exclusive with `--rekor-url`. Reads no environment variable. |
 | `--yes` | `--assume-yes` | bool | false | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 | `--data` | | string | | External data directory to overlay on embedded data |
+| `--external-only` | | bool | false | Use only `--data`, without embedded catalog merging or fallback |
 
 **Input Sources:**
 - **File**: Local file path (`./recipe.yaml`, `./snapshot.yaml`)
@@ -1976,6 +1982,7 @@ aicr bundle [flags]
 | `--set-file` | | string[] | Override a value by reading JSON/YAML from a file (repeatable, format: `component:path=<filepath>`). For larger structures than `--set-json`; same merge and absent-component-rejection semantics (no `enabled` exemption on the typed path). |
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, `helmfile`, `terraform`, and `fleet` deployers. A declaration whose component is absent from the generated bundle is rejected (no path is exempt — a dynamic path is never a removal idiom); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). Certain gate- or contract-owned paths on **present** components cannot be declared dynamic either — driver-ownership paths (e.g. `gpuoperator:driver.enabled`), GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled **and** the eviction contract is opted into with `--dra-eviction-node-label`, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths — because an install-time edit there would undo what AICR verified or made consistent; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Dynamic Install-Time Values](#dynamic-install-time-values). A path the registry lists in `requiredValues` counts as supplied when declared here; a path in `installTimeSecretPaths` may only be supplied this way, and only with the `helm` deployer. See [Required and install-time secret inputs](bundling.md#required-and-install-time-secret-inputs). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
+| `--external-only` | | bool | Use only `--data`, without embedded catalog merging or fallback |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable). Optional in general, but some components (e.g. `slinky-slurm`, `slurm-accounting-mariadb`) declare `requireNodeSelector` in the registry and fail the bundle if this is omitted and no overlay opts their paths out. `kube-prometheus-stack` declares the conditional `requireNodeSelectorIfStorageClassSet` instead, so it only fails once the component ends up with a non-empty value at a declared `storageClassPaths`/`sharedStorageClassPaths` entry, whether from `--storage-class`, a per-component `--set` override, or an overlay's own `storageClassName` default. See [`nodeScheduling.system` vs `accelerated`](../contributor/component.md#nodeschedulingsystem-vs-accelerated). |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable). With `--readiness-hooks`, this (keyed tolerations only) and `--system-node-selector` also place the readiness gate Jobs; see [Readiness Gates](#readiness-gates). |
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable). Same `requireNodeSelector` caveat as `--system-node-selector` above applies to components that declare it on their accelerated paths. |
@@ -3761,6 +3768,7 @@ aicr mirror list [flags]
 | `--inherit` | | string | `all` | Select what to keep from `--inherit-from`: `all` preserves full component identity; `namespace` preserves only namespaces and rebinds health checks, leaving chart, source, path, manifest sets and object names as newly resolved. Requires `--inherit-from`; cannot be combined with `--recipe`. |
 | `--set` | | string[] | | Override values that affect image discovery (format: `component:path.to.field=value`). Repeatable. |
 | `--data` | | string | | External data directory to overlay on embedded data. Overlay-provided component values and manifests both feed image discovery (see [External Data](#external-data-directory)). |
+| `--external-only` | | bool | false | Use only `--data`, without embedded catalog merging or fallback |
 | `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |
 | `--output` | `-o` | string | stdout | Output file path |
 
@@ -4577,6 +4585,16 @@ aicr --debug bundle -r recipe.yaml
 ## External Data Directory
 
 The `--data` flag enables extending or overriding the embedded recipe data with external files. This allows customization without rebuilding the CLI.
+
+Add `--external-only` to use a complete external catalog instead. This disables
+all embedded catalog reads, enumeration, merges and fallbacks. It requires
+`--data` or `spec.recipe.data`; missing required inputs fail with their names.
+The mode applies to every command accepting `--data`, including file and
+whole-directory `recipe validate`. `spec.recipe.externalOnly` is its config
+equivalent; an explicit `--external-only=false` overrides it. Neither flag has
+an environment-variable equivalent. See [fully external catalogs](../integrator/data-extension.md#use-a-fully-external-catalog)
+for the required files and scope. The layering rules below apply when the mode
+is unset.
 
 ### Overview
 
