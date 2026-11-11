@@ -47,7 +47,7 @@ func TestEnforceAllocationPolicyOverrides(t *testing.T) {
 		opts        []config.Option
 		wantErr     bool
 		wantErrMsg  string
-		wantWarning string // substring expected in b.warnings; "" = no warning
+		wantWarning string // substring expected in r.warnings, or "" for none
 	}{
 		{
 			name: "dynamic on the DRA switch via alias is rejected",
@@ -168,7 +168,8 @@ func TestEnforceAllocationPolicyOverrides(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := newPolicyTestBundler(t, config.NewConfig(tt.opts...))
-			err := b.enforceAllocationPolicyOverrides(nil)
+			r := &bundleRun{DefaultBundler: b}
+			err := r.enforceAllocationPolicyOverrides(nil)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -182,14 +183,14 @@ func TestEnforceAllocationPolicyOverrides(t *testing.T) {
 				return
 			}
 			if tt.wantWarning == "" {
-				if len(b.warnings) != 0 {
-					t.Errorf("warnings = %v, want none", b.warnings)
+				if len(r.warnings) != 0 {
+					t.Errorf("warnings = %v, want none", r.warnings)
 				}
 				return
 			}
-			joined := strings.Join(b.warnings, "\n")
+			joined := strings.Join(r.warnings, "\n")
 			if !strings.Contains(joined, tt.wantWarning) || !strings.Contains(joined, "deprecated") {
-				t.Errorf("warnings = %v, want a deprecation warning naming %q", b.warnings, tt.wantWarning)
+				t.Errorf("warnings = %v, want a deprecation warning naming %q", r.warnings, tt.wantWarning)
 			}
 		})
 	}
