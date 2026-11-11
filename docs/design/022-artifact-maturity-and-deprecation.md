@@ -111,6 +111,14 @@ pretending that the legacy `Recipe` input is distinct from the canonical
 | `ComponentUpgrades` (proposed by [ADR-021](021-component-upgrade-safety.md)) | Not shipped | `aicr.run/v1beta1` | New, still-evolving authoring schema; its loader and records are not implemented. Starts at its target, with no alpha version to retire |
 | `RecipeSummary` (`aicr query --summary --format yaml\|json`, `recipe.RecipeSummaryAPIVersion`) | Not shipped | `aicr.run/v1beta1` | Output-only overview of a resolved recipe; carries the source recipe's header under `source`. No AICR reader, so no read-gate entry; recipe inputs reject it through the `RecipeResult` kind gate |
 
+The following proposed rows are contingent on accepting
+[ADR-031](031-artifact-inventory-and-bindings.md); neither kind is implemented.
+
+| Wire kind or artifact | Today | Target | Rationale |
+|---|---|---|---|
+| `ArtifactInventory` | Not shipped | `aicr.run/v1beta1` | Producer-authored release identities; starts on the authoring track with a kind-specific read gate. |
+| `ArtifactBindings` | Not shipped | `aicr.run/v1beta1` | Catalog-authored artifact mappings; starts on the authoring track with a kind-specific read gate. |
+
 `BundleProvenance` here means the bundle-root `provenance.yaml` document emitted
 by deployers through `localformat.WriteProvenance`, not the in-toto provenance
 predicate excluded from this ADR's scope. The producer emits the version in its
