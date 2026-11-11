@@ -265,6 +265,9 @@ bundle-time `--set rdmamodules:enabled=false` is not persisted, so
 
 ## Generate and validate
 
+These commands deploy and validate the training recipe. For the inference
+coordinates, refer to [Inference](#inference).
+
 ```bash
 aicr snapshot --node-selector kubernetes.io/hostname='<gpu-node>' --privileged \
   --output snapshot.yaml
@@ -311,8 +314,9 @@ the report and evidence record it as skipped.
 
 `gb200-nvke-ubuntu-inference` is the training leaf's GPU stack at
 `intent: inference`, plus the Gateway API surface: `agentgateway-crds` and
-`agentgateway`. `gb200-nvke-ubuntu-inference-dynamo` adds `grove` and
-`dynamo-platform`, and declares `robust-controller`.
+`agentgateway`. It serves no model: bring your own serving workload, or use
+`gb200-nvke-ubuntu-inference-dynamo`, which adds `grove` and `dynamo-platform`
+and declares `robust-controller`.
 
 Neither ships the east-west fabric: no `network-operator`,
 `sriov-ib-networks` or `rdma-modules`, and no `kernel-module-params`
@@ -326,8 +330,13 @@ LoadBalancer, generate the bundle with `--set agentgateway:serviceType=ClusterIP
 applies unchanged.
 
 ```shell
+GPU_NODE="my-gpu-worker"  # replace with a GPU worker's kubernetes.io/hostname label value
+aicr snapshot --node-selector "kubernetes.io/hostname=${GPU_NODE}" --privileged \
+  --output snapshot.yaml
 aicr recipe --snapshot snapshot.yaml --intent inference --platform dynamo --output recipe.yaml
 aicr bundle --recipe recipe.yaml --set agentgateway:serviceType=ClusterIP --output bundle
+./bundle/deploy.sh
+aicr validate --recipe bundle/recipe.yaml --phase deployment --phase conformance
 ```
 
 Measured on a GB200 NVKE tenant: two trays with four GPUs each, Kubernetes
