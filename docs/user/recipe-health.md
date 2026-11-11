@@ -23,7 +23,7 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 - `fail` — a graded structural signal failed (e.g. the recipe does not resolve).
 - `unknown` — a transient resolver error (a re-runnable timeout) prevented a confident verdict; the recipe is held rather than penalized. `unknown` is never silently read as `pass`.
 
-> **Structural soundness is not a validation verdict.** A recipe that resolves cleanly is *structurally sound*, **not** *validated and performant*. Runtime/validation claims come only from signed conformance evidence, which is out of scope for this matrix today (see the Evidence column below).
+> **Structural soundness is not a validation verdict.** A recipe that resolves cleanly is *structurally sound*, **not** *validated and performant*. Runtime/validation claims come only from signed conformance evidence, which is out of scope for this matrix today (see the Evidence and Signer class columns below).
 
 **chart_pinned (folded into Status).** One of the graded signals behind `Status` checks that every resolved Helm component references an explicit chart version, per [ADR-006](https://github.com/NVIDIA/aicr/blob/main/docs/design/006-image-pinning-policy.md). This is **layer 1 only** — the chart-version pin — *not* image-digest pinning, and it is a render-free read of the resolved recipe (it does not pull or template the chart).
 
