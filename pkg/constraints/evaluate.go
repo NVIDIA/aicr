@@ -17,6 +17,8 @@
 package constraints
 
 import (
+	stderrors "errors"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -93,7 +95,15 @@ func evaluate(constraint recipe.Constraint, snap *snapshotter.Snapshot, phase ev
 
 	actual, err := path.Extract(snap.Measurements)
 	if err != nil {
-		result.Error = errors.Wrap(errors.ErrCodeNotFound, "value not found in snapshot", err)
+		// Only a missing reading is NotFound. An item predicate that matches
+		// several entries is ErrCodeConflict, a recipe authoring error that
+		// must keep its code so it fails closed instead of excluding the
+		// overlay.
+		if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			result.Error = errors.Wrap(errors.ErrCodeNotFound, "value not found in snapshot", err)
+		} else {
+			result.Error = errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to extract value from snapshot")
+		}
 		return result
 	}
 	result.Actual = actual
