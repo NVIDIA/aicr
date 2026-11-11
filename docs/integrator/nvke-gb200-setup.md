@@ -5,6 +5,9 @@ formerly NKE): bare-metal GB200 NVL trays provisioned by Forge/NICo, running
 Ubuntu 24.04 with NVIDIA's `-nvidia-64k` kernel. It is a Preview coordinate.
 `gb200-nvke-ubuntu-training-kubeflow` (`--platform kubeflow`) is the same leaf
 plus Kubeflow Trainer through the `platform-kubeflow` mixin.
+`gb200-nvke-ubuntu-inference` and `gb200-nvke-ubuntu-inference-dynamo`
+(`--platform dynamo`) are the inference coordinates; refer to
+[Inference](#inference) for what they leave out.
 
 ## Cluster prerequisites
 
@@ -304,6 +307,42 @@ until the launcher timeout. Withhold the check with
 `--skip-check nccl-all-reduce-bw-net` until the fabric grants full membership;
 the report and evidence record it as skipped.
 
+## Inference
+
+`gb200-nvke-ubuntu-inference` is the training leaf's GPU stack at
+`intent: inference`, plus the Gateway API surface: `agentgateway-crds` and
+`agentgateway`. `gb200-nvke-ubuntu-inference-dynamo` adds `grove` and
+`dynamo-platform`, and declares `robust-controller`.
+
+Neither ships the east-west fabric: no `network-operator`,
+`sriov-ib-networks` or `rdma-modules`, and no `kernel-module-params`
+ConfigMap. Serving through the Gateway API needs no InfiniBand rails, so the
+prerequisites above about partitions, multus and the RDMA modules do not apply
+to these coordinates. Neither carries a performance block.
+
+NVKE provisions no LoadBalancer controller. Unless the tenant has a bare-metal
+LoadBalancer, generate the bundle with `--set agentgateway:serviceType=ClusterIP`;
+[External address for the gateway](nvke-vr200-setup.md#external-address-for-the-gateway)
+applies unchanged.
+
+```shell
+aicr recipe --snapshot snapshot.yaml --intent inference --platform dynamo --output recipe.yaml
+aicr bundle --recipe recipe.yaml --set agentgateway:serviceType=ClusterIP --output bundle
+```
+
+Measured on a GB200 NVKE tenant: two trays with four GPUs each, Kubernetes
+v1.36.3, driver 580.173.02. `aicr validate --phase all` against the
+`-inference-dynamo` overlay returned deployment 4/4 and conformance 11/11:
+
+- `inference-gateway` passed with the Gateway `Programmed=True` on a ClusterIP
+  Service.
+- `robust-controller` passed against the Dynamo operator.
+- `driver-runtime-management` found the driver working in a vanilla image.
+
+The tenant already ran the training leaf. `grove` and `dynamo-platform` came
+from this leaf's bundle, and the other components were already at its pinned
+versions, except `nodewright-operator` at v0.20.0.
+
 ## Known gaps
 
 - The reference fabric has not passed RDMA traffic (limited P_Key membership,
@@ -317,4 +356,6 @@ the report and evidence record it as skipped.
   [Upgrade Notes: `nvidia-dra-driver-gpu` 0.5.0 to
   0.5.1](../user/component-catalog.md#nvidia-dra-driver-gpu-050-to-051)).
 - No published evidence yet.
+- No `inference-perf` floor on the Dynamo leaf: nothing has measured Dynamo
+  serving on NVKE.
 - KWOK profiles model scheduling only; they cannot validate RDMA traffic.
