@@ -16,11 +16,13 @@ package pod_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -72,8 +74,24 @@ func TestJobPodObserver(t *testing.T) {
 		other := observedPod("x", done)
 		other.Labels["batch.kubernetes.io/job-name"] = "other"
 		cs := fake.NewSimpleClientset(observedPod("a", running), other)
+		listed := make(chan struct{})
+		var once sync.Once
+		cs.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			fields := action.(k8stesting.ListAction).GetListRestrictions().Fields.String()
+			if fields != "status.phase!=Pending,status.phase!=Running" {
+				t.Errorf("list field selector = %q, want the terminal-phase selector", fields)
+			}
+			once.Do(func() { close(listed) })
+			return false, nil, nil
+		})
 		o := pod.ObserveJobPods(t.Context(), cs, "ns", "job", "validator")
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-listed:
+		case <-time.After(5 * time.Second):
+			t.Fatal("observer never listed pods")
+		}
+		// Stop joins the observer goroutine, which records the listed pods
+		// before it checks for cancellation.
 		if got := o.Stop(); got != nil {
 			t.Errorf("Stop() = %s, want none", got.Name)
 		}
@@ -118,12 +136,40 @@ func TestJobPodObserver(t *testing.T) {
 		eventuallyObserved(t, o, "b")
 	})
 
-	t.Run("list failure is retried", func(t *testing.T) {
-		cs := fake.NewSimpleClientset(observedPod("a", done))
-		failed := false
+	t.Run("expired watch is re-listed and keeps observing", func(t *testing.T) {
+		expired := watch.NewFake()
+		watches := make(chan watch.Interface, 1)
+		watches <- expired
+		cs := fake.NewSimpleClientset()
+		cs.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+			select {
+			case w := <-watches:
+				return true, w, nil
+			default:
+				return true, watch.NewFake(), nil
+			}
+		})
+		lists := 0
 		cs.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
-			if !failed {
-				failed = true
+			lists++
+			if lists == 1 {
+				return true, &corev1.PodList{}, nil
+			}
+			return true, &corev1.PodList{Items: []corev1.Pod{*observedPod("b", done)}}, nil
+		})
+		o := pod.ObserveJobPods(t.Context(), cs, "ns", "job", "validator")
+		defer o.Stop()
+		// The unbuffered fake blocks until the observer reads the 410.
+		expired.Error(&apierrors.NewResourceExpired("too old resource version").ErrStatus)
+		eventuallyObserved(t, o, "b")
+	})
+
+	t.Run("repeated list failures are retried until they clear", func(t *testing.T) {
+		cs := fake.NewSimpleClientset(observedPod("a", done))
+		failures := 0
+		cs.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+			if failures < 3 {
+				failures++
 				return true, nil, context.DeadlineExceeded
 			}
 			return false, nil, nil
@@ -145,4 +191,28 @@ func TestJobPodObserver(t *testing.T) {
 			t.Fatal("Stop did not return after context cancellation")
 		}
 	})
+}
+
+func TestObserverRetryDelay(t *testing.T) {
+	const base = 2 * time.Second
+	maxDelay := pod.JobObserverMaxBackoffForTest
+
+	tests := []struct {
+		name     string
+		failures int
+		want     time.Duration
+	}{
+		{"no failures uses the base", 0, base},
+		{"first failure doubles", 1, 2 * base},
+		{"grows with each consecutive failure", 3, 8 * base},
+		{"capped at the maximum", 4, maxDelay},
+		{"stays capped on long streaks", 1000, maxDelay},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pod.ObserverRetryDelayForTest(base, tt.failures); got != tt.want {
+				t.Errorf("delay(%v, %d) = %v, want %v", base, tt.failures, got, tt.want)
+			}
+		})
+	}
 }

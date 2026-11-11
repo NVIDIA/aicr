@@ -37,3 +37,10 @@ func SetJobWatchResumeBackoffForTest(d time.Duration) func() {
 	jobWatchResumeBackoff = d
 	return func() { jobWatchResumeBackoff = old }
 }
+
+// ObserverRetryDelayForTest exposes observerRetryDelay and its cap to the
+// external test package.
+var ObserverRetryDelayForTest = observerRetryDelay
+
+// JobObserverMaxBackoffForTest is the cap on the observer's retry delay.
+const JobObserverMaxBackoffForTest = jobObserverMaxBackoff

@@ -282,7 +282,14 @@ func (d *Deployer) reportedTermination(ctx context.Context) (string, bool) {
 // terminatedPod returns a pod whose validator container has terminated even if
 // getPodForJob skips it because it is being deleted: first from a live List,
 // then from the last pod observed while waiting.
+//
+// The List is bounded by K8sCleanupTimeout for the same reason as
+// jobFailedCondition: the inherited context may carry no deadline, and a
+// stalled apiserver must not hang the diagnosis this call exists to improve.
 func (d *Deployer) terminatedPod(ctx context.Context) *corev1.Pod {
+	ctx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	defer cancel()
+
 	listed, err := pod.GetTerminatedPodForJob(ctx, d.config.Clientset, d.config.Namespace, d.jobName, ValidatorContainerName)
 	if err == nil {
 		return listed

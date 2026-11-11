@@ -33,6 +33,12 @@ import (
 // traffic to the few pods that matter instead of every status change.
 const terminalPodFieldSelector = "status.phase!=Pending,status.phase!=Running"
 
+// jobObserverMaxBackoff caps the growth of the retry delay while the observer's
+// List or Watch keeps failing, so a persistent failure (an RBAC gap, an
+// unavailable apiserver) costs a request every half minute rather than every
+// jobWatchResumeBackoff for the whole wait.
+const jobObserverMaxBackoff = 30 * time.Second
+
 // JobPodObserver watches the pods of a Job and remembers the last one whose
 // named container was seen Terminated, including the final object carried by a
 // DELETED event. When the Job controller deletes a pod on activeDeadlineSeconds
@@ -71,14 +77,16 @@ func (o *JobPodObserver) Stop() *corev1.Pod {
 
 func (o *JobPodObserver) run(ctx context.Context, client kubernetes.Interface, namespace, jobName, containerName string) {
 	selector := jobNameLabel + "=" + jobName
+	failures := 0
 	for ctx.Err() == nil {
 		list, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: selector,
 			FieldSelector: terminalPodFieldSelector,
 		})
 		if err != nil {
-			o.warn(ctx, "failed to list pods while observing Job", namespace, jobName, err)
-			o.backoff(ctx)
+			o.warn(ctx, "failed to list pods while observing Job", namespace, jobName, failures, err)
+			o.backoff(ctx, failures)
+			failures++
 			continue
 		}
 		for i := range list.Items {
@@ -91,13 +99,15 @@ func (o *JobPodObserver) run(ctx context.Context, client kubernetes.Interface, n
 			ResourceVersion: list.ResourceVersion,
 		})
 		if err != nil {
-			o.warn(ctx, "failed to watch pods while observing Job", namespace, jobName, err)
-			o.backoff(ctx)
+			o.warn(ctx, "failed to watch pods while observing Job", namespace, jobName, failures, err)
+			o.backoff(ctx, failures)
+			failures++
 			continue
 		}
+		failures = 0
 		o.consume(ctx, w, jobName, containerName)
 		w.Stop()
-		o.backoff(ctx)
+		o.backoff(ctx, failures)
 	}
 }
 
@@ -131,19 +141,37 @@ func (o *JobPodObserver) record(p *corev1.Pod, jobName, containerName string) {
 	}
 }
 
-// backoff paces re-establishment so a stream that keeps ending cannot spin.
-func (o *JobPodObserver) backoff(ctx context.Context) {
+// backoff paces re-establishment so a stream that keeps ending cannot spin. The
+// delay doubles with each consecutive failure up to jobObserverMaxBackoff.
+func (o *JobPodObserver) backoff(ctx context.Context, failures int) {
+	delay := observerRetryDelay(jobWatchResumeBackoff, failures)
 	select {
 	case <-ctx.Done():
-	case <-time.After(wait.Jitter(jobWatchResumeBackoff, jobWatchResumeJitterFactor)):
+	case <-time.After(wait.Jitter(delay, jobWatchResumeJitterFactor)):
 	}
 }
 
+// observerRetryDelay returns base doubled once per consecutive failure, capped
+// at jobObserverMaxBackoff.
+func observerRetryDelay(base time.Duration, failures int) time.Duration {
+	delay := base
+	for i := 0; i < failures && delay < jobObserverMaxBackoff; i++ {
+		delay *= 2
+	}
+	return min(delay, jobObserverMaxBackoff)
+}
+
 // warn logs a non-context failure so a silent observer does not leave
-// operators wondering why a deadline-killed check lacks its own message.
-func (o *JobPodObserver) warn(ctx context.Context, msg, namespace, jobName string, err error) {
+// operators wondering why a deadline-killed check lacks its own message. Only
+// the first failure of a streak warns; repeats are logged at debug so a
+// persistent failure does not flood the log for the length of the wait.
+func (o *JobPodObserver) warn(ctx context.Context, msg, namespace, jobName string, failures int, err error) {
 	if ctx.Err() != nil {
 		return
 	}
-	slog.Warn(msg, keyNamespace, namespace, keyJob, jobName, "error", err)
+	level := slog.LevelWarn
+	if failures > 0 {
+		level = slog.LevelDebug
+	}
+	slog.Log(ctx, level, msg, keyNamespace, namespace, keyJob, jobName, "error", err)
 }

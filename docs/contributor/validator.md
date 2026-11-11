@@ -1190,6 +1190,13 @@ termination message after the Job controller deletes the pod at the deadline
 arithmetic is pinned in `pkg/defaults/timeouts_test.go` and
 `pkg/validator/catalog/catalog_test.go`; see ADR 002 for the table.
 
+The client facade's `ValidationOperationTimeout` cap (75m) covers a check only
+while its catalog timeout `c` satisfies `c + 6m05s <= 75m`, that is
+`c < 68m55s`: the envelope (`c` + 4m05s) plus the 30s result capture and the 90s
+pod termination wait. The embedded catalog's longest check (65m) fits. A `--data`
+catalog override above that ceiling, run through the facade without its own
+deadline, reaches the facade cap before the check reports its verdict.
+
 On operator cancellation, the orchestrator uses one fresh 30s deadline for the
 in-flight Job's result capture, deletion and partial CTRF persistence, in that
 order, followed by the pod-termination wait. It does **not** start a fresh 90s
