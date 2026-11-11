@@ -39,7 +39,20 @@ The link is constructed **hermetically and deterministically** from the recipe's
 
 The deep-link is the current Evidence rendering. It is distinct from, and coexists with, [ADR-009](https://github.com/NVIDIA/aicr/blob/main/docs/design/009-recipe-health-tracking.md)'s deferred, verify-gated *in-cell freshness* state (`unattested` vs aged, derived from a signed attestation's `AttestedAt`). The link points at the live board, and an optional freshness token can later annotate the same cell without replacing the link. The signer class has its own column, so the Evidence cell stays free for that token. See also the [coverage matrix](coverage-matrix.md) for the complementary breadth view.
 
-**Signer class** names who signed each recipe's committed evidence pointers under `recipes/evidence/<recipe>/<src>/`. The class is the one [`recipes/evidence/allowlist.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/evidence/allowlist.yaml) assigns to that source slug. `first-party` is the project's own UAT workflows, `community` is individual external contributors, and `partner` is vetted partner organizations. A recipe with pointers from more than one class lists each, as in `community, partner`. Rows match pointers by the same recipe id that `--require-evidence` checks, so a profiled row reads the pointer for its declaration-default value (`<recipe>-gpustack-<value>`), not the unprofiled id. The column reads committed pointers, not dashboard presence, so a recipe can carry a signer class while its Evidence reads `pending`. An em dash means the recipe has no committed pointer. First-party UAT workflows ingest evidence directly and commit no pointer, so an em dash does not mean the evidence is first-party. Today every committed pointer is `community`, published from a contributor fork per [evidence publishing](https://github.com/NVIDIA/aicr/blob/main/docs/contributor/evidence-publishing.md) and admitted by maintainer review.
+**Signer class** names who signed each recipe's committed evidence pointers under `recipes/evidence/<recipe>/<src>/`. The class is the one [`recipes/evidence/allowlist.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/evidence/allowlist.yaml) assigns to that source slug:
+
+- `first-party` is the project's own UAT workflows.
+- `community` is individual external contributors.
+- `partner` is vetted partner organizations.
+
+Reading the column:
+
+- An em dash means the recipe has no committed pointer. First-party UAT workflows ingest evidence directly and commit no pointer, so an em dash does not mean the evidence is first-party.
+- A recipe with pointers from more than one class lists each, as in `community, partner`.
+- A profiled row reads the pointer for its declaration-default value (`<recipe>-gpustack-<value>`), the same id `--require-evidence` checks, not the unprofiled id.
+- The column reads committed pointers, not dashboard presence, so a recipe can carry a signer class while its Evidence reads `pending`.
+
+Today every committed pointer is `community`, published from a contributor fork per [evidence publishing](https://github.com/NVIDIA/aicr/blob/main/docs/contributor/evidence-publishing.md) and admitted by maintainer review.
 
 {/* BEGIN AICR-HEALTH */}
 ## Summary
