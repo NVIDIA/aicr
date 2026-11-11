@@ -202,14 +202,45 @@ func podGroupWithConditions(name string, conditions []any) *unstructured.Unstruc
 const kaiRefusalEight = "PodSchedulingErrors: Resources were found for 6 pods while 8 are required for gang scheduling. " +
 	"Additional pods cannot be scheduled due to: no nodes with enough resources were found"
 
+// kaiOverLimitMessage is what KAI v0.18.3 under Run:ai 3.0.20 recorded for the
+// negative group in a Project with a 4-core CPU limit (live, 2026-11-11).
+const kaiOverLimitMessage = "aicr-gang quota has reached the allowable limit of CPU cores. " +
+	"Limit is 4 cores, currently 0 cores allocated and workload requested 491.028 cores"
+
 func TestEvaluateGangRefusal(t *testing.T) {
 	tests := []struct {
-		name       string
-		conditions []any
-		minMember  int
-		wantMsg    string
-		wantErr    string
+		name        string
+		conditions  []any
+		minMember   int
+		wantMsg     string
+		wantErr     string
+		wantErrCode errors.ErrorCode
 	}{
+		{
+			// The queue's limit is checked before node fit, so the group never
+			// reaches the gang refusal: a configuration error, not a scheduler one.
+			name: "queue limit refusal is a configuration error",
+			conditions: []any{map[string]any{
+				"type": "UnschedulableOnNodePool", "status": "True", "reason": "Unschedulable",
+				"message": "OverLimit: " + kaiOverLimitMessage + ".",
+				"reasons": []any{map[string]any{"reason": kaiOverLimitReason, "message": kaiOverLimitMessage}},
+			}},
+			minMember:   8,
+			wantErr:     "remove the CPU and memory limits",
+			wantErrCode: errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "a gang refusal beside a queue limit refusal is still credited",
+			conditions: []any{map[string]any{
+				"type": "UnschedulableOnNodePool", "status": "True",
+				"reasons": []any{
+					map[string]any{"reason": kaiOverLimitReason, "message": kaiOverLimitMessage},
+					map[string]any{"reason": "PodSchedulingErrors", "message": kaiRefusalEight},
+				},
+			}},
+			minMember: 8,
+			wantMsg:   kaiRefusalEight,
+		},
 		{
 			name: "deprecated message field carries the refusal",
 			conditions: []any{map[string]any{
@@ -285,7 +316,11 @@ func TestEvaluateGangRefusal(t *testing.T) {
 				if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
 				}
-				errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+				wantCode := tt.wantErrCode
+				if wantCode == "" {
+					wantCode = errors.ErrCodeInternal
+				}
+				errorstest.WantReportedCode(t, err, wantCode)
 				return
 			}
 			if err != nil {

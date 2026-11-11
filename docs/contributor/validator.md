@@ -523,8 +523,11 @@ namespace `runai`, `schedulerName: runai-scheduler`, the `runai-operator` and
 Run:ai refuses user-created Queues and resolves each PodGroup's queue from
 the Run:ai Project that owns its namespace, so on that target both phases run
 in the Project namespace named by `AICR_RUNAI_PROJECT_NAMESPACE` (a Project
-with explicit CPU and memory quota; one without gets zero and the positive
-phase cannot schedule), the PodGroups join the queue read from that
+with explicit CPU and memory quota, since one without gets zero and the
+positive phase cannot schedule, and with no CPU or memory limit, since KAI
+checks a queue's limit before node fit and answers the negative group with
+`OverLimit` instead of the gang refusal; the check reports that as
+`ErrCodeInvalidRequest`), the PodGroups join the queue read from that
 namespace's `runai/queue` label, and cleanup deletes the pods and PodGroups
 but leaves the namespace, which belongs to the Project. A Run:ai recipe
 without that input fails rather than skips, because a Skip there would pass

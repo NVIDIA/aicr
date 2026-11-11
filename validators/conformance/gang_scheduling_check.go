@@ -116,6 +116,13 @@ const (
 	// when this phrase names the group's minMember, so an unbound pod from a
 	// stalled or absent scheduler, or a generic quota refusal, never passes.
 	kaiGangRefusalFormat = "while %d are required for gang scheduling"
+
+	// kaiOverLimitReason is the schedulingConditions reason KAI records when
+	// a PodGroup's request exceeds its queue's resource limit. KAI checks
+	// that limit before node fit, so under one the negative group, which is
+	// sized past the cluster's capacity, never reaches the gang refusal
+	// (observed live on Run:ai 3.0.20, KAI v0.18.3, 2026-11-11).
+	kaiOverLimitReason = "OverLimit"
 )
 
 // kaiSchedulerDeployments are the required KAI scheduler components.
@@ -1026,6 +1033,14 @@ func gangPartialSchedulingErr(podName, violation string) error {
 // all-or-nothing refusal for this group: a status.schedulingConditions entry
 // whose message, or one of whose reasons, says minMember members are required
 // for gang scheduling. Returns the matching message.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the scheduler refused the group on its
+//     queue's resource limit instead (kaiOverLimitReason): the queue's
+//     configuration keeps the phase from running, which is not a scheduler
+//     failure.
+//   - ErrCodeInternal when the conditions are malformed, absent, or carry
+//     neither refusal.
 func evaluateGangRefusal(pg *unstructured.Unstructured, minMember int) (string, error) {
 	want := fmt.Sprintf(kaiGangRefusalFormat, minMember)
 	conditions, found, err := unstructured.NestedSlice(pg.Object, "status", "schedulingConditions")
@@ -1040,6 +1055,7 @@ func evaluateGangRefusal(pg *unstructured.Unstructured, minMember int) (string, 
 				pg.GetName()))
 	}
 	var seen []string
+	var overLimit string
 	for _, c := range conditions {
 		cond, ok := c.(map[string]any)
 		if !ok {
@@ -1059,8 +1075,12 @@ func evaluateGangRefusal(pg *unstructured.Unstructured, minMember int) (string, 
 				if !ok {
 					continue
 				}
-				if msg, _, _ := unstructured.NestedString(rm, "message"); msg != "" {
+				msg, _, _ := unstructured.NestedString(rm, "message")
+				if msg != "" {
 					messages = append(messages, msg)
+				}
+				if reason, _, _ := unstructured.NestedString(rm, "reason"); reason == kaiOverLimitReason && overLimit == "" {
+					overLimit = msg
 				}
 			}
 		}
@@ -1070,6 +1090,14 @@ func evaluateGangRefusal(pg *unstructured.Unstructured, minMember int) (string, 
 			}
 			seen = append(seen, msg)
 		}
+	}
+	if overLimit != "" {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("negative phase cannot run: the scheduler refused PodGroup %s on its queue's resource limit before "+
+				"gang scheduling applied (%s). The non-fitting group asks for more CPU than the cluster has, so a queue "+
+				"limit below that hides the gang refusal; remove the CPU and memory limits from the queue (on Run:ai, "+
+				"from the Project) and rerun",
+				pg.GetName(), overLimit))
 	}
 	return "", errors.New(errors.ErrCodeInternal,
 		fmt.Sprintf("negative phase not credited: PodGroup %s schedulingConditions carry no gang refusal %q (saw: %s)",

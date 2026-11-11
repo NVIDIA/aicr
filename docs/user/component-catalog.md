@@ -2834,8 +2834,10 @@ the recipe: on these leaves it exercises Run:ai's scheduler
 Run:ai Project namespace you name with `AICR_RUNAI_PROJECT_NAMESPACE` in the
 shell running `aicr validate`. Create that Project in the control plane with
 an explicit CPU and memory quota first (a Project without one gets zero and
-nothing schedules); the check fails, rather than skips, when the variable is
-unset or the namespace is not a Project namespace. The check does not copy
+nothing schedules) and no CPU or memory limit (the check's non-fitting group
+asks for more CPU than the cluster has, and a limit makes the scheduler refuse
+it on quota before gang scheduling applies); the check fails, rather than
+skips, when the variable is unset or the namespace is not a Project namespace. The check does not copy
 `--image-pull-secret` Secrets into the Project namespace, so a private probe
 image needs a Secret of the same name already there; without it the check
 fails with "gang test pods did not complete". The `nvsentinel-preflight`
