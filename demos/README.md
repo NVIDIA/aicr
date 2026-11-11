@@ -36,7 +36,7 @@ needs one only for its snapshot step.
 Recordings from the KubeCon + CloudNativeCon North America 2026 talk *One Recipe,
 Five Clouds, One Query: Portable GPU Configuration with a Queryable Audit Layer*,
 captured on a real EKS GB300 cluster with AICR v1.1.0.
-Slides: [aicr-kubecon-na-2026-one-recipe-five-clouds-one-query.pdf](https://github.com/user-attachments/files/34663227/aicr-kubecon-na-2026-one-recipe-five-clouds-one-query.pdf)
+Slides: [kubecon-na-2026-one-recipe-five-clouds-one-query.pdf](kubecon-na-2026-one-recipe-five-clouds-one-query.pdf)
 (on slides 15 and 25, click to play the demos).
 
 **End-to-end workflow (2:13).** Install, snapshot, recipe, a signed bundle and its
