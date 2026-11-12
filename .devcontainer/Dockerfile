@@ -22,6 +22,7 @@ RUN apt-get update \
         build-essential \
         ca-certificates \
         curl \
+	gawk \
         git \
         jq \
         libnss3-tools \
