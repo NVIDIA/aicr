@@ -1,0 +1,46 @@
+{
+  "name": "AICR",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": {
+      "version": "latest",
+      "installGoTools": false
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": true
+    }
+  },
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb",
+    "storage": "32gb"
+  },
+  "remoteUser": "vscode",
+  "remoteEnv": {
+    "GOPATH": "/home/vscode/go",
+    "GOCACHE": "/home/vscode/.cache/go-build",
+    "PATH": "${containerEnv:PATH}:/home/vscode/go/bin"
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "forwardPorts": [8080, 10350],
+  "portsAttributes": {
+    "8080": {
+      "label": "AICR API",
+      "onAutoForward": "notify"
+    },
+    "10350": {
+      "label": "Tilt",
+      "onAutoForward": "notify"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go", "redhat.vscode-yaml"]
+    }
+  }
+}
