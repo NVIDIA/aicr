@@ -10,6 +10,8 @@ in five minutes, a clear answer to four questions:
 
 For dev-environment setup, run `make tools-setup` and read
 [DEVELOPMENT.md](https://github.com/NVIDIA/aicr/blob/main/DEVELOPMENT.md).
+For an optional preconfigured cloud or local container environment, follow
+[GitHub Codespaces and Dev Containers](https://github.com/NVIDIA/aicr/blob/main/DEVELOPMENT.md#github-codespaces-and-dev-containers).
 For contribution mechanics (DCO, CI, signing), see
 [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md).
 For the coding rules every PR is graded against, see
