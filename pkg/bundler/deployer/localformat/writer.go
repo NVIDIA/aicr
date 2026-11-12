@@ -32,6 +32,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	helmutil "github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 )
 
@@ -161,7 +162,7 @@ func renderInputFor(c Component) manifest.RenderInput {
 		ComponentName: c.Name,
 		Namespace:     c.Namespace,
 		ChartName:     chart,
-		ChartVersion:  deployer.NormalizeVersionWithDefault(c.Version),
+		ChartVersion:  deployer.NormalizeVersionWithDefault(helmutil.ChartVersion(c.Repository, c.Version)),
 		Values:        c.Values,
 	}
 }

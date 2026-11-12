@@ -196,6 +196,9 @@ func LoadFromFileWithProviderProfile(
 					fmt.Sprintf("failed to strictly decode profile recipe from %q", path))
 			}
 		}
+		if err := CheckArtifactInputs(rec.Metadata.Artifacts, dp); err != nil {
+			return nil, err
+		}
 		if dp != nil {
 			// Already-hydrated RecipeResult: the builder never runs, so bind the
 			// caller's provider directly so downstream value/manifest reads route

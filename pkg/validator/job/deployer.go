@@ -16,6 +16,7 @@ package job
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -94,6 +95,11 @@ type Deployer struct {
 	// WaitForCompletion anchors its own deadline to it so both clocks share an
 	// origin; zero until DeployJob succeeds.
 	jobStart time.Time
+	// lastTerminated is the last pod observed with a terminated validator
+	// container while WaitForCompletion ran. It survives the Job controller
+	// deleting the pod on activeDeadlineSeconds expiry, when the pod can no
+	// longer be listed.
+	lastTerminated *corev1.Pod
 }
 
 // NewDeployer creates a Deployer for a single validator catalog entry.
@@ -363,20 +369,72 @@ func (d *Deployer) CleanupJob(ctx context.Context) error {
 //
 // The wait is anchored to the Job's observed start time rather than to the
 // moment this method was called, so it and the Job's own activeDeadlineSeconds
-// are measured from the same origin, and v1.OrchestratorWaitFor caps the result
-// short of that deadline. The orchestrator therefore stays the tighter clock
-// for every apply response that arrives while the Job deadline is still more
-// than defaults.ValidatorPreDeadlineMargin away. That function carries the
-// derivation, including what the wait is still good for once it is not.
+// are measured from the same origin. v1.OrchestratorWaitFor extends it past the
+// Job deadline by the pod's SIGTERM window (v1.WaitEnvelopeFor), so a check
+// terminated at the deadline can finish cleanup and report before the run is
+// classified. While waiting, the Job's pods are observed so the check's last
+// terminated status survives the Job controller deleting the pod at the
+// deadline (issue #1632).
+//
+// The origin is usually the Job's creationTimestamp, because the Job controller
+// stamps status.startTime after the apply response was read. When the wait
+// expires, rebasedJobStart re-reads the Job and, if the controller started it
+// later than that fallback, the wait resumes to the Job's real envelope instead
+// of classifying a check that is still inside its deadline as timed out.
 func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration) error {
-	waitTimeout := v1.OrchestratorWaitFor(d.jobStart, time.Now(), timeout)
-	// pod.WaitForJobTerminal already returns structured errors with proper
-	// codes (ErrCodeTimeout, ErrCodeUnavailable, ErrCodeInternal). Propagate
-	// as-is so callers can distinguish retryable from terminal failures.
-	if _, err := pod.WaitForJobTerminal(ctx, d.config.Clientset, d.config.Namespace, d.jobName, waitTimeout); err != nil {
-		return err
+	observer := pod.ObserveJobPods(ctx, d.config.Clientset, d.config.Namespace, d.jobName, ValidatorContainerName)
+	defer func() {
+		if last := observer.Stop(); last != nil {
+			d.lastTerminated = last
+		}
+	}()
+	jobStart := d.jobStart
+	for {
+		// pod.WaitForJobTerminal already returns structured errors with proper
+		// codes (ErrCodeTimeout, ErrCodeUnavailable, ErrCodeInternal). Propagate
+		// as-is so callers can distinguish retryable from terminal failures.
+		waitTimeout := v1.OrchestratorWaitFor(jobStart, time.Now(), timeout)
+		_, err := pod.WaitForJobTerminal(ctx, d.config.Clientset, d.config.Namespace, d.jobName, waitTimeout)
+		if err == nil {
+			return nil
+		}
+		rebased, ok := d.rebasedJobStart(ctx, err, jobStart, timeout)
+		if !ok {
+			return err
+		}
+		jobStart = rebased
 	}
-	return nil
+}
+
+// rebasedJobStart reports whether a wait that failed with waitErr should
+// resume, and from which origin. It does only when the wait timed out, the Job
+// now carries a status.startTime later than the origin the wait used, and the
+// Job's envelope measured from that start has not yet passed. A later start is
+// required, so each distinct start time rebases the wait at most once; a failed
+// read, an absent start time, or an elapsed envelope leaves the timeout as is.
+func (d *Deployer) rebasedJobStart(ctx context.Context, waitErr error, jobStart time.Time, timeout time.Duration) (time.Time, bool) {
+	if ctx.Err() != nil || !stderrors.Is(waitErr, errors.New(errors.ErrCodeTimeout, "")) {
+		return time.Time{}, false
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	defer cancel()
+
+	job, err := d.config.Clientset.BatchV1().Jobs(d.config.Namespace).Get(ctx, d.jobName, metav1.GetOptions{})
+	if err != nil {
+		slog.Debug("failed to read Job start time after wait expired", "job", d.jobName, "error", err)
+		return time.Time{}, false
+	}
+	if job.Status.StartTime == nil {
+		return time.Time{}, false
+	}
+	started := job.Status.StartTime.Time
+	if !started.After(jobStart) || !started.Add(v1.WaitEnvelopeFor(timeout)).After(time.Now()) {
+		return time.Time{}, false
+	}
+	slog.Debug("rebasing Job wait onto status.startTime",
+		"job", d.jobName, "creationTimestamp", jobStart, "startTime", started)
+	return started, true
 }
 
 // WaitForPodTermination waits until all pods of the Job are terminal or absent,

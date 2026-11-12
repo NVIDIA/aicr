@@ -24,19 +24,22 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	operatordefaults "github.com/NVIDIA/aicr/pkg/operator/defaults"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"gopkg.in/yaml.v3"
 )
 
-// TestCatalogTimeoutsFitFacadeBudget asserts every catalog entry's rendered
-// Job deadline (CheckTimeout + ValidatorJobDeadlineHeadroom, per
-// v1.JobDeadlineFor) stays below the facade-level ValidationOperationTimeout.
-// Otherwise a controller/library caller (which gets that facade deadline when
-// no explicit timeout is set) could hit the top-level "context deadline
-// exceeded" before the per-check Job reaches its own deadline and emits a
-// structured result.
+// TestCatalogTimeoutsFitFacadeBudget asserts every catalog entry's full
+// per-check envelope stays below the facade-level ValidationOperationTimeout:
+// the orchestrator wait (v1.WaitEnvelopeFor, which already covers the Job
+// deadline and the SIGTERM window), the post-wait result capture
+// (K8sCleanupTimeout) and the pod termination wait
+// (K8sPodTerminationWaitTimeout). Otherwise a controller/library caller (which
+// gets that facade deadline when no explicit timeout is set) could hit the
+// top-level "context deadline exceeded" before the per-check Job reaches its
+// own verdict.
 func TestCatalogTimeoutsFitFacadeBudget(t *testing.T) {
 	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
@@ -47,21 +50,66 @@ func TestCatalogTimeoutsFitFacadeBudget(t *testing.T) {
 		if timeout == 0 {
 			timeout = defaults.ValidatorDefaultTimeout
 		}
-		// The facade budget must exceed the deadline Kubernetes actually
-		// enforces, not just the catalog value — the Job now outlives the check
-		// budget by ValidatorJobDeadlineHeadroom.
-		enforced := v1.JobDeadlineFor(timeout)
-		if enforced >= defaults.ValidationOperationTimeout {
-			t.Errorf("%s: rendered Job deadline %v must stay under ValidationOperationTimeout (%v)",
-				v.Name, enforced, defaults.ValidationOperationTimeout)
+		envelope := v1.WaitEnvelopeFor(timeout) + defaults.K8sCleanupTimeout + defaults.K8sPodTerminationWaitTimeout
+		if envelope >= defaults.ValidationOperationTimeout {
+			t.Errorf("%s: per-check envelope %v (wait + capture + termination wait) must stay under ValidationOperationTimeout (%v)",
+				v.Name, envelope, defaults.ValidationOperationTimeout)
 		}
+	}
+}
+
+// TestDeploymentPhaseEnvelopeFitsOperatorJobDeadline asserts that the
+// operator's `aicr validate --phase deployment` Job can run every deployment
+// check to the end of its wait envelope (v1.WaitEnvelopeFor) plus the result
+// capture (K8sCleanupTimeout) inside its own activeDeadlineSeconds. Otherwise a
+// run in which every check hangs is SIGTERMed by the operator Job's deadline
+// instead of reporting each check's result (issue #1632). The pod termination
+// wait is not counted: by the time the envelope elapses the pod has already
+// had its full SIGTERM window, so that wait returns without blocking.
+func TestDeploymentPhaseEnvelopeFitsOperatorJobDeadline(t *testing.T) {
+	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	var total time.Duration
+	var checks int
+	for _, v := range catalog.Validators {
+		if v.Phase != string(v1.PhaseDeployment) {
+			continue
+		}
+		timeout := v.Timeout
+		if timeout == 0 {
+			timeout = defaults.ValidatorDefaultTimeout
+		}
+		total += v1.WaitEnvelopeFor(timeout) + defaults.K8sCleanupTimeout
+		checks++
+	}
+	if checks == 0 {
+		t.Fatal("catalog has no deployment-phase validators — invariant cannot be verified")
+	}
+	if total >= operatordefaults.ValidationJobDeadline {
+		t.Errorf("sum of %d deployment-phase check envelopes %v must stay under the operator ValidationJobDeadline (%v)",
+			checks, total, operatordefaults.ValidationJobDeadline)
+	}
+}
+
+// TestValidationJobTerminationGraceCoversCLICancellation pins that the grace
+// the operator gives the validation Job's pod after SIGTERM exceeds the cleanup
+// the `aicr validate` it runs is budgeted for, so the Job deadline firing does
+// not SIGKILL that cleanup (issue #1632). It lives here because the operator
+// package may not import pkg/defaults.
+func TestValidationJobTerminationGraceCoversCLICancellation(t *testing.T) {
+	need := defaults.ValidationCancellationBudget + defaults.ValidatorResultFlushMargin
+	if operatordefaults.ValidationJobTerminationGrace < need {
+		t.Errorf("ValidationJobTerminationGrace (%v) must cover the CLI cancellation budget plus the output flush margin (%v)",
+			operatordefaults.ValidationJobTerminationGrace, need)
 	}
 }
 
 // TestExpectedResourcesCatalogEnvelope asserts the expected-resources
 // validator's catalog timeout (the check's own AICR_CHECK_TIMEOUT budget —
 // the Job's activeDeadlineSeconds is this value plus
-// ValidatorJobDeadlineHeadroom, see TestRenderedJobDeadlineExceedsOrchestratorWait
+// ValidatorJobDeadlineHeadroom, see TestOrchestratorWaitCoversJobDeadlineAndGrace
 // below) exceeds the inner chainsaw assert timeout by enough headroom for
 // graceful chainsaw termination. Without this, chainsaw is SIGKILLed
 // mid-cleanup and operators see truncated output. See issue #1220.
@@ -91,12 +139,13 @@ func TestExpectedResourcesCatalogEnvelope(t *testing.T) {
 	}
 }
 
-// TestRenderedJobDeadlineExceedsOrchestratorWait pins the ordering that keeps a
-// timed-out validator's logs readable: the check's own context expires first,
-// the orchestrator is still waiting when it does, and the Job's
-// activeDeadlineSeconds — the only clock that DELETES the pod — is last.
-// Issue #2473 was this ordering collapsing into a three-way tie.
-func TestRenderedJobDeadlineExceedsOrchestratorWait(t *testing.T) {
+// TestOrchestratorWaitCoversJobDeadlineAndGrace pins the clock ordering for
+// every catalog entry: the check's own context expires first, the Job's
+// activeDeadlineSeconds is the backstop that SIGTERMs a stuck pod, and the
+// orchestrator's wait outlives both the deadline and the pod's SIGTERM window,
+// so a late-starting check still runs its deferred cleanup and reports its
+// result before the run is classified (issue #1632).
+func TestOrchestratorWaitCoversJobDeadlineAndGrace(t *testing.T) {
 	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
@@ -115,29 +164,39 @@ func TestRenderedJobDeadlineExceedsOrchestratorWait(t *testing.T) {
 			if checkTimeout == 0 {
 				checkTimeout = defaults.ValidatorDefaultTimeout
 			}
-			orchestratorWait := int64((checkTimeout + defaults.ValidatorWaitBuffer).Seconds())
+			grace := int64(defaults.ValidatorTerminationGracePeriod.Seconds())
+			orchestratorWait := int64(v1.WaitEnvelopeFor(checkTimeout).Seconds())
 
 			if plan.CheckTimeout != int64(checkTimeout.Seconds()) {
 				t.Errorf("CheckTimeout = %d, want %d", plan.CheckTimeout, int64(checkTimeout.Seconds()))
 			}
-			if plan.JobDeadline <= orchestratorWait {
-				t.Errorf("JobDeadline (%ds) must exceed the orchestrator wait (%ds); "+
-					"otherwise the Job controller deletes the pod before its logs are read",
-					plan.JobDeadline, orchestratorWait)
+			if want := plan.CheckTimeout + int64(defaults.ValidatorJobDeadlineHeadroom.Seconds()); plan.JobDeadline != want {
+				t.Errorf("JobDeadline = %ds, want CheckTimeout + headroom = %ds", plan.JobDeadline, want)
+			}
+			if orchestratorWait < plan.JobDeadline+grace {
+				t.Errorf("orchestrator wait (%ds) must cover the Job deadline (%ds) plus the SIGTERM window (%ds)",
+					orchestratorWait, plan.JobDeadline, grace)
 			}
 
-			// Both renderers must carry the same deadline, or server-side apply
-			// and the typed path diverge. Production uses the apply path
-			// (pkg/validator/job/deployer.go RenderPlanToApplyConfig).
+			// Both renderers must carry the same deadline and grace, or
+			// server-side apply and the typed path diverge. Production uses
+			// the apply path (pkg/validator/job/deployer.go
+			// RenderPlanToApplyConfig).
 			typed := v1.RenderPlan(plan)
 			if typed.Spec.ActiveDeadlineSeconds == nil || *typed.Spec.ActiveDeadlineSeconds != plan.JobDeadline {
 				t.Errorf("RenderPlan ActiveDeadlineSeconds = %v, want %d",
 					typed.Spec.ActiveDeadlineSeconds, plan.JobDeadline)
 			}
+			if got := typed.Spec.Template.Spec.TerminationGracePeriodSeconds; got == nil || *got != grace {
+				t.Errorf("RenderPlan TerminationGracePeriodSeconds = %v, want %d", got, grace)
+			}
 			applied := v1.RenderPlanToApplyConfig(plan, "job-name")
 			if applied.Spec.ActiveDeadlineSeconds == nil || *applied.Spec.ActiveDeadlineSeconds != plan.JobDeadline {
 				t.Errorf("RenderPlanToApplyConfig ActiveDeadlineSeconds = %v, want %d",
 					applied.Spec.ActiveDeadlineSeconds, plan.JobDeadline)
+			}
+			if got := applied.Spec.Template.Spec.TerminationGracePeriodSeconds; got == nil || *got != grace {
+				t.Errorf("RenderPlanToApplyConfig TerminationGracePeriodSeconds = %v, want %d", got, grace)
 			}
 		})
 	}
@@ -1235,6 +1294,27 @@ func TestEmbeddedCatalog_InferenceGatewayEntryExists(t *testing.T) {
 		}
 	}
 	t.Fatalf("no embedded catalog entry named %q (AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY forwarding would silently no-op)", v1.InferenceGatewayCheckName)
+}
+
+// TestEmbeddedCatalog_GangSchedulingEntryExists locks the embedded catalog
+// entry name to v1.GangSchedulingCheckName, which scopes the Run:ai Project
+// namespace forwarding (defaults.EnvRunaiProjectNamespace). A renamed entry
+// would otherwise stop the forwarding silently, and every Run:ai
+// gang-scheduling run would then fail on the missing input.
+func TestEmbeddedCatalog_GangSchedulingEntryExists(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for _, v := range cat.Validators {
+		if v.Name == v1.GangSchedulingCheckName {
+			if v.Phase != "conformance" {
+				t.Errorf("%q phase = %q, want conformance", v1.GangSchedulingCheckName, v.Phase)
+			}
+			return
+		}
+	}
+	t.Fatalf("no embedded catalog entry named %q (%s forwarding would silently no-op)", v1.GangSchedulingCheckName, defaults.EnvRunaiProjectNamespace)
 }
 
 // TestEmbeddedCatalog_ProbeImageEntriesExist locks the embedded catalog entry

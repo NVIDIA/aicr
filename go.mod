@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.33.13
 	github.com/aws/aws-sdk-go-v2/service/ecr v1.67.2
 	github.com/coreos/go-systemd/v22 v22.7.0
+	github.com/cyberphone/json-canonicalization v0.0.0-20261011152517-32a48195b9b2
 	github.com/distribution/distribution/v3 v3.1.2
 	github.com/distribution/reference v0.6.0
 	github.com/go-logr/logr v1.4.4
@@ -107,7 +108,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/coreos/go-oidc/v3 v3.21.0 // indirect
-	github.com/cyberphone/json-canonicalization v0.0.0-20261011152517-32a48195b9b2 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/digitorus/pkcs7 v0.0.0-20260914070511-d678ea5ea03f // indirect
 	github.com/digitorus/timestamp v0.0.0-20260914073129-b4b58b92aa51 // indirect

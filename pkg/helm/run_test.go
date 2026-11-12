@@ -350,9 +350,9 @@ func TestTemplateArgs(t *testing.T) {
 			name: "oci chart",
 			input: ChartInput{
 				Name: "gpu-operator", Chart: "nvidia/gpu-operator", Repository: "oci://ghcr.io/nvidia/",
-				Version: "v25.3.0", Namespace: "gpu-operator", KubeVersion: "1.33.0", APIVersions: []string{},
+				Version: "v25.3.0_build.1", Namespace: "gpu-operator", KubeVersion: "1.33.0", APIVersions: []string{},
 			},
-			want: "template release-gpu-operator oci://ghcr.io/nvidia/gpu-operator --version v25.3.0 " +
+			want: "template release-gpu-operator oci://ghcr.io/nvidia/gpu-operator --version v25.3.0+build.1 " +
 				"--namespace gpu-operator --kube-version 1.33.0 --include-crds=false",
 		},
 		{
@@ -379,6 +379,22 @@ func TestTemplateArgs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := strings.Join(templateArgs(tt.input, tt.valuesOnStdin), " "); got != tt.want {
 				t.Errorf("templateArgs() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChartVersion(t *testing.T) {
+	for _, tt := range []struct{ repository, version, want string }{
+		{"oci://registry.example/charts", "v1.2.3_build.1", "v1.2.3+build.1"},
+		{"oci://registry.example/charts", "1.2.3_build.2", "1.2.3+build.2"},
+		{"oci://registry.example/charts", "v1.2.3", "v1.2.3"},
+		{"oci://registry.example/charts", "1.2.3+build.1", "1.2.3+build.1"},
+		{"https://charts.example", "v1.2.3_build.1", "v1.2.3_build.1"},
+	} {
+		t.Run(tt.repository+"/"+tt.version, func(t *testing.T) {
+			if got := ChartVersion(tt.repository, tt.version); got != tt.want {
+				t.Errorf("ChartVersion = %q, want %q", got, tt.want)
 			}
 		})
 	}
