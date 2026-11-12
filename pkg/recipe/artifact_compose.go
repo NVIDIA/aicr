@@ -416,20 +416,22 @@ func staticArtifactProvider(ctx context.Context, provider DataProvider, options 
 	if _, active := composed.(*ArtifactProvider); active {
 		return composed, nil
 	}
-	if bindingErr := validateInactiveArtifactBindings(ctx, provider); bindingErr != nil {
+	if bindingErr := validateInactiveArtifactBindings(ctx, provider, nil); bindingErr != nil {
 		return nil, bindingErr
 	}
 	return provider, nil
 }
 
-func validateInactiveArtifactBindings(ctx context.Context, provider DataProvider) error {
+func validateInactiveArtifactBindings(ctx context.Context, provider DataProvider, candidate []byte) error {
 	layers := []DataProvider{provider}
 	if layered, ok := provider.(*LayeredDataProvider); ok {
 		layers = nil
 		if !layered.externalOnly {
 			layers = append(layers, layered.embedded)
 		}
-		layers = append(layers, &LayeredDataProvider{externalOnly: true, externalDir: layered.externalDir, maxFileSize: layered.maxFileSize})
+		if candidate == nil {
+			layers = append(layers, &LayeredDataProvider{externalOnly: true, externalDir: layered.externalDir, maxFileSize: layered.maxFileSize})
+		}
 	}
 	var bindings []*artifact.Bindings
 	for _, layer := range layers {
@@ -441,6 +443,13 @@ func validateInactiveArtifactBindings(ctx context.Context, provider DataProvider
 			return errors.PropagateOrWrap(readErr, errors.ErrCodeInvalidRequest, "read artifact bindings")
 		}
 		parsed, parseErr := artifact.ParseBindings(data)
+		if parseErr != nil {
+			return parseErr
+		}
+		bindings = append(bindings, parsed)
+	}
+	if candidate != nil {
+		parsed, parseErr := artifact.ParseBindings(candidate)
 		if parseErr != nil {
 			return parseErr
 		}
@@ -476,8 +485,7 @@ func validateStaticArtifactInput(ctx context.Context, provider DataProvider, opt
 		return activeErr
 	}
 	if !active && kind == artifact.BindingsKind {
-		_, parseErr := artifact.ParseBindings(data)
-		return parseErr
+		return validateInactiveArtifactBindings(ctx, provider, data)
 	}
 	embedded, external, captureErr := captureArtifactLayers(ctx, provider)
 	if captureErr != nil {

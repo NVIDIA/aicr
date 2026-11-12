@@ -781,3 +781,26 @@ func TestStaticArtifactInactiveDoesNotCaptureCatalog(t *testing.T) {
 	_, invalidErr := staticArtifactProvider(t.Context(), provider, artifact.Options{})
 	errorstest.WantReportedCode(t, invalidErr, errors.ErrCodeInvalidRequest)
 }
+
+func TestStaticArtifactCandidateMergesEmbeddedBindings(t *testing.T) {
+	candidate := []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactBindings\ncharts:\n  duplicate-cert-manager: {component: cert-manager}\nimages: {}\n")
+	for _, externalOnly := range []bool{false, true} {
+		t.Run(map[bool]string{false: "embedded collision", true: "external only"}[externalOnly], func(t *testing.T) {
+			files, _ := artifactCatalogFixture()
+			files[artifactBindingsPath] = []byte("invalid replaced candidate")
+			dir := writeArtifactCatalog(t, files)
+			provider, providerErr := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), LayeredProviderConfig{ExternalDir: dir, ExternalOnly: externalOnly})
+			if providerErr != nil {
+				t.Fatal(providerErr)
+			}
+			validateErr := validateStaticArtifactInput(t.Context(), provider, artifact.Options{}, artifact.BindingsKind, candidate)
+			if externalOnly {
+				if validateErr != nil {
+					t.Fatal(validateErr)
+				}
+			} else {
+				errorstest.WantReportedCode(t, validateErr, errors.ErrCodeInvalidRequest)
+			}
+		})
+	}
+}
