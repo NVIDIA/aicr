@@ -33,6 +33,7 @@ type KeylessAttester struct {
 	signingConfigPath   string
 	useTUFSigningConfig bool
 	signingConfig       *root.SigningConfig
+	signStatement       func(context.Context, func(signer string) ([]byte, error), SignOptions) (*SignedAttestation, error)
 	identity            string
 }
 
@@ -61,6 +62,7 @@ func NewKeylessAttester(oidcToken, fulcioURL, rekorURL, signingConfigPath string
 		rekorURL:            rekorURL,
 		signingConfigPath:   signingConfigPath,
 		useTUFSigningConfig: useTUFSigningConfig,
+		signStatement:       SignStatement,
 	}
 }
 
@@ -95,23 +97,22 @@ func (k *KeylessAttester) resolveOptions() ResolveOptions {
 	}
 }
 
-// Attest creates a DSSE-signed in-toto SLSA provenance statement for the
-// given subject using keyless OIDC signing via Fulcio and Rekor.
-// Returns the Sigstore bundle as serialized JSON.
-//
-// The Sigstore-signing plumbing (DSSE wrap, ephemeral keypair, Fulcio
-// cert, Rekor entry, claim extraction) is delegated to SignStatement
-// so other packages can call the same primitive directly with their
-// own predicate types.
+// Attest returns the Sigstore bundle, as JSON, for a DSSE-signed in-toto SLSA
+// provenance statement about subject. It signs with keyless OIDC through
+// Fulcio and Rekor. The statement's builder ID is the signing certificate's
+// SAN.
 func (k *KeylessAttester) Attest(ctx context.Context, subject AttestSubject) ([]byte, error) {
-	metadata := subject.Metadata
-	metadata.BuilderID = k.identity
-	statementJSON, err := BuildStatement(subject, metadata)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to build attestation statement", err)
+	build := func(signer string) ([]byte, error) {
+		metadata := subject.Metadata
+		metadata.BuilderID = signer
+		statementJSON, err := BuildStatement(subject, metadata)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to build attestation statement", err)
+		}
+		return statementJSON, nil
 	}
 
-	res, err := SignStatement(ctx, statementJSON, SignOptionsFromResolve(k.oidcToken, k.resolveOptions()))
+	res, err := k.signStatement(ctx, build, SignOptionsFromResolve(k.oidcToken, k.resolveOptions()))
 	if err != nil {
 		return nil, err
 	}

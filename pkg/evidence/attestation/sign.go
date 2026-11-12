@@ -185,7 +185,7 @@ func signEvidenceStatement(ctx context.Context, statementJSON []byte, opts bundl
 
 	signCtx, cancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
 	defer cancel()
-	return bundleattest.SignStatement(signCtx, statementJSON, bundleattest.SignOptionsFromResolve(token, opts))
+	return bundleattest.SignStatement(signCtx, bundleattest.FixedStatement(statementJSON), bundleattest.SignOptionsFromResolve(token, opts))
 }
 
 // validateEvidenceSigningMode rejects a signing request no evidence signature

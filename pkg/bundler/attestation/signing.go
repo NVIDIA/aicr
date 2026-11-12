@@ -119,30 +119,21 @@ type SignedAttestation struct {
 	KeyFingerprint string
 }
 
-// SignStatement DSSE-wraps an in-toto Statement and signs it via
-// cosign keyless OIDC (Fulcio certificate issuance + Rekor
-// transparency log entry). It is the predicate-agnostic signing
-// primitive shared between `aicr bundle --attest` (SLSA Provenance v1
-// predicate) and `aicr validate --emit-attestation` (recipe-evidence
-// v1 predicate); callers construct statementJSON according to their
-// own predicate type.
-//
-// statementJSON must be the protobuf-JSON-encoded intoto.Statement
-// bytes — typically the output of attestation.BuildStatement for the
-// bundle path, or of evidence/attestation.BuildStatement for the
-// recipe-evidence path. SignStatement does not interpret the
+// SignStatement DSSE-wraps the in-toto Statement that build returns and signs
+// it with cosign keyless OIDC, using a Fulcio certificate and a Rekor
+// transparency log entry configured from opts. It does not interpret the
 // predicate.
 //
-// The returned SignedAttestation carries the Sigstore bundle plus the
-// signer-identity claims extracted from the Fulcio certificate so
-// callers do not need to re-parse the cert.
+// build receives the SAN of the issued Fulcio certificate and returns the
+// protobuf-JSON-encoded intoto.Statement. Use FixedStatement for a statement
+// that does not name its signer. It returns an ErrCodeInvalidRequest error
+// when build is nil or opts.OIDCToken is empty.
 //
-// SignStatement is the keyless specialization of the composable core
-// SignStatementWith: it builds a keyless Fulcio identity and a Rekor
-// transparency policy from opts and delegates the signing plumbing there.
-func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) (*SignedAttestation, error) {
-	if len(statementJSON) == 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "empty statement")
+// The returned SignedAttestation carries the Sigstore bundle and the signer
+// identity claims from the Fulcio certificate.
+func SignStatement(ctx context.Context, build func(signer string) ([]byte, error), opts SignOptions) (*SignedAttestation, error) {
+	if build == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "statement builder is required")
 	}
 	if opts.OIDCToken == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "OIDC token is required for keyless signing")
@@ -152,7 +143,13 @@ func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) 
 	if err != nil {
 		return nil, err
 	}
-	return SignStatementWith(ctx, statementJSON, id, tlog)
+	return signStatementFor(ctx, build, id, tlog)
+}
+
+// FixedStatement returns a statement builder for SignStatement that ignores
+// the signer and returns statementJSON.
+func FixedStatement(statementJSON []byte) func(signer string) ([]byte, error) {
+	return func(string) ([]byte, error) { return statementJSON, nil }
 }
 
 // transparencyForOptions selects the transparency policy from SignOptions,
@@ -189,25 +186,25 @@ func transparencyForOptions(ctx context.Context, opts SignOptions) (Transparency
 	}
 }
 
-// SignStatementWith DSSE-wraps an in-toto Statement and signs it using the
-// given identity and transparency policy. It is the composable core shared by
-// keyless signing (SignStatement) and KMS signing (KMSAttester); #409 and
-// #1150 reuse it with different identity/policy pairings.
-//
-// When the identity supplies no Fulcio certificate (KMS), the resulting
-// Sigstore bundle carries a public-key verification material instead of a
-// certificate, and the signer identity is taken from id.FallbackIdentity().
+// SignStatementWith DSSE-wraps statementJSON and signs it with id and tlog.
+// When id issues no Fulcio certificate, as with a KMS key, the bundle
+// carries the public key as its verification material and the signer
+// identity is id.FallbackIdentity().
 func SignStatementWith(ctx context.Context, statementJSON []byte, id SigningIdentity, tlog TransparencyPolicy) (*SignedAttestation, error) {
 	if len(statementJSON) == 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "empty statement")
 	}
+	return signStatementFor(ctx, FixedStatement(statementJSON), id, tlog)
+}
+
+// signStatementFor builds a statement with build and signs it with id and
+// tlog. build receives the SAN of the Fulcio certificate that id issues, or
+// id.FallbackIdentity() when id issues none. It returns an
+// ErrCodeInvalidRequest error when id or tlog is nil or build returns an
+// empty statement.
+func signStatementFor(ctx context.Context, build func(signer string) ([]byte, error), id SigningIdentity, tlog TransparencyPolicy) (*SignedAttestation, error) {
 	if id == nil || tlog == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "signing identity and transparency policy are required")
-	}
-
-	content := &sign.DSSEData{
-		Data:        statementJSON,
-		PayloadType: "application/vnd.in-toto+json",
 	}
 
 	// Bound the entire signing flow — key resolution (for KMS, the provider
@@ -222,16 +219,40 @@ func SignStatementWith(ctx context.Context, statementJSON []byte, id SigningIden
 		return nil, err // already classified by the identity
 	}
 
-	certProvider, certOpts := id.CertProvider()
+	bundleOpts := sign.BundleOptions{
+		TransparencyLogs:     tlog.Logs(),
+		TimestampAuthorities: tlog.TimestampAuthorities(),
+	}
+	signer := id.FallbackIdentity()
+	// The certificate is issued before the statement is built so the
+	// statement can name the certificate's signer.
+	if certProvider, certOpts := id.CertProvider(); certProvider != nil {
+		certDER, certErr := signWithRetry(signCtx, func(attemptCtx context.Context) ([]byte, error) {
+			return certProvider.GetCertificate(attemptCtx, keypair, certOpts)
+		})
+		if certErr != nil {
+			return nil, certErr
+		}
+		signer = certificateIdentity(certDER)
+		bundleOpts.CertificateProvider = issuedCertificate(certDER)
+	}
+
+	statementJSON, err := build(signer)
+	if err != nil {
+		return nil, err
+	}
+	if len(statementJSON) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "empty statement")
+	}
+	content := &sign.DSSEData{
+		Data:        statementJSON,
+		PayloadType: "application/vnd.in-toto+json",
+	}
 
 	bundle, err := signWithRetry(signCtx, func(attemptCtx context.Context) (*protobundle.Bundle, error) {
-		return sign.Bundle(content, keypair, sign.BundleOptions{
-			CertificateProvider:        certProvider,
-			CertificateProviderOptions: certOpts,
-			TransparencyLogs:           tlog.Logs(),
-			TimestampAuthorities:       tlog.TimestampAuthorities(),
-			Context:                    attemptCtx,
-		})
+		attemptOpts := bundleOpts
+		attemptOpts.Context = attemptCtx
+		return sign.Bundle(content, keypair, attemptOpts)
 	})
 	if err != nil {
 		return nil, err
@@ -325,19 +346,42 @@ func extractSignerClaims(bundle *protobundle.Bundle) (identity, issuer string) {
 		return "", ""
 	}
 
-	// Fulcio certificates encode identity as SAN: email for interactive OIDC,
-	// URI for workload identity (GitHub Actions OIDC).
-	if len(parsed.EmailAddresses) > 0 {
-		identity = parsed.EmailAddresses[0]
-	} else if len(parsed.URIs) > 0 {
-		identity = parsed.URIs[0].String()
-	}
-
 	// Fulcio embeds the OIDC issuer in extension OID 1.3.6.1.4.1.57264.1.1
 	// (legacy) and 1.3.6.1.4.1.57264.1.8 (current); extractIssuerExtension
 	// prefers the current OID and falls back to legacy.
-	issuer = extractIssuerExtension(parsed)
-	return identity, issuer
+	return sanIdentity(parsed), extractIssuerExtension(parsed)
+}
+
+// certificateIdentity returns the SAN identity of a DER-encoded certificate,
+// or "" when it does not parse or has no email or URI SAN.
+func certificateIdentity(certDER []byte) string {
+	parsed, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		slog.Debug("failed to parse issued certificate for identity", "error", err)
+		return ""
+	}
+	return sanIdentity(parsed)
+}
+
+// sanIdentity returns the first email SAN, else the first URI SAN, else "".
+// Fulcio encodes interactive OIDC identities as an email SAN and workload
+// identities (GitHub Actions OIDC) as a URI SAN.
+func sanIdentity(cert *x509.Certificate) string {
+	if len(cert.EmailAddresses) > 0 {
+		return cert.EmailAddresses[0]
+	}
+	if len(cert.URIs) > 0 {
+		return cert.URIs[0].String()
+	}
+	return ""
+}
+
+// issuedCertificate is a sign.CertificateProvider that returns a certificate
+// already issued for the signing key.
+type issuedCertificate []byte
+
+func (c issuedCertificate) GetCertificate(context.Context, sign.Keypair, *sign.CertificateProviderOptions) ([]byte, error) {
+	return c, nil
 }
 
 // extractIssuerExtension reads the Fulcio OIDC-issuer claim from the
@@ -402,74 +446,59 @@ func extractRekorLogIndex(bundle *protobundle.Bundle) int64 {
 	return entries[0].GetLogIndex()
 }
 
-// signBundleAttempt is the function signature for one attempt at
-// producing a Sigstore bundle. Extracted from sign.Bundle's concrete
-// signature so signWithRetry can be unit-tested against synthetic
-// failure sequences without depending on the real Fulcio / Rekor /
-// sigstore-go stack.
-type signBundleAttempt func(ctx context.Context) (*protobundle.Bundle, error)
-
-// signWithRetry wraps a sign-attempt closure with exponential-backoff
-// retry on transient failures. Each attempt is bounded by
-// defaults.SigstoreAttemptTimeout (a sub-context of ctx); the outer
-// ctx (typically bounded by SigstoreSignTimeout) is the ceiling and
-// terminates the whole flow when it expires.
+// signWithRetry calls attempt, retrying transient failures with exponential
+// backoff. attempt is one Sigstore request, such as issuing a Fulcio
+// certificate or signing a bundle. Each call to attempt runs under
+// defaults.SigstoreAttemptTimeout, and ctx bounds the whole retry loop,
+// including backoff waits.
 //
-// Retry policy:
+// Special cases are:
 //
-//   - outer ctx DeadlineExceeded → ErrCodeTimeout, no retry (the whole
-//     signing budget is gone; further retries would just chew through
-//     it without any chance of success).
-//   - outer ctx Canceled → ErrCodeCanceled, no retry (caller signaled
-//     they don't want to wait).
-//   - per-attempt failure with outer ctx alive → retry until
-//     SigstoreRetryBudget is exhausted, then return ErrCodeUnavailable.
-//     This is the transient class (Fulcio refused / Rekor 5xx / network
-//     glitch / per-attempt deadline that's tighter than outer ctx).
-//
-// Backoff between attempts is exponential and interruptible by the
-// outer ctx — a slow Rekor recovering 10s later doesn't waste the
-// remaining budget.
-//
-// See issue #1249 for the failure pattern this absorbs (Sigstore
-// Rekor flakes observed in #1244 and #1245).
-func signWithRetry(ctx context.Context, attempt signBundleAttempt) (*protobundle.Bundle, error) {
-	var bundle *protobundle.Bundle
+//   - If ctx's deadline passes, it returns an ErrCodeTimeout error without
+//     retrying.
+//   - If ctx is canceled, it returns an ErrCodeCanceled error without
+//     retrying.
+//   - If attempt fails while ctx is live, it retries up to
+//     defaults.SigstoreRetryBudget attempts, then returns an
+//     ErrCodeUnavailable error. This covers Fulcio refusals, Rekor 5xx
+//     responses, network errors and per-attempt timeouts.
+func signWithRetry[T any](ctx context.Context, attempt func(context.Context) (T, error)) (T, error) {
+	var zero T
 	var lastErr error
 	backoff := defaults.SigstoreRetryInitialBackoff
 	for n := 1; n <= defaults.SigstoreRetryBudget; n++ {
 		// Pre-attempt ctx check — avoid paying the cost of an attempt
 		// the caller's deadline / cancellation has already made
-		// pointless. Per PR #1251 review and the repo's "always check
-		// ctx.Done() in loops" guideline.
+		// pointless.
 		if err := ctx.Err(); err != nil {
 			if stderrors.Is(err, context.DeadlineExceeded) {
-				return nil, errors.Wrap(errors.ErrCodeTimeout,
+				return zero, errors.Wrap(errors.ErrCodeTimeout,
 					"sigstore signing timed out before attempt", err)
 			}
-			return nil, errors.Wrap(errors.ErrCodeCanceled,
+			return zero, errors.Wrap(errors.ErrCodeCanceled,
 				"sigstore signing canceled before attempt", err)
 		}
 
 		attemptCtx, cancel := context.WithTimeout(ctx, defaults.SigstoreAttemptTimeout)
-		bundle, lastErr = attempt(attemptCtx)
+		result, err := attempt(attemptCtx)
 		cancel()
-		if lastErr == nil {
-			return bundle, nil
+		if err == nil {
+			return result, nil
 		}
+		lastErr = err
 
 		// Outer ctx exhausted? Classify and stop — no retry can help.
 		if stderrors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "sigstore signing timed out", lastErr)
+			return zero, errors.Wrap(errors.ErrCodeTimeout, "sigstore signing timed out", lastErr)
 		}
 		if stderrors.Is(ctx.Err(), context.Canceled) {
-			return nil, errors.Wrap(errors.ErrCodeCanceled, "sigstore signing canceled", lastErr)
+			return zero, errors.Wrap(errors.ErrCodeCanceled, "sigstore signing canceled", lastErr)
 		}
 
 		// Outer ctx alive; this attempt failed (per-attempt timeout or
 		// non-ctx error). Retry if budget remains.
 		if n >= defaults.SigstoreRetryBudget {
-			return nil, errors.Wrap(errors.ErrCodeUnavailable,
+			return zero, errors.Wrap(errors.ErrCodeUnavailable,
 				"sigstore signing failed after retries", lastErr)
 		}
 		slog.Warn("sigstore signing attempt failed, retrying",
@@ -483,10 +512,10 @@ func signWithRetry(ctx context.Context, attempt signBundleAttempt) (*protobundle
 		select {
 		case <-ctx.Done():
 			if stderrors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return nil, errors.Wrap(errors.ErrCodeTimeout,
+				return zero, errors.Wrap(errors.ErrCodeTimeout,
 					"sigstore signing timed out during retry backoff", lastErr)
 			}
-			return nil, errors.Wrap(errors.ErrCodeCanceled,
+			return zero, errors.Wrap(errors.ErrCodeCanceled,
 				"sigstore signing canceled during retry backoff", lastErr)
 		case <-time.After(backoff):
 		}
@@ -496,6 +525,6 @@ func signWithRetry(ctx context.Context, attempt signBundleAttempt) (*protobundle
 	// final attempt. The static-analysis-required fallthrough surfaces
 	// any future refactor that breaks that invariant as a clear
 	// "missing return" rather than a silent nil.
-	return nil, errors.Wrap(errors.ErrCodeInternal,
+	return zero, errors.Wrap(errors.ErrCodeInternal,
 		"signWithRetry loop exited without returning", lastErr)
 }

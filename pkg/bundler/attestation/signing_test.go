@@ -38,18 +38,24 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
-func TestSignStatement_RejectsEmptyStatement(t *testing.T) {
-	_, err := SignStatement(context.Background(), nil, SignOptions{OIDCToken: "tok"})
-	if err == nil {
-		t.Errorf("expected error for empty statement")
+func TestSignStatementFor_RejectsEmptyStatement(t *testing.T) {
+	id := newFakeKeyIdentity(t, "awskms://test/key")
+	_, err := signStatementFor(context.Background(), FixedStatement(nil), id, NewNoTLogPolicy())
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+		t.Errorf("want ErrCodeInvalidRequest for empty statement, got %v", err)
 	}
 }
 
 func TestSignStatement_RejectsMissingOIDCToken(t *testing.T) {
-	_, err := SignStatement(context.Background(), []byte("{}"), SignOptions{})
+	_, err := SignStatement(context.Background(), FixedStatement([]byte("{}")), SignOptions{})
 	if err == nil {
 		t.Errorf("expected error when OIDCToken is unset")
 	}
+}
+
+func TestSignStatement_RejectsNilBuilder(t *testing.T) {
+	_, err := SignStatement(context.Background(), nil, SignOptions{OIDCToken: "test-oidc-token"})
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 }
 
 func TestExtractSignerClaims_FromEmail(t *testing.T) {
@@ -329,6 +335,41 @@ func TestSignStatementWithKeyOnlyNoTLog(t *testing.T) {
 	}
 	if len(b.GetVerificationMaterial().GetTlogEntries()) != 0 {
 		t.Error("want no tlog entries")
+	}
+}
+
+// TestSignStatementFor_PassesSigner checks the signer that the statement
+// builder receives. Keyless signing passes the issued certificate's SAN, and
+// key signing passes the fallback identity. Both cases run offline with no
+// transparency log.
+func TestSignStatementFor_PassesSigner(t *testing.T) {
+	const email = "jdoe@company.com"
+	tests := []struct {
+		name string
+		id   SigningIdentity
+		want string
+	}{
+		{"keyless", newFakeCertIdentity(t, email), email},
+		{"key", newFakeKeyIdentity(t, "awskms://test/signer"), "awskms://test/signer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			build := func(signer string) ([]byte, error) {
+				got = signer
+				return validStatementJSON(t), nil
+			}
+			res, err := signStatementFor(context.Background(), build, tt.id, NewNoTLogPolicy())
+			if err != nil {
+				t.Fatalf("signStatementFor: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("build signer = %q, want %q", got, tt.want)
+			}
+			if res.Identity != tt.want {
+				t.Errorf("Identity = %q, want %q", res.Identity, tt.want)
+			}
+		})
 	}
 }
 

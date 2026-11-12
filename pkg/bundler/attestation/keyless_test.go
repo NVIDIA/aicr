@@ -15,13 +15,16 @@
 package attestation
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"math/big"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,6 +83,52 @@ func TestKeylessAttester_Identity(t *testing.T) {
 	// Before signing, identity should be empty.
 	if got := attester.Identity(); got != "" {
 		t.Errorf("Identity() before Attest = %q, want empty string", got)
+	}
+}
+
+// fakeKeylessSign returns a stand-in for SignStatement that skips signing.
+// It passes signer to build, stores the statement in got, and returns signer
+// as the attestation's identity.
+func fakeKeylessSign(signer string, got *[]byte) func(context.Context, func(string) ([]byte, error), SignOptions) (*SignedAttestation, error) {
+	return func(_ context.Context, build func(string) ([]byte, error), _ SignOptions) (*SignedAttestation, error) {
+		statementJSON, err := build(signer)
+		if err != nil {
+			return nil, err
+		}
+		*got = statementJSON
+		return &SignedAttestation{BundleJSON: []byte("{}"), Identity: signer}, nil
+	}
+}
+
+var keylessTestSubject = AttestSubject{
+	Name:   "checksums.txt",
+	Digest: map[string]string{"sha256": strings.Repeat("ab", 32)},
+}
+
+func TestKeylessAttester_BuilderIDIsSigner(t *testing.T) {
+	const signer = "jdoe@company.com"
+	var statementJSON []byte
+	attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
+	attester.signStatement = fakeKeylessSign(signer, &statementJSON)
+
+	if _, err := attester.Attest(t.Context(), keylessTestSubject); err != nil {
+		t.Fatalf("Attest() error = %v", err)
+	}
+
+	var stmt struct {
+		Predicate struct {
+			RunDetails struct {
+				Builder struct {
+					ID string `json:"id"`
+				} `json:"builder"`
+			} `json:"runDetails"`
+		} `json:"predicate"`
+	}
+	if err := json.Unmarshal(statementJSON, &stmt); err != nil {
+		t.Fatalf("unmarshal statement: %v", err)
+	}
+	if got := stmt.Predicate.RunDetails.Builder.ID; got != signer {
+		t.Errorf("builder.id = %q, want %q", got, signer)
 	}
 }
 

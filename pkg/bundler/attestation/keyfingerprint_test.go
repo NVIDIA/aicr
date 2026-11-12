@@ -99,9 +99,13 @@ func TestNewKeyVerificationIdentity_KeyFingerprint(t *testing.T) {
 	}
 }
 
-// selfSignedCertProvider issues a certificate for the signing key from a
-// throwaway CA, so SignStatementWith's keyless branch runs offline.
-type selfSignedCertProvider struct{ ca *ecdsa.PrivateKey }
+// selfSignedCertProvider is a sign.CertificateProvider that issues
+// certificates from a throwaway CA, so keyless signing runs offline. A
+// non-empty email becomes the certificate's SAN.
+type selfSignedCertProvider struct {
+	ca    *ecdsa.PrivateKey
+	email string
+}
 
 func (p selfSignedCertProvider) GetCertificate(_ context.Context, kp sign.Keypair, _ *sign.CertificateProviderOptions) ([]byte, error) {
 	tmpl := &x509.Certificate{
@@ -110,6 +114,9 @@ func (p selfSignedCertProvider) GetCertificate(_ context.Context, kp sign.Keypai
 		NotBefore:    time.Now().Add(-time.Minute),
 		NotAfter:     time.Now().Add(10 * time.Minute),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	if p.email != "" {
+		tmpl.EmailAddresses = []string{p.email}
 	}
 	return x509.CreateCertificate(rand.Reader, tmpl, tmpl, kp.GetPublicKey(), p.ca)
 }
@@ -126,6 +133,22 @@ func (f fakeCertIdentity) CertProvider() (sign.CertificateProvider, *sign.Certif
 }
 
 func (fakeCertIdentity) FallbackIdentity() string { return "" }
+
+// newFakeCertIdentity returns a SigningIdentity with an ephemeral key and a
+// certificate from a throwaway CA. A non-empty email becomes the
+// certificate's SAN.
+func newFakeCertIdentity(t *testing.T, email string) SigningIdentity {
+	t.Helper()
+	kp, err := sign.NewEphemeralKeypair(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fakeCertIdentity{kp: kp, provider: selfSignedCertProvider{ca: ca, email: email}}
+}
 
 // TestSignStatementWith_KeyFingerprint pins which signatures carry a key
 // fingerprint: a key signature does, and it names the signing key; a
@@ -154,16 +177,7 @@ func TestSignStatementWith_KeyFingerprint(t *testing.T) {
 	})
 
 	t.Run("certificate signature", func(t *testing.T) {
-		kp, err := sign.NewEphemeralKeypair(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ca, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		if err != nil {
-			t.Fatal(err)
-		}
-		id := fakeCertIdentity{kp: kp, provider: selfSignedCertProvider{ca: ca}}
-		res, err := SignStatementWith(ctx, validStatementJSON(t), id, NewNoTLogPolicy())
+		res, err := SignStatementWith(ctx, validStatementJSON(t), newFakeCertIdentity(t, ""), NewNoTLogPolicy())
 		if err != nil {
 			t.Fatalf("SignStatementWith: %v", err)
 		}
