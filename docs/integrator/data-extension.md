@@ -34,7 +34,8 @@ also require `validators/catalog.yaml`. Required files or entries that are
 missing produce an error naming the missing input. Optional files remain
 optional; they never inherit embedded content.
 
-No embedded catalog files are read, enumerated, merged or used as fallbacks.
+The invoking CLI's catalog provider does not read, enumerate, merge or fall
+back to embedded catalog files.
 A same-path profile-only overlay therefore cannot extend an embedded overlay;
 supply the complete external declaration. The layering rules and optional
 folder layout below describe the default mode without `--external-only`.
@@ -42,7 +43,12 @@ folder layout below describe the default mode without `--external-only`.
 The flag controls catalog data. Deployer and renderer templates, conformance
 schemas and trust roots remain embedded implementation resources. `aicrd`
 continues to use its embedded catalog; server catalog configuration is outside
-this mode. Artifact-signing commands that specifically sign the shipped
+this mode. In-cluster validator images also retain their own embedded catalogs:
+deployment checks load component values and manifests from them, and performance
+checks fall back to the embedded registry's trainer version when neither the
+recipe nor an environment override supplies a pin. The external catalog is not
+passed to these images, in either layered or external-only mode.
+Artifact-signing commands that specifically sign the shipped
 catalog do not accept `--data` or `--external-only`.
 
 ## Use cases
