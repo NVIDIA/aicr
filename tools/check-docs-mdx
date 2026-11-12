@@ -69,7 +69,8 @@ set -euo pipefail
 # mawk 1.3.4, the default awk on Debian and Ubuntu, panics on it (#3780).
 if ! awk 'BEGIN { exit ("aaa" ~ /^a{3}$/ && "~~~~" ~ /^ {0,3}(`{3,}|~{3,})/ && "``" !~ /^ {0,3}(`{3,}|~{3,})/ ? 0 : 1) }' 2>/dev/null; then
   echo "ERROR: awk must support POSIX interval expressions, including intervals inside alternation groups." >&2
-  echo "       mawk (the Debian/Ubuntu default) does not; install gawk (e.g. sudo apt-get install gawk)." >&2
+  echo "       If awk is mawk (the Debian/Ubuntu default), install gawk (e.g. sudo apt-get install gawk);" >&2
+  echo "       if gawk is already installed, select it: sudo update-alternatives --set awk /usr/bin/gawk" >&2
   exit 1
 fi
 

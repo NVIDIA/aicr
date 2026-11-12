@@ -964,8 +964,11 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         && grep -qiE 'ubuntu|debian' /etc/os-release 2>/dev/null; then
         log_info "Installing gawk..."
         if prompt_continue; then
-            sudo apt-get install -y gawk
-            log_success "gawk installed"
+            if sudo apt-get install -y gawk; then
+                log_success "gawk installed"
+            else
+                log_warning "gawk install failed; install it manually (sudo apt-get update && sudo apt-get install gawk)"
+            fi
         fi
     fi
 
