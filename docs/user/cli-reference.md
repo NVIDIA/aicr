@@ -1097,7 +1097,7 @@ gpu-operator                   Helm  v26.7.2  gpu-operator            nfd,cert-m
 dra-node-labeler               Helm  -        gpu-operator            gpu-operator
 kai-scheduler                  Helm  v0.16.9  kai-scheduler           gpu-operator
 nvidia-dra-driver-gpu          Helm  0.5.1    nvidia-dra-driver       gpu-operator,dra-node-labeler
-nvsentinel                     Helm  v1.28.0  nvsentinel              cert-manager,gpu-operator,prometheus-operator-crds
+nvsentinel                     Helm  v1.31.0  nvsentinel              cert-manager,gpu-operator,prometheus-operator-crds
 prometheus-adapter             Helm  5.3.0    monitoring              kube-prometheus-stack
 
 VALIDATION
