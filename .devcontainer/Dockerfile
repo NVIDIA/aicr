@@ -27,6 +27,7 @@ RUN apt-get update \
         jq \
         libnss3-tools \
         python3 \
+        python3-pip \
         python3-venv \
         unzip \
         xz-utils \
