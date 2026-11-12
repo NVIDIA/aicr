@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
@@ -52,7 +53,6 @@ func TestRecipeValidateArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{"aicr", "validate"},
 		{"aicr", "validate", "--external-only", "input.yaml"},
-		{"aicr", "validate", "--external-only", "--data", "recipes", "input.yaml"},
 		{"aicr", "validate", "--format", "xml", "input.yaml"},
 		{"aicr", "validate", "one.yaml", "two.yaml"},
 	} {
@@ -88,6 +88,27 @@ func TestRecipeValidateExternalOnly(t *testing.T) {
 			}
 			if (len(diagnostics) != 0) != externalOnly {
 				t.Fatalf("unexpected diagnostics: %+v", diagnostics)
+			}
+		})
+	}
+}
+
+func TestRecipeValidateExternalOnlyFile(t *testing.T) {
+	for _, base := range []string{"base", "h100-eks-training"} {
+		t.Run(base, func(t *testing.T) {
+			dir := providertest.WriteDir(t, map[string][]byte{
+				"registry.yaml":        []byte(providertest.EmptyRegistryYAML),
+				"overlays/base.yaml":   []byte("apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: base\nspec: {}\n"),
+				"overlays/custom.yaml": []byte(fmt.Sprintf("apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: custom\nspec:\n  base: %s\n", base)),
+			})
+			var output bytes.Buffer
+			cmd := &cli.Command{Name: "aicr", Commands: []*cli.Command{recipeValidateCmd()}, Writer: &output}
+			err := cmd.Run(t.Context(), []string{"aicr", "validate", "--data", dir, "--external-only", "--format", "json", filepath.Join(dir, "overlays/custom.yaml")})
+			if (err != nil) != (base != "base") {
+				t.Fatalf("error %v, output %s", err, output.String())
+			}
+			if base != "base" && !strings.Contains(output.String(), base) {
+				t.Fatalf("missing base not named: %s", output.String())
 			}
 		})
 	}

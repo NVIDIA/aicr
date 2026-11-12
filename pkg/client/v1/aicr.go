@@ -299,6 +299,7 @@ func defaultClientDependencies() clientDependencies {
 // For FilesystemSource, the external directory is layered OVER the
 // embedded recipe data — files in the directory override embedded
 // equivalents, and recipes must include a registry.yaml at the root.
+// ExternalFilesystemSource disables all embedded catalog merging and fallback.
 //
 // OCI sources require an immutable sha256 manifest digest. One
 // defaults.OCIRecipeConstructionTimeout deadline bounds the complete OCI
@@ -1542,7 +1543,8 @@ func buildDataProvider(
 	case sourceKindFilesystem:
 		embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
 		layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
-			ExternalDir: s.path,
+			ExternalDir:  s.path,
+			ExternalOnly: s.externalOnly,
 		})
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
