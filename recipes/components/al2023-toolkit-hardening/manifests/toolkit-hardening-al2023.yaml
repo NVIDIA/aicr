@@ -22,10 +22,13 @@
 # additively and the inherited tuning.yaml cannot be cleared.
 #
 # Uses the generic skyhook shellscript package (no OS-specific logic, unlike
-# nvidia-setup) to set the same two keys as toolkit-hardening-aks.yaml in
-# /etc/nvidia-container-runtime/config.toml:
+# nvidia-setup) to set the same two keys as toolkit-hardening-aks.yaml:
 #   accept-nvidia-visible-devices-envvar-when-unprivileged = false
 #   accept-nvidia-visible-devices-as-volume-mounts         = true
+# These are TOML-root keys (NVIDIA/nvidia-container-toolkit internal/config
+# Config struct), not nested under [nvidia-container-runtime] — applied via
+# `nvidia-ctk config --in-place --set` so placement is always correct
+# regardless of toolkit version, rather than a hand-rolled TOML edit.
 # No interrupt: the toolkit re-reads config.toml at every container start.
 {{- $cust := index .Values "al2023-toolkit-hardening" }}
 {{- if ne (toString (index $cust "enabled")) "false" }}
@@ -71,28 +74,14 @@ spec:
             echo "no $CONFIG on this node, skipping"
             exit 0
           fi
-          if ! grep -q '^\[nvidia-container-runtime\]' "$CONFIG"; then
-            printf '\n[nvidia-container-runtime]\n' >> "$CONFIG"
+          if ! command -v nvidia-ctk >/dev/null 2>&1; then
+            echo "nvidia-ctk not found on this node, skipping"
+            exit 0
           fi
-          set_key() {
-            local key="$1" val="$2"
-            awk -v key="$key" -v val="$val" '
-              BEGIN { in_sec=0; done=0 }
-              /^\[nvidia-container-runtime\]/ { in_sec=1; print; next }
-              /^\[/ {
-                if (in_sec && !done) { print key " = " val; done=1 }
-                in_sec=0; print; next
-              }
-              in_sec && $0 ~ "^[#[:space:]]*" key "[[:space:]]*=" {
-                print key " = " val; done=1; next
-              }
-              { print }
-              END { if (in_sec && !done) print key " = " val }
-            ' "$CONFIG" > "${CONFIG}.aicr-tmp" && mv "${CONFIG}.aicr-tmp" "$CONFIG"
-          }
-          set_key "accept-nvidia-visible-devices-envvar-when-unprivileged" "false"
-          set_key "accept-nvidia-visible-devices-as-volume-mounts" "true"
-          echo "nvidia-container-runtime hardened"
+          nvidia-ctk config --in-place \
+            --set accept-nvidia-visible-devices-envvar-when-unprivileged=false \
+            --set accept-nvidia-visible-devices-as-volume-mounts=true
+          echo "nvidia-container-runtime hardened at config.toml root"
       resources:
         cpuLimit: 1
         cpuRequest: 100m
