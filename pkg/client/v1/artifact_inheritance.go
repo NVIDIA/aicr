@@ -64,7 +64,20 @@ func readInheritanceSource(ctx context.Context, path string, mode recipe.Inherit
 
 func loadInheritanceSource(ctx context.Context, path, version string, mode recipe.InheritMode, provider recipe.DataProvider) (*recipe.RecipeResult, error) {
 	if mode == recipe.InheritNamespace {
-		return readInheritanceSource(ctx, path, mode)
+		if _, active := provider.(*recipe.ArtifactProvider); active {
+			return readInheritanceSource(ctx, path, mode)
+		}
+		data, format, err := serializer.ReadFileBytesWithKubeconfigContext(ctx, path, "")
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "read inheritance source")
+		}
+		prior, err := recipe.DecodeRecipeResult(data, format)
+		if err != nil {
+			return nil, err
+		}
+		if prior.Metadata.Artifacts != nil {
+			return readInheritanceSource(ctx, path, mode)
+		}
 	}
 	if _, active := provider.(*recipe.ArtifactProvider); active {
 		prior, err := readInheritanceSource(ctx, path, mode)

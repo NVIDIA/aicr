@@ -3639,6 +3639,7 @@ func TestResolveRecipeInheritNamespaceOnly(t *testing.T) {
 	prior := filepath.Join(t.TempDir(), "prior.yaml")
 	doc := fmt.Sprintf(`kind: RecipeResult
 apiVersion: aicr.run/v1
+unknownLegacyField: tolerated
 metadata:
   version: test
 componentRefs:
