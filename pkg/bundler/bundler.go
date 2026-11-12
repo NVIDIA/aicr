@@ -382,6 +382,9 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, exposureErr
 	}
 
+	if err := profileBaseline.ValidateArtifactLock(ctx, recipeResult.ComponentRefs, componentValues, dynamicValues); err != nil {
+		return nil, err
+	}
 	if lockErr := profileBaseline.ValidateProfileLock(
 		ctx, recipeResult.ComponentRefs, componentValues, dynamicValues,
 	); lockErr != nil {
@@ -448,7 +451,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// Copy external data files before deployer construction so the file list
 	// is available for both the deployer (checksum tracking) and post-generation
 	// attestation. This is a no-op when --data is not set.
-	dataFiles, err := b.copyDataFiles(dir, recipeResult.DataProvider())
+	dataFiles, err := b.copyDataFiles(ctx, dir, recipeResult.DataProvider())
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 			return nil, err
@@ -3086,7 +3089,32 @@ func componentValidationError(err error) error {
 // The provider argument supplies the LayeredDataProvider whose external directory is
 // the source of truth; a nil provider falls back to the package-global provider so
 // pre-WithDataProvider callers (legacy CLI path) still emit the same bundles.
-func (b *DefaultBundler) copyDataFiles(dir string, provider recipe.DataProvider) ([]string, error) {
+func (b *DefaultBundler) copyDataFiles(ctx context.Context, dir string, provider recipe.DataProvider) ([]string, error) {
+
+	if captured, ok := provider.(*recipe.ArtifactProvider); ok {
+		inputs := captured.ArtifactInputs()
+		copied := make([]string, 0, len(inputs))
+		for name, data := range inputs {
+			if err := ctx.Err(); err != nil {
+				return nil, errors.WrapCtxErr(err, errors.ErrCodeTimeout, "copy captured artifact inputs")
+			}
+			relative := filepath.Join("data", name)
+			destination, err := deployer.SafeJoin(dir, relative)
+			if err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "unsafe captured artifact input path", err)
+			}
+			if err := os.MkdirAll(filepath.Dir(destination), 0o750); err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInternal, "create captured artifact input directory", err)
+			}
+			if err := os.WriteFile(destination, data, 0o600); err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInternal, "write captured artifact input", err)
+			}
+			copied = append(copied, relative)
+		}
+		slices.Sort(copied)
+		return copied, nil
+	}
+
 	// Check if the bound provider is a LayeredDataProvider with external
 	// files. A nil-interface receiver returns (nil, false) from the type
 	// assertion without panicking — equivalent to no external data.

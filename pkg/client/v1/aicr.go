@@ -153,6 +153,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -160,6 +161,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
@@ -198,10 +200,11 @@ type Client struct {
 	// (multiple concurrent reads are safe), write locked by Close
 	// (exclusive while clearing). source doesn't change after
 	// construction so it doesn't need locking.
-	mu      sync.RWMutex
-	builder *recipe.Builder
-	dp      recipe.DataProvider
-	source  recipeSource
+	mu              sync.RWMutex
+	builder         *recipe.Builder
+	dp              recipe.DataProvider
+	source          recipeSource
+	artifactOptions *ArtifactOptions
 
 	// version is threaded into the Builder via recipe.WithVersion so
 	// resolved recipes carry it in Metadata.Version. Set by WithVersion;
@@ -363,6 +366,24 @@ func newClientWithContextAndDependencies(
 	if err != nil {
 		return nil, err
 	}
+	if c.source.kind == sourceKindOCI {
+		_, inventoryErr := dp.ReadFile(ctx, "artifacts/inventory.yaml")
+		if inventoryErr == nil {
+			return nil, joinDataProviderCleanup(artifact.Invalid("artifact-source-unsupported", "OCI catalogs cannot supply an artifact inventory"), dp)
+		}
+		if !stderrors.Is(inventoryErr, fs.ErrNotExist) && !stderrors.Is(inventoryErr, errors.New(errors.ErrCodeNotFound, "")) {
+			return nil, joinDataProviderCleanup(errors.PropagateOrWrap(inventoryErr, errors.ErrCodeInvalidRequest, "inspect OCI catalog artifact inputs"), dp)
+		}
+	}
+	var artifactOptions ArtifactOptions
+	if c.artifactOptions != nil {
+		artifactOptions = *c.artifactOptions
+	}
+	composed, composeErr := recipe.ComposeArtifacts(ctx, dp, artifactOptions)
+	if composeErr != nil {
+		return nil, joinDataProviderCleanup(composeErr, dp)
+	}
+	dp = composed
 	if err = clientConstructionContextError(ctx); err != nil {
 		return nil, joinDataProviderCleanup(err, dp)
 	}
@@ -400,6 +421,9 @@ func newClientWithContextAndDependencies(
 // validateSourceConfiguration validates the order-independent combination of
 // recipe-source and source-only options before any provider or registry I/O.
 func validateSourceConfiguration(c *Client) error {
+	if c.source.kind == sourceKindOCI && c.artifactOptions != nil {
+		return artifact.Invalid("artifact-source-unsupported", "OCI catalog composition is not supported")
+	}
 	hasOCIOptions := c.ociSource.tempDir != nil
 	if c.source.kind != sourceKindOCI {
 		if hasOCIOptions {
@@ -893,6 +917,9 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 		}
 	}
 
+	if err := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); err != nil {
+		return nil, err
+	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
 		return nil, err
@@ -936,7 +963,11 @@ func (c *Client) inheritIdentity(
 	}
 	// Empty kubeconfig is safe: inheritedRecipePath rejects cm://, the only
 	// artifact form whose load would contact a cluster.
-	priorInternal, err := recipe.LoadFromFileWithProvider(ctx, path, "", c.version, dp)
+	mode := recipe.InheritAll
+	if selection != nil {
+		mode = *selection
+	}
+	priorInternal, err := loadInheritanceSource(ctx, path, c.version, mode, dp)
 	if err != nil {
 		// The loader already returns structured errors with the right code.
 		return err
@@ -953,9 +984,10 @@ func (c *Client) inheritIdentity(
 	if criteriaErr := checkInheritCriteria(resolved.Criteria, priorInternal.Criteria, inheritFrom); criteriaErr != nil {
 		return criteriaErr
 	}
-	mode := recipe.InheritAll
-	if selection != nil {
-		mode = *selection
+	if mode == recipe.InheritAll && priorInternal.Metadata.Artifacts != nil {
+		if err := recipe.CheckArtifactInputs(priorInternal.Metadata.Artifacts, dp); err != nil {
+			return err
+		}
 	}
 	if applyErr := recipe.ApplyInheritedIdentityWithMode(resolved.ComponentRefs, priorInternal.ComponentRefs, mode); applyErr != nil {
 		return applyErr
@@ -1291,6 +1323,9 @@ func (c *Client) ResolveRecipeFromCriteriaWithOptions(
 			return nil, inheritErr
 		}
 	}
+	if err := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); err != nil {
+		return nil, err
+	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
 		return nil, err
@@ -1505,6 +1540,9 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 			ctx, resolveCfg.inheritFrom, resolveCfg.inheritMode, builder.DataProvider(), internal); inheritErr != nil {
 			return nil, inheritErr
 		}
+	}
+	if err := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); err != nil {
+		return nil, err
 	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
@@ -1801,6 +1839,9 @@ func (c *Client) LoadRecipe(ctx context.Context, path, kubeconfig string) (*Reci
 
 	loaded, err := recipe.LoadFromFileWithProvider(ctx, path, kubeconfig, c.version, dp)
 	if err != nil {
+		if c.source.kind == sourceKindOCI {
+			return nil, artifactConsumerError(err, "artifact-source-unsupported")
+		}
 		// Don't re-wrap — the loader already returns structured errors
 		// with the right code (ErrCodeInvalidRequest for a bad overlay,
 		// ErrCodeInternal for read/parse failures).
@@ -1964,6 +2005,9 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 	if scope.Server != "" && len(scope.Consumers) == 0 {
 		slog.Warn("PromQL server is enabled but no enabled component declares telemetry.promql, so its Prometheus scrapes nothing",
 			"component", scope.Server)
+	}
+	if err := r.internal.ValidateArtifactLock(ctx, r.internal.ComponentRefs, helmValues, nil); err != nil {
+		return nil, err
 	}
 	pinned := r.internal.WithResolvedValues(helmValues)
 	if err := bundler.ValidateAccountingValues(pinned, helmValues); err != nil {

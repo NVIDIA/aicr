@@ -423,3 +423,10 @@ file can silently enable. It still composes with a config-supplied `trust.key`.
   examples
 - [Validation](validation.md) — validation phases and evidence workflow
 - [Bundling](bundling.md) — deployers and bundle outputs
+
+## Artifact composition
+
+`spec.recipe.artifacts` configures [artifact inventories and bindings](artifact-inventory.md) for recipe resolution and consumers, starting in AICR v1.3.0.
+`inventory` selects a local inventory file; `allowCatalogPins` lists components permitted to retain missing catalog matches.
+The default inventory location is `<data>/artifacts/inventory.yaml`.
+Without an inventory, composition is inactive.

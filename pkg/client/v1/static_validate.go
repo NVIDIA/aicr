@@ -17,6 +17,7 @@ package aicr
 import (
 	"context"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -37,22 +38,36 @@ func ValidateRecipeCatalog(ctx context.Context, path, dataDir string) ([]RecipeD
 	return validateRecipeCatalog(ctx, path, dataDir, false)
 }
 
+// ValidateRecipeCatalogWithArtifacts includes inventory accounting and active targets.
+func ValidateRecipeCatalogWithArtifacts(ctx context.Context, path, dataDir string, choices artifact.Options) ([]RecipeDiagnostic, error) {
+	return validateRecipeCatalog(ctx, path, dataDir, false, choices)
+}
+
 // ValidateRecipeCatalogDirectory validates a complete catalog directory without
 // embedded fallback, so missing working-tree references remain errors.
 func ValidateRecipeCatalogDirectory(ctx context.Context, dataDir string) ([]RecipeDiagnostic, error) {
 	return validateRecipeCatalog(ctx, "", dataDir, true)
 }
 
-func validateRecipeCatalog(ctx context.Context, path, dataDir string, externalOnly bool) ([]RecipeDiagnostic, error) {
+// ValidateRecipeCatalogDirectoryWithArtifacts checks an external-only catalog.
+func ValidateRecipeCatalogDirectoryWithArtifacts(ctx context.Context, dataDir string, choices artifact.Options) ([]RecipeDiagnostic, error) {
+	return validateRecipeCatalog(ctx, "", dataDir, true, choices)
+}
+
+func validateRecipeCatalog(ctx context.Context, path, dataDir string, externalOnly bool, choices ...artifact.Options) ([]RecipeDiagnostic, error) {
 	if ctx == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
 	}
 	var diagnostics []recipe.StaticDiagnostic
 	var err error
+	var options artifact.Options
+	if len(choices) > 0 {
+		options = choices[0]
+	}
 	if externalOnly {
-		diagnostics, err = recipe.ValidateStaticDirectory(ctx, dataDir)
+		diagnostics, err = recipe.ValidateStaticDirectoryWithArtifacts(ctx, dataDir, options)
 	} else {
-		diagnostics, err = recipe.ValidateStatic(ctx, path, dataDir)
+		diagnostics, err = recipe.ValidateStaticWithArtifacts(ctx, path, dataDir, options)
 	}
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to validate recipe catalog")

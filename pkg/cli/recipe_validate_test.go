@@ -92,3 +92,59 @@ func TestRecipeValidateExternalOnly(t *testing.T) {
 		})
 	}
 }
+
+func TestRecipeValidateArtifactConfig(t *testing.T) {
+	dir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":           []byte(providertest.EmptyRegistryYAML),
+		"artifacts/bindings.yaml": []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactBindings\ncharts: {}\nimages: {}\n"),
+	})
+	inventory := filepath.Join(t.TempDir(), "inventory.yaml")
+	if err := os.WriteFile(inventory, []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactInventory\nartifacts:\n- name: unbound\n  type: other\n  reference: oci://example.test/release\n  version: release\n  manifestDigest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(t.TempDir(), "config.json")
+	body := fmt.Sprintf(`{"apiVersion":"aicr.run/v1beta1","kind":"AICRConfig","spec":{"recipe":{"data":%q,"artifacts":{"inventory":%q}}}}`, dir, inventory)
+	if err := os.WriteFile(config, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	cmd := &cli.Command{Name: "aicr", Commands: []*cli.Command{recipeValidateCmd()}, Writer: &output}
+	if err := cmd.Run(t.Context(), []string{"aicr", "validate", "--config", config, "--format", "json"}); err == nil {
+		t.Fatal("unbound configured inventory passed")
+	}
+	var diagnostics []aicr.RecipeDiagnostic
+	if err := json.Unmarshal(output.Bytes(), &diagnostics); err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) != 1 || diagnostics[0].Field != "" || diagnostics[0].File != "artifacts" {
+		t.Fatalf("config was not applied: %s", output.String())
+	}
+	output.Reset()
+	cmd = &cli.Command{Name: "aicr", Commands: []*cli.Command{recipeValidateCmd()}, Writer: &output}
+	if err := cmd.Run(t.Context(), []string{"aicr", "validate", "--config", config, "--format", "json", filepath.Join(dir, "registry.yaml")}); err == nil {
+		t.Fatal("single-file validation ignored the active inventory")
+	}
+	if err := json.Unmarshal(output.Bytes(), &diagnostics); err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) != 1 || diagnostics[0].File != "artifacts" {
+		t.Fatalf("unexpected file diagnostics: %s", output.String())
+	}
+}
+
+func TestRecipeValidateEmbeddedArtifactOverride(t *testing.T) {
+	inventory := filepath.Join(t.TempDir(), "inventory.yaml")
+	if err := os.WriteFile(inventory, []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactInventory\nartifacts: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(t.TempDir(), "config.json")
+	body := fmt.Sprintf(`{"apiVersion":"aicr.run/v1beta1","kind":"AICRConfig","spec":{"recipe":{"artifacts":{"inventory":%q}}}}`, inventory)
+	if err := os.WriteFile(config, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	cmd := &cli.Command{Name: "aicr", Commands: []*cli.Command{recipeValidateCmd()}, Writer: &output}
+	if err := cmd.Run(t.Context(), []string{"aicr", "validate", "--config", config, "--format", "json"}); err != nil {
+		t.Fatalf("embedded static inventory: %v; %s", err, output.String())
+	}
+}

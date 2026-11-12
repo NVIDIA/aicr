@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Probe a pre-inventory binary's rejection of ADR-031 wire inputs.
+# Usage: tools/check-artifact-compatibility /absolute/path/to/baseline-aicr
+# A pass requires the expected schema/kind failures, not just a nonzero exit.
+set -euo pipefail
+if [[ $# != 1 || "$1" != /* || ! -x "$1" ]]; then
+    echo "Usage: $0 /absolute/path/to/baseline-aicr" >&2
+    exit 2
+fi
+binary="$1"
+probe_dir="$(mktemp -d)"
+trap 'rm -rf "$probe_dir"' EXIT
+mkdir -p "$probe_dir/catalog/artifacts"
+cat > "$probe_dir/catalog/registry.yaml" <<'YAML'
+apiVersion: aicr.run/v1beta1
+kind: ComponentRegistry
+components: []
+YAML
+cat > "$probe_dir/catalog/artifacts/bindings.yaml" <<'YAML'
+apiVersion: aicr.run/v1beta1
+kind: ArtifactBindings
+charts: {}
+images: {}
+ignoredArtifacts: {}
+YAML
+cat > "$probe_dir/recipe.yaml" <<'YAML'
+apiVersion: aicr.run/v1beta2
+kind: RecipeResult
+metadata:
+  artifacts: {}
+componentRefs: []
+deploymentOrder: []
+YAML
+cat > "$probe_dir/config.yaml" <<'YAML'
+apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+spec:
+  recipe:
+    artifacts: {}
+YAML
+probe() {
+    local label="$1" expected="$2" code=0
+    shift 2
+    printf '\nProbe: %s\n' "$label"
+    printf '$ '; printf '%q ' "$binary" "$@"; printf '\n'
+    "$binary" "$@" > "$probe_dir/output" 2>&1 || code=$?
+    cat "$probe_dir/output"
+    if [[ "$code" != 2 ]] || ! grep -Fq "$expected" "$probe_dir/output"; then
+        echo "FAIL: $label did not reject with the expected schema/kind error (exit $code)" >&2
+        exit 1
+    fi
+    echo "PASS: $label rejected"
+}
+probe bindings 'has kind "ArtifactBindings"' recipe --data "$probe_dir/catalog" \
+    --service eks --accelerator h100 --os ubuntu --intent training --output "$probe_dir/result.yaml"
+probe saved-recipe 'field artifacts not found in type recipe.RecipeResultMetadata' \
+    bundle --recipe "$probe_dir/recipe.yaml" --deployer helm --output "$probe_dir/bundle"
+probe configuration 'field artifacts not found in type config.RecipeSpec' \
+    recipe --config "$probe_dir/config.yaml" --service eks --accelerator h100 \
+    --os ubuntu --intent training --output "$probe_dir/result.yaml"

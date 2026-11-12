@@ -15,6 +15,7 @@
 package config
 
 import (
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -111,6 +112,7 @@ type SnapshotExecutionSpec struct {
 
 // RecipeSpec captures the inputs to `aicr recipe`.
 type RecipeSpec struct {
+	Artifacts     *artifact.Options        `yaml:"artifacts,omitempty" json:"artifacts,omitempty"`
 	Criteria      *CriteriaSpec            `yaml:"criteria,omitempty" json:"criteria,omitempty"`
 	Configuration *RecipeConfigurationSpec `yaml:"configuration,omitempty" json:"configuration,omitempty"`
 	Input         *RecipeInputSpec         `yaml:"input,omitempty" json:"input,omitempty"`

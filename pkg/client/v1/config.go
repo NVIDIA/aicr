@@ -20,6 +20,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
@@ -1145,4 +1146,14 @@ func (c *Config) RecipeOutputOptions() RecipeOutputOptions {
 		Path:   c.internal.Recipe().OutputPath(),
 		Format: c.internal.Recipe().OutputFormat(),
 	}
+}
+
+// RecipeArtifacts derives inventory choices without sharing mutable config slices.
+func (c *Config) RecipeArtifacts() artifact.Options {
+	if c == nil || c.internal == nil || c.internal.Spec.Recipe == nil || c.internal.Spec.Recipe.Artifacts == nil {
+		return artifact.Options{}
+	}
+	result := *c.internal.Spec.Recipe.Artifacts
+	result.AllowCatalogPins = append([]string(nil), result.AllowCatalogPins...)
+	return result
 }
