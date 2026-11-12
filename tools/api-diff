@@ -53,6 +53,7 @@ readonly MODULE_PATH="${PACKAGE%/pkg/client/v1}"
 # alias|target package|root type. Each mapping is kept explicit so the
 # syntax-aware exhaustiveness check can detect alias retargeting.
 readonly ALIAS_TARGETS=(
+    'ArtifactOptions|github.com/NVIDIA/aicr/pkg/artifact|Options'
     'BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config'
     'BundleAttester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester'
     'OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions'

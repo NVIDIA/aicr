@@ -30,7 +30,7 @@ global:
 
   # The chart default is docker.io/bitnamilegacy/os-shell:12-debian-12-r30,
   # which no bump can fix: bitnamilegacy is Bitnami's frozen archive, and
-  # every nvsentinel release through v1.28.0 pins that same tag. It carries
+  # every nvsentinel release through v1.31.0 pins that same tag. It carries
   # 13 critical / 109 high fixable findings and will never receive a patch.
   #
   # Nothing about the image is load-bearing. It runs one command --
@@ -76,6 +76,39 @@ platformConnector:
 janitor-provider:
   csp:
     provider: generic
+
+labeler:
+  expectedDeviceCounts:
+    # From v1.30.0 the chart's default gpu class has a ResourceSlice source,
+    # which makes the labeler start a resource.k8s.io/v1 informer and skip
+    # every node reconcile until it syncs. v1 is served from Kubernetes 1.34;
+    # this recipe supports 1.32 and 1.33, where it never syncs and the labeler
+    # stops restoring driver.installed. These are the gpu and nic classes
+    # v1.28.0 shipped, which read no ResourceSlices. Helm does not merge
+    # lists, so this replaces the default list and must carry every class
+    # the chart enables.
+    classes:
+      - name: gpu
+        enabled: true
+        labels:
+          current: nvsentinel.dgxc.nvidia.com/gpu.count.current
+          expected: nvsentinel.dgxc.nvidia.com/gpu.count.expected
+        expectedCountOverrides: []
+        groupingLabels:
+          - node.kubernetes.io/instance-type
+          - nvidia.com/gpu.product
+        currentExpression: |
+          int(node.metadata.labels['nvidia.com/gpu.count'])
+      - name: nic
+        enabled: true
+        labels:
+          current: nvsentinel.dgxc.nvidia.com/nic.count.current
+          expected: nvsentinel.dgxc.nvidia.com/nic.count.expected
+        groupingLabels:
+          - node.kubernetes.io/instance-type
+        expectedCountOverrides: []
+        currentExpression: |
+          int(node.status.allocatable['nvidia.com/mlnxnics'])
 
 # Layer 3 of NIC fault detection: mlx5_core driver faults from the
 # kernel log. Unconditional -- the DaemonSet already runs everywhere and

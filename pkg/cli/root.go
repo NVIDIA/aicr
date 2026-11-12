@@ -436,6 +436,7 @@ func recipeClientFromCmd(
 	}
 	client, err := aicr.NewClientContext(ctx,
 		aicr.WithRecipeSource(source),
+		aicr.WithArtifacts(cfg.RecipeArtifacts()),
 		aicr.WithVersion(version),
 	)
 	if err != nil {

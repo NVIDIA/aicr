@@ -29,8 +29,8 @@ import (
 // for the mixins.
 const (
 	cspHealthMonitorName     = "csp-health-monitor"
-	cspHealthMonitorImage    = "ghcr.io/nvidia/nvsentinel/csp-health-monitor:v1.28.0"
-	maintenanceNotifierImage = "ghcr.io/nvidia/nvsentinel/maintenance-notifier:v1.28.0"
+	cspHealthMonitorImage    = "ghcr.io/nvidia/nvsentinel/csp-health-monitor:v1.31.0"
+	maintenanceNotifierImage = "ghcr.io/nvidia/nvsentinel/maintenance-notifier:v1.31.0"
 )
 
 // cspMonitorClusterValues are the per-cluster values an operator passes on

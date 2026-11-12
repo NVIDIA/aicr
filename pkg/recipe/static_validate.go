@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/chainsaw/validation"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -49,6 +50,11 @@ func ValidateStatic(ctx context.Context, path, dataDir string) ([]StaticDiagnost
 	return validateStatic(ctx, path, dataDir, false)
 }
 
+// ValidateStaticWithArtifacts includes inventory accounting and active-target checks.
+func ValidateStaticWithArtifacts(ctx context.Context, path, dataDir string, options artifact.Options) ([]StaticDiagnostic, error) {
+	return validateStatic(ctx, path, dataDir, false, options)
+}
+
 // ValidateStaticDirectory validates a complete catalog without embedded fallback.
 func ValidateStaticDirectory(ctx context.Context, dataDir string) ([]StaticDiagnostic, error) {
 	return ValidateStaticExternal(ctx, "", dataDir)
@@ -63,7 +69,27 @@ func ValidateStaticExternal(ctx context.Context, path, dataDir string) ([]Static
 	return validateStatic(ctx, path, dataDir, true)
 }
 
-func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool) (diagnostics []StaticDiagnostic, resultErr error) {
+// ValidateStaticDirectoryWithArtifacts checks an external-only artifact catalog.
+func ValidateStaticDirectoryWithArtifacts(ctx context.Context, dataDir string, options artifact.Options) ([]StaticDiagnostic, error) {
+	return ValidateStaticExternalWithArtifacts(ctx, "", dataDir, options)
+}
+
+// ValidateStaticExternalWithArtifacts checks a file or complete external artifact catalog.
+func ValidateStaticExternalWithArtifacts(ctx context.Context, path, dataDir string, options artifact.Options) ([]StaticDiagnostic, error) {
+	if dataDir == "" {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "catalog directory is required")
+	}
+	return validateStatic(ctx, path, dataDir, true, options)
+}
+
+func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool, choices ...artifact.Options) (diagnostics []StaticDiagnostic, resultErr error) {
+	var options artifact.Options
+	if len(choices) > 1 {
+		return nil, artifact.Invalid("artifact-invalid", "at most one artifact options value is accepted")
+	}
+	if len(choices) == 1 {
+		options = choices[0]
+	}
 	ctx, cancel := context.WithTimeout(ctx, defaults.StaticValidationTimeout)
 	defer cancel()
 	defer func() {
@@ -104,6 +130,22 @@ func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool
 			add(path, "", err)
 			return diagnostics, nil
 		}
+		if hdr.Kind == artifact.InventoryKind || hdr.Kind == artifact.BindingsKind {
+			diagnostics = append(diagnostics, validateStaticArtifactDocument(ctx, dp, path, dataDir, options, hdr.Kind, data))
+			return diagnostics, nil
+		}
+		if dataDir != "" || options.Inventory != "" {
+			composed, err := staticArtifactProvider(ctx, dp, options)
+			if err != nil {
+				add("artifacts", "", err)
+				return diagnostics, nil
+			}
+			dp = composed
+			defer EvictCachedStore(dp)
+			defer EvictCachedRegistry(dp)
+			defer EvictCachedCriteriaRegistry(dp)
+		}
+
 		if hdr.Kind == ComponentRegistryKind {
 			var reg ComponentRegistry
 			if err := decodeStaticYAML(data, &reg); err != nil {
@@ -121,10 +163,44 @@ func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool
 	if path == "" && dataDir != "" && !validateStaticExternalRegistry(dataDir, add) {
 		return diagnostics, nil
 	}
+	if path == "" {
+		composed, err := staticArtifactProvider(ctx, dp, options)
+		if err != nil {
+			add("artifacts", "", err)
+			return diagnostics, nil
+		}
+		dp = composed
+		defer EvictCachedStore(dp)
+		defer EvictCachedRegistry(dp)
+		defer EvictCachedCriteriaRegistry(dp)
+	}
+	resultErr = validateStaticCatalogInput(ctx, dp, path, dataDir, data, hdr, add)
+	return diagnostics, resultErr
+}
+
+func validateStaticArtifactDocument(ctx context.Context, dp DataProvider, path, dataDir string, options artifact.Options, kind string, data []byte) StaticDiagnostic {
+	var err error
+	if kind == artifact.InventoryKind {
+		_, err = artifact.ParseInventory(data)
+	} else {
+		_, err = artifact.ParseBindings(data)
+	}
+	message := "Artifact schema validation passed; accounting and target checks require catalog validation."
+	if err == nil && (dataDir != "" || options.Inventory != "") {
+		err = validateStaticArtifactInput(ctx, dp, options, kind, data)
+		message = "Artifact schema and catalog checks passed; selected-recipe coverage remains a resolve-time check."
+	}
+	if err != nil {
+		return staticDiagnostic(path, "", err)
+	}
+	return StaticDiagnostic{File: path, Severity: "info", Message: message}
+}
+
+func validateStaticCatalogInput(ctx context.Context, dp DataProvider, path, dataDir string, data []byte, hdr RecipeMetadataHeader, add func(string, string, error)) error {
 	registry, err := GetComponentRegistryFor(dp)
 	if err != nil {
 		add("registry.yaml", "components", err)
-		return diagnostics, nil
+		return nil
 	}
 	if path == "" {
 		validateStaticRegistry(ctx, registry, dp, "registry.yaml", false, add)
@@ -135,13 +211,13 @@ func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool
 		sources, walkErr = staticOverlaySources(ctx, dp, add)
 		if walkErr != nil {
 			add("overlays", "catalog", walkErr)
-			return diagnostics, nil
+			return nil
 		}
 	}
 	store, err := LoadMetadataStoreFor(ctx, dp)
 	if err != nil {
 		add(dataDir, "catalog", err)
-		return diagnostics, nil
+		return nil
 	}
 	copyStore := *store
 	copyStore.Overlays = maps.Clone(store.Overlays)
@@ -150,13 +226,12 @@ func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool
 	if path != "" {
 		if nameErr := validateStaticOverlayName(ctx, dp, path, dataDir, hdr); nameErr != nil {
 			add(path, "metadata.name", nameErr)
-			return diagnostics, nil
+			return nil
 		}
 		validateStaticAuthoringFile(ctx, path, data, hdr, store, registry, add)
-		return diagnostics, nil
+		return nil
 	}
-	resultErr = validateStaticCatalog(ctx, store, registry, sources, add)
-	return diagnostics, resultErr
+	return validateStaticCatalog(ctx, store, registry, sources, add)
 }
 
 func readStaticInput(path string) ([]byte, error) {
