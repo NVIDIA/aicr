@@ -22,8 +22,9 @@
 # events into the datastore in place of the AWS poller and checks an event and
 # its completion are recorded without quarantining the node. The execution
 # scenarios (CSP_EXECUTION_SCENARIOS=true) are not run here: two of them fail
-# at NVSentinel v1.31.0 by design, documenting why the gate refuses
-# EXECUTE_REMEDIATION.
+# at NVSentinel v1.28.0 by design, documenting why the gate refuses
+# EXECUTE_REMEDIATION; the code they exercise is unchanged in v1.31.0, but they
+# have not been re-run there.
 # Not wired into `make qualify`: it needs a Kind cluster.
 #
 # Path filter kept narrow for the same reason as nvsentinel-preflight-e2e.yaml.

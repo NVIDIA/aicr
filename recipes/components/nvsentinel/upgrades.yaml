@@ -443,7 +443,12 @@ transitions:
       labeler classes passed on Kubernetes 1.32 through 1.36, and the
       simulated-GPU UAT lane installed the h100-training-slurm bundle with all
       four gpu-health-monitor-dcgm-4.x pods connected to DCGM with 8 GPUs each
-      while the dcgm-3.x monitor stayed inactive.
+      while the dcgm-3.x monitor stayed inactive. The csp-health-monitor
+      mixins' claims were checked by comparing the v1.28.0 and v1.31.0 source
+      for fault-quarantine's event keying, the monitor's config minimums and
+      its AWS region handling, which are unchanged; the csp-health-monitor
+      execution scenarios (CSP_EXECUTION_SCENARIOS=true) were not re-run at
+      v1.31.0.
     summary: >-
       Three changes need operator action. A fatal health-events-analyzer event
       now cordons and drains its node through a new default fault-quarantine
@@ -519,8 +524,9 @@ transitions:
               switch. To stop syslog events from acting at all, regenerate the
               bundle with
               --set nv-sentinel:syslog-health-monitor.processingStrategy=STORE_ONLY,
-              which also stops their cordon and drain, and read the
-              processingStrategy of each NIC pattern in the monitor's config,
+              which also stops their cordon and drain and keeps them from the
+              analyzer's rules, since STORE_ONLY events are not analyzer input,
+              and read the processingStrategy of each NIC pattern in the monitor's config,
               because a pattern's own value replaces the module's.
             reason: >-
               v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,
@@ -606,8 +612,9 @@ transitions:
               switch. To stop syslog events from acting at all, regenerate the
               bundle with
               --set nv-sentinel:syslog-health-monitor.processingStrategy=STORE_ONLY,
-              which also stops their cordon and drain, and read the
-              processingStrategy of each NIC pattern in the monitor's config,
+              which also stops their cordon and drain and keeps them from the
+              analyzer's rules, since STORE_ONLY events are not analyzer input,
+              and read the processingStrategy of each NIC pattern in the monitor's config,
               because a pattern's own value replaces the module's.
             reason: >-
               v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,
@@ -691,8 +698,9 @@ transitions:
               switch. To stop syslog events from acting at all, regenerate the
               bundle with
               --set nv-sentinel:syslog-health-monitor.processingStrategy=STORE_ONLY,
-              which also stops their cordon and drain, and read the
-              processingStrategy of each NIC pattern in the monitor's config,
+              which also stops their cordon and drain and keeps them from the
+              analyzer's rules, since STORE_ONLY events are not analyzer input,
+              and read the processingStrategy of each NIC pattern in the monitor's config,
               because a pattern's own value replaces the module's.
             reason: >-
               v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,

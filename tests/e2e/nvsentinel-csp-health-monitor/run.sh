@@ -40,7 +40,8 @@
 # cordons the node and its completion uncordons it; with two notices for the
 # node, the first to complete leaves it cordoned; and a notice stored under
 # STORE_ONLY that completes after the switch does not release a quarantine a
-# newer notice set. The last two fail at v1.28.0; the code they exercise is unchanged in v1.31.0, but they have not been re-run. All must pass before the
+# newer notice set. The last two fail at v1.28.0; the code they exercise is
+# unchanged in v1.31.0, but they have not been re-run. All must pass before the
 # gate may allow EXECUTE_REMEDIATION.
 #
 # WHY THE EVENTS ARE INSERTED. Kind has no AWS Health API to poll, and the
