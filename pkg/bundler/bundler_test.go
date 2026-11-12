@@ -467,6 +467,12 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 			}
 		}
 	}
+	// earlierData is the --data output of earlierBundle, which a rerun
+	// without checksums keeps.
+	earlierData := []string{
+		"data", filepath.Join("data", recipe.RegistryFileName),
+		filepath.Join("data", "extra"), filepath.Join("data", "extra", "a.yaml"),
+	}
 	fresh := t.TempDir()
 	writeTestBundle(t, fresh)
 	want := slices.Sorted(maps.Keys(treeSnapshot(t, fresh)))
@@ -505,6 +511,19 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 			setup:     writeFile("stale.txt"),
 			opts:      []config.Option{config.WithIncludeChecksums(false)},
 			survivors: []string{"stale.txt"},
+		},
+		{
+			name:      "attested earlier bundle without checksums",
+			setup:     earlierBundle(true, ""),
+			opts:      []config.Option{config.WithIncludeChecksums(false)},
+			survivors: earlierData,
+		},
+		{
+			name:  "foreign attestation file without checksums",
+			setup: earlierBundle(true, filepath.Join(attestation.AttestationDir, "notes.txt")),
+			opts:  []config.Option{config.WithIncludeChecksums(false)},
+			survivors: append(slices.Clone(earlierData),
+				attestation.AttestationDir, filepath.Join(attestation.AttestationDir, "notes.txt")),
 		},
 	}
 

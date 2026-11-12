@@ -559,6 +559,8 @@ func (s *bundleStage) publish(ctx context.Context, inventory *checksum.Inventory
 // output, then moves the stage's entries in. Any other entry survives, unless
 // inventory is set. Then an entry made up only of earlierBundle files is
 // removed too, and any other entry fails publishing before dir changes.
+// Without inventory, it also removes the earlier bundle's checksums.txt and
+// attestation files, which would vouch for content the new bundle replaced.
 func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.Inventory) error {
 	staged, err := os.ReadDir(s.path)
 	if err != nil {
@@ -619,11 +621,61 @@ func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.In
 				"failed to remove %s from %s, leaving the bundle in %s", name, s.dir, s.keep()), rmErr)
 		}
 	}
+	if inventory == nil {
+		if rmErr := removeSigningFiles(s.dir); rmErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
+				"failed to remove the earlier bundle's checksums and attestation from %s, leaving the bundle in %s",
+				s.dir, s.keep()), rmErr)
+		}
+	}
 	for _, name := range names {
 		if mvErr := renameNoReplace(filepath.Join(s.path, name), filepath.Join(s.dir, name)); mvErr != nil {
 			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
 				"failed to move %s into %s, leaving the rest of the bundle in %s", name, s.dir, s.keep()), mvErr)
 		}
+	}
+	return nil
+}
+
+// removeSigningFiles removes the regular files among dir's checksums.txt and
+// attestation files, then the attestation directory if that leaves it empty.
+// Other files in the attestation directory are kept.
+func removeSigningFiles(dir string) error {
+	for _, rel := range append([]string{checksum.ChecksumFileName}, attestation.BundleMetadataPaths()...) {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		info, err := os.Lstat(p)
+		if stderrors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to inspect %s", p), err)
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		if err := os.Remove(p); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to remove %s", p), err)
+		}
+	}
+	attestDir := filepath.Join(dir, attestation.AttestationDir)
+	info, err := os.Lstat(attestDir)
+	switch {
+	case stderrors.Is(err, os.ErrNotExist):
+		return nil
+	case err != nil:
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to inspect %s", attestDir), err)
+	case !info.IsDir():
+		return nil
+	}
+	sub, err := os.ReadDir(attestDir)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read %s", attestDir), err)
+	}
+	if len(sub) > 0 {
+		return nil
+	}
+	if err := os.Remove(attestDir); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to remove %s", attestDir), err)
 	}
 	return nil
 }

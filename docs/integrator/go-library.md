@@ -1385,8 +1385,10 @@ that is neither part of the earlier bundle nor named like the new bundle's
 output fails the call. With `config.WithIncludeChecksums(false)`, nothing
 else is checked. A top-level entry the new bundle also writes is replaced
 whole, so a directory such as `data/` loses every file the new bundle does
-not write, and other top-level entries are kept. Copy out any file you need
-before reusing `OutputDir`.
+not write, and other top-level entries are kept. The earlier bundle's
+`checksums.txt` and attestation files are removed, because they describe
+content the new bundle replaced and it carries none of its own. Copy out any
+file you need before reusing `OutputDir`.
 
 To generate a class-partitioned bundle set ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)),
 set `Split` and give `OutputDir` a path that does not exist yet; the set is
