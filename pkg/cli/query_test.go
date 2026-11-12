@@ -638,7 +638,7 @@ func TestQueryCmdFlagCombinations(t *testing.T) {
 func TestQueryCmdRecipeFlagPartition(t *testing.T) {
 	allowedWithRecipe := map[string]bool{
 		cmdNameRecipe: true, flagSelector: true, flagSummary: true, flagFormat: true,
-		"config": true, "data": true, "kubeconfig": true, "criteria-strict": true, flagRequireEvidence: true,
+		"config": true, "data": true, "external-only": true, "kubeconfig": true, "criteria-strict": true, flagRequireEvidence: true,
 	}
 	rejected := make(map[string]bool, len(recipeGenerationFlags))
 	for _, name := range recipeGenerationFlags {

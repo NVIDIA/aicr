@@ -123,6 +123,7 @@ jobs:
             TestNVSentinelPostRemediationValidationChartRender
             TestNVSentinelMaintenanceRequestChartRender
             TestNVSentinelCSPHealthMonitorChartRender
+            TestNVSentinelLabelerChartRendersLabelClasses
           )
           pattern="^($(IFS='|'; echo "${tests[*]}"))$"
           out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?

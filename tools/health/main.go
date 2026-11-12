@@ -42,6 +42,7 @@ import (
 	"path/filepath"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence/index"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/testgrid"
@@ -82,6 +83,13 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load testgrid presence")
 	}
 
+	// The pointer index is embedded in the binary, so reading it keeps the run
+	// offline.
+	signerClasses, err := index.SignerClasses()
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load evidence pointer classes")
+	}
+
 	// Provider nil resolves against the package-global embedded catalog, so the
 	// run is hermetic — no repo-root or filesystem inputs beyond the binary.
 	//
@@ -108,6 +116,7 @@ func run(ctx context.Context, outDir, summaryOut, aicrVersion string, determinis
 			Deterministic: deterministic,
 			NoTitle:       noTitle,
 			Presence:      presence,
+			SignerClasses: signerClasses,
 		})
 	}); err != nil {
 		return err

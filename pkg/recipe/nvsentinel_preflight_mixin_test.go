@@ -568,3 +568,115 @@ func TestNoShippedRecipeAdoptsPreflightMixin(t *testing.T) {
 		t.Fatal("no shipped recipes were resolved -- the walker is broken")
 	}
 }
+
+const preflightRunaiMixin = "nvsentinel-preflight-runai"
+
+// runaiLeaves returns the shipped leaves that declare runai-cluster.
+func runaiLeaves(t *testing.T, store *MetadataStore) []string {
+	t.Helper()
+	var names []string
+	for name, overlay := range store.Overlays {
+		if overlay.Spec.Criteria == nil {
+			continue
+		}
+		if _, ok := findComponentRefByName(overlay.Spec.ComponentRefs, "runai-cluster"); ok {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	if len(names) == 0 {
+		t.Fatal("no shipped leaf declares runai-cluster -- the overlay walker is broken")
+	}
+	return names
+}
+
+// TestMixinNVSentinelPreflightRunai_OrdersNVSentinelAfterRunaiCluster resolves
+// each Run:ai leaf with both preflight mixins composed and asserts the order a
+// deployer installs in. The preflight controller exits until the PodGroup CRD
+// exists, and on these leaves runai-cluster installs it: nvsentinel-preflight's
+// kai-scheduler edge is pruned there because kai-scheduler is declared
+// disabled, so without the companion's edge a deployer that waits on
+// nvsentinel never reaches runai-cluster.
+func TestMixinNVSentinelPreflightRunai_OrdersNVSentinelAfterRunaiCluster(t *testing.T) {
+	ctx, store := preflightUncachedStore(t)
+	if _, ok := store.Mixins[preflightRunaiMixin]; !ok {
+		t.Fatalf("%s mixin not present; check recipes/mixins/%s.yaml", preflightRunaiMixin, preflightRunaiMixin)
+	}
+
+	for _, name := range runaiLeaves(t, store) {
+		overlay := store.Overlays[name]
+		overlay.Spec.Mixins = append(overlay.Spec.Mixins, preflightMixin, preflightRunaiMixin)
+		t.Run(name, func(t *testing.T) {
+			result, err := store.BuildRecipeResult(ctx, overlay.Spec.Criteria)
+			if err != nil {
+				t.Fatalf("resolving %s with %s and %s composed: %v", name, preflightMixin, preflightRunaiMixin, err)
+			}
+			if !slices.Contains(result.Metadata.AppliedOverlays, name) {
+				t.Fatalf("%s: criteria resolved to %v, which does not include it", name, result.Metadata.AppliedOverlays)
+			}
+			nvsentinel, ok := findComponentRefByName(result.ComponentRefs, "nvsentinel")
+			if !ok {
+				t.Fatalf("%s resolved without nvsentinel", name)
+			}
+			if _, present := nvsentinel.Overrides["preflight"]; !present {
+				t.Errorf("%s: mixins composed but preflight overrides are absent", name)
+			}
+			if !slices.Contains(nvsentinel.DependencyRefs, "runai-cluster") {
+				t.Errorf("%s: runai-cluster edge missing from nvsentinel (%v)", name, nvsentinel.DependencyRefs)
+			}
+			provider := slices.Index(result.DeploymentOrder, "runai-cluster")
+			sentinel := slices.Index(result.DeploymentOrder, "nvsentinel")
+			if provider < 0 || sentinel < 0 {
+				t.Fatalf("%s: deployment order %v lacks runai-cluster or nvsentinel", name, result.DeploymentOrder)
+			}
+			if provider > sentinel {
+				t.Errorf("%s: nvsentinel deploys at step %d, before runai-cluster at step %d: %v",
+					name, sentinel+1, provider+1, result.DeploymentOrder)
+			}
+			if slices.Contains(result.DeploymentOrder, "kai-scheduler") {
+				t.Errorf("%s: kai-scheduler is deployed (%v); the leaf must keep it disabled", name, result.DeploymentOrder)
+			}
+		})
+	}
+}
+
+// TestMixinNVSentinelPreflightRunai_NeedsRunaiCluster pins why the edge is a
+// mixin of its own: a dependency on an undeclared component fails resolution,
+// so it cannot ride in nvsentinel-preflight, which composes onto every leaf.
+func TestMixinNVSentinelPreflightRunai_NeedsRunaiCluster(t *testing.T) {
+	ctx, store := preflightStore(t)
+
+	spec := preflightLeaf([]string{preflightMixin, preflightRunaiMixin}, nil)
+	if _, err := store.mergeMixins(ctx, &spec); err != nil {
+		t.Fatalf("mergeMixins: %v", err)
+	}
+	nvsentinel, ok := findComponentRefByName(spec.ComponentRefs, "nvsentinel")
+	if !ok {
+		t.Fatal("nvsentinel missing from merged spec")
+	}
+	if !slices.Contains(nvsentinel.DependencyRefs, "runai-cluster") || !slices.Contains(nvsentinel.DependencyRefs, "kai-scheduler") {
+		t.Fatalf("nvsentinel dependencyRefs = %v, want both mixins' edges", nvsentinel.DependencyRefs)
+	}
+	err := spec.ValidateDependencies()
+	if err == nil || !strings.Contains(err.Error(), `depends on "runai-cluster", which is not present in this recipe`) {
+		t.Errorf("ValidateDependencies() = %v, want the runai-cluster edge rejected on a leaf without runai-cluster", err)
+	}
+}
+
+// TestNoShippedRecipeAdoptsPreflightRunaiMixin keeps the companion opt-in like
+// the mixin it accompanies: its core-to-ops edge would otherwise reach a
+// catalog recipe and fail the class dependency guard.
+func TestNoShippedRecipeAdoptsPreflightRunaiMixin(t *testing.T) {
+	_, store := preflightStore(t)
+
+	inspected := 0
+	for name, overlay := range store.Overlays {
+		inspected++
+		if slices.Contains(overlay.Spec.Mixins, preflightRunaiMixin) {
+			t.Errorf("overlay %s declares the %s mixin; it must stay opt-in, adopted only by an integrator's own leaf", name, preflightRunaiMixin)
+		}
+	}
+	if inspected == 0 {
+		t.Fatal("no overlays were inspected -- the walker is broken")
+	}
+}

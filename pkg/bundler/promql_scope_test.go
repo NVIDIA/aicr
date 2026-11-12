@@ -500,10 +500,12 @@ func TestMake_PromQLScrapeScope(t *testing.T) {
 					t.Fatalf("New: %v", newErr)
 				}
 				dir := t.TempDir()
-				if _, err = b.Make(t.Context(), result, dir); err == nil && tt.wantErr == "" {
-					warned := slices.ContainsFunc(b.warnings, func(w string) bool { return strings.Contains(w, tt.wantWarning) })
+				out, makeErr := b.Make(t.Context(), result, dir)
+				if err = makeErr; err == nil && tt.wantErr == "" {
+					notes := out.Deployment.Notes
+					warned := slices.ContainsFunc(notes, func(w string) bool { return strings.Contains(w, tt.wantWarning) })
 					if tt.wantWarning != "" && !warned {
-						t.Errorf("warnings = %v, want one containing %q", b.warnings, tt.wantWarning)
+						t.Errorf("deployment notes = %v, want one containing %q", notes, tt.wantWarning)
 					}
 					if tt.wantRegex == "" {
 						assertNoScrapeClass(t, dir)

@@ -957,6 +957,21 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         fi
     fi
 
+    # gawk (tools/check-docs-mdx needs an awk that compiles intervals inside
+    # alternation groups; mawk, the Debian/Ubuntu default, panics on them,
+    # #3780). Installing gawk makes `awk` resolve to it via alternatives.
+    if [[ "${OS}" == "linux" ]] && ! command_exists gawk \
+        && grep -qiE 'ubuntu|debian' /etc/os-release 2>/dev/null; then
+        log_info "Installing gawk..."
+        if prompt_continue; then
+            if sudo apt-get install -y gawk; then
+                log_success "gawk installed"
+            else
+                log_warning "gawk install failed; install it manually (sudo apt-get update && sudo apt-get install gawk)"
+            fi
+        fi
+    fi
+
     # grype (vulnerability scanner)
     if command_exists grype && [[ "${UPGRADE}" != "true" ]]; then
         log_success "grype already installed: $(grype version 2>/dev/null | head -1)"

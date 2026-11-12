@@ -2026,3 +2026,27 @@ func TestConfig_ValidateInputOptions_NilConfig(t *testing.T) {
 		t.Errorf("got %+v, want zero value", got)
 	}
 }
+
+func TestConfigArtifactOptions(t *testing.T) {
+	var absent *aicr.Config
+	if got := absent.RecipeArtifacts(); got.Inventory != "" || len(got.AllowCatalogPins) != 0 {
+		t.Fatal(got)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte("apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  recipe:\n    artifacts:\n      inventory: release.yaml\n      allowCatalogPins: [cert-manager]\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := aicr.LoadConfig(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.RecipeArtifacts()
+	if got.Inventory != "release.yaml" || len(got.AllowCatalogPins) != 1 {
+		t.Fatal(got)
+	}
+	got.AllowCatalogPins[0] = "changed"
+	if cfg.RecipeArtifacts().AllowCatalogPins[0] != "cert-manager" {
+		t.Fatal("options share config slice")
+	}
+}
