@@ -77,7 +77,10 @@ func TestTimeoutConstants(t *testing.T) {
 		{"TrainerControllerReadyTimeout", TrainerControllerReadyTimeout, 1 * time.Minute, 5 * time.Minute},
 
 		// Validator timeouts
-		{"ValidatorWaitBuffer", ValidatorWaitBuffer, 1 * time.Minute, 5 * time.Minute},
+		{"ValidatorStartupGrace", ValidatorStartupGrace, 1 * time.Minute, 5 * time.Minute},
+		{"ValidatorCleanupGrace", ValidatorCleanupGrace, 10 * time.Second, 60 * time.Second},
+		{"ValidatorResultFlushMargin", ValidatorResultFlushMargin, 10 * time.Second, 60 * time.Second},
+		{"ValidationCancellationBudget", ValidationCancellationBudget, 1 * time.Minute, 5 * time.Minute},
 		{"ValidatorJobDeadlineHeadroom", ValidatorJobDeadlineHeadroom, 1 * time.Minute, 10 * time.Minute},
 		{"ValidatorDefaultTimeout", ValidatorDefaultTimeout, 1 * time.Minute, 15 * time.Minute},
 		{"ValidatorTerminationGracePeriod", ValidatorTerminationGracePeriod, 10 * time.Second, 60 * time.Second},
@@ -272,17 +275,46 @@ func TestCollectorTimeoutLessThanK8s(t *testing.T) {
 	}
 }
 
-func TestValidatorTimeoutRelationships(t *testing.T) {
-	if ValidatorJobDeadlineHeadroom <= ValidatorTerminationGracePeriod {
-		t.Errorf("Job headroom %v must exceed termination grace %v", ValidatorJobDeadlineHeadroom, ValidatorTerminationGracePeriod)
+// TestValidatorHeadroomDecomposition pins the exact grace arithmetic so a
+// dropped term fails: the Job deadline headroom is startup + cleanup + flush,
+// and the SIGTERM window is cleanup + flush (issue #1632).
+func TestValidatorHeadroomDecomposition(t *testing.T) {
+	if want := ValidatorStartupGrace + ValidatorCleanupGrace + ValidatorResultFlushMargin; ValidatorJobDeadlineHeadroom != want {
+		t.Errorf("ValidatorJobDeadlineHeadroom = %v, want startup+cleanup+flush = %v", ValidatorJobDeadlineHeadroom, want)
 	}
+	if want := ValidatorCleanupGrace + ValidatorResultFlushMargin; ValidatorTerminationGracePeriod != want {
+		t.Errorf("ValidatorTerminationGracePeriod = %v, want cleanup+flush = %v", ValidatorTerminationGracePeriod, want)
+	}
+	if want := 2*K8sCleanupTimeout + ValidatorTerminationGracePeriod + ValidatorTerminationWaitMargin; ValidationCancellationBudget != want {
+		t.Errorf("ValidationCancellationBudget = %v, want %v", ValidationCancellationBudget, want)
+	}
+}
+
+func TestValidatorTimeoutRelationships(t *testing.T) {
+	// The startup grace covers pod readiness (scheduling + image pull), which
+	// consumes the Job deadline before the check's own clock starts.
+	if ValidatorStartupGrace < K8sPodReadyTimeout {
+		t.Errorf("ValidatorStartupGrace (%v) must be at least K8sPodReadyTimeout (%v)",
+			ValidatorStartupGrace, K8sPodReadyTimeout)
+	}
+	// Deferred cleanup runs under a bound no larger than the cleanup grace.
 	for name, bound := range map[string]time.Duration{
 		"K8sCleanupTimeout":       K8sCleanupTimeout,
 		"PreflightCleanupTimeout": PreflightCleanupTimeout,
 	} {
-		if bound > ValidatorTerminationGracePeriod {
-			t.Errorf("%s (%v) exceeds termination grace (%v)", name, bound, ValidatorTerminationGracePeriod)
+		if bound > ValidatorCleanupGrace {
+			t.Errorf("%s (%v) exceeds the cleanup grace (%v)", name, bound, ValidatorCleanupGrace)
 		}
+	}
+	// The SIGTERM window must be strictly above the cleanup budget so the
+	// check can flush its result after cleanup, before SIGKILL.
+	if ValidatorTerminationGracePeriod <= ValidatorCleanupGrace {
+		t.Errorf("ValidatorTerminationGracePeriod (%v) must exceed the cleanup grace (%v)",
+			ValidatorTerminationGracePeriod, ValidatorCleanupGrace)
+	}
+	if ValidatorTerminationGracePeriod < ValidatorCleanupGrace+ValidatorResultFlushMargin {
+		t.Errorf("ValidatorTerminationGracePeriod (%v) must cover cleanup + flush (%v)",
+			ValidatorTerminationGracePeriod, ValidatorCleanupGrace+ValidatorResultFlushMargin)
 	}
 	// The interrupted-run termination wait covers the pod's full SIGTERM grace
 	// from Job deletion plus a delivery margin. The margin is not a work budget,
@@ -296,46 +328,12 @@ func TestValidatorTimeoutRelationships(t *testing.T) {
 		t.Errorf("K8sPodTerminationWaitTimeout (%v) must cover termination grace + margin (%v)",
 			K8sPodTerminationWaitTimeout, ValidatorTerminationGracePeriod+ValidatorTerminationWaitMargin)
 	}
-	// Grace period must fit within the wait buffer so the orchestrator
-	// outlives the container's SIGTERM window.
-	if ValidatorTerminationGracePeriod > ValidatorWaitBuffer {
-		t.Errorf("ValidatorTerminationGracePeriod (%v) should not exceed ValidatorWaitBuffer (%v)",
-			ValidatorTerminationGracePeriod, ValidatorWaitBuffer)
-	}
-	// The orchestrator must outlive the pod's own clean exit, so the wait
-	// buffer has to cover pod-start latency (scheduling + image pull).
-	if ValidatorWaitBuffer < K8sPodReadyTimeout {
-		t.Errorf("ValidatorWaitBuffer (%v) must be at least K8sPodReadyTimeout (%v)",
-			ValidatorWaitBuffer, K8sPodReadyTimeout)
-	}
-	// The two checks above do not backstop a dropped summand: if
-	// ValidatorTerminationGracePeriod were dropped from ValidatorWaitBuffer's
-	// definition, the result (2m) would still pass both the bounds-range table
-	// test and the >= K8sPodReadyTimeout check above. Assert the sum of the two
-	// independently named constants directly so a dropped summand fails here.
-	if ValidatorWaitBuffer < K8sPodReadyTimeout+ValidatorTerminationGracePeriod {
-		t.Errorf("ValidatorWaitBuffer (%v) must be at least K8sPodReadyTimeout + ValidatorTerminationGracePeriod (%v)",
-			ValidatorWaitBuffer, K8sPodReadyTimeout+ValidatorTerminationGracePeriod)
-	}
-	// Kubernetes must be the LOOSEST clock. If the Job deadline is not
-	// strictly beyond the orchestrator's wait, the Job controller can kill and
-	// delete the pod before the orchestrator reads its logs — issue #2473.
-	if ValidatorJobDeadlineHeadroom <= ValidatorWaitBuffer {
-		t.Errorf("ValidatorJobDeadlineHeadroom (%v) must exceed ValidatorWaitBuffer (%v)",
-			ValidatorJobDeadlineHeadroom, ValidatorWaitBuffer)
-	}
 	// The floor on a start-time-rebased wait has to leave room for a Job past
 	// its deadline to stamp a terminal condition, which takes at least the
-	// pod's SIGTERM-to-SIGKILL window; and it must stay under the wait buffer,
-	// or a floor larger than the budget it clamps would extend every wait
-	// instead of bounding the clamped ones.
+	// pod's SIGTERM-to-SIGKILL window.
 	if ValidatorMinCompletionWait < ValidatorTerminationGracePeriod {
 		t.Errorf("ValidatorMinCompletionWait (%v) must be at least ValidatorTerminationGracePeriod (%v)",
 			ValidatorMinCompletionWait, ValidatorTerminationGracePeriod)
-	}
-	if ValidatorMinCompletionWait > ValidatorWaitBuffer {
-		t.Errorf("ValidatorMinCompletionWait (%v) must not exceed ValidatorWaitBuffer (%v)",
-			ValidatorMinCompletionWait, ValidatorWaitBuffer)
 	}
 	// Default timeout must be positive and reasonable.
 	if ValidatorDefaultTimeout < 1*time.Minute {
