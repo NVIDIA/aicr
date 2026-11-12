@@ -3090,7 +3090,6 @@ func componentValidationError(err error) error {
 // the source of truth; a nil provider falls back to the package-global provider so
 // pre-WithDataProvider callers (legacy CLI path) still emit the same bundles.
 func (b *DefaultBundler) copyDataFiles(ctx context.Context, dir string, provider recipe.DataProvider) ([]string, error) {
-
 	if captured, ok := provider.(*recipe.ArtifactProvider); ok {
 		inputs := captured.ArtifactInputs()
 		copied := make([]string, 0, len(inputs))
