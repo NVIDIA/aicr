@@ -175,7 +175,7 @@ spec:
     # The Gateway API surface. aicr refuses to credit a Gateway the recipe does
     # not declare -- "a Gateway left over from another install is not evidence
     # for this recipe" -- so ai_inference evidence needs these declared here and
-    # not merely installed on the cluster. Same two components rke2-inference
+    # not merely installed on the cluster. Same three components rke2-inference
     # declares, in the shape the platform-inference mixin uses.
     #
     # EXTERNAL ADDRESS: NVKE provisions no LoadBalancer controller, and the
@@ -191,13 +191,18 @@ spec:
     # handling checks spec.loadBalancerSourceRanges for internet exposure and
     # records "No LoadBalancer Service" as an observation. The v1.36 evidence
     # set records Programmed=True and PASS on this cluster with no LoadBalancer.
+    - name: gateway-api-crds
+      type: Helm
+      manifestFiles:
+        - components/gateway-api-crds/manifests/gateway-api-crds.yaml
+        - components/gateway-api-crds/manifests/inference-extension-crds.yaml
+
     - name: agentgateway-crds
       type: Helm
       source: oci://cr.agentgateway.dev/charts
       valuesFile: components/agentgateway-crds/values.yaml
-      manifestFiles:
-        - components/agentgateway-crds/manifests/gateway-api-crds.yaml
-        - components/agentgateway-crds/manifests/inference-extension-crds.yaml
+      dependencyRefs:
+        - gateway-api-crds
 
     - name: agentgateway
       type: Helm
@@ -206,6 +211,7 @@ spec:
       manifestFiles:
         - components/agentgateway/manifests/inference-gateway.yaml
       dependencyRefs:
+        - gateway-api-crds
         - agentgateway-crds
         - cert-manager
         - prometheus-operator-crds
