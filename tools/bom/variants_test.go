@@ -236,7 +236,7 @@ spec:
 	}
 	v := bom.VariantResult{Name: "kube-prometheus-stack", Version: "83.7.0", Sources: []string{"aks"}}
 
-	got, surveyErr := surveyVariant(context.Background(), root, v, base, mock, false)
+	got, surveyErr := surveyVariant(context.Background(), root, v, base, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyVariant() error = %v", surveyErr)
 	}
@@ -253,7 +253,7 @@ spec:
 
 	// skipHelm leaves the variant unrendered (no images, no renderer call).
 	mock2 := &helmtest.MockRenderer{}
-	got2, surveyErr := surveyVariant(context.Background(), root, v, base, mock2, true)
+	got2, surveyErr := surveyVariant(context.Background(), root, v, base, mock2, true, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyVariant(skipHelm) error = %v", surveyErr)
 	}
@@ -417,6 +417,7 @@ spec:
 		base,
 		&helmtest.MockRenderer{},
 		true,
+		catalogDriverTargets{},
 	)
 	if surveyErr != nil {
 		t.Fatalf("surveyVariant(skipHelm) error = %v", surveyErr)
