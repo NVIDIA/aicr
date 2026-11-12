@@ -141,4 +141,4 @@ Provenance is marked `metadata-only`.
 It records the supplied identities and composition, not publisher authentication, chart archive verification or runtime image completeness.
 Mirror discovery guards final identities but its version-fetched renders are not verified against the pinned archive.
 Terraform and Fleet GitRepo archive verification remains tracked separately in [issue 3653](https://github.com/NVIDIA/aicr/issues/3653).
-For the complete format and trust boundary, see [ADR-031](../design/031-artifact-inventory-and-bindings.md).
+For the complete format and trust boundary, see [ADR-031](https://github.com/NVIDIA/aicr/blob/main/docs/design/031-artifact-inventory-and-bindings.md).
