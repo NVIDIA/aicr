@@ -163,16 +163,19 @@ const (
 	// ValidationOperationTimeout is the facade-level upper bound for
 	// Client.ValidateState when the caller's context has no deadline
 	// (controller/library callers; the CLI runs uncapped). It must exceed the
-	// LARGEST rendered per-check Job deadline (catalog timeout plus
-	// ValidatorJobDeadlineHeadroom) so that inner timeout fires first and the
-	// run surfaces a structured per-check error rather than the wrapping
-	// context's bare deadline-exceeded. The largest is the inference-perf
-	// catalog timeout (65m, which covers the model-cache populate + cold-start
-	// benchmark phases) plus the 3m30s headroom, i.e. 68m30s — not
-	// CheckExecutionTimeout (55m, the fallback when no catalog timeout is
-	// set). 75m keeps margin above that 68m30s rendered deadline for
-	// orchestration overhead (snapshot agent, RBAC, namespace setup,
-	// cleanup). The catalog-vs-facade relationship is asserted in
+	// LARGEST per-check orchestrator wait envelope — the catalog timeout plus
+	// ValidatorJobDeadlineHeadroom, ValidatorTerminationGracePeriod and
+	// ValidatorTerminationWaitMargin (v1.WaitEnvelopeFor) — plus the post-wait
+	// result capture (K8sCleanupTimeout) and pod termination wait
+	// (K8sPodTerminationWaitTimeout), so the per-check wait ends and surfaces
+	// a structured per-check result rather than the wrapping context's bare
+	// deadline-exceeded. The largest is the inference-perf catalog timeout
+	// (65m, which covers the model-cache populate + cold-start benchmark
+	// phases): 65m + 3m headroom + 60s grace + 5s margin + 30s capture + 90s
+	// termination wait = 71m05s — not CheckExecutionTimeout (55m, the
+	// fallback when no catalog timeout is set). 75m keeps margin above that
+	// for orchestration overhead (snapshot agent, RBAC, namespace setup). The
+	// catalog-vs-facade relationship is asserted in
 	// pkg/validator/catalog/catalog_test.go.
 	ValidationOperationTimeout = 75 * time.Minute
 
@@ -310,8 +313,9 @@ const (
 	// to fully terminate after the Job is deleted. Prevents race conditions
 	// where RBAC resources are cleaned up while the pod is still running
 	// cleanup operations (e.g., chainsaw namespace deletion).
-	// Must exceed the default Kubernetes terminationGracePeriodSeconds (30s).
-	K8sPodTerminationWaitTimeout = 60 * time.Second
+	// Must cover the validator pod's SIGTERM-to-SIGKILL window
+	// (ValidatorTerminationGracePeriod) plus ValidatorTerminationWaitMargin.
+	K8sPodTerminationWaitTimeout = 90 * time.Second
 
 	// K8sJobWatchResumeBackoff paces each watch re-establishment after a Job
 	// watch channel closes without the Job being terminal. Routine closures
@@ -582,9 +586,10 @@ const (
 	// operators see truncated output, masking the actual failure cause.
 	//
 	// 60s = 30s for the default Pod terminationGracePeriodSeconds (the
-	// SIGTERM→SIGKILL window — see K8sPodTerminationWaitTimeout above)
-	// plus 30s headroom for pre-chainsaw helper.VerifyResource iteration
-	// and chainsaw startup variance. Tune upward if chainsaw output
+	// SIGTERM→SIGKILL window of the expected-resources path) plus 30s
+	// headroom for pre-chainsaw helper.VerifyResource iteration and chainsaw
+	// startup variance. Unrelated to the validator Job envelope
+	// (ValidatorJobDeadlineHeadroom), which is sized from its own graces. Tune upward if chainsaw output
 	// truncation is observed in CI runs.
 	JobEnvelopeMargin = 60 * time.Second
 )
@@ -1410,19 +1415,30 @@ const (
 
 // Validator constants.
 const (
-	// ValidatorWaitBuffer is added to the catalog timeout when the orchestrator
-	// waits for Job completion. It must exceed the delay between Job creation
-	// and the validator container's first instruction, or the orchestrator
-	// abandons the wait before the check's own clean exit and reports an
-	// orchestrator timeout in place of the check's verdict.
-	ValidatorWaitBuffer = K8sPodReadyTimeout + ValidatorTerminationGracePeriod
+	// ValidatorStartupGrace is the delay between Job creation and the validator
+	// container's first instruction that a check's Job deadline absorbs.
+	// Scheduling and image pull consume the Job's activeDeadlineSeconds clock,
+	// which starts at pod creation, before the check's own clock
+	// (AICR_CHECK_TIMEOUT) starts.
+	ValidatorStartupGrace = K8sPodReadyTimeout
+
+	// ValidatorCleanupGrace is the time a check's deferred cleanup is given
+	// after its own context expires, before the Job deadline fires. It equals
+	// the in-pod cleanup bound (K8sCleanupTimeout).
+	ValidatorCleanupGrace = K8sCleanupTimeout
+
+	// ValidatorResultFlushMargin is the time after ValidatorCleanupGrace for
+	// the check to write its termination message and flush stdout before
+	// SIGKILL.
+	ValidatorResultFlushMargin = 30 * time.Second
 
 	// ValidatorJobDeadlineHeadroom is the gap between a check's own budget
-	// (AICR_CHECK_TIMEOUT) and the Job's activeDeadlineSeconds. Sized so the
-	// orchestrator is always the tighter clock: on exhaustion the check
-	// self-terminates and its pod stays Failed-but-present for log extraction,
-	// instead of the Job controller deleting it as an active pod (issue #2473).
-	ValidatorJobDeadlineHeadroom = ValidatorWaitBuffer + JobEnvelopeMargin
+	// (AICR_CHECK_TIMEOUT) and the Job's activeDeadlineSeconds:
+	// ValidatorStartupGrace + ValidatorCleanupGrace + ValidatorResultFlushMargin.
+	// AICR_CHECK_TIMEOUT stays bare, so a check that starts as late as the
+	// startup grace allows still expires its own context first and runs its
+	// deferred cleanup to completion before the Job deadline fires (issue #1632).
+	ValidatorJobDeadlineHeadroom = ValidatorStartupGrace + ValidatorCleanupGrace + ValidatorResultFlushMargin
 
 	// ValidatorMinCompletionWait floors the orchestrator's Job-completion wait
 	// once that wait has been rebased onto the Job's observed start time. The
@@ -1430,35 +1446,20 @@ const (
 	// and the floor engages as soon as the rebased remainder drops below it —
 	// not only once that remainder goes zero or negative — since an unfloored
 	// wait that short risks reporting an orchestrator timeout before the check
-	// ran. The floor does not license outrunning the Job's own deadline:
-	// v1.OrchestratorWaitFor caps it to ValidatorPreDeadlineMargin short of
-	// that deadline while the deadline is still ahead. Once it is not, the
-	// floored wait is all that remains, and one SIGTERM-to-SIGKILL window is
-	// the shortest span in which the orchestrator can still read the terminal
-	// condition Kubernetes stamped on the Job it has already ended.
+	// ran. One SIGTERM-to-SIGKILL window is the shortest span in which the
+	// orchestrator can still read the terminal condition Kubernetes stamped on
+	// the Job.
 	ValidatorMinCompletionWait = ValidatorTerminationGracePeriod
-
-	// ValidatorPreDeadlineMargin is how far short of the Job's
-	// activeDeadlineSeconds v1.OrchestratorWaitFor holds the orchestrator's
-	// Job-completion wait. That wait exists to read the check's own verdict,
-	// and the Job deadline destroys it: the Job controller deletes the
-	// still-active pod whose logs carry it (issue #2473). A wait ending at the
-	// same instant as the deadline leaves which of the two lands first to
-	// scheduling chance, so the margin is subtracted to make the ordering
-	// strict. It is a tie-breaker rather than a budget for any work, sized to
-	// exceed the resolution at which the two events can be distinguished while
-	// staying negligible against ValidatorMinCompletionWait, the shortest wait
-	// it ever trims.
-	ValidatorPreDeadlineMargin = 1 * time.Second
 
 	// ValidatorDefaultTimeout is the default per-validator timeout if not
 	// specified in the catalog. Used as fallback only.
 	ValidatorDefaultTimeout = 5 * time.Minute
 
 	// ValidatorTerminationGracePeriod is the time between SIGTERM and SIGKILL
-	// for validator containers. Validators should trap SIGTERM and write partial
-	// results within this window.
-	ValidatorTerminationGracePeriod = 30 * time.Second
+	// for validator containers (terminationGracePeriodSeconds). Validators trap
+	// SIGTERM, run their deferred cleanup (ValidatorCleanupGrace) and then
+	// write partial results (ValidatorResultFlushMargin) within this window.
+	ValidatorTerminationGracePeriod = ValidatorCleanupGrace + ValidatorResultFlushMargin
 
 	// ValidatorTerminationWaitMargin extends an interrupted run's pod
 	// termination wait past ValidatorTerminationGracePeriod, counted from the
@@ -1467,6 +1468,16 @@ const (
 	// so per-run RBAC is not revoked while a cooperative check is still running
 	// its in-grace cleanup. It is a delivery margin, not a work budget.
 	ValidatorTerminationWaitMargin = 5 * time.Second
+
+	// ValidationCancellationBudget is the longest an interrupted `aicr validate`
+	// run spends on cooperative cleanup after its first signal: the shared
+	// phase cleanup window (K8sCleanupTimeout), the pod termination wait that
+	// keeps per-run RBAC alive through the validator pod's SIGTERM grace
+	// (ValidatorTerminationGracePeriod + ValidatorTerminationWaitMargin), and
+	// the separate privileged RBAC/data teardown window (K8sCleanupTimeout).
+	// A Job running the CLI needs terminationGracePeriodSeconds above it.
+	ValidationCancellationBudget = 2*K8sCleanupTimeout +
+		ValidatorTerminationGracePeriod + ValidatorTerminationWaitMargin
 
 	// ValidatorMaxStdoutLines is the maximum number of stdout lines captured
 	// per validator. Lines beyond this are truncated (keeping the last N lines)

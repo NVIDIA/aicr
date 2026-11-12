@@ -182,7 +182,8 @@ func TestFilterEnabledComponents_DRANodeLabelerGate(t *testing.T) {
 				t.Fatalf("PrepareAndValidate: %v", perr)
 			}
 
-			selection, err := b.filterEnabledComponents(t.Context(), rr)
+			r := &bundleRun{DefaultBundler: b}
+			selection, err := r.filterEnabledComponents(t.Context(), rr)
 			enabled, order, reasons := selection.emitted, selection.order, selection.excluded
 			if tt.wantErr != "" {
 				if err == nil {
@@ -249,7 +250,8 @@ func TestInjectDRAEvictionLabel_SetsLabelerPair(t *testing.T) {
 	rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
 		{Name: gpuOperatorComponentName}, {Name: draNodeLabelerComponentName}, {Name: draComponentName},
 	}}
-	if err := b.injectDRAEvictionLabel(values, rr); err != nil {
+	r := &bundleRun{DefaultBundler: b}
+	if err := r.injectDRAEvictionLabel(values, rr); err != nil {
 		t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 	}
 
@@ -277,7 +279,7 @@ func TestInjectDRAEvictionLabel_SetsLabelerPair(t *testing.T) {
 	}
 
 	var derived, provisioned bool
-	for _, w := range b.warnings {
+	for _, w := range r.warnings {
 		if strings.Contains(w, "dra-node-labeler applies that label") {
 			derived = true
 		}
@@ -286,10 +288,10 @@ func TestInjectDRAEvictionLabel_SetsLabelerPair(t *testing.T) {
 		}
 	}
 	if !derived {
-		t.Errorf("expected the derived-label warning, got %v", b.warnings)
+		t.Errorf("expected the derived-label warning, got %v", r.warnings)
 	}
 	if provisioned {
-		t.Errorf("provisioning warning must not fire when the labeler is in the bundle: %v", b.warnings)
+		t.Errorf("provisioning warning must not fire when the labeler is in the bundle: %v", r.warnings)
 	}
 }
 
@@ -305,20 +307,21 @@ func TestInjectDRAEvictionLabel_WithoutLabelerKeepsProvisioningWarning(t *testin
 	rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
 		{Name: gpuOperatorComponentName}, {Name: draComponentName},
 	}}
-	if err := b.injectDRAEvictionLabel(values, rr); err != nil {
+	r := &bundleRun{DefaultBundler: b}
+	if err := r.injectDRAEvictionLabel(values, rr); err != nil {
 		t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 	}
 	if _, present := values[draNodeLabelerComponentName]; present {
 		t.Errorf("labeler values must not be created when the component is absent")
 	}
 	found := false
-	for _, w := range b.warnings {
+	for _, w := range r.warnings {
 		if strings.Contains(w, "node-pool provisioning time") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected the provisioning warning, got %v", b.warnings)
+		t.Errorf("expected the provisioning warning, got %v", r.warnings)
 	}
 }
 
@@ -333,10 +336,11 @@ func TestWarnDRAEvictionNotConfigured_NoProvisioningClause(t *testing.T) {
 	}
 	values := map[string]map[string]any{draComponentName: {}, gpuOperatorComponentName: {}}
 	rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: gpuOperatorComponentName}, {Name: draComponentName}}}
-	if err := b.injectDRAEvictionLabel(values, rr); err != nil {
+	r := &bundleRun{DefaultBundler: b}
+	if err := r.injectDRAEvictionLabel(values, rr); err != nil {
 		t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 	}
-	for _, w := range b.warnings {
+	for _, w := range r.warnings {
 		if !strings.Contains(w, "did not configure automatic eviction") {
 			continue
 		}
@@ -348,7 +352,7 @@ func TestWarnDRAEvictionNotConfigured_NoProvisioningClause(t *testing.T) {
 		}
 		return
 	}
-	t.Fatalf("opt-out warning not emitted: %v", b.warnings)
+	t.Fatalf("opt-out warning not emitted: %v", r.warnings)
 }
 
 // TestRejectDRAEvictionDynamicPaths_LabelerPaths: the labeler's pair is

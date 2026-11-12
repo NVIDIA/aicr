@@ -170,6 +170,11 @@ type ComboHealth struct {
 	// LeafOverlay is the name of the leaf overlay backing this combination.
 	LeafOverlay string `json:"leafOverlay" yaml:"leafOverlay"`
 
+	// Profile is the name=value profile selection the combination resolved
+	// with, the declaration default for a profiled family. It is empty when
+	// the family is unprofiled or the recipe did not resolve.
+	Profile string `json:"profile,omitempty" yaml:"profile,omitempty"`
+
 	// Structure is the structural-soundness axis. A future validation-posture
 	// axis is added here as a separate field, never fused into Structure.
 	Structure StructureHealth `json:"structure" yaml:"structure"`
@@ -258,11 +263,15 @@ func computeCombo(entry recipe.CatalogEntry, result *recipe.RecipeResult, err er
 
 	structure.Status = rollup(structure.Dimensions)
 
-	return ComboHealth{
+	combo := ComboHealth{
 		Criteria:    entry.Criteria,
 		LeafOverlay: entry.Name,
 		Structure:   structure,
 	}
+	if err == nil && result != nil && result.Metadata.SelectedProfile != nil {
+		combo.Profile = result.Metadata.SelectedProfile.Name + "=" + result.Metadata.SelectedProfile.Value
+	}
+	return combo
 }
 
 // classifyChartPinned grades the chart_pinned dimension: every enabled Helm

@@ -32,7 +32,7 @@ const (
 	// lifecycleManagerImage is the image docs/user/container-images.md
 	// discloses for the mixin. The static BOM renders the default values, in
 	// which this subchart is off, so this assertion keeps that note honest.
-	lifecycleManagerImage = "ghcr.io/nvidia/nvsentinel/lifecycle-manager:v1.28.0"
+	lifecycleManagerImage = "ghcr.io/nvidia/nvsentinel/lifecycle-manager:v1.31.0"
 	// dcgmDiagTestImage is named only inside lifecycle-manager's config.yaml.
 	dcgmDiagTestImage = "nvcr.io/nvidia/cloud-native/dcgm:4.7.0-ubuntu24.04"
 	// lifecycleManagerLabelPrefix is the chart's cordon label prefix, which

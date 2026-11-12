@@ -1419,6 +1419,7 @@ Write the same artifact as an OCI image layout without pushing, then publish it:
 			assumeYesFlag(catDeployment),
 			kubeconfigFlag(),
 			dataFlag(),
+			externalOnlyFlag(),
 			// OCI registry connection flags (used when --output is oci://...)
 			&cli.BoolFlag{
 				Name:     flagInsecureTLS,
