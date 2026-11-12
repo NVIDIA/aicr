@@ -1,0 +1,192 @@
+{
+  "$id": "https://aicr.run/schemas/v1/ArtifactBindings.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Catalog dispositions mapping release artifact names to chart and image targets.",
+  "properties": {
+    "apiVersion": {
+      "const": "aicr.run/v1beta1",
+      "type": "string"
+    },
+    "charts": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "maxLength": 128,
+            "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component"
+        ],
+        "type": "object"
+      },
+      "propertyNames": {
+        "maxLength": 128,
+        "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "ignoredArtifacts": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "propertyNames": {
+        "maxLength": 128,
+        "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "images": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "targets": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "component": {
+                  "maxLength": 128,
+                  "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+                  "type": "string"
+                },
+                "platform": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "architecture": {
+                      "maxLength": 128,
+                      "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+                      "type": "string"
+                    },
+                    "os": {
+                      "maxLength": 128,
+                      "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+                      "type": "string"
+                    },
+                    "variant": {
+                      "maxLength": 128,
+                      "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "architecture",
+                    "os"
+                  ],
+                  "type": "object"
+                },
+                "valuesFile": {
+                  "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*\\\\).+\\.(yaml|yml|json)$",
+                  "type": "string"
+                },
+                "write": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "required": [
+                              "repository"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "digest"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "clearTag"
+                            ]
+                          }
+                        ]
+                      },
+                      "required": [
+                        "reference"
+                      ]
+                    },
+                    {
+                      "not": {
+                        "required": [
+                          "reference"
+                        ]
+                      },
+                      "required": [
+                        "repository",
+                        "digest"
+                      ]
+                    }
+                  ],
+                  "properties": {
+                    "clearTag": {
+                      "pattern": "^/(?:[^~]|~[01])*$",
+                      "type": "string"
+                    },
+                    "digest": {
+                      "pattern": "^/(?:[^~]|~[01])*$",
+                      "type": "string"
+                    },
+                    "reference": {
+                      "pattern": "^/(?:[^~]|~[01])*$",
+                      "type": "string"
+                    },
+                    "repository": {
+                      "pattern": "^/(?:[^~]|~[01])*$",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "required": [
+                "component",
+                "valuesFile",
+                "write"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "targets"
+        ],
+        "type": "object"
+      },
+      "propertyNames": {
+        "maxLength": 128,
+        "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "kind": {
+      "const": "ArtifactBindings",
+      "type": "string"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "charts",
+    "images",
+    "kind"
+  ],
+  "title": "ArtifactBindings",
+  "type": "object"
+}

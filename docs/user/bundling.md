@@ -1088,8 +1088,8 @@ never replaced.
   hand-authored recipe; register it, for example through a `--data` registry
   entry that declares its `class`;
 - a dependency points from an earlier class to a later one, including the
-  opt-in `nvsentinel-preflight` and `nvsentinel-slinky-drainer` mixins under
-  the shipped classification;
+  opt-in `nvsentinel-preflight`, `nvsentinel-preflight-runai` and
+  `nvsentinel-slinky-drainer` mixins under the shipped classification;
 - every component of a declared class is disabled, by the recipe or by
   `--set <component>:enabled=false`;
 - two components would emit the same Helm release name in the same

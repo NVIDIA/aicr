@@ -78,20 +78,21 @@ func TestWarnNRIManagementAllowlist(t *testing.T) {
 				opts = append(opts, config.WithBundlers(tt.bundlers))
 			}
 			b := &DefaultBundler{Config: config.NewConfig(opts...)}
-			b.warnNRIManagementAllowlist(result, tt.values)
+			r := &bundleRun{DefaultBundler: b}
+			r.warnNRIManagementAllowlist(result, tt.values)
 
 			if !tt.wantWarning {
-				if len(b.warnings) != 0 {
-					t.Fatalf("warnings = %v, want none", b.warnings)
+				if len(r.warnings) != 0 {
+					t.Fatalf("warnings = %v, want none", r.warnings)
 				}
 				return
 			}
-			if len(b.warnings) != 1 {
-				t.Fatalf("warnings = %v, want exactly one", b.warnings)
+			if len(r.warnings) != 1 {
+				t.Fatalf("warnings = %v, want exactly one", r.warnings)
 			}
 			for _, want := range []string{sentinelRef.Namespace, nriManagementNamespacesEnvName, "every GPU", "gpuoperator:toolkit.env=[]"} {
-				if !strings.Contains(b.warnings[0], want) {
-					t.Errorf("warning %q does not mention %q", b.warnings[0], want)
+				if !strings.Contains(r.warnings[0], want) {
+					t.Errorf("warning %q does not mention %q", r.warnings[0], want)
 				}
 			}
 		})

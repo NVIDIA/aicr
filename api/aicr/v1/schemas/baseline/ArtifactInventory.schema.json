@@ -1,0 +1,149 @@
+{
+  "$id": "https://aicr.run/schemas/v1/ArtifactInventory.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Neutral OCI release identities consumed by artifact bindings.",
+  "properties": {
+    "apiVersion": {
+      "const": "aicr.run/v1beta1",
+      "type": "string"
+    },
+    "artifacts": {
+      "items": {
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "else": {
+              "not": {
+                "required": [
+                  "archiveDigest"
+                ]
+              }
+            },
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "chart"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "version": {
+                  "maxLength": 128,
+                  "pattern": "^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(_[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "not": {
+                "properties": {
+                  "type": {
+                    "const": "image"
+                  }
+                }
+              }
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "platform"
+                ]
+              }
+            }
+          }
+        ],
+        "properties": {
+          "archiveDigest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "manifestDigest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+            "type": "string"
+          },
+          "platform": {
+            "additionalProperties": false,
+            "properties": {
+              "architecture": {
+                "maxLength": 128,
+                "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+                "type": "string"
+              },
+              "os": {
+                "maxLength": 128,
+                "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+                "type": "string"
+              },
+              "variant": {
+                "maxLength": 128,
+                "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "architecture",
+              "os"
+            ],
+            "type": "object"
+          },
+          "reference": {
+            "pattern": "^oci://(?=localhost(?::[0-9]+)?/|[^/]*[.:])[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]+)?/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "chart",
+              "image",
+              "other"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "manifestDigest",
+          "name",
+          "reference",
+          "type",
+          "version"
+        ],
+        "type": "object"
+      },
+      "maxItems": 10000,
+      "type": "array"
+    },
+    "kind": {
+      "const": "ArtifactInventory",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "artifacts",
+    "kind"
+  ],
+  "title": "ArtifactInventory",
+  "type": "object"
+}

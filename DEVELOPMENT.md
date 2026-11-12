@@ -207,10 +207,12 @@ On Ubuntu 24.04+ and other systems using PEP 668, system-wide pip installs are b
 
 ```bash
 # Ubuntu/Debian prerequisites
-sudo apt-get install -y make git curl pipx
+sudo apt-get install -y make git curl pipx gawk
 pipx ensurepath
 pipx install yamllint
 ```
+
+The docs checks (`make lint`, `make test`) need gawk: mawk, the default `awk` on Debian and Ubuntu, cannot compile a regex the MDX checker uses. Installing gawk makes `awk` resolve to it, and `make tools-setup` installs it on Debian and Ubuntu.
 
 `make tools-setup` installs yq itself, at the version pinned in `.settings.yaml`, checksum-verified. It keeps a yq that is already on `PATH`, so run `make tools-update` to replace a hand-installed one.
 
