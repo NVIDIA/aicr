@@ -21,7 +21,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/json"
 	"math/big"
 	"net/url"
 	"strings"
@@ -115,19 +114,7 @@ func TestKeylessAttester_BuilderIDIsSigner(t *testing.T) {
 		t.Fatalf("Attest() error = %v", err)
 	}
 
-	var stmt struct {
-		Predicate struct {
-			RunDetails struct {
-				Builder struct {
-					ID string `json:"id"`
-				} `json:"builder"`
-			} `json:"runDetails"`
-		} `json:"predicate"`
-	}
-	if err := json.Unmarshal(statementJSON, &stmt); err != nil {
-		t.Fatalf("unmarshal statement: %v", err)
-	}
-	if got := stmt.Predicate.RunDetails.Builder.ID; got != signer {
+	if got := decodeStatement(t, statementJSON).Predicate.RunDetails.Builder.ID; got != signer {
 		t.Errorf("builder.id = %q, want %q", got, signer)
 	}
 }

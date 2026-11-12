@@ -357,7 +357,7 @@ func TestSignStatementFor_PassesSigner(t *testing.T) {
 			var got string
 			build := func(signer string) ([]byte, error) {
 				got = signer
-				return validStatementJSON(t), nil
+				return statementJSONFor(t, signer), nil
 			}
 			res, err := signStatementFor(context.Background(), build, tt.id, NewNoTLogPolicy())
 			if err != nil {
@@ -368,6 +368,14 @@ func TestSignStatementFor_PassesSigner(t *testing.T) {
 			}
 			if res.Identity != tt.want {
 				t.Errorf("Identity = %q, want %q", res.Identity, tt.want)
+			}
+			var b protobundle.Bundle
+			if err := protojson.Unmarshal(res.BundleJSON, &b); err != nil {
+				t.Fatalf("unmarshal bundle: %v", err)
+			}
+			stmt := decodeStatement(t, b.GetDsseEnvelope().GetPayload())
+			if id := stmt.Predicate.RunDetails.Builder.ID; id != tt.want {
+				t.Errorf("signed builder.id = %q, want %q", id, tt.want)
 			}
 		})
 	}
@@ -409,6 +417,13 @@ func (f *fakeKeyIdentity) FallbackIdentity() string { return f.uri }
 // package's BuildStatement so the payload is spec-valid (no hand-rolled JSON).
 func validStatementJSON(t *testing.T) []byte {
 	t.Helper()
+	return statementJSONFor(t, "awskms://test/key")
+}
+
+// statementJSONFor builds a valid in-toto statement whose builder ID is
+// builderID.
+func statementJSONFor(t *testing.T, builderID string) []byte {
+	t.Helper()
 	stmt, err := BuildStatement(
 		AttestSubject{
 			Name:   "checksums.txt",
@@ -417,7 +432,7 @@ func validStatementJSON(t *testing.T) []byte {
 		StatementMetadata{
 			Recipe:      "test-recipe",
 			ToolVersion: "v0.0.0-test",
-			BuilderID:   "awskms://test/key",
+			BuilderID:   builderID,
 		},
 	)
 	if err != nil {

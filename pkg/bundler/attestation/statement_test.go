@@ -16,9 +16,82 @@ package attestation
 
 import (
 	"encoding/json"
+	"maps"
 	"testing"
 	"time"
+
+	provenance "github.com/in-toto/attestation/go/predicates/provenance/v1"
+	intoto "github.com/in-toto/attestation/go/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
+
+// decodedStatement holds the statement fields these tests assert on.
+// StartedOn is nil when the key is absent.
+type decodedStatement struct {
+	Type          string `json:"_type"`
+	PredicateType string `json:"predicateType"`
+	Subject       []struct {
+		Name   string            `json:"name"`
+		Digest map[string]string `json:"digest"`
+	} `json:"subject"`
+	Predicate struct {
+		BuildDefinition *struct {
+			InternalParameters struct {
+				ToolVersion string `json:"toolVersion"`
+			} `json:"internalParameters"`
+			ResolvedDependencies []struct {
+				URI string `json:"uri"`
+			} `json:"resolvedDependencies"`
+		} `json:"buildDefinition"`
+		RunDetails *struct {
+			Builder struct {
+				ID string `json:"id"`
+			} `json:"builder"`
+			Metadata struct {
+				InvocationID string  `json:"invocationId"`
+				StartedOn    *string `json:"startedOn"`
+			} `json:"metadata"`
+		} `json:"runDetails"`
+	} `json:"predicate"`
+}
+
+// decodeStatement parses statement JSON into a decodedStatement. It fails
+// the test when the JSON does not match the in-toto Statement and SLSA v1
+// provenance schemas or fails their Validate checks, such as an empty
+// builder.id.
+func decodeStatement(t *testing.T, data []byte) decodedStatement {
+	t.Helper()
+	var schema intoto.Statement
+	if err := protojson.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("statement is not an in-toto Statement: %v", err)
+	}
+	if err := schema.Validate(); err != nil {
+		t.Fatalf("invalid in-toto Statement: %v", err)
+	}
+	predicateJSON, err := protojson.Marshal(schema.GetPredicate())
+	if err != nil {
+		t.Fatalf("marshal predicate: %v", err)
+	}
+	var pred provenance.Provenance
+	if err := protojson.Unmarshal(predicateJSON, &pred); err != nil {
+		t.Fatalf("predicate is not SLSA v1 provenance: %v", err)
+	}
+	if err := pred.Validate(); err != nil {
+		t.Fatalf("invalid SLSA v1 provenance: %v", err)
+	}
+
+	var stmt decodedStatement
+	if err := json.Unmarshal(data, &stmt); err != nil {
+		t.Fatalf("invalid statement JSON: %v", err)
+	}
+	if stmt.Predicate.BuildDefinition == nil {
+		t.Fatal("predicate missing buildDefinition")
+	}
+	if stmt.Predicate.RunDetails == nil {
+		t.Fatal("predicate missing runDetails")
+	}
+	return stmt
+}
 
 func TestBuildStatement(t *testing.T) {
 	subject := AttestSubject{
@@ -43,49 +116,24 @@ func TestBuildStatement(t *testing.T) {
 		t.Fatalf("BuildStatement() error: %v", err)
 	}
 
-	// Parse and validate the JSON structure
-	var stmt map[string]any
-	if err := json.Unmarshal(data, &stmt); err != nil {
-		t.Fatalf("BuildStatement() produced invalid JSON: %v", err)
+	stmt := decodeStatement(t, data)
+	if stmt.Type != "https://in-toto.io/Statement/v1" {
+		t.Errorf("_type = %q, want https://in-toto.io/Statement/v1", stmt.Type)
 	}
-
-	// Check in-toto statement type
-	if got := stmt["_type"]; got != "https://in-toto.io/Statement/v1" {
-		t.Errorf("_type = %v, want https://in-toto.io/Statement/v1", got)
+	if stmt.PredicateType != "https://slsa.dev/provenance/v1" {
+		t.Errorf("predicateType = %q, want https://slsa.dev/provenance/v1", stmt.PredicateType)
 	}
-
-	// Check predicate type
-	if got := stmt["predicateType"]; got != "https://slsa.dev/provenance/v1" {
-		t.Errorf("predicateType = %v, want https://slsa.dev/provenance/v1", got)
+	if len(stmt.Subject) != 1 {
+		t.Fatalf("subject has %d entries, want 1", len(stmt.Subject))
 	}
-
-	// Check subject
-	subjects, ok := stmt["subject"].([]any)
-	if !ok || len(subjects) != 1 {
-		t.Fatalf("subject should have 1 entry, got %v", stmt["subject"])
+	if stmt.Subject[0].Name != "checksums.txt" {
+		t.Errorf("subject.name = %q, want checksums.txt", stmt.Subject[0].Name)
 	}
-	subj := subjects[0].(map[string]any)
-	if subj["name"] != "checksums.txt" {
-		t.Errorf("subject.name = %v, want checksums.txt", subj["name"])
+	if got := stmt.Subject[0].Digest; !maps.Equal(got, subject.Digest) {
+		t.Errorf("subject.digest = %v, want %v", got, subject.Digest)
 	}
-
-	// Check predicate has buildDefinition and runDetails
-	predicate, predicateOK := stmt["predicate"].(map[string]any)
-	if !predicateOK {
-		t.Fatalf("predicate should be a map, got %T", stmt["predicate"])
-	}
-	if _, hasBuildDef := predicate["buildDefinition"]; !hasBuildDef {
-		t.Error("predicate missing buildDefinition")
-	}
-	if _, hasRunDetails := predicate["runDetails"]; !hasRunDetails {
-		t.Error("predicate missing runDetails")
-	}
-
-	// Check resolvedDependencies
-	buildDef := predicate["buildDefinition"].(map[string]any)
-	deps, ok := buildDef["resolvedDependencies"].([]any)
-	if !ok || len(deps) != 1 {
-		t.Fatalf("resolvedDependencies should have 1 entry, got %v", buildDef["resolvedDependencies"])
+	if got := len(stmt.Predicate.BuildDefinition.ResolvedDependencies); got != 1 {
+		t.Errorf("resolvedDependencies has %d entries, want 1", got)
 	}
 }
 
@@ -115,6 +163,7 @@ func TestBuildStatement_WithToolVersion(t *testing.T) {
 		ToolVersion: "v1.2.3",
 		Recipe:      "h100-eks-training",
 		Components:  []string{"gpu-operator"},
+		BuilderID:   "jdoe@company.com",
 	}
 
 	data, err := BuildStatement(subject, metadata)
@@ -122,17 +171,9 @@ func TestBuildStatement_WithToolVersion(t *testing.T) {
 		t.Fatalf("BuildStatement() error: %v", err)
 	}
 
-	var stmt map[string]any
-	if err := json.Unmarshal(data, &stmt); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-
-	// Navigate to internalParameters.toolVersion
-	predicate := stmt["predicate"].(map[string]any)
-	buildDef := predicate["buildDefinition"].(map[string]any)
-	internalParams := buildDef["internalParameters"].(map[string]any)
-	if got := internalParams["toolVersion"]; got != "v1.2.3" {
-		t.Errorf("toolVersion = %v, want v1.2.3", got)
+	stmt := decodeStatement(t, data)
+	if got := stmt.Predicate.BuildDefinition.InternalParameters.ToolVersion; got != "v1.2.3" {
+		t.Errorf("toolVersion = %q, want v1.2.3", got)
 	}
 }
 
@@ -142,21 +183,12 @@ func TestBuildStatement_NoDependencies(t *testing.T) {
 		Digest: map[string]string{"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
 	}
 
-	data, err := BuildStatement(subject, StatementMetadata{})
+	data, err := BuildStatement(subject, StatementMetadata{BuilderID: "jdoe@company.com"})
 	if err != nil {
 		t.Fatalf("BuildStatement() error: %v", err)
 	}
 
-	var stmt map[string]any
-	if err := json.Unmarshal(data, &stmt); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-
-	// Should still have buildDefinition even with no deps
-	predicate := stmt["predicate"].(map[string]any)
-	if _, ok := predicate["buildDefinition"]; !ok {
-		t.Error("missing buildDefinition")
-	}
+	decodeStatement(t, data)
 }
 
 // TestBuildStatement_Deterministic verifies that two runs of BuildStatement
@@ -187,17 +219,11 @@ func TestBuildStatement_Deterministic(t *testing.T) {
 		t.Fatalf("deterministic mode produced different statements:\nfirst:  %s\nsecond: %s", first, second)
 	}
 
-	// Confirm startedOn is omitted in deterministic mode.
-	var stmt map[string]any
-	if err := json.Unmarshal(first, &stmt); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
+	md := decodeStatement(t, first).Predicate.RunDetails.Metadata
+	if md.StartedOn != nil {
+		t.Errorf("startedOn should be omitted in deterministic mode, got %q", *md.StartedOn)
 	}
-	rd := stmt["predicate"].(map[string]any)["runDetails"].(map[string]any)
-	md := rd["metadata"].(map[string]any)
-	if _, present := md["startedOn"]; present {
-		t.Errorf("startedOn should be omitted in deterministic mode, got %v", md["startedOn"])
-	}
-	if md["invocationId"] == "" {
+	if md.InvocationID == "" {
 		t.Error("invocationId should be derived, got empty")
 	}
 }
@@ -212,22 +238,23 @@ func TestBuildStatement_InvocationIDOverride(t *testing.T) {
 	fixedID := "11111111-2222-3333-4444-555555555555"
 	fixedTime := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 	data, err := BuildStatement(subject, StatementMetadata{
+		BuilderID:    "jdoe@company.com",
 		InvocationID: fixedID,
 		StartedOn:    fixedTime,
 	})
 	if err != nil {
 		t.Fatalf("BuildStatement: %v", err)
 	}
-	var stmt map[string]any
-	if err := json.Unmarshal(data, &stmt); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
+	md := decodeStatement(t, data).Predicate.RunDetails.Metadata
+	if md.InvocationID != fixedID {
+		t.Errorf("invocationId = %q, want %q", md.InvocationID, fixedID)
 	}
-	md := stmt["predicate"].(map[string]any)["runDetails"].(map[string]any)["metadata"].(map[string]any)
-	if md["invocationId"] != fixedID {
-		t.Errorf("invocationId = %v, want %v", md["invocationId"], fixedID)
-	}
-	if md["startedOn"] != fixedTime.Format(time.RFC3339) {
-		t.Errorf("startedOn = %v, want %v", md["startedOn"], fixedTime.Format(time.RFC3339))
+	want := fixedTime.Format(time.RFC3339)
+	switch {
+	case md.StartedOn == nil:
+		t.Errorf("startedOn missing, want %q", want)
+	case *md.StartedOn != want:
+		t.Errorf("startedOn = %q, want %q", *md.StartedOn, want)
 	}
 }
 
