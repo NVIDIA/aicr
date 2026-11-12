@@ -99,6 +99,11 @@ func (r *RecipeSpec) DataDir() string {
 	return r.Data
 }
 
+// IsExternalOnly reports whether embedded catalog data is disabled.
+func (r *RecipeSpec) IsExternalOnly() bool {
+	return r != nil && r.ExternalOnly
+}
+
 // ProfileSelection returns spec.recipe.profile, or "" when unset.
 func (r *RecipeSpec) ProfileSelection() string {
 	if r == nil {

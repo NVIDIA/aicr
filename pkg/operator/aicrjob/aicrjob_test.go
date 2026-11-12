@@ -100,6 +100,15 @@ func TestBuildAppliesJobPolicy(t *testing.T) {
 			if pod.RestartPolicy != corev1.RestartPolicyNever || pod.ServiceAccountName != "aicr-jobs" {
 				t.Errorf("pod restart=%s sa=%s", pod.RestartPolicy, pod.ServiceAccountName)
 			}
+			// Only the validation stage runs the CLI's cooperative cleanup on
+			// SIGTERM, so only it overrides the Kubernetes default grace.
+			if stage == StageValidation {
+				if pod.TerminationGracePeriodSeconds == nil || *pod.TerminationGracePeriodSeconds != int64(defaults.ValidationJobTerminationGrace.Seconds()) {
+					t.Errorf("terminationGracePeriodSeconds = %v, want %v", pod.TerminationGracePeriodSeconds, defaults.ValidationJobTerminationGrace)
+				}
+			} else if pod.TerminationGracePeriodSeconds != nil {
+				t.Errorf("terminationGracePeriodSeconds = %d, want the Kubernetes default (unset)", *pod.TerminationGracePeriodSeconds)
+			}
 			c := pod.Containers[0]
 			if c.Image != image || c.Args[0] != spec.subcommand {
 				t.Errorf("container image=%s args=%v", c.Image, c.Args)

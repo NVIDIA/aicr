@@ -19,10 +19,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/evidence/allowlist"
+	"github.com/NVIDIA/aicr/pkg/evidence/index"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/testgrid"
@@ -83,11 +86,11 @@ func TestRenderMatrixContent(t *testing.T) {
 		"## Summary",
 		"- Recipes: **2**",
 		"Pass: **1** · Warn: **0** · Fail: **1** · Unknown: **0**",
-		"| Recipe | Service | Accelerator | OS | Intent | Platform | Status | Coverage | Evidence |",
+		"| Recipe | Service | Accelerator | OS | Intent | Platform | Status | Coverage | Evidence | Signer class |",
 		// Clean pass row: unspecified dims are em dashes; coverage counts checks.
-		"| h100-any | — | h100 | — | — | — | pass | R:0 D:4 P:1 C:0 | pending |",
+		"| h100-any | — | h100 | — | — | — | pass | R:0 D:4 P:1 C:0 | pending | — |",
 		// Fail row with nil Coverage renders an em dash, not an all-zero block.
-		"| h100-eks-ubuntu-training | eks | h100 | ubuntu | training | — | fail | — | pending |",
+		"| h100-eks-ubuntu-training | eks | h100 | ubuntu | training | — | fail | — | pending | — |",
 	}
 	for _, s := range wantSubstrings {
 		if !strings.Contains(out, s) {
@@ -242,8 +245,127 @@ func TestRenderMatrixLinksPresentCoordinate(t *testing.T) {
 	if !strings.Contains(out, "[eks/h100-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/h100-ubuntu/training-kubeflow)") {
 		t.Errorf("present recipe missing deep-link:\n%s", out)
 	}
-	if !strings.Contains(out, "| h100-any | — | h100 | — | — | — | pass | — | pending |") {
+	if !strings.Contains(out, "| h100-any | — | h100 | — | — | — | pass | — | pending | — |") {
 		t.Errorf("unmappable recipe should stay pending:\n%s", out)
+	}
+}
+
+func TestSignerClassCell(t *testing.T) {
+	aks := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceAKS,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		OS:          recipe.CriteriaOSUbuntu,
+		Intent:      recipe.CriteriaIntentTraining,
+	}
+	classes := map[string][]allowlist.Class{
+		"h100-aks-ubuntu-training":                        {allowlist.ClassCommunity},
+		"h100-aks-ubuntu-training-gpustack-azure-managed": {allowlist.ClassCommunity, allowlist.ClassPartner},
+	}
+	tests := []struct {
+		name    string
+		combo   health.ComboHealth
+		classes map[string][]allowlist.Class
+		want    string
+	}{
+		{"unprofiled id", health.ComboHealth{Criteria: aks}, classes, "community"},
+		{
+			"profiled id joins classes in order",
+			health.ComboHealth{Criteria: aks, Profile: "gpuStack=azure-managed"},
+			classes, "community, partner",
+		},
+		{"profiled id without a pointer", health.ComboHealth{Criteria: aks, Profile: "gpuStack=gke-default"}, classes, "—"},
+		{"invalid profile has no id", health.ComboHealth{Criteria: aks, Profile: "gpuStack=bad value"}, classes, "—"},
+		{"nil classes", health.ComboHealth{Criteria: aks}, nil, "—"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := signerClassCell(tt.combo, tt.classes); got != tt.want {
+				t.Errorf("signerClassCell() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderMatrixSignerClass(t *testing.T) {
+	presence, err := testgrid.LoadPresence()
+	if err != nil {
+		t.Fatalf("LoadPresence() error = %v", err)
+	}
+	linked := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceEKS,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		OS:          recipe.CriteriaOSUbuntu,
+		Intent:      recipe.CriteriaIntentTraining,
+		Platform:    recipe.CriteriaPlatformKubeflow,
+	}
+	report := &health.Report{
+		SchemaVersion: health.SchemaVersion,
+		Combos: []health.ComboHealth{
+			{Criteria: linked, LeafOverlay: "linked", Structure: health.StructureHealth{Status: health.StatusPass}},
+			{
+				Criteria:    &recipe.Criteria{Accelerator: recipe.CriteriaAcceleratorH100},
+				LeafOverlay: "h100-any",
+				Structure:   health.StructureHealth{Status: health.StatusPass},
+			},
+		},
+	}
+	classes := map[string][]allowlist.Class{
+		"h100-eks-ubuntu-training-kubeflow": {allowlist.ClassCommunity},
+		"h100":                              {allowlist.ClassPartner},
+	}
+	var buf bytes.Buffer
+	if err := renderMatrix(&buf, report, markdownOptions{
+		Deterministic: true, NoTitle: true, Presence: presence, SignerClasses: classes,
+	}); err != nil {
+		t.Fatalf("renderMatrix() error = %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"| [eks/h100-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/h100-ubuntu/training-kubeflow) | community |",
+		"| h100-any | — | h100 | — | — | — | pass | — | pending | partner |",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered output missing %q\n--- full output ---\n%s", want, out)
+		}
+	}
+}
+
+// TestRunRendersProfiledPointerClass drives run() over the embedded catalog.
+// A profiled row resolves at its declaration default, so its signer class
+// comes from the pointer committed under the profile-suffixed id.
+func TestRunRendersProfiledPointerClass(t *testing.T) {
+	const (
+		leaf       = "h100-gke-cos-training-kubeflow"
+		profiledID = leaf + "-gpustack-gke-default"
+	)
+	classes, err := index.SignerClasses()
+	if err != nil {
+		t.Fatalf("index.SignerClasses() error = %v", err)
+	}
+	if !slices.Equal(classes[profiledID], []allowlist.Class{allowlist.ClassCommunity}) {
+		t.Fatalf("%s pointer classes = %v. Pick another profiled recipe with a community pointer.", profiledID, classes[profiledID])
+	}
+	if _, ok := classes[leaf]; ok {
+		t.Fatalf("%s now has an unprofiled pointer. Pick a recipe whose only pointer is profiled.", leaf)
+	}
+
+	outDir := t.TempDir()
+	if runErr := run(context.Background(), outDir, "", "test-v1", true, true); runErr != nil {
+		t.Fatalf("run() error = %v", runErr)
+	}
+	rendered, err := os.ReadFile(filepath.Join(outDir, matrixFile))
+	if err != nil {
+		t.Fatalf("read %s: %v", matrixFile, err)
+	}
+	var row string
+	for line := range strings.SplitSeq(string(rendered), "\n") {
+		if strings.HasPrefix(line, "| "+leaf+" |") {
+			row = line
+			break
+		}
+	}
+	if !strings.HasSuffix(row, "| pending | community |") {
+		t.Errorf("%s row = %q, want Evidence pending and Signer class community", leaf, row)
 	}
 }
 

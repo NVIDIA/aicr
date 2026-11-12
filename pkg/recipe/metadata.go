@@ -29,6 +29,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -1256,6 +1257,8 @@ func (e *ExcludedOverlay) UnmarshalJSON(data []byte) error {
 // constructors can build it without re-declaring the full field list —
 // which silently breaks on every field addition.
 type RecipeResultMetadata struct {
+	// Artifacts records the release inputs required to execute this recipe.
+	Artifacts *artifact.Provenance `json:"artifacts,omitempty" yaml:"artifacts,omitempty"`
 	// Version is the recipe version (CLI version that generated this recipe).
 	Version string `json:"version,omitempty" yaml:"version,omitempty"`
 
@@ -1516,9 +1519,10 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 		// operation's read-once view, so an independent copy resolves fresh.
 	}
 
-	// Metadata: scalar fields, the SelectedProfile
-	// pointer (cloned with its OwnedPaths map), plus three slices.
+	// Metadata's provenance, profile-owned paths and slices are copied
+	// independently of the caller's record.
 	out.Metadata.Version = r.Metadata.Version
+	out.Metadata.Artifacts = r.Metadata.Artifacts.Clone()
 	out.Metadata.GPUDriverState = r.Metadata.GPUDriverState
 	out.Metadata.MariaDBOperatorState = r.Metadata.MariaDBOperatorState
 	out.Metadata.DefaultStorageClassState = r.Metadata.DefaultStorageClassState

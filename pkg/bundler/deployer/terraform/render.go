@@ -26,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	helmutil "github.com/NVIDIA/aicr/pkg/helm"
 )
 
 // bundleData is the render input shared by every generated file. One struct
@@ -208,7 +209,7 @@ func chartAttrs(f localformat.Folder, digest string) []attr {
 		out = append(out, attr{"repository", hclString(f.Upstream.Repo)})
 	}
 	if f.Upstream.Version != "" {
-		out = append(out, attr{"chart_version", hclString(f.Upstream.Version)})
+		out = append(out, attr{"chart_version", hclString(helmutil.ChartVersion(f.Upstream.Repo, f.Upstream.Version))})
 	}
 	return out
 }
