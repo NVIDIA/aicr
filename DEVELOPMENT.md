@@ -39,7 +39,7 @@ generate deployment artifacts.
 1. Open the repository (or your fork) on GitHub, select **Code > Codespaces >
   Create codespace on main**, and wait for the post-create setup to finish.
   Your GitHub account or organization must allow Codespaces and have available quota.
-2. Select at least 4 CPUs, 16 GB RAM, and 64 GB storage, as requested by the
+2. Select at least 4 CPUs, 16 GB RAM, and 32 GB storage, as requested by the
   container configuration. For the full race-enabled test suite or Kind/Tilt,
   prefer 8 CPUs, 32 GB RAM, and 128 GB storage where available.
 3. Run the normal development commands in the Codespace terminal:
