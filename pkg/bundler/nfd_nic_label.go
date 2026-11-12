@@ -55,8 +55,8 @@ const (
 // emits pci-15b3.present) and labelsTemplate rules are not replayed, so when
 // any is set a missing rule is a warning instead of an error. So is an nfd
 // --dynamic path covering a label input, whose value is set at install time.
-func (b *DefaultBundler) checkNFDNICLabelMismatch(componentValues map[string]map[string]any, dynamicValues map[string][]string) error {
-	if b.Config == nil {
+func (r *bundleRun) checkNFDNICLabelMismatch(componentValues map[string]map[string]any, dynamicValues map[string][]string) error {
+	if r.Config == nil {
 		return nil
 	}
 	rawNFDValues, ok := componentValues[nfdComponentName]
@@ -87,7 +87,7 @@ func (b *DefaultBundler) checkNFDNICLabelMismatch(componentValues map[string]map
 		warning = msg + fmt.Sprintf(" This is a warning, not an error, because %s sets %s, %s, a "+
 			"labelsTemplate rule or a --dynamic label input, which this check does not evaluate.",
 			nfdComponentName, nfdWorkerExtraArgsValuePath, nfdPCISourceValuePath)
-	case !networkOperator && hasRule && len(b.Config.Bundlers()) == 0:
+	case !networkOperator && hasRule && len(r.Config.Bundlers()) == 0:
 		warning = fmt.Sprintf(
 			"%[1]s labels NVIDIA NIC nodes %[2]s (%[3]s), but %[4]s is not in this bundle. The GPU "+
 				"Operator validator waits on those nodes for the %[4]s MOFED driver when the GPU Operator "+
@@ -103,7 +103,7 @@ func (b *DefaultBundler) checkNFDNICLabelMismatch(componentValues map[string]map
 	slog.Warn(warning,
 		"network_operator_in_bundle", networkOperator,
 		"nic_label_rule", hasRule)
-	b.appendWarning(warning)
+	r.appendWarning(warning)
 	return nil
 }
 

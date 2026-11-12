@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
@@ -154,6 +155,13 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 	if ctx == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
 	}
+	c.mu.RLock()
+	_, inventoryEnabled := c.dp.(*recipe.ArtifactProvider)
+	c.mu.RUnlock()
+	if inventoryEnabled {
+		return nil, artifact.Invalid("artifact-upgrade-unsupported", "upgrade-check does not support an inventory-enabled client")
+	}
+
 	if req.From == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"a source artifact is required: set --from (SDK: UpgradeCheckRequest.From)")
@@ -202,7 +210,7 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 		}
 		from, err = c.LoadRecipe(ctx, fromPath, req.Kubeconfig)
 		if err != nil {
-			return nil, err
+			return nil, artifactConsumerError(err, "artifact-upgrade-unsupported")
 		}
 	}
 
@@ -741,7 +749,11 @@ func (c *Client) upgradeCheckTarget(
 		if err != nil {
 			return nil, err
 		}
-		return c.LoadRecipe(ctx, toPath, req.Kubeconfig)
+		target, err := c.LoadRecipe(ctx, toPath, req.Kubeconfig)
+		if err != nil {
+			return nil, artifactConsumerError(err, "artifact-upgrade-unsupported")
+		}
+		return target, nil
 	}
 
 	if req.From == FromCluster {
