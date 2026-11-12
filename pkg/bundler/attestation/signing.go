@@ -233,7 +233,7 @@ func signStatementFor(ctx context.Context, build func(signer string) ([]byte, er
 		if certErr != nil {
 			return nil, certErr
 		}
-		signer = certificateIdentity(certDER)
+		signer, _ = certificateClaims(certDER)
 		bundleOpts.CertificateProvider = issuedCertificate(certDER)
 	}
 
@@ -339,41 +339,29 @@ func extractSignerClaims(bundle *protobundle.Bundle) (identity, issuer string) {
 	if len(certDER) == 0 {
 		return "", ""
 	}
+	return certificateClaims(certDER)
+}
 
+// certificateClaims returns the SAN identity and OIDC issuer of the
+// DER-encoded certificate certDER. The identity is the first email SAN,
+// else the first URI SAN. Each value is "" when the certificate does not
+// parse or lacks it.
+func certificateClaims(certDER []byte) (identity, issuer string) {
 	parsed, err := x509.ParseCertificate(certDER)
 	if err != nil {
-		slog.Debug("failed to parse signing certificate for claim extraction", "error", err)
+		slog.Debug("failed to parse signing certificate for claims", "error", err)
 		return "", ""
 	}
-
-	// Fulcio embeds the OIDC issuer in extension OID 1.3.6.1.4.1.57264.1.1
-	// (legacy) and 1.3.6.1.4.1.57264.1.8 (current); extractIssuerExtension
-	// prefers the current OID and falls back to legacy.
-	return sanIdentity(parsed), extractIssuerExtension(parsed)
-}
-
-// certificateIdentity returns the SAN identity of a DER-encoded certificate,
-// or "" when it does not parse or has no email or URI SAN.
-func certificateIdentity(certDER []byte) string {
-	parsed, err := x509.ParseCertificate(certDER)
-	if err != nil {
-		slog.Debug("failed to parse issued certificate for identity", "error", err)
-		return ""
+	issuer = extractIssuerExtension(parsed)
+	// Fulcio puts interactive OIDC identities in an email SAN and workload
+	// identities, such as GitHub Actions, in a URI SAN.
+	switch {
+	case len(parsed.EmailAddresses) > 0:
+		return parsed.EmailAddresses[0], issuer
+	case len(parsed.URIs) > 0:
+		return parsed.URIs[0].String(), issuer
 	}
-	return sanIdentity(parsed)
-}
-
-// sanIdentity returns the first email SAN, else the first URI SAN, else "".
-// Fulcio encodes interactive OIDC identities as an email SAN and workload
-// identities (GitHub Actions OIDC) as a URI SAN.
-func sanIdentity(cert *x509.Certificate) string {
-	if len(cert.EmailAddresses) > 0 {
-		return cert.EmailAddresses[0]
-	}
-	if len(cert.URIs) > 0 {
-		return cert.URIs[0].String()
-	}
-	return ""
+	return "", issuer
 }
 
 // issuedCertificate is a sign.CertificateProvider that returns a certificate
