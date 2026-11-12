@@ -16,6 +16,7 @@ package aicr
 
 import (
 	stderrors "errors"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -45,4 +46,23 @@ func artifactConsumerError(err error, reason string) error {
 		}
 	}
 	return err
+}
+
+func validateArtifactFacade(r *RecipeResult) error {
+	if r.internal.Metadata.Artifacts == nil {
+		return nil
+	}
+	expected := facadeResultFromInternal(r.internal, r.Name).Components
+	if len(expected) != len(r.Components) {
+		return artifact.Invalid("artifact-identity-conflict", "SDK component set differs from resolved recipe")
+	}
+	for i, component := range r.Components {
+		component.Kind = strings.ToLower(component.Kind)
+		canonical := expected[i]
+		canonical.Kind = strings.ToLower(canonical.Kind)
+		if component != canonical {
+			return artifact.Invalid("artifact-identity-conflict", "SDK component differs from resolved recipe: "+component.Name)
+		}
+	}
+	return nil
 }

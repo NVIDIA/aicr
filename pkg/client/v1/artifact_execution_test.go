@@ -290,3 +290,27 @@ func TestArtifactOCICatalogInventory(t *testing.T) {
 		})
 	}
 }
+
+func TestArtifactBundleFacadeMutation(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		mutate func(*RecipeResult)
+	}{
+		{"version", func(r *RecipeResult) { r.Components[0].Version = "unbound" }},
+		{"source", func(r *RecipeResult) { r.Components[0].Source = "https://unbound.test" }},
+		{"chart", func(r *RecipeResult) { r.Components[0].Chart = "unbound" }},
+		{"kind", func(r *RecipeResult) { r.Components[0].Kind = "Kustomize" }},
+		{"duplicate", func(r *RecipeResult) { r.Components = append(r.Components, r.Components[0]) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			client, rec, _ := artifactExecutionFixture(t)
+			adopted, adoptErr := client.AdoptRecipe(t.Context(), rec)
+			if adoptErr != nil {
+				t.Fatal(adoptErr)
+			}
+			tt.mutate(adopted)
+			_, bundleErr := client.BundleComponents(t.Context(), adopted)
+			wantArtifactReason(t, bundleErr, "artifact-identity-conflict")
+		})
+	}
+}

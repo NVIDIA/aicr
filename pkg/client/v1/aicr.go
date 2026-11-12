@@ -1975,6 +1975,10 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 			"recipe has no enabled components")
 	}
 
+	if artifactErr := validateArtifactFacade(r); artifactErr != nil {
+		return nil, artifactErr
+	}
+
 	// Resolve the complete Helm-value inventory ONCE, before any gate runs and
 	// before emitting any component. Two properties depend on this ordering:
 	//

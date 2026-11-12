@@ -687,3 +687,68 @@ func TestArtifactCapturePreservesDualUseInputs(t *testing.T) {
 		})
 	}
 }
+
+func TestArtifactExistingCapturePathReplay(t *testing.T) {
+	files, inventory := artifactCatalogFixture()
+	files[artifactInventoryPath] = append([]byte("# default\n"), inventory...)
+	files["overlays/dual.yaml"] = []byte("spec: {componentRefs: [{name: other, valuesFile: artifacts/inventory.yaml}]}\n")
+	capturePath := "artifacts/selected-inventory-" + strings.TrimPrefix(digestArtifactBytes(inventory), "sha256:") + ".yaml"
+	files[capturePath] = inventory
+	p, composeErr := composeCapturedArtifacts(t.Context(), map[string][]byte{}, files, inventory, artifact.Options{})
+	if composeErr != nil {
+		t.Fatal(composeErr)
+	}
+	replay, replayErr := composeCapturedArtifacts(t.Context(), map[string][]byte{}, p.ArtifactInputs(), inventory, artifact.Options{}, capturePath)
+	if replayErr != nil {
+		t.Fatal(replayErr)
+	}
+	if inputErr := CheckArtifactInputs(p.ArtifactProvenance(), replay); inputErr != nil {
+		t.Fatal(inputErr)
+	}
+}
+
+func TestArtifactRebindingRejectsTrailingDocuments(t *testing.T) {
+	for _, tail := range []string{"---\n{}\n", "---\n", "---\ninvalid: ["} {
+		t.Run(tail, func(t *testing.T) {
+			files, inventory := artifactCatalogFixture()
+			files["overlays/runner.yaml"] = append(files["overlays/runner.yaml"], []byte(tail)...)
+			_, composeErr := composeCapturedArtifacts(t.Context(), map[string][]byte{}, files, inventory, artifact.Options{})
+			errorstest.WantReportedCode(t, composeErr, errors.ErrCodeInvalidRequest)
+		})
+	}
+}
+
+func TestArtifactCapturedOriginsAndPaths(t *testing.T) {
+	embedded, inventory := artifactCatalogFixture()
+	embedded["overlays/profile.yaml"] = []byte(`apiVersion: aicr.run/v1beta2
+kind: RecipeMetadata
+metadata: {name: profile}
+spec:
+  profile:
+    name: mode
+    default: original
+    values:
+      original: {}
+`)
+	external := map[string][]byte{"overlays/profile.yaml": []byte(`apiVersion: aicr.run/v1beta2
+kind: RecipeMetadata
+metadata: {name: profile}
+spec:
+  profile:
+    name: mode
+    values:
+      extra: {}
+`)}
+	p, composeErr := composeCapturedArtifacts(t.Context(), embedded, external, inventory, artifact.Options{})
+	if composeErr != nil {
+		t.Fatal(composeErr)
+	}
+	if p.Source("overlays/profile.yaml") != sourceEmbedded {
+		t.Fatal("profile patch changed embedded origin")
+	}
+	for _, name := range []string{"./components/runner/values.yaml", "components/runner/../runner/values.yaml"} {
+		if _, readErr := p.ReadFile(t.Context(), name); readErr != nil {
+			t.Fatal(readErr)
+		}
+	}
+}

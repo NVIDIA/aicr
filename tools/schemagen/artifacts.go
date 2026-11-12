@@ -106,7 +106,7 @@ func renderArtifactContract(generated *schema.Schema, kind string) ([]byte, erro
 		item := array["items"].(map[string]any)
 		properties(item)["name"] = name
 		property(item, artifactTypeKey)["enum"] = []string{"chart", "image", "other"}
-		property(item, artifactReferenceKey)[artifactPatternKey] = `^oci://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]+)?/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$`
+		property(item, artifactReferenceKey)[artifactPatternKey] = `^oci://(?=localhost(?::[0-9]+)?/|[^/]*[.:])[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]+)?/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$`
 		property(item, artifactVersionKey)["minLength"] = 1
 		properties(item)["manifestDigest"] = digest
 		properties(item)[artifactArchiveKey] = digest

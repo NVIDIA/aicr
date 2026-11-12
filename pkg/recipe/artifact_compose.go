@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -95,11 +96,12 @@ func composeCapturedArtifacts(ctx context.Context, embedded, external map[string
 	if err := artifact.Account(inventory, bindings); err != nil {
 		return nil, err
 	}
-	files, composeErr := mergeCapturedCatalog(embedded, external)
+	origins := map[string]string{}
+	files, composeErr := mergeCapturedCatalog(embedded, external, origins)
 	if composeErr != nil {
 		return nil, composeErr
 	}
-	p := &ArtifactProvider{files: files, embedded: embedded, external: external, inventoryBytes: bytes.Clone(inventoryBytes), inventory: inventory, bindings: bindings}
+	p := &ArtifactProvider{origins: origins, files: files, embedded: embedded, external: external, inventoryBytes: bytes.Clone(inventoryBytes), inventory: inventory, bindings: bindings}
 	p.bindingsBytes, composeErr = yaml.Marshal(bindings)
 	if composeErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "encode retained merged bindings", composeErr)
@@ -111,10 +113,7 @@ func composeCapturedArtifacts(ctx context.Context, embedded, external map[string
 	if err := validateComponentRegistryHeader(&registry, "artifact base registry"); err != nil {
 		return nil, err
 	}
-	byName := map[string]*ComponentConfig{}
-	for i := range registry.Components {
-		byName[registry.Components[i].Name] = &registry.Components[i]
-	}
+	byName := artifactComponentsByName(&registry)
 	if err := p.initializeProvenance(options, byName, inventoryPaths...); err != nil {
 		return nil, err
 	}
@@ -179,6 +178,14 @@ func composeCapturedArtifacts(ctx context.Context, embedded, external map[string
 	return p, nil
 }
 
+func artifactComponentsByName(registry *ComponentRegistry) map[string]*ComponentConfig {
+	byName := map[string]*ComponentConfig{}
+	for i := range registry.Components {
+		byName[registry.Components[i].Name] = &registry.Components[i]
+	}
+	return byName
+}
+
 func disableChangedArtifactCRDOwnership(registry *ComponentRegistry, changed []string) {
 	if len(changed) > 0 {
 		owners := []string{}
@@ -208,14 +215,7 @@ func (p *ArtifactProvider) initializeProvenance(options artifact.Options, byName
 	if err != nil {
 		return err
 	}
-	excluded := artifactExcludedFiles(p.files, inventoryPaths...)
-	for _, item := range p.inventory.Artifacts {
-		if binding, ok := p.bindings.Images[item.Name]; ok {
-			for _, target := range binding.Targets {
-				delete(excluded, target.ValuesFile)
-			}
-		}
-	}
+	excluded := p.excludedInputs(inventoryPaths...)
 	p.bindingsAsData = !excluded[artifactBindingsPath]
 	p.inventoryCapturePath = artifactInventoryPath
 	if !excluded[artifactInventoryPath] && !bytes.Equal(p.external[artifactInventoryPath], p.inventoryBytes) {
@@ -224,6 +224,7 @@ func (p *ArtifactProvider) initializeProvenance(options artifact.Options, byName
 			return artifact.Invalid("artifact-invalid", "selected inventory capture path already exists: "+p.inventoryCapturePath)
 		}
 	}
+	excluded = p.excludedInputs(append(append([]string{}, inventoryPaths...), p.inventoryCapturePath)...)
 	for _, name := range inventoryPaths {
 		if name != "" && name != artifactInventoryPath && excluded[name] {
 			p.relocatedInventories = append(p.relocatedInventories, name)
@@ -238,6 +239,18 @@ func (p *ArtifactProvider) initializeProvenance(options artifact.Options, byName
 		return err
 	}
 	return nil
+}
+
+func (p *ArtifactProvider) excludedInputs(inventoryPaths ...string) map[string]bool {
+	excluded := artifactExcludedFiles(p.files, inventoryPaths...)
+	for _, item := range p.inventory.Artifacts {
+		if binding, ok := p.bindings.Images[item.Name]; ok {
+			for _, target := range binding.Targets {
+				delete(excluded, target.ValuesFile)
+			}
+		}
+	}
+	return excluded
 }
 
 func artifactExcludedFiles(files map[string][]byte, inventoryPaths ...string) map[string]bool {
@@ -369,6 +382,9 @@ func (p *ArtifactProvider) rebindCatalogDefaults(ctx context.Context, old map[st
 			}
 		}
 		if changed {
+			if documentErr := requireSingleArtifactCatalogDocument(data); documentErr != nil {
+				return documentErr
+			}
 			encoded, err := encodeComposedArtifactFile(name, document)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "encode rebound catalog defaults", err)
@@ -460,4 +476,16 @@ func encodeComposedArtifactFile(name string, value any) ([]byte, error) {
 		return json.Marshal(value)
 	}
 	return yaml.Marshal(value)
+}
+
+func requireSingleArtifactCatalogDocument(data []byte) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var document any
+	if err := decoder.Decode(&document); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "decode artifact catalog document", err)
+	}
+	if err := decoder.Decode(&document); !stderrors.Is(err, io.EOF) {
+		return artifact.Invalid("artifact-invalid", "catalog rebinding requires one YAML document")
+	}
+	return nil
 }

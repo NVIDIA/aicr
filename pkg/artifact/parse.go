@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/url"
 	"path"
+	"reflect"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -124,6 +125,9 @@ func decode(data []byte, dst any) error {
 	if err != nil {
 		return err
 	}
+	if keyErr := validateFieldNames(value, reflect.TypeOf(dst).Elem()); keyErr != nil {
+		return keyErr
+	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "encode artifact fields", err)
@@ -132,6 +136,48 @@ func decode(data []byte, dst any) error {
 	jsonDecoder.DisallowUnknownFields()
 	if err := jsonDecoder.Decode(dst); err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid artifact fields", err)
+	}
+	return nil
+}
+
+func validateFieldNames(value any, shape reflect.Type) error {
+	for shape.Kind() == reflect.Pointer {
+		shape = shape.Elem()
+	}
+	switch node := value.(type) {
+	case map[string]any:
+		fields := map[string]reflect.Type{}
+		if shape.Kind() == reflect.Struct {
+			for i := range shape.NumField() {
+				field := shape.Field(i)
+				fields[strings.Split(field.Tag.Get("json"), ",")[0]] = field.Type
+			}
+		}
+		for name, child := range node {
+			var childType reflect.Type
+			switch {
+			case shape.Kind() == reflect.Struct:
+				childType = fields[name]
+				if childType == nil {
+					return invalid("unknown field " + name)
+				}
+			case shape.Kind() == reflect.Map:
+				childType = shape.Elem()
+			default:
+				continue
+			}
+			if err := validateFieldNames(child, childType); err != nil {
+				return err
+			}
+		}
+	case []any:
+		if shape.Kind() == reflect.Slice {
+			for _, child := range node {
+				if err := validateFieldNames(child, shape.Elem()); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -194,7 +240,7 @@ func validateIdentity(item Identity) error {
 		return invalid("invalid artifact type for " + item.Name)
 	}
 	parsed, err := url.Parse(item.Reference)
-	if err != nil || parsed.Scheme != "oci" || parsed.User != nil || !hostPattern.MatchString(parsed.Host) || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" || !repositoryPattern.MatchString(strings.TrimPrefix(parsed.Path, "/")) || strings.ContainsAny(item.Reference, "@%?#") {
+	if err != nil || !strings.HasPrefix(item.Reference, "oci://") || parsed.Scheme != "oci" || parsed.User != nil || !hostPattern.MatchString(parsed.Host) || (parsed.Host != "localhost" && !strings.ContainsAny(parsed.Host, ".:")) || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" || !repositoryPattern.MatchString(strings.TrimPrefix(parsed.Path, "/")) || strings.ContainsAny(item.Reference, "@%?#") {
 		return invalid("invalid OCI reference for " + item.Name)
 	}
 	if item.Version == "" || !digestPattern.MatchString(item.ManifestDigest) {

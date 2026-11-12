@@ -34,7 +34,8 @@ artifacts:
 ```
 
 These digests are illustrative; use the publisher's actual digests.
-`reference` contains neither a tag nor a digest.
+`reference` contains neither a tag nor a digest and starts with literal lowercase `oci://`.
+Its registry host must contain a dot or port, or be `localhost`, so container tools cannot reinterpret it as a Docker Hub path.
 The chart version is the literal OCI tag: an optional leading `v` is preserved, and `_` encodes SemVer build metadata.
 The chart manifest digest and chart archive digest identify different bytes; an active chart binding requires the archive digest.
 

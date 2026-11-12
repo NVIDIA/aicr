@@ -56,13 +56,14 @@ type ArtifactProvider struct {
 	inventoryCapturePath string
 	relocatedInventories []string
 	provenance           artifact.Provenance
+	origins              map[string]string
 }
 
 func (p *ArtifactProvider) ReadFile(ctx context.Context, name string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, errors.WrapCtxErr(err, errors.ErrCodeTimeout, "read captured artifact catalog")
 	}
-	data, ok := p.files[name]
+	data, ok := p.files[path.Clean(filepath.ToSlash(name))]
 	if !ok {
 		return nil, &fs.PathError{Op: "read", Path: name, Err: fs.ErrNotExist}
 	}
@@ -70,8 +71,8 @@ func (p *ArtifactProvider) ReadFile(ctx context.Context, name string) ([]byte, e
 }
 
 func (p *ArtifactProvider) Source(name string) string {
-	if _, ok := p.external[name]; ok {
-		return sourceExternal
+	if source, ok := p.origins[path.Clean(filepath.ToSlash(name))]; ok {
+		return source
 	}
 	return sourceEmbedded
 }
@@ -231,7 +232,10 @@ func captureArtifactLayers(ctx context.Context, provider DataProvider) (map[stri
 	}
 }
 
-func mergeCapturedCatalog(embedded, external map[string][]byte) (map[string][]byte, error) {
+func mergeCapturedCatalog(embedded, external map[string][]byte, origins map[string]string) (map[string][]byte, error) {
+	for name := range external {
+		origins[name] = sourceExternal
+	}
 	files := maps.Clone(embedded)
 	maps.Copy(files, external)
 	if len(embedded) == 0 {
@@ -253,6 +257,7 @@ func mergeCapturedCatalog(embedded, external map[string][]byte) (map[string][]by
 			return nil, errors.Wrap(errors.ErrCodeInternal, "encode captured registry", err)
 		}
 		files[registryFileName] = data
+		origins[registryFileName] = sourceMerged
 	}
 	if externalData, ok := external[catalogFileName]; ok {
 		var base, overlay catalogForMerge
@@ -267,15 +272,19 @@ func mergeCapturedCatalog(embedded, external map[string][]byte) (map[string][]by
 			return nil, errors.Wrap(errors.ErrCodeInternal, "encode captured validator catalog", err)
 		}
 		files[catalogFileName] = data
+		origins[catalogFileName] = sourceMerged
 	}
 	for name, data := range external {
 		if strings.HasPrefix(name, "overlays/") && path.Ext(name) == ".yaml" {
 			if base, ok := embedded[name]; ok {
-				merged, _, err := patchOverlayProfile(name, base, data)
+				merged, patched, err := patchOverlayProfile(name, base, data)
 				if err != nil {
 					return nil, err
 				}
 				files[name] = merged
+				if patched {
+					origins[name] = sourceEmbedded
+				}
 			}
 		}
 	}
