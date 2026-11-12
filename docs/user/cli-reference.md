@@ -794,16 +794,16 @@ checks emit error diagnostics; errors cause a non-zero exit status.
 **Synopsis:**
 
 ```text
-aicr recipe validate [--data DIR] [--external-only] [--format text|json] [FILE]
+aicr recipe validate [--data DIR] [--config FILE] [--external-only] [--format text|json] [FILE]
 ```
 
 **Flags:**
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--config` | | string | | AICRConfig path or URL; `spec.recipe.data` and `spec.recipe.externalOnly` select the catalog |
-| `--data` | | string | | Catalog directory used to resolve references; required when no FILE is given |
-| `--external-only` | | bool | false | Validate the file or complete external catalog without embedded fallback; requires `--data` |
+| `--config` | | string | | AICRConfig path or URL; supplies `spec.recipe.data`, `spec.recipe.externalOnly`, and artifact inventory options |
+| `--data` | | string | | Catalog directory used to resolve references; falls back to `spec.recipe.data`. Without FILE, supply a catalog directory or a configured inventory |
+| `--external-only` | | bool | false | Validate the file or complete external catalog without embedded fallback; requires a catalog directory |
 | `--format` | | string | text | Output format: `text` or `json` |
 
 **Examples:**

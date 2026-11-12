@@ -1479,9 +1479,9 @@ func TestBuildApplicationData_OCIHandling(t *testing.T) {
 			name:           "OCI source: chart appended, v preserved (nvsentinel pattern)",
 			source:         "oci://ghcr.io/nvidia",
 			chart:          "nvsentinel",
-			recipeVer:      "v1.3.0",
+			recipeVer:      "v1.3.0_build.1",
 			wantRepository: "oci://ghcr.io/nvidia/nvsentinel",
-			wantVersion:    "v1.3.0",
+			wantVersion:    "v1.3.0+build.1",
 		},
 		{
 			name:           "OCI source: chart appended even when org name == chart name (kai-scheduler pattern)",

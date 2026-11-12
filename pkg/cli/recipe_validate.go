@@ -43,7 +43,7 @@ Examples:
 			&cli.StringFlag{Name: flagFormat, Value: verifyFormatText, Usage: "Output format (text or json)", Category: catOutput},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, flagFormat, "data"); err != nil {
+			if err := validateSingleValueFlags(cmd, flagFormat, "data", "config"); err != nil {
 				return err
 			}
 			cfg, err := loadFacadeConfig(ctx, cmd)
@@ -54,7 +54,7 @@ Examples:
 			if err != nil {
 				return err
 			}
-			if cmd.Args().Len() > 1 || (cmd.Args().Len() == 0 && dataDir == "") {
+			if cmd.Args().Len() > 1 || (cmd.Args().Len() == 0 && dataDir == "" && cfg.RecipeArtifacts().Inventory == "") {
 				return errors.New(errors.ErrCodeInvalidRequest, "provide one file or --data <directory>")
 			}
 			format := cmd.String(flagFormat)
@@ -63,9 +63,9 @@ Examples:
 			}
 			var diagnostics []aicr.RecipeDiagnostic
 			if externalOnly {
-				diagnostics, err = aicr.ValidateExternalRecipeCatalog(ctx, cmd.Args().First(), dataDir)
+				diagnostics, err = aicr.ValidateExternalRecipeCatalogWithArtifacts(ctx, cmd.Args().First(), dataDir, cfg.RecipeArtifacts())
 			} else {
-				diagnostics, err = aicr.ValidateRecipeCatalog(ctx, cmd.Args().First(), dataDir)
+				diagnostics, err = aicr.ValidateRecipeCatalogWithArtifacts(ctx, cmd.Args().First(), dataDir, cfg.RecipeArtifacts())
 			}
 			if err != nil {
 				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to validate recipe data")

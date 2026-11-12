@@ -413,7 +413,7 @@ func (r *bundleRun) makeSplit(
 		return nil, rootErr
 	}
 
-	dataFiles, err := r.copyDataFiles(stage, enabled.DataProvider())
+	dataFiles, err := r.copyDataFiles(ctx, stage, enabled.DataProvider())
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to copy external data files")
 	}
