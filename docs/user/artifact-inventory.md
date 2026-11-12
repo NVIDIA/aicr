@@ -2,7 +2,10 @@
 
 Artifact inventories let a release publisher supply chart and image identities independently of the recipe catalog.
 This feature requires **AICR v1.3.0 or newer**.
-Pin the AICR executable used by your release workflow; older releases can ignore artifact files and resolve the original catalog pins.
+Integrators must pin the AICR executable to **v1.3.0 or newer**.
+Earlier releases from v0.21.0 through v1.2.0 refuse inventory catalogs.
+Releases before v0.21.0 are unsupported and unsafe with inventory catalogs: some silently ignore `artifacts/` and use catalog pins, and very old readers also fail to reject saved artifact provenance.
+Historical rejection behavior is not a compatibility guarantee for those unsupported releases.
 The inventory and bindings use `aicr.run/v1beta1`; generated recipes with artifact provenance use the strict `aicr.run/v1beta2` RecipeResult format.
 
 ## Supply release identities
