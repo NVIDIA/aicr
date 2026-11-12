@@ -502,7 +502,7 @@ func prepareMirrorCandidate(
 
 		candidate.refs = append(candidate.refs, ref)
 		candidate.overrides[ref.Name] = overrides
-		if _, profileOwned := owned[ref.Name]; !profileOwned {
+		if _, profileOwned := owned[ref.Name]; !profileOwned && rec.Metadata.Artifacts == nil {
 			continue
 		}
 
@@ -522,6 +522,9 @@ func prepareMirrorCandidate(
 				map[string]any{logKeyComponent: ref.Name})
 		}
 		candidate.profileValues[ref.Name] = values
+	}
+	if err := rec.ValidateArtifactLock(ctx, candidate.refs, candidate.profileValues, nil); err != nil {
+		return nil, err
 	}
 	if err := rec.ValidateProfileLock(ctx, candidate.refs, candidate.profileValues, nil); err != nil {
 		return nil, err

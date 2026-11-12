@@ -115,6 +115,7 @@ if [[ "$1" == "run" && "$2" == "./tools/api-diff-closure" ]]; then
         # Keep every line below in sorted order or the contract check fails for
         # the wrong reason.
         cat <<'ALIASES'
+ArtifactOptions|github.com/NVIDIA/aicr/pkg/artifact|Options
 BundleArtifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output
 BundleAttester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester
 ALIASES
@@ -140,6 +141,7 @@ ALIASES
         exit 42
     fi
     cat <<'CLOSURE'
+github.com/NVIDIA/aicr/pkg/artifact|Options
 github.com/NVIDIA/aicr/pkg/bundler/attestation|AttestSubject
 github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester
 github.com/NVIDIA/aicr/pkg/bundler/attestation|Dependency
@@ -461,12 +463,14 @@ expected_apidiff_log() {
     local cwd=$1
 
     printf 'mode=export package=github.com/NVIDIA/aicr/pkg/client/v1 allow_internal=false\n'
+    printf 'mode=export package=github.com/NVIDIA/aicr/pkg/artifact allow_internal=true\n'
     printf 'mode=export package=github.com/NVIDIA/aicr/pkg/bundler/attestation allow_internal=true\n'
     printf 'mode=export package=github.com/NVIDIA/aicr/pkg/bundler/config allow_internal=true\n'
     printf 'mode=export package=github.com/NVIDIA/aicr/pkg/bundler/result allow_internal=true\n'
     printf 'mode=export package=github.com/NVIDIA/aicr/pkg/bundler/types allow_internal=true\n'
     printf 'mode=export package=github.com/NVIDIA/aicr/pkg/recipe allow_internal=true\n'
     printf 'mode=report package=github.com/NVIDIA/aicr/pkg/client/v1 allow_internal=false cwd=%s\n' "${cwd}"
+    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/artifact allow_internal=true cwd=%s\n' "${cwd}"
     printf 'mode=report package=github.com/NVIDIA/aicr/pkg/bundler/attestation allow_internal=true cwd=%s\n' "${cwd}"
     printf 'mode=report package=github.com/NVIDIA/aicr/pkg/bundler/config allow_internal=true cwd=%s\n' "${cwd}"
     printf 'mode=report package=github.com/NVIDIA/aicr/pkg/bundler/result allow_internal=true cwd=%s\n' "${cwd}"
@@ -590,6 +594,7 @@ check_apidiff_log_equals "compatible-only-report-loads-facade-and-alias-targets-
     "$(expected_apidiff_log "${REPO_ROOT}")"
 
 alias_target_cases=(
+    'artifact-options|github.com/NVIDIA/aicr/pkg/artifact|Options.Inventory: removed'
     'bundle-config|github.com/NVIDIA/aicr/pkg/bundler/config|(*Config).Deployer: removed'
     'bundle-attester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester.Identity: removed'
     'oidc-resolve-options|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions.Attest: removed'
@@ -737,6 +742,7 @@ else
         mkdir -p \
             "${internal_fixture}/tools/api-diff-closure" \
             "${internal_fixture}/pkg/client/v1" \
+            "${internal_fixture}/pkg/artifact" \
             "${internal_fixture}/pkg/bundler/attestation" \
             "${internal_fixture}/pkg/bundler/config" \
             "${internal_fixture}/pkg/bundler/result" \
@@ -764,6 +770,7 @@ EOF
 package v1
 
 import (
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
@@ -774,6 +781,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
+type ArtifactOptions = artifact.Options
 type BundleConfig = config.Config
 type BundleAttester = attestation.Attester
 type OIDCResolveOptions = attestation.ResolveOptions
@@ -784,6 +792,14 @@ type EvidenceVerification = evidenceverifier.VerifyResult
 type UpgradeReport = upgrade.Report
 type CNCFRequirementAggregate = cncf.Aggregate
 type RecipeSummary = recipe.Summary
+EOF
+        cat >"${internal_fixture}/pkg/artifact/options.go" <<'EOF'
+package artifact
+
+type Options struct {
+	Inventory        string
+	AllowCatalogPins []string
+}
 EOF
         cat >"${internal_fixture}/pkg/upgrade/upgrade.go" <<'EOF'
 package upgrade
@@ -888,6 +904,7 @@ else
         mkdir -p \
             "${deleted_target_fixture}/tools/api-diff-closure" \
             "${deleted_target_fixture}/pkg/client/v1" \
+            "${deleted_target_fixture}/pkg/artifact" \
             "${deleted_target_fixture}/pkg/bundler/attestation" \
             "${deleted_target_fixture}/pkg/bundler/config" \
             "${deleted_target_fixture}/pkg/bundler/result" \
@@ -916,6 +933,7 @@ EOF
 package v1
 
 import (
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
@@ -926,6 +944,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
+type ArtifactOptions = artifact.Options
 type BundleConfig = legacyconfig.Config
 type BundleAttester = attestation.Attester
 type OIDCResolveOptions = attestation.ResolveOptions
@@ -936,6 +955,14 @@ type EvidenceVerification = evidenceverifier.VerifyResult
 type UpgradeReport = upgrade.Report
 type CNCFRequirementAggregate = cncf.Aggregate
 type RecipeSummary = recipe.Summary
+EOF
+        cat >"${deleted_target_fixture}/pkg/artifact/options.go" <<'EOF'
+package artifact
+
+type Options struct {
+	Inventory        string
+	AllowCatalogPins []string
+}
 EOF
         cat >"${deleted_target_fixture}/pkg/upgrade/upgrade.go" <<'EOF'
 package upgrade
@@ -999,6 +1026,7 @@ EOF
 package v1
 
 import (
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
@@ -1009,6 +1037,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
+type ArtifactOptions = artifact.Options
 type BundleConfig = config.Config
 type BundleAttester = attestation.Attester
 type OIDCResolveOptions = attestation.ResolveOptions

@@ -2027,3 +2027,19 @@ func TestDoFetchIndexYAMLAttempt_ClosesIdleConnections(t *testing.T) {
 		t.Errorf("goroutine leak: before=%d after=%d delta=%d (want <=5)", before, after, delta)
 	}
 }
+
+func TestChartPullArgsOCIBuildMetadata(t *testing.T) {
+	for _, version := range []string{"1.2.3_build.1", "v1.2.3_build.1", "v1.2.3"} {
+		t.Run(version, func(t *testing.T) {
+			c := Component{Name: "example", Repository: "oci://registry.example/charts", Version: version, IsOCI: true}
+			got := strings.Join(chartPullArgs(c, "/tmp/charts"), " ")
+			want := "pull oci://registry.example/charts/example --version " + strings.ReplaceAll(version, "_", "+") + " --destination /tmp/charts"
+			if got != want {
+				t.Fatalf("got %s, want %s", got, want)
+			}
+			if c.Version != version {
+				t.Fatal("mutated identity")
+			}
+		})
+	}
+}

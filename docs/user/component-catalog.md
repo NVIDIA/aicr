@@ -563,6 +563,16 @@ spec:
     - nvsentinel-preflight
 ```
 
+On a leaf that declares `runai-cluster` (the `platform=runai` leaves), compose `nvsentinel-preflight-runai` as well. The preflight controller exits until the PodGroup CRD exists, and on those leaves `runai-cluster` installs it; the companion mixin orders `nvsentinel` after `runai-cluster`, and the bundle gate fails without it:
+
+```yaml
+# your-runai-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-preflight
+    - nvsentinel-preflight-runai
+```
+
 The catalog-registration rule described under [Audit Logging and Tracing](#audit-logging-and-tracing) applies here too: the overlay must be in the resolved catalog — committed to `recipes/overlays/`, or placed at `<dir>/overlays/` and loaded with `--data <dir>`. Passing the file directly to `aicr bundle -r` or `aicr validate -r` hydrates it from `spec.criteria` alone and never reads `spec.mixins`, so the mixin cannot compose that way; AICR rejects the load with `INVALID_REQUEST`, naming the mixins that were dropped, rather than shipping a bundle without them. The "has no effect if `nvsentinel` is disabled by the chain" caveat applies equally, as does the allowlist mechanism — `nvsentinel`'s `mixinSafeOverridePaths` entry names each `preflight.*` leaf path this mixin may set, and anything outside it fails at compose time.
 
 **Two gates, not one.** Adopting the mixin only deploys the webhook. Nothing is injected until you also label the namespaces whose pods should be checked:
@@ -657,7 +667,7 @@ The entry stays in the list rather than being removed, because the webhook resol
 
 - **Rejected with `os-talos`, at bundle time.** That mixin relocates `gpu-operator` to `privileged-gpu-operator`, where `nvidia-dcgm.gpu-operator.svc:5555` does not resolve. The mixin pins that address and cannot vary it per composition — a second mixin setting the same allowlisted path collides at compose time. Rather than ship a DCGM check that cannot reach its hostengine, `CheckNVSentinelPreflightDCGMReachable` fails the bundle whenever preflight is enabled and gpu-operator is absent, disabled, relocated, or running with `dcgm.enabled: false`.
 - **The multi-node check is unusable on Grove-scheduled recipes.** Grove's gang model is hierarchical while preflight assumes one flat PodGroup per gang ([NVIDIA/NVSentinel#1354](https://github.com/NVIDIA/NVSentinel/issues/1354)), so gang discovery finds nothing there. Because the check is off by default this costs nothing unless you request it — and if you do request it on such a recipe, the pod is stranded rather than merely uncoordinated. The two single-node checks are unaffected. Every `*-inference-dynamo` leaf is affected and no other leaf is -- today that is `b200-gke-cos`, `gb200-eks-ubuntu`, `gb200-oke-ubuntu`, `gb300-eks-ubuntu`, `gb300-gke-cos`, `h100-aks-ubuntu`, `h100-eks-ubuntu`, `h100-gke-cos`, `h100-kind`, `rtx-pro-6000-eks-ubuntu` and `vr200-rke2-ubuntu`. `TestGroveLeavesAreExactlyTheDynamoLeaves` pins the correspondence -- a Grove leaf under another name, or a dynamo leaf that moves off Grove, fails there -- but it does not read the names above, so re-check them when a dynamo leaf is added.
-- **`kai-scheduler` must stay enabled, and the bundle now enforces it.** The mixin's dependency edge only orders the install — the bundler prunes an edge to a declared-but-disabled component as satisfied externally, so ordering alone would let a bundle look well-formed while `podgroups.scheduling.run.ai` never exists, crash-looping the controller and leaving `failurePolicy: Ignore` to admit every GPU pod unchecked. `CheckNVSentinelPreflightGangSchedulerRequired` blocks that at bundle time.
+- **A provider of the PodGroup CRD must stay enabled, and the bundle now enforces it.** The mixin's dependency edge only orders the install — the bundler prunes an edge to a declared-but-disabled component as satisfied externally, so ordering alone would let a bundle look well-formed while `podgroups.scheduling.run.ai` never exists, crash-looping the controller and leaving `failurePolicy: Ignore` to admit every GPU pod unchecked. `CheckNVSentinelPreflightGangSchedulerRequired` blocks that at bundle time unless `kai-scheduler` is enabled or, on the Run:ai leaves, `runai-cluster` is (its chart bundles KAI and installs the same CRD).
 - **The loopback bandwidth threshold is not enforced.** The chart's 150 GB/s is calibrated for NVLink, while its own values note PCIe parts need roughly 15 — so on `l40`, `l40s` and `rtx-pro-6000` a healthy GPU would fail it. Because the checks now gate, that would be a pod-creation outage on those recipes, so the mixin sets `SKIP_BANDWIDTH_CHECK: "true"`. The loopback *connectivity* test still runs and still gates; only its bandwidth assertion is skipped. Revisit if upstream gains per-accelerator thresholds. The all-reduce check keeps its 100 GB/s threshold, but it is off by default.
 - **A DCGM outage blocks GPU pods.** `preflight-dcgm-diag` treats an unreachable hostengine as a fatal result, so while DCGM is down every GPU pod in an opted-in namespace strands in `Init:Error`. `CheckNVSentinelPreflightDCGMReachable` catches the *configuration* cases at bundle time — gpu-operator absent, disabled, relocated, or running with `dcgm.enabled: false` (which the shipped Kind overlay does) — but it cannot catch a runtime outage. This is the main operational risk of adopting the mixin.
 
@@ -2820,10 +2830,24 @@ re-apply an expired token on every sync:
 configuration, so the Run:ai leaves set `overrides.enabled: false` on AICR's
 `kai-scheduler` (the two ship the same CRDs and PriorityClasses). On a cluster
 that already runs AICR's `kai-scheduler`, uninstall that release before
-installing a Run:ai bundle. The `gang-scheduling` conformance check keys on
-AICR's `kai-scheduler`, which these leaves disable, so it reports Skip on them
-until it learns the Run:ai scheduler. Run:ai's support matrix covers Kubernetes
-1.35 through 1.37, and the leaves carry that floor.
+installing a Run:ai bundle. The `gang-scheduling` conformance check follows
+the recipe: on these leaves it exercises Run:ai's scheduler
+(`runai-scheduler` in the `runai` namespace) and runs its test pods in a
+Run:ai Project namespace you name with `AICR_RUNAI_PROJECT_NAMESPACE` in the
+shell running `aicr validate`. Create that Project in the control plane with
+an explicit CPU and memory quota first (a Project without one gets zero and
+nothing schedules) and no CPU or memory limit (the check's non-fitting group
+asks for more CPU than the cluster has, and a limit makes the scheduler refuse
+it on quota before gang scheduling applies); the check fails, rather than
+skips, when the variable is unset or the namespace is not a Project namespace. The check does not copy
+`--image-pull-secret` Secrets into the Project namespace, so a private probe
+image needs a Secret of the same name already there; without it the check
+fails with "gang test pods did not complete". The `nvsentinel-preflight`
+mixin accepts `runai-cluster` as the provider of the PodGroup CRD its bundle
+gate requires; compose `nvsentinel-preflight-runai` with it so that
+`nvsentinel` installs after `runai-cluster` (see
+[Preflight Checks](#preflight-checks)). Run:ai's support matrix covers Kubernetes 1.35 through 1.37,
+and the leaves carry that floor.
 
 **Prerequisites the health check expects.** The check asserts the
 `RunaiConfig` the install creates from the control plane's configuration

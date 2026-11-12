@@ -1063,6 +1063,7 @@ func validateCmdFlags() []cli.Flag {
 	return append(flags,
 		configFlag(),
 		dataFlag(),
+		externalOnlyFlag(),
 		outputFlag(),
 		kubeconfigFlag(),
 	)
