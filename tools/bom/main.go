@@ -31,6 +31,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -126,7 +127,12 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 
 	ctx := context.Background()
 
-	results, err := surveyComponents(ctx, repoRoot, reg.Components, renderer, skipHelm)
+	driverTargets, err := loadCatalogDriverTargets(ctx, repoRoot)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load driver targets")
+	}
+
+	results, err := surveyComponents(ctx, repoRoot, reg.Components, renderer, skipHelm, driverTargets)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "survey components")
 	}
@@ -143,23 +149,8 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "derive variants")
 	}
-	for i, v := range variants {
-		surveyed, surveyErr := surveyVariant(
-			ctx,
-			repoRoot,
-			v,
-			byName[v.Name],
-			renderer,
-			skipHelm,
-		)
-		if surveyErr != nil {
-			return errors.PropagateOrWrap(
-				surveyErr,
-				errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("survey component variant %q@%q", v.Name, v.Version),
-			)
-		}
-		variants[i] = surveyed
+	if err = surveyVariants(ctx, repoRoot, variants, byName, renderer, skipHelm, driverTargets); err != nil {
+		return err
 	}
 
 	if strict {
@@ -256,6 +247,31 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 	return nil
 }
 
+// surveyVariants renders each variant in place.
+func surveyVariants(
+	ctx context.Context,
+	repoRoot string,
+	variants []bom.VariantResult,
+	byName map[string]component,
+	renderer helm.Renderer,
+	skipHelm bool,
+	driverTargets catalogDriverTargets,
+) error {
+
+	for i, v := range variants {
+		surveyed, surveyErr := surveyVariant(ctx, repoRoot, v, byName[v.Name], renderer, skipHelm, driverTargets)
+		if surveyErr != nil {
+			return errors.PropagateOrWrap(
+				surveyErr,
+				errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("survey component variant %q@%q", v.Name, v.Version),
+			)
+		}
+		variants[i] = surveyed
+	}
+	return nil
+}
+
 // enableNoImagesCheck sets the zero-image check on every component.
 func enableNoImagesCheck(components []component, on bool) {
 	for i := range components {
@@ -290,11 +306,12 @@ func surveyComponents(
 	components []component,
 	renderer helm.Renderer,
 	skipHelm bool,
+	driverTargets catalogDriverTargets,
 ) ([]bom.ComponentResult, error) {
 
 	results := make([]bom.ComponentResult, 0, len(components))
 	for _, c := range components {
-		result, err := surveyComponent(ctx, repoRoot, c, renderer, skipHelm)
+		result, err := surveyComponent(ctx, repoRoot, c, renderer, skipHelm, driverTargets)
 		if err != nil {
 			return nil, errors.PropagateOrWrap(
 				err,
@@ -342,6 +359,7 @@ func surveyComponent(
 	c component,
 	r helm.Renderer,
 	skipHelm bool,
+	driverTargets catalogDriverTargets,
 ) (bom.ComponentResult, error) {
 
 	version := pinnedVersion(c)
@@ -369,7 +387,7 @@ func surveyComponent(
 		out, warnings := renderHelmComponent(ctx, repoRoot, c, r)
 		res.Warnings = append(res.Warnings, warnings...)
 		if len(out) > 0 {
-			imgs, parseErr := bom.ExtractImagesFromYAML(out)
+			set, parseErr := bom.ExtractImageSetFromYAML(out)
 			if parseErr != nil {
 				if bom.IsInvalidStructuredImageDescriptor(parseErr) {
 					return res, wrapInvalidDescriptorSurveyError(
@@ -380,7 +398,9 @@ func surveyComponent(
 				}
 				res.Warnings = append(res.Warnings, "parse rendered yaml: "+parseErr.Error())
 			}
-			for _, i := range imgs {
+			qualified, driverWarnings := driverTargets.qualify(c.Name, "", set.Drivers)
+			res.Warnings = append(res.Warnings, driverWarnings...)
+			for _, i := range slices.Concat(set.Images, qualified) {
 				images[i] = struct{}{}
 			}
 		}
@@ -409,7 +429,7 @@ func surveyComponent(
 			if rerr != nil {
 				return rerr
 			}
-			imgs, perr := bom.ExtractImagesFromYAML(data)
+			set, perr := bom.ExtractImageSetFromYAML(data)
 			if perr != nil {
 				if bom.IsInvalidStructuredImageDescriptor(perr) {
 					return wrapInvalidDescriptorSurveyError(perr, c.Name, path)
@@ -417,7 +437,13 @@ func surveyComponent(
 				res.Warnings = append(res.Warnings, fmt.Sprintf("parse %s: %v", path, perr))
 				return nil
 			}
-			for _, i := range imgs {
+			relPath, relErr := filepath.Rel(manifestsDir, path)
+			if relErr != nil {
+				return relErr
+			}
+			qualified, driverWarnings := driverTargets.qualify(c.Name, manifestRelPath(c.Name, relPath), set.Drivers)
+			res.Warnings = append(res.Warnings, driverWarnings...)
+			for _, i := range slices.Concat(set.Images, qualified) {
 				images[i] = struct{}{}
 			}
 			return nil

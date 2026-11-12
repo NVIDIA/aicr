@@ -297,6 +297,245 @@
             "type": "string"
           }
         },
+        "artifacts": {
+          "type": "object",
+          "properties": {
+            "allowCatalogPins": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "applied": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "object",
+                "properties": {
+                  "artifact": {
+                    "type": "object",
+                    "properties": {
+                      "archiveDigest": {
+                        "type": "string"
+                      },
+                      "manifestDigest": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "platform": {
+                        "type": "object",
+                        "properties": {
+                          "architecture": {
+                            "type": "string"
+                          },
+                          "os": {
+                            "type": "string"
+                          },
+                          "variant": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "architecture",
+                          "os"
+                        ]
+                      },
+                      "reference": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "manifestDigest",
+                      "name",
+                      "reference",
+                      "type",
+                      "version"
+                    ]
+                  },
+                  "chart": {
+                    "type": "object",
+                    "properties": {
+                      "component": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "component"
+                    ]
+                  },
+                  "image": {
+                    "type": "object",
+                    "properties": {
+                      "targets": {
+                        "type": [
+                          "array",
+                          "null"
+                        ],
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "component": {
+                              "type": "string"
+                            },
+                            "platform": {
+                              "type": "object",
+                              "properties": {
+                                "architecture": {
+                                  "type": "string"
+                                },
+                                "os": {
+                                  "type": "string"
+                                },
+                                "variant": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "architecture",
+                                "os"
+                              ]
+                            },
+                            "valuesFile": {
+                              "type": "string"
+                            },
+                            "write": {
+                              "type": "object",
+                              "properties": {
+                                "clearTag": {
+                                  "type": "string"
+                                },
+                                "digest": {
+                                  "type": "string"
+                                },
+                                "reference": {
+                                  "type": "string"
+                                },
+                                "repository": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "required": [
+                            "component",
+                            "valuesFile",
+                            "write"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "targets"
+                    ]
+                  }
+                },
+                "required": [
+                  "artifact"
+                ]
+              }
+            },
+            "baseCatalogDigest": {
+              "type": "string"
+            },
+            "bindingsDigest": {
+              "type": "string"
+            },
+            "ignored": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "object",
+                "properties": {
+                  "artifact": {
+                    "type": "object",
+                    "properties": {
+                      "archiveDigest": {
+                        "type": "string"
+                      },
+                      "manifestDigest": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "platform": {
+                        "type": "object",
+                        "properties": {
+                          "architecture": {
+                            "type": "string"
+                          },
+                          "os": {
+                            "type": "string"
+                          },
+                          "variant": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "architecture",
+                          "os"
+                        ]
+                      },
+                      "reference": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "manifestDigest",
+                      "name",
+                      "reference",
+                      "type",
+                      "version"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "artifact",
+                  "reason"
+                ]
+              }
+            },
+            "inventoryDigest": {
+              "type": "string"
+            },
+            "verification": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "allowCatalogPins",
+            "applied",
+            "baseCatalogDigest",
+            "bindingsDigest",
+            "ignored",
+            "inventoryDigest",
+            "verification"
+          ]
+        },
         "constraintWarnings": {
           "type": "array",
           "items": {

@@ -213,6 +213,7 @@ jobs:
               # modules, the actions that set up the job, the Makefile target
               # and this workflow are listed so a change to the check runs it.
               - 'recipes/*.go'
+              - 'recipes/artifacts/**'
               - 'recipes/registry.yaml'
               - 'recipes/overlays/**'
               - 'recipes/mixins/**'
@@ -222,6 +223,7 @@ jobs:
               - 'recipes/components/*/manifests/**'
               - 'tools/crd-inventory/**'
               - 'pkg/allocpolicy/*.go'
+              - 'pkg/artifact/*.go'
               - 'pkg/chainsaw/*.go'
               - 'pkg/chainsaw/validation/*.go'
               - 'pkg/constraints/expr/*.go'

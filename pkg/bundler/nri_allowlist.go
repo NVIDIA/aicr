@@ -39,8 +39,8 @@ const (
 // --set nv-sentinel:enabled=false on RKE2) grants that access to whoever later
 // creates the namespace. A subset bundle stays silent because the component
 // may be deployed outside it.
-func (b *DefaultBundler) warnNRIManagementAllowlist(recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) {
-	if b.Config == nil || recipeResult == nil || len(b.Config.Bundlers()) > 0 {
+func (r *bundleRun) warnNRIManagementAllowlist(recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) {
+	if r.Config == nil || recipeResult == nil || len(r.Config.Bundlers()) > 0 {
 		return
 	}
 	gpuValues, ok := componentValues[gpuOperatorComponentName]
@@ -79,7 +79,7 @@ func (b *DefaultBundler) warnNRIManagementAllowlist(recipeResult *recipe.RecipeR
 	slog.Warn(warning,
 		"component", gpuOperatorComponentName,
 		"namespaces", orphaned)
-	b.appendWarning(warning)
+	r.appendWarning(warning)
 }
 
 // nriManagementNamespaces returns the sorted, de-duplicated namespaces listed

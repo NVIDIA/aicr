@@ -48,6 +48,8 @@ navigation:
         path: user/fabric-attached-training.md
       - page: CLI Configuration File
         path: user/cli-config.md
+      - page: Artifact Inventories and Bindings
+        path: user/artifact-inventory.md
       - page: Artifact Verification
         path: user/artifact-verification.md
       - page: API Reference
