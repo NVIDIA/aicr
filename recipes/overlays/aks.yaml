@@ -225,7 +225,6 @@ spec:
     # Prometheus persistent storage (provide --storage-class at bundle time, e.g. managed-csi)
     - name: kube-prometheus-stack
       type: Helm
-      version: "83.7.0"
       overrides:
         prometheus:
           prometheusSpec:

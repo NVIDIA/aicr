@@ -1082,10 +1082,10 @@ NAME                           TYPE  VERSION  NAMESPACE               DEPENDS ON
 aws-efa                        Helm  v0.5.29  kube-system             -
 nodewright-operator            Helm  v0.20.0  nodewright              -
 nodewright-customizations      Helm  -        nodewright              nodewright-operator
-prometheus-operator-crds       Helm  28.0.1   monitoring              -
+prometheus-operator-crds       Helm  31.0.1   monitoring              -
 aws-ebs-csi-driver             Helm  2.59.0   kube-system             prometheus-operator-crds
 cert-manager                   Helm  v1.20.2  cert-manager            prometheus-operator-crds
-kube-prometheus-stack          Helm  84.4.0   monitoring              prometheus-operator-crds
+kube-prometheus-stack          Helm  88.6.5   monitoring              prometheus-operator-crds
 k8s-ephemeral-storage-metrics  Helm  1.19.2   monitoring              kube-prometheus-stack,prometheus-operator-crds
 nfd                            Helm  0.20.1   node-feature-discovery  prometheus-operator-crds
 gpu-operator                   Helm  v26.7.2  gpu-operator            nfd,cert-manager,prometheus-operator-crds,nodewright-customizations

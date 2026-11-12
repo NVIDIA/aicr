@@ -1,0 +1,71 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The stack half of the prometheus-operator upgrade. The CRDs this chart's
+# operator needs ship in the sibling prometheus-operator-crds release (this
+# chart runs with crds.enabled: false), so upstream's "apply the new CRDs
+# before upgrading" step is that release's upgrade, which every bundle orders
+# first through dependencyRefs.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: kube-prometheus-stack
+transitions:
+  # The from floor is the oldest pin AICR shipped in this line: 83.7.0 was the
+  # AKS override (#700) until the fleet moved to 88.6.5 together, and 84.4.0
+  # the registry default from v0.17.0 through v1.0.0.
+  - from: ">=83.7.0 <88.6.5"
+    to: "=88.6.5"
+    verdict: safe
+    verifiedBy: >-
+      Upstream UPGRADE.md for 83.x through 88.x: 84.x upgrades Grafana to
+      v13, 85.x switches the prometheus and prometheus-node-exporter images to
+      their distroless variants by default, and 86.x, 87.x and 88.x each
+      upgrade prometheus-operator (v0.91.0, v0.92.0, v0.93.0) and ask only
+      for the matching CRDs to be applied first, which prometheus-operator-crds
+      31.0.1 does. prometheus-operator v0.91.0 to v0.93.1 release notes: CRD
+      changes are added optional fields plus tighter validation on
+      ScrapeConfig and AlertmanagerConfig receivers, neither of which AICR
+      ships; the v0.93.0 default of one shard and the v0.92.0 promotion of the
+      sharding feature gates match a stack with shards unset. A diff of the
+      84.4.0 and 88.6.5 charts' values at every path AICR's values.yaml and
+      overlays set found no renamed or removed key. In-place Helm upgrade on a
+      single-node Kind v1.37.0 cluster, 2026-11-09: prometheus-operator-crds
+      28.0.1 to 31.0.1, then kube-prometheus-stack 84.4.0 to 88.6.5 with
+      AICR's component values.yaml (Grafana enabled, emptyDir storage). The
+      operator, Prometheus and Alertmanager StatefulSets, Grafana,
+      kube-state-metrics and node-exporter rolled to the new images, both
+      CRs reported Available, every chart ServiceMonitor was scraped (the
+      four control-plane targets Kind binds to localhost were down before
+      and after), and the shipped health check passed before and after.
+      Live upgrade on the UAT GKE daytime cluster (h100-gke-cos-inference-
+      dynamo, helmfile, 10 nodes, k8s 1.35), 2026-11-09: the same two
+      steps against the deployed releases with their live values, Prometheus
+      on a 50Gi premium-rwo PVC. The StatefulSets rolled in under seven
+      minutes, the PVC kept its volume and samples scraped before the
+      upgrade stayed queryable, 103 of 105 targets up (the two kube-dns
+      endpoints GKE does not expose were down before as well), and the
+      kube-prometheus-stack, prometheus-operator-crds and prometheus-adapter
+      health checks passed.
+    summary: >-
+      Prometheus moves to v3.14.0 on a distroless image, Alertmanager to
+      v0.34.0 and the operator to v0.93.1; the Prometheus and Alertmanager
+      StatefulSets roll once. Upgrade the prometheus-operator-crds release
+      first, as the bundle's dependency order already does. A private
+      registry that mirrors the stack's images needs the -distroless tags.
+    references:
+      - https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/UPGRADE.md
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.91.0
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.92.0
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.93.0
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.93.1
