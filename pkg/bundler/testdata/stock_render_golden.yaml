@@ -511,7 +511,7 @@ b200-gke-cos-inference-dynamo:
   009-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   009-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  009-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  009-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   009-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   010-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -562,7 +562,7 @@ b200-gke-cos-inference-dynamo:
   README.md: da71bc468c05f69cb97465059861648cbf2faaec8e47a56b7defd9498015f74c
   UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
   bundle-info.yaml: 2843d0aa3e20f778697a1aa04efd8bfd74f02402fc5ab08d6c1a522c6472453c
-  checksums.txt: f1c88f91857c4c897d33ec4335f225329366a2cbeadd7d83945c9e22dd5ec0a6
+  checksums.txt: fe5e0836b6c6ed083c78413c1f2c57d3d7c9b4a52798e2473d02c33423de6dbc
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: e4b2d12b4e4d5b57044ead20e25e85fe8eb99b2c4be43a9b1b71923465ca8b57
 b200-gke-cos-training-kubeflow:
@@ -715,7 +715,7 @@ bcm-inference:
   008-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   008-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  008-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  008-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   008-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   009-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
@@ -753,7 +753,7 @@ bcm-inference:
   README.md: b521cf0ae3c256862830d9291f5a9bd32a7e4fc6ce59d58fbea30fb989181b6d
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
   bundle-info.yaml: ffa12aea4b930a0d6cff2c222691394dec02e46127e8fd3fa91469ed54cfde8a
-  checksums.txt: 9e677e8b6fbb4c7fb1b2242f084a86776420297f7da359e6986000ae7b9af35b
+  checksums.txt: fd1697642e234bbddfafa4efce7e0ceb8472db0bb62e6c38e00507122b0dea88
   deploy.sh: 7fa5853c62bb89311e349a172bf81202b6b19fc1e044952c14ce299a4903211d
   recipe.yaml: 11a404df8916054972f7d42a73f113f21302134263ff86f1379e846a1e5190d4
 eks-ubuntu:
@@ -906,7 +906,7 @@ gb200-eks-amazonlinux-inference:
   009-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   009-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  009-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  009-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   009-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   010-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
@@ -949,7 +949,7 @@ gb200-eks-amazonlinux-inference:
   README.md: f6640ecd288614d71f168899620affaf0a9448d9ea3a76d48b4025e7060a1ca2
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
   bundle-info.yaml: ef3de9c774acb430c02a48e9bb7f4854df1759e9d8edebde4d86c367b122ee7c
-  checksums.txt: 31e5d571e48a2e6369045136449babc17250d6437fba78be393065292346332f
+  checksums.txt: 2f84af194058c0a62e23bc64b9d0ba617a2b05459e68589bd1212d2007d03bd5
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: 90e2167c5587a0ed1cd507c43026303b885cad25f521e13c222fc946ea0c8ead
 gb200-eks-ubuntu-inference-dynamo:
@@ -995,7 +995,7 @@ gb200-eks-ubuntu-inference-dynamo:
   010-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   010-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  010-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  010-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   010-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   011-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -1046,7 +1046,7 @@ gb200-eks-ubuntu-inference-dynamo:
   README.md: 6dd2d16f52484d1345facb398f6df88b6c114fe6c541bce63eed449ad3f59d14
   UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
   bundle-info.yaml: e14d08b7bdb7c03d64c5155e4a91bb7abea3087454eb663e6dde65002eb423e7
-  checksums.txt: f543e82c9a0fcff6e6bfa183403b8d9519c4fcc876d4abf26ff136ecea398cb9
+  checksums.txt: f4b6bc7f5f0ee2bd91d9fd4c516d3c7525a4ebb35738a6f27610484eace5183b
   deploy.sh: 3959fc5810868ccacc85f59d575441096be6d232b62267d5476a65855794a8e4
   recipe.yaml: b297f9f1ec18cef345dd7b1a29fb5a5323e84beefd91537b5e161815d76a18bc
 gb200-eks-ubuntu-training-kubeflow:
@@ -1260,7 +1260,7 @@ gb200-gke-cos-inference-dynamo:
   010-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   010-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  010-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  010-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   010-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   011-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -1317,7 +1317,7 @@ gb200-gke-cos-inference-dynamo:
   README.md: 8d090801b2e103802ef799c11afd716144378c9553b35496fb8eaf7b6d206e53
   UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
   bundle-info.yaml: 469467a9d8186f8ef204206e9c607079605a058c6f1b023a99b955a2a1613d12
-  checksums.txt: 96d52fb4567f18ca105582d1ac88853ef7dfad5e05e8e64adfa3a87f9b884271
+  checksums.txt: 2fbb150a99429ad96324da4f35644e2635268087473f2e5f8a93abbb8499b278
   deploy.sh: 169ebed142cd9adf4392755b843629729d2d26e0cfd613dfce97b816b1069827
   recipe.yaml: 096971d4ff3184092f6ec1233be856a353319d28528c4b9ad1e2097e3e476a52
 gb200-gke-cos-training-kubeflow:
@@ -1492,6 +1492,85 @@ gb200-gke-cos-training-slurm:
   checksums.txt: ebdbf877aa33b68db2796d62ff30649e3b87053f3afd8ce969f9ff76e591a89e
   deploy.sh: d54909f4d258435a4f5a944a2624c6ab0adf954532cebb9c8c27321f08d0d0bc
   recipe.yaml: 9b8b11c9b5317636e4dc11ae1140d3f5eda7e37c8d7aecb57afa7900b46004c3
+gb200-nvke-ubuntu-inference-dynamo:
+  001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
+  001-agentgateway-crds/upstream.env: 54471a3a9e2d5807a7096c8305eac6faa6d2b3745724e558673d36911830664a
+  001-agentgateway-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
+  002-agentgateway-crds-post/Chart.yaml: ea9a5e92c1cf3e482d6b5eeaf90d19e29fa53bb9bc7d4f29762f68449600b250
+  002-agentgateway-crds-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  002-agentgateway-crds-post/install.sh: 24d659ee11abd79f8be8243ad3c589aaf53dbc26eed49318af2d5e413ae400a4
+  002-agentgateway-crds-post/templates/gateway-api-crds.yaml: b5c4de4a535e22ca770f68f2f514007c53b23b4eca7dcedee53e1e430fe0d8c8
+  002-agentgateway-crds-post/templates/inference-extension-crds.yaml: 1c436040dbd2be09155c7201edefb9120f75b603590e7fb197aa7bd98149e60d
+  002-agentgateway-crds-post/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
+  003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
+  003-nodewright-operator/upstream.env: 8e4f7653a969c4147e83f356f7eac24d08e37f9f9786e8ebf5855e150fdb4125
+  003-nodewright-operator/values.yaml: 51fa2415047c28bd86ba33936eaa3de9f79c6ad8ed584a152570dd02e3112299
+  004-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  004-prometheus-operator-crds/install.sh: 4c10c479d2d735c3024bf809520a4efb7f97904cda4fe211f9374189ea3292d4
+  004-prometheus-operator-crds/upstream.env: 79fc2ce93f1bb62225f9b62cfe618fde8081bce8f7a6d9a56f3a118346da4a4c
+  004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
+  005-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  005-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
+  005-cert-manager/upstream.env: 8984ad504d9290d252f1fd39602328bce17d424b3a96e1dc794b4887b949c01e
+  005-cert-manager/values.yaml: ce084da8e50e390f133c8b1598cc26d5cdc6655fc7e4a2a475a7fcbee4d8b22e
+  006-agentgateway/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  006-agentgateway/install.sh: 94fc5e591f8bc582f533da33174e77fd97ea2d6a356f6b787a8ef94fd47e62c3
+  006-agentgateway/upstream.env: a071e67566441fbd8d8e0849cf2168398cf9a59df279963e3622840fac785f02
+  006-agentgateway/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
+  007-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
+  007-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  007-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
+  007-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
+  007-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
+  008-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  008-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
+  008-grove/upstream.env: cf5effebfecdead639bae89cb7a4d502d4f5a6c27e4e2a4a0748b48ab6458fc9
+  008-grove/values.yaml: dc3c2ab7b1a4842d14e268319bf9daefac0100b3eb03ebd7a951aae5ce90b5c4
+  009-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  009-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
+  009-kube-prometheus-stack/upstream.env: 4cb3f21994a62e8c6f073fca04e2fa0361f9e2841932205321375af4c8ee638a
+  009-kube-prometheus-stack/values.yaml: aeee738b3859d56bef93f04c1949ee3413da6b6cdaad73ea0a7a14306d2b86f5
+  010-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  010-k8s-ephemeral-storage-metrics/install.sh: 727160f359e5476c7211551f781f1a857aedd834922ed255197f7059d78ea816
+  010-k8s-ephemeral-storage-metrics/upstream.env: dbb5b7f8b156e8f1ad3ace176d3d1bef38280a533242107e49e0b76b24fbf435
+  010-k8s-ephemeral-storage-metrics/values.yaml: bd965e10e0f6eca07d732ea00d66e8327c176acfdc52d998809f7d4d53e056e8
+  011-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  011-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
+  011-nfd/upstream.env: d32e82295f07818de16529268751b4274b225110ad6b0ae02948a8084ccc311e
+  011-nfd/values.yaml: 87aaa7960bf7454e54cab513ac6a1de11746869c3f6f6dd4a65457396fc98915
+  012-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  012-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
+  012-gpu-operator/upstream.env: 7ffe32c2e799396b13d0fefc870cdab28e82e363681d0d5301c09d3d98c3ffdd
+  012-gpu-operator/values.yaml: 87eac91a4e5785440f02d5e216d876c069735840e118a123ad8640d4608b8d17
+  013-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  013-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
+  013-kai-scheduler/upstream.env: 28796b9c560ab50439fa444585d161dfdb838c82420680a85a0e6eeef3fb7af0
+  013-kai-scheduler/values.yaml: 478f75baf393a9f6c9425b543f8ea2b3103b090e75dea49284805e0ddd625265
+  014-dynamo-platform/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  014-dynamo-platform/install.sh: 26f4a6ece285df70c933829cf3fc476fd3b61b711f858d86dd77f5abb22bee24
+  014-dynamo-platform/upstream.env: 89ae9bb9a71c7128a4052419094084fb73b4ec5beef34eae6da02e932ee429d0
+  014-dynamo-platform/values.yaml: 4aa3bde85694503a6938dcf0976702d945881750492809e2e80cf311c0cc41f2
+  015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  015-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
+  015-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
+  015-nvidia-dra-driver-gpu/values.yaml: 13baa7381abbc06291f63a7e94b790ad95c7f205d30e91528198c9f11ef25420
+  016-nvsentinel/apply-crds.sh: fb49c9bf7cadd9719c047c71db55af605156b4ff53d5728566ebd6d6d0cae706
+  016-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  016-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
+  016-nvsentinel/upstream.env: 7fc07c3fb32a6e569a151e4c12f2834386b4c7026cda6cd1c86e29592ad8936e
+  016-nvsentinel/values.yaml: 0af63c5f93656b55dd0d0c8725169dccdc0ffe02dfe9d9b70a46466017368d7d
+  017-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
+  017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
+  017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
+  README.md: 0a4a768741cbe74ec2fad85f5d492afbee895daa89cf1d6cc90bd6d3898e5ae1
+  UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
+  bundle-info.yaml: d858c2869a301c53b2a45598f53d37ebd0813290dac39e47f7f7cceaed60460f
+  checksums.txt: 706b60d9466f4cd6c581b3a067a524bcfae848f10836c0482f8ea7d24d813b74
+  deploy.sh: 6afc61322581830d1c33ecce94a979bec614c59e94538849be47ae9833244072
+  recipe.yaml: 1b39e3b7e6f6cb3f34eca6da4d371798389c49a7aeffda42ba7d444b4cac4e78
 gb200-nvke-ubuntu-training-kubeflow:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -1612,7 +1691,7 @@ gb200-oke-ubuntu-inference-dynamo:
   008-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   008-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  008-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  008-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   008-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   009-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -1658,7 +1737,7 @@ gb200-oke-ubuntu-inference-dynamo:
   README.md: a77913a599a042749449f4756231a0cd48748f2faa82d09ec34eb7447efe97c2
   UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
   bundle-info.yaml: f114e79c9cf08d870c86a5e14e79f6f8fd6f3c9084c31e5dff94bc7b43346870
-  checksums.txt: 7565deeeffc942d565767abf2f9e579a11177358b785fda253c23fb7dc35480c
+  checksums.txt: 29e7f62a69b39d93bd2003f6c886bec0c5bc5f048cadb3949d7940f10f8faf8e
   deploy.sh: 0d2ad4ff56102247a58ce5d8191728631c6e789f965890a596fd95613e0be07b
   recipe.yaml: 35a64e8d9081aac54326b1b3d16ae2a31851bde13323dfe597634f74ae702bb0
 gb200-oke-ubuntu-training-kubeflow:
@@ -1831,7 +1910,7 @@ gb300-eks-amazonlinux-inference:
   009-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   009-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  009-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  009-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   009-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   010-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
@@ -1874,7 +1953,7 @@ gb300-eks-amazonlinux-inference:
   README.md: 7cb1151d03dae96fa9851eea6a15fa2011ea2b780b5c20a15c8aca9c9fc3b559
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
   bundle-info.yaml: 22288b970ebac465cae76a935fa97dacffa545d17b663fc6e00d2a864f96c451
-  checksums.txt: 0fd4f80446e74045ee51d4e09af9adda21a910941049007faaf01374396276b9
+  checksums.txt: cd254e1914cd3d475dc2def6334c4a50e51e049ba616cc50b9853f2a7d5a06ec
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: 805e8e6f62a503a602eb8372f47d032fd77454f8deee0b6768881a1db15dbd65
 gb300-eks-ubuntu-inference-dynamo:
@@ -1920,7 +1999,7 @@ gb300-eks-ubuntu-inference-dynamo:
   010-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   010-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  010-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  010-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   010-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   011-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -1971,7 +2050,7 @@ gb300-eks-ubuntu-inference-dynamo:
   README.md: 0efec187fd9fcba013084bfc1926a41a09f356b8766c013b4b3d35437d7c93ac
   UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
   bundle-info.yaml: d6ee84780bcb1e09f0d40429f3e1898f246ee39e1334e902c0ed778aed3db916
-  checksums.txt: 591a9e1c678073b41d1195297f393d469c51fb7a6a3296c3c30d348562a056e3
+  checksums.txt: 9f3319de02f54344eb786f9c0f9c55fb473357e87ed7854cd37b03b130c97a5d
   deploy.sh: 3959fc5810868ccacc85f59d575441096be6d232b62267d5476a65855794a8e4
   recipe.yaml: 228cc91bda3f607e74a428fdc6f9a5be010a85126664dbf2e349bfbb20dbb984
 gb300-eks-ubuntu-training-kubeflow:
@@ -2246,7 +2325,7 @@ gb300-gke-cos-inference-dynamo:
   009-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   009-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  009-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  009-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   009-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   010-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -2297,7 +2376,7 @@ gb300-gke-cos-inference-dynamo:
   README.md: 5c3fd65d44f4eec45ecf13ec31aa1bea3f4de6cb8fa3932590c6f83b712492ae
   UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
   bundle-info.yaml: 5ef2db6735c537efa51feab5dd49969ed45d23c92035afe7247f9a5917b8888b
-  checksums.txt: 81f35fd19021b2d0e48be3d5a035982e4e426944b817b00c1280984d37ceb07d
+  checksums.txt: 18f72fa5967796cf51d0d1f34401b867ae9aca4e823346771b5d6227423343b3
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: 6f2082062fab1fe910677b4d3c0acb5e840334dc5290d9d2e14df1e55e647b12
 gb300-gke-cos-training-kubeflow:
@@ -2405,7 +2484,7 @@ gb300-nvke-ubuntu-inference-dynamo:
   007-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   007-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  007-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  007-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   007-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   008-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -2451,7 +2530,7 @@ gb300-nvke-ubuntu-inference-dynamo:
   README.md: 2de9709847e9faf89c7e2414797151a7e234d17021147075f660706f5fb0d452
   UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
   bundle-info.yaml: 3b591fbd1210f5d45e5e8df4ef737de3512e2e1afea3f79ef97f5c7b36960474
-  checksums.txt: ed92e4023e07549512eefb2c71d63d3c252c88872c0643e1bceb8290b6fc9483
+  checksums.txt: c7a030102aac86a6a6a2e4a5627e588df95d97a69d0d60aca1c5ef1003527d2c
   deploy.sh: 6afc61322581830d1c33ecce94a979bec614c59e94538849be47ae9833244072
   recipe.yaml: 4d452a896b556ba04aa203f1987c7a89c53a8a69e26e5e2e5ca8e87e34fb4c74
 gb300-nvke-ubuntu-training-kubeflow:
@@ -2619,7 +2698,7 @@ h100-aks-ubuntu-inference-dynamo:
   008-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   008-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  008-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  008-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   008-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   009-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -2676,7 +2755,7 @@ h100-aks-ubuntu-inference-dynamo:
   README.md: dfb26f8d9a5dfa5f6311aed8a4bc75f916e09a7fb1725fc076be837dff26c0c6
   UPGRADING.md: f6ec2079df17024ac86a2c579b1106b3d884123a4105010e82422d55e88dfcc7
   bundle-info.yaml: 19234f4b22e70921c2bcf1068811b0cbb737a2ee9d76dc001874880d817b96dd
-  checksums.txt: 5393b4d033e52e279849ec235d95724eadf8f789d3ed4973f1fbeb220aa2a072
+  checksums.txt: bcd61a7361de001af2c052ebc26db668a64ddede6f1f7501e6b36bbd78fc26b6
   deploy.sh: 1a78677ffdf4ba1f861de19dbb30bffaab64b77aa62b48a87bd929a564bce55a
   recipe.yaml: f35d7c37022b45c5c864e3bca43ae1bf7838ff256926944844d92dcda52a2a84
 h100-aks-ubuntu-training-kubeflow:
@@ -3030,7 +3109,7 @@ h100-eks-amazonlinux-inference:
   009-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   009-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  009-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  009-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   009-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   010-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
@@ -3068,7 +3147,7 @@ h100-eks-amazonlinux-inference:
   README.md: 760c727e0f4be03b06ff4d4452f8e9309ef0a52a1589c681ddce82521ab186fb
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
   bundle-info.yaml: 021cf500b121587bb7b0d55d387d5f97f0f57573565712dedd8cafecddbd8f3d
-  checksums.txt: a676954940ddbbe29bae1e767778e308c68caee39f950fabdba34e333b02faed
+  checksums.txt: 58486c8f0c3c937add662f87160c5ce65545fa3176ba1ce0af43a7c9b1d7f945
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: 3a4b079d4a7d9784f20e7cebfe5368680fffe2e89e5790ecfbb6dccafd9d8ba7
 h100-eks-ubuntu-inference-dynamo:
@@ -3114,7 +3193,7 @@ h100-eks-ubuntu-inference-dynamo:
   010-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   010-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  010-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  010-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   010-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   011-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -3160,7 +3239,7 @@ h100-eks-ubuntu-inference-dynamo:
   README.md: deec6057f2cfca22cfb896d25801286f8470ab50eae44d002c06b4ba4f223937
   UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
   bundle-info.yaml: e66f39ae129934f2a849346aef7fb6f0055248b1e92f0b3f6e8264542c12d209
-  checksums.txt: d18fd8f6afd33040cd5773784cb2eff0927f6b495da131359e3dac5246d471bf
+  checksums.txt: 470a4142f8599a28688f098d625ec78a6810073e31a85f654359fdc2576227da
   deploy.sh: 3959fc5810868ccacc85f59d575441096be6d232b62267d5476a65855794a8e4
   recipe.yaml: ee61911527bb04ab539a226716dc1a11bc02cb38e724ad496da4065bcf0a5b8e
 h100-eks-ubuntu-inference-nim:
@@ -3206,7 +3285,7 @@ h100-eks-ubuntu-inference-nim:
   010-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   010-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  010-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  010-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   010-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   011-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
@@ -3248,7 +3327,7 @@ h100-eks-ubuntu-inference-nim:
   README.md: 2c4b3699d20340598867a5e8cfc45deff13327a56c37722fcf7ed3ddb4a0af68
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
   bundle-info.yaml: 451c2da2a2821267cb6fd2c3751a27b45458072514d2b674323d073526d950bb
-  checksums.txt: 955d0055d39b08b533aa4a64af70067f4b714fd01e823634d8227849d3f46062
+  checksums.txt: d7bb59580e7e380f8569267c2fffd86c900fae1b4a2e208b0efdc792db361034
   deploy.sh: b3f9fab16a2f2eba39adf6fcaab0adb9cfb86a263b9c25f121c31c7eacd29075
   recipe.yaml: 02aaad50fe27ed340c2a08b9b8924eb69e6d51791f4a09ca0028359155adf986
 h100-eks-ubuntu-training-kubeflow:
@@ -4046,7 +4125,7 @@ h100-gke-cos-inference-dynamo:
   009-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   009-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  009-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  009-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   009-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   010-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -4102,7 +4181,7 @@ h100-gke-cos-inference-dynamo:
   README.md: 49b842a24407c5616303ac18d3094f6d896123d4bc855d0d88a6bde3715a29bb
   UPGRADING.md: 127dd74db6b02ebfc7de7b9d2e9bc5d57629e347ab6bb1b559bca21431758967
   bundle-info.yaml: 31dd1c3a8e493383812f76278ad77568b447a5f1f5edd1b6342cb7711b9f67f2
-  checksums.txt: 7b7a253dbf27da02a825a6ff4ade22d285a582c6028395613f4e0049ea7c00ae
+  checksums.txt: 701aafd2691d1e57810beed02b170a53c243a3ea1fa02933903addb807283953
   deploy.sh: 34d9d6c33e26fe690cb388ba01ea383b3444fa18c63e525c83f143f5c41f613e
   recipe.yaml: 0008142204f743b38a70d1e221b6b3e87c4a7dbed02f8cc9cf788ac9b8e88c39
 h100-gke-cos-training-kubeflow:
@@ -4553,7 +4632,7 @@ h100-kind-inference-dynamo:
   007-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   007-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  007-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  007-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   007-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   008-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -4603,7 +4682,7 @@ h100-kind-inference-dynamo:
   README.md: 315735ece56dcdef84261a3d142ca0c702733452f7cf95adadfe0d610218d284
   UPGRADING.md: f6ec2079df17024ac86a2c579b1106b3d884123a4105010e82422d55e88dfcc7
   bundle-info.yaml: 9f508857e0002198b2eb6a713642dafbf8b181ed0a753b2f9af3bb8c10535ed4
-  checksums.txt: 485f70e9ee81e66be3c02c2fd7a89d9c8d39e1f8a62c7a12b3973524f257b39a
+  checksums.txt: b8bd98086bbd7a34d5ba4c22dc95344f04ca0879b44055c9cf7f333728b0efa8
   deploy.sh: fc332287efdf91cc0ea399c6b5227ed2bb2fac9577a14311a44f24646cd09ad2
   recipe.yaml: 60a8b53fe48d2c07ce7dff2ae1c16a52c694e4693d4c10826f2337d53c75fcda
 h100-kind-training-kubeflow:
@@ -4915,7 +4994,7 @@ h200-eks-inference:
   010-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   010-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  010-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  010-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   010-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   011-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
@@ -4953,7 +5032,7 @@ h200-eks-inference:
   README.md: e6d9a845e3ce412b51d46a106836e51dd0a9054dc79eaf22bb8945db16c420dc
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
   bundle-info.yaml: 6b3d19921dbdfde5d21ad5bd36a14eb67fd517cc4c098f7bafc6b851c2839960
-  checksums.txt: 8cf512096148e43e2609ea835eefde1d2995f94a3e2293a0583120cdfdb32930
+  checksums.txt: b90a05cc389f5669b0bbc8f090d6ccd39529b85e7d24f8a01ab112e435f17cc0
   deploy.sh: d24463c80f667dc815817624d68ca0583487a6ee519000cd06bb9549424892f7
   recipe.yaml: 9c6a38d7f1b3571a6d9dd4e0bd10005d63b54a2a179a453600ce937fd380687e
 h200-eks-training-kubeflow:
@@ -5221,7 +5300,7 @@ l40s-oke-inference:
   008-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   008-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  008-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  008-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   008-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   009-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
@@ -5259,7 +5338,7 @@ l40s-oke-inference:
   README.md: 5ba13752a70f5bd5a26479733635812d72d610883842b7a2705eabc41c5d20c1
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
   bundle-info.yaml: 3ea9e39cf850c521d071a094d6d62f576508ac717896f14295898e25dea12439
-  checksums.txt: 62388b97eb1a4bcfce062530b3cc9092ae3557375f6a9e8d1564893daaa700ad
+  checksums.txt: 9b8adcf97fd17216b21e20c9e9f3ddbe3b347019c285102ea0f17ff1517be867
   deploy.sh: f43f7421dee56ff6677e500ef194cdecdd114d49d6558fa82de390f8452e0538
   recipe.yaml: 4daf3dc19aeefdb35e605b3318e3dde9078e2526ee2227049f3991ad5b69df78
 l40s-oke-training-kubeflow:
@@ -5726,7 +5805,7 @@ rtx-pro-6000-eks-amazonlinux-inference:
   009-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   009-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  009-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  009-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   009-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   010-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
@@ -5764,7 +5843,7 @@ rtx-pro-6000-eks-amazonlinux-inference:
   README.md: 31592d026fba0af3a91759f302731161ceafe9e3bb68204ba7345479d5d829ad
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
   bundle-info.yaml: 39841448cafcc13a9d66d08eaf1759f731f4b8f3c224ac9786ee5a2273a103b2
-  checksums.txt: 6002b240639eb810112b6df171e2c33e44309147864cf1f884564ff961d549e7
+  checksums.txt: 3ca3685f9ab36182ae199763a81eb0f2f765b19f844232cbd271b9b1a98fbae5
   deploy.sh: 0248fabe5a8e4dbdbe60fc3f0cbf1aaab47a637402bec6eca1191fa601e8bfd6
   recipe.yaml: 4faa06884f1d4fe34747a7559b61490eea5856241c7ae35cb48eb3e445142c92
 rtx-pro-6000-eks-ubuntu-inference-dynamo:
@@ -5810,7 +5889,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   010-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   010-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  010-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  010-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   010-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   011-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -5856,7 +5935,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   README.md: 1bc8598fdfde934bfe4c30d0f7dc26da24aeb6a4d9b4c88acda11c7e276b8ba6
   UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
   bundle-info.yaml: 18e4ce513067873627eabd3fd97a46be00a494869615144c8a5cb42baa887179
-  checksums.txt: e0c6e6786fd50bab789c624837f9caa672b1ea28a2ecb67c78b51c643d5fedcd
+  checksums.txt: 2af15b386b29e950a827cb4ecfc865808038f780b00741cca9d0af0984fab530
   deploy.sh: 3959fc5810868ccacc85f59d575441096be6d232b62267d5476a65855794a8e4
   recipe.yaml: 2c13440c9ffc2f6d3e91cf8588fd19d3e61469425b58ad3ee5bb6ab2fd593aee
 rtx-pro-6000-eks-ubuntu-inference-nim:
@@ -5902,7 +5981,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   010-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   010-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  010-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  010-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   010-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   011-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
@@ -5944,7 +6023,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   README.md: 8e70b173e82db0e33135d1260c6f0228395e6c085af7d659e80d4ec802f6ad01
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
   bundle-info.yaml: 15d512d79571808241a3eed86c6e3f6c50e79d4a1404e1ddef94e3fe646a7712
-  checksums.txt: b440df686a7171d9d5d9caa16935b8e53c17dec998f683a680fab33884cf735b
+  checksums.txt: 05ce3be2842e962a3afb99ba5319cf953ee9fd694bf4e364cb105b9f2a7ad58b
   deploy.sh: b3f9fab16a2f2eba39adf6fcaab0adb9cfb86a263b9c25f121c31c7eacd29075
   recipe.yaml: fd075e7066d0fcc93c520a7f693b476d4c6c82e80166d110c224bc5ef8ec7e07
 rtx-pro-6000-eks-ubuntu-training-kubeflow:
@@ -6051,7 +6130,7 @@ rtx-pro-6000-lke-ubuntu-inference:
   007-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   007-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  007-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  007-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   007-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   008-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
@@ -6089,7 +6168,7 @@ rtx-pro-6000-lke-ubuntu-inference:
   README.md: 9fe2654d6d852ea843da9bf3d79ca75d531987c4e71ff6246b297104590f091f
   UPGRADING.md: 404e82b49264498a90e851dfb610a6c10810de9b0de6491fca13cba7434cc05a
   bundle-info.yaml: df9b1817dd1e517fdeaad63e06dcbf509f952297a2ca4225f78ba6392a7c3886
-  checksums.txt: 9d350d7cfe2fb88eda7c2abc95e98dad33211e7eb4cab18c3062b188fe7b9af2
+  checksums.txt: 240b3b7ae3f0c9cf7d4aac6252ff7d5363e1ede5345fe1715332e911720c35d3
   deploy.sh: 49d525ddd078ed165ad0c17da3038b968d1f118418c1e01cc4596b6859cfef74
   recipe.yaml: 362a145e0b2a42dfc28f97b237574050c8116371240ba40c83266ce4cdff8afe
 rtx-pro-6000-lke-ubuntu-training-kubeflow:
@@ -6183,7 +6262,7 @@ vr200-nvke-ubuntu-inference-dynamo:
   007-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   007-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  007-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  007-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   007-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   008-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -6229,7 +6308,7 @@ vr200-nvke-ubuntu-inference-dynamo:
   README.md: 69441478be77dcd9158adc3556ce82fec5bb7eceddcd25210d1e310fbc6beceb
   UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
   bundle-info.yaml: 28a18fe11cb2ba2ef94128f7411081830451b3cd282f2e53f8e5ba9c5034f4c3
-  checksums.txt: 5961ab5d0d9e73e6989ad2b86bb96b6f900452405374c16cf7744ba742ceef4a
+  checksums.txt: d289ad1e7121bb09b6bde76732971b2a621d0eae583d6feafd649d8b122fa6b8
   deploy.sh: 6afc61322581830d1c33ecce94a979bec614c59e94538849be47ae9833244072
   recipe.yaml: b1a551763287e77b75c3727731d3467db0c32a99e326b4fb6c8c4ee339287885
 vr200-nvke-ubuntu-training-kubeflow:
@@ -6348,7 +6427,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   009-agentgateway-post/Chart.yaml: af673ef38ab23525e7c88fae697902e55d6905c23587967bd52f9835bed3a199
   009-agentgateway-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-agentgateway-post/install.sh: cdee7f6ea826826990737d9251be8c4eea329cda92f7f91bcfa4a398f50b5dda
-  009-agentgateway-post/templates/inference-gateway.yaml: 5a6a4fa374284a5f9a536b5cfe90bef04fbd5daf3d29669de618294e0272e71d
+  009-agentgateway-post/templates/inference-gateway.yaml: 4d6b6a3e8c7145376cc139f05e2bb4faa48c48f3bcb27b8533e39dbee9a829c7
   009-agentgateway-post/values.yaml: 1a728394fb5f81fcdad86c14f7c9e8526719f02d11285fc82c1d13ba8076f2c6
   010-grove/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-grove/install.sh: df864e490313b705beeba0626af9e5b12299adec20902cadf52ffb2e7dfbb866
@@ -6394,7 +6473,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   README.md: aaf2a51a3f23ea2aa67199b7b581d966c77226d750ee60e80814274f2aa40c29
   UPGRADING.md: 9edde929c0dca6719f9eb1d5c99f7174afaf35960a59010cecf72983f7914379
   bundle-info.yaml: ba2511cef74ac9df287f8a44559511877b5d7be261ebf5eb423c1772ac1bf6a8
-  checksums.txt: 378882f49f7b8bbf78afd99ffbf4cb86b33babe7d12b38f195581bc0ad0187c2
+  checksums.txt: abe8344cf86598f4b1e46ee610e864fe8e286c62de3af54e1c825fc77d18530a
   deploy.sh: 841a92636bb0a65da6fa0162b67084f68f362fa0e41837b1c57e6560c10a7a63
   recipe.yaml: 9c9c41ca30f750e4fa43a98c9d40d7b31fca5510ed83661baaa9ab89e88f99e2
 vr200-rke2-ubuntu-training-kubeflow:

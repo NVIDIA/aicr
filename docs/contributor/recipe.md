@@ -391,7 +391,7 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`, `os-amazonlinux`, `o
 `platform-inference`, `platform-kubeflow`, `gpu-operator-nvidia-driver-cr`,
 `nvsentinel-observability`,
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
-`nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
+`nvsentinel-preflight`, `nvsentinel-preflight-runai`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
 `nvsentinel-quarantine`, `nvsentinel-remediation`, `nvsentinel-slinky-drainer`,
 `nvsentinel-health-events-analyzer`, `nvsentinel-event-exporter`, `nvsentinel-datastore-eks`, `nvsentinel-log-collector`,
 `nvsentinel-node-validation`, `nvsentinel-external-remediation`, `nvsentinel-maintenance-request`,

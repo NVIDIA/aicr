@@ -32,17 +32,23 @@ func valid() Config {
 	return c
 }
 
+// parse binds c's flags and parses args over c.
+func parse(c *Config, args ...string) error {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	c.BindFlags(fs)
+	return fs.Parse(args)
+}
+
 func TestFlagsOverrideDefaults(t *testing.T) {
 	t.Parallel()
 	c := Defaults()
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	c.BindFlags(fs)
-	err := fs.Parse([]string{
-		"--aicr-version=v1.0.0", "--aicr-image=" + image, "--registry-repository=oci://r.example.com/x",
+	err := parse(&c,
+		"--aicr-version=v1.0.0", "--aicr-image="+image, "--registry-repository=oci://r.example.com/x",
 		"--registry-plain-http", "--development-bypass-approvals", "--jobs-namespace=jobs", "--engine=ArgoCD",
 		"--engine-namespace=gitops", "--engine-project=p", "--development-skip-discovery", "--snapshot-agent-requests=cpu=250m",
 		"--allow-prerelease-aicr",
-	})
+	)
 	if err != nil {
 		t.Fatalf("Parse() = %v", err)
 	}
@@ -67,9 +73,7 @@ func TestFlagsOverrideDefaults(t *testing.T) {
 	}
 	for value, want := range map[string][]string{"gpu-operator, cert-manager,": {"gpu-operator", "cert-manager"}, "": nil} {
 		c = Defaults()
-		fs = flag.NewFlagSet("test", flag.ContinueOnError)
-		c.BindFlags(fs)
-		if err = fs.Parse([]string{"--component-namespaces=" + value}); err != nil || !c.RestrictNamespaces || !slices.Equal(c.ComponentNamespaces, want) {
+		if err = parse(&c, "--component-namespaces="+value); err != nil || !c.RestrictNamespaces || !slices.Equal(c.ComponentNamespaces, want) {
 			t.Errorf("--component-namespaces=%q: %v %t %v", value, err, c.RestrictNamespaces, c.ComponentNamespaces)
 		}
 	}
@@ -123,10 +127,8 @@ const validator = "ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8
 func TestValidateValidation(t *testing.T) {
 	t.Parallel()
 	c := valid()
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	c.BindFlags(fs)
 	conformance := "ghcr.io/nvidia/aicr-validators/conformance:v1.0.0@sha256:e091d51f600255c2166e5c1b42afd556880d498f2a9bb913a32da38fa28e038b"
-	if err := fs.Parse([]string{"--validation-enabled", "--validator-images=" + validator + ", " + conformance}); err != nil {
+	if err := parse(&c, "--validation-enabled", "--validator-images="+validator+", "+conformance); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Validate(false); err != nil {
@@ -165,13 +167,11 @@ func TestValidateValidation(t *testing.T) {
 func TestValidateSigning(t *testing.T) {
 	t.Parallel()
 	c := valid()
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	c.BindFlags(fs)
 	if !c.ValidationTransparencyLog {
 		t.Fatal("the transparency log is off by default")
 	}
-	err := fs.Parse([]string{"--aicr-version=v1.1.0", "--validation-enabled", "--validator-images=" + validator,
-		"--validation-signing-key=awskms:///alias/aicr-evidence", "--validation-transparency-log=false"})
+	err := parse(&c, "--aicr-version=v1.1.0", "--validation-enabled", "--validator-images="+validator,
+		"--validation-signing-key=awskms:///alias/aicr-evidence", "--validation-transparency-log=false")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,12 +211,10 @@ func TestValidateAWSProvider(t *testing.T) {
 // none by default.
 func TestJobPlacementFlags(t *testing.T) {
 	c := Defaults()
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	c.BindFlags(fs)
-	err := fs.Parse([]string{
+	err := parse(&c,
 		`--job-node-selector={"node-role":"system"}`,
 		`--job-tolerations=[{"key":"CriticalAddonsOnly","operator":"Exists","effect":"NoSchedule"}]`,
-	})
+	)
 	if err != nil {
 		t.Fatalf("Parse() = %v", err)
 	}
@@ -227,11 +225,8 @@ func TestJobPlacementFlags(t *testing.T) {
 		t.Fatalf("default placement = %v %v", d.JobNodeSelector, d.JobTolerations)
 	}
 	for _, bad := range []string{`--job-node-selector=[1]`, `--job-tolerations={}`} {
-		fs = flag.NewFlagSet("test", flag.ContinueOnError)
-		fs.SetOutput(io.Discard)
 		fresh := Defaults()
-		fresh.BindFlags(fs)
-		if err = fs.Parse([]string{bad}); err == nil {
+		if err = parse(&fresh, bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
 	}
