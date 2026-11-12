@@ -1808,6 +1808,13 @@ it (the OpenShift overlay serves `prometheus-adapter-ocp` from the platform
 monitoring stack) there is no Prometheus to ask, the check records the wait as
 skipped, and its baseline is bounded by the metric timeout alone.
 
+`pod-autoscaling` creates its PodMonitor in the Prometheus namespace, because
+that Prometheus loads monitors only from the namespaces the bundle names and
+its own. On a recipe with `nktp`, `ai-service-metrics` does not ask this
+Prometheus at all: it queries NKTP's `otel-lgtm` and waits for the stub
+target's `up` series, and fails with "the telemetry pipeline did not report
+the stub's target as up" when NKTP does not discover the ServiceMonitor.
+
 The baseline then ends in one of three ways, each with its own message.
 
 A failure naming the load, such as:

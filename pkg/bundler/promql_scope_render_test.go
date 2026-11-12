@@ -121,7 +121,7 @@ func TestPromQLScrapeScopeRendersOnChart(t *testing.T) {
 		t.Fatal("chart renders no Prometheus")
 	}
 
-	scopeNamespaces := []any{"dynamo-system", "gpu-operator"}
+	scopeNamespaces := []any{"dynamo-system", "gpu-operator", "monitoring"}
 	wantNamespaceSelector := map[string]any{"matchExpressions": []any{map[string]any{
 		"key": namespaceNameLabel, "operator": "In", "values": scopeNamespaces,
 	}}}

@@ -189,8 +189,12 @@ type fakeMonitoring struct {
 	poolNamespace   string
 	poolLoadedAfter time.Duration
 	poolNever       bool
-	start           time.Time
-	stop            chan struct{}
+	// pipeline makes the fake a backend a telemetry pipeline writes to: it
+	// has no scrape pool API, and reports the target's up series once the
+	// pipeline has discovered it (the same clock as the scrape pool).
+	pipeline bool
+	start    time.Time
+	stop     chan struct{}
 }
 
 func newFakeMonitoring(scrapes bool) *fakeMonitoring {
@@ -227,12 +231,24 @@ func (f *fakeMonitoring) scrapePools() []byte {
 
 func (f *fakeMonitoring) handler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/api/v1/scrape_pools" {
+		if f.pipeline {
+			http.NotFound(w, r)
+			return
+		}
 		_, _ = w.Write(f.scrapePools())
 		return
 	}
 	q := r.URL.Query().Get("query")
 	if q == "vector(1)" {
 		_, _ = w.Write(promVector(1))
+		return
+	}
+	if strings.HasPrefix(q, "max(up{") {
+		if f.pipeline && f.poolLoaded() && strings.Contains(q, f.poolNamespace) {
+			_, _ = w.Write(promVector(1))
+			return
+		}
+		_, _ = w.Write(promVector())
 		return
 	}
 	if !f.scrapes || !f.poolLoaded() {
@@ -277,7 +293,9 @@ func readyOnCreate(c *k8sfake.Clientset) {
 // the collection timeout would have expired (#3671); a ServiceMonitor never
 // loaded fails at baseline naming the load; one loaded but never scraped
 // fails at baseline naming the collection; foreign traffic above baseline
-// plus N fails the increase phase.
+// plus N fails the increase phase. Against a backend a telemetry pipeline
+// writes to, the target's up series takes the scrape pool's place and the
+// scrape pool API is never asked.
 func TestAIMetricsScenarioPhases(t *testing.T) {
 	t.Parallel()
 	const collectionTimeout = 200 * time.Millisecond
@@ -286,6 +304,7 @@ func TestAIMetricsScenarioPhases(t *testing.T) {
 		scrapes   bool
 		poolAfter time.Duration
 		poolNever bool
+		pipeline  bool
 		extra     float64
 		wantPhase aiMetricsPhase
 		wantCode  errors.ErrorCode
@@ -296,9 +315,12 @@ func TestAIMetricsScenarioPhases(t *testing.T) {
 		{name: "ServiceMonitor never loaded fails at baseline", scrapes: true, poolNever: true, wantPhase: aiMetricsPhaseBaseline,
 			wantCode: errors.ErrCodeNotFound, wantMsg: "Prometheus did not load the ServiceMonitor"},
 		{name: "ServiceMonitor loaded but not scraped fails at baseline", scrapes: false, wantPhase: aiMetricsPhaseBaseline,
-			wantCode: errors.ErrCodeNotFound, wantMsg: "Prometheus loaded the ServiceMonitor but the workload metrics were not collected"},
+			wantCode: errors.ErrCodeNotFound, wantMsg: "discovered the ServiceMonitor but the workload metrics were not collected"},
 		{name: "traffic above baseline plus N fails the increase", scrapes: true, extra: float64(defaults.AIServiceMetricsRequestCount), wantPhase: aiMetricsPhaseIncrease,
 			wantCode: errors.ErrCodeInternal, wantMsg: "extra requests reached the workload"},
+		{name: "pipeline backend: exact count passes", scrapes: true, pipeline: true, poolAfter: 3 * collectionTimeout, wantPhase: aiMetricsPhaseIncrease},
+		{name: "pipeline backend: target never up fails at baseline", scrapes: true, pipeline: true, poolNever: true, wantPhase: aiMetricsPhaseBaseline,
+			wantCode: errors.ErrCodeNotFound, wantMsg: "did not report the stub's target as up"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -306,7 +328,7 @@ func TestAIMetricsScenarioPhases(t *testing.T) {
 			mon := newFakeMonitoring(tt.scrapes)
 			defer close(mon.stop)
 			mon.extraTraffic = tt.extra
-			mon.poolLoadedAfter, mon.poolNever = tt.poolAfter, tt.poolNever
+			mon.poolLoadedAfter, mon.poolNever, mon.pipeline = tt.poolAfter, tt.poolNever, tt.pipeline
 			srv := httptest.NewServer(http.HandlerFunc(mon.handler))
 			defer srv.Close()
 
@@ -319,6 +341,9 @@ func TestAIMetricsScenarioPhases(t *testing.T) {
 				t.Fatalf("newAIMetricsScenario: %v", err)
 			}
 			mon.poolNamespace = s.testRun.namespace
+			if tt.pipeline {
+				s.useTargetUp()
+			}
 			s.sendRequest = mon.sendRequest
 			s.pollInterval = 2 * time.Millisecond
 			s.readyTimeout = time.Second
@@ -634,6 +659,52 @@ func TestAIMetricsScenarioRunWithCleanup_NamespaceCreateFailure(t *testing.T) {
 			assertNamespaceCreateFailureCleanup(t, c, s.testRun.namespace, out, err, tt.persists || tt.surfacesLate, tt.deleteErr, tt.wantDeleted, tt.wantStatus)
 			if s.phase != "" {
 				t.Errorf("phase = %q, want none — the cycle must not start without a namespace", s.phase)
+			}
+		})
+	}
+}
+
+// TestDiscoverTelemetryBackendURL pins where the check reads when the recipe
+// ships NKTP: otel-lgtm's Prometheus port in nktp's namespace, a skip when
+// NKTP runs without otel-lgtm, and a failure when the Service lacks the port.
+func TestDiscoverTelemetryBackendURL(t *testing.T) {
+	t.Parallel()
+	lgtm := func(port int32) *corev1.Service {
+		return &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: otelLGTMServiceName, Namespace: "nktp"},
+			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: port}}},
+		}
+	}
+	tests := []struct {
+		name     string
+		refs     []recipe.ComponentRef
+		objects  []runtime.Object
+		wantURL  string
+		wantSkip bool
+		wantCode errors.ErrorCode
+	}{
+		{name: "otel-lgtm installed", refs: []recipe.ComponentRef{{Name: nktpComponentName, Namespace: "nktp"}},
+			objects: []runtime.Object{lgtm(otelLGTMPrometheusPort)}, wantURL: "http://lgtm.nktp.svc:9090"},
+		{name: "otel-lgtm disabled skips", refs: []recipe.ComponentRef{{Name: nktpComponentName, Namespace: "nktp"}}, wantSkip: true},
+		{name: "Service without the Prometheus port fails", refs: []recipe.ComponentRef{{Name: nktpComponentName, Namespace: "nktp"}},
+			objects: []runtime.Object{lgtm(3000)}, wantCode: errors.ErrCodeNotFound},
+		{name: "nktp without a namespace fails", refs: []recipe.ComponentRef{{Name: nktpComponentName}}, wantCode: errors.ErrCodeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := &validators.Context{Ctx: context.Background(), Clientset: k8sfake.NewClientset(tt.objects...),
+				ValidationInput: &v1.ValidationInput{ComponentRefs: tt.refs}}
+			got, err := discoverTelemetryBackendURL(ctx)
+			switch {
+			case tt.wantSkip:
+				if !validators.IsSkip(err) {
+					t.Fatalf("error = %v, want a skip", err)
+				}
+			case tt.wantCode != "":
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+			case err != nil || got != tt.wantURL:
+				t.Fatalf("got %q, %v; want %q", got, err, tt.wantURL)
 			}
 		})
 	}

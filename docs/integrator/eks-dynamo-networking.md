@@ -190,7 +190,8 @@ group), so this rule is needed **even when Frontend and Worker are
 co-located** — it is not part of the Frontend↔Worker relationship above.
 
 Allow ingress on TCP `9090` (Prometheus, required for the `ai-service-metrics`
-conformance check, and for `pod-autoscaling` when the recipe declares
+conformance check, which on a recipe with `nktp` dials NKTP's `otel-lgtm` on
+the same port, and for `pod-autoscaling` when the recipe declares
 `kube-prometheus-stack`) from **every security group that can host the
 conformance orchestrator Job** into the **Prometheus/system security
 group**. The orchestrator Job tolerates every taint (can schedule on any

@@ -254,6 +254,7 @@ var ctrfSkipReasons = []string{
 	"dra-driver-not-installed", // standalone run with no NVIDIA DRA driver on the cluster
 	"slurm-managed-gpus",       // GPUs are allocated by Slurm, not the Kubernetes scheduler
 	"simulated-nodes",          // the workload runs on KWOK simulated nodes
+	"no-metrics-backend",       // telemetry goes to a backend the check has no query URL for
 }
 
 // ctrfGPUAllocationPolicies holds the pkg/validator/v1 GPUAllocationPolicy*

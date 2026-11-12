@@ -216,7 +216,7 @@ validators:
     env: []
   - name: ai-service-metrics
     phase: conformance
-    description: "Verify Prometheus discovers a ServiceMonitor-selected CPU stub workload and collects exactly the requests sent to it"
+    description: "Verify the monitoring system discovers a ServiceMonitor-selected CPU stub workload and collects exactly the requests sent to it"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     # 8m30s shared work budget enforced by the check's workCtx, plus 30s
     # cleanup and 60s margin; the per-wait caps (stub Ready 3m, monitor load
@@ -235,6 +235,11 @@ validators:
       - componentRef: kube-prometheus-stack
         podLabelSelector:
           app.kubernetes.io/name: prometheus
+        requirement: preferred
+      # On a recipe with nktp the check dials NKTP's otel-lgtm instead.
+      - componentRef: nktp
+        podLabelSelector:
+          app: lgtm
         requirement: preferred
   - name: inference-gateway
     phase: conformance
