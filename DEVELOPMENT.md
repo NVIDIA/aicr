@@ -144,11 +144,11 @@ Docker/Kind logs and increase the machine size, or use the cluster-free workflow
 above. CPU-only Kind cannot validate a real NVIDIA driver or GPU workload.
 
 Open the **Ports** tab for the forwarded Tilt UI (10350) and AICR API (8080).
-Keep both ports private. Do not forward the Docker socket, Kubernetes API, or
-local registry publicly. Use Tilt's authenticated UI URL/token when prompted;
-forwarding a port does not bypass Tilt authentication. Codespace suspension
-interrupts running processes, so check `docker info` and restart `make dev-env`
-after resuming as needed.
+Keep both ports at **Private** visibility; this is their only access protection.
+Do not set ports 10350 or 8080 to **Public** or **Organization**. Do not forward
+the Docker socket, Kubernetes API, or local registry publicly. Codespace
+suspension interrupts running processes, so check `docker info` and restart
+`make dev-env` after resuming as needed.
 
 An external Kubernetes cluster is also optional: authenticate using your
 provider's CLI and an untracked kubeconfig, verify the current context before
