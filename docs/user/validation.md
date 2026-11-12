@@ -17,8 +17,30 @@ For the architectural view of how snapshot + recipe flow into the validator, see
 | `conformance` | Does the cluster support workload-specific capabilities (DRA, gang scheduling, autoscaling, ...)? | Before opening the cluster to real workloads |
 | `performance` | Does the cluster hit expected bandwidth / throughput thresholds? | After components are ready; before going to production |
 
+Under a GitOps deployer (Argo CD, Flux, Fleet), start `aicr validate --phase
+deployment` only after the sync of every wave has completed, not while it is
+still progressing. The phase treats a declared resource the cluster lacks as a
+deployment that was not applied, not as one that is not ready yet: a Nodewright
+CR the recipe declares (shipped by `nodewright-customizations`, which syncs in
+a later wave than the operator) that is absent fails `expected-resources`
+immediately instead of waiting for the sync to deliver it.
+
 Readiness pre-flight constraints (K8s version, OS, kernel) run implicitly before
-any phase. If pre-flight fails, no validator Jobs are deployed.
+any phase. If pre-flight fails, no validator Jobs are deployed. A submission run
+(`--cncf-submission`) adds two pre-flights of its own once the snapshot is
+loaded or captured and before any validator Job: the cluster's Kubernetes minor
+must match a carried checklist exactly (1.34 and 1.38 are refused alike, since
+a submission certifies one minor) unless
+`spec.validate.evidence.cncf.conformanceVersion` names one, which the
+submission README then records as selected explicitly; and the recipe's
+`validation.conformance.checks` must declare a complete proof path for every
+applicable MUST of that checklist (`secure-accelerator-access` or the Slinky
+Slurm alternative `slinky-slurm-gpu-access`; a conditional MUST declared under
+`spec.validate.evidence.cncf.notApplicable` is not required). A recipe that
+cannot establish a MUST is refused with `INVALID_REQUEST` naming the
+requirements and the checks that would close each gap, since no run of it can
+establish the submission. A plain run that includes the conformance phase logs
+the same gaps as a warning and proceeds.
 
 ## The workflow
 
@@ -61,7 +83,7 @@ a component the bundler enabled at bundle time is not checked.
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
 - Effectively cluster-admin for the identity running `aicr validate`. Each run creates a ServiceAccount for its validator Jobs and binds it to the built-in `cluster-admin` ClusterRole through a per-run `aicr-validator-<run-id>` ClusterRoleBinding, and Kubernetes RBAC only lets you bind a role whose permissions you already hold. The run deletes the binding at cleanup; `--no-cleanup` leaves it active until you delete it yourself. AICR creates its own `aicr-validation` namespace on first run. To run without that grant, have an administrator provision the ServiceAccount instead; see [Running under a pre-provisioned ServiceAccount](#running-under-a-pre-provisioned-serviceaccount).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
-- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate with no cap set, from the flag, `AICR_MAX_NODES_PER_ENTRY`, or `spec.snapshot.execution.maxNodesPerEntry`; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` additionally re-evaluates `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so the value fails closed. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
+- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` and `dra` require every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin — or, under `dra`, the NVIDIA DRA driver's ResourceSlices — is the sole whole-GPU advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate with no cap set, from the flag, `AICR_MAX_NODES_PER_ENTRY`, or `spec.snapshot.execution.maxNodesPerEntry`; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` and `dra` additionally re-evaluate `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so those values fail closed. `dra` also re-evaluates its own `K8s.server.version >= 1.35.0` floor. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
 - **`NodeTopology.gpu-nodes.label` readiness constraints outside GKE** (including bare metal and `--data` services): GPU nodes are those the GPU Operator labels `nvidia.com/gpu.present=true`, so capture the snapshot after it is running. A snapshot with no such node fails readiness closed (exit 2), and GPU nodes it has not labeled are not checked.
 
 ## Training performance validation
@@ -84,8 +106,8 @@ is installed on the cluster.
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE (GPUDirect TCPXO), H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE and NVKE) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB300 + EKS, and VR200 + NVKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE, the per-rail SR-IOV VFs (`nvidia.com/sriov_resource_rail_<n>`) on NVKE, over InfiniBand for GB200 and RoCE v2 for VR200 — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the Grace Blackwell combinations — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, generic), VR200 + RKE2, and VR200 + NVKE. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE and NVKE), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE and NVKE) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB300 + EKS, GB300 + OKE, and VR200 + NVKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS; on OKE, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) for GB200 and RoCE over SR-IOV VFs (`nvidia.com/mlnxnics` VFs attached through the `rdma-net` network) for GB300; on NVKE, the per-rail SR-IOV VFs (`nvidia.com/sriov_resource_rail_<n>`), over InfiniBand for GB200 and RoCE v2 for VR200 — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the GB200 combinations and GB300 + EKS — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, OKE, NVKE, generic), VR200 + RKE2, and VR200 + NVKE. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE GB200 and NVKE, RoCE on OKE GB300), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -155,6 +177,15 @@ On OKE, `-net` exercises the NVL72 rack's InfiniBand east-west fabric
 `rdmaSharedDevicePlugin` NicClusterPolicy) over NCCL's built-in IB/verbs
 transport — no EFA plumbing is involved. Both variants were validated
 end to end on a `BM.GPU.GB200.4` NVL72 rack.
+
+The GB300/OKE training recipe enables `-net` and `-nvls` with `>= 300` /
+`>= 700` GB/s floors. Its `-net` runs NCCL's built-in IB/verbs transport over
+RoCE: each worker pod requests the node's four SR-IOV VFs
+(`nvidia.com/mlnxnics`) and attaches them through the recipe's `rdma-net`
+network, and NCCL reads the node topology that `nvidia-tuned` writes to
+`/etc/nccl/topo.xml`. On `BM.GPU.GB300.4` nodes with NCCL 2.29.2, the 16 GiB bus
+bandwidth measured 363 GB/s (NET) and 836 GB/s (NVLS) on 2 nodes, and 376 GB/s
+and 909 GB/s on 4.
 
 ```bash
 # Capture snapshot, generate training recipe, validate the performance phase.
@@ -233,7 +264,9 @@ catches that on its own — it fails on a `Using network Socket` banner rather
 than reporting a figure — so the preflight exists to fail fast, naming the
 driver, instead of after a full benchmark run.
 
-The preflight covers every NET fabric: EFA on EKS and built-in IB/verbs on OKE and NVKE.
+The preflight covers EFA on EKS and built-in IB/verbs on OKE and NVKE for
+GB200, and EFA on EKS for GB300. GB300 on OKE (RoCE) ships R595 in the node
+image and is not preflighted.
 
 **Before R595** — which includes `580.173.02`, the version AICR pins — the
 driver must be loaded with `NVreg_GrdmaPciTopoCheckOverride=1`. Without it the
@@ -335,7 +368,7 @@ is passed it replaces the automatic filters rather than narrowing them.
 
 Valid profiles are the pairs in the applicability table above: `b200/any`,
 `gb200/any`, `gb200/eks`, `gb200/gke`, `gb200/nvke`, `gb200/oke`, `gb300/eks`, `gb300/generic`,
-`h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/nvke`, `vr200/rke2`. A
+`gb300/nvke`, `gb300/oke`, `h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/nvke`, `vr200/rke2`. A
 malformed or unknown value **fails** the check rather than silently skipping
 it. A valid profile that doesn't implement a requested variant (e.g.
 `gb200/eks` with the auto-detect `nccl-all-reduce-bw` check) skips just that
@@ -872,7 +905,13 @@ waiver would disarm the upstream chart's install-guard tripwire).
 
 Stock recipes ship the production default: `gpus.enabled=false`,
 `gpuResourcesEnabledOverride=false`, and `devicePlugin.enabled=true`; the
-experimental DRA opt-in flips all three together in a recipe overlay.
+experimental DRA opt-in flips all three together in a recipe overlay. On
+GKE-COS the `gpuStack=dra` profile value
+([#2517](https://github.com/NVIDIA/aicr/issues/2517)) is the stock selection
+of exactly that opt-in tuple — the one stock selection resolving
+`dra-resource-claim`, still experimental pending the #1327 graduation
+checklist ([#3282](https://github.com/NVIDIA/aicr/issues/3282)); see
+[GKE GPU Setup](../integrator/gke-gpu-setup.md#alternative-dra-resourceclaims-as-the-advertiser-experimental).
 
 **Upgrading a cluster from the dual-advertised (pre-flip) configuration:**
 applying the flipped bundle does not drain existing workloads — a running
@@ -1490,12 +1529,70 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 | `2` | Invalid input or request (`ErrCodeInvalidRequest`) — bad CLI flag, malformed argument, a validator rejecting a recipe value (e.g., an inference constraint that uses the wrong comparator direction), or a **readiness pre-flight** constraint not met. The readiness gate always fails closed with this code, even under `--fail-on-error=false` |
 | `5` | A structured `ErrCodeTimeout` reached the top-level CLI — for example while loading the recipe or snapshot, waiting on the snapshot-agent Job, or signing evidence under `--emit-attestation --push` (which runs after the checks). A per-validator wait deadline does **not** reach this code: `runPhase` converts that error into a check result, so it surfaces as exit `8` (see note 2) |
 | `6` | A structured `ErrCodeUnavailable` reached the top-level CLI; under `--cncf-submission`, the pinned upstream validator could not start because the CNCF landscape was unreachable ([Exit status of a submission run](#exit-status-of-a-submission-run)) |
-| `8` | One or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Suppressed by `--fail-on-error=false`. Under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error`, and a submission write, redaction or upstream-validator failure ([Exit status of a submission run](#exit-status-of-a-submission-run)). |
+| `8` | A privileged RBAC revocation failed after operator cancellation (`ErrCodeInternal`; not suppressed by `--fail-on-error=false`), **or** one or more phases reported status `failed` (a check that returned a failure verdict — exit code `1` — or, in most cases, a validator Job killed on `activeDeadlineSeconds` — see the note below) **or** `other` (an indeterminate outcome — the check produced no usable verdict; a crash or OOM are the common examples, as is a validator Job that failed for a non-deadline reason with no inspectable pod), including per-check internal timeouts (e.g., DynamoGraphDeployment not ready within `InferenceWorkloadReadyTimeout`). Only the result-driven phase exits are suppressed by `--fail-on-error=false`. Under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error`, and a submission write, redaction or upstream-validator failure ([Exit status of a submission run](#exit-status-of-a-submission-run)). |
+| `9` | Operator interrupted the CLI with Ctrl-C or SIGTERM (`ErrCodeCanceled`) before the last validation phase completed, and privileged cleanup did not fail. Not suppressed by `--fail-on-error=false`; completed checks and the partial current phase are retained, and CTRF output is attempted once at least one phase has results. A signal that arrives after the last phase completed takes the normal completion path instead (see **Interrupted runs** below) |
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
-> 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` normally reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. One narrow exception remains — the CLI waits the catalog timeout plus `ValidatorWaitBuffer` (2m30s) for the Job to become terminal — measured from the Job's observed start time (`status.startTime` when the apiserver has stamped it, otherwise `creationTimestamp`, which is never later and so only ever ends the wait earlier), so it shares an origin with the Job's clock — a window that is deliberately shorter than the Job's own `activeDeadlineSeconds` (catalog timeout plus `ValidatorJobDeadlineHeadroom`, 3m30s), so a validator whose pod is still running when the CLI's wait expires exhausts the wait before the deadline condition is ever stamped. Such a run falls back to the CLI-wait path and still reports `other`.
+> 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. The Job deadline is the catalog timeout plus `ValidatorJobDeadlineHeadroom` (3m: 2m for container startup, 30s for the check's deferred cleanup, 30s to flush its result), and the CLI waits for the Job to become terminal for that deadline plus the pod's 60s SIGTERM window and a 5s margin (catalog timeout + 4m05s), measured from the Job's observed start time (`status.startTime` when the apiserver has stamped it, otherwise `creationTimestamp`). The CLI therefore never gives up on a run while the pod is still finishing its cleanup. When the Job controller deletes the pod at the deadline, the CLI reports what the check itself reported: the exit code and termination message of the pod in its deletion grace window, or of the last terminated pod it observed while waiting, is appended to the deadline message (`check reported: exit code 3: terminated by SIGTERM …`). The verdict stays `failed`; if no terminated status was observed the generic deadline message stands.
 > 2. Exit 5 is narrower than it sounds. A timeout **inside** a check's own logic (DynamoGraphDeployment not ready, inference endpoint never healthy, AIPerf Job pod-wait deadline) surfaces as a failed phase, not as a structured `ErrCodeTimeout`, so the CLI exits **8**. So does a per-validator wait deadline: `runPhase` hands that error to the timeout handler and records the outcome as a check result rather than propagating it, which is the same path the wait-exhaustion exception in note 1 takes. The rule, rather than a list of sources: exit 5 applies whenever an `ErrCodeTimeout` reaches the top-level CLI. A timeout that is converted into a check result instead — whether raised inside a check or by a per-validator wait — surfaces as exit 8.
+
+**Interrupted runs.** The first Ctrl-C or SIGTERM cancels validation and, with
+cleanup enabled, deletes the in-flight validator Job using a fresh context.
+Completed verdicts and the partial current phase are retained; unstarted checks
+in that phase say `not run: validation canceled` and later phases do not start.
+The interrupted phase is blocking (`other` unless already `failed`), and so is
+its CTRF report. When no check entry already records the interruption, for
+example because the signal landed between checks or between phases, the report
+gains a `validation-interrupted` entry with status `other`, so `summary.other`
+is non-zero. CTRF output is still attempted once at least one phase has
+results, even if the cluster's report ConfigMap cannot be written. A signal
+that arrives before any phase has results, for example during cluster
+preparation, writes no CTRF output. Partial output is written only for an
+interruption. Any other error (for example a later phase's pre-flight failure,
+or a privileged RBAC revocation failure after every phase completed) writes no
+CTRF output, as before.
+Cleanup typically takes about 65s, and about 125s plus overhead in the worst
+case. One shared 30s window covers result capture, Job deletion and report
+persistence. The wait for the validator pod to terminate then covers the pod's
+full 60s SIGTERM grace from Job deletion (plus a 5s margin), so the validator's
+RBAC stays in place while a cooperative check cleans up. The existing 30s
+per-run RBAC/data teardown window follows. The CLI records this 125s aggregate
+deadline when cancellation is first observed, not when validation starts.
+Partial output uses only the time remaining before that deadline (and at most
+its existing 30s I/O cap), never a further cleanup window. If no time remains,
+the in-memory results and original error are retained without starting output.
+These limits are cooperative: an arbitrary file/stdout writer is not physically
+interruptible just because it receives a context. A second Ctrl-C or SIGTERM
+force-terminates the CLI and can leave resources behind. `--no-cleanup`
+continues to leave them intentionally.
+
+Exit `9` applies only when the signal arrives before the last phase completed.
+A signal that arrives after that, for example during the final per-run RBAC/data
+teardown or while evidence is rendered, signed or pushed, takes the normal
+completion path on a canceled context. The run may then exit `0`, `8` or another
+code, depending on what that work returns.
+
+If cancellation coincides with a **privileged RBAC revocation failure**, the
+returned error is instead `ErrCodeInternal` (CLI exit `8`), explicitly warning
+that the cluster-admin binding may be orphaned. Both cancellation and cleanup
+causes are preserved; check and revoke the potentially orphaned binding
+manually. Partial CTRF output is still attempted within the same remaining
+budget. Neither ordinary cancellation nor this combined failure renders, signs
+or pushes conformance/recipe evidence.
+
+When **the validator pod itself** receives SIGTERM (deadline, eviction or drain),
+a cooperative check runs deferred cleanup, writes a SIGTERM interruption message
+and exits `3`, mapped to CTRF `other` rather than a completed failure verdict.
+This container exit is distinct from the CLI's exit `9` on operator cancellation.
+It remains blocking (normally CLI exit `8`), including when the check returns
+nil after cancellation. The pod's 60s grace (30s for cleanup, 30s to write the
+termination message) is best effort: blocking checks, long cleanup, SIGKILL, OOM
+or a crash may prevent a termination message, and a missing pod with a terminal
+Job deadline condition still uses the Job-level `failed` classification
+described above, carrying the check's own message when one was observed. No
+external orphan-resource sweeper is provided yet; namespaces a check leaves
+behind after SIGKILL or a crash carry the `aicr.run/gpu-test-run` label.
 
 Scripts that gate on validation outcome should treat **any non-zero code** as
 failure rather than branching on specific values, and should additionally
@@ -1577,10 +1674,9 @@ Common reasons and their cause:
 
 The check (CNCF `driver_runtime_management`, SHOULD at v1.37 and MUST at v1.38)
 runs a pod from a vanilla `ubuntu:22.04` image that requests one GPU, and reads
-the driver from inside it. The probe pod carries no `imagePullSecrets`
-(`--image-pull-secret` reaches the validator Job, not the per-run namespace),
-so a mirror of the probe image that needs credentials must supply them
-node-side, through the container runtime's registry configuration. Its artifacts (`Driver runtime probe pod logs`,
+the driver from inside it. The probe pod carries the
+`--image-pull-secret` Secrets, copied into its per-run namespace (see the
+image note below). Its artifacts (`Driver runtime probe pod logs`,
 `Advertised driver version`, `Driver runtime compatibility`) name the failing
 step:
 
@@ -1601,7 +1697,21 @@ the full reference of your copy or of another vanilla OS image. It must ship no
 accelerator driver or tools, and it must provide what the probe script runs on:
 a POSIX `/bin/sh`, `head` and `tr` (`timeout` is used when present). A
 distroless image cannot run the probe; mirroring the Ubuntu image is the
-simplest choice.
+simplest choice. When the mirror needs credentials, `--image-pull-secret`
+covers the probe too: every conformance check that creates a per-run namespace
+copies the named Secrets from the validator namespace into it and attaches
+them to its probe pods, and the copies are deleted with the namespace. A
+Secret the flag names but the validator namespace lacks fails the check with
+`NotFound` before any probe is created.
+
+A probe pod whose `RuntimeClass` names a handler the node's container runtime
+does not serve stays `Pending` with `ContainerCreating` and no status change;
+the checks read the kubelet's `FailedCreatePodSandBox` event (the containerd
+message `no runtime for "..." is configured` naming the handler, a missing
+runtime handler, or a shim binary not found) and fail within seconds with
+`stuck: FailedCreatePodSandBox: ...`
+instead of waiting out the pod timeout. A sandbox failure from network setup
+is transient and is not treated this way.
 
 ### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus unreachable"
 
@@ -1666,7 +1776,8 @@ failing step:
 | `unmet prerequisite: no sandboxed RuntimeClass` | Auto-detection found no `RuntimeClass` whose name or handler contains `gvisor`, `runsc`, `kata` (the AKS `kata-mshv-vm-isolation` class matches), `sandboxed`, `quark` or `krun`. A sandboxed class may still exist under another name; the check never skips or records N/A for this | Provide a sandbox runtime (which one AICR recipes ship, and on which pool, is the pending decision in #3615), or set `AICR_SANDBOX_RUNTIME_CLASS=<name>` when the cluster has one under another name |
 | `AICR_SANDBOX_RUNTIME_CLASS names RuntimeClass "...", which does not exist on this cluster` | The override names a class the cluster does not have | Fix the name (`kubectl get runtimeclass`) or unset the variable to auto-detect |
 | `kernel identity: the sandboxed pod observes the same kernel identity` | Every kernel identity field both pods reported (release, version, boot id) matched, or neither pod reported a comparable field. With matching fields the pods share the host kernel: the class's handler maps to a runc-like runtime | Read the identity values in both probe log artifacts. If no field was comparable, find out why the probes could not read them; otherwise check that the containerd runtime configuration maps the handler to the sandbox binary |
-| `sandboxed probe pod did not complete in time` with `status=ContainerCreating` | The pod was bound to a node but its sandbox never started: the handler is not configured, or its binary is missing, on that node (`FailedCreatePodSandBox` events), or the node is cordoned or NotReady | Check that the `RuntimeClass` `scheduling.nodeSelector` selects only nodes with the sandbox runtime installed, and read the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs |
+| `sandboxed probe pod stuck: FailedCreatePodSandBox: ... no runtime for "<handler>" is configured` (or a missing runtime handler or shim binary) | The pod was bound to a node whose container runtime does not serve the class's handler; the check reads the kubelet's `FailedCreatePodSandBox` event and fails within seconds instead of waiting out the pod timeout | Check that the `RuntimeClass` `scheduling.nodeSelector` selects only nodes with the sandbox runtime installed, and that the handler name matches the runtime's configuration on those nodes |
+| `sandboxed probe pod did not complete in time` with `status=ContainerCreating` | The pod was bound to a node but its sandbox never started for a reason the fast failure above does not recognise, or the node is cordoned or NotReady | Read the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs |
 | `process isolation:`, `kernel and memory isolation:`, `filesystem isolation:` or `network isolation:` | The named probe saw host state inside the sandbox (a host daemon in `/proc`, a readable `/dev/mem`, a host path such as `/var/lib/kubelet`, a bridge such as `cni0`); the probe logs artifact shows what it saw | The sandbox shares that host namespace or mount; correct the runtime configuration |
 | `sandboxed probe pod stuck:` or `unsandboxed control pod stuck:` | The pod could not pull its image or be scheduled (`Unschedulable`); for the sandboxed pod, usually a `RuntimeClass` `scheduling.nodeSelector` that no node satisfies | Inspect the pod events in the per-run `aicr-gpu-test-*` namespace while the check runs; for mirrors see the image note below |
 
@@ -1678,10 +1789,9 @@ the full reference of your copy or of another vanilla OS image. It must
 provide what the probe script runs on: a POSIX `/bin/sh`, `uname`, `cat`,
 `ls`, `wc`, `head`, `awk` and `tr`. A distroless image cannot run the probe;
 mirroring the Ubuntu image is the simplest choice. The two probe pods carry
-no `imagePullSecrets` (`--image-pull-secret` reaches the validator Job, not
-the per-run namespace, the same as for the other vanilla probe images), so a
-mirror that needs credentials must supply them node-side, through the
-container runtime's registry configuration.
+the `--image-pull-secret` Secrets, copied into the per-run namespace as for
+the other probe pods (see the `driver-runtime-management` note above), so a
+mirror that needs credentials is served the same way as the validator image.
 
 ### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus did not load the ServiceMonitor/PodMonitor"
 
@@ -1738,7 +1848,7 @@ rule.
 
 ### Benchmark Job stuck or timed out
 
-Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:` plus `ValidatorJobDeadlineHeadroom` (3m30s) on top. For `inference-perf`, the full pipeline (model-cache populate → workload ready → endpoint health → benchmark) can take up to ~50 min on cold-start clusters; the catalog budgets a 65 min timeout. If it still times out:
+Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:` plus `ValidatorJobDeadlineHeadroom` (3m) on top. For `inference-perf`, the full pipeline (model-cache populate → workload ready → endpoint health → benchmark) can take up to ~50 min on cold-start clusters; the catalog budgets a 65 min timeout. If it still times out:
 
 ```bash
 # validator orchestrator Job + AIPerf benchmark Job both live in aicr-validation.

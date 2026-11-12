@@ -1493,6 +1493,11 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	if applyErr := applyNVSentinelDatastoreState(ctx, internal, internalSnap); applyErr != nil {
 		return nil, applyErr
 	}
+	// The RDMA namespace mode is evidence only; CheckRDMANamespaceModeCoherent
+	// compares it with the bundle's RDMA attachment.
+	if applyErr := applyRDMANamespaceMode(ctx, internal, internalSnap); applyErr != nil {
+		return nil, applyErr
+	}
 	// Last write to the refs before the facade projection, so the emitted
 	// recipe and the Components view agree on where each component lives.
 	if resolveCfg.inheritFrom != "" {
@@ -2477,7 +2482,13 @@ func (c *Client) PreflightValidatorServiceAccount(ctx context.Context, opts ...V
 // snapshot, runs the selected validation phases (by default
 // PhaseDeployment, PhaseConformance, PhasePerformance) in order, and
 // returns one PhaseResult per phase run. Pass WithValidationPhases to
-// restrict the run to a subset.
+// restrict the run to a subset. On interruption, the returned results include
+// completed checks and the partial current phase alongside ErrCodeCanceled
+// (operator abort) or ErrCodeTimeout (deadline). If privileged RBAC revocation
+// also fails after an operator abort, ErrCodeInternal preserves both causes and
+// warns that the cluster-admin binding may be orphaned. Other errors may also
+// arrive with the results of phases completed before them. Callers must inspect
+// both results and error; partial results do not mean the run succeeded.
 //
 // recipe must come from a prior Client.ResolveRecipe call on this
 // Client — it carries the unexported internal recipe state needed to
@@ -2571,10 +2582,12 @@ func (c *Client) ValidateState(
 	// Apply a facade-level deadline only as opted into by WithValidationTimeout,
 	// mirroring MakeBundle. The default (cfg.timeout == nil) keeps the
 	// ValidationOperationTimeout cap (75m), which sits ABOVE the largest
-	// rendered per-check Job deadline (the 65m inference-perf catalog timeout
-	// plus the 3m30s ValidatorJobDeadlineHeadroom, i.e. 68m30s; the
-	// CheckExecutionTimeout fallback is 55m), so a single hung check fires its
-	// own per-check timeout first and surfaces as a structured check failure
+	// per-check envelope: the 65m inference-perf catalog timeout plus the 3m
+	// ValidatorJobDeadlineHeadroom, the 60s SIGTERM window and 5s margin
+	// (v1.WaitEnvelopeFor, 69m05s), the 30s result capture and the 90s pod
+	// termination wait, i.e. 71m05s; the CheckExecutionTimeout fallback is
+	// 55m. A single hung check therefore reaches its own verdict first and
+	// surfaces as a structured check failure
 	// rather than a wrapping deadline-exceeded that loses the per-check signal —
 	// the behavior controllers rely on. It is a per-check ordering guarantee and
 	// a coarse operation cap, not a bound on the serial sum of an all-phase run
@@ -2651,10 +2664,7 @@ func (c *Client) ValidateState(
 		return nil, err
 	}
 	results, err := v.ValidatePhases(ctx, internalPhases, validationInput, toInternalSnapshot(snap))
-	if err != nil {
-		return nil, err
-	}
-	return fromInternalPhaseResults(results), nil
+	return fromInternalPhaseResults(results), err
 }
 
 // loadManifestFiles concatenates the recipe-attached ManifestFiles for

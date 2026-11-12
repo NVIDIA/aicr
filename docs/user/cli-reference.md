@@ -103,7 +103,7 @@ aicr snapshot [flags]
 | `--cluster-config` | | string | | Path to a pre-existing k8s-launch-kit (l8k) `cluster-config.yaml`. Ingests the file's per-hardware-group network topology (PFs, capabilities, kernel modules, machine/GPU type, fabric type) into the snapshot as a `NetworkTopology` Measurement. **Local agent mode only for now** (`AICR_AGENT_MODE=true`) — Job-mode rejects this flag with an `INVALID_REQUEST` error until ConfigMap mounting is implemented. Mutually exclusive with `--discover-network` at the collector level — file path wins when both are set, so callers can default discovery from a flag without inadvertent cluster contact. Reads `AICR_CLUSTER_CONFIG_PATH` env when unset. |
 | `--oke-addons` | | string | | Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. Projects the `NvidiaGpuPlugin` add-on's control-plane state into the `K8s.oke-addons.nvidia-gpu-plugin` snapshot reading (`installed` / `absent`). Any other add-on lifecycle state projects a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state. Also projects the `NvidiaNetworkOperator` add-on into `K8s.oke-addons.nvidia-network-operator` the same way. OKE recipes that deploy `network-operator` require it to be `absent`. Capture the dump with `--all`. Capturing with `--page` is not supported. A dump with `opc-next-page` set is rejected, but a final page alone looks like a complete list. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode. A bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_OKE_ADDONS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json > addons.json && aicr snapshot --oke-addons addons.json -o snapshot.yaml`. |
 | `--aks-gpu-pools` | | string | | Path to an `az aks nodepool list -o json` dump on the local filesystem. Projects each NVIDIA GPU agent pool's `gpuProfile.driver` into the `K8s.aks-gpu-pools.gpu-driver` snapshot reading (`Install` / `None`); mixed or AKS-managed pools project a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state (ADR-015 DD3). AMD GPU pools (NG family, MI300X-class ND sizes, Radeon NV sizes) are excluded. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode; a bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_AKS_GPU_POOLS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json && aicr snapshot --aks-gpu-pools pools.json -o snapshot.yaml`. |
-| `--gke-gpu-pools` | | string | | Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem. Projects each GPU pool's `gpuDriverInstallationConfig.gpuDriverVersion` into the `K8s.gke-gpu-pools.gpu-driver-installation` snapshot reading (`Installed` / `Disabled`). Mixed or unrecognized driver-version values project a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state. Only the GKE `bundle-installer` gpuStack value declares a constraint on this reading. The default `gke-default` value resolves from the opt-out node label alone and needs no pool dump. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode. A bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_GKE_GPU_POOLS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `gcloud container node-pools list --cluster <cluster> --format=json > pools.json && aicr snapshot --gke-gpu-pools pools.json -o snapshot.yaml`. |
+| `--gke-gpu-pools` | | string | | Path to a `gcloud container node-pools list --cluster <cluster> --format=json` dump on the local filesystem. Projects each GPU pool's `gpuDriverInstallationConfig.gpuDriverVersion` into the `K8s.gke-gpu-pools.gpu-driver-installation` snapshot reading (`Installed` / `Disabled`). Mixed or unrecognized driver-version values project a value no profile constraint accepts, so profile-qualified resolution fails closed with the observed state. Only the GKE `bundle-installer` and `dra` gpuStack values declare a constraint on this reading. The default `gke-default` value resolves from the opt-out node label alone and needs no pool dump. The projection runs controller-side and is merged into the snapshot in both agent Job mode and local mode. A bad file fails the command before any cluster work. Input is capped at 1 MiB and must be a regular file. Reads `AICR_GKE_GPU_POOLS_PATH` env when unset. Also accepted by `aicr validate` for its live-capture path. Example: `gcloud container node-pools list --cluster <cluster> --format=json > pools.json && aicr snapshot --gke-gpu-pools pools.json -o snapshot.yaml`. |
 | `--discover-network` | | bool | false | Opt into read-only live k8s-launch-kit (l8k) discovery: reads the `NicDevice` objects published by an already-running Network Operator `nic-configuration-daemon`, plus nodes and pods, and emits a `NetworkTopology` Measurement. Creates, patches, and deletes nothing and never execs into pods. If the daemon is not installed the measurement is skipped with a warning. If some daemon pods are not Ready (for example on NotReady nodes) discovery waits up to 5 minutes before proceeding with the Ready ones, so raise `--timeout` to at least `8m` in Job mode on such clusters. If you need the node labels or `NicClusterPolicy` tuning that `l8k discover` applies, run l8k yourself first. Job-mode is supported (the snapshot Job's ClusterRole gains `configuration.net.nvidia.com` nicdevices `get`/`list`). Reads `AICR_DISCOVER_NETWORK` env when unset. |
 
 **Output Destinations:**
@@ -120,7 +120,7 @@ aicr snapshot [flags]
 
 **What it captures:**
 - **SystemD Services**: containerd, docker, kubelet configurations
-- **OS Configuration**: grub, kmod, sysctl, release info
+- **OS Configuration**: grub, kmod, kmod-param, sysctl, release info
 - **Kubernetes**: server version, images, ClusterPolicy
 - **GPU**: driver-free PCI/NFD hardware detection — GPU presence, GPU count, accelerator model/SKU (resolved from the PCI device ID), nvidia kernel-module loaded state, and detection source. Does not require the NVIDIA driver or `nvidia-smi`, and does not emit driver version, CUDA version, or MIG settings.
 - **NodeTopology**: node topology (cluster-wide taints and labels across all nodes)
@@ -391,7 +391,13 @@ forfeits GKE's managed driver install, are created
 `gpu-driver-version=disabled` — the bundle's `gcp-driver-installer`
 component supplies the driver with a recipe-pinned version, and a snapshot
 carrying the label without a matching `K8s.gke-gpu-pools.gpu-driver-installation`
-reading (`--gke-gpu-pools`) fails the `bundle-installer` selection closed);
+reading (`--gke-gpu-pools`) fails the `bundle-installer` selection closed)
+and `dra` (experimental, [#2517](https://github.com/NVIDIA/aicr/issues/2517):
+the same opt-out pool shape as `bundle-installer`, with the NVIDIA DRA
+driver's ResourceSlices as the sole whole-GPU advertiser — allocation
+policy `dra-resource-claim`, ResourceClaims only, plain `nvidia.com/gpu`
+requests unserved — and the value's own `K8s.server.version >= 1.35.0`
+floor tightening the composed chain's);
 because the GKE
 values govern advertisement, the #1327 allocation-policy paths are
 closure-locked in addition to the declared owned paths — see
@@ -419,8 +425,8 @@ Selection and verification are independent: `--profile` (or the default)
 always decides the selected value — never the snapshot — and a supplied
 `--snapshot` always verifies the selection against the cluster's recorded
 readings (fail-closed on mismatch or a missing reading; on AKS, the pool
-mode from `--aks-gpu-pools`; on GKE `bundle-installer`, the pool mode from
-`--gke-gpu-pools`). Without a snapshot no check can run at
+mode from `--aks-gpu-pools`; on GKE `bundle-installer` and `dra`, the pool
+mode from `--gke-gpu-pools`). Without a snapshot no check can run at
 generation; the recorded constraint is enforced at `aicr validate`
 readiness instead. See the with/without matrices in
 [AKS GPU setup](../integrator/aks-gpu-setup.md#gpu-driver-setup) and
@@ -513,7 +519,7 @@ Generate recipes using direct system parameters:
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos, sles, rocky |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, kueue, nim, runai, slurm |
-| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE or `gpuStack=bundle-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE, `gpuStack=coreweave` on CKS) |
+| `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE, or `gpuStack=bundle-installer` / `gpuStack=dra` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE, `gpuStack=coreweave` on CKS) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled` grants the component on a GKE recipe that neither declares nor declines it, confirms it where the recipe already declares it, and is rejected over an explicit recipe decline (any service) or against a non-GKE recipe that does not declare it; `disabled` is unchanged and always requires the recipe to already declare the component. Recorded in the generated recipe |
 | `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
@@ -524,7 +530,7 @@ Generate recipes using direct system parameters:
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--criteria-strict` | | bool | Reject criteria values not in the embedded OSS catalog; ignores values registered from `--data`. Also honored via `AICR_CRITERIA_STRICT=1` or `spec.recipe.criteriaStrict: true` in `--config`. Intended for OSS CI gates. |
-| `--require-evidence` | | bool | Fail when the resolved recipe has no committed evidence pointer. The check is offline presence for the resolved id, including the selected profile value. It does not verify a signature or contact a registry. A pointer on a base id does not cover a profiled resolve. Resolving with external data (`--data` or `spec.recipe.data`) fails, even when the leaf overlay is still the embedded one. Also honored via `AICR_REQUIRE_EVIDENCE` (`1`, `true`, `yes`, `on`) or `spec.recipe.requireEvidence: true` in `--config`. Any one of the three enables it. An explicit false does not turn off an environment value that is already on. Applies to `aicr recipe` and `aicr query`. |
+| `--require-evidence` | | bool | Fail when the resolved recipe has no committed evidence pointer. The check is offline presence for the resolved id, including the selected profile value. It does not verify a signature or contact a registry. A pointer on a base id does not cover a profiled resolve. Resolving with external data (`--data` or `spec.recipe.data`) fails, even when the leaf overlay is still the embedded one. Also honored via `AICR_REQUIRE_EVIDENCE` (`1`, `true`, `yes`, `on`) or `spec.recipe.requireEvidence: true` in `--config`. Any one of the three enables it. An explicit false does not turn off an environment value that is already on. Applies to `aicr recipe` and `aicr query`; `aicr query --recipe` is rejected while it is on. |
 
 **Accelerator values name a GPU model, not a machine type.** A provider
 usually offers several machine types for the same GPU, and the machine type —
@@ -541,7 +547,7 @@ node shape the resolved recipe targets. See
 
 > **`--service cks` is Preview**, covering H100 and RTX PRO 6000 on Ubuntu for training. Pass the service explicitly, including with a snapshot; CKS auto-detection is not implemented. See [CoreWeave H100 Setup](../integrator/cks-h100-setup.md) and [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md) for provider ownership and qualification gaps.
 
-> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training`, `nvke / gb200 / ubuntu / training / kubeflow` and `nvke / vr200 / ubuntu / training` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md) and [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md) for their prerequisites and known gaps. The VR200 coordinate requires an `nvidia-bos-64k` kernel, which the recipe's constraints cannot express — check it before deploying.
+> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training`, `nvke / gb200 / ubuntu / training / kubeflow`, `nvke / gb200 / ubuntu / inference`, `nvke / gb200 / ubuntu / inference / dynamo`, `nvke / vr200 / ubuntu / training`, `nvke / vr200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / inference`, `nvke / vr200 / ubuntu / inference / dynamo`, `nvke / gb300 / ubuntu / training`, `nvke / gb300 / ubuntu / training / kubeflow`, `nvke / gb300 / ubuntu / inference` and `nvke / gb300 / ubuntu / inference / dynamo` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md), [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md) and [NVKE GB300 Setup](../integrator/nvke-gb300-setup.md) for their prerequisites and known gaps. The VR200 coordinates require an `nvidia-bos-64k` kernel, which the recipe's constraints cannot express — check it before deploying.
 
 > **`--platform runai` is Preview**, covering the `eks / h100 / ubuntu / training / runai` and `gke / h100 / cos / training / runai` coordinates. See [Run:ai cluster](component-catalog.md#runai-cluster) for its per-cluster inputs and known gaps.
 
@@ -987,9 +993,14 @@ catalog verified
 
 ### aicr query
 
-Query a specific value from the fully hydrated recipe configuration. Resolves a recipe
-from criteria (same as `aicr recipe`), merges all base, overlay, and inline value
-overrides, then extracts the value at the given dot-path selector.
+Query a specific value from the fully hydrated recipe configuration, or print a concise
+recipe overview with `--summary`. Resolve a recipe from criteria (same as `aicr recipe`),
+or load a previously generated recipe with `--recipe` / `-r` (file path, HTTP/HTTPS URL,
+or `cm://namespace/name` ConfigMap URI; use `--kubeconfig` for the latter).
+Selectors merge all base, overlay, and inline values before extracting the given dot-path.
+Summaries skip the selector's additional full values hydration. Loading or generating
+a profiled recipe still runs the canonical profile-coherence checks, which read locked
+component values and may fail if a values file is missing or invalid.
 
 Because `aicr query` resolves criteria the same way `aicr recipe` does, it is subject
 to the same coverage post-condition: a stated `service`/`accelerator`/`intent`/`os`/`platform`
@@ -1001,6 +1012,8 @@ cannot read a value from a recipe that `aicr recipe --require-evidence` would re
 **Synopsis:**
 ```text
 aicr query --selector <path> [flags]
+aicr query --summary [flags]
+aicr query --recipe <path-or-uri> (--selector <path> | --summary) [flags]
 ```
 
 **Flags:**
@@ -1009,7 +1022,107 @@ All `aicr recipe` flags except `--output` are supported (query always prints to 
 
 | Flag | Type | Description |
 |------|------|-------------|
-| `--selector` | string | **Required.** Dot-path to the configuration value to extract |
+| `--selector` | string | Required unless `--summary` is set. Dot-path to extract; `--selector ''` selects the whole hydrated recipe |
+| `--summary` | bool | Print identity, criteria, overlays, constraints, components, and validation checks. Text table by default; `--format table\|yaml\|json` selects the representation |
+| `--recipe`, `-r` | string | Load a previously generated recipe from a file path, HTTP/HTTPS URL, or `cm://namespace/name` instead of generating one |
+
+Exactly one of `--selector` or `--summary` is required. They are mutually exclusive,
+including an explicitly empty selector. `--recipe` cannot be combined with generation
+inputs: `--service`, `--accelerator` / `--gpu`, `--intent`, `--os`, `--platform`, `--nodes`,
+`--snapshot`, `--profile`, `--slurm-accounting-mode`, `--runtime-inventory`,
+`--gke-tcpxo-interfaces`, `--inherit-from`, or `--inherit`. The same rule applies to
+criteria, snapshot input, profile, and configuration selections in `spec.recipe` of
+`--config`. Data source and output format settings in the config remain usable.
+`--recipe` is rejected with `INVALID_REQUEST` while evidence is required by
+`--require-evidence`, `spec.recipe.requireEvidence`, or `AICR_REQUIRE_EVIDENCE`, before
+the file is read and for both selectors and summaries. A committed pointer attests the
+embedded catalog resolve, and a loaded file only names its criteria, profile, and leaf
+overlay; an edited file or one generated with `--data` could name an attested leaf.
+Query by criteria instead to keep the evidence check.
+
+#### Recipe Summary
+
+```shell
+# Summarize an embedded recipe without additional selector hydration
+aicr query --service eks --accelerator h100 --intent training --summary
+
+# Inspect a saved recipe, or emit a structured summary
+aicr query --recipe recipe.yaml --summary
+aicr query -r recipe.yaml --summary --format json
+
+# Select from a saved recipe (hydrates component values)
+aicr query -r recipe.yaml --selector criteria.service
+```
+
+Example output from the embedded EKS H100 training recipe (a point-in-time sample;
+versions and component membership are illustrative and change with the catalog):
+
+```text
+RECIPE SUMMARY
+API Version:  aicr.run/v1
+Kind:         RecipeResult
+Version:      dev
+GPU Driver:   unknown
+
+CRITERIA
+  Service:      eks
+  Accelerator:  h100
+  Intent:       training
+  OS:           any
+  Platform:     any
+
+OVERLAYS
+  Applied:  base, monitoring-hpa, h100-any, eks, eks-training, h100-eks-training
+
+CONSTRAINTS
+  K8s.server.version  >= 1.32.4
+
+COMPONENTS (15)
+NAME                           TYPE  VERSION  NAMESPACE               DEPENDS ON
+aws-efa                        Helm  v0.5.29  kube-system             -
+nodewright-operator            Helm  v0.20.0  nodewright              -
+nodewright-customizations      Helm  -        nodewright              nodewright-operator
+prometheus-operator-crds       Helm  28.0.1   monitoring              -
+aws-ebs-csi-driver             Helm  2.59.0   kube-system             prometheus-operator-crds
+cert-manager                   Helm  v1.20.2  cert-manager            prometheus-operator-crds
+kube-prometheus-stack          Helm  84.4.0   monitoring              prometheus-operator-crds
+k8s-ephemeral-storage-metrics  Helm  1.19.2   monitoring              kube-prometheus-stack,prometheus-operator-crds
+nfd                            Helm  0.20.1   node-feature-discovery  prometheus-operator-crds
+gpu-operator                   Helm  v26.7.2  gpu-operator            nfd,cert-manager,prometheus-operator-crds,nodewright-customizations
+dra-node-labeler               Helm  -        gpu-operator            gpu-operator
+kai-scheduler                  Helm  v0.16.9  kai-scheduler           gpu-operator
+nvidia-dra-driver-gpu          Helm  0.5.1    nvidia-dra-driver       gpu-operator,dra-node-labeler
+nvsentinel                     Helm  v1.28.0  nvsentinel              cert-manager,gpu-operator,prometheus-operator-crds
+prometheus-adapter             Helm  5.3.0    monitoring              kube-prometheus-stack
+
+VALIDATION
+  Deployment:   operator-health, expected-resources, gpu-operator-version, check-nvidia-smi
+  Conformance:  platform-health, gpu-operator-health, dra-support, accelerator-metrics, ai-service-metrics, gang-scheduling, pod-autoscaling, cluster-autoscaling, secure-accelerator-access
+  Performance:  nccl-all-reduce-bw
+```
+
+`API Version` and `Kind` are the summarized recipe's header.
+`GPU Driver` is the snapshot-observed state recorded in recipe metadata:
+`preinstalled`, `absent`, or `unknown` when none was recorded. It is not inferred
+from the presence of a GPU operator. A selected profile appears as `name=value`.
+Components follow deployment order, with enabled references not listed there appended in
+recipe order; the VERSION column shows Helm chart versions or Kustomize tags.
+Components disabled with `enabled: false` or `install: false` are not deployed, so they
+are left out of the table and the `COMPONENTS (n)` count, and dependencies on them are
+dropped from DEPENDS ON. `--selector components` still lists every component, including
+disabled ones.
+Constraints and applied overlays keep recipe order. Validation phases always appear
+in run order: readiness, then deployment, conformance, performance as `aicr validate`
+runs them, omitting phases without checks. Empty sections and empty table cells use
+`-`; a recipe with no components still shows the component table header. Unspecified
+criteria display as `any`.
+`--format yaml` and `--format json` emit the typed summary document rather than the
+full recipe, with empty optional fields omitted. The document has its own header,
+`apiVersion: aicr.run/v1beta1` and `kind: RecipeSummary`, and carries the summarized
+recipe's header under `source.apiVersion` and `source.kind`. A summary is output only:
+`--recipe`, `aicr bundle --recipe`, and other recipe inputs reject it by kind.
+`--format table` selects the text view explicitly. A format from
+`spec.recipe.output.format` is honored too.
 
 #### Selector Syntax
 
@@ -1144,7 +1257,7 @@ aicr validate [flags]
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file selecting the target cluster for **every** Kubernetes operation in the invocation: `cm://` recipe/snapshot/output I/O, snapshot-agent deployment, validation namespace and RBAC, validator Jobs, and cleanup. One invocation targets one cluster. When omitted, default discovery applies (`KUBECONFIG` env, then `~/.kube/config`, then in-cluster). An invalid path fails any run that performs Kubernetes operations; `--no-cluster` dry-runs over local files do not load it. **Changed in v0.18:** validator-engine operations, including validator Jobs, now honor this flag instead of using the default cluster. |
 | `--namespace` | `-n` | string | aicr-validation | Kubernetes namespace for validation Job deployment. Reads `AICR_NAMESPACE` when unset. |
 | `--image` | | string | matches CLI version | Container image for the **snapshot-capture agent** Job, not the validator Jobs. Release builds default to `ghcr.io/nvidia/aicr:v<version>`; dev and `-next` builds default to `ghcr.io/nvidia/aicr:latest`. Reads `AICR_VALIDATOR_IMAGE` when unset. Validator catalog images are resolved separately — override them with `AICR_VALIDATOR_IMAGE_TAG` / `AICR_VALIDATOR_IMAGE_REGISTRY`. |
-| `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
+| `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable). Attached to the agent and validator Jobs, and copied by each conformance check that creates a per-run namespace into that namespace for its probe pods, so a private mirror serves the probe images with the same credentials. A named Secret missing from the validator namespace fails such a check with `NotFound` |
 | `--job-name` | | string | aicr-validate | Prefix for the **live snapshot-capture agent's** Job name; the run ID is always appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied — no agent is deployed. Does not name the validator Jobs (`aicr-<validator>-<hash>`) |
 | `--service-account-name` | | string | aicr | ServiceAccount the **live snapshot-capture agent** runs as. Leaving the flag unset is not the same as passing that default: an unset value is never probed, and the agent's run-scoped names are derived from the `aicr-validate` base instead. **Exact-if-exists:** an existing ServiceAccount of exactly this name in `--namespace` is used verbatim, and the agent leaves the namespace untouched and creates no RBAC for the run (the validator Jobs still apply the namespace unless `--validator-service-account-name` is set); otherwise the value is a prefix for the agent's ServiceAccount, Role, and RoleBinding and the run ID is appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied. Generate the agent ServiceAccount's RBAC manifests with `aicr snapshot --namespace <validate-namespace> --add-roles-to-service-account <name>` (matching this command's `--namespace`) and apply them yourself — that command applies nothing. Does not name the validator Jobs' ServiceAccount; see `--validator-service-account-name` |
 | `--validator-service-account-name` | | string | | Existing ServiceAccount in `--namespace` that the **validator Jobs** run as, instead of a per-run `aicr-validator-<run-id>` ServiceAccount bound to `cluster-admin`. For the validator Jobs the run then creates and deletes no ServiceAccount or ClusterRoleBinding and does not apply the namespace, so the caller needs no permission to grant `cluster-admin`. That does not make the caller less powerful: an identity that can create Jobs in the namespace can run as that ServiceAccount. An administrator creates the namespace and the ServiceAccount and binds it to `cluster-admin`. Before creating anything, including the live snapshot-capture agent, the run verifies the ServiceAccount with a `SubjectAccessReview` and fails closed: exit 3 when it does not exist, exit 2 when it sets `automountServiceAccountToken: false`, exit 4 when it is not bound to `cluster-admin` or the caller may not read it or create a `SubjectAccessReview`. Without `--snapshot`, the snapshot-capture agent still creates or labels the namespace and creates its own RBAC unless `--service-account-name` names an existing ServiceAccount for it. Unrelated to `--service-account-name`, which names the snapshot-capture agent's ServiceAccount. Mirrors `spec.validate.agent.validatorServiceAccountName`. See [Running under a pre-provisioned ServiceAccount](validation.md#running-under-a-pre-provisioned-serviceaccount) for the manifests and the caller's permissions |
@@ -1550,7 +1663,8 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 | `0` | All phases passed or were skipped (also returned under `--fail-on-error=false` even when phases report `failed`/`other`). Under `--cncf-submission` also requires every applicable MUST requirement to be established: an all-skipped submission run exits `8`, see [Exit status of a submission run](validation.md#exit-status-of-a-submission-run) |
 | `2` | Invalid input (bad flags, missing recipe), a readiness pre-flight constraint not met, or a declared check that does not resolve to exactly one catalog validator in its phase (unmatched, cross-phase, or duplicate) — these pre-flight gates always fail closed here regardless of `--fail-on-error` |
 | `5` | A structured timeout reached the top-level CLI (recipe/snapshot load, snapshot-agent wait, evidence signing). A per-validator wait deadline becomes a check result instead and exits `8` — see [validation: CI/CD integration](validation.md#cicd-integration) |
-| `8` | One or more phase checks reported `failed` (including a validator Job killed on its `activeDeadlineSeconds`) or `other` (crash/OOM) — when `--fail-on-error` is set; under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error` ([Exit status of a submission run](validation.md#exit-status-of-a-submission-run)) |
+| `8` | One or more phase checks reported `failed` (including a validator Job killed on its `activeDeadlineSeconds`) or `other` (crash/OOM) — when `--fail-on-error` is set; under `--cncf-submission` also an applicable MUST requirement not established, regardless of `--fail-on-error` ([Exit status of a submission run](validation.md#exit-status-of-a-submission-run)). Also returned when operator cancellation coincides with a failed privileged RBAC revocation (the cluster-admin binding may be orphaned); that case is **not** suppressed by `--fail-on-error=false` |
+| `9` | Operator cancellation (first Ctrl-C or SIGTERM, `ErrCodeCanceled`) with privileged cleanup succeeding. Not suppressed by `--fail-on-error=false`. Partial CTRF output is attempted only when at least one phase has results. A signal that arrives after the last phase completed may end in another code — see [validation: interrupted runs](validation.md#cicd-integration) |
 
 ---
 
@@ -2257,13 +2371,13 @@ The `--deployer` flag controls how deployment artifacts are generated:
 |--------|-------------|
 | `helm` | (Default) Generates Helm charts with values for deployment. Supports `--dynamic`. |
 | `argocd` | Generates Argo CD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
-| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All non-profile-owned values overridable at install time via `helm --set`; a profiled recipe ships a lock template that rejects overrides on profile-owned paths. Use `--dynamic` to pre-populate specific paths for components that resolve to remote Helm charts. `--dynamic` naming a local-chart or non-Helm component is rejected (those components bake values at bundle time and have no install-time stub surface). |
+| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. Values are overridable at install time via `helm --set`, except GPU driver-ownership paths (`aicr-driver-ownership-lock` template, emitted whenever the bundle ships `gpu-operator`, `nvidia-dra-driver-gpu`, or their `-ocp` variants) and, for a profiled recipe, profile-owned paths (`aicr-profile-lock` template). Use `--dynamic` to pre-populate specific paths for components that resolve to remote Helm charts. `--dynamic` naming a local-chart or non-Helm component is rejected (those components bake values at bundle time and have no install-time stub surface). |
 | `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Supports `--dynamic` via ConfigMap `valuesFrom`. |
 | `helmfile` | Generates a `helmfile.yaml` release graph driven by the upstream [helmfile](https://helmfile.readthedocs.io/) CLI (`helmfile apply` / `diff` / `destroy`). Supports `--dynamic` via per-release `cluster-values.yaml`. Requires the `helmfile` binary at deploy time. |
 | `terraform` | Generates a Terraform root module (`terraform plan` / `apply` / `destroy`). One module call per component, chaining that component's pre/post/readiness releases inside it; `depends_on` carries the recipe's `dependencyRefs` exactly. Supports `--dynamic` via per-release `cluster-values.yaml`. Does not create a cluster: the `helm` provider is configured from variables, or — with `--terraform-child-module` — by the calling configuration. Helm components only: a recipe with a Kustomize component is rejected. Requires `terraform` or `tofu` at deploy time; the generated module uses no feature newer than Terraform 1.5 and was validated by hand on Terraform 1.16 and OpenTofu 1.13 (no CI runs either). |
 | `fleet` | Generates a [Rancher Fleet](https://fleet.rancher.io/) bundle: by default one `fleet.yaml` per component folder plus a root `gitrepo.yaml`, or with `--fleet-mode helmop` a single `helmops.yaml` with one HelmOp per component. Supports `--dynamic` via per-folder `cluster-values.yaml` (inlined into `helmops.yaml` in HelmOp mode). Clusters opt in with the `aicr.nvidia.com/bundle=<app-name>` label. OCI output (`--output oci://`) is not supported. |
 
-> **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all non-profile-owned values are overridable at install time (a profiled recipe ships a lock template that rejects install-time values on profile-owned paths).
+> **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where values are overridable at install time, except GPU driver-ownership paths and, for a profiled recipe, profile-owned paths, which lock templates reject.
 
 > **Note:** `--dynamic` declarations targeting the GPU allocation-policy keys (`nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride`, `gpu-operator`(`-ocp`) `devicePlugin.enabled`, or those components' `enabled` toggle) are rejected: validators verify the recipe-resolved allocation policy, so its value cannot be deferred to install time. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
 
@@ -2693,7 +2807,7 @@ Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
 
 **Argo CD deployer behavior:**
 
-The `--deployer argocd-helm` generates a Helm chart app-of-apps where all non-profile-owned values are overridable at install time. When the recipe carries a selected profile, `templates/aicr-profile-lock.yaml` fails the install if a value is supplied for a profile-owned path. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml` for components that resolve to remote Helm charts. Local-chart components (Helm with no upstream `Source`, common on OCP overlays) and non-Helm components have no install-time stub surface — `--dynamic` naming them is rejected rather than silently dropped.
+The `--deployer argocd-helm` generates a Helm chart app-of-apps where values are overridable at install time, except two guarded sets. When the recipe carries a selected profile, `templates/aicr-profile-lock.yaml` fails the install if a value is supplied for a profile-owned path. When the bundle ships `gpu-operator`, `gpu-operator-ocp`, `nvidia-dra-driver-gpu` or `nvidia-dra-driver-gpu-ocp`, `templates/aicr-driver-ownership-lock.yaml` fails the install if a value is supplied for a GPU driver-ownership path (`driver.enabled`, `toolkit.enabled`, `hostPaths.driverInstallDir`, `nvidiaDriverRoot`); set those at bundle time with `--set` so bundle-time ownership checks apply, or, for a path the selected profile owns, choose the profile value with `aicr recipe --profile`. Upgrading an install that passes these values at install time needs the steps in the [upgrade note](component-catalog.md#gpu-operator-and-nvidia-dra-driver-gpu-argocd-helm-rejects-install-time-driver-ownership-values). Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml` for components that resolve to remote Helm charts. Local-chart components (Helm with no upstream `Source`, common on OCP overlays) and non-Helm components have no install-time stub surface — `--dynamic` naming them is rejected rather than silently dropped.
 
 ```shell
 helm install aicr-bundle ./bundle \
@@ -2720,13 +2834,13 @@ aicr bundle -r recipe.yaml \
   --dynamic kubeprometheusstack:prometheus.prometheusSpec.externalLabels.cluster \
   -o ./bundles
 
-# Argo CD Helm chart: all non-profile-owned values overridable, --dynamic pre-populates specific paths
+# Argo CD Helm chart: values overridable except guarded ownership paths, --dynamic pre-populates specific paths
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   --dynamic kubeprometheusstack:prometheus.prometheusSpec.externalLabels.cluster \
   -o ./bundles
 
-# Argo CD Helm chart: without --dynamic, non-profile-owned values still overridable via helm --set
+# Argo CD Helm chart: without --dynamic, other values still overridable via helm --set
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   -o ./bundles
@@ -3021,7 +3135,9 @@ Warning: nodewright-customizations is enabled but --accelerated-node-selector is
 Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
 ```
 
-Neither warning is shown when the only nodewright manifest the recipe wires is the AKS toolkit hardening (`toolkit-hardening-aks.yaml`), as in AKS recipes without an accelerator: its package never cordons or drains a node, and it selects GPU nodes by a fixed label rather than `--accelerated-node-selector`.
+Neither warning is shown when the only nodewright manifest the recipe wires is a toolkit hardening manifest (`toolkit-hardening-aks.yaml` or `toolkit-hardening-oke.yaml`), as in AKS recipes without an accelerator and every OKE recipe except GB300: its package never cordons or drains a node, and it selects GPU nodes by a fixed label rather than `--accelerated-node-selector`.
+
+On OKE GB300 recipes the missing selector is an error and no bundle is produced, because their tuning CR reboots every node it matches and makes CRI-O wait for Multus.
 
 **Viewing Validation Warnings:**
 
@@ -3621,7 +3737,10 @@ the recipe was resolved with `--data <dir>`, both values and manifests are read
 through the overlay so overlay-shadowed paths take precedence over embedded.
 Recognized mapping-valued image descriptors with null, empty, or non-scalar
 members are rejected so the command cannot succeed with a known-incomplete
-image set.
+image set. GPU and DOCA driver images are listed with the OS-qualified tag the
+operator pulls on a node; a driver whose tag the recipe does not determine is
+named in the component's `warnings` instead (see
+[Air-Gapped Mirroring](air-gap-mirror.md#overriding-component-values)).
 
 For an end-to-end walkthrough covering Hauler and Zarf workflows, see
 [Air-Gapped Mirroring](air-gap-mirror.md).
@@ -4330,7 +4449,7 @@ AICR respects standard environment variables:
 | `AICR_REQUESTS` | Default for `aicr snapshot --requests`. Comma-separated `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. | unset |
 | `AICR_LIMITS` | Default for `aicr snapshot --limits`. Comma-separated `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when this list does not already contain that key — explicit `nvidia.com/gpu=N` wins. | unset |
 | `AICR_CRITERIA_STRICT` | When set to `1` / `true` / `yes` / `on`, equivalent to `--criteria-strict` on every `aicr recipe` invocation: rejects criteria values not in the embedded OSS catalog regardless of `--data` contributions. Intended for OSS CI gates; `make qualify` exports it automatically for the unit-test step. | unset |
-| `AICR_REQUIRE_EVIDENCE` | When set to `1` / `true` / `yes` / `on`, equivalent to `--require-evidence` on `aicr recipe` and `aicr query`: reject a resolved recipe with no committed evidence pointer. Resolving with `--data` fails the check. A false spelling (`0`, `false`, `no`, `off`) does not turn the check off when the flag or config already enables it, and an unrecognized value does not enable it. Does not affect `aicr bundle` or `aicr mirror`. The `aicrd` process honors the same variable on `/v1/recipe` and `/v1/query`. | unset |
+| `AICR_REQUIRE_EVIDENCE` | When set to `1` / `true` / `yes` / `on`, equivalent to `--require-evidence` on `aicr recipe` and `aicr query`: reject a resolved recipe with no committed evidence pointer. Resolving with `--data` fails the check, and `aicr query --recipe` is rejected. A false spelling (`0`, `false`, `no`, `off`) does not turn the check off when the flag or config already enables it, and an unrecognized value does not enable it. Does not affect `aicr bundle` or `aicr mirror`. The `aicrd` process honors the same variable on `/v1/recipe` and `/v1/query`. | unset |
 | `NO_COLOR` | Suppress ANSI color codes in CLI logger output (de-facto standard, see [no-color.org](https://no-color.org/)) | unset |
 
 ## Exit Codes
@@ -4347,6 +4466,17 @@ AICR respects standard environment variables:
 | 7 | Rate limited (client exceeded rate limit) |
 | 8 | Internal error (unexpected failure) |
 | 9 | Operation aborted by the operator (SIGINT/SIGTERM) |
+
+**Interrupts.** The first SIGINT (Ctrl-C) or SIGTERM cancels the running
+command. The command then runs its bounded cleanup, such as deleting
+snapshot-agent or validator Jobs and RBAC, and exits with the code of the
+error it returns: `9` when it reports the cancellation. A signal that arrives
+after the command's main work has already finished may still end in another
+code, including `0`. A second SIGINT or SIGTERM, for any
+subcommand, terminates the process immediately with the default signal
+disposition (the shell typically reports `130` for Ctrl-C and `143` for
+SIGTERM). Cleanup still in progress is cut short and may leave cluster
+resources behind.
 
 ## Common Usage Patterns
 
@@ -4575,17 +4705,30 @@ The `examples/` directory contains reference files for testing and learning:
 
 ### Recipes (`examples/recipes/`)
 
+These hand-curated `RecipeResult` illustrations are intentionally incomplete
+and differ from actual generated output. Generate a current recipe before
+bundling or validation, even with the same AICR version. The checked-in files
+are for learning the structure, not deployment inputs.
+
 | File | Description |
 |------|-------------|
-| `kind.yaml` | Recipe for local Kind cluster with fake GPU |
-| `eks-training.yaml` | EKS recipe optimized for training workloads |
-| `aks-training.yaml` | AKS recipe for training workloads |
-| `eks-gb200-ubuntu-training-with-validation.yaml` | GB200 on EKS with Ubuntu and multi-phase validation |
+| `kind.yaml` | Selected Kind supporting components; omits the GPU stack and validation |
+| `eks-training.yaml` | Selected EKS training components; omits validation and resolved metadata |
+| `aks-training.yaml` | AKS training structure; omits `selectedProfile`, ownership locks, profile-specific overrides, and readiness constraints |
+| `eks-gb200-ubuntu-training-with-validation.yaml` | Authored severity/remediation and selected deployment/performance checks; omits conformance and parts of the component graph |
+
+For AKS, use [AKS GPU Setup](../integrator/aks-gpu-setup.md) to generate a recipe
+with the matching `gpuStack` profile and GPU pool projection. The legacy
+`aicr.run/v1` illustration does not represent current profiled output.
 
 **Usage:**
 ```shell
-# Generate bundle from example recipe
-aicr bundle --recipe examples/recipes/eks-training.yaml --output ./bundles
+# Generate a current recipe for the intended EKS H100 Ubuntu training cluster
+aicr recipe --service eks --accelerator h100 --os ubuntu --intent training \
+  --output generated-recipe.yaml
+
+# Consume the generated recipe
+aicr bundle --recipe generated-recipe.yaml --output ./bundles
 ```
 
 ### Templates (`examples/templates/`)

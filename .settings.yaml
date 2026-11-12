@@ -19,7 +19,7 @@
 # Build Tools
 build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
-  goreleaser: 'v2.19.0'
+  goreleaser: 'v2.20.0'
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
   ko: 'v0.19.1'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
@@ -34,7 +34,7 @@ linting:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan (#2657).
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
-  oasdiff: 'v1.35.0'
+  oasdiff: 'v1.36.0'
   # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
   # oras pin in security_tools: the checksums.txt served beside the tarball
@@ -52,7 +52,7 @@ linting:
   #
   # linux/amd64 only: this feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oasdiff_sha256_linux_amd64: 'a8023002fcb2eaa7f5758148a9303cb63d33b939886df312268bc0fc7b939140'
+  oasdiff_sha256_linux_amd64: 'dba65661f6d0f178a3e4884c309f19527a849388bb9df0e81545db76dbb697d6'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.15.0'
   # renovate: datasource=pypi depName=yamllint depType=linting
@@ -84,11 +84,11 @@ linting:
 # Security Tools
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
-  grype: 'v0.121.0'
+  grype: 'v0.121.1'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.4'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
-  syft: 'v1.55.0'
+  syft: 'v1.57.0'
   # Attaches the aiperf-bench third-party source archive as an OCI 1.1 referrer
   # (tools/generate-aiperf-source). Cosign cannot attach arbitrary artifacts, so
   # this is a separate dependency from the signing/attestation path.
@@ -180,14 +180,14 @@ testing_tools:
     darwin_amd64: '214d890745b45679400442552ad4554fb4df622b92d031931536eff85bdb46c2'
     darwin_arm64: 'af2834052ba32fe8006a44a31db16cad30baf1c46f6b59160b092974578d7798'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
-  helmfile: 'v1.8.2'
+  helmfile: 'v1.8.3'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
   # via Renovate postUpgradeTasks whenever the helmfile version above is bumped.
   helmfile_checksums:
-    linux_amd64: 'f179485c5bb9f8e20fbd8ea16d8807915988aba4d60131ee864fb3232452716e'
-    linux_arm64: '9163f0d7ad088d243d7305ba09c3465aac02dfebd658d46c62dbdaa11c224b16'
-    darwin_amd64: 'e99b669bb02729d5c4b0f5de9d830298d336d5968dcac76c7c01635f67095574'
-    darwin_arm64: '0e788f4aa7b4eea1ec0d1e278e0e66e845d5733be5f4e6cb7f832c779e656c72'
+    linux_amd64: '7d79c6d2099a4819213873164eda23bdbd32f1404fec7a7104d934e5d102596f'
+    linux_arm64: 'e035c0338e31e0a8054ae798280532d32edcfbb7d6c4993e3b2efa2dc40647ce'
+    darwin_amd64: '043c4139987ad0009416575a0d52480af45b651f4dc85a90133199e8f9d6a71c'
+    darwin_arm64: 'a80eda044f1b73adc9ca051d34c787444203f31c3b9d5328a6b27c3ff02520ff'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.8.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools
@@ -203,14 +203,14 @@ testing_tools:
   yq: 'v4.54.1'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
-  awscli: '1.46.2'
+  awscli: '1.46.3'
   # MiniStack: MIT-licensed, token-free AWS emulator (https://ministack.org) used
   # by the KMS e2e in place of LocalStack, whose latest/stable images now refuse
   # to boot without a paid license token. Pinned (never :latest) for reproducibility.
   # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
   # serves TLS with a mkcert cert (see mkcert below).
   # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
-  ministack_image: 'ministackorg/ministack:1.5.36'
+  ministack_image: 'ministackorg/ministack:1.5.38'
   # OpenBAO: the Linux Foundation Apache-2.0 fork of HashiCorp Vault, used by the
   # Vault KMS e2e to exercise the hashivault:// signing/verification path against
   # a real Transit secrets engine. API-identical to Vault; the sigstore hashivault
@@ -386,23 +386,22 @@ operator:
   aicr_version_range: '>=1.0.0, <2.0.0'
   # AICR release the operator is built and qualified against outside a
   # release; a release tag's chart defaults to that tag's own AICR. Digests resolved
-  # from ghcr.io on 2026-10-22; v1.1.2 is commit 2bf662b86c21a97b6e79e90035382ea252a44798,
-  # v1.1.0 rebuilt with Go 1.27.3 and nothing else changed.
-  aicr_version: 'v1.1.2'
-  aicr_image: 'ghcr.io/nvidia/aicr:v1.1.2@sha256:611cbcb8a44b30ccfbbf77a797ed0a8e7fae228c97088a849f70b042709a62fb'
+  # from ghcr.io on 2026-11-03; v1.2.0 is commit 935e0746dc54da890a23c1ecca998244b3a25de7.
+  aicr_version: 'v1.2.0'
+  aicr_image: 'ghcr.io/nvidia/aicr:v1.2.0@sha256:5ef145efe98ede9f4da7be3a66304f5fdc95dd31f825295d6a608a39feb0cac9'
   aicr_validator_images:
-    deployment: 'ghcr.io/nvidia/aicr-validators/deployment:v1.1.2@sha256:f9d1cd2843ab0271d7b763c485558c1f3d4b37b984e96ad73e1ce6ae77365928'
-    conformance: 'ghcr.io/nvidia/aicr-validators/conformance:v1.1.2@sha256:ce74905d3df0f6a5d8bb6c7f53e979fdf02e1d778b76817f98d964d9ad913312'
-    performance: 'ghcr.io/nvidia/aicr-validators/performance:v1.1.2@sha256:2d847aa5e4d0a547a86022eb5a71ec7ad8b5a801906578c77adedcdcb9083d07'
+    deployment: 'ghcr.io/nvidia/aicr-validators/deployment:v1.2.0@sha256:0e697d829916b20698488666d44ecde9429c7d1c6063c5ade425d2f27845ca95'
+    conformance: 'ghcr.io/nvidia/aicr-validators/conformance:v1.2.0@sha256:8930d96f5bf6cd72058d4496558963a9b67383d4ceb776f44cafd1a7f3259913'
+    performance: 'ghcr.io/nvidia/aicr-validators/performance:v1.2.0@sha256:35f45febe754141b3f9154fc0af3273c5de6c4a9d68da154d4477ef3dd2f4722'
   # AICR releases `make operator-e2e` runs against in CI: the lowest and the
   # newest supported.
   aicr_e2e:
     - version: 'v1.0.0'
       image: 'ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433'
       validator_images: 'ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790,ghcr.io/nvidia/aicr-validators/conformance:v1.0.0@sha256:e091d51f600255c2166e5c1b42afd556880d498f2a9bb913a32da38fa28e038b,ghcr.io/nvidia/aicr-validators/performance:v1.0.0@sha256:96af7b9e4362917e081d7152efd063d10ba6a213825aae44a4b6fd826da4c4fe'
-    - version: 'v1.1.2'
-      image: 'ghcr.io/nvidia/aicr:v1.1.2@sha256:611cbcb8a44b30ccfbbf77a797ed0a8e7fae228c97088a849f70b042709a62fb'
-      validator_images: 'ghcr.io/nvidia/aicr-validators/deployment:v1.1.2@sha256:f9d1cd2843ab0271d7b763c485558c1f3d4b37b984e96ad73e1ce6ae77365928,ghcr.io/nvidia/aicr-validators/conformance:v1.1.2@sha256:ce74905d3df0f6a5d8bb6c7f53e979fdf02e1d778b76817f98d964d9ad913312,ghcr.io/nvidia/aicr-validators/performance:v1.1.2@sha256:2d847aa5e4d0a547a86022eb5a71ec7ad8b5a801906578c77adedcdcb9083d07'
+    - version: 'v1.2.0'
+      image: 'ghcr.io/nvidia/aicr:v1.2.0@sha256:5ef145efe98ede9f4da7be3a66304f5fdc95dd31f825295d6a608a39feb0cac9'
+      validator_images: 'ghcr.io/nvidia/aicr-validators/deployment:v1.2.0@sha256:0e697d829916b20698488666d44ecde9429c7d1c6063c5ade425d2f27845ca95,ghcr.io/nvidia/aicr-validators/conformance:v1.2.0@sha256:8930d96f5bf6cd72058d4496558963a9b67383d4ceb776f44cafd1a7f3259913,ghcr.io/nvidia/aicr-validators/performance:v1.2.0@sha256:35f45febe754141b3f9154fc0af3273c5de6c4a9d68da154d4477ef3dd2f4722'
   # Kubernetes floor (support policy): newest 1.34 patch in kind v0.33.0.
   kind_node_image_floor: 'kindest/node:v1.34.11@sha256:44e222ee2132dab25ff87301682f89eb82c7880ea3a1bf543bfe9708fd08d67d'
   # Generates deep copies and CRDs (`make generate`). Run with `go run

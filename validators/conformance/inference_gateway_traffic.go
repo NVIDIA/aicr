@@ -587,7 +587,7 @@ func (s *gatewayTrafficScenario) deploy(ctx *validators.Context) error {
 	start := time.Now()
 	ns := s.testRun.namespace
 	for _, name := range []string{gatewayTrafficPrimary, gatewayTrafficAlternate} {
-		deploy, svc := buildGatewayTrafficBackend(ns, name, s.tolerations)
+		deploy, svc := buildGatewayTrafficBackend(ns, name, s.tolerations, s.testRun.imagePullSecretRefs())
 		if _, err := s.clientset.AppsV1().Deployments(ns).Create(ctx.Ctx, deploy, metav1.CreateOptions{}); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to create backend Deployment "+name, err)
 		}
@@ -884,7 +884,7 @@ func gatewayProbeNotReadyLine(logs string) string {
 // gatewayTrafficPodSpec is the restricted CPU pod shape both backends and the
 // probe use. tolerations, when nil, defaults to tolerate-all so the pods
 // schedule on all-tainted clusters.
-func gatewayTrafficPodSpec(container corev1.Container, tolerations []corev1.Toleration) corev1.PodSpec {
+func gatewayTrafficPodSpec(container corev1.Container, tolerations []corev1.Toleration, pullSecrets []corev1.LocalObjectReference) corev1.PodSpec {
 	if tolerations == nil {
 		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
 	}
@@ -901,7 +901,8 @@ func gatewayTrafficPodSpec(container corev1.Container, tolerations []corev1.Tole
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{capabilityAll}},
 	}
 	return corev1.PodSpec{
-		Tolerations: tolerations,
+		Tolerations:      tolerations,
+		ImagePullSecrets: pullSecrets,
 		SecurityContext: &corev1.PodSecurityContext{
 			RunAsNonRoot:   ptr.To(true),
 			RunAsUser:      ptr.To(int64(65534)),
@@ -912,7 +913,7 @@ func gatewayTrafficPodSpec(container corev1.Container, tolerations []corev1.Tole
 }
 
 // buildGatewayTrafficBackend returns one backend's Deployment and Service.
-func buildGatewayTrafficBackend(ns, name string, tolerations []corev1.Toleration) (*appsv1.Deployment, *corev1.Service) {
+func buildGatewayTrafficBackend(ns, name string, tolerations []corev1.Toleration, pullSecrets []corev1.LocalObjectReference) (*appsv1.Deployment, *corev1.Service) {
 	labels := map[string]string{hpaAppLabelKey: name}
 	spec := gatewayTrafficPodSpec(corev1.Container{
 		Name:    gatewayTrafficServerName,
@@ -923,7 +924,7 @@ func buildGatewayTrafficBackend(ns, name string, tolerations []corev1.Toleration
 			ProbeHandler:  corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/", Port: intstr.FromString(gatewayTrafficPortName)}},
 			PeriodSeconds: 2,
 		},
-	}, tolerations)
+	}, tolerations, pullSecrets)
 	deploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels},
 		Spec: appsv1.DeploymentSpec{
@@ -1015,7 +1016,7 @@ func buildGatewayTrafficProbe(ns string, s *gatewayTrafficScenario) *corev1.Pod 
 			{Name: "TOLERANCE", Value: strconv.FormatFloat(s.tolerance, 'f', -1, 64)},
 			{Name: "READY_SECONDS", Value: strconv.Itoa(int(s.routeReadyWindow / time.Second))},
 		},
-	}, s.tolerations)
+	}, s.tolerations, s.testRun.imagePullSecretRefs())
 	spec.RestartPolicy = corev1.RestartPolicyNever
 	lifetime := s.probeTimeout + defaults.K8sCleanupTimeout + gpuCheckSkewAndFlushMargin
 	spec.ActiveDeadlineSeconds = ptr.To(int64(lifetime / time.Second))

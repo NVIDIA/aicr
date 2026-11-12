@@ -29,8 +29,8 @@ import (
 func legacyPluginDS(labels map[string]string, desired int32) *appsv1.DaemonSet {
 	return &appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      okeLegacyPluginDSName,
-			Namespace: okeLegacyPluginNamespace,
+			Name:      okeGPUPluginDSName,
+			Namespace: okeGPUPluginNamespace,
 			Labels:    labels,
 		},
 		Status: appsv1.DaemonSetStatus{DesiredNumberScheduled: desired},

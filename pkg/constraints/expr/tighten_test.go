@@ -61,8 +61,32 @@ func TestTighten(t *testing.T) {
 		{"node-set label predicates have no ordering",
 			"gke-no-default-nvidia-gpu-device-plugin=true", "!gke-no-default-nvidia-gpu-device-plugin",
 			"", TightenIncomparable},
-		{"alternatives are not intersected", ">= 1.34 < 1.35 || >= 1.35.1", ">= 1.35", "", TightenIncomparable},
+		{"candidate alternatives are not intersected", ">= 1.35", ">= 1.34 < 1.35 || >= 1.35.1", "", TightenIncomparable},
 		{"unparseable version", ">= 1.32", ">= not-a-version", "", TightenIncomparable},
+
+		// The existing side MAY carry alternatives: the candidate
+		// distributes over them, emptied tracks drop, and survivors rejoin.
+		{"candidate empties one alternative and narrows the other",
+			">= 1.34.3-gke.1318000 < 1.35 || >= 1.35.0-gke.2745000", ">= 1.35.0",
+			">= 1.35.0-gke.2745000", TightenNarrowed},
+		{"candidate narrows every alternative",
+			">= 1.33 < 1.35 || >= 1.36", ">= 1.34.0",
+			">= 1.34.0 < 1.35 || >= 1.36", TightenNarrowed},
+		{"candidate already covered by every alternative",
+			">= 1.34 < 1.35 || >= 1.35.1", ">= 1.33.0",
+			">= 1.34 < 1.35 || >= 1.35.1", TightenUnchanged},
+		{"candidate empties every alternative",
+			">= 1.34 < 1.35 || >= 1.35.1 < 1.36", ">= 1.37.0",
+			"", TightenUnsatisfiable},
+		{"a precision mismatch in one alternative rejects the whole expression",
+			">= 1.34 < 1.35 || >= 1.35.1", ">= 1.35",
+			"", TightenPrecisionMismatch},
+		{"a non-range alternative rejects the whole expression",
+			">= 1.34 < 1.35 || == 1.36", ">= 1.35.0",
+			"", TightenIncomparable},
+		{"an alternative emptied against an inclusive ceiling is refused, not dropped",
+			">= 1.30 <= 1.34 || >= 1.36", ">= 1.35.0",
+			"", TightenIncomparable},
 		{"a clause repeating a direction is not reduced", ">= 1.34.1 > 1.34.0", "< 1.36", "", TightenIncomparable},
 		{"a clause repeating the upper direction is not reduced", "<= 1.34.0 < 1.35", ">= 1.30", "", TightenIncomparable},
 		{"a repeated direction on the candidate side too", "< 1.36", ">= 1.34.1 > 1.34.0", "", TightenIncomparable},
@@ -178,6 +202,11 @@ func TestTightenNeverWidens(t *testing.T) {
 		// The shape appendBound emits when it retains an exclusive loser.
 		">= 1.34.1 > 1.34.0", ">= 24.04.1 > 24.04.0",
 		"<= 1.35.2 < 1.35.0",
+		// Per-track alternatives (the gb300 K8s floor shape): candidates
+		// distribute over them, so the intersection invariants must hold
+		// across a dropped track as much as a narrowed one.
+		">= 1.34.3-gke.100 < 1.35.0 || >= 1.35.0-gke.101",
+		">= 1.34.0 < 1.35.0 || >= 1.35.2",
 	}
 	expressions := make([]string, 0, len(ranges)+len(operators)*len(versions))
 	expressions = append(expressions, ranges...)
@@ -291,7 +320,14 @@ func TestTightenRejectsEmptyRanges(t *testing.T) {
 		"1.36.0-gke.10", "1.36.0-gke.50", "1.36.0-gke.51",
 	}
 
-	expressions := make([]string, 0, len(operators)*len(versions))
+	expressions := make([]string, 0, 2+len(operators)*len(versions))
+	// Compound existings take the distribution path: a reported
+	// Unsatisfiable there means every alternative emptied, and a
+	// satisfiable result must still have a witness.
+	expressions = append(expressions,
+		">= 1.35.0 < 1.36.0 || >= 1.36.0-gke.50",
+		">= 1.35.0-gke.100 <= 1.35.0-gke.101 || >= 1.36.0",
+	)
 	for _, operator := range operators {
 		for _, version := range versions {
 			expressions = append(expressions, operator+" "+version)

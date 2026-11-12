@@ -530,6 +530,7 @@ func buildSandboxProbePod(run *gpuTestRun, name, image, runtimeClassName, nodeNa
 			RuntimeClassName: rcName,
 			NodeName:         nodeName,
 			Tolerations:      tolerations,
+			ImagePullSecrets: run.imagePullSecretRefs(),
 			RestartPolicy:    corev1.RestartPolicyNever,
 			Containers: []corev1.Container{{
 				Name:    sandboxProbeContainer,

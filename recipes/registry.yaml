@@ -194,6 +194,26 @@ components:
     # disableValidation: true on the -post wrapper release only.
     # See issues #914 and #929 for the pattern.
     manifestsUseChartCRDs: true
+    validations:
+      # Advisory: the snapshot's RDMA network namespace mode
+      # (metadata.rdmaNamespaceMode) and rdmaCni.enabled disagree. Only the
+      # OKE GB300 manifests read rdmaCni.
+      - function: CheckRDMANamespaceModeCoherent
+        severity: warning
+        conditions:
+          service:
+            - oke
+          accelerator:
+            - gb300
+      # Informational: no usable evidence to compare, as for a recipe built
+      # without a snapshot.
+      - function: CheckRDMANamespaceModeEvidence
+        severity: info
+        conditions:
+          service:
+            - oke
+          accelerator:
+            - gb300
     healthCheck:
       assertFile: checks/network-operator/health-check.yaml
     upgrades:
@@ -254,7 +274,7 @@ components:
   # GKE COS NVIDIA driver installer (issue #1716): Google's cos-gpu-installer
   # DaemonSet as an AICR-managed, values-gated component. Present
   # unconditionally in the gke-cos chain; renders nothing unless the gpuStack
-  # bundle-installer profile value flips installer.enabled true. The
+  # bundle-installer or dra profile value flips installer.enabled true. The
   # DaemonSet carries its own nodeAffinity (GPU nodes without GKE-managed
   # driver labels), so no nodeSelector injection — only accelerated
   # tolerations flow through.
@@ -521,6 +541,32 @@ components:
             - training
             - inference
         message: "Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes."
+      - function: CheckAcceleratedSelectorMissing
+        # Blocking for OKE GB300: tuning-oke-gb300.yaml makes CRI-O wait for
+        # Multus and reboots each node it matches, so an unscoped CR would
+        # reboot the CPU pools into the GB300 OCI profile.
+        severity: error
+        conditions:
+          service:
+            - oke
+          accelerator:
+            - gb300
+        message: "The OKE GB300 tuning CR reboots every node it matches and
+          makes CRI-O depend on Multus. Pass --accelerated-node-selector with a
+          label only the GB300 pool carries."
+      - function: CheckNetworkOperatorEnabled
+        # Blocking for OKE GB300: tuning-oke-gb300.yaml sets CRI-O's default
+        # network to Multus, which network-operator installs; without it, pod
+        # sandboxes fail and the tuned nodes stay NotReady.
+        severity: error
+        conditions:
+          service:
+            - oke
+          accelerator:
+            - gb300
+        message: "The OKE GB300 tuning CR makes CRI-O require Multus, which
+          network-operator installs, so without it the tuned nodes stay
+          NotReady. Re-enable network-operator."
       - function: CheckWildcardAcceleratedToleration
         # Blocking: the wildcard deadlock requires manual node cordon/reboot to
         # recover, so fail the bundle rather than emit a missable warning.
@@ -543,6 +589,7 @@ components:
         conditions:
           service:
             - generic
+            - oke
           accelerator:
             - gb300
         message: "nvidia-gb300-performance sizes hugepages for a 64k-page ARM64
@@ -591,9 +638,10 @@ components:
     # nvsentinel-observe, -quarantine and -remediation,
     # nvsentinel-slinky-drainer (#2615), nvsentinel-health-events-analyzer
     # (#2618), nvsentinel-event-exporter (#2621), nvsentinel-log-collector
-    # (#2619), nvsentinel-node-validation (#3088) and
-    # nvsentinel-external-remediation (#3091) mixins: the exact leaf paths a
-    # mixin may set on this
+    # (#2619), nvsentinel-node-validation (#3088),
+    # nvsentinel-external-remediation (#3091), and
+    # nvsentinel-csp-health-monitor-aws and -gcp (#2620) mixins: the exact
+    # leaf paths a mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
     # recipe's own override, or an operator --set), never from a mixin, so
@@ -746,6 +794,10 @@ components:
       - lifecycle-manager.config.newNodeValidation.newNodeTests
       - fault-quarantine.validation.enabled
       - fault-quarantine.validation.ruleSets
+      - global.cspHealthMonitor.enabled
+      - csp-health-monitor.cspName
+      - csp-health-monitor.processingStrategy
+      - csp-health-monitor.configToml.triggerQuarantineWorkflowTimeLimitMinutes
     # The in-cluster file server's ReadWriteOnce volume, which the
     # nvsentinel-log-collector mixin turns on (#2619).
     storageClassPaths:
@@ -766,7 +818,8 @@ components:
       # itself — from the gpuStack profile on AKS, GKE-COS, and OKE, at
       # overlay level on Kind (#2181) — so this gate is defense in depth
       # rather than the primary mechanism. GKE
-      # gpuStack=bundle-installer and AKS gpuStack=operator-managed
+      # gpuStack=bundle-installer and gpuStack=dra, and AKS
+      # gpuStack=operator-managed,
       # assign an explicit false: a driver pod exists there for the
       # labeler to detect. Issue #2175.
       - function: CheckNVSentinelDriverLabelDetectable
@@ -880,6 +933,9 @@ components:
       # Blocking: a MaintenanceRequest (#3092) that would be accepted but
       # neither cordon nor drain its node. The rules are in the function's doc.
       - function: CheckNVSentinelMaintenanceRequestCoherent
+        severity: error
+      # Blocking (#2620). The rules are in the function's doc.
+      - function: CheckNVSentinelCSPHealthMonitorCoherent
         severity: error
 
   # NVSentinel's remediation datastore, added only by the nvsentinel-observe,
@@ -1161,12 +1217,13 @@ components:
       - nktp
     healthCheck:
       assertFile: checks/nktp/health-check.yaml
+    upgrades:
+      file: components/nktp/upgrades.yaml
     helm:
-      defaultRepository: oci://ghcr.io/dsx-ai-factory/nvke/charts
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nktp
-      # Moves to 0.1.1 at GA.
-      # renovate: datasource=docker depName=ghcr.io/dsx-ai-factory/nvke/charts/nktp
-      defaultVersion: "0.1.1-rc.3"
+      # renovate: datasource=helm depName=nktp registryUrl=https://helm.ngc.nvidia.com/nvidia
+      defaultVersion: "0.2.0"
       # The node collector is privileged: a platform that enforces Pod
       # Security needs this namespace labeled privileged (os-talos pattern).
       defaultNamespace: nktp

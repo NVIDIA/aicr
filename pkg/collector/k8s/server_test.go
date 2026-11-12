@@ -41,9 +41,9 @@ func TestKubernetesCollector_Collect(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
-	// server, image, policy, node, Slinky, MariaDB, OKE legacy plugin,
-	// default StorageClass, and Percona.
-	assert.Len(t, m.Subtypes, 9)
+	// server, image, policy, node, Slinky, MariaDB, OKE legacy plugin, OKE
+	// GPU plugin, default StorageClass, and Percona.
+	assert.Len(t, m.Subtypes, 10)
 
 	// Find the server subtype
 	var serverSubtype *measurement.Subtype
@@ -223,7 +223,7 @@ func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
 	// All standard subtypes should be present; custom-resource detection is unknown.
-	assert.Len(t, m.Subtypes, 9)
+	assert.Len(t, m.Subtypes, 10)
 	foundSlinky := false
 	foundMariaDB := false
 	foundOKELegacy := false

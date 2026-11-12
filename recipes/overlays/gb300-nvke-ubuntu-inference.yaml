@@ -1,0 +1,166 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GB300 NVL72 trays on NVKE, at intent inference. The nvke root's platform
+# handling with the GB300 node facts: Ubuntu 26.04 on the 7.0 nvidia-64k arm64
+# kernel, and no pre-installed driver.
+#
+# SCOPE: the Gateway API inference surface, not model serving. Like every other
+# AICR `-inference` recipe this declares agentgateway and nothing that serves a
+# model; serving is gb300-nvke-ubuntu-inference-dynamo.
+#
+# NO east-west stack. network-operator, sriov-ib-networks and rdma-modules are
+# left out: serving through the Gateway API needs no RDMA rails, and
+# vr200-nvke-ubuntu-inference leaves them out for the same reason.
+#
+# No performance block: an all-reduce floor is a training claim, and nothing
+# has measured serving throughput on this coordinate.
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: gb300-nvke-ubuntu-inference
+
+spec:
+  base: nvke
+
+  criteria:
+    service: nvke
+    accelerator: gb300
+    os: ubuntu
+    intent: inference
+
+  # No os-ubuntu mixin: it pins VERSION_ID 24.04 / kernel >= 6.8, while GB300
+  # on NVKE runs Ubuntu 26.04 on a 7.0.0-*-nvidia-64k arm64 kernel. Restated
+  # from nvke for K8s: snapshot resolution checks a leaf's own constraints, and
+  # >= 1.34 keeps the GA DRA API that ComputeDomain and IMEX need.
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "26.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 7.0"
+
+  componentRefs:
+    # NVKE's node image ships no driver, so GPU Operator installs it. The
+    # registry pin, 580.173.02, publishes no -ubuntu26.04 driver container;
+    # 595.91.07 is the oldest that does. Verified on a GB300 tray: the driver
+    # builds against 7.0.0-1018-nvidia-64k and all four GPUs enumerate.
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - prometheus-operator-crds
+      overrides:
+        gdrcopy:
+          enabled: true
+        driver:
+          enabled: true
+          version: 595.91.07
+        toolkit:
+          enabled: true
+          # NVKE ships containerd 2.3 with a version 3 config.toml, while the
+          # toolkit's default source (`containerd config dump`) reports the
+          # migrated version 4; the drop-in is then rejected and containerd
+          # crash-loops. NVKE platform behaviour, as in gb200-nvke.
+          env:
+            - name: RUNTIME_CONFIG_SOURCE
+              value: file
+            - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED
+              value: "false"
+        devicePlugin:
+          enabled: true
+          # Helm replaces lists: the first two entries restate the component
+          # base. MOFED_ENABLED off because this leaf wires no RDMA path, so
+          # mounting /dev/infiniband into every GPU pod would grant devices
+          # nothing uses.
+          env:
+            - name: DP_DISABLE_HEALTHCHECKS
+              value: "109"
+            - name: DEVICE_LIST_STRATEGY
+              value: cdi-cri,cdi-annotations,volume-mounts
+            - name: MOFED_ENABLED
+              value: "false"
+
+    # Restates the component default: the kubelet plugin finding the driver
+    # where gpu-operator puts it is what makes a ComputeDomain usable.
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        nvidiaDriverRoot: /run/nvidia/driver
+
+    # The component's topology-updater limits already cover these 144-vCPU
+    # trays. No values-nvidia-nics.yaml: its rule is for recipes that ship
+    # network-operator.
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
+    # The Gateway API surface, in the shape vr200-nvke-ubuntu-inference
+    # declares it. aicr credits only a Gateway the recipe declares, so these
+    # must be declared here and not merely installed on the cluster.
+    #
+    # NVKE provisions no LoadBalancer controller. Without a bare-metal LB, build
+    # the bundle with `--set agentgateway:serviceType=ClusterIP`; otherwise the
+    # Service sits at EXTERNAL-IP <pending>. Reachability only: the
+    # inference-gateway check gates on ready endpoints, not an external address.
+    - name: agentgateway-crds
+      type: Helm
+      source: oci://cr.agentgateway.dev/charts
+      valuesFile: components/agentgateway-crds/values.yaml
+      manifestFiles:
+        - components/agentgateway-crds/manifests/gateway-api-crds.yaml
+        - components/agentgateway-crds/manifests/inference-extension-crds.yaml
+
+    - name: agentgateway
+      type: Helm
+      source: oci://cr.agentgateway.dev/charts
+      valuesFile: components/agentgateway/values.yaml
+      manifestFiles:
+        - components/agentgateway/manifests/inference-gateway.yaml
+      dependencyRefs:
+        - agentgateway-crds
+        - cert-manager
+        - prometheus-operator-crds
+
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v26.7.0"
+    conformance:
+      # gang-scheduling is a v1.36 MUST and KAI comes from the nvke base; an
+      # undeclared check renders as "not tested". driver-runtime-management
+      # follows the other gb300 leaves.
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - inference-gateway
+        - pod-autoscaling
+        - secure-accelerator-access
+        - driver-runtime-management

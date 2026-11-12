@@ -170,3 +170,35 @@ func TestStockCatalogResolvesDevicePluginPolicy(t *testing.T) {
 	}
 	t.Logf("verified device-plugin allocation policy across %d stock overlays", overlayCount)
 }
+
+// TestGKEDRAProfileResolvesResourceClaimPolicy pins the one stock selection
+// that is NOT the device-plugin default: the GKE-COS gpuStack=dra value
+// (issue #2517) hydrates the #1327 DRA opt-in tuple, and the validation-time
+// resolver must read it as dra-resource-claim — the gate/resolver symmetry
+// for the tuple the hydration gate accepted at generation.
+func TestGKEDRAProfileResolvesResourceClaimPolicy(t *testing.T) {
+	ctx := context.Background()
+	store, err := recipe.LoadMetadataStoreFor(ctx, nil)
+	if err != nil {
+		t.Fatalf("LoadMetadataStoreFor: %v", err)
+	}
+
+	criteria := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceGKE,
+		Accelerator: recipe.CriteriaAcceleratorH100,
+		OS:          recipe.CriteriaOSCOS,
+		Intent:      recipe.CriteriaIntentTraining,
+	}
+	result, err := store.BuildRecipeResultWithProfile(ctx, criteria, "gpuStack=dra")
+	if err != nil {
+		t.Fatalf("BuildRecipeResultWithProfile: %v", err)
+	}
+
+	policy, err := ResolveGPUAllocationPolicy(ctx, result)
+	if err != nil {
+		t.Fatalf("ResolveGPUAllocationPolicy: %v", err)
+	}
+	if policy != GPUAllocationPolicyDRAResourceClaim {
+		t.Errorf("policy = %q, want %q", policy, GPUAllocationPolicyDRAResourceClaim)
+	}
+}

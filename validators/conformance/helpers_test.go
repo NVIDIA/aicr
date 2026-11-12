@@ -436,8 +436,8 @@ func TestNewGangTestRun(t *testing.T) {
 	if run.suffix == "" {
 		t.Error("newGangTestRun() suffix is empty")
 	}
-	if len(run.suffix) != 8 {
-		t.Errorf("newGangTestRun() suffix length = %d, want 8 hex chars", len(run.suffix))
+	if len(run.suffix) != 32 {
+		t.Errorf("newGangTestRun() suffix length = %d, want 32 hex chars (a 128-bit token)", len(run.suffix))
 	}
 	if run.groupName == "" {
 		t.Error("newGangTestRun() groupName is empty")

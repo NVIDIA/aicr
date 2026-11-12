@@ -253,8 +253,8 @@ reported as no drift.
 // role from a
 // `gcloud container node-pools list --cluster <cluster> --format=json`
 // dump, merged as the K8s.gke-gpu-pools.gpu-driver-installation reading.
-// It's required only when resolving the GKE `bundle-installer` gpuStack
-// value from a snapshot. The default `gke-default` value needs no pool
+// It's required only when resolving the GKE `bundle-installer` or `dra`
+// gpuStack value from a snapshot. The default `gke-default` value needs no pool
 // dump.
 // Give the Job-backed snapshot its own deadline: contexts cap the
 // configured timeouts from the parent side, so reusing the 30-second
@@ -287,7 +287,7 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Cleanup:         true,
 	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
 	OKEAddonsPath:   "/path/to/oke-addons.json",    // OKE only
-	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer only
+	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer and dra only
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
@@ -336,6 +336,31 @@ if err != nil {
 }
 for _, r := range results {
 	log.Printf("phase=%s status=%s duration=%s", r.Phase, r.Status, r.Duration)
+}
+```
+
+**Results and error together.** `ValidateState` can return non-nil
+`results` **together with** a non-nil error, so an `err != nil` check alone
+discards them. When the run is interrupted (`ErrCodeCanceled` for a canceled
+`ctx`, `ErrCodeTimeout` for a deadline), the results hold every completed phase
+plus the partial current phase. Unstarted checks in it are `skipped`, and the
+phase reports a blocking status (`other` unless already `failed`). If
+privileged RBAC revocation also fails after a cancellation, the error is
+`ErrCodeInternal`, wrapping both causes and warning that the cluster-admin
+binding may be orphaned. Other errors, such as a later phase's pre-flight
+rejection, can also arrive alongside the phases completed before it. Partial
+results never mean the run succeeded: inspect both return values, and treat a
+non-nil error as a failed run even when the results look complete.
+
+```go
+results, err := client.ValidateState(valCtx, aksResult, snap,
+	aicr.WithValidationKubeconfig("/path/to/target-kubeconfig"),
+	aicr.WithValidationTimeout(0))
+for _, r := range results { // may be non-empty even when err != nil
+	log.Printf("phase=%s status=%s", r.Phase, r.Status)
+}
+if err != nil {
+	log.Fatalf("validate state: %v", err) // the run did not complete
 }
 ```
 
@@ -655,7 +680,16 @@ return res.Aggregate.Outcome(report, true)
   writes the evidence pages under `opts.Dir` against the checklist of the
   cluster's Kubernetes minor, or, when `opts.Vendor` is set,
   `WriteCNCFSubmission` writes the complete submission directory there
-  instead (`opts.Documented` applies either way). Each stage keeps its own bound (the snapshot its 5-minute
+  instead (`opts.Documented` applies either way). With a vendor, the
+  snapshot's Kubernetes version is checked against the carried checklists
+  (`ValidateCNCFSubmissionOptions`) between the snapshot and the validator
+  run: a submission certifies the cluster's exact minor, so a minor no
+  carried checklist matches (1.34 or 1.38 alike) is refused with
+  `ErrCodeInvalidRequest` before any validator Job unless
+  `opts.ConformanceVersion` names a checklist (`"v1.37"`), which is then
+  carried into the write and recorded in the README as selected explicitly;
+  the write repeats the check as the backstop. The pages render keeps its
+  nearest-checklist fallback. Each stage keeps its own bound (the snapshot its 5-minute
   budget plus grace, the run the 75-minute `ValidateState` default), and
   `opts.Kubeconfig` and `opts.Namespace` (default `aicr-validation`, as
   `aicr validate --namespace`) apply to both the agent and the validator
@@ -683,8 +717,9 @@ return res.Aggregate.Outcome(report, true)
 
 ```go
 err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
-	Dir:           "./cncf-evidence",
-	NotApplicable: map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"},
+	Dir:                "./cncf-evidence",
+	NotApplicable:      map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"},
+	ConformanceVersion: "", // empty: the cluster's exact minor must be a carried checklist
 })
 ```
 
@@ -696,8 +731,9 @@ or earlier either; `RenderCNCFEvidenceWithResult`,
 `WriteCNCFSubmission`, `ValidateCNCFSubmissionOptions`, `CNCFSubmissionOptions`,
 `CNCFSubmissionResult`, `CNCFVendor`, `CNCFDocumentation`,
 `RenderCNCFEvidenceOptions.Documented`, `CNCFEvidenceOptions.Vendor`,
-`CNCFEvidenceOptions.Documented`, `CNCFCollectOptions.Vendor` and
-`CNCFCollectOptions.Documented` are not in v1.2.0 or earlier.
+`CNCFEvidenceOptions.Documented`, `CNCFCollectOptions.Vendor`,
+`CNCFCollectOptions.Documented`, `CNCFCollectOptions.ConformanceVersion` and
+`ValidateCNCFRecipeCoverage` are not in v1.2.0 or earlier.
 
 ## Recipe sources
 
@@ -1125,6 +1161,13 @@ caller can shape a response without reimplementing hydrate-then-select:
 wrap chain and would match an `ErrCodeNotFound` cause nested inside a
 hydration failure.
 
+`SummarizeRecipe(rec)` returns the overview `aicr query --summary` prints, as
+an `*aicr.RecipeSummary` (a transparent alias of `pkg/recipe.Summary`):
+identity, criteria, applied overlays, constraints, enabled components in
+deployment order, and the validation checks per phase. It performs no I/O and
+does not hydrate component values. A `nil` `*RecipeResult`, or one without
+internal recipe state, returns `ErrCodeInvalidRequest`.
+
 ### Delivering a collected snapshot
 
 `snapshotter.DeliverSnapshot(ctx, raw, snapshotter.SnapshotDelivery{...})`
@@ -1283,7 +1326,8 @@ derive step rather than the load step.
 
 `IsRequireEvidence()` is a read, like `IsCriteriaStrict()`. It does not change
 resolution. After `ResolveRecipe`, call `PublishedEvidenceRequired` to combine
-that field with a flag and `AICR_REQUIRE_EVIDENCE`, then
+that field with a flag and `AICR_REQUIRE_EVIDENCE` (named by
+`aicr.RequireEvidenceEnvVar`), then
 `Client.RequirePublishedEvidence` when it reports true. That call rejects a
 Client whose recipe source is not `EmbeddedSource()`, including
 `FilesystemSource` from `--data` or `spec.recipe.data`, before it checks the

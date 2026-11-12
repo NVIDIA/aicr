@@ -155,8 +155,11 @@ func (s *MetadataStore) resolveAppliedProfileDeclaration(
 // intersection is well defined and the composition takes it: a profile value
 // gated on a feature with its own Kubernetes floor (DRA on GKE, issue #2512)
 // can raise the floor for itself alone without the chain having to raise it
-// for every value. Everything else — the node-set label predicates, exact
-// matches, "!=" — has no ordering to intersect, so it keeps failing closed.
+// for every value. A composed expression carrying "||" alternatives (the
+// gb300 per-GKE-track floors, issue #2517) intersects per-alternative —
+// expr.Tighten distributes the profile's simple range over them. Everything
+// else — the node-set label predicates, exact matches, "!=", a profile-side
+// "||" — has no ordering to intersect, so it keeps failing closed.
 //
 // The profile only ever narrows. A candidate that would widen the composed
 // range is dropped, not applied, because a value fragment must not relax a
@@ -207,8 +210,11 @@ func tightenProfileConstraint(profileName, valueName string, existing, candidate
 	case expr.TightenIncomparable:
 		return Constraint{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("profile %q value %q constraint %q collides with the composed recipe: "+
-				"%q and %q are not both simple version ranges (one clause, at most one bound "+
-				"per direction), so there is no intersection to take",
+				"%q and %q have no intersection to take — the profile's expression must be a "+
+				"simple version range (one clause of ordering terms, at most one bound per "+
+				"direction, no \"||\"), the composed expression a simple range or \"||\" "+
+				"alternatives of them, and an alternative the profile's range empties is "+
+				"droppable only against an exclusive ceiling",
 				profileName, valueName, candidate.Name, candidate.Value, existing.Value))
 
 	default:

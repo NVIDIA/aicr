@@ -100,6 +100,15 @@ func TestBuildAppliesJobPolicy(t *testing.T) {
 			if pod.RestartPolicy != corev1.RestartPolicyNever || pod.ServiceAccountName != "aicr-jobs" {
 				t.Errorf("pod restart=%s sa=%s", pod.RestartPolicy, pod.ServiceAccountName)
 			}
+			// Only the validation stage runs the CLI's cooperative cleanup on
+			// SIGTERM, so only it overrides the Kubernetes default grace.
+			if stage == StageValidation {
+				if pod.TerminationGracePeriodSeconds == nil || *pod.TerminationGracePeriodSeconds != int64(defaults.ValidationJobTerminationGrace.Seconds()) {
+					t.Errorf("terminationGracePeriodSeconds = %v, want %v", pod.TerminationGracePeriodSeconds, defaults.ValidationJobTerminationGrace)
+				}
+			} else if pod.TerminationGracePeriodSeconds != nil {
+				t.Errorf("terminationGracePeriodSeconds = %d, want the Kubernetes default (unset)", *pod.TerminationGracePeriodSeconds)
+			}
 			c := pod.Containers[0]
 			if c.Image != image || c.Args[0] != spec.subcommand {
 				t.Errorf("container image=%s args=%v", c.Image, c.Args)
@@ -380,15 +389,15 @@ func TestObserveOutcomeFailedJobThatExitedZero(t *testing.T) {
 func TestSupportsV11(t *testing.T) {
 	t.Parallel()
 	cases := map[string]bool{
-		"v1.0.0": false, "v1.0.9": false, "v1.0.9-rc.1": false, "1.0.2": false,
-		"v1.1.0-rc.1": true, "v1.1.0-alpha": true, "v1.1.0": true, "1.1.0": true, "v1.2.0-next": true, "v1.3.4": true,
+		"v1.0.0": false, "v1.0.9": false, "v1.0.9-rc.1": false,
+		"v1.1.0-rc.1": true, "v1.1.0-alpha": true, "v1.1.0": true, "v1.2.0-next": true, "v1.3.4": true,
 	}
 	for v, want := range cases {
 		if got := SupportsV11(v); got != want {
 			t.Errorf("SupportsV11(%s) = %t, want %t", v, got, want)
 		}
 	}
-	for v, want := range map[string]string{"v1.3.0-rc.1": "v1.3.0", "1.2.0": "v1.2.0", "v1.1.0+b.1": "v1.1.0", "latest": ""} {
+	for v, want := range map[string]string{"v1.3.0-rc.1": "v1.3.0", "v1.1.0+b.1": "v1.1.0", "1.2.0": "", "latest": ""} {
 		if got := Core(v); got != want {
 			t.Errorf("Core(%s) = %q, want %q", v, got, want)
 		}
@@ -397,52 +406,70 @@ func TestSupportsV11(t *testing.T) {
 
 func TestVersionGate(t *testing.T) {
 	t.Parallel()
-	for _, v := range []string{"v1.0.0", "v1.1.0", "v1.99.3"} {
-		for _, allow := range []bool{false, true} {
-			if err := CheckSupportedVersion(v, allow); err != nil {
-				t.Errorf("CheckSupportedVersion(%s, %t) = %v", v, allow, err)
+	tests := map[string]struct{ wantDeclaredErr, wantSupportedErr, wantOptInErr bool }{
+		"v1.0.0":             {wantDeclaredErr: false, wantSupportedErr: false, wantOptInErr: false},
+		"v1.1.0":             {wantDeclaredErr: false, wantSupportedErr: false, wantOptInErr: false},
+		"v1.99.3":            {wantDeclaredErr: false, wantSupportedErr: false, wantOptInErr: false},
+		"v0.22.0":            {wantDeclaredErr: false, wantSupportedErr: true, wantOptInErr: false},
+		"v2.0.0":             {wantDeclaredErr: false, wantSupportedErr: true, wantOptInErr: false},
+		"v1.0.0-rc.1":        {wantDeclaredErr: false, wantSupportedErr: false, wantOptInErr: true},
+		"v1.1.0-rc1":         {wantDeclaredErr: false, wantSupportedErr: false, wantOptInErr: true},
+		"v1.3.0-next":        {wantDeclaredErr: false, wantSupportedErr: false, wantOptInErr: true},
+		"v1.2.0-12-gabcdef0": {wantDeclaredErr: false, wantSupportedErr: false, wantOptInErr: true},
+		"v0.9.9-rc.1":        {wantDeclaredErr: false, wantSupportedErr: true, wantOptInErr: true},
+		"v2.0.0-rc.1":        {wantDeclaredErr: false, wantSupportedErr: true, wantOptInErr: true},
+		"v1.3-rc.1":          {wantDeclaredErr: true, wantSupportedErr: true, wantOptInErr: false},
+		"v1.1.0+build.1":     {wantDeclaredErr: true, wantSupportedErr: true, wantOptInErr: false},
+		"v1.1":               {wantDeclaredErr: true, wantSupportedErr: true, wantOptInErr: false},
+		"1.0.0":              {wantDeclaredErr: true, wantSupportedErr: true, wantOptInErr: false},
+		"1.0":                {wantDeclaredErr: true, wantSupportedErr: true, wantOptInErr: false},
+		"latest":             {wantDeclaredErr: true, wantSupportedErr: true, wantOptInErr: false},
+		"":                   {wantDeclaredErr: true, wantSupportedErr: true, wantOptInErr: false},
+	}
+	for v, tt := range tests {
+		checks := []struct {
+			name    string
+			wantErr bool
+			err     error
+		}{
+			{name: "CheckDeclaredVersion", wantErr: tt.wantDeclaredErr, err: CheckDeclaredVersion(v)},
+			{name: "CheckSupportedVersion", wantErr: tt.wantSupportedErr, err: CheckSupportedVersion(v)},
+			{name: "CheckPrereleaseAllowed(false)", wantErr: tt.wantOptInErr, err: CheckPrereleaseAllowed(v, false)},
+			{name: "CheckPrereleaseAllowed(true)", wantErr: false, err: CheckPrereleaseAllowed(v, true)},
+		}
+		for _, c := range checks {
+			if (c.err != nil) != c.wantErr || (c.err != nil && operrors.CodeOf(c.err) != operrors.ErrCodeInvalidRequest) {
+				t.Errorf("%q: %s = %v, wantErr %t", v, c.name, c.err, c.wantErr)
 			}
 		}
-	}
-	// A prerelease needs the opt-in, and is in range when its release is.
-	for _, v := range []string{"v1.0.0-rc.1", "v1.1.0-rc1", "v1.3.0-next", "v1.2.0-12-gabcdef0"} {
-		if err := CheckSupportedVersion(v, true); err != nil {
-			t.Errorf("CheckSupportedVersion(%s, true) = %v", v, err)
+		if err := CheckPrereleaseAllowed(v, false); err != nil && !strings.Contains(err.Error(), "aicr.allowPrerelease") {
+			t.Errorf("%q: CheckPrereleaseAllowed(false) = %v, want it to name aicr.allowPrerelease", v, err)
 		}
-		if err := CheckSupportedVersion(v, false); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest ||
-			!strings.Contains(err.Error(), "aicr.allowPrerelease") {
+	}
+}
 
-			t.Errorf("CheckSupportedVersion(%s, false) = %v, want INVALID_REQUEST naming the opt-in", v, err)
-		}
+func TestCheckArtifactVersion(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		wantErr            bool
+		declared, reported string
+	}{
+		"matching release":                  {wantErr: false, declared: "v1.0.0", reported: "v1.0.0"},
+		"reported without the v prefix":     {wantErr: false, declared: "v1.0.0", reported: "1.0.0"},
+		"different release":                 {wantErr: true, declared: "v1.0.0", reported: "v1.1.0"},
+		"no reported version":               {wantErr: true, declared: "v1.0.0", reported: ""},
+		"declared out of range":             {wantErr: true, declared: "v2.0.0", reported: "v2.0.0"},
+		"matching prerelease":               {wantErr: false, declared: "v1.3.0-rc.1", reported: "v1.3.0-rc.1"},
+		"release reported for a prerelease": {wantErr: true, declared: "v1.3.0-rc.1", reported: "v1.3.0"},
 	}
-	for _, v := range []string{"v0.22.0", "v2.0.0", "v0.9.9-rc.1", "v2.0.0-rc.1", "v1.1.0+build.1", "v1.1", "1.0", "", "latest"} {
-		for _, allow := range []bool{false, true} {
-			if err := CheckSupportedVersion(v, allow); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
-				t.Errorf("CheckSupportedVersion(%q, %t) = %v, want INVALID_REQUEST", v, allow, err)
-			}
-		}
-	}
-	if err := CheckArtifactVersion("v1.3.0-rc.1", "v1.3.0-rc.1"); err != nil {
-		t.Errorf("matching prerelease versions = %v", err)
-	}
-	if err := CheckArtifactVersion("v1.3.0-rc.1", "v1.3.0"); err == nil {
-		t.Error("a release artifact for a declared prerelease passed the gate")
-	}
-	if err := CheckArtifactVersion("v1.0.0", "v1.0.0"); err != nil {
-		t.Errorf("matching versions = %v", err)
-	}
-	if err := CheckArtifactVersion("v1.0.0", "1.0.0"); err != nil {
-		t.Errorf("artifact version without v prefix = %v", err)
-	}
-	for _, reported := range []string{"v1.1.0", ""} {
-		err := CheckArtifactVersion("v1.0.0", reported)
+	for name, tt := range tests {
+		err := CheckArtifactVersion(tt.declared, tt.reported)
 		var se *operrors.StructuredError
-		if !errors.As(err, &se) || se.Context["reason"] != ReasonVersionMismatch {
-			t.Errorf("CheckArtifactVersion(v1.0.0, %q) = %v, want %s", reported, err, ReasonVersionMismatch)
+		if (err != nil) != tt.wantErr || (err != nil && (operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest ||
+			!errors.As(err, &se) || se.Context["reason"] != ReasonVersionMismatch)) {
+
+			t.Errorf("%s: CheckArtifactVersion(%q, %q) = %v, wantErr %t", name, tt.declared, tt.reported, err, tt.wantErr)
 		}
-	}
-	if err := CheckArtifactVersion("v2.0.0", "v2.0.0"); err == nil {
-		t.Error("an out-of-range declared version passed the gate")
 	}
 }
 
@@ -455,8 +482,8 @@ func TestPushedDigest(t *testing.T) {
 	if got := ImageRefsArgs("v1.0.0"); got != nil {
 		t.Errorf("ImageRefsArgs(v1.0.0) = %v", got)
 	}
-	if got := ImageRefsArgs("1.1.2"); len(got) != 2 || got[0] != "--image-refs" || got[1] != TerminationMessagePath {
-		t.Errorf("ImageRefsArgs(1.1.2) = %v", got)
+	if got := ImageRefsArgs("v1.1.2"); len(got) != 2 || got[0] != "--image-refs" || got[1] != TerminationMessagePath {
+		t.Errorf("ImageRefsArgs(v1.1.2) = %v", got)
 	}
 	for _, tc := range []struct {
 		version, message string

@@ -223,18 +223,21 @@ spec:
         - name: Deployment.gpu-operator.version
           value: ">= v26.7.0"
     conformance:
-      # Same set vr200-rke2-ubuntu-inference declares. inference-gateway is the
-      # one this leaf exists for: it is the only requirement aicr gates on the
-      # recipe rather than the cluster, so a leaf that ships agentgateway and
-      # does not name the check leaves its own capability unvalidated.
-      # gang-scheduling is omitted to match that sibling, though KAI comes from
-      # the nvke base and passes; h100-kind-inference does list it.
+      # inference-gateway is the one this leaf exists for: a leaf that ships
+      # agentgateway and does not name the check leaves its own capability
+      # unvalidated.
+      #
+      # gang-scheduling is a v1.36 MUST and KAI comes from the nvke base. An
+      # undeclared check renders as "not tested", which never establishes a
+      # requirement, so omitting it makes every submission from this leaf
+      # incomplete.
       checks:
         - platform-health
         - gpu-operator-health
         - dra-support
         - accelerator-metrics
         - ai-service-metrics
+        - gang-scheduling
         - inference-gateway
         - pod-autoscaling
         - secure-accelerator-access

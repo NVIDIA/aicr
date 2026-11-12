@@ -23,10 +23,15 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/evidence/redact"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
@@ -67,10 +72,22 @@ var extraKeySamples = map[string]string{
 	ExtraKeyDetectedVersion:     "v25.3.0",
 	ExtraKeyVersionSatisfied:    FormatBool(false),
 	ExtraKeyObservationOnly:     FormatBool(true),
+	ExtraKeyResultSchema:        ctrf.ResultSchemaVersion,
+}
+
+// sharedKeyValues resolves the constants extra_keys.go re-exports from
+// pkg/validator/ctrf by selector expression, so constsWithPrefix can pin
+// their values too.
+var sharedKeyValues = map[string]string{
+	"ctrf.ExtraKeySkipReason":      ctrf.ExtraKeySkipReason,
+	"ctrf.ExtraKeyObservationOnly": ctrf.ExtraKeyObservationOnly,
+	"ctrf.ExtraKeyResultSchema":    ctrf.ExtraKeyResultSchema,
 }
 
 // constsWithPrefix returns the string value of each constant in extra_keys.go
-// whose name starts with prefix, keyed by name.
+// whose name starts with prefix, keyed by name. A constant defined as a
+// string literal is read from the literal; one re-exported from
+// pkg/validator/ctrf is resolved through sharedKeyValues.
 func constsWithPrefix(t *testing.T, prefix string) map[string]string {
 	t.Helper()
 	f, err := parser.ParseFile(token.NewFileSet(), "extra_keys.go", nil, 0)
@@ -89,13 +106,26 @@ func constsWithPrefix(t *testing.T, prefix string) map[string]string {
 				if !strings.HasPrefix(name.Name, prefix) {
 					continue
 				}
-				lit, ok := vs.Values[i].(*ast.BasicLit)
-				if !ok {
-					t.Fatalf("%s is not a string literal", name.Name)
-				}
-				v, uerr := strconv.Unquote(lit.Value)
-				if uerr != nil {
-					t.Fatalf("%s: %v", name.Name, uerr)
+				var v string
+				switch value := vs.Values[i].(type) {
+				case *ast.BasicLit:
+					unquoted, uerr := strconv.Unquote(value.Value)
+					if uerr != nil {
+						t.Fatalf("%s: %v", name.Name, uerr)
+					}
+					v = unquoted
+				case *ast.SelectorExpr:
+					pkg, ok := value.X.(*ast.Ident)
+					if !ok {
+						t.Fatalf("%s is not a package-qualified constant", name.Name)
+					}
+					shared, ok := sharedKeyValues[pkg.Name+"."+value.Sel.Name]
+					if !ok {
+						t.Fatalf("%s re-exports %s.%s, which sharedKeyValues does not resolve", name.Name, pkg.Name, value.Sel.Name)
+					}
+					v = shared
+				default:
+					t.Fatalf("%s is neither a string literal nor a re-exported constant", name.Name)
 				}
 				out[name.Name] = v
 			}
@@ -162,6 +192,26 @@ func TestSkipWithReason(t *testing.T) {
 	}
 }
 
+// TestSkipWithReasonFailsClosed pins #3703: a skip reason that cannot be
+// written is a failure, not a skip, since the aggregation would otherwise
+// record an unexplained NOT TESTED.
+func TestSkipWithReasonFailsClosed(t *testing.T) {
+	orig := extrasOut
+	extrasOut = errWriter{}
+	defer func() { extrasOut = orig }()
+
+	err := SkipWithReason(SkipReasonNoConstraint, "no foo constraint in recipe")
+	if IsSkip(err) {
+		t.Fatalf("SkipWithReason() = %v, want a failure when the reason cannot be written", err)
+	}
+	errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInternal)
+	for _, want := range []string{SkipReasonNoConstraint, "no foo constraint in recipe"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lost %q", err, want)
+		}
+	}
+}
+
 func TestEmitExtraOrWarnSwallowsWriteError(t *testing.T) {
 	orig := extrasOut
 	extrasOut = errWriter{}
@@ -225,6 +275,63 @@ func TestObservationOnlyExtra(t *testing.T) {
 	}
 	if redacted := redactedExtra(got); !maps.Equal(redacted, want) {
 		t.Errorf("redaction changed the marker: %v", redacted)
+	}
+}
+
+func TestResultSchemaExtra(t *testing.T) {
+	want := map[string]string{"resultSchema": "1"}
+	got := ResultSchemaExtra()
+	if !maps.Equal(got, want) {
+		t.Errorf("ResultSchemaExtra() = %v, want %v", got, want)
+	}
+	if redacted := redactedExtra(got); !maps.Equal(redacted, want) {
+		t.Errorf("redaction changed the stamp: %v", redacted)
+	}
+}
+
+func TestImagePullSecretNames(t *testing.T) {
+	tests := []struct {
+		name   string
+		envVal string
+		want   []string
+	}{
+		{"unset names nothing", "", nil},
+		{"one name", "regcred", []string{"regcred"}},
+		{"several names, trimmed, empty entries dropped", " regcred , mirror-cred,, ", []string{"regcred", "mirror-cred"}},
+		{"only separators names nothing", ",,", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(ImagePullSecretsEnv, tt.envVal)
+			if got := ImagePullSecretNames(); !slices.Equal(got, tt.want) {
+				t.Errorf("ImagePullSecretNames() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidatorNamespace(t *testing.T) {
+	// Point the ServiceAccount namespace source at a file that does not
+	// exist, so the test holds whether or not it runs inside a pod with the
+	// real file mounted; the env var then decides, then the default.
+	orig := serviceAccountNamespaceFile
+	serviceAccountNamespaceFile = filepath.Join(t.TempDir(), "namespace")
+	t.Cleanup(func() { serviceAccountNamespaceFile = orig })
+	t.Setenv("AICR_NAMESPACE", "aicr-validation")
+	if got := ValidatorNamespace(); got != "aicr-validation" {
+		t.Errorf("ValidatorNamespace() = %q, want aicr-validation", got)
+	}
+	t.Setenv("AICR_NAMESPACE", "")
+	if got := ValidatorNamespace(); got != "default" {
+		t.Errorf("ValidatorNamespace() = %q, want default", got)
+	}
+	// The mounted file wins over the env var when it exists.
+	if err := os.WriteFile(serviceAccountNamespaceFile, []byte("from-the-pod\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AICR_NAMESPACE", "aicr-validation")
+	if got := ValidatorNamespace(); got != "from-the-pod" {
+		t.Errorf("ValidatorNamespace() = %q, want the mounted namespace to take precedence", got)
 	}
 }
 
