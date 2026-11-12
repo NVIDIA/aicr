@@ -67,6 +67,38 @@ cluster:
   # default for it.
   url: ""
 
+# The Kubeflow Training Operator the leaves install
+# (components/kubeflow-training-operator/manifests/training-operator.yaml).
+# The Run:ai operator reports each kubeflow.org/v1 framework usable only when
+# it finds the Deployment kubeflow/training-operator and can translate its
+# image tag to a version through the training-operator-tags-config ConfigMap
+# this map renders; an unknown tag reports "unknown image tag" and the
+# frameworks' suspend support as unavailable. Upstream tags the image by
+# commit, not release, so the mapping has to be carried here: 3.0.20 ships
+# entries up to 1.9.3 (v1-d6eb98e) and knows nothing of 1.9.4. Helm merges
+# this map into the chart's, so the earlier entries stay.
+#
+# Two keys for one image. The operator takes the text after the image
+# reference's last colon as the tag (GetImageTag in 3.0.20's go-operator), so
+# for the digest-pinned reference AICR deploys, repo:v1-93c5489@sha256:<hex>,
+# it looks up the digest's hex, not the tag; the live run of 2026-11-08
+# reported "unknown image tag 45aa299d..." with the tag key alone. The tag key
+# stays for a tag-only install of the same image. Both are the vendored
+# Deployment's, and TestKubeflowTrainingOperatorTagMappedForRunai keeps them
+# equal to it.
+trainingOperatorImageTags:
+  v1-93c5489: "1.9.4"
+  45aa299d92c21a1abc0e9731694f01be637ab5c6c9681a687aedf142b0468d45: "1.9.4"
+
+# The chart's default, written out because the leaves depend on it: this
+# switch renders the training-operator-tags-config ConfigMap the map above
+# feeds and has the operator create the ServiceMonitor that scrapes the
+# training operator's metrics Service (app: training-operator, port
+# monitoring-port, in kubeflow). It installs no training operator of its own.
+operands:
+  trainingOperator:
+    enabled: true
+
 # The chart detects OpenShift through a Helm `lookup`, which returns nothing
 # when AICR renders offline (Argo CD, Flux, helm template), so the render and
 # the install would disagree. Pinned off; an OpenShift leaf sets Enabled

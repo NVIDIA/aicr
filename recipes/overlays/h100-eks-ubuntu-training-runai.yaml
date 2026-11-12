@@ -59,10 +59,23 @@ spec:
       overrides:
         enabled: false
 
+    # Run:ai submits distributed training as kubeflow.org/v1 jobs, so the
+    # cluster needs the v1 Training Operator (not Kubeflow Trainer v2, which
+    # Run:ai does not speak). Vendored manifests, namespace and Deployment name
+    # fixed by what the Run:ai operator looks up; the operator's image tag is
+    # mapped to its version in components/runai-cluster/values.yaml. Phase 1.3
+    # of #3302.
+    - name: kubeflow-training-operator
+      type: Helm
+      source: ""
+      valuesFile: components/kubeflow-training-operator/values.yaml
+
     # Per-cluster inputs: the control plane URL and cluster UID are --set at
     # bundle time; the bootstrap token is declared with --dynamic and written
     # into cluster-values.yaml at install time. See
-    # components/runai-cluster/values.yaml.
+    # components/runai-cluster/values.yaml. Ordered after the training
+    # operator so the Run:ai operator finds it on its first reconcile instead
+    # of reporting the frameworks unavailable until the next one.
     - name: runai-cluster
       type: Helm
       valuesFile: components/runai-cluster/values.yaml
@@ -71,3 +84,4 @@ spec:
         - kube-prometheus-stack
         - prometheus-operator-crds
         - cert-manager
+        - kubeflow-training-operator

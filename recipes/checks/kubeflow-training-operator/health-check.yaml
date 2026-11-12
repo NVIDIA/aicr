@@ -1,0 +1,156 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Kubeflow Training Operator v1 (kubeflow.org/v1) health check.
+#
+# Positive asserts throughout, so nothing passes on an empty cluster:
+# 1. The six kubeflow.org CRDs the vendored manifests install are
+#    Established. The Run:ai operator reports a framework usable only when
+#    its kind is served, so each is load-bearing, MPIJob v1 included.
+# 2. The Deployment the Run:ai operator looks up by name,
+#    kubeflow/training-operator, has rolled out: an available replica, and
+#    no stale rollout (the slinky-drainer check's guards).
+# 3. The operator wrote its webhook serving certificate. The shipped Secret
+#    is empty; the operator's cert-controller fills tls.crt at startup and
+#    injects the CA into the ValidatingWebhookConfiguration. With
+#    failurePolicy Fail, an operator that never got this far rejects every
+#    kubeflow.org job, so a populated Secret is what proves the admission
+#    path works, and the configuration must still be there to be served:
+#    five webhooks (JAXJob, PaddleJob, PyTorchJob, TFJob, XGBoostJob; MPIJob
+#    v1 has none upstream), which TestKubeflowTrainingOperatorWebhookCount
+#    keeps equal to the vendored manifest.
+#
+# Names verified against training-operator v1.9.4's standalone overlay;
+# re-verify on every re-vendor.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kubeflow-training-operator-health
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-crds-established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: pytorchjobs.kubeflow.org
+              status:
+                (conditions[?type == 'Established' && status == 'True'] | length(@) > `0`): true
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: tfjobs.kubeflow.org
+              status:
+                (conditions[?type == 'Established' && status == 'True'] | length(@) > `0`): true
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: xgboostjobs.kubeflow.org
+              status:
+                (conditions[?type == 'Established' && status == 'True'] | length(@) > `0`): true
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: paddlejobs.kubeflow.org
+              status:
+                (conditions[?type == 'Established' && status == 'True'] | length(@) > `0`): true
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: jaxjobs.kubeflow.org
+              status:
+                (conditions[?type == 'Established' && status == 'True'] | length(@) > `0`): true
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: mpijobs.kubeflow.org
+              status:
+                (conditions[?type == 'Established' && status == 'True'] | length(@) > `0`): true
+    - name: validate-operator-rollout
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: training-operator
+                namespace: kubeflow
+              status:
+                (availableReplicas > `0`): true
+        # Stale-rollout guards, compared against spec.replicas, which
+        # status.replicas lags.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: training-operator
+                namespace: kubeflow
+              ((status.updatedReplicas || `0`) < (spec.replicas || `1`)): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: training-operator
+                namespace: kubeflow
+              ((status.availableReplicas || `0`) < (spec.replicas || `1`)): true
+        # Old pods can still be ready while new ones are stuck.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: training-operator
+                namespace: kubeflow
+              ((status.replicas || `0`) > (status.updatedReplicas || `0`)): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: training-operator
+                namespace: kubeflow
+              ((status.observedGeneration || `0`) < metadata.generation): true
+    - name: validate-webhook-serving
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: training-operator-webhook-cert
+                namespace: kubeflow
+              (data."tls.crt" != null && data."tls.crt" != ''): true
+        - assert:
+            resource:
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: ValidatingWebhookConfiguration
+              metadata:
+                name: validator.training-operator.kubeflow.org
+              (webhooks[?clientConfig.service.name == 'training-operator' && clientConfig.service.namespace == 'kubeflow'] | length(@) == `5`): true
