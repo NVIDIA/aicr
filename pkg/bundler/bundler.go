@@ -111,7 +111,8 @@ const errCtxKeyComponent = "component"
 //	./deploy.sh
 //
 // DefaultBundler is safe for concurrent use by Make calls whose output
-// directories do not overlap. Neither may be the other or lie inside it.
+// directories do not overlap and that do not share an Attester. Neither
+// directory may be the other or lie inside it.
 type DefaultBundler struct {
 	// Config provides bundler-specific configuration including value overrides.
 	Config *config.Config
