@@ -45,13 +45,9 @@ const (
 func ComposeArtifacts(ctx context.Context, provider DataProvider, options artifact.Options) (DataProvider, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
 	defer cancel()
-	active := options.Inventory != ""
-	if p, ok := provider.(*LayeredDataProvider); ok && !active {
-		_, err := os.Lstat(filepath.Join(p.externalDir, artifactInventoryPath))
-		if err != nil && !stderrors.Is(err, fs.ErrNotExist) {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "locate artifact inventory", err)
-		}
-		active = err == nil
+	active, activeErr := artifactInventoryActive(provider, options)
+	if activeErr != nil {
+		return nil, activeErr
 	}
 	if !active {
 		return provider, nil
@@ -68,6 +64,18 @@ func ComposeArtifacts(ctx context.Context, provider DataProvider, options artifa
 		}
 	}
 	return composeCapturedArtifacts(ctx, embedded, external, inventoryBytes, options, artifactInventoryRelativePath(provider, options.Inventory))
+}
+
+func artifactInventoryActive(provider DataProvider, options artifact.Options) (bool, error) {
+	active := options.Inventory != ""
+	if p, ok := provider.(*LayeredDataProvider); ok && !active {
+		_, err := os.Lstat(filepath.Join(p.externalDir, artifactInventoryPath))
+		if err != nil && !stderrors.Is(err, fs.ErrNotExist) {
+			return false, errors.Wrap(errors.ErrCodeInvalidRequest, "locate artifact inventory", err)
+		}
+		active = err == nil
+	}
+	return active, nil
 }
 
 func mergedArtifactBindings(embedded, external map[string][]byte) (*artifact.Bindings, error) {
@@ -401,25 +409,45 @@ func validateStaticArtifacts(ctx context.Context, provider DataProvider, options
 }
 
 func staticArtifactProvider(ctx context.Context, provider DataProvider, options artifact.Options) (DataProvider, error) {
-	embedded, external, captureErr := captureArtifactLayers(ctx, provider)
-	if captureErr != nil {
-		return nil, captureErr
+	composed, composeErr := ComposeArtifacts(ctx, provider, options)
+	if composeErr != nil {
+		return nil, composeErr
 	}
-	if _, err := mergedArtifactBindings(embedded, external); err != nil {
-		return nil, err
+	if _, active := composed.(*ArtifactProvider); active {
+		return composed, nil
 	}
-	inventoryBytes, active := external[artifactInventoryPath]
-	if options.Inventory != "" {
-		inventoryBytes, captureErr = readArtifactOverride(ctx, options.Inventory)
-		if captureErr != nil {
-			return nil, captureErr
+	if bindingErr := validateInactiveArtifactBindings(ctx, provider); bindingErr != nil {
+		return nil, bindingErr
+	}
+	return provider, nil
+}
+
+func validateInactiveArtifactBindings(ctx context.Context, provider DataProvider) error {
+	layers := []DataProvider{provider}
+	if layered, ok := provider.(*LayeredDataProvider); ok {
+		layers = nil
+		if !layered.externalOnly {
+			layers = append(layers, layered.embedded)
 		}
-		active = true
+		layers = append(layers, &LayeredDataProvider{externalOnly: true, externalDir: layered.externalDir, maxFileSize: layered.maxFileSize})
 	}
-	if !active {
-		return provider, nil
+	var bindings []*artifact.Bindings
+	for _, layer := range layers {
+		data, readErr := layer.ReadFile(ctx, artifactBindingsPath)
+		if stderrors.Is(readErr, fs.ErrNotExist) {
+			continue
+		}
+		if readErr != nil {
+			return errors.PropagateOrWrap(readErr, errors.ErrCodeInvalidRequest, "read artifact bindings")
+		}
+		parsed, parseErr := artifact.ParseBindings(data)
+		if parseErr != nil {
+			return parseErr
+		}
+		bindings = append(bindings, parsed)
 	}
-	return composeCapturedArtifacts(ctx, embedded, external, inventoryBytes, options, artifactInventoryRelativePath(provider, options.Inventory))
+	_, mergeErr := artifact.Merge(bindings...)
+	return mergeErr
 }
 
 func artifactInventoryRelativePath(provider DataProvider, override string) string {
@@ -443,11 +471,19 @@ func artifactInventoryRelativePath(provider DataProvider, override string) strin
 }
 
 func validateStaticArtifactInput(ctx context.Context, provider DataProvider, options artifact.Options, kind string, data []byte) error {
+	active, activeErr := artifactInventoryActive(provider, options)
+	if activeErr != nil {
+		return activeErr
+	}
+	if !active && kind == artifact.BindingsKind {
+		_, parseErr := artifact.ParseBindings(data)
+		return parseErr
+	}
 	embedded, external, captureErr := captureArtifactLayers(ctx, provider)
 	if captureErr != nil {
 		return captureErr
 	}
-	inventoryBytes, active := external[artifactInventoryPath]
+	inventoryBytes := external[artifactInventoryPath]
 	if options.Inventory != "" {
 		inventoryBytes, captureErr = readArtifactOverride(ctx, options.Inventory)
 		if captureErr != nil {

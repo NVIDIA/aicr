@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/artifact"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"gopkg.in/yaml.v3"
@@ -751,4 +752,32 @@ spec:
 			t.Fatal(readErr)
 		}
 	}
+}
+
+func TestStaticArtifactInactiveDoesNotCaptureCatalog(t *testing.T) {
+	files, _ := artifactCatalogFixture()
+	files["unrelated.bin"] = []byte("not catalog YAML")
+	dir := writeArtifactCatalog(t, files)
+	if truncateErr := os.Truncate(filepath.Join(dir, "unrelated.bin"), defaults.ArtifactCatalogBytes+1); truncateErr != nil {
+		t.Fatal(truncateErr)
+	}
+	provider, providerErr := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), LayeredProviderConfig{ExternalDir: dir, ExternalOnly: true, MaxFileSize: defaults.ArtifactCatalogBytes + 1})
+	if providerErr != nil {
+		t.Fatal(providerErr)
+	}
+	got, validateErr := staticArtifactProvider(t.Context(), provider, artifact.Options{})
+	if validateErr != nil {
+		t.Fatal(validateErr)
+	}
+	if got != provider {
+		t.Fatal("inactive catalog was composed")
+	}
+	if inputErr := validateStaticArtifactInput(t.Context(), provider, artifact.Options{}, artifact.BindingsKind, files[artifactBindingsPath]); inputErr != nil {
+		t.Fatal(inputErr)
+	}
+	if writeErr := os.WriteFile(filepath.Join(dir, artifactBindingsPath), []byte("invalid"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	_, invalidErr := staticArtifactProvider(t.Context(), provider, artifact.Options{})
+	errorstest.WantReportedCode(t, invalidErr, errors.ErrCodeInvalidRequest)
 }
