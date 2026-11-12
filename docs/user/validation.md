@@ -1534,7 +1534,7 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
-> 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` normally reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. One narrow exception remains — the CLI waits the catalog timeout plus `ValidatorWaitBuffer` (2m30s) for the Job to become terminal — measured from the Job's observed start time (`status.startTime` when the apiserver has stamped it, otherwise `creationTimestamp`, which is never later and so only ever ends the wait earlier), so it shares an origin with the Job's clock — a window that is deliberately shorter than the Job's own `activeDeadlineSeconds` (catalog timeout plus `ValidatorJobDeadlineHeadroom`, 3m30s), so a validator whose pod is still running when the CLI's wait expires exhausts the wait before the deadline condition is ever stamped. Such a run falls back to the CLI-wait path and still reports `other`.
+> 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. The Job deadline is the catalog timeout plus `ValidatorJobDeadlineHeadroom` (3m: 2m for container startup, 30s for the check's deferred cleanup, 30s to flush its result), and the CLI waits for the Job to become terminal for that deadline plus the pod's 60s SIGTERM window and a 5s margin (catalog timeout + 4m05s), measured from the Job's observed start time (`status.startTime` when the apiserver has stamped it, otherwise `creationTimestamp`). The CLI therefore never gives up on a run while the pod is still finishing its cleanup. When the Job controller deletes the pod at the deadline, the CLI reports what the check itself reported: the exit code and termination message of the pod in its deletion grace window, or of the last terminated pod it observed while waiting, is appended to the deadline message (`check reported: exit code 3: terminated by SIGTERM …`). The verdict stays `failed`; if no terminated status was observed the generic deadline message stands.
 > 2. Exit 5 is narrower than it sounds. A timeout **inside** a check's own logic (DynamoGraphDeployment not ready, inference endpoint never healthy, AIPerf Job pod-wait deadline) surfaces as a failed phase, not as a structured `ErrCodeTimeout`, so the CLI exits **8**. So does a per-validator wait deadline: `runPhase` hands that error to the timeout handler and records the outcome as a check result rather than propagating it, which is the same path the wait-exhaustion exception in note 1 takes. The rule, rather than a list of sources: exit 5 applies whenever an `ErrCodeTimeout` reaches the top-level CLI. A timeout that is converted into a check result instead — whether raised inside a check or by a per-validator wait — surfaces as exit 8.
 
 **Interrupted runs.** The first Ctrl-C or SIGTERM cancels validation and, with
@@ -1552,12 +1552,12 @@ preparation, writes no CTRF output. Partial output is written only for an
 interruption. Any other error (for example a later phase's pre-flight failure,
 or a privileged RBAC revocation failure after every phase completed) writes no
 CTRF output, as before.
-Cleanup typically takes about 35s, and about 95s plus overhead in the worst
+Cleanup typically takes about 65s, and about 125s plus overhead in the worst
 case. One shared 30s window covers result capture, Job deletion and report
 persistence. The wait for the validator pod to terminate then covers the pod's
-full 30s SIGTERM grace from Job deletion (plus a 5s margin), so the validator's
+full 60s SIGTERM grace from Job deletion (plus a 5s margin), so the validator's
 RBAC stays in place while a cooperative check cleans up. The existing 30s
-per-run RBAC/data teardown window follows. The CLI records this 95s aggregate
+per-run RBAC/data teardown window follows. The CLI records this 125s aggregate
 deadline when cancellation is first observed, not when validation starts.
 Partial output uses only the time remaining before that deadline (and at most
 its existing 30s I/O cap), never a further cleanup window. If no time remains,
@@ -1586,11 +1586,13 @@ a cooperative check runs deferred cleanup, writes a SIGTERM interruption message
 and exits `3`, mapped to CTRF `other` rather than a completed failure verdict.
 This container exit is distinct from the CLI's exit `9` on operator cancellation.
 It remains blocking (normally CLI exit `8`), including when the check returns
-nil after cancellation. The pod's 30s grace is best effort: blocking checks,
-long cleanup, SIGKILL, OOM or a crash may prevent a termination message, and a
-missing pod with a terminal Job deadline condition still uses the Job-level
-`failed` classification described above. No external orphan-resource sweeper
-is provided.
+nil after cancellation. The pod's 60s grace (30s for cleanup, 30s to write the
+termination message) is best effort: blocking checks, long cleanup, SIGKILL, OOM
+or a crash may prevent a termination message, and a missing pod with a terminal
+Job deadline condition still uses the Job-level `failed` classification
+described above, carrying the check's own message when one was observed. No
+external orphan-resource sweeper is provided yet; namespaces a check leaves
+behind after SIGKILL or a crash carry the `aicr.run/gpu-test-run` label.
 
 Scripts that gate on validation outcome should treat **any non-zero code** as
 failure rather than branching on specific values, and should additionally
@@ -1846,7 +1848,7 @@ rule.
 
 ### Benchmark Job stuck or timed out
 
-Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:` plus `ValidatorJobDeadlineHeadroom` (3m30s) on top. For `inference-perf`, the full pipeline (model-cache populate → workload ready → endpoint health → benchmark) can take up to ~50 min on cold-start clusters; the catalog budgets a 65 min timeout. If it still times out:
+Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:` plus `ValidatorJobDeadlineHeadroom` (3m) on top. For `inference-perf`, the full pipeline (model-cache populate → workload ready → endpoint health → benchmark) can take up to ~50 min on cold-start clusters; the catalog budgets a 65 min timeout. If it still times out:
 
 ```bash
 # validator orchestrator Job + AIPerf benchmark Job both live in aicr-validation.

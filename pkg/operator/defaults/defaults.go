@@ -77,6 +77,15 @@ const (
 	// ValidationJobDeadline bounds deployment validation; the rollout
 	// deadline can shorten it further.
 	ValidationJobDeadline = 60 * time.Minute
+	// ValidationJobTerminationGrace is the validation Job pod's
+	// terminationGracePeriodSeconds. When ValidationJobDeadline fires, the
+	// `aicr validate` it runs gets SIGTERM and needs its full cancellation
+	// budget (125s) for cooperative cleanup, plus a 30s margin to write partial
+	// output and exit, before SIGKILL. The Kubernetes default of 30s would cut
+	// that cleanup short. The operator may not import pkg/defaults, so
+	// TestValidationJobTerminationGraceCoversCLICancellation in
+	// pkg/validator/catalog pins this value against it.
+	ValidationJobTerminationGrace = 155 * time.Second
 	// StageRetryBackoff is the wait before the first new run after a
 	// transient AICR failure; it doubles per run up to StageRetryMaxBackoff.
 	StageRetryBackoff = 10 * time.Second

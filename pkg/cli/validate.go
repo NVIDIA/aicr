@@ -510,10 +510,11 @@ type validationConfig struct {
 
 // validationCancellationBudget covers the shared phase cleanup window, the pod
 // termination wait that keeps per-run RBAC alive through the validator pod's
-// SIGTERM grace, and the separate privileged RBAC/data teardown window.
-// Partial output cannot renew it.
-const validationCancellationBudget = 2*defaults.K8sCleanupTimeout +
-	defaults.ValidatorTerminationGracePeriod + defaults.ValidatorTerminationWaitMargin
+// SIGTERM grace, and the separate privileged RBAC/data teardown window
+// (125s: 2x30s + 60s grace + 5s margin). Partial output cannot renew it. The
+// operator's validation Job gives its pod a termination grace above it
+// (defaults.ValidationCancellationBudget).
+const validationCancellationBudget = defaults.ValidationCancellationBudget
 
 type validationCancellation struct {
 	deadline time.Time

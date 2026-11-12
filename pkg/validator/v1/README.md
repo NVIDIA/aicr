@@ -208,7 +208,12 @@ for _, p := range groups[string(v1.PhaseConformance)] { /* … */ }
 
 Change the timeout on the catalog entry, not on the returned plan.
 `BuildJobPlan` bakes `AICR_CHECK_TIMEOUT` into `plan.Env` and derives
-`plan.JobDeadline` from the same value, so both follow from `entry.Timeout`:
+`plan.JobDeadline` from the same value, so both follow from `entry.Timeout`.
+`terminationGracePeriodSeconds` is `ValidatorTerminationGracePeriod`. An
+orchestrator that waits on the rendered Job should use `v1.OrchestratorWaitFor`
+(bounded by `v1.WaitEnvelopeFor`), which outlives the Job deadline by the
+SIGTERM window so a check terminated at the deadline can finish cleanup and
+report its result:
 
 ```go
 entry.Timeout = 10 * time.Minute // drives AICR_CHECK_TIMEOUT and activeDeadlineSeconds

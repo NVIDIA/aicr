@@ -282,7 +282,7 @@ func (b *DefaultBundler) enforcePromQLServerOwnership(recipeResult *recipe.Recip
 }
 
 // injectPromQLScrapeScope warns when an enabled server has no consumers.
-func (b *DefaultBundler) injectPromQLScrapeScope(
+func (r *bundleRun) injectPromQLScrapeScope(
 	recipeResult *recipe.RecipeResult,
 	platform []recipe.ComponentRef,
 	values map[string]map[string]any,
@@ -293,7 +293,7 @@ func (b *DefaultBundler) injectPromQLScrapeScope(
 		return err
 	}
 	if scope.Server != "" && len(scope.Consumers) == 0 {
-		b.appendWarning(fmt.Sprintf("%s is enabled but no enabled component declares telemetry.promql, "+
+		r.appendWarning(fmt.Sprintf("%s is enabled but no enabled component declares telemetry.promql, "+
 			"so its Prometheus scrapes nothing", scope.Server))
 	}
 	return nil

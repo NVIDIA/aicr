@@ -46,7 +46,7 @@ func TestArtifactBundleCaptureRetainsOriginalInputs(t *testing.T) {
 		t.Fatal(writeErr)
 	}
 	dest := t.TempDir()
-	b := &DefaultBundler{}
+	b := &bundleRun{DefaultBundler: &DefaultBundler{}}
 	files, err := b.copyDataFiles(t.Context(), dest, captured)
 	if err != nil {
 		t.Fatal(err)
