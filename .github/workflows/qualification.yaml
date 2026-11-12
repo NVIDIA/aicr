@@ -218,6 +218,7 @@ jobs:
           python3 tools/ci-tests/suite.py merge "$RUNNER_TEMP/all-packages.txt" "$TEST_RESULTS" coverage.out
 
       - name: Enforce merged coverage threshold
+        if: inputs.coverage_report
         uses: ./.github/actions/go-coverage
         with:
           coverage_file: ./coverage.out
