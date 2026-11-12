@@ -368,7 +368,7 @@ func prepareSplitDestination(dir string) (string, string, error) {
 // leaves the destination absent and removes the staging directory.
 //
 //nolint:funlen // one linear render-then-publish sequence; splitting it would scatter the cleanup contract.
-func (b *DefaultBundler) makeSplit(
+func (r *bundleRun) makeSplit(
 	ctx context.Context,
 	declared []recipe.ComponentRef,
 	enabled *recipe.RecipeResult,
@@ -386,7 +386,7 @@ func (b *DefaultBundler) makeSplit(
 	if err != nil {
 		return nil, err
 	}
-	if identityErr := b.validateSplitHelmIdentities(ctx, enabled, componentValues); identityErr != nil {
+	if identityErr := r.validateSplitHelmIdentities(ctx, enabled, componentValues); identityErr != nil {
 		return nil, identityErr
 	}
 
@@ -413,7 +413,7 @@ func (b *DefaultBundler) makeSplit(
 		return nil, rootErr
 	}
 
-	dataFiles, err := b.copyDataFiles(stage, enabled.DataProvider())
+	dataFiles, err := r.copyDataFiles(stage, enabled.DataProvider())
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to copy external data files")
 	}
@@ -437,11 +437,11 @@ func (b *DefaultBundler) makeSplit(
 		}
 		// Each class README carries only the notes for its own components,
 		// linking the guide one level up at the set root.
-		classNotice, noticeErr := classUpgradeNotice(upgradeNotes, plan.refs, string(b.Config.Deployer()))
+		classNotice, noticeErr := classUpgradeNotice(upgradeNotes, plan.refs, string(r.Config.Deployer()))
 		if noticeErr != nil {
 			return nil, noticeErr
 		}
-		d, buildErr := b.buildDeployer(ctx, &subset, subsetValues, nil, classNotice)
+		d, buildErr := r.buildDeployer(ctx, &subset, subsetValues, nil, classNotice)
 		if buildErr != nil {
 			return nil, buildErr
 		}
@@ -480,14 +480,14 @@ func (b *DefaultBundler) makeSplit(
 	}
 
 	if len(upgradeNotes) > 0 {
-		guidePath, guideSize, guideErr := b.writeUpgradeGuide(stage, upgradeNotes)
+		guidePath, guideSize, guideErr := r.writeUpgradeGuide(stage, upgradeNotes)
 		if guideErr != nil {
 			return nil, guideErr
 		}
 		output.Files = append(output.Files, guidePath)
 		output.TotalSize += guideSize
 	}
-	recipeSize, err := b.writeRecipeFile(enabled, stage)
+	recipeSize, err := r.writeRecipeFile(enabled, stage)
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to write recipe file")
 	}
@@ -506,7 +506,7 @@ func (b *DefaultBundler) makeSplit(
 	if digestErr != nil {
 		return nil, errors.PropagateOrWrap(digestErr, errors.ErrCodeInternal, "failed to digest recipe for bundle info")
 	}
-	info := b.buildBundleInfo(enabled, infoOut, fmt.Sprintf("sha256:%x", rawDigest))
+	info := r.buildBundleInfo(enabled, infoOut, fmt.Sprintf("sha256:%x", rawDigest))
 	infoSize, infoErr := bundleinfo.Write(ctx, stage, info)
 	if infoErr != nil {
 		return nil, errors.PropagateOrWrap(infoErr, errors.ErrCodeInternal, "failed to write bundle info")
@@ -520,7 +520,7 @@ func (b *DefaultBundler) makeSplit(
 	if sumErr := checksum.WriteChecksums(ctx, stage, output); sumErr != nil {
 		return nil, errors.PropagateOrWrap(sumErr, errors.ErrCodeInternal, "failed to finalize bundle set checksums")
 	}
-	if _, attestErr := b.attestBundleAt(ctx, stage, dest, dataFiles, enabled); attestErr != nil {
+	if _, attestErr := r.attestBundleAt(ctx, stage, dest, dataFiles, enabled); attestErr != nil {
 		return nil, attestErr
 	}
 	verifyOpts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
@@ -547,7 +547,7 @@ func (b *DefaultBundler) makeSplit(
 	for _, rel := range inventory.RelativeFiles() {
 		files = append(files, filepath.Join(dest, filepath.FromSlash(rel)))
 	}
-	resultType, deploymentType := deployerResultNames(b.Config.Deployer(), false)
+	resultType, deploymentType := deployerResultNames(r.Config.Deployer(), false)
 	out := &result.Output{
 		Results: []*result.Result{{
 			Type:     resultType,
@@ -567,7 +567,7 @@ func (b *DefaultBundler) makeSplit(
 		"Bundle set split by class (ADR-018): install %s; tear down in reverse. Verify the set at %s before deploying a class.",
 		strings.Join(partition.classNames(), ", then "), dest))
 	allNotes = append(allNotes, notes...)
-	allNotes = append(allNotes, b.warnings...)
+	allNotes = append(allNotes, r.warnings...)
 	out.Deployment = &result.DeploymentInfo{
 		Type:  deploymentType + " set, split by class",
 		Steps: steps,
