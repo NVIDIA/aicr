@@ -16,7 +16,6 @@ package chart
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"sort"
 	"strings"
@@ -30,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -47,7 +47,7 @@ const (
 // renderInCluster renders the chart with the in-cluster registry.
 func renderInCluster(ctx context.Context, t *testing.T, set ...string) []unstructured.Unstructured {
 	t.Helper()
-	objs, out, err := renderFiles(ctx, operatorNS, []string{valuesFile, inClusterValuesFile}, set...)
+	objs, out, err := renderFiles(ctx, chartDir, operatorNS, []string{valuesFile, inClusterValuesFile}, set...)
 	if err != nil {
 		t.Fatal(out)
 	}
@@ -57,13 +57,25 @@ func renderInCluster(ctx context.Context, t *testing.T, set ...string) []unstruc
 // decode converts a rendered object into a typed one.
 func decode(t *testing.T, u *unstructured.Unstructured, into any) {
 	t.Helper()
-	raw, err := u.MarshalJSON()
-	if err != nil {
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, into); err != nil {
 		t.Fatal(err)
 	}
-	if err = json.Unmarshal(raw, into); err != nil {
-		t.Fatal(err)
+}
+
+// decodeKinds decodes every rendered object of the given kinds into a T. A
+// Role decodes into a ClusterRole, and a RoleBinding into a
+// ClusterRoleBinding, since each pair has the same fields.
+func decodeKinds[T any](t *testing.T, objs []unstructured.Unstructured, kinds ...string) []T {
+	t.Helper()
+	var decoded []T
+	for i := range objs {
+		if slices.Contains(kinds, objs[i].GetKind()) {
+			var v T
+			decode(t, &objs[i], &v)
+			decoded = append(decoded, v)
+		}
 	}
+	return decoded
 }
 
 // login is the in-cluster registry's credentials as the chart rendered or

@@ -1050,6 +1050,24 @@ generate_bundle() {
             --set "nvsentinel:event-exporter.exporter.metadata.environment=ci"
         )
     fi
+    # Placeholder per-cluster values the CSP gate requires; KWOK reaches no cloud.
+    case ",${kwok_mixins//[[:space:]]/}," in
+        *,nvsentinel-csp-health-monitor-aws,*)
+            conditional_sets+=(
+                --set "nvsentinel:csp-health-monitor.configToml.clusterName=kwok"
+                --set-json 'nvsentinel:csp-health-monitor.configToml.aws.accountId="000000000000"'
+                --set "nvsentinel:csp-health-monitor.configToml.aws.region=us-east-1"
+            )
+            ;;
+        *,nvsentinel-csp-health-monitor-gcp,*)
+            conditional_sets+=(
+                --set "nvsentinel:csp-health-monitor.configToml.clusterName=kwok"
+                --set "nvsentinel:csp-health-monitor.configToml.gcp.targetProjectId=kwok-project"
+                --set "nvsentinel:csp-health-monitor.configToml.gcp.gcpServiceAccountName=nvsentinel-csp"
+                --set 'nvsentinel:csp-health-monitor.configToml.gcp.logFilter=protoPayload.methodName="compute.instances.upcomingMaintenance"'
+            )
+            ;;
+    esac
     if grep -qx "nvsentinel-mongodb" <<< "$bundled_components"; then
         # platform-connectors tolerates every taint, so one pod lands on the
         # real Kind node, where it needs the datastore's client certificate

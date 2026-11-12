@@ -44,6 +44,10 @@ recipes:
     sources:
       - slug: 2e85f8702c6214cafcc0ed714d928720
         class: community
+  - id: gb200-nvke-ubuntu-inference-dynamo
+    sources:
+      - slug: c0e6951cd501b85118706a01b76f2bb5
+        class: community
   - id: gb200-nvke-ubuntu-training-kubeflow
     sources:
       - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
@@ -59,6 +63,18 @@ recipes:
   - id: gb300-generic-ubuntu-training
     sources:
       - slug: 728b071aed7124418b1fa9c7f0521e24
+        class: community
+  - id: gb300-nvke-ubuntu-inference-dynamo
+    sources:
+      - slug: c0e6951cd501b85118706a01b76f2bb5
+        class: community
+  - id: gb300-nvke-ubuntu-training-kubeflow
+    sources:
+      - slug: c0e6951cd501b85118706a01b76f2bb5
+        class: community
+  - id: gb300-oke-ubuntu-training-gpustack-oci-managed
+    sources:
+      - slug: a5460c0aead783a8b1316659e75e7acc
         class: community
   - id: h100-aks-ubuntu-inference-dynamo
     sources:
