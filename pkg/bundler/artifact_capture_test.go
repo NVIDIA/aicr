@@ -15,6 +15,8 @@
 package bundler
 
 import (
+	stderrors "errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,5 +73,70 @@ func TestArtifactBundleCaptureRetainsOriginalInputs(t *testing.T) {
 	}
 	if err := recipe.CheckArtifactInputs(captured.(*recipe.ArtifactProvider).ArtifactProvenance(), rebuilt); err != nil {
 		t.Fatalf("captured inputs cannot replay: %v", err)
+	}
+}
+
+func TestArtifactBundleReusePreservesInputsOnFailure(t *testing.T) {
+	dir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":            []byte(providertest.EmptyRegistryYAML),
+		"artifacts/bindings.yaml":  []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactBindings\ncharts: {}\nimages: {}\nignoredArtifacts:\n  notes: {reason: release notes}\n"),
+		"artifacts/inventory.yaml": []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactInventory\nartifacts:\n- name: notes\n  type: other\n  reference: oci://example.test/notes\n  version: v2\n  manifestDigest: sha256:" + strings.Repeat("a", 64) + "\n"),
+	})
+	layered, err := recipe.NewLayeredDataProvider(recipe.NewEmbeddedDataProvider(recipes.FS, ""), recipe.LayeredProviderConfig{ExternalDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured, err := recipe.ComposeArtifacts(t.Context(), layered, artifact.Options{AllowCatalogPins: []string{"gpu-operator"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := &recipe.RecipeResult{
+		APIVersion: "aicr.run/v1beta2", Kind: "Recipe",
+		ComponentRefs:   []recipe.ComponentRef{{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"}},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+	rr.Metadata.Artifacts = captured.(*recipe.ArtifactProvider).ArtifactProvenance()
+	rr.BindDataProvider(captured)
+	b, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, blockDeployer := range []bool{false, true} {
+		t.Run(fmt.Sprint("deployerFailure=", blockDeployer), func(t *testing.T) {
+			dest := t.TempDir()
+			old := map[string][]byte{
+				"data/artifacts/inventory.yaml": []byte("old inventory\n"),
+				"data/artifacts/bindings.yaml":  []byte("old bindings\n"),
+				"checksums.txt":                 []byte("old checksums\n"),
+			}
+			for name, data := range old {
+				path := filepath.Join(dest, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Force generation to fail if copying mistakenly permits reuse.
+			if blockDeployer {
+				if err := os.Mkdir(filepath.Join(dest, "deploy.sh"), 0o750); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := b.Make(t.Context(), rr, dest)
+			if !stderrors.Is(err, os.ErrExist) {
+				t.Fatalf("want no-overwrite failure, got %v", err)
+			}
+			for name, want := range old {
+				got, err := os.ReadFile(filepath.Join(dest, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(got) != string(want) {
+					t.Errorf("%s changed after failed bundle: %q", name, got)
+				}
+			}
+		})
 	}
 }

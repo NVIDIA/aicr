@@ -3108,7 +3108,7 @@ func (r *bundleRun) copyDataFiles(ctx context.Context, dir string, provider reci
 			if err := os.MkdirAll(filepath.Dir(destination), 0o750); err != nil {
 				return nil, errors.Wrap(errors.ErrCodeInternal, "create captured artifact input directory", err)
 			}
-			if err := os.WriteFile(destination, data, 0o600); err != nil {
+			if err := writeCapturedInput(destination, data); err != nil {
 				return nil, errors.Wrap(errors.ErrCodeInternal, "write captured artifact input", err)
 			}
 			copied = append(copied, relative)
@@ -3151,6 +3151,23 @@ func (r *bundleRun) copyDataFiles(ctx context.Context, dir string, provider reci
 
 	slog.Info("external data files copied into bundle", "count", len(copiedFiles))
 	return copiedFiles, nil
+}
+
+// writeCapturedInput preserves existing files, matching os.CopyFS for layered inputs.
+func writeCapturedInput(destination string, data []byte) error {
+	file, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "create captured artifact input", err)
+	}
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "write captured artifact input", writeErr)
+	}
+	if closeErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "close captured artifact input", closeErr)
+	}
+	return nil
 }
 
 // attestBundle signs the bundle checksums and copies the binary attestation into the bundle.
