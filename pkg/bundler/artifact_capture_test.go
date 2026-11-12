@@ -17,10 +17,13 @@ package bundler
 import (
 	stderrors "errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 
 	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -136,6 +139,66 @@ func TestArtifactBundleReusePreservesInputsOnFailure(t *testing.T) {
 				if string(got) != string(want) {
 					t.Errorf("%s changed after failed bundle: %q", name, got)
 				}
+			}
+		})
+	}
+}
+
+func TestArtifactChartVersionHelmHandoffs(t *testing.T) {
+	for _, tt := range allDeployerCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := New(WithConfig(tt.configFor(config.WithRepoURL("https://github.com/example/bundles.git"))))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr := closedWorldRecipeResult()
+			rr.ComponentRefs[0].Source = "oci://registry.example/charts"
+			rr.ComponentRefs[0].Version = "v25.3.3_build.1"
+			dir := t.TempDir()
+			if _, makeErr := b.Make(t.Context(), rr, dir); makeErr != nil {
+				t.Fatal(makeErr)
+			}
+			found := false
+			err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if entry.IsDir() {
+					return nil
+				}
+				name := entry.Name()
+				eligible := name == "upstream.env"
+				switch tt.name {
+				case "helmfile":
+					eligible = name == "helmfile.yaml"
+				case "argocd", "argocd-helm", "flux":
+					eligible = strings.HasSuffix(name, ".yaml") && name != RecipeFileName
+				case "fleet-gitrepo", "fleet-helmop":
+					eligible = strings.HasSuffix(name, ".yaml") && name != RecipeFileName
+				case "terraform":
+					eligible = strings.HasSuffix(name, ".tf")
+				}
+				if eligible {
+					data, readErr := os.ReadFile(path)
+					if readErr != nil {
+						return readErr
+					}
+					found = found || strings.Contains(string(data), "v25.3.3+build.1")
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !found {
+				t.Fatal("Helm handoff did not decode OCI build metadata")
+			}
+			data, err := os.ReadFile(filepath.Join(dir, RecipeFileName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), "v25.3.3_build.1") {
+				t.Fatal("recipe lost literal OCI tag")
 			}
 		})
 	}
