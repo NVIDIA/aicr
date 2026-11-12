@@ -98,13 +98,13 @@ artifacts:
 func TestArtifactComposition(t *testing.T) {
 	files, inventory := artifactCatalogFixture()
 	original := string(files["components/runner/values.yaml"])
-	p, err := composeCapturedArtifacts(t.Context(), map[string][]byte{}, files, inventory, artifact.Options{})
-	if err != nil {
-		t.Fatal(err)
+	p, composeErr := composeCapturedArtifacts(t.Context(), map[string][]byte{}, files, inventory, artifact.Options{})
+	if composeErr != nil {
+		t.Fatal(composeErr)
 	}
-	data, err := p.ReadFile(t.Context(), "registry.yaml")
-	if err != nil {
-		t.Fatal(err)
+	data, composeErr := p.ReadFile(t.Context(), "registry.yaml")
+	if composeErr != nil {
+		t.Fatal(composeErr)
 	}
 	var registry ComponentRegistry
 	if err := yaml.Unmarshal(data, &registry); err != nil {
@@ -119,16 +119,16 @@ func TestArtifactComposition(t *testing.T) {
 			t.Fatal("ownership survived changed chart")
 		}
 	}
-	values, err := p.ReadFile(t.Context(), "components/runner/values.yaml")
-	if err != nil {
-		t.Fatal(err)
+	values, composeErr := p.ReadFile(t.Context(), "components/runner/values.yaml")
+	if composeErr != nil {
+		t.Fatal(composeErr)
 	}
 	if !strings.Contains(string(values), "new.test/images/runner") || !strings.Contains(string(values), `tag: ""`) {
 		t.Fatalf("wrong values: %s", values)
 	}
-	overlay, err := p.ReadFile(t.Context(), "overlays/runner.yaml")
-	if err != nil {
-		t.Fatal(err)
+	overlay, composeErr := p.ReadFile(t.Context(), "overlays/runner.yaml")
+	if composeErr != nil {
+		t.Fatal(composeErr)
 	}
 	if !strings.Contains(string(overlay), "oci://new.test/charts") || !strings.Contains(string(overlay), "v2.0.0_build.1") {
 		t.Fatalf("default restatement not rebound: %s", overlay)
@@ -141,9 +141,9 @@ func TestArtifactComposition(t *testing.T) {
 		t.Fatal("bundle inputs differ from retained bytes")
 	}
 	values[0] = 'x'
-	fresh, err := p.ReadFile(t.Context(), "components/runner/values.yaml")
-	if err != nil {
-		t.Fatal(err)
+	fresh, composeErr := p.ReadFile(t.Context(), "components/runner/values.yaml")
+	if composeErr != nil {
+		t.Fatal(composeErr)
 	}
 	if fresh[0] == 'x' {
 		t.Fatal("ReadFile exposed mutable storage")
@@ -233,13 +233,13 @@ func writeArtifactCatalog(t *testing.T, files map[string][]byte) string {
 func TestArtifactActivationAndSnapshot(t *testing.T) {
 	files, inventory := artifactCatalogFixture()
 	dir := writeArtifactCatalog(t, files)
-	provider, err := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), LayeredProviderConfig{ExternalDir: dir, ExternalOnly: true})
-	if err != nil {
-		t.Fatal(err)
+	provider, providerErr := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), LayeredProviderConfig{ExternalDir: dir, ExternalOnly: true})
+	if providerErr != nil {
+		t.Fatal(providerErr)
 	}
-	got, err := ComposeArtifacts(t.Context(), provider, artifact.Options{})
-	if err != nil {
-		t.Fatal(err)
+	got, providerErr := ComposeArtifacts(t.Context(), provider, artifact.Options{})
+	if providerErr != nil {
+		t.Fatal(providerErr)
 	}
 	if got != provider {
 		t.Fatal("no inventory changed provider")
@@ -257,16 +257,16 @@ func TestArtifactActivationAndSnapshot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, artifactInventoryPath), inventory, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	composed, err := ComposeArtifacts(t.Context(), provider, artifact.Options{})
-	if err != nil {
-		t.Fatal(err)
+	composed, providerErr := ComposeArtifacts(t.Context(), provider, artifact.Options{})
+	if providerErr != nil {
+		t.Fatal(providerErr)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "components/runner/values.yaml"), []byte("changed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	data, err := composed.ReadFile(t.Context(), "components/runner/values.yaml")
-	if err != nil {
-		t.Fatal(err)
+	data, providerErr := composed.ReadFile(t.Context(), "components/runner/values.yaml")
+	if providerErr != nil {
+		t.Fatal(providerErr)
 	}
 	if !strings.Contains(string(data), "new.test/images/runner") {
 		t.Fatal("read live directory")
@@ -393,9 +393,9 @@ func TestArtifactExceptionsAndFullReference(t *testing.T) {
 
 func TestArtifactCoverageAndIdentityGuards(t *testing.T) {
 	files, inventory := artifactCatalogFixture()
-	p, err := composeCapturedArtifacts(t.Context(), map[string][]byte{}, files, inventory, artifact.Options{})
-	if err != nil {
-		t.Fatal(err)
+	p, composeErr := composeCapturedArtifacts(t.Context(), map[string][]byte{}, files, inventory, artifact.Options{})
+	if composeErr != nil {
+		t.Fatal(composeErr)
 	}
 	ref := ComponentRef{Name: "runner", Type: ComponentTypeHelm, Source: "oci://new.test/charts", Chart: "runner", Version: "v2.0.0_build.1", ValuesFile: "components/runner/values.yaml"}
 	tests := []struct {
@@ -428,16 +428,16 @@ func TestArtifactCoverageAndIdentityGuards(t *testing.T) {
 		t.Fatal("dynamic parent accepted")
 	}
 	partial := []byte(strings.Split(string(inventory), "- name: runner-image")[0])
-	p, err = composeCapturedArtifacts(t.Context(), map[string][]byte{}, files, partial, artifact.Options{})
-	if err != nil {
-		t.Fatal(err)
+	p, composeErr = composeCapturedArtifacts(t.Context(), map[string][]byte{}, files, partial, artifact.Options{})
+	if composeErr != nil {
+		t.Fatal(composeErr)
 	}
 	if err := p.CheckSelection(t.Context(), []ComponentRef{ref}); err == nil {
 		t.Fatal("partial image coverage accepted")
 	}
-	p, err = composeCapturedArtifacts(t.Context(), map[string][]byte{}, files, partial, artifact.Options{AllowCatalogPins: []string{"runner"}})
-	if err != nil {
-		t.Fatal(err)
+	p, composeErr = composeCapturedArtifacts(t.Context(), map[string][]byte{}, files, partial, artifact.Options{AllowCatalogPins: []string{"runner"}})
+	if composeErr != nil {
+		t.Fatal(composeErr)
 	}
 	if err := p.CheckSelection(t.Context(), []ComponentRef{ref}); err != nil {
 		t.Fatal(err)
@@ -545,9 +545,9 @@ func TestArtifactSnapshotRejectsSymlink(t *testing.T) {
 	files, inventory := artifactCatalogFixture()
 	files[artifactInventoryPath] = inventory
 	dir := writeArtifactCatalog(t, files)
-	provider, err := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), LayeredProviderConfig{ExternalDir: dir, ExternalOnly: true})
-	if err != nil {
-		t.Fatal(err)
+	provider, providerErr := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), LayeredProviderConfig{ExternalDir: dir, ExternalOnly: true})
+	if providerErr != nil {
+		t.Fatal(providerErr)
 	}
 	name := filepath.Join(dir, "components/runner/values.yaml")
 	if err := os.Rename(name, name+".original"); err != nil {
@@ -556,8 +556,8 @@ func TestArtifactSnapshotRejectsSymlink(t *testing.T) {
 	if err := os.Symlink("values.yaml.original", name); err != nil {
 		t.Fatal(err)
 	}
-	_, err = ComposeArtifacts(t.Context(), provider, artifact.Options{})
-	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	_, providerErr = ComposeArtifacts(t.Context(), provider, artifact.Options{})
+	errorstest.WantReportedCode(t, providerErr, errors.ErrCodeInvalidRequest)
 }
 
 func TestArtifactInventoryOverrideCapture(t *testing.T) {

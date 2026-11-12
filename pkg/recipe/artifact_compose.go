@@ -84,25 +84,25 @@ func mergedArtifactBindings(embedded, external map[string][]byte) (*artifact.Bin
 }
 
 func composeCapturedArtifacts(ctx context.Context, embedded, external map[string][]byte, inventoryBytes []byte, options artifact.Options, inventoryPaths ...string) (*ArtifactProvider, error) {
-	inventory, err := artifact.ParseInventory(inventoryBytes)
-	if err != nil {
-		return nil, err
+	inventory, composeErr := artifact.ParseInventory(inventoryBytes)
+	if composeErr != nil {
+		return nil, composeErr
 	}
-	bindings, err := mergedArtifactBindings(embedded, external)
-	if err != nil {
-		return nil, err
+	bindings, composeErr := mergedArtifactBindings(embedded, external)
+	if composeErr != nil {
+		return nil, composeErr
 	}
 	if err := artifact.Account(inventory, bindings); err != nil {
 		return nil, err
 	}
-	files, err := mergeCapturedCatalog(embedded, external)
-	if err != nil {
-		return nil, err
+	files, composeErr := mergeCapturedCatalog(embedded, external)
+	if composeErr != nil {
+		return nil, composeErr
 	}
 	p := &ArtifactProvider{files: files, embedded: embedded, external: external, inventoryBytes: bytes.Clone(inventoryBytes), inventory: inventory, bindings: bindings}
-	p.bindingsBytes, err = yaml.Marshal(bindings)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "encode retained merged bindings", err)
+	p.bindingsBytes, composeErr = yaml.Marshal(bindings)
+	if composeErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "encode retained merged bindings", composeErr)
 	}
 	var registry ComponentRegistry
 	if err := yaml.Unmarshal(files[registryFileName], &registry); err != nil {
@@ -167,9 +167,9 @@ func composeCapturedArtifacts(ctx context.Context, embedded, external map[string
 		}
 	}
 	disableChangedArtifactCRDOwnership(&registry, changed)
-	p.files[registryFileName], err = yaml.Marshal(&registry)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "encode artifact registry", err)
+	p.files[registryFileName], composeErr = yaml.Marshal(&registry)
+	if composeErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "encode artifact registry", composeErr)
 	}
 	if err := p.rebindCatalogDefaults(ctx, oldCharts, byName); err != nil {
 		return nil, err
@@ -385,18 +385,18 @@ func validateStaticArtifacts(ctx context.Context, provider DataProvider, options
 }
 
 func staticArtifactProvider(ctx context.Context, provider DataProvider, options artifact.Options) (DataProvider, error) {
-	embedded, external, err := captureArtifactLayers(ctx, provider)
-	if err != nil {
-		return nil, err
+	embedded, external, captureErr := captureArtifactLayers(ctx, provider)
+	if captureErr != nil {
+		return nil, captureErr
 	}
 	if _, err := mergedArtifactBindings(embedded, external); err != nil {
 		return nil, err
 	}
 	inventoryBytes, active := external[artifactInventoryPath]
 	if options.Inventory != "" {
-		inventoryBytes, err = readArtifactOverride(ctx, options.Inventory)
-		if err != nil {
-			return nil, err
+		inventoryBytes, captureErr = readArtifactOverride(ctx, options.Inventory)
+		if captureErr != nil {
+			return nil, captureErr
 		}
 		active = true
 	}
@@ -427,15 +427,15 @@ func artifactInventoryRelativePath(provider DataProvider, override string) strin
 }
 
 func validateStaticArtifactInput(ctx context.Context, provider DataProvider, options artifact.Options, kind string, data []byte) error {
-	embedded, external, err := captureArtifactLayers(ctx, provider)
-	if err != nil {
-		return err
+	embedded, external, captureErr := captureArtifactLayers(ctx, provider)
+	if captureErr != nil {
+		return captureErr
 	}
 	inventoryBytes, active := external[artifactInventoryPath]
 	if options.Inventory != "" {
-		inventoryBytes, err = readArtifactOverride(ctx, options.Inventory)
-		if err != nil {
-			return err
+		inventoryBytes, captureErr = readArtifactOverride(ctx, options.Inventory)
+		if captureErr != nil {
+			return captureErr
 		}
 		active = true
 	}
@@ -451,8 +451,8 @@ func validateStaticArtifactInput(ctx context.Context, provider DataProvider, opt
 	if !active {
 		return nil
 	}
-	_, err = composeCapturedArtifacts(ctx, embedded, external, inventoryBytes, options, artifactInventoryRelativePath(provider, options.Inventory))
-	return err
+	_, captureErr = composeCapturedArtifacts(ctx, embedded, external, inventoryBytes, options, artifactInventoryRelativePath(provider, options.Inventory))
+	return captureErr
 }
 
 func encodeComposedArtifactFile(name string, value any) ([]byte, error) {

@@ -382,8 +382,8 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 		return nil, exposureErr
 	}
 
-	if err := profileBaseline.ValidateArtifactLock(ctx, recipeResult.ComponentRefs, componentValues, dynamicValues); err != nil {
-		return nil, err
+	if artifactErr := profileBaseline.ValidateArtifactLock(ctx, recipeResult.ComponentRefs, componentValues, dynamicValues); artifactErr != nil {
+		return nil, artifactErr
 	}
 	if lockErr := profileBaseline.ValidateProfileLock(
 		ctx, recipeResult.ComponentRefs, componentValues, dynamicValues,

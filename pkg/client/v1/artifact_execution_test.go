@@ -112,9 +112,9 @@ func TestArtifactExecutionConsumers(t *testing.T) {
 		}
 	}
 	writeRecipe(rec)
-	otherVersion, err := NewClientContext(t.Context(), WithRecipeSource(FilesystemSource(dir)), WithVersion("different-binary-version"))
-	if err != nil {
-		t.Fatal(err)
+	otherVersion, setupErr := NewClientContext(t.Context(), WithRecipeSource(FilesystemSource(dir)), WithVersion("different-binary-version"))
+	if setupErr != nil {
+		t.Fatal(setupErr)
 	}
 	if _, err := otherVersion.LoadRecipe(t.Context(), path, ""); err != nil {
 		t.Fatalf("binary version changed the input identity: %v", err)
@@ -128,9 +128,9 @@ func TestArtifactExecutionConsumers(t *testing.T) {
 	if _, err := active.AdoptRecipe(t.Context(), rec); err != nil {
 		t.Fatalf("matching adoption: %v", err)
 	}
-	plain, err := NewClientContext(t.Context(), WithRecipeSource(EmbeddedSource()))
-	if err != nil {
-		t.Fatal(err)
+	plain, setupErr := NewClientContext(t.Context(), WithRecipeSource(EmbeddedSource()))
+	if setupErr != nil {
+		t.Fatal(setupErr)
 	}
 	defer func() {
 		if err := plain.Close(); err != nil {
@@ -153,9 +153,9 @@ func TestArtifactExecutionConsumers(t *testing.T) {
 	legacy.Metadata.Artifacts = nil
 	legacy.APIVersion = "aicr.run/v1"
 	writeRecipe(legacy)
-	_, err = active.LoadRecipe(t.Context(), path, "")
-	wantArtifactReason(t, err, "artifact-provenance-required")
-	_, err = plain.UpgradeCheck(t.Context(), UpgradeCheckRequest{From: path, To: func() string {
+	_, setupErr = active.LoadRecipe(t.Context(), path, "")
+	wantArtifactReason(t, setupErr, "artifact-provenance-required")
+	_, setupErr = plain.UpgradeCheck(t.Context(), UpgradeCheckRequest{From: path, To: func() string {
 		p := filepath.Join(t.TempDir(), "target.json")
 		data, _ := json.Marshal(rec)
 		if err := os.WriteFile(p, data, 0o600); err != nil {
@@ -163,24 +163,24 @@ func TestArtifactExecutionConsumers(t *testing.T) {
 		}
 		return p
 	}()})
-	wantArtifactReason(t, err, "artifact-upgrade-unsupported")
+	wantArtifactReason(t, setupErr, "artifact-upgrade-unsupported")
 	changed := rec.DeepCopy()
 	changed.Metadata.Artifacts.InventoryDigest = "sha256:" + strings.Repeat("d", 64)
 	writeRecipe(changed)
-	_, err = active.LoadRecipe(t.Context(), path, "")
-	wantArtifactReason(t, err, "artifact-inputs-mismatch")
+	_, setupErr = active.LoadRecipe(t.Context(), path, "")
+	wantArtifactReason(t, setupErr, "artifact-inputs-mismatch")
 	conflict := rec.DeepCopy()
 	conflict.ComponentRefs[0].Version = "v3.0.0"
-	_, err = active.AdoptRecipe(t.Context(), conflict)
-	wantArtifactReason(t, err, "artifact-identity-conflict")
+	_, setupErr = active.AdoptRecipe(t.Context(), conflict)
+	wantArtifactReason(t, setupErr, "artifact-identity-conflict")
 	// Change only the source discriminator after construction to exercise the
 	// unsupported consumer without network access or a materialized OCI source.
 	plain.source.kind = sourceKindOCI
 	writeRecipe(rec)
-	_, err = plain.LoadRecipe(t.Context(), path, "")
-	wantArtifactReason(t, err, "artifact-source-unsupported")
-	_, err = plain.AdoptRecipe(t.Context(), rec)
-	wantArtifactReason(t, err, "artifact-source-unsupported")
+	_, setupErr = plain.LoadRecipe(t.Context(), path, "")
+	wantArtifactReason(t, setupErr, "artifact-source-unsupported")
+	_, setupErr = plain.AdoptRecipe(t.Context(), rec)
+	wantArtifactReason(t, setupErr, "artifact-source-unsupported")
 }
 
 func TestArtifactNamespaceInheritance(t *testing.T) {
@@ -227,9 +227,9 @@ func TestArtifactNamespaceInheritance(t *testing.T) {
 
 func TestArtifactFinalConsumerGuards(t *testing.T) {
 	client, rec, _ := artifactExecutionFixture(t)
-	adopted, err := client.AdoptRecipe(t.Context(), rec)
-	if err != nil {
-		t.Fatal(err)
+	adopted, adoptErr := client.AdoptRecipe(t.Context(), rec)
+	if adoptErr != nil {
+		t.Fatal(adoptErr)
 	}
 	bound := adopted.Resolved()
 	renderer := &helmtest.MockRenderer{}
@@ -246,20 +246,20 @@ func TestArtifactFinalConsumerGuards(t *testing.T) {
 	renderer.Inputs = nil
 	overrideValue := "unbound.example/runner:latest"
 	overrides := map[string]map[string]string{"fixture-runner": {"image": "unbound.example/runner:latest"}}
-	_, err = mirror.NewLister(mirror.WithHelmRenderer(renderer), mirror.WithValueOverrides([]config.ComponentPath{{Component: "fixture-runner", Path: "image", Value: &overrideValue}})).Discover(t.Context(), bound)
-	wantArtifactReason(t, err, "artifact-identity-conflict")
+	_, adoptErr = mirror.NewLister(mirror.WithHelmRenderer(renderer), mirror.WithValueOverrides([]config.ComponentPath{{Component: "fixture-runner", Path: "image", Value: &overrideValue}})).Discover(t.Context(), bound)
+	wantArtifactReason(t, adoptErr, "artifact-identity-conflict")
 	if len(renderer.Inputs) != 0 {
 		t.Fatal("conflicting identity reached renderer")
 	}
 	destination := filepath.Join(t.TempDir(), "rejected")
-	_, err = client.MakeBundle(t.Context(), adopted, BundleOptions{Config: config.NewConfig(config.WithDeployer(config.DeployerHelm), config.WithValueOverrides(overrides)), OutputDir: destination})
-	wantArtifactReason(t, err, "artifact-identity-conflict")
+	_, adoptErr = client.MakeBundle(t.Context(), adopted, BundleOptions{Config: config.NewConfig(config.WithDeployer(config.DeployerHelm), config.WithValueOverrides(overrides)), OutputDir: destination})
+	wantArtifactReason(t, adoptErr, "artifact-identity-conflict")
 	if entries, readErr := os.ReadDir(destination); readErr == nil && len(entries) > 0 {
 		t.Fatal("rejected bundle wrote output")
 	}
 	bound.ComponentRefs[0].Overrides = map[string]any{"image": "unbound.example/runner:latest"}
-	_, err = validatorv1.ToValidationInputWithContext(t.Context(), bound)
-	wantArtifactReason(t, err, "artifact-identity-conflict")
+	_, adoptErr = validatorv1.ToValidationInputWithContext(t.Context(), bound)
+	wantArtifactReason(t, adoptErr, "artifact-identity-conflict")
 }
 
 func TestArtifactOCICatalogInventory(t *testing.T) {

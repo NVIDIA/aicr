@@ -917,8 +917,8 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 		}
 	}
 
-	if err := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); err != nil {
-		return nil, err
+	if artifactErr := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); artifactErr != nil {
+		return nil, artifactErr
 	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
@@ -1323,8 +1323,8 @@ func (c *Client) ResolveRecipeFromCriteriaWithOptions(
 			return nil, inheritErr
 		}
 	}
-	if err := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); err != nil {
-		return nil, err
+	if artifactErr := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); artifactErr != nil {
+		return nil, artifactErr
 	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
@@ -1541,8 +1541,8 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 			return nil, inheritErr
 		}
 	}
-	if err := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); err != nil {
-		return nil, err
+	if artifactErr := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); artifactErr != nil {
+		return nil, artifactErr
 	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
@@ -2006,8 +2006,8 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 		slog.Warn("PromQL server is enabled but no enabled component declares telemetry.promql, so its Prometheus scrapes nothing",
 			"component", scope.Server)
 	}
-	if err := r.internal.ValidateArtifactLock(ctx, r.internal.ComponentRefs, helmValues, nil); err != nil {
-		return nil, err
+	if artifactErr := r.internal.ValidateArtifactLock(ctx, r.internal.ComponentRefs, helmValues, nil); artifactErr != nil {
+		return nil, artifactErr
 	}
 	pinned := r.internal.WithResolvedValues(helmValues)
 	if err := bundler.ValidateAccountingValues(pinned, helmValues); err != nil {

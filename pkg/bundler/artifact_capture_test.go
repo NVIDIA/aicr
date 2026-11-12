@@ -42,8 +42,8 @@ func TestArtifactBundleCaptureRetainsOriginalInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "components/example/values.yaml"), []byte("message: changed\n"), 0o600); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(filepath.Join(dir, "components/example/values.yaml"), []byte("message: changed\n"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	dest := t.TempDir()
 	b := &DefaultBundler{}

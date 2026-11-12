@@ -24,21 +24,36 @@ import (
 	"github.com/NVIDIA/aicr/pkg/schema"
 )
 
+const (
+	artifactRequiredKey   = "required"
+	artifactTypeKey       = "type"
+	artifactPropertiesKey = "properties"
+	artifactChartsKey     = "charts"
+	artifactPatternKey    = "pattern"
+	artifactNotKey        = "not"
+	artifactImagesKey     = "images"
+	artifactIgnoredKey    = "ignoredArtifacts"
+	artifactPlatformKey   = "platform"
+	artifactReferenceKey  = "reference"
+	artifactVersionKey    = "version"
+	artifactArchiveKey    = "archiveDigest"
+)
+
 // Artifact schemas start from the Go wire types and add the ADR's constraints.
 // Cross-document accounting, targets, duplicate YAML keys and resource bounds
 // remain parser checks rather than claims a standalone JSON Schema can make.
 func renderArtifactContract(generated *schema.Schema, kind string) ([]byte, error) {
-	encoded, err := json.Marshal(generated)
-	if err != nil {
-		return nil, fmt.Errorf("encode artifact schema: %w", err)
+	encoded, encodeErr := json.Marshal(generated)
+	if encodeErr != nil {
+		return nil, fmt.Errorf("encode artifact schema: %w", encodeErr)
 	}
 	var document map[string]any
 	if err := json.Unmarshal(encoded, &document); err != nil {
 		return nil, fmt.Errorf("decode artifact schema: %w", err)
 	}
 	if kind == artifact.BindingsKind {
-		fields := document["properties"].(map[string]any)
-		for key, value := range map[string]any{"charts": artifact.Chart{}, "images": artifact.Image{}, "ignoredArtifacts": artifact.Ignored{}} {
+		fields := document[artifactPropertiesKey].(map[string]any)
+		for key, value := range map[string]any{artifactChartsKey: artifact.Chart{}, artifactImagesKey: artifact.Image{}, artifactIgnoredKey: artifact.Ignored{}} {
 			child, err := schema.Generate(reflect.TypeOf(value), schema.Options{})
 			if err != nil {
 				return nil, fmt.Errorf("generate binding value schema: %w", err)
@@ -57,15 +72,15 @@ func renderArtifactContract(generated *schema.Schema, kind string) ([]byte, erro
 	}
 	var nonnullable func(map[string]any)
 	nonnullable = func(node map[string]any) {
-		if types, ok := node["type"].([]any); ok {
+		if types, ok := node[artifactTypeKey].([]any); ok {
 			for _, value := range types {
 				if value != "null" {
-					node["type"] = value
+					node[artifactTypeKey] = value
 					break
 				}
 			}
 		}
-		if properties, ok := node["properties"].(map[string]any); ok {
+		if properties, ok := node[artifactPropertiesKey].(map[string]any); ok {
 			node["additionalProperties"] = false
 			for _, value := range properties {
 				nonnullable(value.(map[string]any))
@@ -78,10 +93,10 @@ func renderArtifactContract(generated *schema.Schema, kind string) ([]byte, erro
 		}
 	}
 	nonnullable(document)
-	properties := func(node map[string]any) map[string]any { return node["properties"].(map[string]any) }
+	properties := func(node map[string]any) map[string]any { return node[artifactPropertiesKey].(map[string]any) }
 	property := func(node map[string]any, key string) map[string]any { return properties(node)[key].(map[string]any) }
-	name := map[string]any{"type": "string", "pattern": "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$", "maxLength": defaults.ArtifactNameLength}
-	digest := map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+	name := map[string]any{artifactTypeKey: "string", artifactPatternKey: "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$", "maxLength": defaults.ArtifactNameLength}
+	digest := map[string]any{artifactTypeKey: "string", artifactPatternKey: "^sha256:[0-9a-f]{64}$"}
 	property(document, "apiVersion")["const"] = artifact.APIVersion
 	property(document, "kind")["const"] = kind
 	if kind == artifact.InventoryKind {
@@ -90,50 +105,50 @@ func renderArtifactContract(generated *schema.Schema, kind string) ([]byte, erro
 		array["maxItems"] = defaults.ArtifactInventoryEntries
 		item := array["items"].(map[string]any)
 		properties(item)["name"] = name
-		property(item, "type")["enum"] = []string{"chart", "image", "other"}
-		property(item, "reference")["pattern"] = `^oci://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]+)?/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$`
-		property(item, "version")["minLength"] = 1
+		property(item, artifactTypeKey)["enum"] = []string{"chart", "image", "other"}
+		property(item, artifactReferenceKey)[artifactPatternKey] = `^oci://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]+)?/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$`
+		property(item, artifactVersionKey)["minLength"] = 1
 		properties(item)["manifestDigest"] = digest
-		properties(item)["archiveDigest"] = digest
-		platform := property(item, "platform")
+		properties(item)[artifactArchiveKey] = digest
+		platform := property(item, artifactPlatformKey)
 		for _, key := range []string{"os", "architecture", "variant"} {
 			properties(platform)[key] = name
 		}
 		item["allOf"] = []any{
-			map[string]any{"if": map[string]any{"properties": map[string]any{"type": map[string]any{"const": "chart"}}}, "then": map[string]any{"properties": map[string]any{"version": map[string]any{"pattern": `^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(_[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`, "maxLength": defaults.ArtifactChartTagBytes}}}, "else": map[string]any{"not": map[string]any{"required": []string{"archiveDigest"}}}},
-			map[string]any{"if": map[string]any{"not": map[string]any{"properties": map[string]any{"type": map[string]any{"const": "image"}}}}, "then": map[string]any{"not": map[string]any{"required": []string{"platform"}}}},
+			map[string]any{"if": map[string]any{artifactPropertiesKey: map[string]any{artifactTypeKey: map[string]any{"const": "chart"}}}, "then": map[string]any{artifactPropertiesKey: map[string]any{artifactVersionKey: map[string]any{artifactPatternKey: `^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(_[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`, "maxLength": defaults.ArtifactChartTagBytes}}}, "else": map[string]any{artifactNotKey: map[string]any{artifactRequiredKey: []string{artifactArchiveKey}}}},
+			map[string]any{"if": map[string]any{artifactNotKey: map[string]any{artifactPropertiesKey: map[string]any{artifactTypeKey: map[string]any{"const": "image"}}}}, "then": map[string]any{artifactNotKey: map[string]any{artifactRequiredKey: []string{artifactPlatformKey}}}},
 		}
 	} else {
-		document["required"] = []string{"apiVersion", "charts", "images", "kind"}
-		for _, key := range []string{"charts", "images", "ignoredArtifacts"} {
+		document[artifactRequiredKey] = []string{"apiVersion", artifactChartsKey, artifactImagesKey, "kind"}
+		for _, key := range []string{artifactChartsKey, artifactImagesKey, artifactIgnoredKey} {
 			property(document, key)["propertyNames"] = name
 		}
-		chart := property(document, "charts")["additionalProperties"].(map[string]any)
+		chart := property(document, artifactChartsKey)["additionalProperties"].(map[string]any)
 		properties(chart)["component"] = name
-		image := property(document, "images")["additionalProperties"].(map[string]any)
+		image := property(document, artifactImagesKey)["additionalProperties"].(map[string]any)
 		targets := property(image, "targets")
 		targets["minItems"] = 1
 		target := targets["items"].(map[string]any)
 		properties(target)["component"] = name
-		property(target, "valuesFile")["pattern"] = `^(?!/)(?!.*(?:^|/)\.\.?(?:/|$))(?!.*//)(?!.*\\).+\.(yaml|yml|json)$`
-		platform := property(target, "platform")
+		property(target, "valuesFile")[artifactPatternKey] = `^(?!/)(?!.*(?:^|/)\.\.?(?:/|$))(?!.*//)(?!.*\\).+\.(yaml|yml|json)$`
+		platform := property(target, artifactPlatformKey)
 		for _, key := range []string{"os", "architecture", "variant"} {
 			properties(platform)[key] = name
 		}
 		write := property(target, "write")
 		for _, value := range properties(write) {
-			value.(map[string]any)["pattern"] = `^/(?:[^~]|~[01])*$`
+			value.(map[string]any)[artifactPatternKey] = `^/(?:[^~]|~[01])*$`
 		}
 		write["oneOf"] = []any{
-			map[string]any{"required": []string{"reference"}, "not": map[string]any{"anyOf": []any{map[string]any{"required": []string{"repository"}}, map[string]any{"required": []string{"digest"}}, map[string]any{"required": []string{"clearTag"}}}}},
-			map[string]any{"required": []string{"repository", "digest"}, "not": map[string]any{"required": []string{"reference"}}},
+			map[string]any{artifactRequiredKey: []string{artifactReferenceKey}, artifactNotKey: map[string]any{"anyOf": []any{map[string]any{artifactRequiredKey: []string{"repository"}}, map[string]any{artifactRequiredKey: []string{"digest"}}, map[string]any{artifactRequiredKey: []string{"clearTag"}}}}},
+			map[string]any{artifactRequiredKey: []string{"repository", "digest"}, artifactNotKey: map[string]any{artifactRequiredKey: []string{artifactReferenceKey}}},
 		}
-		ignored := property(document, "ignoredArtifacts")["additionalProperties"].(map[string]any)
-		property(ignored, "reason")["pattern"] = `\S`
+		ignored := property(document, artifactIgnoredKey)["additionalProperties"].(map[string]any)
+		property(ignored, "reason")[artifactPatternKey] = `\S`
 	}
-	encoded, err = json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("encode constrained artifact schema: %w", err)
+	encoded, encodeErr = json.MarshalIndent(document, "", "  ")
+	if encodeErr != nil {
+		return nil, fmt.Errorf("encode constrained artifact schema: %w", encodeErr)
 	}
 	return append(encoded, '\n'), nil
 }

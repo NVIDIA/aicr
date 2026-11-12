@@ -16,6 +16,7 @@ package aicr
 
 import (
 	stderrors "errors"
+
 	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
