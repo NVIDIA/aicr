@@ -4,5 +4,9 @@ attestations:
       digest: sha256:e53f4fc2a6bb8bdd2ad9815cdcd74edf677a44edebc808f485c46b175c0db773
       oci: ghcr.io/xdu31/aicr-evidence:gb200-nvke-ubuntu-inference-dynamo-2c4bca5d31c0
       predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: https://github.com/xdu31/aicr/.github/workflows/evidence-publish.yaml@refs/heads/evidence/nvke
+      issuer: https://token.actions.githubusercontent.com
+      rekorLogIndex: 194907616
 recipe: gb200-nvke-ubuntu-inference-dynamo
 schemaVersion: 1.0.0
