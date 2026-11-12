@@ -1159,9 +1159,11 @@ components:
           - nodeSelector
         tolerationPaths:
           - tolerations
-    # The DCGM gauges behind the rules in
-    # components/prometheus-adapter/values.yaml, from gpu-operator's
-    # dcgm-exporter ServiceMonitor.
+    # The series behind the rules in
+    # components/prometheus-adapter/values.yaml: the DCGM gauges, from
+    # gpu-operator's dcgm-exporter ServiceMonitor, and the gauge the
+    # pod-autoscaling conformance check scales on, from the PodMonitor it
+    # creates in the Prometheus server's namespace.
     telemetry:
       promql:
         monitorsFrom:
@@ -1170,6 +1172,7 @@ components:
           - DCGM_FI_DEV_GPU_UTIL
           - DCGM_FI_DEV_FB_USED
           - DCGM_FI_DEV_POWER_USAGE
+          - ai_conformance_hpa_queue_depth
 
   - name: nktp
     displayName: NKTP Telemetry Pipeline

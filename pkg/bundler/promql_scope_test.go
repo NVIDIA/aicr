@@ -163,21 +163,21 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 			name: "union of two consumers",
 			platform: append(slices.Clone(adapterPlatform),
 				scopeRef("dynamo-platform", "dynamo-system")),
-			wantNamespaces: []string{"dynamo-system", "gpu-operator"},
+			wantNamespaces: []string{"dynamo-system", "gpu-operator", "monitoring"},
 			wantRegex: `^(?:(?:DCGM_FI_DEV_FB_USED)|(?:DCGM_FI_DEV_GPU_UTIL)|` +
 				`(?:dynamo_frontend_requests_total)|(?:dynamo_ttft_seconds_(sum|count)))$`,
 		},
 		{
 			name:           "overlapping consumers are de-duplicated",
 			platform:       append(slices.Clone(adapterPlatform), scopeRef("gpu-dashboard", "dash")),
-			wantNamespaces: []string{"gpu-operator"},
+			wantNamespaces: []string{"gpu-operator", "monitoring"},
 			wantRegex:      `^(?:(?:(?i)foo)|(?:BAR)|(?:DCGM_FI_DEV_FB_USED)|(?:DCGM_FI_DEV_GPU_UTIL))$`,
 		},
 		{
 			name:           "null at an owned path is unset",
 			platform:       adapterPlatform,
 			serverValues:   nested(chartScopePaths.scrapeClasses, nil),
-			wantNamespaces: []string{"gpu-operator"},
+			wantNamespaces: []string{"gpu-operator", "monitoring"},
 			wantRegex:      adapterRegex,
 		},
 		{
@@ -191,6 +191,12 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 			platform: []recipe.ComponentRef{scopeRef(testPromQLServer, "monitoring"),
 				scopeRef("gpu-operator", ""), scopeRef("prometheus-adapter", "monitoring")},
 			wantErr: `"gpu-operator" has no namespace in this recipe`,
+		},
+		{
+			name: "server without a namespace fails",
+			platform: []recipe.ComponentRef{scopeRef(testPromQLServer, ""),
+				scopeRef("gpu-operator", "gpu-operator"), scopeRef("prometheus-adapter", "monitoring")},
+			wantErr: `declares telemetry.promqlServer but has no namespace`,
 		},
 		{
 			name:     "two enabled servers fail",
@@ -448,21 +454,22 @@ func TestMake_PromQLScrapeScope(t *testing.T) {
 		wantErr        string
 	}{
 		{name: "training scopes the adapter's source", criteria: training,
-			wantNamespaces: []string{"gpu-operator"}, wantRegex: adapterRegex},
+			wantNamespaces: []string{"gpu-operator", "monitoring"}, wantRegex: adapterRegex},
 		{name: "bundlers subset keeps the platform's scope", criteria: dynamo,
 			opts:           []config.Option{config.WithBundlers([]string{testPromQLServer})},
-			wantNamespaces: []string{"dynamo-system", "gpu-operator"},
+			wantNamespaces: []string{"dynamo-system", "gpu-operator", "monitoring"},
 			wantRegex:      `^(?:(?:DCGM_FI_DEV_GPU_UTIL)|(?:dynamo_frontend_requests_total))$`},
 		{name: "--set-disabled consumer drops out", criteria: dynamo, opts: []config.Option{disable("dynamoplatform")},
-			wantNamespaces: []string{"gpu-operator"}, wantRegex: adapterRegex},
-		{name: "server without consumers selects nothing and warns", criteria: training,
+			wantNamespaces: []string{"gpu-operator", "monitoring"}, wantRegex: adapterRegex},
+		{name: "server without consumers keeps nothing and warns", criteria: training,
 			fixture: map[string]recipe.TelemetryConfig{
 				testPromQLServer:     recipetest.FixturePromQLServer(),
 				"prometheus-adapter": {},
 				"dynamo-platform":    {},
 			},
-			wantRegex:   `^(?:)$`,
-			wantWarning: "no enabled component declares telemetry.promql"},
+			wantNamespaces: []string{"monitoring"},
+			wantRegex:      `^(?:)$`,
+			wantWarning:    "no enabled component declares telemetry.promql"},
 		{name: "disabling the server injects and checks nothing", criteria: training,
 			opts: []config.Option{disable(testPromQLServer, "gpuoperator")}},
 		{name: "disabling a monitorsFrom source fails", criteria: training,
@@ -545,6 +552,6 @@ func TestMake_SplitCarriesPromQLScrapeScope(t *testing.T) {
 		t.Fatalf("Make() error = %v", err)
 	}
 	values := readPromQLStackValues(t, filepath.Join(dest, string(recipe.ComponentClassOps)))
-	assertScrapeScope(t, values, fixtureScopePaths, []string{"cert-manager", "kai-scheduler"}, `^(?:(?:kai_queue_.*))$`)
+	assertScrapeScope(t, values, fixtureScopePaths, []string{"cert-manager", "kai-scheduler", "monitoring"}, `^(?:(?:kai_queue_.*))$`)
 	assertNoScrapeClass(t, filepath.Join(dest, string(recipe.ComponentClassCore)))
 }
