@@ -1,0 +1,114 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Knative Operator Health Check
+#
+# Validates that the Knative Operator is running in the knative-operator
+# namespace. Asserts knativeservings.operator.knative.dev is Established=True
+# (verified against chart v1.23.1; re-verify on defaultVersion bump), that
+# the knative-operator and operator-webhook Deployments have every replica
+# available, and that no pod in the namespace is stuck.
+#
+# Read-only. Whether the operator has installed Serving is the
+# knative-serving component's check.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: knative-operator-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-crd-established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: knativeservings.operator.knative.dev
+              status:
+                (conditions[?type == 'Established'] | [0].status): "True"
+
+    - name: validate-operator-deployments-ready
+      try:
+        # Asserting the named Deployments guards against a vacuous pass on
+        # an empty namespace, where the pod checks below find nothing.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: knative-operator
+                namespace: knative-operator
+              ((spec.replicas || `0`) > `0`): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: operator-webhook
+                namespace: knative-operator
+              ((spec.replicas || `0`) > `0`): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+
+    - name: validate-all-pods-healthy
+      try:
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: knative-operator
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: knative-operator
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: knative-operator
+              status:
+                phase: Unknown
+        # JMESPath projections, not single-element slice matches: a slice
+        # literal matches only pods with exactly that many containers.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: knative-operator
+              status:
+                ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: knative-operator
+              status:
+                ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

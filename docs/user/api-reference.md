@@ -644,6 +644,8 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `k8s-nim-operator` | NVIDIA NIM Operator for inference microservice deployments |
 | `k8s-nim-operator-ocp` | NIM Operator variant for OpenShift (OCP) |
 | `kai-scheduler` | DRA-aware gang scheduler with topology-aware placement |
+| `knative-operator` | Knative Operator, which installs Knative Serving from `knative-serving` (not installed by default) |
+| `knative-serving` | Knative Serving with the Kourier ingress — request-driven model serving with scale to zero (not installed by default) |
 | `kube-prometheus-stack` | Prometheus operator and the Prometheus that serves runtime PromQL queries |
 | `kubeflow-trainer` | Kubeflow Training Operator for distributed training |
 | `kueue` | Kubernetes-native job queuing for batch and AI workloads |

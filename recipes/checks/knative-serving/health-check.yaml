@@ -1,0 +1,185 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Knative Serving Health Check
+#
+# Validates that the operator has installed Knative Serving from the
+# KnativeServing resource this component ships. Asserts that the resource is
+# Ready for its current generation, that every Serving, HPA-autoscaler and
+# Kourier Deployment has every replica available, that config-features
+# enables the two flags Run:ai requires before it reports Knative available,
+# and that no pod in the namespace is stuck. Verified against operator chart
+# v1.23.1 installing Serving 1.23.0.
+#
+# Read-only: it does not create a Knative Service.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: knative-serving-health-check
+spec:
+  timeouts:
+    assert: 10m
+  steps:
+    - name: validate-knativeserving-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: operator.knative.dev/v1beta1
+              kind: KnativeServing
+              metadata:
+                name: knative-serving
+                namespace: knative-serving
+              # Knative conditions carry no per-condition generation, so the
+              # top-level observedGeneration ties Ready to this spec.
+              ((status.observedGeneration || `0`) == metadata.generation): true
+              ((status.conditions || `[]`)[?type == 'Ready' && status == 'True'] | length(@) > `0`): true
+
+    - name: validate-serving-deployments-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: controller
+                namespace: knative-serving
+              ((spec.replicas || `0`) > `0`): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: webhook
+                namespace: knative-serving
+              ((spec.replicas || `0`) > `0`): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: activator
+                namespace: knative-serving
+              ((spec.replicas || `0`) > `0`): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: autoscaler
+                namespace: knative-serving
+              ((spec.replicas || `0`) > `0`): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: autoscaler-hpa
+                namespace: knative-serving
+              ((spec.replicas || `0`) > `0`): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: net-kourier-controller
+                namespace: knative-serving
+              ((spec.replicas || `0`) > `0`): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: 3scale-kourier-gateway
+                namespace: knative-serving
+              ((spec.replicas || `0`) > `0`): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+
+    - name: validate-runai-required-features
+      try:
+        # Run:ai marks Knative unavailable unless both are enabled.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: config-features
+                namespace: knative-serving
+              data:
+                kubernetes.podspec-schedulername: enabled
+                kubernetes.podspec-affinity: enabled
+
+    - name: validate-all-pods-healthy
+      try:
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: knative-serving
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: knative-serving
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: knative-serving
+              status:
+                phase: Unknown
+        # JMESPath projections, not single-element slice matches: a slice
+        # literal matches only pods with exactly that many containers.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: knative-serving
+              status:
+                ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: knative-serving
+              status:
+                ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

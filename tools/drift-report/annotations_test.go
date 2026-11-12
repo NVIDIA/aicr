@@ -35,6 +35,7 @@ var untrackedComponents = map[string]string{
 	"nodewright-customizations": "manifest-only: in-tree customization manifests",
 	"rdma-modules":              "manifest-only: in-tree NodeWright CR, no upstream chart",
 	"sriov-ib-networks":         "manifest-only: in-tree SR-IOV objects, no upstream chart",
+	"knative-serving":           "manifest-only: in-tree KnativeServing resource; Serving moves with knative-operator's pin",
 	"slinky-drainer":            "manifest-only: vendored from NVSentinel; image moves with nvsentinel's pin",
 	"slinky-drainer-crds":       "manifest-only: vendored from NVSentinel; moves with nvsentinel's pin",
 	"gpu-operator-ocp-olm":      "OpenShift OLM variant: subscription manifests, no chart",
@@ -115,8 +116,8 @@ func TestRegistryPinsAreRenovateTracked(t *testing.T) {
 		}
 	}
 
-	if tracked != 40 {
-		t.Errorf("tracked chart pins = %d, want 40; update this count and the spec deliberately", tracked)
+	if tracked != 41 {
+		t.Errorf("tracked chart pins = %d, want 41; update this count and the spec deliberately", tracked)
 	}
 
 	// report.go joins Renovate's lookups by DepName alone (lookups[p.DepName]),

@@ -49,6 +49,8 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **agentgateway-crds** | `ops` | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | `ops` | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **k8s-nim-operator** | `ops` | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. AICR installs the operator only — it creates no `NIMService` and no credentials; see [NIM workload credentials](#nim-workload-credentials). | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
+| **knative-operator** | `ops` | Knative Operator. Installs nothing user-facing by itself: it reconciles the `KnativeServing` resource that `knative-serving` ships. **Not installed by default:** no stock recipe selects it. See [Enabling Knative Serving](#enabling-knative-serving). | [Knative Operator](https://github.com/knative/operator) |
+| **knative-serving** | `ops` | Knative Serving with the Kourier ingress and the HPA autoscaler: request-driven HTTP model serving with scale to zero, which Run:ai's standard inference runs on. A single `KnativeServing` resource that `knative-operator` turns into the Serving Deployments, so it depends on that component. **Not installed by default.** Cluster-local URLs only. Installs into `knative-serving`. See [Enabling Knative Serving](#enabling-knative-serving). | [Knative Serving](https://github.com/knative/serving) |
 | **kueue** | `ops` | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. The `platform=kueue` leaves (`h100-kind-training-kueue`, `h100-gke-cos-training-kueue`, `h100-eks-ubuntu-training-kueue`) do exactly that to enable topology-aware scheduling; see [Topology-aware scheduling](#topology-aware-scheduling-with-kueue-and-topograph). Upgrading from a 0.18.x bundle needs two checks first: see [Upgrade Notes](#kueue-018x-to-019x) below. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | `ops` | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
 | **runai-cluster** | `ops` | NVIDIA Run:ai cluster side (3.0, open source): the Run:ai operator, KAI Scheduler 0.18 with KAI Resource Management, Karta, and the agent and controllers that register the cluster with a Run:ai control plane you already run. Selected by `--platform runai`; its leaves turn off AICR's `kai-scheduler` because the chart bundles its own. The control plane URL, cluster UID and cluster FQDN (`cluster.url`) are `--set` at bundle time; the bootstrap token is declared with `--dynamic` and written in at install time. Preview. See [Run:ai cluster](#runai-cluster). | [Run:ai](https://github.com/dsx-ai-factory/run-ai) |
@@ -1798,6 +1800,44 @@ kubectl logs -n kube-system deploy/ebs-csi-controller -c ebs-plugin --all-pods=t
 ```
 
 Credential errors in the `ebs-plugin` log — no credential provider found, an unauthorized operation, or a failed role assumption — confirm a missing or insufficient credential path. Fix the path using one of the options above, then let the provisioner retry; the PVC binds once `CreateVolume` succeeds.
+
+## Enabling Knative Serving
+
+**knative-operator** and **knative-serving** are not on any shipped overlay, so enabling Knative means adding both `componentRef`s yourself, in an overlay that inherits a stock AICR base:
+
+```yaml
+spec:
+  componentRefs:
+    - name: knative-operator
+      type: Helm
+      valuesFile: components/knative-operator/values.yaml
+    - name: knative-serving
+      type: Helm
+      valuesFile: components/knative-serving/values.yaml
+      dependencyRefs:
+        - knative-operator
+```
+
+Keep both `valuesFile`s. Component values are never discovered from the component name. Without its values file, `knative-serving` renders a `KnativeServing` resource with no version and no configuration. Keep the `dependencyRefs` too: the resource's CRD comes from the operator chart, and the dependency is what makes every deployer install the operator first.
+
+The values file configures Serving the way Run:ai's own installer does:
+
+- **Version.** Serving 1.23.0, the newest release the pinned operator (v1.23.1) carries. `TestKnativeServingVersionMatchesOperator` fails if the operator pin and this version drift apart, so bump them together.
+- **Features.** The two flags Run:ai requires before it reports Knative available, `kubernetes.podspec-schedulername` and `kubernetes.podspec-affinity`, plus the seven pod-spec features its installer also enables.
+- **Autoscaling.** Scale to zero is on, and the HPA autoscaler extension is installed for latency and custom-metric autoscaling.
+- **Networking.** Kourier is the ingress, with a `ClusterIP` Service.
+
+Change any of it with `overrides` on the `knative-serving` `componentRef`. The `config` block is written into the resource as is, one key per Knative ConfigMap without its `config-` prefix, so you can also add ConfigMaps the values file does not mention. `--system-node-selector` and `--system-node-toleration` place every Serving and Kourier Deployment, as they do other system components. Without the toleration flag, those Deployments tolerate every taint, so the activator and the Kourier gateway, which carry request traffic, can land on GPU nodes; pass `--system-node-selector` to keep them on a system pool.
+
+The release must stay in `knative-serving`. The operator installs Serving into the namespace of the `KnativeServing` resource, and Run:ai looks for the Serving controller and its `config-features` ConfigMap there.
+
+**Operator placement.** The operator chart renders no node selector for its two Deployments, so `--system-node-selector` and `--system-node-toleration` do not reach them. They carry no tolerations, which keeps them off tainted GPU nodes. For a tainted system pool, or to pin them to a pool, set `tolerations` or `affinity` under `knative_operator.knative_operator` and `knative_operator.operator_webhook` with `overrides` on the `knative-operator` `componentRef`.
+
+**Cluster-local only.** No domain is configured, so Knative Services get cluster-local URLs. External URLs need a wildcard domain in `config.domain`, a matching certificate, and a route from the cluster's ingress controller or Gateway to the Kourier Service. None of that is part of these components yet.
+
+**Images the BOM does not list.** The operator chart renders only the operator and its webhook. Every other image is started by the operator at run time, so neither the [container image list](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md) nor `aicr mirror list` includes it ([#3659](https://github.com/NVIDIA/aicr/issues/3659)). For a disconnected install, mirror these from `gcr.io/knative-releases/knative.dev`: Serving `activator`, `autoscaler`, `autoscaler-hpa`, `controller`, `webhook` and `queue`, the `storageversion` migration and `cleanup` Job images, and `net-kourier/cmd/kourier`. The operator pins each by digest. The Kourier gateway also runs `docker.io/envoyproxy/envoy:v1.37-latest`, a moving tag, so pin your mirror's copy deliberately.
+
+**Upgrades.** The operator chart ships its CRDs as templates, not under `crds/`, so Helm upgrades them with the chart on every deployer and no manual CRD step is needed. Neither component sets `ownsCRDs`: those CRDs use webhook conversion.
 
 ## Inference Gateway Network Exposure
 
