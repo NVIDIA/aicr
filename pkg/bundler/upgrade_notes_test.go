@@ -374,7 +374,8 @@ func TestSelectUpgradeNotes_KustomizeTag(t *testing.T) {
 	}
 	rr.BindDataProvider(upgradeNotesFixtureProvider(t, upgradeNotesKustomizeSource, upgradeNotesKustomizeRecord))
 
-	notes, notice, err := b.selectUpgradeNotes(t.Context(), rr)
+	r := &bundleRun{DefaultBundler: b}
+	notes, notice, err := r.selectUpgradeNotes(t.Context(), rr)
 	if err != nil {
 		t.Fatalf("selectUpgradeNotes: %v", err)
 	}

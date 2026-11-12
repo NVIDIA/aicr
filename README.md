@@ -51,6 +51,10 @@ aicr query --service eks --accelerator h100 --os ubuntu \
 
 The contents of the `bundles/` directory depend on the chosen `--deployer`: Argo CD `Application` manifests for `argocd`, a Helm chart app-of-apps for `argocd-helm`, `HelmRelease` and `Kustomization` manifests for `flux`, `helmfile.yaml` release graph for `helmfile`, a Terraform module with one call per component for `terraform`, Fleet `fleet.yaml` bundles and a `GitRepo` (or `HelmOp`s) for `fleet`, or simple Helm commands for `helm`.
 
+To use a catalog you own entirely, add `--data ./catalog --external-only` to
+the catalog-consuming commands. See [fully external catalogs](docs/integrator/data-extension.md#use-a-fully-external-catalog)
+for required files and configuration.
+
 See the [Installation Guide](docs/user/installation.md) for manual installation, building from source, and container images.
 
 ## Features

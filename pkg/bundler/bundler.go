@@ -131,6 +131,11 @@ type DefaultBundler struct {
 	// directly instead of re-finding/re-verifying/re-reading. Empty (the CLI
 	// default) preserves the discover-and-verify-per-run path exactly.
 	verifiedBinaryAttestation []byte
+}
+
+// bundleRun holds the state of one Make call.
+type bundleRun struct {
+	*DefaultBundler
 
 	// warnings stores warning messages to be added to deployment notes.
 	warnings []string
@@ -262,9 +267,7 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 //nolint:funlen // linear gate sequence; every check must precede the first filesystem write.
 func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeResult, dir string) (*result.Output, error) {
 	start := time.Now()
-
-	// Reset warnings so they dont accumulate between multiple bundle generations
-	b.warnings = nil
+	r := &bundleRun{DefaultBundler: b}
 
 	// Validate input
 	if recipeResult == nil {
@@ -279,15 +282,15 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// New initializes Config for every supported construction path. Fail
 	// closed when a caller bypasses it with a zero-value or struct-literal
 	// bundler instead of panicking on the first configuration lookup.
-	if b.Config == nil {
+	if r.Config == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"bundler config is required; construct the bundler with New")
 	}
-	if err := b.Config.Validate(); err != nil {
+	if err := r.Config.Validate(); err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 			"invalid bundler configuration")
 	}
-	if err := b.validateDeployerConfig(); err != nil {
+	if err := r.validateDeployerConfig(); err != nil {
 		return nil, err
 	}
 
@@ -307,22 +310,22 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	recipeResult = &validated
 	profileBaseline := recipeResult
 
-	if err := b.enforceConfigurationOwnership(recipeResult); err != nil {
+	if err := r.enforceConfigurationOwnership(recipeResult); err != nil {
 		return nil, err
 	}
 
 	// The PromQL scrape scope spans the platform, not the bundlers subset.
-	recipeResult, platformRefs, err := b.filterAndValidateRecipe(ctx, recipeResult)
+	recipeResult, platformRefs, err := r.filterAndValidateRecipe(ctx, recipeResult)
 	if err != nil {
 		return nil, err
 	}
-	if ownershipErr := b.enforcePromQLServerOwnership(recipeResult, platformRefs); ownershipErr != nil {
+	if ownershipErr := r.enforcePromQLServerOwnership(recipeResult, platformRefs); ownershipErr != nil {
 		return nil, ownershipErr
 	}
 	// Before values are extracted, so an operator on the wrong deployer
 	// hears that first rather than a required-value hint to declare the
 	// secret --dynamic, which that deployer would then refuse.
-	if secretErr := b.rejectInstallTimeSecretsOutsideHelm(recipeResult.ComponentRefs, recipeResult.DataProvider()); secretErr != nil {
+	if secretErr := r.rejectInstallTimeSecretsOutsideHelm(recipeResult.ComponentRefs, recipeResult.DataProvider()); secretErr != nil {
 		return nil, secretErr
 	}
 
@@ -330,13 +333,13 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// reject --dynamic declarations, warn on static overrides. Runs after
 	// alias resolution against the recipe-bound registry, before values are
 	// extracted, so REST/SDK callers get the same enforcement as the CLI.
-	if policyErr := b.enforceAllocationPolicyOverrides(recipeResult.DataProvider()); policyErr != nil {
+	if policyErr := r.enforceAllocationPolicyOverrides(recipeResult.DataProvider()); policyErr != nil {
 		return nil, policyErr
 	}
 
 	// The declared union lets the NVSentinel drain scope cover components this
 	// bundle filters out.
-	componentValues, err := b.extractComponentValues(ctx,
+	componentValues, err := r.extractComponentValues(ctx,
 		recipeResult.WithDeclaredComponents(profileBaseline.ComponentRefs))
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
@@ -348,11 +351,11 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if validationErr := ValidateAccountingValues(recipeResult, componentValues); validationErr != nil {
 		return nil, validationErr
 	}
-	dynamicValues, err := b.buildDynamicValuesMap(recipeResult.DataProvider())
+	dynamicValues, err := r.buildDynamicValuesMap(recipeResult.DataProvider())
 	if err != nil {
 		return nil, err
 	}
-	if dynamicErr := rejectDRAEvictionDynamicPaths(recipeResult, dynamicValues, b.Config.DRAEvictionNodeLabel()); dynamicErr != nil {
+	if dynamicErr := rejectDRAEvictionDynamicPaths(recipeResult, dynamicValues, r.Config.DRAEvictionNodeLabel()); dynamicErr != nil {
 		return nil, dynamicErr
 	}
 
@@ -360,26 +363,26 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// recipe state are applied AFTER extractComponentValues so global
 	// scheduling and user overrides cannot make either cross-chart contract
 	// drift. Every deployer sees the same final map.
-	b.injectDRAChartVersionAnnotation(componentValues, recipeResult)
-	if evictionErr := b.injectDRAEvictionLabel(componentValues, recipeResult); evictionErr != nil {
+	r.injectDRAChartVersionAnnotation(componentValues, recipeResult)
+	if evictionErr := r.injectDRAEvictionLabel(componentValues, recipeResult); evictionErr != nil {
 		return nil, evictionErr
 	}
-	if scopeErr := b.injectPromQLScrapeScope(recipeResult, platformRefs, componentValues); scopeErr != nil {
+	if scopeErr := r.injectPromQLScrapeScope(recipeResult, platformRefs, componentValues); scopeErr != nil {
 		return nil, scopeErr
 	}
-	if warningErr := b.warnPeermemReadinessDisabled(ctx, recipeResult, componentValues); warningErr != nil {
+	if warningErr := r.warnPeermemReadinessDisabled(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
 	}
-	if nicErr := b.checkNFDNICLabelMismatch(componentValues, dynamicValues); nicErr != nil {
+	if nicErr := r.checkNFDNICLabelMismatch(componentValues, dynamicValues); nicErr != nil {
 		return nil, nicErr
 	}
-	b.warnNRIManagementAllowlist(recipeResult, componentValues)
+	r.warnNRIManagementAllowlist(recipeResult, componentValues)
 
-	if warningErr := b.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
+	if warningErr := r.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
 	}
 
-	if exposureErr := b.resolveAgentgatewayExposure(componentValues); exposureErr != nil {
+	if exposureErr := r.resolveAgentgatewayExposure(componentValues); exposureErr != nil {
 		return nil, exposureErr
 	}
 
@@ -403,13 +406,13 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// bundlers=nvsentinel) must not skip the NVSentinel gates just
 	// because the gpu-operator ref they key on was filtered out of the
 	// OUTPUT — the declaration still describes the platform.
-	if validationErr := b.runComponentValidations(ctx,
+	if validationErr := r.runComponentValidations(ctx,
 		recipeResult.WithResolvedValues(componentValues).
 			WithDeclaredComponents(profileBaseline.ComponentRefs)); validationErr != nil {
 		return nil, componentValidationError(validationErr)
 	}
 
-	upgradeNotes, upgradeNotice, err := b.selectUpgradeNotes(ctx, recipeResult)
+	upgradeNotes, upgradeNotice, err := r.selectUpgradeNotes(ctx, recipeResult)
 	if err != nil {
 		return nil, err
 	}
@@ -417,8 +420,8 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// A class-partitioned set (ADR-018) branches here: every gate above ran
 	// once on the complete component set, and the partition is rendered
 	// into private staging and published atomically.
-	if b.Config.Split() {
-		return b.makeSplit(ctx, profileBaseline.ComponentRefs, recipeResult, componentValues, dir, upgradeNotes, start)
+	if r.Config.Split() {
+		return r.makeSplit(ctx, profileBaseline.ComponentRefs, recipeResult, componentValues, dir, upgradeNotes, start)
 	}
 
 	// No filesystem output is created until the final candidate has passed the
@@ -431,9 +434,9 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// After component validations, so a bundle that ships gpu-operator hears
 	// CheckDriverOwnershipCoherence's dynamic-path verdict first. Checked
 	// against dir, because Generate sees only the fresh stage.
-	if b.Config.Deployer() == config.DeployerArgoCDHelm {
+	if r.Config.Deployer() == config.DeployerArgoCDHelm {
 		if ownershipErr := argocdhelm.ValidateDriverOwnership(
-			ctx, recipeResult, dynamicValues, b.Config.VendorCharts(), dir,
+			ctx, recipeResult, dynamicValues, r.Config.VendorCharts(), dir,
 		); ownershipErr != nil {
 			return nil, ownershipErr
 		}
@@ -447,7 +450,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// Copy external data files before deployer construction so the file list
 	// is available for both the deployer (checksum tracking) and post-generation
 	// attestation. This is a no-op when --data is not set.
-	dataFiles, err := b.copyDataFiles(ctx, stage.path, recipeResult.DataProvider())
+	dataFiles, err := r.copyDataFiles(ctx, stage.path, recipeResult.DataProvider())
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 			return nil, err
@@ -457,11 +460,11 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	}
 
 	// Build the deployer and run it
-	d, err := b.buildDeployer(ctx, recipeResult, componentValues, dataFiles, upgradeNotice)
+	d, err := r.buildDeployer(ctx, recipeResult, componentValues, dataFiles, upgradeNotice)
 	if err != nil {
 		return nil, err
 	}
-	out, inventory, err := b.runDeployer(ctx, d, recipeResult, stage.path, dir, dataFiles, upgradeNotes, start)
+	out, inventory, err := r.runDeployer(ctx, d, recipeResult, stage.path, dir, dataFiles, upgradeNotes, start)
 	if err != nil {
 		return nil, err
 	}
@@ -961,31 +964,31 @@ func accountingValuesEqual(actual, expected any) bool {
 
 // enforceConfigurationOwnership checks typed ownership before filtering, so
 // removing a component cannot hide a protected path.
-func (b *DefaultBundler) enforceConfigurationOwnership(result *recipe.RecipeResult) error {
-	if err := b.enforceAccountingOwnership(result); err != nil {
+func (r *bundleRun) enforceConfigurationOwnership(result *recipe.RecipeResult) error {
+	if err := r.enforceAccountingOwnership(result); err != nil {
 		return err
 	}
-	return b.enforceGKETCPXOOwnership(result)
+	return r.enforceGKETCPXOOwnership(result)
 }
 
 // enforceAccountingOwnership prevents bundle-time inputs from becoming a
 // second representation of the typed ownership mode recorded in the recipe.
 // It runs before component filtering so a required component cannot disappear
 // before the check observes it.
-func (b *DefaultBundler) enforceAccountingOwnership(result *recipe.RecipeResult) error {
+func (r *bundleRun) enforceAccountingOwnership(result *recipe.RecipeResult) error {
 	mode, present := result.AccountingMode()
-	if b.Config == nil {
+	if r.Config == nil {
 		return nil
 	}
 	if !present {
-		return b.warnLegacyAccountingOverride(result.DataProvider())
+		return r.warnLegacyAccountingOverride(result.DataProvider())
 	}
 
-	if err := b.enforceOwnedPaths(result, recipe.AccountingOwnership(mode)); err != nil {
+	if err := r.enforceOwnedPaths(result, recipe.AccountingOwnership(mode)); err != nil {
 		return err
 	}
 
-	if requested := b.Config.Bundlers(); len(requested) > 0 {
+	if requested := r.Config.Bundlers(); len(requested) > 0 {
 		if mode == recipe.AccountingModeDisabled {
 			return nil
 		}
@@ -1110,13 +1113,13 @@ func (b *DefaultBundler) enforceGKETCPXOOwnership(result *recipe.RecipeResult) e
 	return b.enforceOwnedPaths(result, recipe.GKETCPXOOwnership())
 }
 
-func (b *DefaultBundler) warnLegacyAccountingOverride(provider recipe.DataProvider) error {
+func (r *bundleRun) warnLegacyAccountingOverride(provider recipe.DataProvider) error {
 	const accountingEnabledPath = "accounting.enabled"
-	_, scalarPresent := b.getValueOverridesForComponent(
+	_, scalarPresent := r.getValueOverridesForComponent(
 		"slinky-slurm", provider)[accountingEnabledPath]
-	_, typedPresent := b.getTypedValueOverridesForComponent(
+	_, typedPresent := r.getTypedValueOverridesForComponent(
 		"slinky-slurm", provider)[accountingEnabledPath]
-	dynamicValues, err := b.buildDynamicValuesMap(provider)
+	dynamicValues, err := r.buildDynamicValuesMap(provider)
 	if err != nil {
 		return err
 	}
@@ -1126,7 +1129,7 @@ func (b *DefaultBundler) warnLegacyAccountingOverride(provider recipe.DataProvid
 			"selects only customer-managed accounting and is not recorded in recipe evidence; " +
 			"regenerate the Slurm recipe with --slurm-accounting-mode customer-managed"
 		slog.Warn(warning)
-		b.appendWarning(warning)
+		r.appendWarning(warning)
 	}
 	return nil
 }
@@ -1140,7 +1143,7 @@ func (b *DefaultBundler) warnLegacyAccountingOverride(provider recipe.DataProvid
 // record's coverage is the user's deliberate choice. A record that cannot be
 // read drops all guidance with a warning; one that loads but is ill-formed
 // renders what it can, since BundleNotes leaves unparseable ranges inert.
-func (b *DefaultBundler) selectUpgradeNotes(ctx context.Context, rr *recipe.RecipeResult) ([]upgrade.BundleNote, string, error) {
+func (r *bundleRun) selectUpgradeNotes(ctx context.Context, rr *recipe.RecipeResult) ([]upgrade.BundleNote, string, error) {
 	set, _, err := recipe.LoadUpgradeRecords(ctx, rr.DataProvider())
 	if err != nil {
 		// Cancellation is the caller stopping the bundle, not a record fault.
@@ -1150,7 +1153,7 @@ func (b *DefaultBundler) selectUpgradeNotes(ctx context.Context, rr *recipe.Reci
 		warning := fmt.Sprintf("upgrade guidance was not added to this bundle; run aicr upgrade-check "+
 			"to review upgrade steps. A transition record could not be read: %v", err)
 		slog.Warn(warning)
-		b.appendWarning(warning)
+		r.appendWarning(warning)
 		return nil, "", nil
 	}
 	refs := deployer.SortComponentRefsByDeploymentOrder(rr.ComponentRefs, rr.DeploymentOrder)
@@ -1167,7 +1170,7 @@ func (b *DefaultBundler) selectUpgradeNotes(ctx context.Context, rr *recipe.Reci
 		return nil, "", nil
 	}
 	var sb strings.Builder
-	if err := upgrade.WriteNotice(&sb, notes, string(b.Config.Deployer())); err != nil {
+	if err := upgrade.WriteNotice(&sb, notes, string(r.Config.Deployer())); err != nil {
 		return nil, "", err
 	}
 	return notes, sb.String(), nil
@@ -1519,7 +1522,7 @@ var warnDeprecated = deprecation.Warn
 // it reads once dir is published at publishedDir. It also returns the
 // verified checksum inventory of dir, nil when checksums are disabled.
 // dataFiles is the list of external data file paths already copied by Make().
-func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir, publishedDir string, dataFiles []string, upgradeNotes []upgrade.BundleNote, start time.Time) (*result.Output, *checksum.Inventory, error) {
+func (r *bundleRun) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir, publishedDir string, dataFiles []string, upgradeNotes []upgrade.BundleNote, start time.Time) (*result.Output, *checksum.Inventory, error) {
 	output, err := d.Generate(ctx, dir)
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
@@ -1528,14 +1531,14 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate bundle", err)
 	}
 	if len(upgradeNotes) > 0 {
-		guidePath, guideSize, guideErr := b.writeUpgradeGuide(dir, upgradeNotes)
+		guidePath, guideSize, guideErr := r.writeUpgradeGuide(dir, upgradeNotes)
 		if guideErr != nil {
 			return nil, nil, guideErr
 		}
 		output.Files = append(output.Files, guidePath)
 		output.TotalSize += guideSize
 	}
-	recipeSize, writeErr := b.writeRecipeFile(recipeResult, dir)
+	recipeSize, writeErr := r.writeRecipeFile(recipeResult, dir)
 	if writeErr != nil {
 		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
 	}
@@ -1555,7 +1558,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	}
 	recipeDigest := fmt.Sprintf("sha256:%x", rawDigest)
 
-	info := b.buildBundleInfo(recipeResult, output, recipeDigest)
+	info := r.buildBundleInfo(recipeResult, output, recipeDigest)
 	infoSize, infoErr := bundleinfo.Write(ctx, dir, info)
 	if infoErr != nil {
 		return nil, nil, errors.PropagateOrWrap(infoErr, errors.ErrCodeInternal, "failed to write bundle info")
@@ -1563,7 +1566,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	output.Files = append(output.Files, filepath.Join(dir, bundleinfo.FileName))
 	output.TotalSize += infoSize
 
-	if b.Config.IncludeChecksums() {
+	if r.Config.IncludeChecksums() {
 		if checksumErr := checksum.WriteChecksums(ctx, dir, output); checksumErr != nil {
 			return nil, nil, errors.PropagateOrWrap(
 				checksumErr, errors.ErrCodeInternal, "failed to finalize bundle checksums")
@@ -1571,12 +1574,12 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	}
 
 	// Attest bundle (skips internally when not configured)
-	attestFiles, err := b.attestBundleAt(ctx, dir, publishedDir, dataFiles, recipeResult)
+	attestFiles, err := r.attestBundleAt(ctx, dir, publishedDir, dataFiles, recipeResult)
 	if err != nil {
 		return nil, nil, err
 	}
 	var inventory *checksum.Inventory
-	if b.Config.IncludeChecksums() {
+	if r.Config.IncludeChecksums() {
 		verifyOpts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
 		var verifyErr error
 		_, inventory, _, verifyErr = checksum.ReadAndVerifyBundle(ctx, dir, verifyOpts)
@@ -1597,7 +1600,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	}
 
 	// Map deployer type to result and deployment names
-	resultType, deploymentType := deployerResultNames(b.Config.Deployer(), b.Config.TerraformChildModule())
+	resultType, deploymentType := deployerResultNames(r.Config.Deployer(), r.Config.TerraformChildModule())
 
 	// Build result
 	resultOutput := &result.Output{
@@ -1623,8 +1626,8 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	if len(output.DeploymentNotes) > 0 {
 		notes = append(notes, publishedText(dir, publishedDir, output.DeploymentNotes)...)
 	}
-	if len(b.warnings) > 0 {
-		notes = append(notes, b.warnings...)
+	if len(r.warnings) > 0 {
+		notes = append(notes, r.warnings...)
 	}
 	resultOutput.Deployment = &result.DeploymentInfo{
 		Type:  deploymentType,
@@ -1633,7 +1636,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	}
 
 	slog.Debug("bundle generation complete",
-		"deployer", b.Config.Deployer(),
+		"deployer", r.Config.Deployer(),
 		"files", len(output.Files),
 		"size_bytes", output.TotalSize,
 		"duration", output.Duration,
@@ -1971,8 +1974,8 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 
 // filterAndValidateRecipe also returns the platform's refs, before the
 // bundlers filter.
-func (b *DefaultBundler) filterAndValidateRecipe(ctx context.Context, recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, []recipe.ComponentRef, error) {
-	selection, filterErr := b.filterEnabledComponents(ctx, recipeResult)
+func (r *bundleRun) filterAndValidateRecipe(ctx context.Context, recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, []recipe.ComponentRef, error) {
+	selection, filterErr := r.filterEnabledComponents(ctx, recipeResult)
 	if filterErr != nil {
 		return nil, nil, filterErr
 	}
@@ -1981,7 +1984,7 @@ func (b *DefaultBundler) filterAndValidateRecipe(ctx context.Context, recipeResu
 	// the generated bundle cannot take effect. Reject it rather than drop
 	// it on the floor. Runs immediately after filtering, so the "present"
 	// set is exactly what will be rendered.
-	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, selection.emitted, selection.excluded); overrideErr != nil {
+	if overrideErr := r.rejectOverridesForAbsentComponents(recipeResult, selection.emitted, selection.excluded); overrideErr != nil {
 		return nil, nil, overrideErr
 	}
 
@@ -2008,7 +2011,7 @@ type componentSelection struct {
 
 // filterEnabledComponents narrows platformEnabledComponents by the bundlers
 // filter (config.WithBundlers, #1531).
-func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResult *recipe.RecipeResult) (componentSelection, error) {
+func (r *bundleRun) filterEnabledComponents(ctx context.Context, recipeResult *recipe.RecipeResult) (componentSelection, error) {
 	// declaredSet is every component the recipe names, regardless of enabled
 	// state. It distinguishes a declared-but-disabled dependency (prune the
 	// edge — satisfied externally) from an undeclared one (keep it so topology
@@ -2018,7 +2021,7 @@ func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResu
 		declaredSet[ref.Name] = struct{}{}
 	}
 
-	platformRefs, excludedReasons, platformErr := b.platformEnabledComponents(ctx, recipeResult)
+	platformRefs, excludedReasons, platformErr := r.platformEnabledComponents(ctx, recipeResult)
 	if platformErr != nil {
 		return componentSelection{}, platformErr
 	}
@@ -2036,8 +2039,8 @@ func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResu
 	// components outside the requested set are skipped exactly like
 	// disabled ones, so the dependency-edge pruning below treats them as
 	// satisfied externally. See #1531.
-	if b.Config != nil {
-		if requested := b.Config.Bundlers(); len(requested) > 0 {
+	if r.Config != nil {
+		if requested := r.Config.Bundlers(); len(requested) > 0 {
 			requestedSet := make(map[string]struct{}, len(requested))
 			for _, name := range requested {
 				if _, declared := declaredSet[name]; !declared {
@@ -2060,8 +2063,8 @@ func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResu
 				if _, ok := requestedSet[ref.Name]; !ok {
 					slog.Info("skipping component excluded by bundlers filter", "component", ref.Name)
 					excludedReasons[ref.Name] = "the bundlers filter excludes it"
-					b.warnExcludedDriverInstaller(recipeResult, ref.Name, "excluded by the bundlers filter")
-					b.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "excluded by the bundlers filter")
+					r.warnExcludedDriverInstaller(recipeResult, ref.Name, "excluded by the bundlers filter")
+					r.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "excluded by the bundlers filter")
 					delete(enabledSet, ref.Name)
 					continue
 				}
@@ -2073,7 +2076,7 @@ func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResu
 
 	// After the positive filter, so a `bundlers` selection that keeps the
 	// labeler but drops either half of the contract it serves still removes it.
-	enabledRefs, labelerErr := b.dropUnservedDRANodeLabeler(enabledRefs, enabledSet, excludedReasons)
+	enabledRefs, labelerErr := r.dropUnservedDRANodeLabeler(enabledRefs, enabledSet, excludedReasons)
 	if labelerErr != nil {
 		return componentSelection{}, labelerErr
 	}
@@ -2137,13 +2140,13 @@ func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResu
 // already provides it (e.g. a CSP-managed cert-manager on OKE), so re-enabling
 // would install a conflicting second copy and there is no authored deployment
 // order for it. Such an attempt is rejected with ErrCodeInvalidRequest.
-func (b *DefaultBundler) platformEnabledComponents(ctx context.Context, recipeResult *recipe.RecipeResult) ([]recipe.ComponentRef, map[string]string, error) {
+func (r *bundleRun) platformEnabledComponents(ctx context.Context, recipeResult *recipe.RecipeResult) ([]recipe.ComponentRef, map[string]string, error) {
 	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
 	// excludedReasons records, per dropped component, the reason phrase
 	// rejectOverridesForAbsentComponents quotes back to the operator.
 	excludedReasons := make(map[string]string)
 	for _, ref := range recipeResult.ComponentRefs {
-		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name, recipeResult.DataProvider())
+		setEnabled, ok, overrideErr := r.getSetEnabledOverride(ref.Name, recipeResult.DataProvider())
 		if overrideErr != nil {
 			return nil, nil, overrideErr
 		}
@@ -2165,16 +2168,16 @@ func (b *DefaultBundler) platformEnabledComponents(ctx context.Context, recipeRe
 				} else {
 					excludedReasons[ref.Name] = "the recipe disables it"
 				}
-				b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled via --set")
-				b.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "disabled via --set")
+				r.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled via --set")
+				r.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "disabled via --set")
 				continue
 			}
 			// setEnabled && recipeEnabled: explicit --set enabled=true is a no-op.
 		} else if !recipeEnabled {
 			slog.Info("skipping disabled component", "component", ref.Name)
 			excludedReasons[ref.Name] = "the recipe disables it"
-			b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled by the recipe")
-			b.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "disabled by the recipe")
+			r.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled by the recipe")
+			r.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "disabled by the recipe")
 			continue
 		}
 		enabledRefs = append(enabledRefs, ref)
@@ -2379,7 +2382,7 @@ func overridePathsByComponent[V any](overrides map[string]map[string]V) map[stri
 // either, so an exclusion made by mistake (or to dodge a Rule 1
 // rejection) turns into late, opaque scheduling failures on driverless
 // GPU nodes. Warn at the point of exclusion instead.
-func (b *DefaultBundler) warnExcludedDriverInstaller(recipeResult *recipe.RecipeResult, componentName, how string) {
+func (r *bundleRun) warnExcludedDriverInstaller(recipeResult *recipe.RecipeResult, componentName, how string) {
 	if !isGPUOperatorComponent(componentName) {
 		return
 	}
@@ -2393,7 +2396,7 @@ func (b *DefaultBundler) warnExcludedDriverInstaller(recipeResult *recipe.Recipe
 			"This is expected only when the driver stack is provided out-of-band or by a "+
 			"separate bundle that includes %s.", componentName, how, componentName)
 	slog.Warn(warning, "component", componentName)
-	b.appendWarning(warning)
+	r.appendWarning(warning)
 }
 
 // aksToolkitHardeningManifest and okeToolkitHardeningManifest are the
@@ -2412,7 +2415,7 @@ const (
 // explicit opt-out of it; this warns rather than blocks, but nothing else in
 // the bundle sets those keys. When gpu-operator's values cannot be resolved it
 // warns too.
-func (b *DefaultBundler) warnExcludedToolkitHardening(ctx context.Context, recipeResult *recipe.RecipeResult, componentName, how string) {
+func (r *bundleRun) warnExcludedToolkitHardening(ctx context.Context, recipeResult *recipe.RecipeResult, componentName, how string) {
 	ref := recipeResult.GetComponentRef(componentName)
 	if ref == nil {
 		return
@@ -2424,7 +2427,7 @@ func (b *DefaultBundler) warnExcludedToolkitHardening(ctx context.Context, recip
 	if recipeResult.GetComponentRef(gpuOperatorComponentName) == nil {
 		return
 	}
-	toolkitEnabled, err := b.effectiveGPUOperatorToolkitEnabled(ctx, recipeResult)
+	toolkitEnabled, err := r.effectiveGPUOperatorToolkitEnabled(ctx, recipeResult)
 	if err == nil && toolkitEnabled != "false" {
 		return
 	}
@@ -2442,7 +2445,7 @@ func (b *DefaultBundler) warnExcludedToolkitHardening(ctx context.Context, recip
 		warning += fmt.Sprintf(" (gpu-operator toolkit.enabled could not be resolved: %v)", err)
 	}
 	slog.Warn(warning, "component", componentName)
-	b.appendWarning(warning)
+	r.appendWarning(warning)
 }
 
 // effectiveGPUOperatorToolkitEnabled returns gpu-operator's toolkit.enabled as
@@ -3058,8 +3061,8 @@ func intersectingPaths(paths []string, set map[string]struct{}) []string {
 	return out
 }
 
-func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) error {
-	if b.Config == nil {
+func (r *bundleRun) warnMissingStorageClassForPVCs(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) error {
+	if r.Config == nil {
 		return nil
 	}
 
@@ -3097,7 +3100,7 @@ func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, rec
 				ref.Name,
 				path,
 			)
-			b.appendWarning(msg)
+			r.appendWarning(msg)
 			slog.Warn("component PVC storageClassName is unset",
 				"component", ref.Name,
 				"path", path,
@@ -3172,7 +3175,7 @@ const (
 // --set-json agentgateway:allowedSourceRanges='["<cidr>"]'; an explicit
 // any-source opt-in is still permitted but logged loudly; an invalid value is
 // rejected. It mutates componentValues only in the unset case. See #1373.
-func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]map[string]any) error {
+func (r *bundleRun) resolveAgentgatewayExposure(componentValues map[string]map[string]any) error {
 	values := componentValues[agentgatewayComponentName]
 	if values == nil {
 		return nil
@@ -3183,7 +3186,7 @@ func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]
 		return err
 	}
 	if serviceType != "" && serviceType != agentgatewayServiceTypeLB {
-		return b.noteAgentgatewayNonLBService(values, serviceType)
+		return r.noteAgentgatewayNonLBService(values, serviceType)
 	}
 
 	state, detail := classifyAgentgatewaySourceRanges(values, agentgatewaySourceRangesPath)
@@ -3200,7 +3203,7 @@ func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]
 				"scope it to trusted networks unless public exposure is intended.",
 			agentgatewayComponentName, agentgatewaySourceRangesPath,
 		)
-		b.appendWarning(msg)
+		r.appendWarning(msg)
 		slog.Warn("agentgateway inference-gateway is explicitly opened via an any-source CIDR (deliberate public opt-in)",
 			"component", agentgatewayComponentName,
 			"path", agentgatewaySourceRangesPath,
@@ -3223,7 +3226,7 @@ func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]
 			ranges[i] = r
 		}
 		values[agentgatewaySourceRangesPath] = ranges
-		b.appendWarning(fmt.Sprintf(
+		r.appendWarning(fmt.Sprintf(
 			"%s: %s was not set; defaulting the inference-gateway to private ranges (%s) so it is "+
 				"not exposed to the public internet. To allow specific public clients (e.g. a corporate VPN), "+
 				"set --set-json %s:%s='[\"<cidr>\"]'; to expose it publicly, use [\"0.0.0.0/0\"]. "+
@@ -3285,7 +3288,7 @@ func agentgatewayNonLBReach(serviceType string) string {
 // LoadBalancer-only Service field, so the manifest renders no ranges and the
 // private-by-default injection is skipped. Ranges the operator passed
 // explicitly are reported as a warning because they will not take effect.
-func (b *DefaultBundler) noteAgentgatewayNonLBService(values map[string]any, serviceType string) error {
+func (r *bundleRun) noteAgentgatewayNonLBService(values map[string]any, serviceType string) error {
 	state, detail := classifyAgentgatewaySourceRanges(values, agentgatewaySourceRangesPath)
 	switch state {
 	case exposureInvalid:
@@ -3293,7 +3296,7 @@ func (b *DefaultBundler) noteAgentgatewayNonLBService(values map[string]any, ser
 			"%s: %s must be a list of CIDR strings (%s)",
 			agentgatewayComponentName, agentgatewaySourceRangesPath, detail))
 	case exposureScoped, exposureOpen:
-		b.appendWarning(fmt.Sprintf(
+		r.appendWarning(fmt.Sprintf(
 			"%s: %s is set but %s is %s; loadBalancerSourceRanges applies only to a LoadBalancer "+
 				"Service, so the inference-gateway renders without them. %s",
 			agentgatewayComponentName, agentgatewaySourceRangesPath, agentgatewayServiceTypePath, serviceType,
@@ -3303,7 +3306,7 @@ func (b *DefaultBundler) noteAgentgatewayNonLBService(values map[string]any, ser
 			"serviceType", serviceType,
 		)
 	case exposureUnset:
-		b.appendWarning(fmt.Sprintf(
+		r.appendWarning(fmt.Sprintf(
 			"%s: %s is %s, so the inference-gateway Service is not a LoadBalancer and %s does not apply; "+
 				"the private-by-default source ranges are not injected. %s",
 			agentgatewayComponentName, agentgatewayServiceTypePath, serviceType, agentgatewaySourceRangesPath,
@@ -3398,28 +3401,28 @@ func hasConfiguredStorageClass(values map[string]any, path string) bool {
 	return true
 }
 
-func (b *DefaultBundler) appendWarning(warning string) {
+func (r *bundleRun) appendWarning(warning string) {
 	if !strings.HasPrefix(warning, "Warning: ") {
 		warning = "Warning: " + warning
 	}
-	b.warnings = append(b.warnings, warning)
+	r.warnings = append(r.warnings, warning)
 }
 
 // runComponentValidations executes all component-specific validations registered in the registry.
 // Collects warnings and errors based on validation severity. The iteration
 // itself lives in validations.RunComponentValidations so the SDK bundle path
 // (Client.BundleComponents) runs the identical preflight.
-func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResult *recipe.RecipeResult) error {
-	if b.Config == nil {
+func (r *bundleRun) runComponentValidations(ctx context.Context, recipeResult *recipe.RecipeResult) error {
+	if r.Config == nil {
 		return nil
 	}
 
-	warnings, err := validations.RunComponentValidations(ctx, recipeResult, b.Config)
+	warnings, err := validations.RunComponentValidations(ctx, recipeResult, r.Config)
 
 	// Collect warnings (prepend "Warning: " if not already present) —
 	// including any gathered before a blocking error.
 	for _, warning := range warnings {
-		b.appendWarning(warning)
+		r.appendWarning(warning)
 	}
 
 	return err
@@ -4411,12 +4414,12 @@ func valuePathsIntersect(left, right string) bool {
 // did before the contract existed. The cost is that the plugin cannot be
 // descheduled ahead of a driver container restart; that is surfaced as a
 // bundle-time warning where a Driver Manager actually runs.
-func (b *DefaultBundler) injectDRAEvictionLabel(
+func (r *bundleRun) injectDRAEvictionLabel(
 	componentValues map[string]map[string]any,
 	recipeResult *recipe.RecipeResult,
 ) error {
 
-	if b == nil || b.Config == nil || componentValues == nil || recipeResult == nil {
+	if r.DefaultBundler == nil || r.Config == nil || componentValues == nil || recipeResult == nil {
 		return nil
 	}
 
@@ -4425,9 +4428,9 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 		return nil
 	}
 
-	label := b.Config.DRAEvictionNodeLabel()
+	label := r.Config.DRAEvictionNodeLabel()
 	if label == (config.NodeLabel{}) {
-		b.warnDRAEvictionNotConfigured(componentValues, draNames, gpuOperatorNames)
+		r.warnDRAEvictionNotConfigured(componentValues, draNames, gpuOperatorNames)
 		return nil
 	}
 
@@ -4465,11 +4468,11 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 		// must start rendering (issue #2846).
 		values[draNodeLabelerEnabledPath] = true
 		persistDRANodeLabelerGate(recipeResult)
-		b.warnDRAEvictionLabelDerived(draNames, label)
+		r.warnDRAEvictionLabelDerived(draNames, label)
 		return nil
 	}
 
-	b.warnDRAEvictionNodeLabelRequired(draNames, label)
+	r.warnDRAEvictionNodeLabelRequired(draNames, label)
 
 	return nil
 }
@@ -4497,7 +4500,7 @@ func persistDRANodeLabelerGate(recipeResult *recipe.RecipeResult) {
 // the label is applied by the labeler from GFD's nvidia.com/gpu.present, so no
 // node-pool provisioning is required, and the remaining gap is a GPU node GFD
 // has not labeled (no gpu.present, no eviction label, no kubelet plugin).
-func (b *DefaultBundler) warnDRAEvictionLabelDerived(draNames []string, label config.NodeLabel) {
+func (r *bundleRun) warnDRAEvictionLabelDerived(draNames []string, label config.NodeLabel) {
 	for _, name := range draNames {
 		msg := fmt.Sprintf(
 			"%s schedules its kubelet plugin only on nodes labeled %s=%s; dra-node-labeler applies that label to every node GFD reports as nvidia.com/gpu.present=true, so no node-pool labeling is required. A GPU node without gpu.present (GFD not yet running, or a node GPU Operator does not manage) that does not already carry %s=%s runs no kubelet plugin and publishes no ResourceSlices. To provision the label yourself instead, pass --set %s:enabled=false",
@@ -4508,7 +4511,7 @@ func (b *DefaultBundler) warnDRAEvictionLabelDerived(draNames []string, label co
 			label.Value,
 			draNodeLabelerComponentName,
 		)
-		b.appendWarning(msg)
+		r.appendWarning(msg)
 		slog.Warn("DRA kubelet plugin label derived by dra-node-labeler",
 			"component", name,
 			"label", label.String(),
@@ -4531,7 +4534,7 @@ func (b *DefaultBundler) warnDRAEvictionLabelDerived(draNames []string, label co
 // silently lacking DRA — measured on an EKS GB300 cluster, where unlabeling
 // one of two nodes moved the DaemonSet to DESIRED=1, not 0. DESIRED=0 applies
 // only when no GPU node carries the label at all.
-func (b *DefaultBundler) warnDRAEvictionNodeLabelRequired(draNames []string, label config.NodeLabel) {
+func (r *bundleRun) warnDRAEvictionNodeLabelRequired(draNames []string, label config.NodeLabel) {
 	for _, name := range draNames {
 		msg := fmt.Sprintf(
 			"%s schedules its kubelet plugin only on nodes labeled %s=%s; apply that label to every GPU node at node-pool provisioning time (EKS managed nodegroup labels, Karpenter NodePool spec.template.metadata.labels, or equivalent) — including when upgrading an existing cluster. Unlabeled GPU nodes silently run without DRA: they publish no ResourceSlices, and if no GPU node carries the label the kubelet-plugin DaemonSet sits at DESIRED=0. Neither Helm nor deploy.sh reports an error either way",
@@ -4539,7 +4542,7 @@ func (b *DefaultBundler) warnDRAEvictionNodeLabelRequired(draNames []string, lab
 			label.Key,
 			label.Value,
 		)
-		b.appendWarning(msg)
+		r.appendWarning(msg)
 		slog.Warn("DRA kubelet plugin requires a node label",
 			"component", name,
 			"label", label.String(),
@@ -4557,7 +4560,7 @@ func (b *DefaultBundler) warnDRAEvictionNodeLabelRequired(draNames []string, lab
 // deploys no driver pod, nothing can restart the driver under the plugin, and
 // the warning would be noise. A missing field means enabled, matching the
 // GPU Operator chart default.
-func (b *DefaultBundler) warnDRAEvictionNotConfigured(
+func (r *bundleRun) warnDRAEvictionNotConfigured(
 	componentValues map[string]map[string]any,
 	draNames []string,
 	gpuOperatorNames []string,
@@ -4579,7 +4582,7 @@ func (b *DefaultBundler) warnDRAEvictionNotConfigured(
 			"AICR did not configure automatic eviction for %s: no DRA eviction node label is set, so the kubelet plugin is not descheduled before a GPU driver container restart. The plugin runs on every accelerated node and needs no extra node label. On a driver upgrade the module unload can fail with \"failed to uninstall nvidia driver components\"; on an unchanged-config restart the stale driver rootfs is unmounted underneath the running plugin, which upstream documents as leaving NodePrepareResources unable to build CDI specs for full-GPU allocation, with no error at restart time. Set --dra-eviction-node-label (or scheduling.draEvictionNodeLabel) to opt in; the bundle then carries dra-node-labeler, which applies the label from GFD's nvidia.com/gpu.present, so no node-pool labeling is needed (pass --set dra-node-labeler:enabled=false to provision it yourself)",
 			name,
 		)
-		b.appendWarning(msg)
+		r.appendWarning(msg)
 		slog.Warn("DRA kubelet-plugin eviction not configured",
 			"component", name,
 		)

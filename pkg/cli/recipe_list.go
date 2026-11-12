@@ -110,6 +110,8 @@ Include overlays from an external data directory:
 				Category: catQueryParameters,
 			}, recipe.GetCriteriaPlatformTypes),
 			dataFlag(),
+			configFlag(),
+			externalOnlyFlag(),
 			withCompletions(&cli.StringFlag{
 				Name:     flagFormat,
 				Aliases:  []string{"t"},
@@ -129,7 +131,11 @@ Include overlays from an external data directory:
 				return err
 			}
 
-			client, err := recipeClientFromCmd(ctx, cmd, nil)
+			cfg, err := loadFacadeConfig(ctx, cmd)
+			if err != nil {
+				return err
+			}
+			client, err := recipeClientFromCmd(ctx, cmd, cfg)
 			if err != nil {
 				return err
 			}

@@ -33,7 +33,8 @@ A validator is any container that follows the exit code contract:
 Any other exit code, or a container that never terminates, maps to CTRF `other`
 (indeterminate), which blocks like `failed`. A validator that traps SIGTERM
 (Job deadline, eviction, node drain or operator cancellation) should finish its
-cleanup within the pod's 30s termination grace and exit `3`, not `0`, because
+cleanup within the pod's 60s termination grace (30s for cleanup, 30s to write the
+termination message) and exit `3`, not `0`, because
 its verdict is incomplete. Validators built on `validators.Run` do this
 automatically.
 
@@ -252,7 +253,7 @@ ENTRYPOINT ["/check.sh"]
 
 - Should run as non-root (the validator Job sets no `securityContext`, so the image's own `USER` applies)
 - Must handle the mounted data paths (`/data/snapshot/`, `/data/validation/`)
-- **Must** self-terminate within the catalog `timeout` (published as `AICR_CHECK_TIMEOUT`) rather than rely on the Job — the Job's `activeDeadlineSeconds` is set to the catalog entry plus a fixed headroom, as a backstop for a check that never exits on its own. Self-termination is what preserves the logs: a pod that exited on its own is no longer *active*, so the Job controller's `deleteActivePods` leaves it in place as `Failed` for the orchestrator to read, whereas a pod still running when the backstop fires is deleted along with its verdict
+- **Must** self-terminate within the catalog `timeout` (published as `AICR_CHECK_TIMEOUT`) rather than rely on the Job — the Job's `activeDeadlineSeconds` is set to the catalog entry plus a fixed headroom, as a backstop for a check that never exits on its own. Self-termination is what preserves the logs: a pod that exited on its own is no longer *active*, so the Job controller's `deleteActivePods` leaves it in place as `Failed` for the orchestrator to read, whereas a pod still running when the backstop fires is deleted, so only its termination message and exit code (not its logs) survive. The headroom (3m) covers container startup, deferred cleanup and a result flush, and the orchestrator waits a further 60s SIGTERM window past the Job deadline
 - Should write meaningful evidence to stdout for the CTRF report
 - Must use explicit image tags (not `:latest`) for reproducibility in external catalogs
 

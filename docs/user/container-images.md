@@ -16,11 +16,19 @@ The image set below is regenerated from the live Helm chart catalog and the embe
 
 A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by `make bom` and published as a release asset. Tooling that consumes SBOMs (Trivy, Grype, Cosign attestation, in-toto) should prefer the JSON; this Markdown is the human-readable view.
 
+## Driver images
+
+The GPU Operator and Network Operator build their driver image tags on each node, so the version in a recipe is not itself a published tag. The GPU driver tag is `<version>-<os><os-version>` (for example `580.173.02-ubuntu24.04`); for `rhel` the GPU Operator uses only the major version (for example `580.173.02-rhel9`). The DOCA driver tag is `<version>-<os><os-version>-<arch>` (for example `doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`). The GPU Operator completes the GDRCopy (`gdrdrv`), GDS (`nvidia-fs`) and vGPU Manager (`vgpuManager`) tags the same way as the GPU driver, for example `gdrdrv:v2.6-ubuntu24.04`. No shipped recipe enables vGPU Manager, so the catalog lists none.
+
+This list names the tags for the OS version (and, for DOCA, the architecture) that the recipes deploying that driver pin. Tags that also name each node's kernel (a GPU driver with `usePrecompiled: true`, such as the SUSE driver in `rke2-sles`, or a DOCA driver with `forcePrecompiled: true`) are not listed. A DOCA driver with `forcePrecompiled: false` uses a kernel-specific precompiled tag when the registry has one and otherwise builds from the listed standard tag on the node. The standard tag is therefore enough for a mirror, but the precompiled images it may pull from nvcr.io are not listed. A driver pinned by digest needs no extra tag. GDRCopy and GDS are containers of the operator-managed driver pod, so they are listed only for recipes that enable them and deploy that driver.
+
+The catalog lists the driver version that the default chart render carries. Versions that a leaf recipe pins (such as `595.91.07` and `615.71.09`) are not listed; `aicr mirror list` gives the tags for one recipe.
+
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
 - Components: **58**
-- Unique images: **167**
+- Unique images: **168**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -45,7 +53,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-gb200-rdma | manifest | — | — | 2 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.7.2 | 14 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.7.2 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.13 | 1 |
@@ -180,14 +188,15 @@ _No images extracted._
 ### gpu-operator
 
 - `nvcr.io/nvidia/cloud-native/dcgm:4.6.1-1-ubuntu24.04`
-- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6`
+- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu24.04`
+- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu26.04`
 - `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.4`
 - `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.12.1`
 - `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.1`
-- `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4`
+- `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4-ubuntu24.04`
 - `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.5`
 - `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.1`
-- `nvcr.io/nvidia/driver:580.173.02`
+- `nvcr.io/nvidia/driver:580.173.02-ubuntu24.04`
 - `nvcr.io/nvidia/gpu-operator:v26.7.2`
 - `nvcr.io/nvidia/k8s-device-plugin:v0.20.1`
 - `nvcr.io/nvidia/k8s/container-toolkit:v1.20.1`
@@ -269,7 +278,7 @@ _No images extracted._
 
 ### network-operator
 
-- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0`
+- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0-ubuntu24.04-amd64`
 - `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
 - `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
 - `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
@@ -280,8 +289,8 @@ _No images extracted._
 - `ghcr.io/mellanox/nvidia-k8s-ipam@sha256:47e1bb84ac97f9af49f97b49c2de44b4ba82b890b487880edc5c9adf86a176f7`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.7.0`
 - `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
 - `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`
@@ -480,7 +489,7 @@ _No images extracted._
 
 ### network-operator@25.7.0 (variant)
 
-- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0`
+- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0-ubuntu24.04-amd64`
 - `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
 - `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
 - `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
@@ -491,8 +500,8 @@ _No images extracted._
 - `ghcr.io/mellanox/nvidia-k8s-ipam@sha256:47e1bb84ac97f9af49f97b49c2de44b4ba82b890b487880edc5c9adf86a176f7`
 - `nvcr.io/nvidia/cloud-native/network-operator:v25.7.0`
 - `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
 - `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`
@@ -506,7 +515,7 @@ _No images extracted._
 
 ### network-operator@26.7.1 (variant)
 
-- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0`
+- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0-ubuntu24.04-amd64`
 - `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
 - `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
 - `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
@@ -517,8 +526,8 @@ _No images extracted._
 - `ghcr.io/mellanox/nvidia-k8s-ipam@sha256:47e1bb84ac97f9af49f97b49c2de44b4ba82b890b487880edc5c9adf86a176f7`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.7.1`
 - `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
 - `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`

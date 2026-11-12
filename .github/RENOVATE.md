@@ -17,15 +17,17 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 
 | Source | Manager |
 |---|---|
-| `go.mod` | `gomod` (groups: `kubernetes`, `golang-x`, `opencontainers`) |
+| `go.mod` | `gomod` (groups: `kubernetes`, `golang-x`, `opencontainers`, `sigstore-modules`, `aws-sdk-go-v2`; every other non-major bump shares `go-modules`, majors stay one PR each) |
 | `.github/workflows/*.yaml`, `.github/actions/*/action.yml` | `github-actions` (**disabled** — Dependabot owns workflow / composite-action bumps; Renovate cannot push `.github/workflows/*` with the auto-issued `GITHUB_TOKEN`) |
 | `validators/*/Dockerfile` | `dockerfile` |
 | `validators/performance/requirements.txt` (aiperf) | `pip_requirements` (`aiperf` group) |
 | `validators/performance/requirements-overrides.txt` (transitive overrides, e.g. pillow) | `pip_requirements` (default file pattern; needs the same `make python-licenses` refresh) |
 | `validators/performance/aiperf-bench.Dockerfile` `ARG AIPERF_VERSION` | dedicated `pypi` customManager (`aiperf` group, so it moves with `requirements.txt`) |
 | `infra/**/*.tf` | `terraform` (grouped) |
-| `recipes/components/*/values.yaml` | `helm-values` (partial — see limitations) |
+| `recipes/components/*/values.yaml` | `helm-values` (partial — see limitations; `docker.io/percona/*` images share the `percona` group) |
+| `recipes/components/*/manifests/*.yaml` image references | `kubernetes` (digest rotations share the `component-manifest-digests` group) |
 | `recipes/components/*/manifests/*.yaml` digests in CRD fields (NicClusterPolicy `version: sha256:<hex>`, Skyhook Package `containerSHA`) | dedicated `crd-digest` customManager: digest PRs only, never auto-merged. A NicClusterPolicy digest needs a `# renovate: datasource=docker depName=<image> tag=<tag>` line directly above it, because the digest replaces the tag; change `tag=` and the digest together, or the next rotation moves the digest back to the tag the line still names. `recipes/manifest_digest_renovate_test.go` fails on a digest the manager cannot read, and on a `network-operator-v*` tag that differs from the chart pin |
+| `tools/mdx/package.json` | `npm` (non-major bumps share the `mdx-tools` group) |
 | `recipes/registry.yaml` (35 chart pins) | custom regex manager (`# renovate:` annotations) — **report-only**, see [Registry drift report](#registry-drift-report) |
 | `.settings.yaml` (39 tool entries) | custom regex manager (`# renovate:` annotations) |
 | `.settings.yaml` `nvkind` SHA | dedicated git-refs digest customManager (`# renovate-digest:`) |

@@ -299,6 +299,7 @@ func defaultClientDependencies() clientDependencies {
 // For FilesystemSource, the external directory is layered OVER the
 // embedded recipe data — files in the directory override embedded
 // equivalents, and recipes must include a registry.yaml at the root.
+// ExternalFilesystemSource disables all embedded catalog merging and fallback.
 //
 // OCI sources require an immutable sha256 manifest digest. One
 // defaults.OCIRecipeConstructionTimeout deadline bounds the complete OCI
@@ -1542,7 +1543,8 @@ func buildDataProvider(
 	case sourceKindFilesystem:
 		embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
 		layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
-			ExternalDir: s.path,
+			ExternalDir:  s.path,
+			ExternalOnly: s.externalOnly,
 		})
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
@@ -2582,10 +2584,12 @@ func (c *Client) ValidateState(
 	// Apply a facade-level deadline only as opted into by WithValidationTimeout,
 	// mirroring MakeBundle. The default (cfg.timeout == nil) keeps the
 	// ValidationOperationTimeout cap (75m), which sits ABOVE the largest
-	// rendered per-check Job deadline (the 65m inference-perf catalog timeout
-	// plus the 3m30s ValidatorJobDeadlineHeadroom, i.e. 68m30s; the
-	// CheckExecutionTimeout fallback is 55m), so a single hung check fires its
-	// own per-check timeout first and surfaces as a structured check failure
+	// per-check envelope: the 65m inference-perf catalog timeout plus the 3m
+	// ValidatorJobDeadlineHeadroom, the 60s SIGTERM window and 5s margin
+	// (v1.WaitEnvelopeFor, 69m05s), the 30s result capture and the 90s pod
+	// termination wait, i.e. 71m05s; the CheckExecutionTimeout fallback is
+	// 55m. A single hung check therefore reaches its own verdict first and
+	// surfaces as a structured check failure
 	// rather than a wrapping deadline-exceeded that loses the per-check signal —
 	// the behavior controllers rely on. It is a per-check ordering guarantee and
 	// a coarse operation cap, not a bound on the serial sum of an all-phase run

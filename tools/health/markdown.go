@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence/allowlist"
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/health"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/testgrid"
@@ -63,6 +65,12 @@ type markdownOptions struct {
 	// render evidencePending. A nil Presence renders every recipe pending (the
 	// pre-RQ1 behavior), so rendering degrades safely if the manifest is absent.
 	Presence *testgrid.Presence
+
+	// SignerClasses maps a recipe evidence id (attestation.RecipeNameFor) to
+	// the signer classes of its committed pointers, rendered in the Signer
+	// class column. A nil map renders every recipe's Signer class as an em
+	// dash.
+	SignerClasses map[string][]allowlist.Class
 
 	// Deterministic suppresses per-run metadata (the generated timestamp) so
 	// the output is byte-stable and committable.
@@ -115,7 +123,7 @@ func renderMatrix(w io.Writer, report *health.Report, opts markdownOptions) erro
 	}
 
 	writeSummary(sw, report)
-	writeMatrix(sw, report, opts.Presence)
+	writeMatrix(sw, report, opts)
 
 	if sw.err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to write recipe-health markdown", sw.err)
@@ -146,13 +154,13 @@ func writeSummary(sw *stickyWriter, report *health.Report) {
 }
 
 // writeMatrix emits the per-recipe matrix table.
-func writeMatrix(sw *stickyWriter, report *health.Report, presence *testgrid.Presence) {
+func writeMatrix(sw *stickyWriter, report *health.Report, opts markdownOptions) {
 	fmt.Fprintf(sw, "## Recipes\n\n")
-	fmt.Fprintln(sw, "| Recipe | Service | Accelerator | OS | Intent | Platform | Status | Coverage | Evidence |")
-	fmt.Fprintln(sw, "|--------|---------|-------------|----|--------|----------|--------|----------|----------|")
+	fmt.Fprintln(sw, "| Recipe | Service | Accelerator | OS | Intent | Platform | Status | Coverage | Evidence | Signer class |")
+	fmt.Fprintln(sw, "|--------|---------|-------------|----|--------|----------|--------|----------|----------|--------------|")
 	for _, c := range report.Combos {
 		crit := c.Criteria
-		fmt.Fprintf(sw, "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+		fmt.Fprintf(sw, "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
 			c.LeafOverlay,
 			dimCell(string(crit.Service)),
 			dimCell(string(crit.Accelerator)),
@@ -161,10 +169,37 @@ func writeMatrix(sw *stickyWriter, report *health.Report, presence *testgrid.Pre
 			dimCell(string(crit.Platform)),
 			c.Structure.Status,
 			coverageCell(c.Structure.Coverage),
-			evidenceCell(crit, presence),
+			evidenceCell(crit, opts.Presence),
+			signerClassCell(c, opts.SignerClasses),
 		)
 	}
 	fmt.Fprintln(sw)
+}
+
+// signerClassCell renders the Signer class column for c, the comma-joined
+// signer classes of its committed pointers. A recipe with no committed
+// pointer renders as an em dash.
+func signerClassCell(c health.ComboHealth, classes map[string][]allowlist.Class) string {
+	signers := classes[evidenceID(c)]
+	if len(signers) == 0 {
+		return "—"
+	}
+	names := make([]string, 0, len(signers))
+	for _, class := range signers {
+		names = append(names, string(class))
+	}
+	return strings.Join(names, ", ")
+}
+
+// evidenceID returns the recipe id that names c's evidence pointer directory
+// under recipes/evidence. A profiled combination carries its resolved
+// selection, so its id matches the one --require-evidence checks.
+func evidenceID(c health.ComboHealth) string {
+	result := &recipe.RecipeResult{Criteria: c.Criteria}
+	if name, value, ok := strings.Cut(c.Profile, "="); ok {
+		result.Metadata.SelectedProfile = &recipe.SelectedProfile{Name: name, Value: value}
+	}
+	return attestation.RecipeNameFor(result)
 }
 
 // evidenceCell renders the Evidence column for one recipe. It emits a

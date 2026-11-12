@@ -181,7 +181,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestRunDeployer_ClosedWorld(t *testing.T) {
-	newBundler := func(t *testing.T) *DefaultBundler {
+	newRun := func(t *testing.T) *bundleRun {
 		t.Helper()
 		b, err := New(WithConfig(config.NewConfig(
 			config.WithDeployer(config.DeployerHelm),
@@ -190,12 +190,12 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
 		}
-		return b
+		return &bundleRun{DefaultBundler: b}
 	}
 
 	t.Run("final inventory includes and binds recipe", func(t *testing.T) {
 		dir := t.TempDir()
-		output, _, err := newBundler(t).runDeployer(
+		output, _, err := newRun(t).runDeployer(
 			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
@@ -242,7 +242,8 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		attester := &closedWorldTestAttester{}
 		b := &DefaultBundler{Config: cfg, Attester: attester}
 		dir := t.TempDir()
-		_, _, err := b.runDeployer(
+		r := &bundleRun{DefaultBundler: b}
+		_, _, err := r.runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
 			closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
@@ -262,7 +263,8 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		attester := &closedWorldTestAttester{writeMetadata: true}
 		b := &DefaultBundler{Config: cfg, Attester: attester}
 		dir := t.TempDir()
-		output, _, err := b.runDeployer(
+		r := &bundleRun{DefaultBundler: b}
+		output, _, err := r.runDeployer(
 			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
@@ -296,7 +298,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 
 	t.Run("unmanaged executable is rejected", func(t *testing.T) {
 		dir := t.TempDir()
-		_, _, err := newBundler(t).runDeployer(
+		_, _, err := newRun(t).runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
 			closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
@@ -308,7 +310,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		dir := t.TempDir()
-		_, _, err := newBundler(t).runDeployer(
+		_, _, err := newRun(t).runDeployer(
 			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("runDeployer() error = %v, want ErrCodeTimeout", err)
@@ -2028,7 +2030,7 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 		state       string
 		refs        []recipe.ComponentRef
 		cfgOpts     []config.Option
-		wantWarning string // substring expected in b.warnings; "" = no warning
+		wantWarning string // substring expected in r.warnings, or "" for none
 	}{
 		{
 			name:  "disabled via --set + absent state → warning",
@@ -2104,20 +2106,21 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 			}
 			recipeResult.Metadata.GPUDriverState = tt.state
 
-			if _, filterErr := b.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if _, filterErr := r.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
 			}
 
 			if tt.wantWarning == "" {
-				if len(b.warnings) != 0 {
-					t.Fatalf("warnings = %v, want none", b.warnings)
+				if len(r.warnings) != 0 {
+					t.Fatalf("warnings = %v, want none", r.warnings)
 				}
 				return
 			}
-			joined := strings.Join(b.warnings, "\n")
+			joined := strings.Join(r.warnings, "\n")
 			for _, want := range []string{tt.wantWarning, "driverless", "gpu-operator"} {
 				if !strings.Contains(joined, want) {
-					t.Errorf("warnings = %v, want substring %q", b.warnings, want)
+					t.Errorf("warnings = %v, want substring %q", r.warnings, want)
 				}
 			}
 		})
@@ -2150,7 +2153,7 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 		name        string
 		refs        []recipe.ComponentRef
 		cfgOpts     []config.Option
-		wantWarning string // substring expected in b.warnings; "" = no warning
+		wantWarning string // substring expected in r.warnings, or "" for none
 		oke         bool   // OKE hardening: the AKS-only accelerator=generic tip must be absent
 	}{
 		{
@@ -2266,26 +2269,27 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 				Criteria:      &recipe.Criteria{Service: "aks", Intent: "training"},
 				ComponentRefs: tt.refs,
 			}
-			if _, filterErr := b.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if _, filterErr := r.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
 			}
 
 			if tt.wantWarning == "" {
-				if len(b.warnings) != 0 {
-					t.Fatalf("warnings = %v, want none", b.warnings)
+				if len(r.warnings) != 0 {
+					t.Fatalf("warnings = %v, want none", r.warnings)
 				}
 				return
 			}
-			joined := strings.Join(b.warnings, "\n")
+			joined := strings.Join(r.warnings, "\n")
 			wants := []string{tt.wantWarning, "device-isolation"}
 			if !tt.oke {
 				wants = append(wants, "accelerator=generic")
 			} else if strings.Contains(joined, "accelerator=generic") {
-				t.Errorf("warnings = %v, want no AKS accelerator=generic tip for OKE", b.warnings)
+				t.Errorf("warnings = %v, want no AKS accelerator=generic tip for OKE", r.warnings)
 			}
 			for _, want := range wants {
 				if !strings.Contains(joined, want) {
-					t.Errorf("warnings = %v, want substring %q", b.warnings, want)
+					t.Errorf("warnings = %v, want substring %q", r.warnings, want)
 				}
 			}
 		})
@@ -4681,19 +4685,20 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 			values := map[string]any{}
 			tt.setupValues(values)
 
-			err = b.warnMissingStorageClassForPVCs(context.Background(), recipeResult, map[string]map[string]any{
+			r := &bundleRun{DefaultBundler: b}
+			err = r.warnMissingStorageClassForPVCs(context.Background(), recipeResult, map[string]map[string]any{
 				"kube-prometheus-stack": values,
 			})
 			if err != nil {
 				t.Fatalf("warnMissingStorageClassForPVCs() error = %v", err)
 			}
 
-			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
-				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
+			if gotWarning := len(r.warnings) > 0; gotWarning != tt.wantWarning {
+				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, r.warnings)
 			}
 
 			if tt.wantWarning {
-				warning := b.warnings[0]
+				warning := r.warnings[0]
 				for _, want := range []string{
 					"Warning: kube-prometheus-stack renders a PVC without storageClassName",
 					scPath,
@@ -4879,7 +4884,8 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 				componentValues[agentgatewayComponentName] = tt.values
 			}
 
-			gotErr := b.resolveAgentgatewayExposure(componentValues)
+			r := &bundleRun{DefaultBundler: b}
+			gotErr := r.resolveAgentgatewayExposure(componentValues)
 			if (gotErr != nil) != tt.wantErr {
 				t.Fatalf("resolveAgentgatewayExposure() error = %v, wantErr %v", gotErr, tt.wantErr)
 			}
@@ -4889,11 +4895,11 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 				}
 			}
 
-			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
-				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
+			if gotWarning := len(r.warnings) > 0; gotWarning != tt.wantWarning {
+				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, r.warnings)
 			}
 			if tt.wantWarning {
-				warning := b.warnings[0]
+				warning := r.warnings[0]
 				for _, want := range []string{"inference-gateway", "allowedSourceRanges"} {
 					if !strings.Contains(warning, want) {
 						t.Errorf("warning = %q, want substring %q", warning, want)
@@ -4901,8 +4907,8 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 				}
 			}
 
-			if tt.wantReach != "" && !strings.Contains(b.warnings[0], tt.wantReach) {
-				t.Errorf("warning = %q, want reach guidance %q", b.warnings[0], tt.wantReach)
+			if tt.wantReach != "" && !strings.Contains(r.warnings[0], tt.wantReach) {
+				t.Errorf("warning = %q, want reach guidance %q", r.warnings[0], tt.wantReach)
 			}
 
 			if tt.wantNoRange {
