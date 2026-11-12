@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestNewKeylessAttester(t *testing.T) {
@@ -106,6 +108,16 @@ func TestKeylessAttester_BuilderIDIsSigner(t *testing.T) {
 	if got := decodeStatement(t, statementJSON).Predicate.RunDetails.Builder.ID; got != signer {
 		t.Errorf("builder.id = %q, want %q", got, signer)
 	}
+}
+
+func TestKeylessAttester_RejectsInvalidSubjectBeforeSigning(t *testing.T) {
+	attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
+	attester.signStatement = func(context.Context, func(string) ([]byte, error), SignOptions) (*SignedAttestation, error) {
+		t.Error("signStatement called for an invalid subject")
+		return nil, errors.New(errors.ErrCodeInternal, "unexpected sign")
+	}
+	_, err := attester.Attest(t.Context(), AttestSubject{Name: "checksums.txt"})
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 }
 
 func TestKeylessAttester_HasRekorEntry(t *testing.T) {

@@ -85,18 +85,8 @@ var aicrBundleNamespace = uuid.NewSHA1(uuid.NameSpaceURL, []byte(BundleBuildType
 // BuildStatement constructs an in-toto Statement v1 with a SLSA Build Provenance v1
 // predicate. Returns the statement as serialized JSON.
 func BuildStatement(subject AttestSubject, metadata StatementMetadata) ([]byte, error) {
-	if subject.Name == "" || len(subject.Digest) == 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "subject name and digest are required")
-	}
-	for algo, value := range subject.Digest {
-		if value == "" {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				"empty digest value for algorithm "+algo)
-		}
-		if algo == "sha256" && len(value) != 64 {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("sha256 digest must be 64 hex characters, got %d", len(value)))
-		}
+	if err := validateSubject(subject); err != nil {
+		return nil, err
 	}
 
 	// Build SLSA predicate as a structpb.Struct
@@ -124,6 +114,27 @@ func BuildStatement(subject AttestSubject, metadata StatementMetadata) ([]byte, 
 	}
 
 	return protojson.Marshal(stmt)
+}
+
+// validateSubject returns an ErrCodeInvalidRequest error when subject has
+// no name, no digest, or an empty digest value, or when a digest for an
+// algorithm in-toto knows, such as sha256 or sha512, is not hex of that
+// algorithm's length.
+func validateSubject(subject AttestSubject) error {
+	if subject.Name == "" || len(subject.Digest) == 0 {
+		return errors.New(errors.ErrCodeInvalidRequest, "subject name and digest are required")
+	}
+	for algo, value := range subject.Digest {
+		if value == "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				"empty digest value for algorithm "+algo)
+		}
+	}
+	rd := &intoto.ResourceDescriptor{Name: subject.Name, Digest: subject.Digest}
+	if err := rd.Validate(); err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid subject digest", err)
+	}
+	return nil
 }
 
 // buildPredicate constructs the SLSA Build Provenance v1 predicate.

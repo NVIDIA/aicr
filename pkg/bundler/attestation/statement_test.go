@@ -17,12 +17,16 @@ package attestation
 import (
 	"encoding/json"
 	"maps"
+	"strings"
 	"testing"
 	"time"
 
 	provenance "github.com/in-toto/attestation/go/predicates/provenance/v1"
 	intoto "github.com/in-toto/attestation/go/v1"
 	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 // decodedStatement holds the statement fields these tests assert on.
@@ -137,21 +141,9 @@ func TestBuildStatement(t *testing.T) {
 	}
 }
 
-func TestBuildStatement_EmptySubject(t *testing.T) {
-	_, err := BuildStatement(AttestSubject{}, StatementMetadata{})
-	if err == nil {
-		t.Error("BuildStatement() with empty subject should return error")
-	}
-}
-
-func TestBuildStatement_EmptyName(t *testing.T) {
-	_, err := BuildStatement(AttestSubject{
-		Name:   "",
-		Digest: map[string]string{"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
-	}, StatementMetadata{})
-	if err == nil {
-		t.Error("BuildStatement() with empty name should return error")
-	}
+func TestBuildStatement_InvalidSubject(t *testing.T) {
+	_, err := BuildStatement(AttestSubject{}, StatementMetadata{BuilderID: "jdoe@company.com"})
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 }
 
 func TestBuildStatement_WithToolVersion(t *testing.T) {
@@ -258,25 +250,31 @@ func TestBuildStatement_InvocationIDOverride(t *testing.T) {
 	}
 }
 
-func TestBuildStatement_InvalidDigest(t *testing.T) {
+func TestValidateSubject(t *testing.T) {
+	sha256Digest := map[string]string{"sha256": strings.Repeat("ab", 32)}
 	tests := []struct {
-		name   string
-		digest map[string]string
+		name    string
+		subject AttestSubject
+		wantErr bool
 	}{
-		{"empty sha256 value", map[string]string{"sha256": ""}},
-		{"short sha256", map[string]string{"sha256": "abc123"}},
-		{"long sha256", map[string]string{"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855aa"}},
-		{"empty other algo", map[string]string{"sha512": ""}},
+		{"valid", AttestSubject{Name: "checksums.txt", Digest: sha256Digest}, false},
+		{"missing name", AttestSubject{Digest: sha256Digest}, true},
+		{"missing digest", AttestSubject{Name: "checksums.txt"}, true},
+		{"empty digest value", AttestSubject{Name: "checksums.txt", Digest: map[string]string{"sha256": ""}}, true},
+		{"short sha256", AttestSubject{Name: "checksums.txt", Digest: map[string]string{"sha256": "abc123"}}, true},
+		{"non-hex sha256", AttestSubject{Name: "checksums.txt", Digest: map[string]string{"sha256": strings.Repeat("zz", 32)}}, true},
+		{"short sha512", AttestSubject{Name: "checksums.txt", Digest: map[string]string{"sha512": strings.Repeat("ab", 32)}}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := BuildStatement(AttestSubject{
-				Name:   "checksums.txt",
-				Digest: tt.digest,
-			}, StatementMetadata{})
-			if err == nil {
-				t.Errorf("BuildStatement() with digest %v should return error", tt.digest)
+			err := validateSubject(tt.subject)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("validateSubject() error = %v", err)
+				}
+				return
 			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 		})
 	}
 }
