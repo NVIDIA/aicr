@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	stderrors "errors"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -311,6 +312,9 @@ func TestNewGangTestRunTarget(t *testing.T) {
 				}
 				if got := pod.Labels[gpuTestRunLabel]; got != run.suffix {
 					t.Errorf("pod %d label %s = %q, want the run suffix %q", i, gpuTestRunLabel, got, run.suffix)
+				}
+				if got := pod.Spec.TerminationGracePeriodSeconds; got == nil || *got != gangTerminationGracePeriod {
+					t.Errorf("pod %d terminationGracePeriodSeconds = %s, want %d", i, formatGracePeriod(got), gangTerminationGracePeriod)
 				}
 			}
 			wantPhase := []string{gangPhasePositive, gangPhaseNegative}
@@ -1024,4 +1028,11 @@ func TestRunGangPositivePhaseRunaiTarget(t *testing.T) {
 			t.Errorf("%s imagePullSecrets = %v, want the forwarded regcred reference", pod.Name, refs)
 		}
 	}
+}
+
+func formatGracePeriod(p *int64) string {
+	if p == nil {
+		return "unset"
+	}
+	return strconv.FormatInt(*p, 10)
 }

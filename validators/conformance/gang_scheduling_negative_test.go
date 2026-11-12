@@ -693,6 +693,7 @@ func TestRunGangNegativePhase(t *testing.T) {
 		wantMembers int
 		refusal     bool // fake KAI writes the gang refusal
 		bindMembers bool // fake default scheduler binds members (gang disabled)
+		otherRun    bool // a Pending negative member of another run shares the namespace
 		wantErr     string
 		wantMsg     string
 	}{
@@ -738,6 +739,16 @@ func TestRunGangNegativePhase(t *testing.T) {
 			refusal:     false,
 			wantErr:     "not credited",
 		},
+		{
+			// A Run:ai Project namespace is shared, so another validation's
+			// negative members sit beside this run's with the same phase label.
+			name:        "another run's Pending member in the namespace: still credited",
+			nodes:       nodeObjs,
+			wantMembers: len(nodes) + 1,
+			refusal:     true,
+			otherRun:    true,
+			wantMsg:     "while 8 are required for gang scheduling",
+		},
 	}
 
 	for _, tt := range tests {
@@ -747,6 +758,9 @@ func TestRunGangNegativePhase(t *testing.T) {
 				t.Fatalf("newGangTestRun: %v", err)
 			}
 			clientset := k8sfake.NewSimpleClientset(tt.nodes...)
+			if tt.otherRun {
+				seedOtherRunNegativeMember(t, clientset, run.namespace)
+			}
 			if tt.bindMembers {
 				bindNegativePodOnCreate(clientset, "gpu-0")
 			}
@@ -776,7 +790,7 @@ func TestRunGangNegativePhase(t *testing.T) {
 				t.Errorf("negative shape = %+v with %d pod names, want %d members", run.negShape, len(run.negPods), tt.wantMembers)
 			}
 			pods, err := clientset.CoreV1().Pods(run.namespace).List(context.Background(), metav1.ListOptions{
-				LabelSelector: gangPhaseSelector(gangPhaseNegative),
+				LabelSelector: run.phaseSelector(gangPhaseNegative),
 			})
 			if err != nil {
 				t.Fatalf("list negative pods: %v", err)
@@ -797,6 +811,23 @@ func TestRunGangNegativePhase(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// seedOtherRunNegativeMember creates a Pending negative member of a second
+// run in namespace, carrying the same phase label as the run under test.
+func seedOtherRunNegativeMember(t *testing.T, clientset *k8sfake.Clientset, namespace string) {
+	t.Helper()
+	other, err := newGangTestRun(kaiGangTarget())
+	if err != nil {
+		t.Fatalf("newGangTestRun (other): %v", err)
+	}
+	other.namespace = namespace
+	other.setNegativeShape(gangNegativeShape{Members: 1})
+	pod := buildGangNegativePod(other, 0, nil)
+	pod.Status.Phase = corev1.PodPending
+	if _, err := clientset.CoreV1().Pods(namespace).Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("seed other run's negative member: %v", err)
 	}
 }
 
