@@ -167,8 +167,9 @@ permission is access to the HPAs' inputs.
 PodMonitor in the Prometheus server's namespace. `ai-service-metrics` shows that
 the monitoring system discovers and collects a workload's metrics, so it queries
 the backend NKTP exports to: `otel-lgtm` on a stock bundle, or a Prometheus
-query URL the owner supplies. Without either, the check is skipped. Each
-target's `up` series is the evidence of discovery. `otel-lgtm`'s evaluation
+query URL the owner supplies. Without either, the check is skipped and the
+CNCF requirement is reported as not tested. Each target's `up` series is the
+evidence of discovery. `otel-lgtm`'s evaluation
 posture does not affect the evidence, which shows that metrics are discovered
 and collected, not that the backend is fit for production. No runtime consumer
 reads that backend.
@@ -183,9 +184,6 @@ their own backend must provide:
 - a selector that scopes queries to this cluster, if the backend is shared.
   Without one, external metrics average every cluster's GPUs;
 - network reachability from every consumer.
-
-The query URL given to `ai-service-metrics` needs the same scoping, or the
-check passes on another cluster's data.
 
 The Prometheus CRD marks scrape classes, which carry the series filter, as
 experimental. Their behavior is pinned by the operator in
@@ -418,6 +416,8 @@ scale stay unaddressed.
   `cluster-autoscaling` pass.
 - An HPA scales on a workload series added through `runtimeMetrics`, with its
   monitor in the server's namespace.
+- Each PodMonitor that `pod-autoscaling` creates in the server's namespace is
+  named for its run and is removed even after an interrupted run.
 - The Dynamo planner's SLA queries return data on an inference-dynamo
   recipe.
 
