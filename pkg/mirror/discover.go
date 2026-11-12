@@ -148,6 +148,8 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(defaults.MirrorDiscoveryConcurrency)
 
+	driverTarget, driverNotes := DriverTargetForRecipe(rec)
+
 	for i, compRef := range candidate.refs {
 		g.Go(func() error {
 			// Bail early if context is already canceled.
@@ -230,7 +232,7 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 					ci.Warnings = append(ci.Warnings,
 						fmt.Sprintf("helm template failed: %v", renderErr))
 				} else {
-					imgs, extractErr := bom.ExtractImagesFromYAML(rendered)
+					set, extractErr := bom.ExtractImageSetFromYAML(rendered)
 					if extractErr != nil {
 						if bom.IsInvalidStructuredImageDescriptor(extractErr) {
 							return errors.WrapWithContext(
@@ -248,7 +250,9 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 						ci.Warnings = append(ci.Warnings,
 							fmt.Sprintf("image extraction failed: %v", extractErr))
 					} else {
-						allImages = append(allImages, imgs...)
+						allImages = append(allImages, set.Images...)
+						allImages = append(allImages,
+							qualifyDrivers(set.Drivers, driverTarget, driverNotes, compRef.Name, &ci)...)
 					}
 				}
 			}
@@ -273,7 +277,7 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 					}
 					var manifestErr error
 					allImages, manifestErr = extractManifestImages(
-						gctx, dp, allImages, &ci, compRef.Name, mPath,
+						gctx, dp, allImages, &ci, compRef.Name, mPath, driverTarget, driverNotes,
 					)
 					if manifestErr != nil {
 						return manifestErr
@@ -347,7 +351,8 @@ func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*Mirro
 
 // extractManifestImages reads a manifest file from the supplied DataProvider
 // and appends extracted images to the accumulator. Read and general parse
-// failures are recorded as warnings; invalid structured image descriptors are
+// failures are recorded as warnings, as are driver images whose tag cannot be
+// resolved for the recipe's node OS; invalid structured image descriptors are
 // returned as errors so discovery cannot succeed with a known-incomplete image
 // set. A nil provider falls back to the package-global embedded provider inside
 // recipe.GetManifestContentWithContext.
@@ -357,6 +362,8 @@ func extractManifestImages(
 	acc []string,
 	ci *ComponentImages,
 	compName, mPath string,
+	driverTarget bom.DriverTarget,
+	driverNotes []string,
 ) ([]string, error) {
 
 	content, readErr := recipe.GetManifestContentWithContext(ctx, dp, mPath)
@@ -370,7 +377,7 @@ func extractManifestImages(
 			fmt.Sprintf("manifest read failed %s: %v", mPath, readErr))
 		return acc, nil
 	}
-	imgs, extractErr := bom.ExtractImagesFromYAML(content)
+	set, extractErr := bom.ExtractImageSetFromYAML(content)
 	if extractErr != nil {
 		if bom.IsInvalidStructuredImageDescriptor(extractErr) {
 			return acc, errors.WrapWithContext(
@@ -390,7 +397,8 @@ func extractManifestImages(
 			fmt.Sprintf("manifest image extraction failed %s: %v", mPath, extractErr))
 		return acc, nil
 	}
-	return append(acc, imgs...), nil
+	acc = append(acc, set.Images...)
+	return append(acc, qualifyDrivers(set.Drivers, driverTarget, driverNotes, compName, ci)...), nil
 }
 
 // buildOverrideLookup converts a slice of ComponentPath overrides into
@@ -494,7 +502,7 @@ func prepareMirrorCandidate(
 
 		candidate.refs = append(candidate.refs, ref)
 		candidate.overrides[ref.Name] = overrides
-		if _, profileOwned := owned[ref.Name]; !profileOwned {
+		if _, profileOwned := owned[ref.Name]; !profileOwned && rec.Metadata.Artifacts == nil {
 			continue
 		}
 
@@ -514,6 +522,9 @@ func prepareMirrorCandidate(
 				map[string]any{logKeyComponent: ref.Name})
 		}
 		candidate.profileValues[ref.Name] = values
+	}
+	if err := rec.ValidateArtifactLock(ctx, candidate.refs, candidate.profileValues, nil); err != nil {
+		return nil, err
 	}
 	if err := rec.ValidateProfileLock(ctx, candidate.refs, candidate.profileValues, nil); err != nil {
 		return nil, err

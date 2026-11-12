@@ -17,6 +17,7 @@ package header_test
 import (
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/header"
@@ -65,6 +66,8 @@ type adr022Row struct {
 // when its loader lands.
 func adr022Map() []adr022Row {
 	return []adr022Row{
+		{kind: artifact.InventoryKind, emitted: artifact.APIVersion, target: header.GroupVersionV1Beta1, accepts: func(v string) bool { return header.IsSupportedArtifactInventory(artifact.InventoryKind, v) }},
+		{kind: artifact.BindingsKind, emitted: artifact.APIVersion, target: header.GroupVersionV1Beta1, accepts: func(v string) bool { return header.IsSupportedArtifactBindings(artifact.BindingsKind, v) }},
 		{
 			kind:    "Snapshot",
 			emitted: snapshotter.FullAPIVersion,

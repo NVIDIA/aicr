@@ -3998,9 +3998,22 @@ func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName st
 	return nil, nil
 }
 
+// kaiPodGroupCRDProviders are the components that install the
+// scheduling.run.ai PodGroup CRD the preflight controller resolves at
+// startup: AICR's kai-scheduler, and runai-cluster, whose
+// kai-resource-management subchart bundles KAI (the Run:ai leaves disable
+// kai-scheduler for that reason). An enabled one is enough.
+var kaiPodGroupCRDProviders = []string{"kai-scheduler", runaiClusterProvider}
+
+// runaiClusterProvider is the kaiPodGroupCRDProviders member the
+// nvsentinel-preflight mixin does not order nvsentinel after: its
+// kai-scheduler edge is pruned on a Run:ai leaf, where kai-scheduler is
+// declared disabled, so the nvsentinel-preflight-runai mixin adds the edge.
+const runaiClusterProvider = "runai-cluster"
+
 // CheckNVSentinelPreflightGangSchedulerRequired blocks a bundle that enables
-// preflight gang coordination against KAI PodGroups while kai-scheduler is
-// disabled or absent.
+// preflight gang coordination against KAI PodGroups while no component that
+// installs the PodGroup CRD (kaiPodGroupCRDProviders) is enabled.
 //
 // The dependencyRefs edge the mixin adds only orders the install; it does not
 // require the scheduler to stay enabled, and the bundler prunes an edge to a
@@ -4080,13 +4093,14 @@ func CheckNVSentinelPreflightGangSchedulerRequired(ctx context.Context, componen
 	}
 
 	// The gate applies. Now guard the dependency paths too.
-	kaiKeysForGuard := componentOverrideKeys("kai-scheduler", provider)
 	dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
 		[]string{preflightEnabledPath, "preflight.gangCoordination.enabled", "preflight.gangDiscovery.podGroupGVR"},
 		"decides whether the preflight controller resolves KAI PodGroups at startup")
-	dynMsgs = append(dynMsgs, nvsentinelDynamicGuardViolations(bundlerConfig, "kai-scheduler", kaiKeysForGuard,
-		[]string{"enabled"},
-		"decides whether the PodGroup CRD the preflight controller requires exists at all")...)
+	for _, supplier := range kaiPodGroupCRDProviders {
+		dynMsgs = append(dynMsgs, nvsentinelDynamicGuardViolations(bundlerConfig, supplier, componentOverrideKeys(supplier, provider),
+			[]string{"enabled"},
+			"decides whether the PodGroup CRD the preflight controller requires exists at all")...)
+	}
 	if len(dynMsgs) > 0 {
 		for _, msg := range dynMsgs {
 			slog.Warn(msg, logKeyComponent, componentName)
@@ -4095,23 +4109,55 @@ func CheckNVSentinelPreflightGangSchedulerRequired(ctx context.Context, componen
 	}
 
 	// Read the DECLARED union, not the enabled set: a `bundlers=` subset that
-	// omits kai-scheduler is a legitimate partial install of a correct recipe.
-	// What must fail is a recipe where the scheduler is disabled or was never
-	// declared at all.
+	// omits the scheduler is a legitimate partial install of a correct recipe.
+	// What must fail is a recipe where every provider of the CRD is disabled
+	// or none was ever declared.
 	union := declaredUnionView(recipeResult)
-	kaiRef := union.GetComponentRef("kai-scheduler")
-	if kaiRef == nil {
+	var declared, enabled []string
+	for _, supplier := range kaiPodGroupCRDProviders {
+		ref := union.GetComponentRef(supplier)
+		if ref == nil {
+			continue
+		}
+		declared = append(declared, supplier)
+		if !componentDisabled(ref, bundlerConfig, componentOverrideKeys(supplier, provider)) {
+			enabled = append(enabled, supplier)
+		}
+	}
+	if len(enabled) > 0 {
+		// An enabled provider is not enough when it installs after nvsentinel:
+		// the controller exits until the CRD exists, so a deployer that waits
+		// on nvsentinel never reaches the provider. Only runai-cluster can be
+		// left unordered; a recipe ordered after kai-scheduler, or one that
+		// enables preflight on kai-scheduler by values alone, passes as before.
+		sentinelDeclared := union.GetComponentRef(componentName)
+		if slices.Equal(enabled, []string{runaiClusterProvider}) && sentinelDeclared != nil &&
+			!slices.Contains(sentinelDeclared.DependencyRefs, runaiClusterProvider) {
+
+			return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: preflight gang discovery targets scheduling.run.ai PodGroups, whose CRD %s installs on this "+
+					"recipe, but nothing orders %s after %s; the preflight controller resolves that GVR at startup and exits when "+
+					"the CRD is absent, so a deployer that waits on %s never installs %s. Compose the nvsentinel-preflight-runai "+
+					"mixin next to nvsentinel-preflight (it adds the dependencyRefs edge)",
+					componentName, runaiClusterProvider, componentName, runaiClusterProvider, componentName, runaiClusterProvider))}
+		}
+		return nil, nil
+	}
+	providers := strings.Join(kaiPodGroupCRDProviders, " nor ")
+	if len(declared) == 0 {
 		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("component %q: preflight gang discovery targets scheduling.run.ai PodGroups but kai-scheduler is not in the recipe; "+
+			fmt.Sprintf("component %q: preflight gang discovery targets scheduling.run.ai PodGroups but neither %s is in the recipe; "+
 				"the preflight controller resolves that GVR at startup and exits when the CRD is absent, so the Deployment crash-loops "+
-				"and the webhook (failurePolicy: Ignore) then admits every GPU pod unchecked", componentName))}
+				"and the webhook (failurePolicy: Ignore) then admits every GPU pod unchecked", componentName, providers))}
 	}
-	kaiKeys := componentOverrideKeys("kai-scheduler", provider)
-	if componentDisabled(kaiRef, bundlerConfig, kaiKeys) {
-		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("component %q: preflight gang discovery targets scheduling.run.ai PodGroups but kai-scheduler is disabled; "+
-				"the PodGroup CRD will not exist, so the preflight controller crash-loops on startup GVR resolution and the webhook "+
-				"(failurePolicy: Ignore) admits every GPU pod unchecked. Re-enable kai-scheduler or drop the nvsentinel-preflight mixin", componentName))}
+	verb := "is"
+	if len(declared) > 1 {
+		verb = "are"
 	}
-	return nil, nil
+	return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+		fmt.Sprintf("component %q: preflight gang discovery targets scheduling.run.ai PodGroups but %s %s disabled and no other provider "+
+			"of the PodGroup CRD (%s) is enabled; the CRD will not exist, so the preflight controller crash-loops on startup GVR "+
+			"resolution and the webhook (failurePolicy: Ignore) admits every GPU pod unchecked. Re-enable %s or drop the "+
+			"nvsentinel-preflight mixin", componentName, strings.Join(declared, " and "), verb, strings.Join(kaiPodGroupCRDProviders, ", "),
+			strings.Join(declared, " or ")))}
 }

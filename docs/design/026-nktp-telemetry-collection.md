@@ -36,12 +36,10 @@ Its Prometheus server serves two roles, which this decision separates:
 
 - **Cluster observability:** dashboards, node and Kubernetes metrics, and
   alert rules. No AICR component reads these.
-- **Runtime metrics for components:** `prometheus-adapter` turns three DCGM
-  series into the custom and external metrics APIs, which HPAs on GPU
-  metrics and the `pod-autoscaling` and `cluster-autoscaling` conformance
-  checks use. The Dynamo planner, in its SLA mode, queries frontend and
-  router traffic series. The `ai-service-metrics` validator queries
-  `DCGM_FI_DEV_GPU_UTIL`.
+- **Runtime metrics for components:** `prometheus-adapter` turns series into
+  the custom and external metrics APIs, which HPAs and the `pod-autoscaling`
+  and `cluster-autoscaling` conformance checks use. The Dynamo planner, in
+  its SLA mode, queries frontend and router traffic series.
 
 ### NKTP
 
@@ -76,8 +74,9 @@ requires cert-manager.
    the system node selector, so with one set, GPU nodes report no host metrics.
 3. **Scale.** One Prometheus server scrapes every target, and the recipe offers
    no sharding.
-4. **Runtime consumers keep working.** The adapter's APIs, the conformance
-   checks, and the Dynamo planner must work without changes on their side.
+4. **Runtime consumers keep working.** The adapter's APIs and the Dynamo
+   planner must work without changes on their side, and an owner must still
+   be able to autoscale on a workload's own metrics.
 5. **Class boundaries.** Under ADR-018, observability
    is `ops`, and a `core` component depends only on `core` components. The
    `core` components that render monitors therefore depend on the monitoring
@@ -108,7 +107,7 @@ persistence, access control, alerting, and retention.
 **Runtime metrics dependency.** `kube-prometheus-stack` stays in `base` as a
 runtime dependency of the components that query metrics. It keeps its release,
 namespace, and Service (`kube-prometheus-prometheus.monitoring:9090`), so the
-adapter, the Dynamo planner, and the validators are unchanged. It runs only the
+adapter and the Dynamo planner are unchanged. It runs only the
 prometheus-operator and one Prometheus server. There is no Grafana,
 Alertmanager, `node-exporter`, `kube-state-metrics`, rule, or default
 ServiceMonitor. It stores hours of data, capped by time and size, on a
@@ -117,7 +116,7 @@ on recent data. It stays in production; an owner may replace it under the
 contract in Decision 3.
 
 **Why the two roles are separate.** Pointing the consumers at `otel-lgtm` ties
-HPA and conformance to an evaluation backend and to NKTP's pipeline, and forces
+HPAs to an evaluation backend and to NKTP's pipeline, and forces
 owners to re-point every consumer when they move to production. Feeding a
 separate Prometheus server from NKTP's pipeline keeps that coupling since a
 Prometheus server outage can cause backpressure on NKTP's main pipeline.
@@ -133,25 +132,47 @@ A component that queries the runtime Prometheus server declares
   expose the data. Each resolves to its namespace in the resolved recipe.
 - `series` lists RE2 patterns, matched against the metric name as scraped.
 
-`prometheus-adapter` declares `gpu-operator` and the three DCGM gauges it
-maps. `dynamo-platform` declares itself and the planner's SLA-mode traffic
-series.
+`prometheus-adapter` declares `gpu-operator`, the three DCGM gauges it maps,
+and the gauge the `pod-autoscaling` check scales on. `dynamo-platform` declares
+itself and the planner's SLA-mode traffic series.
 
 At bundle time, on every path (CLI, API server, and SDK), AICR takes the union
 of the enabled consumers' declarations and writes it at value paths that
 `kube-prometheus-stack`'s registry entry declares. The Prometheus server then
-selects every monitor in exactly those namespaces, whatever their labels, keeps
-only the declared series, and loads no rules, probes, or scrape configurations.
-Those paths cannot be overridden. A declared source that is absent or disabled
-fails the bundle, as does a pattern that does not compile. With
-`kube-prometheus-stack` disabled nothing is injected or checked, and consumers
-use the platform's Prometheus, as `prometheus-adapter-ocp` does with OpenShift's
-Thanos Querier. Adding a consumer is a registry change only; overlays carry no
-telemetry configuration. Validators query only declared series. CNCF evidence is
-collected on a stock bundle and queries `otel-lgtm`, where each target's `up`
-series replaces Prometheus's target list as evidence of discovery. `otel-lgtm`'s
-evaluation posture does not affect the evidence, which shows that metrics are
-discovered and collected, not that the backend is fit for production.
+selects every monitor in exactly those namespaces and in its own, whatever
+their labels, keeps only the declared series, and loads no rules, probes, or
+scrape configurations. Those paths cannot be overridden. A declared source that
+is absent or disabled fails the bundle, as does a pattern that does not
+compile. With `kube-prometheus-stack` disabled nothing is injected or checked,
+and consumers use the platform's Prometheus, as `prometheus-adapter-ocp` does
+with OpenShift's Thanos Querier. Adding an AICR consumer is a registry change
+only; overlays carry no telemetry configuration.
+
+**Workload metrics.** A cluster owner can add a workload's series, for example
+to autoscale an inference server on its queue depth:
+
+- At bundle time, `runtimeMetrics.series` adds patterns to the kept series, and
+  `runtimeMetrics.namespaces` adds namespaces whose monitors are loaded. The
+  bundler merges both with the registry's declarations.
+- A monitor created in the Prometheus server's own namespace may select targets
+  in any namespace, so a workload whose series are already kept needs no new
+  bundle.
+- The adapter serves a series only through a rule in its values.
+
+The series filter matches names only. Whoever can create a monitor in a
+selected namespace can supply any kept series, the GPU series included, so that
+permission is access to the HPAs' inputs.
+
+**Conformance.** `pod-autoscaling` takes the workload path: it creates its
+PodMonitor in the Prometheus server's namespace. `ai-service-metrics` shows that
+the monitoring system discovers and collects a workload's metrics, so it queries
+the backend NKTP exports to: `otel-lgtm` on a stock bundle, or a Prometheus
+query URL the owner supplies. Without either, the check is skipped and the
+CNCF requirement is reported as not tested. Each target's `up` series is the
+evidence of discovery. `otel-lgtm`'s evaluation
+posture does not affect the evidence, which shows that metrics are discovered
+and collected, not that the backend is fit for production. No runtime consumer
+reads that backend.
 
 **Replacing the runtime Prometheus server.** An owner who points consumers at
 their own backend must provide:
@@ -161,8 +182,7 @@ their own backend must provide:
   authentication configuration, as on OpenShift, and the planner's token and
   CA. The planner sends no custom headers today;
 - a selector that scopes queries to this cluster, if the backend is shared.
-  Without one, external metrics average every cluster's GPUs, and
-  `ai-service-metrics` passes on another cluster's data;
+  Without one, external metrics average every cluster's GPUs;
 - network reachability from every consumer.
 
 The Prometheus CRD marks scrape classes, which carry the series filter, as
@@ -326,7 +346,7 @@ On an existing cluster the change is an in-place upgrade of
 ## Alternatives Considered
 
 **Replace `kube-prometheus-stack` entirely, with consumers reading
-`otel-lgtm`.** Rejected: it ties HPA and conformance to an evaluation backend
+`otel-lgtm`.** Rejected: it ties HPAs to an evaluation backend
 and to NKTP's pipeline, and owners must re-point every consumer to reach
 production.
 
@@ -387,20 +407,26 @@ scale stay unaddressed.
 **Runtime metrics.**
 
 - Every stock recipe that enables `kube-prometheus-stack` injects exactly the
-  declared namespaces and series, identically through the CLI, the API server,
-  and the SDK. The others inject nothing.
-- The runtime Prometheus server stores only declared series, within its time
-  and size caps.
+  declared and bundle-supplied namespaces and series, plus the server's own
+  namespace, identically through the CLI, the API server, and the SDK. The
+  others inject nothing.
+- The runtime Prometheus server stores only declared and bundle-supplied
+  series, within its time and size caps.
 - The adapter serves both metrics APIs, and `pod-autoscaling` and
   `cluster-autoscaling` pass.
+- An HPA scales on a workload series added through `runtimeMetrics`, with its
+  monitor in the server's namespace.
+- Each PodMonitor that `pod-autoscaling` creates in the server's namespace is
+  named for its run and is removed even after an interrupted run.
 - The Dynamo planner's SLA queries return data on an inference-dynamo
   recipe.
 
 **Conformance.**
 
-- The `accelerator-metrics` and `ai-service-metrics` validators pass unchanged.
-- CNCF evidence regenerates for accelerator metrics, and for AI service metrics
-  on Dynamo, NIM, and the trainer.
+- `accelerator-metrics` passes unchanged. `ai-service-metrics` passes against
+  the backend NKTP exports to.
+- The CNCF submission rendered from a stock bundle's conformance run reports
+  `ai_service_metrics` and `pod_autoscaling` as passed.
 - The Chainsaw monitoring assertions match the reduced stack and NKTP, and pass
   in the GPU CI lanes.
 

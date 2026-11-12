@@ -45,8 +45,9 @@ validators:
     # work (helper.VerifyResource iteration) can't starve the chainsaw
     # budget. 8m provides 60s for cleanup plus another 60s for
     # pre-chainsaw work. The Job's activeDeadlineSeconds adds
-    # defaults.ValidatorJobDeadlineHeadroom (3m30s) on top of this value
-    # as a separate, later backstop. The invariant is verified by
+    # defaults.ValidatorJobDeadlineHeadroom (3m: 2m startup + 30s
+    # cleanup + 30s result flush) on top of this value as a separate, later
+    # backstop; the orchestrator then waits out the 60s SIGTERM window. The invariant is verified by
     # TestExpectedResourcesCatalogEnvelope in
     # pkg/validator/catalog — raising ChainsawAssertTimeout without
     # raising this in tandem will fail the test. See issue #1220 and
@@ -136,9 +137,9 @@ validators:
     # = 50m. The 65m timeout = that 50m sum + 15m headroom for inter-phase
     # overhead (slow registries, K8s API round-trips) and deferred cleanup /
     # CTRF-tail work. The Job's activeDeadlineSeconds adds
-    # defaults.ValidatorJobDeadlineHeadroom (3m30s) on top of this value, so
-    # it kills the pod only after the ctx has already surfaced a clean
-    # timeout. Raising the model (or disabling the cache) shifts this
+    # defaults.ValidatorJobDeadlineHeadroom (3m) on top of this value, so
+    # it signals the pod only after the ctx has already surfaced a clean
+    # timeout and the check's deferred cleanup has had its grace. Raising the model (or disabling the cache) shifts this
     # budget — see the knobs below.
     timeout: 65m
     args: ["inference-perf"]
@@ -378,9 +379,10 @@ validators:
   # against 489.80 GB/s at the original 2026-09-02 run on v0.1.0.
   #
   # The timeout covers the Certification wait, the measurement-finalize wait,
-  # and the teardown in series, because the Job's activeDeadlineSeconds is this
-  # value plus only ValidatorJobDeadlineHeadroom — a shorter budget kills the
-  # pod partway through teardown and leaves the TrainJobs holding GPUs.
+  # and the teardown in series, because the check's own context expires at this
+  # value and only ValidatorJobDeadlineHeadroom (a bounded cleanup grace, not a
+  # work budget) follows — a shorter budget cuts the check off partway through
+  # teardown and leaves the TrainJobs holding GPUs.
   # TestCRECatalogTimeoutCoversTeardown pins the relation.
   - name: nccl-cre-all-reduce-bw
     phase: performance
