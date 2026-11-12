@@ -314,9 +314,10 @@ the report and evidence record it as skipped.
 
 `gb200-nvke-ubuntu-inference` is the training leaf's GPU stack at
 `intent: inference`, plus the Gateway API surface: `agentgateway-crds` and
-`agentgateway`. It serves no model: bring your own serving workload, or use
-`gb200-nvke-ubuntu-inference-dynamo`, which adds `grove` and `dynamo-platform`
-and declares `robust-controller`.
+`agentgateway`. `gb200-nvke-ubuntu-inference-dynamo` adds the Dynamo serving
+platform, `grove` and `dynamo-platform`, and declares `robust-controller`.
+Neither leaf deploys a model. With the Dynamo leaf, deploy one as a
+`DynamoGraphDeployment`. With the plain leaf, bring your own serving workload.
 
 Neither ships the east-west fabric: no `network-operator`,
 `sriov-ib-networks` or `rdma-modules`, and no `kernel-module-params`
