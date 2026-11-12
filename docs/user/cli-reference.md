@@ -547,7 +547,7 @@ node shape the resolved recipe targets. See
 
 > **`--service cks` is Preview**, covering H100 and RTX PRO 6000 on Ubuntu for training. Pass the service explicitly, including with a snapshot; CKS auto-detection is not implemented. See [CoreWeave H100 Setup](../integrator/cks-h100-setup.md) and [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md) for provider ownership and qualification gaps.
 
-> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training`, `nvke / gb200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / training`, `nvke / vr200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / inference`, `nvke / vr200 / ubuntu / inference / dynamo`, `nvke / gb300 / ubuntu / training`, `nvke / gb300 / ubuntu / training / kubeflow`, `nvke / gb300 / ubuntu / inference` and `nvke / gb300 / ubuntu / inference / dynamo` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md), [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md) and [NVKE GB300 Setup](../integrator/nvke-gb300-setup.md) for their prerequisites and known gaps. The VR200 coordinates require an `nvidia-bos-64k` kernel, which the recipe's constraints cannot express — check it before deploying.
+> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training`, `nvke / gb200 / ubuntu / training / kubeflow`, `nvke / gb200 / ubuntu / inference`, `nvke / gb200 / ubuntu / inference / dynamo`, `nvke / vr200 / ubuntu / training`, `nvke / vr200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / inference`, `nvke / vr200 / ubuntu / inference / dynamo`, `nvke / gb300 / ubuntu / training`, `nvke / gb300 / ubuntu / training / kubeflow`, `nvke / gb300 / ubuntu / inference` and `nvke / gb300 / ubuntu / inference / dynamo` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md), [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md) and [NVKE GB300 Setup](../integrator/nvke-gb300-setup.md) for their prerequisites and known gaps. The VR200 coordinates require an `nvidia-bos-64k` kernel, which the recipe's constraints cannot express — check it before deploying.
 
 > **`--platform runai` is Preview**, covering the `eks / h100 / ubuntu / training / runai` and `gke / h100 / cos / training / runai` coordinates. See [Run:ai cluster](component-catalog.md#runai-cluster) for its per-cluster inputs and known gaps.
 
@@ -3737,7 +3737,10 @@ the recipe was resolved with `--data <dir>`, both values and manifests are read
 through the overlay so overlay-shadowed paths take precedence over embedded.
 Recognized mapping-valued image descriptors with null, empty, or non-scalar
 members are rejected so the command cannot succeed with a known-incomplete
-image set.
+image set. GPU and DOCA driver images are listed with the OS-qualified tag the
+operator pulls on a node; a driver whose tag the recipe does not determine is
+named in the component's `warnings` instead (see
+[Air-Gapped Mirroring](air-gap-mirror.md#overriding-component-values)).
 
 For an end-to-end walkthrough covering Hauler and Zarf workflows, see
 [Air-Gapped Mirroring](air-gap-mirror.md).
