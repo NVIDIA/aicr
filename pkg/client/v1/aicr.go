@@ -2035,6 +2035,10 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 		return nil, preflightErr
 	}
 
+	return encodeComponentBundles(ctx, r, dp, helmValues)
+}
+
+func encodeComponentBundles(ctx context.Context, r *RecipeResult, dp recipe.DataProvider, helmValues map[string]map[string]any) ([]ComponentBundle, error) {
 	bundles := make([]ComponentBundle, 0, len(r.Components))
 	for i := range r.Components {
 		// Bail on every iteration so a long recipe doesn't hold

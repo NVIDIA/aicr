@@ -33,6 +33,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	chartArtifactType = "chart"
+	imageArtifactType = "image"
+)
+
 var (
 	namePattern       = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$`)
 	digestPattern     = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -173,6 +178,8 @@ func strictNode(node *yaml.Node, depth int) (any, error) {
 			return nil, invalid("artifact scalar fields must be strings; quote numeric labels")
 		}
 		return node.Value, nil
+	case yaml.DocumentNode, yaml.AliasNode:
+		return nil, invalid("nested documents and aliases are forbidden")
 	default:
 		return nil, invalid("unsupported YAML node")
 	}
@@ -183,7 +190,7 @@ func validName(value string) bool {
 }
 
 func validateIdentity(item Identity) error {
-	if item.Type != "chart" && item.Type != "image" && item.Type != "other" {
+	if item.Type != chartArtifactType && item.Type != imageArtifactType && item.Type != "other" {
 		return invalid("invalid artifact type for " + item.Name)
 	}
 	parsed, err := url.Parse(item.Reference)
@@ -193,10 +200,10 @@ func validateIdentity(item Identity) error {
 	if item.Version == "" || !digestPattern.MatchString(item.ManifestDigest) {
 		return invalid("version and manifestDigest required for " + item.Name)
 	}
-	if item.ArchiveDigest != "" && (item.Type != "chart" || !digestPattern.MatchString(item.ArchiveDigest)) {
+	if item.ArchiveDigest != "" && (item.Type != chartArtifactType || !digestPattern.MatchString(item.ArchiveDigest)) {
 		return invalid("invalid archiveDigest for " + item.Name)
 	}
-	if item.Type == "chart" {
+	if item.Type == chartArtifactType {
 		if len(item.Version) > defaults.ArtifactChartTagBytes || strings.Contains(item.Version, "+") || strings.Count(item.Version, "_") > 1 {
 			return invalid("chart version must be a literal Helm OCI tag")
 		}
@@ -206,7 +213,7 @@ func validateIdentity(item Identity) error {
 		}
 	}
 	if item.Platform != nil {
-		if item.Type != "image" {
+		if item.Type != imageArtifactType {
 			return invalid("platform is image-only")
 		}
 		return validatePlatform(item.Platform)
@@ -369,13 +376,13 @@ func Account(inventory *Inventory, bindings *Bindings) error {
 			continue
 		}
 		if _, ok := bindings.Charts[item.Name]; ok {
-			if item.Type != "chart" || item.ArchiveDigest == "" {
+			if item.Type != chartArtifactType || item.ArchiveDigest == "" {
 				return invalid("chart binding requires chart and archiveDigest for " + item.Name)
 			}
 			continue
 		}
 		if _, ok := bindings.Images[item.Name]; ok {
-			if item.Type != "image" {
+			if item.Type != imageArtifactType {
 				return invalid("image binding requires image for " + item.Name)
 			}
 			continue

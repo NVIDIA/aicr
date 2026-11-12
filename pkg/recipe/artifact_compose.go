@@ -33,6 +33,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	artifactSourceKey  = "source"
+	artifactChartKey   = "chart"
+	artifactVersionKey = "version"
+)
+
 // ComposeArtifacts activates only for an explicit or external default inventory.
 // Without one, it returns the exact original provider without reading bindings.
 func ComposeArtifacts(ctx context.Context, provider DataProvider, options artifact.Options) (DataProvider, error) {
@@ -109,45 +115,7 @@ func composeCapturedArtifacts(ctx context.Context, embedded, external map[string
 	for i := range registry.Components {
 		byName[registry.Components[i].Name] = &registry.Components[i]
 	}
-	exceptions := append([]string{}, options.AllowCatalogPins...)
-	slices.Sort(exceptions)
-	for i, name := range exceptions {
-		if byName[name] == nil || (i > 0 && exceptions[i-1] == name) {
-			return nil, artifact.Invalid("artifact-invalid", "unknown or duplicate allowCatalogPins component "+name)
-		}
-	}
-	p.provenance = artifact.Provenance{InventoryDigest: digestArtifactBytes(inventoryBytes), AllowCatalogPins: exceptions, Verification: "metadata-only", Applied: []artifact.Applied{}, Ignored: []artifact.IgnoredIdentity{}}
-	p.provenance.BindingsDigest, err = canonicalArtifactDigest(bindings)
-	if err != nil {
-		return nil, err
-	}
-	excluded := artifactExcludedFiles(files, inventoryPaths...)
-	for _, item := range inventory.Artifacts {
-		if binding, ok := bindings.Images[item.Name]; ok {
-			for _, target := range binding.Targets {
-				delete(excluded, target.ValuesFile)
-			}
-		}
-	}
-	p.bindingsAsData = !excluded[artifactBindingsPath]
-	p.inventoryCapturePath = artifactInventoryPath
-	if !excluded[artifactInventoryPath] && !bytes.Equal(external[artifactInventoryPath], inventoryBytes) {
-		p.inventoryCapturePath = "artifacts/selected-inventory-" + strings.TrimPrefix(p.provenance.InventoryDigest, "sha256:") + ".yaml"
-		if existing, exists := files[p.inventoryCapturePath]; exists && !bytes.Equal(existing, inventoryBytes) {
-			return nil, artifact.Invalid("artifact-invalid", "selected inventory capture path already exists: "+p.inventoryCapturePath)
-		}
-	}
-	for _, name := range inventoryPaths {
-		if name != "" && name != artifactInventoryPath && excluded[name] {
-			p.relocatedInventories = append(p.relocatedInventories, name)
-		}
-	}
-	embeddedDigest, err := canonicalArtifactDigest(artifactFileList(embedded, excluded))
-	if err != nil {
-		return nil, err
-	}
-	p.provenance.BaseCatalogDigest, err = canonicalArtifactDigest(map[string]any{"embedded": embeddedDigest, "external": artifactFileList(external, excluded)})
-	if err != nil {
+	if err := p.initializeProvenance(options, byName, inventoryPaths...); err != nil {
 		return nil, err
 	}
 	oldCharts := map[string]HelmConfig{}
@@ -198,6 +166,20 @@ func composeCapturedArtifacts(ctx context.Context, embedded, external map[string
 			p.provenance.Applied = append(p.provenance.Applied, artifact.Applied{Artifact: item, Image: &binding})
 		}
 	}
+	disableChangedArtifactCRDOwnership(&registry, changed)
+	p.files[registryFileName], err = yaml.Marshal(&registry)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "encode artifact registry", err)
+	}
+	if err := p.rebindCatalogDefaults(ctx, oldCharts, byName); err != nil {
+		return nil, err
+	}
+	slices.SortFunc(p.provenance.Applied, func(a, b artifact.Applied) int { return strings.Compare(a.Artifact.Name, b.Artifact.Name) })
+	slices.SortFunc(p.provenance.Ignored, func(a, b artifact.IgnoredIdentity) int { return strings.Compare(a.Artifact.Name, b.Artifact.Name) })
+	return p, nil
+}
+
+func disableChangedArtifactCRDOwnership(registry *ComponentRegistry, changed []string) {
 	if len(changed) > 0 {
 		owners := []string{}
 		for i := range registry.Components {
@@ -210,16 +192,52 @@ func composeCapturedArtifacts(ctx context.Context, embedded, external map[string
 		}
 		slog.Warn("artifact chart identities changed; disabling catalog CRD ownership", "changed", changed, "disabledOwners", owners)
 	}
-	p.files[registryFileName], err = yaml.Marshal(&registry)
+}
+
+func (p *ArtifactProvider) initializeProvenance(options artifact.Options, byName map[string]*ComponentConfig, inventoryPaths ...string) error {
+	var err error
+	exceptions := append([]string{}, options.AllowCatalogPins...)
+	slices.Sort(exceptions)
+	for i, name := range exceptions {
+		if byName[name] == nil || (i > 0 && exceptions[i-1] == name) {
+			return artifact.Invalid("artifact-invalid", "unknown or duplicate allowCatalogPins component "+name)
+		}
+	}
+	p.provenance = artifact.Provenance{InventoryDigest: digestArtifactBytes(p.inventoryBytes), AllowCatalogPins: exceptions, Verification: "metadata-only", Applied: []artifact.Applied{}, Ignored: []artifact.IgnoredIdentity{}}
+	p.provenance.BindingsDigest, err = canonicalArtifactDigest(p.bindings)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "encode artifact registry", err)
+		return err
 	}
-	if err := p.rebindCatalogDefaults(ctx, oldCharts, byName); err != nil {
-		return nil, err
+	excluded := artifactExcludedFiles(p.files, inventoryPaths...)
+	for _, item := range p.inventory.Artifacts {
+		if binding, ok := p.bindings.Images[item.Name]; ok {
+			for _, target := range binding.Targets {
+				delete(excluded, target.ValuesFile)
+			}
+		}
 	}
-	slices.SortFunc(p.provenance.Applied, func(a, b artifact.Applied) int { return strings.Compare(a.Artifact.Name, b.Artifact.Name) })
-	slices.SortFunc(p.provenance.Ignored, func(a, b artifact.IgnoredIdentity) int { return strings.Compare(a.Artifact.Name, b.Artifact.Name) })
-	return p, nil
+	p.bindingsAsData = !excluded[artifactBindingsPath]
+	p.inventoryCapturePath = artifactInventoryPath
+	if !excluded[artifactInventoryPath] && !bytes.Equal(p.external[artifactInventoryPath], p.inventoryBytes) {
+		p.inventoryCapturePath = "artifacts/selected-inventory-" + strings.TrimPrefix(p.provenance.InventoryDigest, "sha256:") + ".yaml"
+		if existing, exists := p.files[p.inventoryCapturePath]; exists && !bytes.Equal(existing, p.inventoryBytes) {
+			return artifact.Invalid("artifact-invalid", "selected inventory capture path already exists: "+p.inventoryCapturePath)
+		}
+	}
+	for _, name := range inventoryPaths {
+		if name != "" && name != artifactInventoryPath && excluded[name] {
+			p.relocatedInventories = append(p.relocatedInventories, name)
+		}
+	}
+	embeddedDigest, err := canonicalArtifactDigest(artifactFileList(p.embedded, excluded))
+	if err != nil {
+		return err
+	}
+	p.provenance.BaseCatalogDigest, err = canonicalArtifactDigest(map[string]any{"embedded": embeddedDigest, "external": artifactFileList(p.external, excluded)})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func artifactExcludedFiles(files map[string][]byte, inventoryPaths ...string) map[string]bool {
@@ -335,13 +353,13 @@ func (p *ArtifactProvider) rebindCatalogDefaults(ctx context.Context, old map[st
 				continue
 			}
 			after := components[componentName].Helm
-			for _, field := range []struct{ key, old, new string }{{"source", before.DefaultRepository, after.DefaultRepository}, {"chart", before.DefaultChart, after.DefaultChart}, {"version", before.DefaultVersion, after.DefaultVersion}} {
+			for _, field := range []struct{ key, old, new string }{{artifactSourceKey, before.DefaultRepository, after.DefaultRepository}, {artifactChartKey, before.DefaultChart, after.DefaultChart}, {artifactVersionKey, before.DefaultVersion, after.DefaultVersion}} {
 				actual, ok := ref[field.key].(string)
 				if !ok || actual == "" {
 					continue
 				}
 				equal := actual == field.old
-				if field.key == "chart" {
+				if field.key == artifactChartKey {
 					equal = path.Base(actual) == path.Base(field.old)
 				}
 				if equal {
