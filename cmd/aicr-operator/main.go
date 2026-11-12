@@ -50,16 +50,13 @@ func main() {
 }
 
 func run(args []string) error {
-	opts := manager.DefaultOptions()
-	cfg := config.Defaults()
 	fs := flag.NewFlagSet("aicr-operator", flag.ContinueOnError)
-	opts.BindFlags(fs)
-	cfg.BindFlags(fs)
-	logLevel := fs.String("log-level", "info", "Log level: debug, info, warn or error.")
 	showVersion := fs.Bool("version", false, "Print the version and exit.")
-	if err := fs.Parse(args); err != nil {
+	flags, err := manager.ParseFlags(fs, args)
+	if err != nil {
 		return err
 	}
+	opts, cfg := flags.Options, flags.Config
 
 	info := version.Get()
 	if *showVersion {
@@ -67,11 +64,7 @@ func run(args []string) error {
 		return nil
 	}
 
-	var level slog.Level
-	if err := level.UnmarshalText([]byte(*logLevel)); err != nil {
-		return fmt.Errorf("invalid --log-level %q: %w", *logLevel, err)
-	}
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: opts.LogLevel}))
 	slog.SetDefault(logger)
 	ctrl.SetLogger(logr.FromSlogHandler(logger.Handler()))
 
@@ -79,7 +72,7 @@ func run(args []string) error {
 		"version", info.Version, "commit", info.Commit, "release", info.Release, "development", info.Development,
 		"options", opts.String(), "aicrVersion", cfg.AICRVersion, "aicrImage", cfg.AICRImage, "registry", cfg.RegistryRepository,
 		"bypassApprovals", cfg.BypassApprovals)
-	if err := cfg.Validate(info.AcceptsDevelopment()); err != nil {
+	if err = cfg.Validate(info.AcceptsDevelopment()); err != nil {
 		return err
 	}
 	if cfg.ValidationEnabled && os.Getenv("POD_NAME") == "" {

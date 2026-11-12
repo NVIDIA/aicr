@@ -34,7 +34,7 @@ linting:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan (#2657).
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
-  oasdiff: 'v1.35.0'
+  oasdiff: 'v1.36.0'
   # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
   # oras pin in security_tools: the checksums.txt served beside the tarball
@@ -52,7 +52,7 @@ linting:
   #
   # linux/amd64 only: this feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oasdiff_sha256_linux_amd64: 'a8023002fcb2eaa7f5758148a9303cb63d33b939886df312268bc0fc7b939140'
+  oasdiff_sha256_linux_amd64: 'dba65661f6d0f178a3e4884c309f19527a849388bb9df0e81545db76dbb697d6'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.15.0'
   # renovate: datasource=pypi depName=yamllint depType=linting
@@ -84,11 +84,11 @@ linting:
 # Security Tools
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
-  grype: 'v0.121.0'
+  grype: 'v0.121.1'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.4'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
-  syft: 'v1.56.0'
+  syft: 'v1.57.0'
   # Attaches the aiperf-bench third-party source archive as an OCI 1.1 referrer
   # (tools/generate-aiperf-source). Cosign cannot attach arbitrary artifacts, so
   # this is a separate dependency from the signing/attestation path.
@@ -180,14 +180,14 @@ testing_tools:
     darwin_amd64: '214d890745b45679400442552ad4554fb4df622b92d031931536eff85bdb46c2'
     darwin_arm64: 'af2834052ba32fe8006a44a31db16cad30baf1c46f6b59160b092974578d7798'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
-  helmfile: 'v1.8.2'
+  helmfile: 'v1.8.3'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
   # via Renovate postUpgradeTasks whenever the helmfile version above is bumped.
   helmfile_checksums:
-    linux_amd64: 'f179485c5bb9f8e20fbd8ea16d8807915988aba4d60131ee864fb3232452716e'
-    linux_arm64: '9163f0d7ad088d243d7305ba09c3465aac02dfebd658d46c62dbdaa11c224b16'
-    darwin_amd64: 'e99b669bb02729d5c4b0f5de9d830298d336d5968dcac76c7c01635f67095574'
-    darwin_arm64: '0e788f4aa7b4eea1ec0d1e278e0e66e845d5733be5f4e6cb7f832c779e656c72'
+    linux_amd64: '7d79c6d2099a4819213873164eda23bdbd32f1404fec7a7104d934e5d102596f'
+    linux_arm64: 'e035c0338e31e0a8054ae798280532d32edcfbb7d6c4993e3b2efa2dc40647ce'
+    darwin_amd64: '043c4139987ad0009416575a0d52480af45b651f4dc85a90133199e8f9d6a71c'
+    darwin_arm64: 'a80eda044f1b73adc9ca051d34c787444203f31c3b9d5328a6b27c3ff02520ff'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.8.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools

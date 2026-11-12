@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -44,7 +45,7 @@ func TestRunPrintsVersion(t *testing.T) {
 func TestRunRejectsInvalidLogLevel(t *testing.T) {
 	isolate(t)
 	err := run([]string{"--log-level=loud"})
-	if err == nil || !strings.Contains(err.Error(), "--log-level") {
+	if err == nil || !strings.Contains(err.Error(), "-log-level") {
 		t.Fatalf("run(--log-level=loud) = %v, want a log-level error", err)
 	}
 }
@@ -56,18 +57,30 @@ func TestRunRejectsUnknownFlag(t *testing.T) {
 	}
 }
 
+const (
+	aicrImage      = "ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433"
+	validatorImage = "ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790"
+	repository     = "oci://registry.example.com/aicr/cluster"
+)
+
 var installFlags = []string{
 	"--aicr-version=v1.0.0",
-	"--aicr-image=ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433",
-	"--registry-repository=oci://registry.example.com/aicr/cluster",
+	"--aicr-image=" + aicrImage,
+	"--registry-repository=" + repository,
+}
+
+// startArgs runs the manager without leader election, metrics or a fixed
+// probe port, with args and installFlags.
+func startArgs(args ...string) []string {
+	return slices.Concat([]string{"--leader-elect=false", "--metrics-bind-address=0", "--health-probe-bind-address=127.0.0.1:0"},
+		args, installFlags)
 }
 
 // Without client config the manager must refuse to start rather than fall
 // back to any ambient cluster.
 func TestRunFailsWithoutClientConfig(t *testing.T) {
 	isolate(t)
-	args := append([]string{"--leader-elect=false", "--metrics-bind-address=0", "--health-probe-bind-address=127.0.0.1:0"}, installFlags...)
-	err := run(args)
+	err := run(startArgs())
 	if err == nil || !strings.Contains(err.Error(), "client config") {
 		t.Fatalf("run() = %v, want a client config error", err)
 	}
@@ -94,8 +107,7 @@ func TestRunDevelopmentSettingsNeedTheOptIn(t *testing.T) {
 	for _, flag := range []string{"--development-bypass-approvals", "--development-skip-discovery"} {
 		t.Run(flag, func(t *testing.T) {
 			isolate(t)
-			args := append([]string{"--leader-elect=false", "--metrics-bind-address=0", "--health-probe-bind-address=127.0.0.1:0", flag}, installFlags...)
-			if err := run(args); err == nil || !strings.Contains(err.Error(), want) {
+			if err := run(startArgs(flag)); err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("run(%s) = %v, want an error naming %q", flag, err, want)
 			}
 		})
@@ -105,10 +117,7 @@ func TestRunDevelopmentSettingsNeedTheOptIn(t *testing.T) {
 // Validation binds evidence to the operator's own pod, so it refuses to start
 // without the pod name; past that check, startup reaches client config.
 func TestRunNeedsPodNameForValidation(t *testing.T) {
-	validation := append([]string{"--leader-elect=false", "--metrics-bind-address=0", "--health-probe-bind-address=127.0.0.1:0",
-		"--validation-enabled=true",
-		"--validator-images=ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790",
-	}, installFlags...)
+	validation := startArgs("--validation-enabled=true", "--validator-images="+validatorImage)
 	cases := []struct {
 		name, pod, want string
 	}{
@@ -133,7 +142,7 @@ func TestCredentialProviders(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "test")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
 	cfg := config.Defaults()
-	cfg.RegistryRepository = "oci://registry.example.com/aicr/cluster"
+	cfg.RegistryRepository = repository
 	cfg.RegistryCredentialsSecret = "registry-auth"
 	provider, refresher, err := credentials(context.Background(), nil, nil, &cfg)
 	if err != nil || refresher != nil {
@@ -153,7 +162,7 @@ func TestCredentialProviders(t *testing.T) {
 	if p, ok := provider.(*registry.ECRProvider); !ok || p.Host != "123456789012.dkr.ecr.us-west-2.amazonaws.com" {
 		t.Fatalf("aws provider = %+v", provider)
 	}
-	cfg.RegistryRepository = "oci://registry.example.com/aicr/cluster"
+	cfg.RegistryRepository = repository
 	if _, _, err = credentials(context.Background(), nil, nil, &cfg); err == nil {
 		t.Fatal("the aws provider accepted a registry that is not ECR")
 	}

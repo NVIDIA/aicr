@@ -47,6 +47,14 @@ every AICR version gate compares, so a prerelease is treated as its release.
 {{- if and .Values.validation.enabled (not .Values.aicr.validatorImages) -}}
 {{- fail "validation.enabled needs aicr.validatorImages: the validator images of aicr.version, pinned by tag and digest" -}}
 {{- end -}}
+{{- $validatorRepos := dict -}}
+{{- range .Values.aicr.validatorImages -}}
+  {{- $repo := regexReplaceAll `:[^:/@]+@sha256:[a-f0-9]{64}$` . "" -}}
+  {{- if hasKey $validatorRepos $repo -}}
+    {{- fail (printf "aicr.validatorImages pins the validator repository %s twice" $repo) -}}
+  {{- end -}}
+  {{- $_ := set $validatorRepos $repo true -}}
+{{- end -}}
 {{- with .Values.validation.signingKey -}}
 {{- if not $.Values.validation.enabled -}}
 {{- fail "validation.signingKey needs validation.enabled" -}}
@@ -74,6 +82,9 @@ every AICR version gate compares, so a prerelease is treated as its release.
 {{- end -}}
 {{- if and (eq .Values.registry.auth.provider "aws") .Values.registry.auth.staticSecretRef -}}
 {{- fail "registry.auth.staticSecretRef applies to the static provider only" -}}
+{{- end -}}
+{{- if and (eq .Values.registry.auth.provider "aws") (not (regexMatch `^oci://[0-9]{12}\.dkr\.ecr(-fips)?\.[a-z0-9-]+\.amazonaws\.com(\.cn)?/` .Values.registry.repository)) -}}
+{{- fail (printf "registry.auth.provider aws needs registry.repository on a private Amazon ECR registry, not %s" .Values.registry.repository) -}}
 {{- end -}}
 {{- end -}}
 {{- /* The installed project names the registry the running plans were

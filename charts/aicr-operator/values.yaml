@@ -25,10 +25,10 @@ aicr:
   allowPrerelease: false
   # AICR CLI and snapshot agent image, pinned by digest. Required.
   image: ""
-  # AICR's validator images for aicr.version, each as repository:tag@digest;
-  # required with validation.enabled. AICR names the tag in its evidence; the
-  # operator fails a run whose evidence names any other validator image and
-  # checks that each tag still resolves to its digest.
+  # AICR's validator images for aicr.version, each as repository:tag@digest,
+  # one per repository. Required with validation.enabled. AICR names the tag
+  # in its evidence. The operator fails a run whose evidence names any other
+  # validator image, and checks that each tag still resolves to its digest.
   validatorImages: []
   # Placement of every AICR Job the operator runs (snapshot, recipe, render,
   # upgrade-check and the validation launcher), for clusters whose nodes are
@@ -79,10 +79,10 @@ registry:
   # registry is always plain HTTP, behind its NetworkPolicy.
   plainHTTP: false
   auth:
-    # external only. aws: ECR through the operator's AWS identity (EKS Pod
-    # Identity or IRSA); the chart creates repoCredsSecret and the operator
-    # refreshes it. static: administrator-provided Secrets; the operator only
-    # reads them.
+    # external only. aws: private ECR through the operator's AWS identity
+    # (EKS Pod Identity or IRSA). The chart creates repoCredsSecret and the
+    # operator refreshes it. static: administrator-provided Secrets, which the
+    # operator only reads.
     provider: aws
     # static: docker config Secret with this name in the operator, Job and
     # validation namespaces, created by the administrator; empty is an

@@ -83,7 +83,7 @@ context; the schema rejects unknown keys.
 | `aicr.version` | `v1.0.0`; a published chart, the version it was tested with | To change AICR | The declared AICR release, `>=1.0.0, <2.0.0`. Changing it is an AICR upgrade, rolled out like any other change. A prerelease such as `v1.3.0-rc.1` needs `aicr.allowPrerelease` and counts as the release it precedes |
 | `aicr.allowPrerelease` | `false`; a release candidate's chart, `true` | To run an AICR release candidate or a build from a commit | Accept a prerelease `aicr.version`. Without it, the chart and the operator refuse one |
 | `aicr.image` | A published chart's tested image | Required from source | AICR CLI and snapshot agent image, pinned by digest |
-| `aicr.validatorImages` | A published chart's tested images | Required from source with `validation.enabled` | AICR's validator images for `aicr.version`, each `repository:tag@sha256:<digest>` |
+| `aicr.validatorImages` | A published chart's tested images | Required from source with `validation.enabled` | AICR's validator images for `aicr.version`, each `repository:tag@sha256:<digest>`, one per repository |
 | `aicr.jobs.nodeSelector` | `{}` | When every node is tainted | Node selector for every AICR Job the operator runs; empty places none |
 | `aicr.jobs.tolerations` | `[]` | When every node is tainted | Tolerations for every AICR Job the operator runs, such as `CriticalAddonsOnly` on EKS system nodes |
 | `operator.image` | A published chart's tested image | Required from source | Operator image; pin it by digest on a shared cluster |
@@ -101,7 +101,7 @@ context; the schema rejects unknown keys.
 | `registry.mode` | `inCluster` | To use your own registry | `inCluster`: the chart runs the runtime registry in the operator namespace with a generated login. `external`: the registry at `registry.repository` |
 | `registry.repository` | `""` | **Required** with `external` | Runtime registry prefix, `oci://host/path`, for bundles, mirrored charts and evidence |
 | `registry.plainHTTP` | `false` | Test registries only | Plain HTTP to an external registry; the in-cluster registry always uses it |
-| `registry.auth.provider` | `aws` | With `external` | `aws`: ECR through the operator's AWS identity, with a token the operator refreshes. `static`: Secrets you provide |
+| `registry.auth.provider` | `aws` | With `external` | `aws`: a private ECR registry through the operator's AWS identity, with a token the operator refreshes. `static`: Secrets you provide |
 | `registry.auth.staticSecretRef` | `""` | With `static` and a private registry | Docker config Secret name in the operator, Job and validation namespaces |
 | `registry.auth.repoCredsSecret` | `aicr-registry` | Optional | Argo CD `repo-creds` Secret for the runtime registry; the chart creates it with `aws` and `inCluster` |
 | `registry.inCluster.image` | A published chart's registry image | Required from source with `inCluster` | The registry image (`cmd/aicr-registry`, CNCF Distribution); from source, `KO_DOCKER_REPO=<repo> ko build ./cmd/aicr-registry`. The upstream `registry:3` image also works. It runs on the operator's nodes: `operator.nodeSelector`, `operator.tolerations` and the node affinity in `operator.affinity` |
