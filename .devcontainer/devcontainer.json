@@ -6,10 +6,10 @@
   "features": {
     "ghcr.io/devcontainers/features/go:1": {
       "version": "latest",
-      "golangciLintVersion": "none"
+      "installGoTools": false
     },
     "ghcr.io/devcontainers/features/node:1": {
-      "version": "lts"
+      "version": "20"
     },
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "moby": true
