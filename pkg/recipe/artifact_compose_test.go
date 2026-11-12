@@ -804,3 +804,28 @@ func TestStaticArtifactCandidateMergesEmbeddedBindings(t *testing.T) {
 		})
 	}
 }
+
+func TestArtifactExternalOnlyExcludesEmbeddedInputs(t *testing.T) {
+	files, inventory := artifactCatalogFixture()
+	files[artifactInventoryPath] = inventory
+	dir := writeArtifactCatalog(t, files)
+	provider, err := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), LayeredProviderConfig{ExternalDir: dir, ExternalOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	composed, err := ComposeArtifacts(t.Context(), provider, artifact.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := composeCapturedArtifacts(t.Context(), map[string][]byte{}, files, inventory, artifact.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := composed.(*ArtifactProvider)
+	if snapshot.ArtifactProvenance().BaseCatalogDigest != expected.ArtifactProvenance().BaseCatalogDigest || snapshot.ArtifactProvenance().BindingsDigest != expected.ArtifactProvenance().BindingsDigest {
+		t.Fatal("external-only provenance included embedded catalog or bindings")
+	}
+	if _, err := snapshot.ReadFile(t.Context(), "components/gpu-operator/values.yaml"); err == nil {
+		t.Fatal("external-only composition exposed embedded values")
+	}
+}

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
@@ -94,41 +95,51 @@ func TestRecipeValidateExternalOnly(t *testing.T) {
 }
 
 func TestRecipeValidateArtifactConfig(t *testing.T) {
-	dir := providertest.WriteDir(t, map[string][]byte{
-		"registry.yaml":           []byte(providertest.EmptyRegistryYAML),
-		"artifacts/bindings.yaml": []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactBindings\ncharts: {}\nimages: {}\n"),
-	})
-	inventory := filepath.Join(t.TempDir(), "inventory.yaml")
-	if err := os.WriteFile(inventory, []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactInventory\nartifacts:\n- name: unbound\n  type: other\n  reference: oci://example.test/release\n  version: release\n  manifestDigest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	config := filepath.Join(t.TempDir(), "config.json")
-	body := fmt.Sprintf(`{"apiVersion":"aicr.run/v1beta1","kind":"AICRConfig","spec":{"recipe":{"data":%q,"artifacts":{"inventory":%q}}}}`, dir, inventory)
-	if err := os.WriteFile(config, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var output bytes.Buffer
-	cmd := &cli.Command{Name: "aicr", Commands: []*cli.Command{recipeValidateCmd()}, Writer: &output}
-	if err := cmd.Run(t.Context(), []string{"aicr", "validate", "--config", config, "--format", "json"}); err == nil {
-		t.Fatal("unbound configured inventory passed")
-	}
-	var diagnostics []aicr.RecipeDiagnostic
-	if err := json.Unmarshal(output.Bytes(), &diagnostics); err != nil {
-		t.Fatal(err)
-	}
-	if len(diagnostics) != 1 || diagnostics[0].Field != "" || diagnostics[0].File != "artifacts" {
-		t.Fatalf("config was not applied: %s", output.String())
-	}
-	output.Reset()
-	cmd = &cli.Command{Name: "aicr", Commands: []*cli.Command{recipeValidateCmd()}, Writer: &output}
-	if err := cmd.Run(t.Context(), []string{"aicr", "validate", "--config", config, "--format", "json", filepath.Join(dir, "registry.yaml")}); err == nil {
-		t.Fatal("single-file validation ignored the active inventory")
-	}
-	if err := json.Unmarshal(output.Bytes(), &diagnostics); err != nil {
-		t.Fatal(err)
-	}
-	if len(diagnostics) != 1 || diagnostics[0].File != "artifacts" {
-		t.Fatalf("unexpected file diagnostics: %s", output.String())
+	for _, tt := range []struct {
+		name       string
+		configOnly bool
+		flags      []string
+	}{
+		{name: "layered"}, {name: "external flag", flags: []string{"--external-only"}}, {name: "external config", configOnly: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := providertest.WriteDir(t, map[string][]byte{
+				"registry.yaml":           []byte(providertest.EmptyRegistryYAML),
+				"artifacts/bindings.yaml": []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactBindings\ncharts: {}\nimages: {}\n"),
+			})
+			inventory := filepath.Join(t.TempDir(), "inventory.yaml")
+			if err := os.WriteFile(inventory, []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactInventory\nartifacts:\n- name: unbound\n  type: other\n  reference: oci://example.test/release\n  version: release\n  manifestDigest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			config := filepath.Join(t.TempDir(), "config.json")
+			body := fmt.Sprintf(`{"apiVersion":"aicr.run/v1beta1","kind":"AICRConfig","spec":{"recipe":{"data":%q,"externalOnly":%t,"artifacts":{"inventory":%q}}}}`, dir, tt.configOnly, inventory)
+			if err := os.WriteFile(config, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			cmd := &cli.Command{Name: "aicr", Commands: []*cli.Command{recipeValidateCmd()}, Writer: &output}
+			if err := cmd.Run(t.Context(), append([]string{"aicr", "validate", "--config", config, "--format", "json"}, tt.flags...)); err == nil {
+				t.Fatal("unbound configured inventory passed")
+			}
+			var diagnostics []aicr.RecipeDiagnostic
+			if err := json.Unmarshal(output.Bytes(), &diagnostics); err != nil {
+				t.Fatal(err)
+			}
+			if len(diagnostics) != 1 || diagnostics[0].Field != "" || diagnostics[0].File != "artifacts" {
+				t.Fatalf("config was not applied: %s", output.String())
+			}
+			output.Reset()
+			cmd = &cli.Command{Name: "aicr", Commands: []*cli.Command{recipeValidateCmd()}, Writer: &output}
+			if err := cmd.Run(t.Context(), append(append([]string{"aicr", "validate", "--config", config, "--format", "json"}, tt.flags...), filepath.Join(dir, "registry.yaml"))); err == nil {
+				t.Fatal("single-file validation ignored the active inventory")
+			}
+			if err := json.Unmarshal(output.Bytes(), &diagnostics); err != nil {
+				t.Fatal(err)
+			}
+			if len(diagnostics) != 1 || diagnostics[0].File != "artifacts" {
+				t.Fatalf("unexpected file diagnostics: %s", output.String())
+			}
+		})
 	}
 }
 
@@ -146,5 +157,26 @@ func TestRecipeValidateEmbeddedArtifactOverride(t *testing.T) {
 	cmd := &cli.Command{Name: "aicr", Commands: []*cli.Command{recipeValidateCmd()}, Writer: &output}
 	if err := cmd.Run(t.Context(), []string{"aicr", "validate", "--config", config, "--format", "json"}); err != nil {
 		t.Fatalf("embedded static inventory: %v; %s", err, output.String())
+	}
+}
+
+func TestRecipeValidateExternalOnlyFile(t *testing.T) {
+	for _, base := range []string{"base", "h100-eks-training"} {
+		t.Run(base, func(t *testing.T) {
+			dir := providertest.WriteDir(t, map[string][]byte{
+				"registry.yaml":        []byte(providertest.EmptyRegistryYAML),
+				"overlays/base.yaml":   []byte("apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: base\nspec: {}\n"),
+				"overlays/custom.yaml": []byte(fmt.Sprintf("apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: custom\nspec:\n  base: %s\n", base)),
+			})
+			var output bytes.Buffer
+			cmd := &cli.Command{Name: "aicr", Commands: []*cli.Command{recipeValidateCmd()}, Writer: &output}
+			err := cmd.Run(t.Context(), []string{"aicr", "validate", "--data", dir, "--external-only", "--format", "json", filepath.Join(dir, "overlays/custom.yaml")})
+			if (err != nil) != (base != "base") {
+				t.Fatalf("error %v, output %s", err, output.String())
+			}
+			if base != "base" && !strings.Contains(output.String(), base) {
+				t.Fatalf("missing base not named: %s", output.String())
+			}
+		})
 	}
 }

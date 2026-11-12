@@ -309,6 +309,13 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 		"max_file_size", config.MaxFileSize,
 		"allow_symlinks", config.AllowSymlinks)
 
+	if config.ExternalOnly && config.ExternalDir == "" {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "external-only catalog requires an external data directory")
+	}
+	if config.ExternalOnly {
+		embedded = nil
+	}
+
 	if config.MaxFileSize == 0 {
 		// Single source of truth: same constant readExternalFile uses
 		// when its caller passes a non-positive maxBytes, so direct
@@ -446,7 +453,7 @@ func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte
 	if p.externalOnly {
 		data, err := readExternalFile(p.externalDir, lookupPath, p.maxFileSize, p.allowSymlinks)
 		if err != nil {
-			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInvalidRequest, "failed to read external catalog file")
+			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to read external catalog file %q", lookupPath))
 		}
 		return data, nil
 	}

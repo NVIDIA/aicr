@@ -50,6 +50,7 @@ flag    aicr bundle  --data  type=string default= required=false hidden=false en
 flag    aicr bundle  --deployer,-d  type=string default= required=false hidden=false env=
 flag    aicr bundle  --dra-eviction-node-label  type=string default= required=false hidden=false env=
 flag    aicr bundle  --dynamic  type=string default= required=false hidden=false env=
+flag    aicr bundle  --external-only  type=bool default=false required=false hidden=false env=
 flag    aicr bundle  --fleet-mode  type=string default="gitrepo" required=false hidden=false env=
 flag    aicr bundle  --fleet-namespace  type=string default="fleet-default" required=false hidden=false env=
 flag    aicr bundle  --flux-namespace  type=string default="flux-system" required=false hidden=false env=
@@ -132,6 +133,7 @@ flag    aicr mirror list  --accelerator,--gpu  type=string default= required=fal
 flag    aicr mirror list  --config  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --criteria-strict  type=bool default=false required=false hidden=false env=
 flag    aicr mirror list  --data  type=string default= required=false hidden=false env=
+flag    aicr mirror list  --external-only  type=bool default=false required=false hidden=false env=
 flag    aicr mirror list  --format,-f  type=string default="yaml" required=false hidden=false env=
 flag    aicr mirror list  --gke-tcpxo-interfaces  type=string default= required=false hidden=false env=
 flag    aicr mirror list  --inherit  type=string default="all" required=false hidden=false env=
@@ -153,6 +155,7 @@ flag    aicr query  --accelerator,--gpu  type=string default= required=false hid
 flag    aicr query  --config  type=string default= required=false hidden=false env=
 flag    aicr query  --criteria-strict  type=bool default=false required=false hidden=false env=
 flag    aicr query  --data  type=string default= required=false hidden=false env=
+flag    aicr query  --external-only  type=bool default=false required=false hidden=false env=
 flag    aicr query  --format,-t  type=string default="yaml" required=false hidden=false env=
 flag    aicr query  --gke-tcpxo-interfaces  type=string default= required=false hidden=false env=
 flag    aicr query  --inherit  type=string default="all" required=false hidden=false env=
@@ -175,6 +178,7 @@ flag    aicr recipe  --accelerator,--gpu  type=string default= required=false hi
 flag    aicr recipe  --config  type=string default= required=false hidden=false env=
 flag    aicr recipe  --criteria-strict  type=bool default=false required=false hidden=false env=
 flag    aicr recipe  --data  type=string default= required=false hidden=false env=
+flag    aicr recipe  --external-only  type=bool default=false required=false hidden=false env=
 flag    aicr recipe  --format,-t  type=string default="yaml" required=false hidden=false env=
 flag    aicr recipe  --gke-tcpxo-interfaces  type=string default= required=false hidden=false env=
 flag    aicr recipe  --inherit  type=string default="all" required=false hidden=false env=
@@ -192,7 +196,9 @@ flag    aicr recipe  --service  type=string default= required=false hidden=false
 flag    aicr recipe  --slurm-accounting-mode  type=string default= required=false hidden=false env=
 flag    aicr recipe  --snapshot,-s  type=string default= required=false hidden=false env=
 flag    aicr recipe list  --accelerator,--gpu  type=string default= required=false hidden=false env=
+flag    aicr recipe list  --config  type=string default= required=false hidden=false env=
 flag    aicr recipe list  --data  type=string default= required=false hidden=false env=
+flag    aicr recipe list  --external-only  type=bool default=false required=false hidden=false env=
 flag    aicr recipe list  --format,-t  type=string default="table" required=false hidden=false env=
 flag    aicr recipe list  --intent  type=string default= required=false hidden=false env=
 flag    aicr recipe list  --no-health,--skip-health  type=bool default=false required=false hidden=false env=
@@ -256,6 +262,7 @@ flag    aicr validate  --config  type=string default= required=false hidden=fals
 flag    aicr validate  --data  type=string default= required=false hidden=false env=
 flag    aicr validate  --emit-attestation  type=string default= required=false hidden=false env=
 flag    aicr validate  --evidence-dir  type=string default= required=false hidden=false env=
+flag    aicr validate  --external-only  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --fail-fast  type=bool default=false required=false hidden=false env=
 flag    aicr validate  --fail-on-error  type=bool default=true required=false hidden=false env=
 flag    aicr validate  --fulcio-url  type=string default= required=false hidden=false env=

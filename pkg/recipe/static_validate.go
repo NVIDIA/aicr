@@ -57,18 +57,29 @@ func ValidateStaticWithArtifacts(ctx context.Context, path, dataDir string, opti
 
 // ValidateStaticDirectory validates a complete catalog without embedded fallback.
 func ValidateStaticDirectory(ctx context.Context, dataDir string) ([]StaticDiagnostic, error) {
+	return ValidateStaticExternal(ctx, "", dataDir)
+}
+
+// ValidateStaticExternal validates a file or complete external catalog without
+// embedded fallback. An empty path selects the complete catalog.
+func ValidateStaticExternal(ctx context.Context, path, dataDir string) ([]StaticDiagnostic, error) {
 	if dataDir == "" {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "catalog directory is required")
 	}
-	return validateStatic(ctx, "", dataDir, true)
+	return validateStatic(ctx, path, dataDir, true)
 }
 
 // ValidateStaticDirectoryWithArtifacts checks an external-only artifact catalog.
 func ValidateStaticDirectoryWithArtifacts(ctx context.Context, dataDir string, options artifact.Options) ([]StaticDiagnostic, error) {
+	return ValidateStaticExternalWithArtifacts(ctx, "", dataDir, options)
+}
+
+// ValidateStaticExternalWithArtifacts checks a file or complete external artifact catalog.
+func ValidateStaticExternalWithArtifacts(ctx context.Context, path, dataDir string, options artifact.Options) ([]StaticDiagnostic, error) {
 	if dataDir == "" {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "catalog directory is required")
 	}
-	return validateStatic(ctx, "", dataDir, true, options)
+	return validateStatic(ctx, path, dataDir, true, options)
 }
 
 func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool, choices ...artifact.Options) (diagnostics []StaticDiagnostic, resultErr error) {
@@ -110,7 +121,7 @@ func validateStatic(ctx context.Context, path, dataDir string, externalOnly bool
 		if err != nil {
 			return nil, err
 		}
-		data, err = mergeStaticProfilePatch(ctx, path, dataDir, input)
+		data, err = mergeStaticProfilePatch(ctx, path, dataDir, input, externalOnly)
 		if err != nil {
 			add(path, "spec.profile", err)
 			return diagnostics, nil
@@ -239,8 +250,8 @@ func readStaticInput(path string) ([]byte, error) {
 	return data, nil
 }
 
-func mergeStaticProfilePatch(ctx context.Context, path, dataDir string, data []byte) ([]byte, error) {
-	if dataDir == "" {
+func mergeStaticProfilePatch(ctx context.Context, path, dataDir string, data []byte, externalOnly bool) ([]byte, error) {
+	if externalOnly || dataDir == "" {
 		return data, nil
 	}
 	inputPath, err := filepath.Abs(path)
