@@ -37,6 +37,7 @@ These digests are illustrative; use the publisher's actual digests.
 `reference` contains neither a tag nor a digest and starts with literal lowercase `oci://`.
 Its registry host must contain a dot or port, or be `localhost`, so container tools cannot reinterpret it as a Docker Hub path.
 The chart version is the literal OCI tag: an optional leading `v` is preserved, and `_` encodes SemVer build metadata.
+Pins and provenance retain that tag; Helm version inputs decode `_` to `+` while preserving the leading `v` and build metadata.
 The chart manifest digest and chart archive digest identify different bytes; an active chart binding requires the archive digest.
 
 The parser accepts one UTF-8 YAML or JSON document with string scalar values, at most 8 MiB and depth 32.
@@ -116,7 +117,8 @@ Standalone inventory and bindings files receive schema validation; accounting an
 Resolution records inventory, merged bindings and base catalog digests, exceptions, applied identities and ignored identities in `metadata.artifacts`.
 A bundle captures the original external inputs under `data/`, including the selected inventory and external bindings; embedded bindings are retained by the matching base catalog.
 Loading a saved recipe for validation, discovery or bundling requires the same inputs and exception set.
-Use the captured `data/` directory and the same `allowCatalogPins` configuration to replay a bundle.
+For a bundle made with an external catalog, use its captured `data/` directory as `--data` and retain the same `allowCatalogPins` configuration.
+For an embedded-catalog-only bundle, keep the matching embedded catalog: omit `--data` and set `spec.recipe.artifacts.inventory` in the replay configuration to `bundle/data/artifacts/inventory.yaml`. Its captured directory is not a complete external catalog and has no `registry.yaml`. Retain the same `allowCatalogPins` configuration in this case too.
 If an inventory override would replace a default inventory that also serves as catalog data, capture keeps that original file and stores the selected inventory as `artifacts/selected-inventory-<sha256>.yaml`; select that file explicitly when replaying.
 
 Namespace-only inheritance can read a historical recipe with different inventory provenance, extracting only component names and namespaces.
