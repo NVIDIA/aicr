@@ -25,7 +25,7 @@ go env -w GOTOOLCHAIN="${GOTOOLCHAIN}"
 AUTO_MODE=true make tools-setup
 make tools-check
 
-for tool in goreleaser helmfile; do
+for tool in goreleaser helmfile chainsaw; do
     command -v "$tool" >/dev/null 2>&1 || {
         printf 'required tool %s is missing; rerun `make tools-setup`\n' "$tool" >&2
         exit 1
