@@ -275,7 +275,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v2.1.2'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
-  zarf: 'v0.89.0'
+  zarf: 'v1.0.0'
 # Quality Thresholds
 quality:
   coverage_threshold: '83'
