@@ -1714,14 +1714,15 @@ runtime handler, or a shim binary not found) and fail within seconds with
 instead of waiting out the pod timeout. A sandbox failure from network setup
 is transient and is not treated this way.
 
-### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus unreachable"
+### `ai-service-metrics` or `pod-autoscaling` cannot reach its metrics endpoint
 
 On EKS clusters that split worker and system pods across separate security
 groups (e.g. DGXC EKS with distinct customer/system ENI subnets), the
-conformance check `ai-service-metrics` can fail non-deterministically with:
+conformance check `ai-service-metrics`, which queries NKTP's `otel-lgtm`, can
+fail non-deterministically with:
 
 ```text
-[SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
+[SERVICE_UNAVAILABLE] metrics backend unreachable at http://lgtm.nktp.svc:9090 — verify network connectivity
 ```
 
 `pod-autoscaling`, which dials Prometheus for its PodMonitor load wait when the
@@ -1735,10 +1736,11 @@ Both checks' orchestrator Jobs carry the preferred `dependencyAffinity`
 described below.
 
 The validator orchestrator Job tolerates every taint and sets a *preferred*
-`dependencyAffinity` toward Prometheus, so the scheduler co-locates it with the
-Prometheus pod when possible. The preference is best-effort, so on fallback it
+`dependencyAffinity` toward the pod it dials (`otel-lgtm` for
+`ai-service-metrics`, Prometheus for `pod-autoscaling`), so the scheduler
+co-locates the two when possible. The preference is best-effort, so on fallback it
 can still land on any worker node — including one whose ENI is in a security
-group whose ingress to the Prometheus-hosting SG is missing or asymmetric. On
+group whose ingress to that pod's SG is missing or asymmetric. On
 such a fallback the outcome is **not stable across re-runs**: image-locality
 scoring tends to keep the pod on whatever node won the first scheduling
 decision, so a passing run on a fresh cluster does not prove the SG topology is
@@ -1746,13 +1748,14 @@ correct.
 
 This is a cluster-side prerequisite, not an AICR bug per se — see
 [EKS Dynamo Networking Prerequisites](../integrator/eks-dynamo-networking.md#required-security-group-rules)
-for the SG ingress rules required for Prometheus (`tcp/9090`). The preferred
+for the SG ingress rules required for `tcp/9090`, which both Prometheus and
+`otel-lgtm` serve. The preferred
 `dependencyAffinity` ([#933](https://github.com/NVIDIA/aicr/issues/933),
 resolved) makes a bad placement far less likely, but the `9090` SG rule remains
 the reliable guarantee since the affinity is best-effort.
 
 Workaround when SG changes are not available: re-run the check until the
-orchestrator lands on a node whose SG can reach Prometheus, then leave the
+orchestrator lands on a node whose SG can reach that pod, then leave the
 image cached there so image-locality keeps subsequent runs on the same node.
 This is unreliable and should not be used as the steady-state validation
 strategy.
@@ -1794,58 +1797,77 @@ the `--image-pull-secret` Secrets, copied into the per-run namespace as for
 the other probe pods (see the `driver-runtime-management` note above), so a
 mirror that needs credentials is served the same way as the validator image.
 
-### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus did not load the ServiceMonitor/PodMonitor"
+### `pod-autoscaling` fails with "Prometheus did not load the PodMonitor"
 
-Both checks create a monitor (a ServiceMonitor or a PodMonitor) and, before
-starting their collection budget, wait up to five minutes for the recipe's
-Prometheus to list it among its scrape pools (`GET /api/v1/scrape_pools`).
-That wait exists because prometheus-operator reconciles monitors on its own
-schedule: gaps of about three minutes between a monitor's creation and
-Prometheus loading it were observed on a healthy AKS cluster, longer than the
-collection budget itself. For `pod-autoscaling` the scrape-pool preflight and
-the wait happen only when the recipe declares `kube-prometheus-stack`; without
-it (the OpenShift overlay serves `prometheus-adapter-ocp` from the platform
-monitoring stack) there is no Prometheus to ask, the check records the wait as
-skipped, and its baseline is bounded by the metric timeout alone.
+When the recipe declares `kube-prometheus-stack`, the check creates its
+PodMonitor in the Prometheus namespace, because that Prometheus loads monitors
+only from the namespaces the bundle names and its own. Before starting its
+metric budget it waits up to five minutes for Prometheus to list the
+PodMonitor among its scrape pools (`GET /api/v1/scrape_pools`). That wait
+exists because prometheus-operator reconciles monitors on its own schedule:
+gaps of about three minutes between a monitor's creation and Prometheus
+loading it were observed on a healthy AKS cluster. Without
+`kube-prometheus-stack` (the OpenShift overlay serves `prometheus-adapter-ocp`
+from the platform monitoring stack) there is no Prometheus to ask: the
+PodMonitor stays in the test namespace, the check records the wait as skipped,
+and its baseline is bounded by the metric timeout alone.
 
 The baseline then ends in one of three ways, each with its own message.
 
 A failure naming the load, such as:
 
 ```text
-[NOT_FOUND] AI service metrics test failed in phase baseline: [NOT_FOUND] Prometheus did not load the ServiceMonitor ai-metrics-test-<id>/ai-metrics-stub within 5m0s: no scrape pool serviceMonitor/ai-metrics-test-<id>/ai-metrics-stub/* among the 12 configured ...
+[NOT_FOUND] HPA autoscaling test failed in phase baseline: [NOT_FOUND] Prometheus did not load the PodMonitor monitoring/hpa-workload-<id> within 5m0s: no scrape pool podMonitor/monitoring/hpa-workload-<id>/* among the 12 configured ...
 ```
 
 means Prometheus did not load the monitor within the wait. Two things have
 to happen for it to: prometheus-operator must write the monitor into the
 generated configuration, and Prometheus must reload that configuration. Check
 both. For the first, look at the operator's logs for the reconcile of that
-namespace, and confirm the Prometheus resource selects the monitor: the checks
-label it `release=kube-prometheus-stack`, and the recipe's Prometheus opens
-`serviceMonitorSelector`, `podMonitorSelector` and their namespace selectors.
-For the second, a rejected reload leaves Prometheus running on its previous
-configuration with the pool absent even though the operator did its part:
-check `prometheus_config_last_reload_successful` (0 after a failed reload),
-the `PrometheusBadConfig` alert and its runbook, and the Prometheus and
-config-reloader container logs for the reload error.
+namespace, and confirm the Prometheus resource's `podMonitorNamespaceSelector`
+names its own namespace. For the second, a rejected reload leaves Prometheus
+running on its previous configuration with the pool absent even though the
+operator did its part: check `prometheus_config_last_reload_successful` (0
+after a failed reload) and the Prometheus and config-reloader container logs
+for the reload error.
 
 A failure reading "could not determine whether Prometheus loaded the
-ServiceMonitor/PodMonitor ... the last completed scrape pool listing failed"
+PodMonitor ... the last completed scrape pool listing failed"
 (or "... no scrape pool listing completed") means the scrape pool API stopped
 answering after the preflight, so no verdict on the monitor was reached; the
 underlying listing error (unreachable, HTTP status, malformed response) is
 attached. A listing the wait's deadline interrupts does not change the
-verdict: "did not load" rests on the last listing that completed. Check the Prometheus pod and the network
-path from the validator pod to it, as for "Prometheus unreachable" above.
+verdict: "did not load" rests on the last listing that completed. Check the
+Prometheus pod and the network path from the validator pod to it, as in the
+section above.
 
-A failure naming the collection instead ("Prometheus loaded the ServiceMonitor
-but the workload metrics were not collected", or "Prometheus loaded the
-PodMonitor, but the custom metrics pipeline does not serve the workload
-metric") means the configuration was loaded and the scrape or the adapter
-query did not produce a sample: check the target under the active or
-dropped targets at `/api/v1/targets` (a target relabeling dropped is listed
-as dropped, not active) and, for `pod-autoscaling`, the prometheus-adapter
-rule.
+A failure naming the collection instead ("Prometheus loaded the PodMonitor,
+but the custom metrics pipeline does not serve the workload metric") means the
+configuration was loaded and the scrape or the adapter query did not produce a
+sample: check the target under the active or dropped targets at
+`/api/v1/targets` (a target relabeling dropped is listed as dropped, not
+active), that the Prometheus series filter keeps
+`ai_conformance_hpa_queue_depth`, and the prometheus-adapter rule.
+
+### `ai-service-metrics` fails with "did not report the stub's target as up"
+
+The check queries the backend NKTP exports to, not the recipe's Prometheus.
+It creates a ServiceMonitor in its test namespace and waits up to five minutes
+for that backend to hold the stub target's `up` series with value 1.
+
+- No `up` series: NKTP did not discover the ServiceMonitor, or did not export
+  the sample. NKTP needs no monitor label, so check the ServiceMonitor's
+  selector and port, the Target Allocators' logs, and the collectors' logs for
+  failed scrapes or exports.
+- `up` is 0: the target is discovered but its scrape fails. Check the network
+  path from NKTP's collectors to the stub pod.
+
+A failure reading "discovered the ServiceMonitor but the workload metrics were
+not collected" means `up` arrived but the stub's own series did not within the
+collection timeout: check the collectors' logs as above.
+
+The check is skipped, and the CNCF requirement reported as not tested, when
+the recipe has no `nktp` or NKTP runs without `otel-lgtm`.
 
 ### Benchmark Job stuck or timed out
 

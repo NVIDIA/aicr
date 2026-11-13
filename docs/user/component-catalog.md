@@ -37,9 +37,9 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **nvidia-dra-driver-gpu** | `core` | Dynamic Resource Allocation (DRA) driver. Advertises devices via the Kubernetes `resource.k8s.io` API (`v1` on 1.34+, `v1beta1`/`v1beta2` on 1.32/1.33) — ComputeDomain/IMEX channels for MNNVL platforms, and optionally whole GPUs. Stock recipes disable whole-GPU DRA advertisement (`resources.gpus.enabled: false`) — the device plugin is the production default whole-GPU advertiser, and DRA whole-GPU allocation is an experimental recipe-level opt-in ([#1327](https://github.com/NVIDIA/aicr/issues/1327)). Whole-GPU DRA and the GPU Operator device plugin (`nvidia.com/gpu`) are mutually exclusive per node: recipe-backed validation rejects a configuration that enables both (at policy-resolution time — skipping validation bypasses the check), because the two allocators keep independent ledgers and concurrent advertisement can double-allocate the same physical GPUs (see the guidance in `recipes/components/nvidia-dra-driver-gpu/values.yaml`). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
 | **dra-node-labeler** | `core` | Applies the DRA eviction node label (`--dra-eviction-node-label`) to every node GFD reports as `nvidia.com/gpu.present=true`, so the DRA kubelet plugin's node selector and GPU Operator's Driver Manager eviction hook need no node-pool labeling. Write-once: an existing value, including the Driver Manager's `paused-for-driver-upgrade`, is never rewritten. Present in the bundle only when the eviction label is configured. | — |
 | **prometheus-operator-crds** | `core` | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
-| **kube-prometheus-stack** | `ops` | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). Prometheus selects every ServiceMonitor and PodMonitor in every namespace, with no `release` label required. Most components whose charts offer a monitor ship it enabled (NVCRE keeps its ServiceMonitor off because it is on no shipped overlay), and each one that renders its monitor at install declares a dependency on `prometheus-operator-crds`. | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
+| **kube-prometheus-stack** | `ops` | The prometheus-operator and one Prometheus that serves PromQL to the components that query metrics at runtime, such as prometheus-adapter and the Dynamo planner. It loads monitors only from the namespaces those components name and its own, and keeps only the series they declare ([runtime metrics declarations](../integrator/recipe-development.md#runtime-metrics-declarations)), on an `emptyDir`. It has no Grafana, Alertmanager, node-exporter, kube-state-metrics, or rules; cluster telemetry comes from `nktp`. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). Most components whose charts offer a monitor ship it enabled (NVCRE keeps its ServiceMonitor off because it is on no shipped overlay), and each one that renders its monitor at install declares a dependency on `prometheus-operator-crds`. | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
 | **prometheus-adapter** | `ops` | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
-| **nktp** | `ops` | NKTP, the NVKE Telemetry Pipeline: an OpenTelemetry Operator and a fixed topology of collectors that gather metrics, logs, events, and traces, with bundled `kube-state-metrics` and `node-exporter`. Its default backend, `otel-lgtm`, is for evaluation only. Available, but no stock recipe selects it yet ([ADR-026](https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md)). See [NKTP Telemetry Pipeline](#nktp-telemetry-pipeline). | [NKTP](https://github.com/dsx-ai-factory/nvke-telemetry-pipeline/tree/main/nktp) |
+| **nktp** | `ops` | NKTP, the NVKE Telemetry Pipeline: an OpenTelemetry Operator and a fixed topology of collectors that gather metrics, logs, events, and traces, with bundled `kube-state-metrics` and `node-exporter`. Its default backend, `otel-lgtm`, is for evaluation only. Every stock recipe installs it except `ocp` and `b300-mk8s-ubuntu-inference-dynamo` ([ADR-026](https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md)). See [NKTP Telemetry Pipeline](#nktp-telemetry-pipeline). | [NKTP](https://github.com/dsx-ai-factory/nvke-telemetry-pipeline/tree/main/nktp) |
 | **aws-ebs-csi-driver** | `core` | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work without naming a class. **The driver still needs AWS credentials, which AICR does not configure** — see [EBS CSI Driver Credentials](#ebs-csi-driver-credentials). Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | `ops` | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **k8s-aibom** | `ops` | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Ships by default in two stock recipes, `h100-gke-cos-inference` and its Dynamo descendant `h100-gke-cos-inference-dynamo`; available by opt-in on any other GKE recipe with `aicr recipe --runtime-inventory enabled`, including the `b200`, `gb200`, and `gb300` GKE Dynamo recipes. On the two recipes that ship it by default, decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
@@ -1780,7 +1780,7 @@ The `aws-ebs-csi-driver` health check verifies only that the controller Deployme
 
 ### Troubleshooting provisioning failures
 
-On the stock EKS overlay, `kube-prometheus-stack` creates a PVC for Prometheus, so a missing credential path usually surfaces there first as a failing `kube-prometheus-stack` health check: the Prometheus StatefulSet never becomes ready because its PVC stays `Pending`. Any other PVC bound to `ebs-csi-default-sc` fails the same way.
+The stock EKS recipe's telemetry creates no PVC: Prometheus stores to an `emptyDir` and NKTP keeps its queues in memory. A missing credential path therefore surfaces at the first claim bound to `ebs-csi-default-sc`, from an opt-in component such as `nvsentinel-mongodb` or from a workload: the claim stays `Pending` and its pod never becomes ready.
 
 A `Pending` PVC alone does not identify the cause. Confirm it from the driver's own diagnostics:
 
@@ -2680,11 +2680,26 @@ templates rather than manifests.
 
 `nktp` installs NKTP, the NVKE Telemetry Pipeline, in the `nktp` namespace
 ([ADR-026](https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md)).
-No stock recipe selects it yet. An overlay that adds it lists `cert-manager`,
-`prometheus-operator-crds`, and `kube-prometheus-stack` in its
-`dependencyRefs`, and turns off `kube-prometheus-stack`'s `node-exporter`,
-since both bind host port 9100. On a cluster that enforces Pod Security, label
-the namespace `privileged` for the node collector.
+Every stock recipe installs it except `ocp` and
+`b300-mk8s-ubuntu-inference-dynamo`.
+
+- Its bundled metrics-server is on only where the platform ships no resource
+  metrics API: EKS, OKE, LKE, NVKE, CKS, Kind, and generic GB300. On LKE
+  and Kind it skips kubelet certificate verification, which their kubelet
+  certificates cannot pass. On EKS it runs on the host network, so it can reach
+  kubelets when VPC CNI custom networking puts pods in a different security
+  group from their nodes.
+  Where a cluster already serves the resource metrics API, such as an OKE or
+  EKS cluster with the metrics-server add-on, turn the bundled one off with
+  `--set nktp:metrics-server.enabled=false`. Both register the same
+  `v1beta1.metrics.k8s.io` APIService, and Helm fails the `nktp` release on one
+  it does not own.
+- On Kind, each central collector runs one replica.
+- On RKE2 and CKS, its `node-exporter` listens on port 9110, since some RKE2
+  hosts and CoreWeave's own exporter use 9100.
+- On Talos, the `os-talos` mixin installs it in a privileged namespace. On any
+  other cluster that enforces Pod Security, label the `nktp` namespace
+  `privileged` for the node collector.
 
 Its bundled backend, `otel-lgtm`, is for evaluation only: one pod with every
 signal on `emptyDir`, anonymous Grafana Admin, and no alerting. NKTP collects
@@ -2719,6 +2734,21 @@ each of `gateway_metrics`, `gateway_logs`, `gateway_traces`, and `watchdog` in
 an overlay, with a `storageClassName` in each `volumeClaimTemplates` entry; the
 chart's README lists them.
 
+Each NKTP workload runs as its own service account. None reads Secrets outside
+the `nktp` namespace.
+
+| Service account | Scope | Permissions |
+|-----------------|-------|-------------|
+| `opentelemetry-operator` | Cluster | Creates, changes, and deletes Pods, ServiceAccounts, Services, ConfigMaps, volumes, Deployments, DaemonSets, StatefulSets, HPAs, PodDisruptionBudgets, Ingresses, NetworkPolicies, ServiceMonitors, PodMonitors, and cert-manager Issuers and Certificates in any namespace. Reads Secrets in `nktp`. It can create Pods anywhere, so treat it as highly privileged. |
+| `nktp-daemonset-targetallocator`, `nktp-large-target-metrics-targetallocator` | Cluster | Read Pods, Services, Endpoints, EndpointSlices, Namespaces, Nodes, ServiceMonitors, PodMonitors, Probes, and ScrapeConfigs, to find scrape targets. |
+| `nktp-watchdog-targetallocator` | `nktp` | Reads Pods, Services, and EndpointSlices. |
+| `nktp-daemonset-collector` | Cluster | Reads kubelet metrics (`nodes/metrics`). |
+| `nktp-large-target-metrics-collector`, `nktp-watchdog-collector` | Cluster | Read the `/metrics` endpoint. |
+| `nktp-cluster-events-collector` | Cluster | Reads Events. Updates its Lease in `nktp`. |
+| `nktp-ksm-*` (seven) | Cluster | List and watch what kube-state-metrics reports on: workloads, Pods, Services, EndpointSlices, Ingresses, NetworkPolicies, ConfigMaps, volumes, StorageClasses, Nodes, Namespaces, quotas, Leases, CertificateSigningRequests, and webhook and admission policy configurations. |
+| `nktp-metrics-server`, where enabled | Cluster | Reads kubelet metrics, Pods, Nodes, Namespaces, and ConfigMaps. Delegates authentication and authorization checks to the API server. |
+| `delete-resources-sa` | `nktp` | Deletes NKTP's OpenTelemetry resources during uninstall. |
+
 NKTP owns the `opentelemetry.io` CRDs and replaces them on upgrade (see
 [Upgrading components that own CRDs](#upgrading-components-that-own-crds)).
 The `monitoring.coreos.com` CRDs its chart bundles belong to
@@ -2733,8 +2763,10 @@ it cannot schedule, delete the collectors while the operator still runs, then
 uninstall without hooks:
 
 ```shell
-kubectl delete opentelemetrycollectors.opentelemetry.io -n nktp --all --wait --timeout=5m
-helm uninstall nktp -n nktp --no-hooks
+NAMESPACE="nktp"  # replace with nktp's namespace: privileged-nktp with the os-talos mixin
+
+kubectl delete opentelemetrycollectors.opentelemetry.io -n "${NAMESPACE}" --all --wait --timeout=5m
+helm uninstall nktp -n "${NAMESPACE}" --no-hooks
 ```
 
 Other deployers remove `nktp` through their own resource. Follow step 2 of the
@@ -3964,3 +3996,38 @@ The legacy `Skyhook` group, its `runtime-required` taint key and the
 `v0.22.0`. A pin at or above that is not reachable until the remaining
 `skyhook.nvidia.com` references in the `nodewright-operator` health check and
 the `vr200-rke2-ubuntu-*` overlays are migrated.
+
+### `kube-prometheus-stack`: `84.5.0` keeps only the runtime Prometheus
+
+From `84.5.0`, AICR runs only the prometheus-operator and one Prometheus, which
+serves the components that query metrics at runtime
+([ADR-026](https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md)).
+`nktp` collects cluster telemetry instead. The upgrade:
+
+- deletes Grafana, Alertmanager, `node-exporter`, `kube-state-metrics`, the
+  default rules, and the dashboards;
+- stops loading PrometheusRules, Probes, and ScrapeConfigs;
+- keeps only the series AICR components declare;
+- moves Prometheus from its PVC to an `emptyDir`, so its history is lost.
+
+1. Export any Grafana dashboards, Alertmanager configuration, and
+   PrometheusRules you still need.
+2. Deploy the new bundle, upgrading `kube-prometheus-stack` before `nktp`:
+   `nktp`'s `node-exporter` can't start while the old one holds host port
+   9100. The operator recreates Prometheus, so `prometheus-adapter`'s metrics
+   are unavailable for about 30 seconds.
+3. Delete what the release leaves behind:
+
+   ```bash
+   kubectl delete pvc --ignore-not-found -n monitoring prometheus-kube-prometheus-prometheus-db-prometheus-kube-prometheus-prometheus-0
+   kubectl delete secret --ignore-not-found -n monitoring kube-prometheus-admission
+   kubectl delete service --ignore-not-found -n kube-system kube-prometheus-kubelet
+   ```
+
+To roll back, uninstall `nktp` (`helm uninstall nktp -n nktp`, with
+`privileged-nktp` as the namespace under the `os-talos` mixin, or remove it
+through your deployer) before redeploying the previous bundle: its
+`node-exporter` and the previous `kube-prometheus-stack`'s both bind host port
+9100. The uninstall keeps that namespace with its TLS Secrets, and the
+`opentelemetry.io` CRDs. If it hangs on a Pending cleanup Job, see
+[NKTP Telemetry Pipeline](#nktp-telemetry-pipeline).

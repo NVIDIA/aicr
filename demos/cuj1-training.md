@@ -110,7 +110,7 @@ Adjust both pairs to your cluster's actual labels and taints.
 
 > Selector / toleration flags accept comma-separated values. See the [bundle](../docs/user/cli-reference.md#aicr-bundle) section for the full flag set.
 >
-> Set `--storage-class` to the name of a StorageClass that exists on the target cluster (check with `kubectl get storageclass`). The cloud overlay configures `kube-prometheus-stack` with a `volumeClaimTemplate` but no `storageClassName`, so without this flag the PVC falls to the cluster's default StorageClass — and if no default is configured, the deploy hangs on a Pending PVC.
+> Set `--storage-class` to the name of a StorageClass that exists on the target cluster (check with `kubectl get storageclass`). It is written to every component that renders a PVC; without it a PVC falls to the cluster's default StorageClass — and if no default is configured, the deploy hangs on a Pending PVC.
 
 **EKS**
 

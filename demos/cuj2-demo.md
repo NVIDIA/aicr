@@ -51,7 +51,7 @@
   │    ├── 009-agentgateway/                   (inference gateway)         │
   │    ├── 010-agentgateway-post/              (post-chart manifests)      │
   │    ├── 011-grove/                          (multinode inference)       │
-  │    ├── 012-kube-prometheus-stack/          (Prometheus, Grafana)       │
+  │    ├── 012-kube-prometheus-stack/          (Prometheus)                │
   │    ├── 013-k8s-ephemeral-storage-metrics/  (storage metrics)           │
   │    ├── 014-nfd/                            (node feature discovery)    │
   │    ├── 015-gpu-operator/                   (driver, plugin, DCGM)      │
