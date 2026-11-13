@@ -22,6 +22,18 @@ export GOTOOLCHAIN
 go version
 go env -w GOTOOLCHAIN="${GOTOOLCHAIN}"
 
+# SSH sessions (gh codespace ssh) get their environment from /etc/environment
+# through PAM; remoteEnv in devcontainer.json does not reach them. Codespaces
+# seeds that file with the container's GOPATH=/go, so override it too. This
+# script runs with remoteEnv applied, so PATH and `go env GOPATH` below already
+# hold its values, ~/go/bin included; do not append them again.
+env_file=/etc/environment
+{
+    grep -v -E '^(PATH|GOPATH)=' "${env_file}" 2>/dev/null || true
+    printf 'PATH="%s"\nGOPATH="%s"\n' "${PATH}" "$(go env GOPATH)"
+} | sudo tee "${env_file}.new" >/dev/null
+sudo mv "${env_file}.new" "${env_file}"
+
 AUTO_MODE=true make tools-setup
 make tools-check
 
