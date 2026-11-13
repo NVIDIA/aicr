@@ -15,6 +15,7 @@
 package attestation
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -383,6 +384,72 @@ func TestSignStatementFor_PassesSigner(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSignStatementFor_ReusesIssuedCertificate checks that keyless signing
+// retries a failed certificate request, requests one certificate per
+// successful issuance, and signs the bundle with that certificate.
+func TestSignStatementFor_ReusesIssuedCertificate(t *testing.T) {
+	tests := []struct {
+		name      string
+		failures  int
+		wantCalls int
+	}{
+		{"first request succeeds", 0, 1},
+		{"first request fails", 1, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base, ok := newFakeCertIdentity(t, "jdoe@company.com").(fakeCertIdentity)
+			if !ok {
+				t.Fatal("newFakeCertIdentity did not return a fakeCertIdentity")
+			}
+			provider := &countingCertProvider{inner: base.provider, failures: tt.failures}
+			id := fakeCertIdentity{kp: base.kp, provider: provider}
+
+			res, err := signStatementFor(context.Background(), func(signer string) ([]byte, error) {
+				return statementJSONFor(t, signer), nil
+			}, id, NewNoTLogPolicy())
+			if err != nil {
+				t.Fatalf("signStatementFor: %v", err)
+			}
+			if provider.calls != tt.wantCalls {
+				t.Errorf("GetCertificate calls = %d, want %d", provider.calls, tt.wantCalls)
+			}
+			if len(provider.issued) != 1 {
+				t.Fatalf("issued %d certificates, want 1", len(provider.issued))
+			}
+			var b protobundle.Bundle
+			if err := protojson.Unmarshal(res.BundleJSON, &b); err != nil {
+				t.Fatalf("unmarshal bundle: %v", err)
+			}
+			if got := b.GetVerificationMaterial().GetCertificate().GetRawBytes(); !bytes.Equal(got, provider.issued[0]) {
+				t.Error("bundle certificate differs from the issued certificate")
+			}
+		})
+	}
+}
+
+// countingCertProvider wraps a sign.CertificateProvider. It returns an error
+// for its first failures calls and records each certificate inner issues.
+type countingCertProvider struct {
+	inner    sign.CertificateProvider
+	failures int
+	calls    int
+	issued   [][]byte
+}
+
+func (p *countingCertProvider) GetCertificate(ctx context.Context, kp sign.Keypair, opts *sign.CertificateProviderOptions) ([]byte, error) {
+	p.calls++
+	if p.calls <= p.failures {
+		return nil, errors.New(errors.ErrCodeUnavailable, "simulated Fulcio failure")
+	}
+	der, err := p.inner.GetCertificate(ctx, kp, opts)
+	if err != nil {
+		return nil, err
+	}
+	p.issued = append(p.issued, der)
+	return der, nil
 }
 
 // fakeKeyIdentity is a test SigningIdentity backed by a local ECDSA signer
