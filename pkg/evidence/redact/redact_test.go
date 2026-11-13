@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/evidence/redact"
@@ -845,6 +846,22 @@ func reportWithProvenance(p *ctrf.RuntimeProvenance) *ctrf.Report {
 	r := reportWithExtra(nil)
 	r.Results.Tests[0].RuntimeProvenance = p
 	return r
+}
+
+func TestCTRFBoundsImages(t *testing.T) {
+	valid := ctrf.PodImage{Image: "ghcr.io/x/deployment:v1", Digest: "sha256:" + strings.Repeat("a", 64)}
+	in := reportWithExtra(nil)
+	in.Results.Tests[0].Images = []ctrf.PodImage{{Image: "ghcr.io/x/deployment:v1", Digest: "sha256:short"}, valid}
+	out, rules := redact.CTRF(in)
+	if got, want := out.Results.Tests[0].Images, []ctrf.PodImage{valid}; !reflect.DeepEqual(got, want) {
+		t.Errorf("bounded images = %+v, want %+v", got, want)
+	}
+	if in.Results.Tests[0].Images[0].Digest != "sha256:short" {
+		t.Errorf("CTRF mutated its input images: %+v", in.Results.Tests[0].Images)
+	}
+	if !slices.Contains(rules, "ctrf.tests.images.bound") {
+		t.Errorf("applied rules must name the images bound, got %v", rules)
+	}
 }
 
 // TestCTRFBoundsRuntimeProvenance covers #2297's evidence carrier policy: the

@@ -80,7 +80,8 @@ const (
 	//     ID and AWS account aliases, node-name aliases, JWT removal.
 	//   - v10 added the resultSchema stamp naming the result contract the
 	//     validator image spoke.
-	PolicyVersion = "v10"
+	//   - v11 added the per-test images carrier (boundImages).
+	PolicyVersion = "v11"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -620,9 +621,22 @@ func collapseListSelectors(p string) string {
 	})
 }
 
+// boundImages returns, in a new slice, the records of in that pass
+// ctrf.PodImage.Valid, or nil when none do.
+func boundImages(in []ctrf.PodImage) []ctrf.PodImage {
+	var out []ctrf.PodImage
+	for _, img := range in {
+		if img.Valid() {
+			out = append(out, img)
+		}
+	}
+	return out
+}
+
 // ctrfAppliedRules is the static, sorted description of the CTRF scrub.
 var ctrfAppliedRules = []string{
 	"ctrf.tests.extra.allowlist",
+	"ctrf.tests.images.bound",
 	"ctrf.tests.omit:message",
 	"ctrf.tests.omit:stdout",
 	"ctrf.tests.runtimeProvenance.bound",
@@ -737,6 +751,9 @@ func CTRF(in *ctrf.Report) (*ctrf.Report, []string) {
 			tr.Message = ""
 			tr.Extra = allowlistExtra(tr.Extra)
 			tr.RuntimeProvenance = boundRuntimeProvenance(tr.RuntimeProvenance)
+			// Image refs are kept because the predicate's validatorImages
+			// already publishes them.
+			tr.Images = boundImages(tr.Images)
 			tests[i] = tr
 		}
 		out.Results.Tests = tests
