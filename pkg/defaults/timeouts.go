@@ -339,6 +339,11 @@ const (
 	// with limit=1 against a local apiserver is fast; 5s matches
 	// PodAffinitySelectorLookupTimeout (same best-effort preflight category).
 	GPUNodeDetectionTimeout = 5 * time.Second
+
+	// NodePlatformLookupTimeout bounds the Node read for the os/arch recorded
+	// beside a pod's image digest. The platform is optional, so a slow
+	// apiserver omits it rather than delaying result capture.
+	NodePlatformLookupTimeout = 5 * time.Second
 )
 
 // Local filesystem timeouts.
