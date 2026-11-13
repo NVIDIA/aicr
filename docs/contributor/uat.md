@@ -380,7 +380,7 @@ The row's `reservation-id` must equal every reservation its `cluster-config-path
 No broker, workflow, or Go change is needed — the nightly batch enumerates rows from the registry, and `uat-run.yaml` resolves them. Teardown coverage follows the row too: the evening `daytime-down` covers every non-kind row, and the [orphan janitor](#the-orphan-janitor-backstop-teardown) adds an AWS leg for any new `.deployment.tenancy` / `.deployment.location` pair. Two AWS constraints come with that:
 
 - A new AWS tenancy needs `infra/uat-aws-account/` applied in that account (GitHub OIDC provider and `github-actions-role-aicr`), or its janitor leg fails at authentication.
-- Cluster-configs that share a tenancy and region must also share `.deployment.state` and `.deployment.stateLocation`. One janitor leg destroys every orphan in that account and region with one config, so `uat-broker reservations --janitor-aws` rejects configs whose state backend settings differ.
+- Cluster-configs that share a tenancy and region must also share `.deployment.state` and `.deployment.stateLocation` (an omitted `stateLocation` is the config's `location`). One janitor leg destroys every orphan in that account and region with one config, so `uat-broker reservations --janitor-aws` rejects configs whose state backend settings differ.
 
 The unit of sequencing is the *reservation*, so a new GPU type in an existing cloud simply runs in parallel with the others on its own lease. (Provisioning is per *cloud*: the same `uat-aws.yaml` pipeline provisions any AWS accelerator from the row's `cluster-config-path`; you do not add a per-accelerator workflow.)
 

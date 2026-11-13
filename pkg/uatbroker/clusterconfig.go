@@ -196,8 +196,8 @@ type deploymentConfig struct {
 }
 
 // AWSJanitorTarget is one AWS account and region the registry provisions
-// into, and the cluster-config the janitor destroys that pair's orphans with.
-// uat-janitor.yaml consumes a JSON array of these as its AWS matrix.
+// into, and the cluster-config that stands for every cluster-config naming
+// that pair.
 type AWSJanitorTarget struct {
 	Tenancy  string `json:"tenancy"`
 	Location string `json:"location"`
@@ -207,10 +207,10 @@ type AWSJanitorTarget struct {
 // AWSJanitorTargets returns one target per distinct (.deployment.tenancy,
 // .deployment.location) across the aws rows' cluster-configs under root,
 // sorted by tenancy then location. A target's Config is the first
-// cluster-config in registry order that names its pair. Since one janitor leg
-// destroys every orphan in its pair with that one config, the cluster-configs
-// sharing a pair must agree on .deployment.state and .deployment.stateLocation.
-// A registry with no aws row fails.
+// cluster-config in registry order that names its pair, so the
+// cluster-configs sharing a pair must name the same Terraform backend: the
+// same .deployment.state, and the same .deployment.stateLocation, where an
+// omitted one is .deployment.location. A registry with no aws row fails.
 func (r *Registry) AWSJanitorTargets(root string) ([]AWSJanitorTarget, error) {
 	type backend struct{ state, stateLocation, config string }
 	backends := make(map[[2]string]backend)
@@ -241,18 +241,22 @@ func (r *Registry) AWSJanitorTargets(root string) ([]AWSJanitorTarget, error) {
 				"reservation %s cluster-config %s: .deployment.location %q is not an AWS region",
 				res.Name, res.ClusterConfigPath, d.Location))
 		}
+		stateLocation := d.StateLocation
+		if stateLocation == "" {
+			stateLocation = d.Location
+		}
 		key := [2]string{d.Tenancy, d.Location}
 		if prev, ok := backends[key]; ok {
-			if prev.state != d.State || prev.stateLocation != d.StateLocation {
+			if prev.state != d.State || prev.stateLocation != stateLocation {
 				return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 					"%s (reservation %s) and %s both target %s/%s but disagree on .deployment.state/.stateLocation "+
 						"(%q/%q vs %q/%q); one janitor leg destroys every orphan there with one config",
 					res.ClusterConfigPath, res.Name, prev.config, d.Tenancy, d.Location,
-					d.State, d.StateLocation, prev.state, prev.stateLocation))
+					d.State, stateLocation, prev.state, prev.stateLocation))
 			}
 			continue
 		}
-		backends[key] = backend{state: d.State, stateLocation: d.StateLocation, config: res.ClusterConfigPath}
+		backends[key] = backend{state: d.State, stateLocation: stateLocation, config: res.ClusterConfigPath}
 		out = append(out, AWSJanitorTarget{Tenancy: d.Tenancy, Location: d.Location, Config: res.ClusterConfigPath})
 	}
 	if len(out) == 0 {

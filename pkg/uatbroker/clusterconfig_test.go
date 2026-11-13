@@ -376,6 +376,16 @@ func TestAWSJanitorTargets(t *testing.T) {
 			want:  []AWSJanitorTarget{{Tenancy: "036338176747", Location: "us-east-1", Config: "a.yaml"}},
 		},
 		{
+			// An omitted stateLocation is the deployment's own location.
+			name: "omitted stateLocation equals an explicit one at the location",
+			files: map[string]string{
+				"a.yaml": east1,
+				"b.yaml": deployment(`"111111111111"`, "us-east-1", "tenancy", "us-east-1"),
+			},
+			rows: []Reservation{aws("a1", "a.yaml"), aws("b1", "b.yaml")},
+			want: []AWSJanitorTarget{{Tenancy: "111111111111", Location: "us-east-1", Config: "a.yaml"}},
+		},
+		{
 			name: "unequal stateLocation in one pair",
 			files: map[string]string{
 				"a.yaml": east1,
@@ -391,7 +401,7 @@ func TestAWSJanitorTargets(t *testing.T) {
 				"b.yaml": deployment(`"111111111111"`, "us-east-1", "local", `""`),
 			},
 			rows:    []Reservation{aws("a1", "a.yaml"), aws("b1", "b.yaml")},
-			wantErr: []string{"b.yaml (reservation b1) and a.yaml", `"local"/"" vs "tenancy"/""`},
+			wantErr: []string{"b.yaml (reservation b1) and a.yaml", `"local"/"us-east-1" vs "tenancy"/"us-east-1"`},
 		},
 		{
 			name:    "no aws row",

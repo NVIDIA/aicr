@@ -80,7 +80,8 @@ being the pair's first cluster-config in document order. Cluster-config paths
 resolve from the current directory, the checkout root in CI. One leg destroys
 every orphan in its account and region with that one config, so
 cluster-configs sharing a pair must agree on `.deployment.state` and
-`.deployment.stateLocation`; the command fails otherwise, and when a
+`.deployment.stateLocation` (an omitted `stateLocation` is the config's
+`location`); the command fails otherwise, and when a
 tenancy is not a 12-digit account id or a location is not an AWS region:
 
 ```sh

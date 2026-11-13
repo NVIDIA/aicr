@@ -756,26 +756,43 @@ func TestDaytimeAssignmentsNone(t *testing.T) {
 }
 
 func TestDaytimeTeardownAssignments(t *testing.T) {
-	reg := &Registry{Reservations: []Reservation{
-		{Name: "aws-a", Cloud: CloudAWS, DaytimeIntent: IntentTraining},
-		{Name: "kind-a", Cloud: CloudKind, DaytimeIntent: IntentTraining},
-		{Name: "gcp-a", Cloud: CloudGCP, DaytimeIntent: IntentInference},
-		{Name: "aws-b", Cloud: CloudAWS},
-		{Name: "azure-a", Cloud: CloudAzure},
-	}}
-	want := []DaytimeAssignment{
-		{Reservation: "aws-a", Intent: IntentTraining},
-		{Reservation: "gcp-a", Intent: IntentInference},
-		{Reservation: "aws-b", Intent: IntentTraining},
-		{Reservation: "azure-a", Intent: IntentTraining},
+	tests := []struct {
+		name string
+		rows []Reservation
+		// want is never nil: the encoder turns a nil slice into null, which
+		// the scheduler's `matrix != '[]'` guard does not catch.
+		want []DaytimeAssignment
+	}{
+		{
+			name: "every non-kind row in registry order, intent or training",
+			rows: []Reservation{
+				{Name: "aws-a", Cloud: CloudAWS, DaytimeIntent: IntentTraining},
+				{Name: "kind-a", Cloud: CloudKind, DaytimeIntent: IntentTraining},
+				{Name: "gcp-a", Cloud: CloudGCP, DaytimeIntent: IntentInference},
+				{Name: "aws-b", Cloud: CloudAWS},
+				{Name: "azure-a", Cloud: CloudAzure},
+			},
+			want: []DaytimeAssignment{
+				{Reservation: "aws-a", Intent: IntentTraining},
+				{Reservation: "gcp-a", Intent: IntentInference},
+				{Reservation: "aws-b", Intent: IntentTraining},
+				{Reservation: "azure-a", Intent: IntentTraining},
+			},
+		},
+		{
+			name: "kind-only registry",
+			rows: []Reservation{{Name: "kind-a", Cloud: CloudKind}},
+			want: []DaytimeAssignment{},
+		},
 	}
-	if got := reg.DaytimeTeardownAssignments(); !slices.Equal(got, want) {
-		t.Errorf("DaytimeTeardownAssignments() = %+v, want %+v", got, want)
-	}
-
-	kindOnly := &Registry{Reservations: []Reservation{{Name: "kind-a", Cloud: CloudKind}}}
-	if got := kindOnly.DaytimeTeardownAssignments(); got == nil || len(got) != 0 {
-		t.Errorf("DaytimeTeardownAssignments() on a kind-only registry = %#v, want an empty non-nil slice", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := &Registry{Reservations: tt.rows}
+			got := reg.DaytimeTeardownAssignments()
+			if got == nil || !slices.Equal(got, tt.want) {
+				t.Errorf("DaytimeTeardownAssignments() = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 
