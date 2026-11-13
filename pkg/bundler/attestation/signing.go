@@ -228,7 +228,7 @@ func signStatementFor(ctx context.Context, build func(signer string) ([]byte, er
 	// The certificate is issued before the statement is built so the
 	// statement can name the certificate's signer.
 	if certProvider, certOpts := id.CertProvider(); certProvider != nil {
-		certDER, certErr := signWithRetry(signCtx, func(attemptCtx context.Context) ([]byte, error) {
+		certDER, certErr := signWithRetry(signCtx, "fulcio certificate request", func(attemptCtx context.Context) ([]byte, error) {
 			return certProvider.GetCertificate(attemptCtx, keypair, certOpts)
 		})
 		if certErr != nil {
@@ -250,7 +250,7 @@ func signStatementFor(ctx context.Context, build func(signer string) ([]byte, er
 		PayloadType: "application/vnd.in-toto+json",
 	}
 
-	bundle, err := signWithRetry(signCtx, func(attemptCtx context.Context) (*protobundle.Bundle, error) {
+	bundle, err := signWithRetry(signCtx, "sigstore bundle signing", func(attemptCtx context.Context) (*protobundle.Bundle, error) {
 		attemptOpts := bundleOpts
 		attemptOpts.Context = attemptCtx
 		return sign.Bundle(content, keypair, attemptOpts)
@@ -437,9 +437,9 @@ func extractRekorLogIndex(bundle *protobundle.Bundle) int64 {
 
 // signWithRetry calls attempt, retrying transient failures with exponential
 // backoff. attempt is one Sigstore request, such as issuing a Fulcio
-// certificate or signing a bundle. Each call to attempt runs under
-// defaults.SigstoreAttemptTimeout, and ctx bounds the whole retry loop,
-// including backoff waits.
+// certificate or signing a bundle, and step names it in errors and logs.
+// Each call to attempt runs under defaults.SigstoreAttemptTimeout, and ctx
+// bounds the whole retry loop, including backoff waits.
 //
 // Special cases are:
 //
@@ -451,7 +451,7 @@ func extractRekorLogIndex(bundle *protobundle.Bundle) int64 {
 //     defaults.SigstoreRetryBudget attempts, then returns an
 //     ErrCodeUnavailable error. This covers Fulcio refusals, Rekor 5xx
 //     responses, network errors and per-attempt timeouts.
-func signWithRetry[T any](ctx context.Context, attempt func(context.Context) (T, error)) (T, error) {
+func signWithRetry[T any](ctx context.Context, step string, attempt func(context.Context) (T, error)) (T, error) {
 	var zero T
 	var lastErr error
 	backoff := defaults.SigstoreRetryInitialBackoff
@@ -461,11 +461,9 @@ func signWithRetry[T any](ctx context.Context, attempt func(context.Context) (T,
 		// pointless.
 		if err := ctx.Err(); err != nil {
 			if stderrors.Is(err, context.DeadlineExceeded) {
-				return zero, errors.Wrap(errors.ErrCodeTimeout,
-					"sigstore signing timed out before attempt", err)
+				return zero, errors.Wrap(errors.ErrCodeTimeout, step+" timed out before attempt", err)
 			}
-			return zero, errors.Wrap(errors.ErrCodeCanceled,
-				"sigstore signing canceled before attempt", err)
+			return zero, errors.Wrap(errors.ErrCodeCanceled, step+" canceled before attempt", err)
 		}
 
 		attemptCtx, cancel := context.WithTimeout(ctx, defaults.SigstoreAttemptTimeout)
@@ -478,19 +476,19 @@ func signWithRetry[T any](ctx context.Context, attempt func(context.Context) (T,
 
 		// Outer ctx exhausted? Classify and stop — no retry can help.
 		if stderrors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return zero, errors.Wrap(errors.ErrCodeTimeout, "sigstore signing timed out", lastErr)
+			return zero, errors.Wrap(errors.ErrCodeTimeout, step+" timed out", lastErr)
 		}
 		if stderrors.Is(ctx.Err(), context.Canceled) {
-			return zero, errors.Wrap(errors.ErrCodeCanceled, "sigstore signing canceled", lastErr)
+			return zero, errors.Wrap(errors.ErrCodeCanceled, step+" canceled", lastErr)
 		}
 
 		// Outer ctx alive; this attempt failed (per-attempt timeout or
 		// non-ctx error). Retry if budget remains.
 		if n >= defaults.SigstoreRetryBudget {
-			return zero, errors.Wrap(errors.ErrCodeUnavailable,
-				"sigstore signing failed after retries", lastErr)
+			return zero, errors.Wrap(errors.ErrCodeUnavailable, step+" failed after retries", lastErr)
 		}
-		slog.Warn("sigstore signing attempt failed, retrying",
+		slog.Warn("sigstore attempt failed, retrying",
+			"step", step,
 			"attempt", n,
 			"budget", defaults.SigstoreRetryBudget,
 			"backoff", backoff,
@@ -501,11 +499,9 @@ func signWithRetry[T any](ctx context.Context, attempt func(context.Context) (T,
 		select {
 		case <-ctx.Done():
 			if stderrors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return zero, errors.Wrap(errors.ErrCodeTimeout,
-					"sigstore signing timed out during retry backoff", lastErr)
+				return zero, errors.Wrap(errors.ErrCodeTimeout, step+" timed out during retry backoff", lastErr)
 			}
-			return zero, errors.Wrap(errors.ErrCodeCanceled,
-				"sigstore signing canceled during retry backoff", lastErr)
+			return zero, errors.Wrap(errors.ErrCodeCanceled, step+" canceled during retry backoff", lastErr)
 		case <-time.After(backoff):
 		}
 		backoff *= time.Duration(defaults.SigstoreRetryBackoffFactor)
