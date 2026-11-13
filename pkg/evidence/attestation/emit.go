@@ -71,20 +71,16 @@ type EmitOptions struct {
 	PhaseResults []*validator.PhaseResult
 
 	// Catalog is the validator catalog snapshot used for the auto-BOM and
-	// the predicate's validatorImages list. Pass nil when no catalog was
-	// loaded — the predicate's validatorImages will be omitted.
+	// the predicate's validatorImages, which lists the catalog images of the
+	// phases PhaseResults show ran. A nil Catalog leaves validatorImages
+	// with only the images PhaseResults report.
 	Catalog *catalog.ValidatorCatalog
 
-	// AllowMutableValidatorTags emits the bundle even when a validator image
-	// resolves to a moving tag. Emit otherwise fails closed, because the
-	// predicate records validator images by tag alone (ValidatorImages'
-	// Digest is empty by design) and a moving tag leaves the attestation's
-	// claim about which validators ran unverifiable once the tag advances.
-	//
-	// Set it only where the ref is known-disposable and the evidence is not:
-	// the kind UAT smoke lane runs side-loaded ko.local images, and the
-	// evidence demo publishes to a 72h ttl.sh repo. A real conformance run
-	// drops AICR_VALIDATOR_IMAGE_TAG instead. See #2873.
+	// AllowMutableValidatorTags lets Emit proceed when a validator image has
+	// no recorded digest and a moving tag, which the attestation would name
+	// by a ref that can later resolve to different validator code. Set it
+	// only where the ref is disposable, such as a side-loaded ko.local image
+	// or a short-lived ttl.sh repo.
 	AllowMutableValidatorTags bool
 
 	// AICRVersion is stamped into the predicate and into the auto BOM's
@@ -114,33 +110,31 @@ type EmitResult struct {
 }
 
 // errMutableValidatorTag is the cause carried by the provenance failure. The
-// predicate identifies validators by tag alone, so a moving tag is a defect in
-// the evidence, not in the run that produced it — the validations themselves
-// succeeded.
+// predicate identifies an image with no recorded digest by tag alone, so a
+// moving tag is a defect in the evidence, not in the run that produced it.
+// The validations themselves succeeded.
 var errMutableValidatorTag = stderrors.New(
 	"validator image tag can be repointed after the run, leaving the attestation unverifiable")
 
-// checkValidatorTagProvenance fails closed when any validator image the
-// predicate will record resolves to a moving tag, naming every offending ref
-// so the operator can see which override to drop. With allow set the emit
-// proceeds and the refs are logged instead — the bundle still records what
-// actually ran, it just cannot be independently re-resolved later.
+// checkValidatorTagProvenance returns an ErrCodeInvalidRequest error naming
+// every ref UnpinnedValidatorImages reports for images. With allow set it
+// logs those refs and returns nil.
 func checkValidatorTagProvenance(images []ValidatorImage, allow bool) error {
-	mutable := MutableValidatorImages(images)
-	if len(mutable) == 0 {
+	unpinned := UnpinnedValidatorImages(images)
+	if len(unpinned) == 0 {
 		return nil
 	}
 	if allow {
 		slog.Warn("emitting evidence with mutable validator image tags",
-			"images", mutable,
+			"images", unpinned,
 			"impact", "the attestation names refs that can later resolve to different validator code")
 		return nil
 	}
 	return errors.WrapWithContext(errors.ErrCodeInvalidRequest,
-		"refusing to emit evidence naming validator images that are not immutably pinned: "+strings.Join(mutable, ", "),
+		"refusing to emit evidence naming validator images that are not immutably pinned: "+strings.Join(unpinned, ", "),
 		errMutableValidatorTag,
 		map[string]any{
-			"images": mutable,
+			"images": unpinned,
 			// Every cause is named because the override is only the most
 			// common one. An unstamped `go build` (commit "unknown") resolves
 			// nothing and leaves the catalog's own :latest in place, and an
@@ -163,8 +157,8 @@ func checkValidatorTagProvenance(images []ValidatorImage, allow bool) error {
 // pointer is written. When Push is absent the pointer is still written
 // (with empty bundle fields) on a successful build.
 //
-// A validator image resolving to a mutable tag fails the emit before any work
-// is done, unless AllowMutableValidatorTags is set.
+// Emit fails before writing anything when a validator image has no recorded
+// digest and a mutable tag, unless AllowMutableValidatorTags is set.
 //
 // Behavior matrix:
 //
@@ -183,7 +177,7 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 	// Gate the validator provenance before any work, for the same reason the
 	// push ref is parsed above: a bundle that must not be published should
 	// cost nothing to reject, and must leave nothing half-written on disk.
-	validatorImages := ValidatorImagesForPredicate(opts.Catalog)
+	validatorImages := ValidatorImagesForPredicate(opts.Catalog, opts.PhaseResults)
 	if err := checkValidatorTagProvenance(validatorImages, opts.AllowMutableValidatorTags); err != nil {
 		return nil, err
 	}

@@ -54,10 +54,10 @@ type PredicateInputs struct {
 
 // BuildPredicate constructs the predicate body from in. The result matches
 // the shape PredicateTypeV3 requires (see StatementPredicateType) whether
-// or not the recipe is profile-bearing. ValidatorImages is sorted by image
-// for deterministic field ordering. AICRCommit is lowercased and dropped
-// unless it is a 7-40 character hex SHA, so the ldflags default "unknown"
-// is never recorded.
+// or not the recipe is profile-bearing. ValidatorImages is sorted by image,
+// then platform, then digest, for deterministic field ordering. AICRCommit
+// is lowercased and dropped unless it is a 7-40 character hex SHA, so the
+// ldflags default "unknown" is never recorded.
 func BuildPredicate(in PredicateInputs) *Predicate {
 	commit := strings.ToLower(in.AICRCommit)
 	if !catalog.IsValidCommit(commit) {
@@ -66,7 +66,14 @@ func BuildPredicate(in PredicateInputs) *Predicate {
 
 	images := append([]ValidatorImage(nil), in.ValidatorImages...)
 	sort.Slice(images, func(i, j int) bool {
-		return images[i].Image < images[j].Image
+		a, b := images[i], images[j]
+		if a.Image != b.Image {
+			return a.Image < b.Image
+		}
+		if a.Platform != b.Platform {
+			return a.Platform < b.Platform
+		}
+		return a.Digest < b.Digest
 	})
 
 	// Filters to the canonical phase set. Any key in in.Phases outside

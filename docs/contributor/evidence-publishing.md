@@ -22,17 +22,16 @@ for a release build, `:sha-<commit>` for a `main`-tip build — and the override
 replaces it unconditionally, including over a release tag.
 
 That matters more here than in an ordinary validate run, because the predicate
-identifies the validators that ran by *tag alone*: `validatorImages[].digest`
-is deliberately empty (resolving it would cost a registry round-trip per
-image), so a moving tag leaves the attestation with nothing to fall back on.
-Once `:edge` advances, the bundle's claim about which validator code produced
-its results is no longer true, and nothing in the bundle records that. This is
-not hypothetical — `:edge` has been observed moving to a commit with a breaking
-rename about 75 minutes after a run it was recorded in, and moving twice within
-a single working session ([#2873](https://github.com/NVIDIA/aicr/issues/2873)).
+identifies a validator image with no
+[recorded digest](#recorded-validator-digests) by *tag alone*. Once `:edge`
+advances, the bundle's claim about that validator code is no longer true, and
+nothing in the bundle records that. This is not hypothetical. `:edge` has been
+observed moving to a commit with a breaking rename about 75 minutes after a
+run it was recorded in, and moving twice within a single working session
+([#2873](https://github.com/NVIDIA/aicr/issues/2873)).
 
 `aicr validate --emit-attestation` therefore **fails closed** on a mutable
-validator tag:
+validator tag with no recorded digest:
 
 ```text
 [INVALID_REQUEST] refusing to emit evidence naming validator images that are not
@@ -85,6 +84,26 @@ guard that can be switched off by an inherited variable is not a guard. (Go
 callers set `EvidenceOptions.AllowMutableValidatorTags` explicitly, which is
 the same deliberate per-call act — see the
 [Go library guide](../integrator/go-library.md#what-evidenceattestationoptions-does-and-does-not-carry).)
+
+### Recorded validator digests
+
+Each check records its validator image's registry digest, taken from the pod's
+`containerStatuses[].imageID`, and its `os/arch` in the CTRF `images` field.
+The `os/arch` is the Node's, or the validator's `platform` stamp when the
+caller cannot read Nodes. A validator reports the images of workloads it
+launches, such as the `aiperf-bench` Job, with the `##AICR-IMAGE##` sentinel.
+`validatorImages` lists the catalog images of each phase where some check was
+not skipped, and every image a check reports, once per recorded digest and
+platform.
+
+The digest is what the kubelet pulled, not what the tag resolves to now.
+containerd reports the multi-arch index digest. Other runtimes may report the
+node platform's manifest digest, so each entry also records `platform`.
+
+A phase that did not run, or whose checks were all skipped as in a
+`--no-cluster` run, lists no catalog images. A check that started no pod, or
+an image side-loaded into kind, records no digest. Those entries get the
+mutable-tag check.
 
 ## The Fulcio connectivity problem
 

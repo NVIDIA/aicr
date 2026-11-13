@@ -611,11 +611,15 @@ aicrVersion: v0.13.0
 # Build commit of the aicr binary. Omitted when the binary has no commit stamp.
 aicrCommit: 0123456789abcdef0123456789abcdef01234567
 validatorCatalogVersion: v2.4.0
+# Images of the phases that ran, one entry per digest and platform. Empty
+# digest if none was recorded.
 validatorImages:
   - image: ghcr.io/nvidia/aicr/validator-deployment
     digest: sha256:...
+    platform: linux/amd64
   - image: ghcr.io/nvidia/aicr/validator-performance
     digest: sha256:...
+    platform: linux/amd64
 fingerprint:
   service: { value: eks }
   accelerator: { value: h100 }

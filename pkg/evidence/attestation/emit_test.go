@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -30,7 +31,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
 // snapshotWithSensitiveData builds a snapshot whose measurements include the
@@ -363,6 +366,8 @@ func TestSignAndPush_NoPushReturnsZeroOutcome(t *testing.T) {
 }
 
 // emitCatalog builds a validator catalog whose images carry the given tags.
+var testImageDigest = "sha256:" + strings.Repeat("1", 64)
+
 func emitCatalog(tags ...string) *catalog.ValidatorCatalog {
 	cat := &catalog.ValidatorCatalog{}
 	for i, tag := range tags {
@@ -375,7 +380,19 @@ func emitCatalog(tags ...string) *catalog.ValidatorCatalog {
 	return cat
 }
 
-func TestMutableValidatorImages(t *testing.T) {
+// phaseWithImages returns a passed phase result with one test per element of
+// tests, each test carrying that element as its Images.
+func phaseWithImages(phase validator.Phase, tests ...[]ctrf.PodImage) *validator.PhaseResult {
+	report := &ctrf.Report{}
+	for i, images := range tests {
+		report.Results.Tests = append(report.Results.Tests, ctrf.TestResult{
+			Name: fmt.Sprintf("check-%d", i), Status: ctrf.StatusPassed, Images: images,
+		})
+	}
+	return &validator.PhaseResult{Phase: phase, Status: ctrf.StatusPassed, Report: report}
+}
+
+func TestUnpinnedValidatorImages(t *testing.T) {
 	tests := []struct {
 		name   string
 		images []ValidatorImage
@@ -398,17 +415,21 @@ func TestMutableValidatorImages(t *testing.T) {
 			"ghcr.io/nvidia/aicr-validators/conformance:edge",
 		}},
 		{"empty ref is skipped", []ValidatorImage{{Image: ""}}, nil},
+		{"recorded digest pins a mutable tag", []ValidatorImage{
+			{Image: "ghcr.io/nvidia/aicr-validators/conformance:edge", Digest: testImageDigest},
+			{Image: "ghcr.io/nvidia/aicr-validators/performance:edge"},
+		}, []string{"ghcr.io/nvidia/aicr-validators/performance:edge"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := MutableValidatorImages(tt.images)
+			got := UnpinnedValidatorImages(tt.images)
 			if len(got) != len(tt.want) {
-				t.Fatalf("MutableValidatorImages() = %v, want %v", got, tt.want)
+				t.Fatalf("UnpinnedValidatorImages() = %v, want %v", got, tt.want)
 			}
 			for i := range got {
 				if got[i] != tt.want[i] {
-					t.Errorf("MutableValidatorImages()[%d] = %q, want %q", i, got[i], tt.want[i])
+					t.Errorf("UnpinnedValidatorImages()[%d] = %q, want %q", i, got[i], tt.want[i])
 				}
 			}
 		})
@@ -418,11 +439,12 @@ func TestMutableValidatorImages(t *testing.T) {
 func TestEmit_RejectsMutableValidatorTag(t *testing.T) {
 	dir := t.TempDir()
 	_, err := Emit(context.Background(), EmitOptions{
-		OutDir:      dir,
-		Recipe:      emitRecipe(),
-		Snapshot:    snapshotWithSensitiveData(),
-		Catalog:     emitCatalog("v1.0.0", "edge"),
-		AICRVersion: "v0.0.0-test",
+		OutDir:       dir,
+		Recipe:       emitRecipe(),
+		Snapshot:     snapshotWithSensitiveData(),
+		Catalog:      emitCatalog("v1.0.0", "edge"),
+		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, nil)},
+		AICRVersion:  "v0.0.0-test",
 	})
 	if err == nil {
 		t.Fatal("expected Emit to fail closed on a mutable validator tag")
@@ -450,6 +472,7 @@ func TestEmit_AllowMutableValidatorTagsOptsOut(t *testing.T) {
 		Recipe:                    emitRecipe(),
 		Snapshot:                  snapshotWithSensitiveData(),
 		Catalog:                   emitCatalog("edge"),
+		PhaseResults:              []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, nil)},
 		AllowMutableValidatorTags: true,
 		AICRVersion:               "v0.0.0-test",
 	})
@@ -464,14 +487,50 @@ func TestEmit_AllowMutableValidatorTagsOptsOut(t *testing.T) {
 	}
 }
 
+func TestEmit_RecordedDigestPinsMutableTag(t *testing.T) {
+	const ref = "ghcr.io/nvidia/aicr-validators/performance:edge"
+	img := ctrf.PodImage{Image: ref, Digest: testImageDigest, Platform: "linux/amd64"}
+	res, err := Emit(context.Background(), EmitOptions{
+		OutDir:       t.TempDir(),
+		Recipe:       emitRecipe(),
+		Snapshot:     snapshotWithSensitiveData(),
+		Catalog:      emitCatalog("edge"),
+		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, []ctrf.PodImage{img})},
+		AICRVersion:  "v0.0.0-test",
+	})
+	if err != nil {
+		t.Fatalf("Emit with a recorded digest for a mutable tag: %v", err)
+	}
+	want := []ValidatorImage{ValidatorImage(img)}
+	if got := res.Bundle.Predicate.ValidatorImages; !reflect.DeepEqual(got, want) {
+		t.Errorf("predicate validatorImages = %+v, want %+v", got, want)
+	}
+}
+
+func TestEmit_RejectsReportedImageWithoutDigest(t *testing.T) {
+	const ref = "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest"
+	_, err := Emit(context.Background(), EmitOptions{
+		OutDir:       t.TempDir(),
+		Recipe:       emitRecipe(),
+		Snapshot:     snapshotWithSensitiveData(),
+		Catalog:      emitCatalog("v1.0.0"),
+		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhasePerformance, []ctrf.PodImage{{Image: ref}})},
+		AICRVersion:  "v0.0.0-test",
+	})
+	if err == nil || !strings.Contains(err.Error(), ref) {
+		t.Fatalf("Emit error = %v, want a refusal naming %s", err, ref)
+	}
+}
+
 func TestEmit_ImmutableValidatorTagsPass(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Emit(context.Background(), EmitOptions{
-		OutDir:      dir,
-		Recipe:      emitRecipe(),
-		Snapshot:    snapshotWithSensitiveData(),
-		Catalog:     emitCatalog("v1.0.0", "sha-1f27c0dc6e4617db9b505eb10ee9d910a08968aa", "uat-19283746"),
-		AICRVersion: "v0.0.0-test",
+		OutDir:       dir,
+		Recipe:       emitRecipe(),
+		Snapshot:     snapshotWithSensitiveData(),
+		Catalog:      emitCatalog("v1.0.0", "sha-1f27c0dc6e4617db9b505eb10ee9d910a08968aa", "uat-19283746"),
+		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, nil)},
+		AICRVersion:  "v0.0.0-test",
 	}); err != nil {
 		t.Fatalf("Emit with immutable validator tags: %v", err)
 	}

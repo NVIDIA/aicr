@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
@@ -27,7 +29,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
 func TestCatalogVersion(t *testing.T) {
@@ -98,27 +102,116 @@ func TestDedupValidatorImages(t *testing.T) {
 }
 
 func TestValidatorImagesForPredicate(t *testing.T) {
+	const (
+		deploy = "ghcr.io/x/deployment:edge"
+		perf   = "ghcr.io/x/performance:edge"
+		aiperf = "nvcr.io/nvidia/aiperf-bench:1.0"
+	)
+	digA := "sha256:" + strings.Repeat("a", 64)
+	digB := "sha256:" + strings.Repeat("b", 64)
 	cat := &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-		{Name: "a", Image: "ghcr.io/x/deployment:v1"},
-		{Name: "b", Image: "ghcr.io/x/deployment:v1"},
-		{Name: "c", Image: "ghcr.io/x/performance:v1"},
+		{Name: "a", Phase: string(validator.PhaseDeployment), Image: deploy},
+		{Name: "b", Phase: string(validator.PhasePerformance), Image: perf},
 	}}
-	got := ValidatorImagesForPredicate(cat)
-	want := []ValidatorImage{
-		{Image: "ghcr.io/x/deployment:v1"},
-		{Image: "ghcr.io/x/performance:v1"},
+	deployment := func(images ...[]ctrf.PodImage) *validator.PhaseResult {
+		return phaseWithImages(validator.PhaseDeployment, images...)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("len = %d, want %d (got=%v)", len(got), len(want), got)
+	performance := func(images ...[]ctrf.PodImage) *validator.PhaseResult {
+		return phaseWithImages(validator.PhasePerformance, images...)
 	}
-	for i := range got {
-		if got[i] != want[i] {
-			t.Errorf("[%d] = %+v, want %+v", i, got[i], want[i])
-		}
+	skipped := func(images []ctrf.PodImage) *validator.PhaseResult {
+		pr := deployment(images)
+		pr.Report.Results.Tests[0].Status = ctrf.StatusSkipped
+		return pr
 	}
 
-	if ValidatorImagesForPredicate(nil) != nil {
-		t.Errorf("nil catalog should produce nil slice")
+	tests := []struct {
+		name    string
+		cat     *catalog.ValidatorCatalog
+		results []*validator.PhaseResult
+		want    []ValidatorImage
+	}{
+		{"nil catalog and results", nil, nil, nil},
+		{"no results lists nothing", cat, nil, nil},
+		{"nil phase and nil report are skipped", cat, []*validator.PhaseResult{nil, {}}, nil},
+		{"phase whose tests all skipped lists nothing", cat, []*validator.PhaseResult{skipped(nil)}, nil},
+		{
+			name:    "image a skipped test reports is kept",
+			cat:     cat,
+			results: []*validator.PhaseResult{skipped([]ctrf.PodImage{{Image: deploy, Digest: digA}})},
+			want:    []ValidatorImage{{Image: deploy, Digest: digA}},
+		},
+		{"phase that ran lists its catalog image", cat, []*validator.PhaseResult{deployment(nil)}, []ValidatorImage{{Image: deploy}}},
+		{
+			name: "recorded digest fills its catalog image",
+			cat:  cat,
+			results: []*validator.PhaseResult{deployment(
+				[]ctrf.PodImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
+			)},
+			want: []ValidatorImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
+		},
+		{
+			name: "repeated runs dedupe and platforms sort",
+			cat:  cat,
+			results: []*validator.PhaseResult{deployment(
+				[]ctrf.PodImage{{Image: deploy, Digest: digB, Platform: "linux/arm64"}},
+				[]ctrf.PodImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
+				[]ctrf.PodImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
+			)},
+			want: []ValidatorImage{
+				{Image: deploy, Digest: digA, Platform: "linux/amd64"},
+				{Image: deploy, Digest: digB, Platform: "linux/arm64"},
+			},
+		},
+		{
+			name: "image outside the catalog is appended",
+			cat:  cat,
+			results: []*validator.PhaseResult{performance([]ctrf.PodImage{
+				{Image: perf, Digest: digA},
+				{Image: aiperf, Digest: digB, Platform: "linux/amd64"},
+			})},
+			want: []ValidatorImage{
+				{Image: perf, Digest: digA},
+				{Image: aiperf, Digest: digB, Platform: "linux/amd64"},
+			},
+		},
+		{
+			name:    "invalid record is ignored",
+			cat:     cat,
+			results: []*validator.PhaseResult{deployment([]ctrf.PodImage{{Image: deploy, Digest: "sha256:short"}})},
+			want:    []ValidatorImage{{Image: deploy}},
+		},
+		{
+			name: "reported image without a digest is listed by reference",
+			cat:  cat,
+			results: []*validator.PhaseResult{performance(
+				[]ctrf.PodImage{{Image: aiperf}},
+				[]ctrf.PodImage{{Image: aiperf}},
+			)},
+			want: []ValidatorImage{{Image: perf}, {Image: aiperf}},
+		},
+		{
+			name: "digested record supersedes a digest-less one",
+			cat:  cat,
+			results: []*validator.PhaseResult{performance(
+				[]ctrf.PodImage{{Image: aiperf}},
+				[]ctrf.PodImage{{Image: aiperf, Digest: digB}},
+			)},
+			want: []ValidatorImage{{Image: perf}, {Image: aiperf, Digest: digB}},
+		},
+		{
+			name:    "nil catalog keeps reported images",
+			results: []*validator.PhaseResult{performance([]ctrf.PodImage{{Image: aiperf, Digest: digB}})},
+			want:    []ValidatorImage{{Image: aiperf, Digest: digB}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ValidatorImagesForPredicate(tt.cat, tt.results)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ValidatorImagesForPredicate() = %+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }
 

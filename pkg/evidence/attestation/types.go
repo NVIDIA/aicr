@@ -220,11 +220,13 @@ type RecipeRef struct {
 	Digest string `json:"digest" yaml:"digest"`
 }
 
-// ValidatorImage records one validator image that ran during the
-// validate session. The list is sorted by Image for determinism.
+// ValidatorImage is one image a validate session ran, at one digest and
+// platform. Digest is the registry digest the kubelet reported, and Platform
+// is the os/arch of the node. Both are empty when no digest was recorded.
 type ValidatorImage struct {
-	Image  string `json:"image" yaml:"image"`
-	Digest string `json:"digest" yaml:"digest"`
+	Image    string `json:"image" yaml:"image"`
+	Digest   string `json:"digest" yaml:"digest"`
+	Platform string `json:"platform,omitempty" yaml:"platform,omitempty"`
 }
 
 // PhaseSummary is the per-phase outcome recorded in the predicate.

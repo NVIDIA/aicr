@@ -16,8 +16,11 @@ package attestation
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"slices"
 	"sort"
+	"strings"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 
@@ -29,7 +32,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
 // LoadOrGenerateBOM returns the CycloneDX BOM bytes to embed. When bomPath
@@ -171,18 +176,12 @@ func CatalogVersion(cat *catalog.ValidatorCatalog) string {
 	return cat.Metadata.Version
 }
 
-// MutableValidatorImages returns the refs in images that do not dereference to
-// stable content, in the order given. Empty when every ref is immutable.
-//
-// This is the only identification the predicate carries for the validators
-// that ran: ValidatorImagesForPredicate leaves Digest empty (see its doc), so
-// a moving tag leaves an attestation with nothing to fall back on — its claim
-// about which validators produced the results stops being true the moment the
-// tag advances. Callers gate on this before emitting. See issue #2873.
-func MutableValidatorImages(images []ValidatorImage) []string {
+// UnpinnedValidatorImages returns, in the order given, the refs of images that
+// have neither a Digest nor an immutable ref (see catalog.IsImmutableRef).
+func UnpinnedValidatorImages(images []ValidatorImage) []string {
 	var out []string
 	for _, img := range images {
-		if img.Image == "" {
+		if img.Image == "" || img.Digest != "" {
 			continue
 		}
 		if !catalog.IsImmutableRef(img.Image) {
@@ -192,18 +191,67 @@ func MutableValidatorImages(images []ValidatorImage) []string {
 	return out
 }
 
-// ValidatorImagesForPredicate adapts the dedup'd list to predicate form.
-// Digest stays empty: the catalog records refs by tag, and resolving to
-// digest would require a registry round-trip per image. Operators wanting
-// digest pinning ship an exhaustive BOM via the --bom path.
-func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog) []ValidatorImage {
-	images := DedupValidatorImages(cat)
-	if len(images) == 0 {
+// ValidatorImagesForPredicate returns the predicate's validatorImages: the
+// images in cat of each phase in results with a test that was not skipped,
+// and every other image a test in results reports. Each appears once per
+// digest and platform recorded for it, sorted by platform and digest, or once
+// with an empty Digest when none was. Records failing ctrf.PodImage.Valid are
+// ignored.
+func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*validator.PhaseResult) []ValidatorImage {
+	notSkipped := func(tr ctrf.TestResult) bool { return tr.Status != ctrf.StatusSkipped }
+	ran := map[string]bool{}
+	for _, pr := range results {
+		if pr != nil && pr.Report != nil && slices.ContainsFunc(pr.Report.Results.Tests, notSkipped) {
+			ran[string(pr.Phase)] = true
+		}
+	}
+	var refs []string
+	listed := map[string]bool{}
+	if cat != nil {
+		for _, v := range cat.Validators {
+			if v.Image != "" && ran[v.Phase] && !listed[v.Image] {
+				listed[v.Image] = true
+				refs = append(refs, v.Image)
+			}
+		}
+	}
+	digested := map[string][]ValidatorImage{}
+	seen := map[ValidatorImage]bool{}
+	for _, pr := range results {
+		if pr == nil || pr.Report == nil {
+			continue
+		}
+		for _, tr := range pr.Report.Results.Tests {
+			for _, podImg := range tr.Images {
+				if !podImg.Valid() {
+					continue
+				}
+				if !listed[podImg.Image] {
+					listed[podImg.Image] = true
+					refs = append(refs, podImg.Image)
+				}
+				img := ValidatorImage(podImg)
+				if img.Digest != "" && !seen[img] {
+					seen[img] = true
+					digested[img.Image] = append(digested[img.Image], img)
+				}
+			}
+		}
+	}
+
+	if len(refs) == 0 {
 		return nil
 	}
-	out := make([]ValidatorImage, 0, len(images))
-	for _, img := range images {
-		out = append(out, ValidatorImage{Image: img})
+	out := make([]ValidatorImage, 0, len(refs))
+	for _, ref := range refs {
+		if imgs := digested[ref]; len(imgs) > 0 {
+			slices.SortFunc(imgs, func(a, b ValidatorImage) int {
+				return cmp.Or(strings.Compare(a.Platform, b.Platform), strings.Compare(a.Digest, b.Digest))
+			})
+			out = append(out, imgs...)
+			continue
+		}
+		out = append(out, ValidatorImage{Image: ref})
 	}
 	return out
 }

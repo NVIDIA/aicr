@@ -71,10 +71,11 @@ type EvidenceOptions struct {
 	// payloads instead of the redacted defaults).
 	Full bool
 
-	// AllowMutableValidatorTags emits even when a validator image resolves to
-	// a moving tag (`:edge`, `:latest`, anything not a release, `:sha-<commit>`
-	// or `:uat-<run_id>` ref). Emission otherwise fails closed, because the
-	// predicate identifies validators by tag alone. See #2873.
+	// AllowMutableValidatorTags permits emission when a validator image has
+	// no recorded digest and a moving tag (`:edge`, `:latest`, anything not a
+	// release, `:sha-<commit>` or `:uat-<run_id>` ref). Emission otherwise
+	// fails closed, because the attestation would name that image by a tag
+	// that can move.
 	AllowMutableValidatorTags bool
 
 	// Commit is the build commit. It resolves the validator catalog for the
