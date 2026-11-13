@@ -3359,10 +3359,10 @@ h100-eks-amazonlinux-inference-dynamo:
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 0beddc552f9de0bc6f218280e0128ac1c431486db17df25e31531288f72b0c99
   UPGRADING.md: f1f52d9e8db352522467cd520a8162df2356852d241f1c84c43ab420055709ac
-  bundle-info.yaml: 2605c73e2cdbf0499934529e9ff7b201ebafac36d1ff3b8ac5dd9de0d3d207d7
-  checksums.txt: 4fd5927ed4018e46099388b69f1df80691fd8bb0085d93171acd7a8d58529a26
+  bundle-info.yaml: 1e96bc68843f1b5ca511f67644af62f9b499e0a11b949da8ffce083cdde58c55
+  checksums.txt: 455c253313be949b803496fb73837d5ca0d282af0f1a8076b4c456ffd5d87b62
   deploy.sh: 0065f39a32eee146d6a2c94b87ab7eb0fe324a47d35696de0e5e61917df0a54c
-  recipe.yaml: fed876f2724a433c8d7c89e47030ec6a7f4d95ffe4198f12fca4de859b4e7898
+  recipe.yaml: 4938d6c9e949d56668878505c27e100eb0909c038ed6a6b5d5600aa1ac843ba8
 h100-eks-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
