@@ -29,6 +29,33 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
+func TestFindContainerStatus(t *testing.T) {
+	p := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+		{Name: "sidecar", ImageID: "sidecar-id"},
+		{Name: "validator", ImageID: "validator-id"},
+	}}}
+
+	tests := []struct {
+		name      string
+		pod       *corev1.Pod
+		container string
+		wantID    string
+		wantOK    bool
+	}{
+		{"by name, not position", p, "validator", "validator-id", true},
+		{"no such container", p, "missing", "", false},
+		{"nil pod", nil, "validator", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs, ok := pod.FindContainerStatus(tt.pod, tt.container)
+			if ok != tt.wantOK || cs.ImageID != tt.wantID {
+				t.Errorf("FindContainerStatus() = (%q, %v), want (%q, %v)", cs.ImageID, ok, tt.wantID, tt.wantOK)
+			}
+		})
+	}
+}
+
 func TestGetPodForJob(t *testing.T) {
 	const ns = "default"
 	const jobName = "validator-job"

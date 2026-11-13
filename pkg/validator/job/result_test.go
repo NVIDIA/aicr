@@ -948,7 +948,7 @@ func TestHandleTimeoutContainerNotFoundReflectsCause(t *testing.T) {
 			d := deployTestJob(t, ns, testEntry())
 
 			// Pod exists but carries only a non-validator container status, so
-			// findContainerStatus reports the validator container as absent.
+			// pod.FindContainerStatus reports the validator container as absent.
 			createPodForJob(t, ns, d.JobName(), corev1.PodStatus{
 				ContainerStatuses: []corev1.ContainerStatus{{
 					Name:  "sidecar",
