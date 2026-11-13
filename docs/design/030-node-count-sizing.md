@@ -92,11 +92,6 @@ generated: large clusters install a published OCI bundle through
   scope. Adding them is a data change under this ADR.
 - **Fixing the growth itself.** gpu-operator's per-node cost is a question
   raised with its team in #3214.
-- **The NIC configuration daemon.** It runs on every node and caches every
-  NicDevice in the cluster ([#3149](https://github.com/NVIDIA/aicr/issues/3149)).
-  AICR sets no resources for it and leaves the Network Operator's default
-  ([#3698](https://github.com/NVIDIA/aicr/issues/3698)), so there is
-  nothing to size.
 
 ## Context
 
@@ -148,8 +143,8 @@ exception that shows the limits of a GPU count. Its cache holds every Node,
 per-node Skyhook CRs, pods, and the package-execution Jobs it retains for
 `jobTtlSucceeded` (1h default) and `jobTtlFailed` (24h). A cluster with 118
 GPU nodes, 436 nodes in total and 18k pods killed its manager at a 2Gi
-limit, as did a 447-GPU-node cluster with the same pod count, so nodewright's
-tiers must cover the denser of the two.
+limit, as did a 447-GPU-node cluster with the same pod count: for such a
+controller a GPU count alone does not bound memory.
 
 ### What AICR already has
 
@@ -159,11 +154,11 @@ tiers must cover the denser of the two.
   in a registry-referenced file, validated fail-closed at load.
 - [ADR-015](015-recipe-configuration-profiles.md)'s profile locks, which
   cover every mutation source including node-count injection, with a
-  template-time guard on `argocd-helm` root-chart values.
+  template-time guard on `argocd-helm` root-chart values
+  (`templates/aicr-profile-lock.yaml`), the precedent for install-time
+  template logic in a generated chart.
 - The `argocd-helm` child Application template, which already merges a
   component's static values with its root-chart values at render time.
-- The readiness-gate chart, the precedent for install-time template logic in
-  a generated chart.
 
 ## Options
 
@@ -240,8 +235,8 @@ grows with cluster size may declare lower tiers in
 a count the user states selects one. A count walks down from the top: it
 selects the lowest tier whose bound is at or above it.
 
-A tier only lowers values. It never sets a value above the tier above it,
-never raises a request, never touches a value the recipe's inline overrides
+A tier only lowers values. It is never below the tier under it, never
+raises a request, never touches a value the recipe's inline overrides
 or the user set, and is only as low as a reading at or near its bound
 supports.
 
@@ -287,15 +282,16 @@ fractional `sizing.nodeCount` rather than truncating it into a lower tier.
 ### The sizing file
 
 `recipes/components/<name>/sizing.yaml`, referenced from the registry
-entry's `sizing.file`. An example showing every kind of measurement (the
-shipped tiers are in the files themselves):
+entry's `sizing.file`. An illustrative file showing every kind of
+measurement. Its component and values are examples only; the shipped
+tiers are in the files themselves:
 
 ```yaml
 apiVersion: aicr.run/v1beta1
 kind: ComponentSizing
 basis: gpuNodes
 resources:
-  - path: controllerManager.manager.resources
+  - path: controller.resources
     tiers:
       - maxNodes: 250
         requests: {memory: 2000Mi}
@@ -360,9 +356,17 @@ resources:
   records one reading:
   - `sets`: which of `requests` and `limits` it set, or empty for a reading
     that only constrained the result (one that a higher reading outweighed,
-    or a truncated reading that sent the limit to a reading above);
+    or a truncated reading that brought in a reading from above);
   - `kind`: `windowed` or `instantaneous`, and `window` for a windowed one;
-  - `gpuNodes`, `nodes` and `pods`: the measured cluster at read time;
+  - `gpuNodes`, `nodes` and `pods`: the measured cluster at read time.
+    `nodes` is required on a windowed reading that sets a limit, because
+    the limit covers clusters only up to that total (see The node count).
+    `pods` is optional: the controllers that track pods do so through
+    caches being scoped upstream
+    ([Mellanox/network-operator#3173](https://github.com/Mellanox/network-operator/issues/3173),
+    [Mellanox/maintenance-operator#275](https://github.com/Mellanox/maintenance-operator/issues/275));
+  - `version`, optional: the component's chart version on the measured
+    cluster, where known, so a reading that predates a pin shows;
   - `p90` where the reading kept it, and `max`;
   - `truncatedAt`: the limit in force, when the container was being
     OOM-killed;
@@ -384,16 +388,21 @@ replace it.
   nearest reading above the bound covers the tier, which over-sizes it.
 - **Request:** the highest p90 among the covering reading and every
   reading inside the tier, using a reading's max when p90 was not kept and
-  a truncated reading's value as it stands. The pod then stays under its
-  request, and out of the kubelet's first eviction group, about 90% of the
-  time. Not the limit, as GKE [recommends](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/vertical-pod-autoscaling):
+  a truncated reading's value as it stands. Where a windowed p90 sets the
+  request and no cap lowers it, the pod stays under its request, and out
+  of the kubelet's first eviction group, about 90% of the time. A request
+  capped at the top tier's, or taken from an instantaneous or truncated
+  reading, carries no such figure. Not the limit, as GKE [recommends](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/vertical-pod-autoscaling):
   that would reserve the peak on every system node.
 - **Limit:** the highest peak among the covering reading and every reading
   inside the tier, times 1.3. The 30% covers spikes above p90 and some drift
   between measurements; see Open questions for tightening it.
-- **Truncated readings.** If any reading inside the tier was taken while the
-  container was being OOM-killed, the limit comes instead from the nearest
-  reading above the bound whose peak exceeds the limit that killed it.
+- **Truncated readings.** A reading taken while the container was being
+  OOM-killed shows what it reached, not what it needed, so its peak is
+  not a limit candidate. If a tier holds one, the nearest reading above
+  the bound whose peak exceeds the limit that killed it joins the
+  candidates. The limit is still the highest peak among all of them, so
+  a higher untruncated peak inside the tier is never discarded.
 - **Instantaneous readings:** the reading stands in for p90, and reading ×
   1.7 for the peak, so it contributes reading × 1.7 × 1.3 to a limit. 1.7 is
   the largest max-to-p90 ratio measured on any controller.
@@ -401,10 +410,21 @@ replace it.
   of each pod's p90, and the limit uses the largest single-pod peak.
 - **Rounding:** round up to a multiple of 256Mi below 2Gi, and of 512Mi
   from 2Gi.
-- **Caps:** no value is above the same field in the tier above, and no
-  request is above the top tier's. A tier may equal the tier above; every
-  component's file keeps the same bounds, so one count selects the same
-  row in each.
+- **Ordering:** derive tiers from the lowest up. A tier's limit is at
+  least the limit of the tier below it, so a requirement measured in a
+  lower tier carries upward and is never clamped down to fit. A tier may
+  equal the tier above.
+- **Today's values are the ceiling:** no request is above the top
+  tier's, and a field whose requirement is at or above today's value is
+  left out of the tier, and of every tier above it, so today's value
+  applies. Two cases differ. If today's value is below a measured peak,
+  the default itself is undersized: that is a defect in the values file,
+  fixed there, not by sizing. If it is at or above the peak but below
+  peak × 1.3, the tier keeps today's value with a thinner margin, and
+  the measurement stays in the file to show it.
+- **Same bounds:** every component's file declares the same `maxNodes`
+  set, so one count selects the same row in each. A unit test over the
+  registry enforces it.
 - **Re-measurement:** the readings are re-read, from the longest window
   kept, before each release that changes the component's pin or values. For
   a controller that drifts at a constant node count, a limit derived from
@@ -412,6 +432,8 @@ replace it.
 
 **Validation.** The loader fails closed with `ErrCodeInvalidRequest` on:
 
+- an `apiVersion` or `kind` other than `aicr.run/v1beta1` and
+  `ComponentSizing`;
 - a malformed path;
 - a `basis` other than `gpuNodes`;
 - `maxNodes` values that do not strictly ascend;
@@ -420,8 +442,9 @@ replace it.
 - a tier value above the same field in the next higher tier;
 - a tier that sets `requests` or `limits` with no measurement whose `sets`
   names it;
-- a measurement missing `kind`, `gpuNodes`, `max` or `date`, or a
-  windowed one missing `window`.
+- a measurement missing `kind`, `gpuNodes`, `max` or `date`, a windowed
+  one missing `window`, or a windowed one that sets a limit missing
+  `nodes`.
 
 The loader cannot reject a well-formed path that no values file sets,
 because an entry is skipped by design where a file does not set it. A
@@ -431,8 +454,9 @@ renamed by a chart bump cannot turn sizing into a silent no-op.
 
 The contributor guide (`docs/contributor/component-sizing.md`, added by the
 implementation PR) holds these rules, the Prometheus queries behind each
-kind of reading, and a "Refining a tier" walkthrough. A line in `AGENTS.md`
-points to it from the component-values task. No unit test asserts a real
+kind of reading, and a "Refining a tier" walkthrough. A line in
+`.claude/CLAUDE.md` (mirrored to `AGENTS.md`) points to it from the
+component-values task. No unit test asserts a real
 component's tier values, the same rule as for upgrade records.
 
 ### Where the values live
@@ -447,7 +471,8 @@ nodes, is left out of the file until it can be measured against them.
 ### Precedence
 
 Sizing runs on a component's values after its values files resolve: the
-registry's values file and the overlay's `valuesFile`. For each memory
+component's base `values.yaml` and the componentRef's `valuesFile`, from
+an overlay or mixin. For each memory
 request and limit that a sizing entry names and those files set, it writes
 the smaller of the resolved value and the tier's value, compared as
 Kubernetes quantities. It skips a path the files do not set, and an
@@ -473,12 +498,18 @@ one, because the template never compares quantities; the API server then
 rejects the pod spec and Argo CD reports the sync error. The documentation
 states this limitation.
 
-### Generation time (`--nodes`)
+### Generation time
 
-The sizing pass runs once per component, after values files resolve and
-before inline and user overrides. For every deployer except `argocd-helm`
-the result is baked into the component's values, including any
-bundle-rendered manifest that reads a sized path.
+`aicr bundle --nodes` runs the sizing pass once per component, after
+values files resolve and before inline and user overrides. For every
+deployer except `argocd-helm` the result is baked into the component's
+values.
+
+A sizing file never names a path that a bundle-rendered manifest reads,
+on any deployer. Such a manifest is rendered at generation time, so on
+`argocd-helm` it could not follow the install-time count, and one rule
+for every deployer keeps a component sized from one count. This is an
+authoring rule, checked in review.
 
 `bundle-info.yaml` does not record the tier. Its reader rejects unknown
 fields, so a new field needs a release that reads it before one that writes
@@ -497,9 +528,8 @@ chart, which the operator sets at install. Sizing is decided per path:
   `--set-file`, by inline overrides, or in a lock set are left out of every
   row, so those values survive. The template only selects a row; it never
   compares quantities.
-- **Paths read by bundle-rendered manifests** are never sized. Those
-  manifests are rendered at generation time and cannot see root-chart
-  values, so a sizing file does not name such a path.
+- **Paths read by bundle-rendered manifests** are never sized, as at
+  generation time.
 - **Local-chart components** are sized at generation time.
 
 Rendering:
@@ -589,12 +619,15 @@ by following this section.
    [#3643](https://github.com/NVIDIA/aicr/issues/3643) and
    [#3644](https://github.com/NVIDIA/aicr/issues/3644):
    - the `sizing.yaml` schema, loader and data files; no default changes;
+   - the `ComponentSizing` row in
+     [ADR-022](022-artifact-maturity-and-deprecation.md) §2 and its read-gate
+     entry, at `aicr.run/v1beta1`;
    - the generation-time sizing pass, the post-override request ≤ limit
      check, and the SDK's negative-count check;
    - the `argocd-helm` root value, per-tier static files, template
      selection, annotations and `--dynamic` guard;
    - the user docs, `docs/contributor/component-sizing.md` and its
-     `AGENTS.md` pointer.
+     pointer in `.claude/CLAUDE.md` (mirrored to `AGENTS.md`).
 
 ## Open questions
 
@@ -610,7 +643,7 @@ by following this section.
 - **Nodewright inputs known at bundle time.** AICR knows how many packages a
   recipe ships, which NodeWright's own formula multiplies by, and can set
   `jobTtlSucceeded` and `jobTtlFailed` lower to shrink the retained-Job
-  cache. Either refines the nodewright cells; neither adds an input to tier
+  cache. Either refines a nodewright tier; neither adds an input to tier
   selection.
 - **Reporting the measured NodeWright numbers upstream** (see Option E).
 - **Install-time sizing for the other deployers.** For `helm` and
