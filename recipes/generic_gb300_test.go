@@ -17,12 +17,20 @@
 package recipes_test
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/component"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -177,6 +185,8 @@ func TestNicConfigurationDaemonResources(t *testing.T) {
 		overrides      map[string]string
 		wantLimitMem   string
 		wantRequestMem string
+		wantRequestCPU string
+		wantErr        bool
 	}{
 		{name: "operator default"},
 		{
@@ -187,6 +197,38 @@ func TestNicConfigurationDaemonResources(t *testing.T) {
 			},
 			wantLimitMem:   "8Gi",
 			wantRequestMem: "1Gi",
+		},
+		{
+			name: "override with a CPU request",
+			overrides: map[string]string{
+				"nicConfigurationOperator.configurationDaemon.resources.limits.memory":   "8Gi",
+				"nicConfigurationOperator.configurationDaemon.resources.requests.memory": "1Gi",
+				"nicConfigurationOperator.configurationDaemon.resources.requests.cpu":    "100m",
+			},
+			wantLimitMem:   "8Gi",
+			wantRequestMem: "1Gi",
+			wantRequestCPU: "100m",
+		},
+		{
+			name: "limit without a request fails",
+			overrides: map[string]string{
+				"nicConfigurationOperator.configurationDaemon.resources.limits.memory": "4Gi",
+			},
+			wantErr: true,
+		},
+		{
+			name: "request without a limit fails",
+			overrides: map[string]string{
+				"nicConfigurationOperator.configurationDaemon.resources.requests.memory": "1Gi",
+			},
+			wantErr: true,
+		},
+		{
+			name: "CPU request alone fails",
+			overrides: map[string]string{
+				"nicConfigurationOperator.configurationDaemon.resources.requests.cpu": "200m",
+			},
+			wantErr: true,
 		},
 	}
 
@@ -235,49 +277,111 @@ func TestNicConfigurationDaemonResources(t *testing.T) {
 						ComponentName: ref.Name,
 						Values:        values,
 					})
-					if err != nil {
-						t.Fatalf("render %s: %v", manifestPath, err)
+					if tt.wantErr {
+						errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+					} else {
+						if err != nil {
+							t.Fatalf("render %s: %v", manifestPath, err)
+						}
+						assertDaemonResources(t, rendered, tt.wantLimitMem, tt.wantRequestMem, tt.wantRequestCPU)
 					}
 
-					var policy struct {
-						Spec struct {
-							NicConfigurationOperator struct {
-								ConfigurationDaemon struct {
-									Image              string `yaml:"image"`
-									ContainerResources []struct {
-										Name     string            `yaml:"name"`
-										Requests map[string]string `yaml:"requests"`
-										Limits   map[string]string `yaml:"limits"`
-									} `yaml:"containerResources"`
-								} `yaml:"configurationDaemon"`
-							} `yaml:"nicConfigurationOperator"`
-						} `yaml:"spec"`
-					}
-					if err = yaml.Unmarshal(rendered, &policy); err != nil {
-						t.Fatalf("rendered policy does not parse: %v\n%s", err, rendered)
-					}
-					daemon := policy.Spec.NicConfigurationOperator.ConfigurationDaemon
-					if daemon.Image == "" {
-						t.Fatalf("rendered policy has no configurationDaemon:\n%s", rendered)
-					}
-					res := daemon.ContainerResources
-					if tt.wantLimitMem == "" {
-						if len(res) != 0 {
-							t.Fatalf("configurationDaemon.containerResources = %+v, want none so the operator's default applies", res)
+					// A flux bundle ships the manifest as a chart template, so Helm renders it.
+					t.Run("helm", func(t *testing.T) {
+						helmtest.RequireBinary(t)
+						out, helmErr := helmTemplateManifest(t, leaf.manifest, content, ref.Name, values)
+						if tt.wantErr {
+							if helmErr == nil || !strings.Contains(string(out), "must set both requests.memory and limits.memory") {
+								t.Fatalf("helm template error = %v, want the incomplete-override failure:\n%s", helmErr, out)
+							}
+							return
 						}
-						return
-					}
-					if len(res) != 1 || res[0].Name != "nic-configuration-daemon" {
-						t.Fatalf("configurationDaemon.containerResources = %+v, want one nic-configuration-daemon entry", res)
-					}
-					if got := res[0].Limits["memory"]; got != tt.wantLimitMem {
-						t.Errorf("limits.memory = %q, want %q", got, tt.wantLimitMem)
-					}
-					if got := res[0].Requests["memory"]; got != tt.wantRequestMem {
-						t.Errorf("requests.memory = %q, want %q", got, tt.wantRequestMem)
-					}
+						if helmErr != nil {
+							t.Fatalf("helm template: %v\n%s", helmErr, out)
+						}
+						assertDaemonResources(t, out, tt.wantLimitMem, tt.wantRequestMem, tt.wantRequestCPU)
+					})
 				})
 			}
 		})
 	}
+}
+
+// assertDaemonResources checks the nic-configuration-daemon resources of a
+// rendered NicClusterPolicy. An empty wantLimitMem means the policy must set
+// none.
+func assertDaemonResources(t *testing.T, rendered []byte, wantLimitMem, wantRequestMem, wantRequestCPU string) {
+	t.Helper()
+
+	var policy struct {
+		Spec struct {
+			NicConfigurationOperator struct {
+				ConfigurationDaemon struct {
+					Image              string `yaml:"image"`
+					ContainerResources []struct {
+						Name     string            `yaml:"name"`
+						Requests map[string]string `yaml:"requests"`
+						Limits   map[string]string `yaml:"limits"`
+					} `yaml:"containerResources"`
+				} `yaml:"configurationDaemon"`
+			} `yaml:"nicConfigurationOperator"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(rendered, &policy); err != nil {
+		t.Fatalf("rendered policy does not parse: %v\n%s", err, rendered)
+	}
+	daemon := policy.Spec.NicConfigurationOperator.ConfigurationDaemon
+	if daemon.Image == "" {
+		t.Fatalf("rendered policy has no configurationDaemon:\n%s", rendered)
+	}
+	res := daemon.ContainerResources
+	if wantLimitMem == "" {
+		if len(res) != 0 {
+			t.Fatalf("configurationDaemon.containerResources = %+v, want none so the operator's default applies", res)
+		}
+		return
+	}
+	if len(res) != 1 || res[0].Name != "nic-configuration-daemon" {
+		t.Fatalf("configurationDaemon.containerResources = %+v, want one nic-configuration-daemon entry", res)
+	}
+	if got := res[0].Limits["memory"]; got != wantLimitMem {
+		t.Errorf("limits.memory = %q, want %q", got, wantLimitMem)
+	}
+	if got := res[0].Requests["memory"]; got != wantRequestMem {
+		t.Errorf("requests.memory = %q, want %q", got, wantRequestMem)
+	}
+	if got := res[0].Requests["cpu"]; got != wantRequestCPU {
+		t.Errorf("requests.cpu = %q, want %q", got, wantRequestCPU)
+	}
+}
+
+// helmTemplateManifest renders one manifest with `helm template`, as a chart
+// template with the component's values nested under its name.
+func helmTemplateManifest(t *testing.T, name string, content []byte, componentName string, values map[string]any) ([]byte, error) {
+	t.Helper()
+
+	valuesYAML, err := yaml.Marshal(map[string]any{componentName: values})
+	if err != nil {
+		t.Fatalf("marshal values: %v", err)
+	}
+	chartDir := t.TempDir()
+	files := map[string][]byte{
+		"Chart.yaml":                     []byte("apiVersion: v2\nname: nic-policy-test\nversion: 0.1.0\n"),
+		"values.yaml":                    valuesYAML,
+		filepath.Join("templates", name): content,
+	}
+	for rel, data := range files {
+		path := filepath.Join(chartDir, rel)
+		if err = os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatalf("create %s: %v", filepath.Dir(path), err)
+		}
+		if err = os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "helm", "template", "test-release", chartDir) //nolint:gosec // controlled test arguments
+	return cmd.CombinedOutput()
 }

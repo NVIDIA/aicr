@@ -171,8 +171,8 @@ func writeLocalHelmFolder(
 
 		rendered, rerr := manifest.Render(manifests[p], renderInput)
 		if rerr != nil {
-			return Folder{}, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("render manifest %s for %s", p, c.Name), rerr)
+			return Folder{}, errors.PropagateOrWrap(rerr, errors.ErrCodeInternal,
+				fmt.Sprintf("render manifest %s for %s", p, c.Name))
 		}
 		// Both branches run the same YAML round-trip; only the filter
 		// differs. keepHookAnnotations skips the FILTER, never the
