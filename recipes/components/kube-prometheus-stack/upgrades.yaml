@@ -1,0 +1,104 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# 84.5.0 is where AICR reduced this chart to the operator and one Prometheus
+# (ADR-026). The chart itself changes only the node-exporter subchart and the
+# Alertmanager image from 84.4.0, and only Grafana, kube-state-metrics, rules,
+# dashboards and a Prometheus patch release from 83.7.0 (the AKS pin), so the
+# steps are about the values change.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: kube-prometheus-stack
+transitions:
+  - from: "<84.5.0"
+    to: "84.5.0"
+    verdict: manual
+    summary: >-
+      The upgrade deletes Grafana, Alertmanager, node-exporter,
+      kube-state-metrics, the default rules and the dashboards. Prometheus
+      stops loading PrometheusRules, Probes and ScrapeConfigs, keeps only the
+      series AICR components query, and moves from its PVC to an emptyDir, so
+      its history is lost.
+    precondition: >-
+      Anything that reads this release's Grafana, Alertmanager or Prometheus
+      history has another source, such as nktp.
+    reversible: true
+    reversibleNotes: >-
+      Redeploy the previous bundle. Remove nktp first: its node-exporter and
+      this chart's both bind host port 9100.
+    affectedResources:
+      - group: monitoring.coreos.com
+        kinds:
+          - PrometheusRule
+          - Probe
+          - ScrapeConfig
+    stepsByDeployer:
+      - deployers: [helm, helmfile, terraform]
+        steps:
+          - id: export
+            description: >-
+              Export any Grafana dashboards, Alertmanager configuration, and
+              PrometheusRules you still need.
+            reason: The upgrade deletes them.
+          - id: upgrade
+            description: >-
+              Re-run install.sh (helm), helmfile apply (helmfile), or
+              terraform apply (terraform) on the new bundle, upgrading this
+              release before nktp.
+            reason: >-
+              nktp's node-exporter can't start while the old one holds host
+              port 9100. The operator recreates Prometheus on an emptyDir, so
+              prometheus-adapter's metrics are unavailable for about 30
+              seconds.
+          - id: clean-up
+            description: >-
+              Delete what the release leaves behind: kubectl delete pvc
+              --ignore-not-found -n monitoring
+              prometheus-kube-prometheus-prometheus-db-prometheus-kube-prometheus-prometheus-0;
+              kubectl delete secret --ignore-not-found -n monitoring
+              kube-prometheus-admission; kubectl delete service
+              --ignore-not-found -n kube-system kube-prometheus-kubelet.
+            reason: >-
+              Helm doesn't own them: the StatefulSet created the PVC, a hook
+              Job created the Secret, and the operator created the Service.
+      - steps:
+          - id: export
+            description: >-
+              Export any Grafana dashboards, Alertmanager configuration, and
+              PrometheusRules you still need.
+            reason: The upgrade deletes them.
+          - id: upgrade
+            description: >-
+              Sync or reconcile the new bundle, upgrading this release before
+              nktp.
+            reason: >-
+              nktp's node-exporter can't start while the old one holds host
+              port 9100. The operator recreates Prometheus on an emptyDir, so
+              prometheus-adapter's metrics are unavailable for about 30
+              seconds.
+          - id: clean-up
+            description: >-
+              Delete what the release leaves behind: kubectl delete pvc
+              --ignore-not-found -n monitoring
+              prometheus-kube-prometheus-prometheus-db-prometheus-kube-prometheus-prometheus-0;
+              kubectl delete secret --ignore-not-found -n monitoring
+              kube-prometheus-admission; kubectl delete service
+              --ignore-not-found -n kube-system kube-prometheus-kubelet.
+            reason: >-
+              The deployer doesn't own them: the StatefulSet created the PVC,
+              a hook Job created the Secret, and the operator created the
+              Service.
+    references:
+      - https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#kube-prometheus-stack-8450-keeps-only-the-runtime-prometheus

@@ -2009,7 +2009,7 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 		return nil, scopeErr
 	}
 	if scope.Server != "" && len(scope.Consumers) == 0 {
-		slog.Warn("PromQL server is enabled but no enabled component declares telemetry.promql, so its Prometheus scrapes nothing",
+		slog.Warn("PromQL server is enabled but no enabled component declares telemetry.promql, so its Prometheus keeps no series",
 			"component", scope.Server)
 	}
 	if artifactErr := r.internal.ValidateArtifactLock(ctx, r.internal.ComponentRefs, helmValues, nil); artifactErr != nil {
