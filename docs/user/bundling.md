@@ -530,25 +530,39 @@ GB300 recipe. Other recipes keep a lower limit (2Gi on OKE, the chart default
 elsewhere), so raise `limits.memory` together with the request there: a
 request above its limit is rejected.
 
-The generic GB300 recipe also sizes the NIC configuration daemon, a
-per-node DaemonSet whose pods each cache every `NicDevice` in the cluster, so
-each pod's memory grows with cluster size. Its resources come from the
-`networkoperator` values at `nicConfigurationOperator.configurationDaemon.resources`
-(256Mi request, 2Gi limit by default), which the recipe's `NicClusterPolicy`
-manifest reads. Set this path at bundle time:
+The NIC configuration daemon, a per-node DaemonSet whose pods each cache every
+`NicDevice` in the cluster, is not sized by AICR. The generic GB300 and NVKE
+VR200 recipes' `NicClusterPolicy` sets no resources for it, so the Network
+Operator applies its own default (100m CPU and 512Mi memory requests, 5Gi
+memory limit). To set them yourself, use the `networkoperator` values path
+`nicConfigurationOperator.configurationDaemon.resources`, which the policy
+manifest reads:
 
 ```bash
 aicr bundle --recipe recipe.yaml \
-  --set networkoperator:nicConfigurationOperator.configurationDaemon.resources.limits.memory=4Gi \
+  --set networkoperator:nicConfigurationOperator.configurationDaemon.resources.limits.memory=8Gi \
+  --set networkoperator:nicConfigurationOperator.configurationDaemon.resources.requests.memory=1Gi \
+  --set networkoperator:nicConfigurationOperator.configurationDaemon.resources.requests.cpu=100m \
   --output ./bundles
 ```
+
+An override replaces the operator's default as a whole: the operator fills in
+no field you leave out. It must set both `requests.memory` and
+`limits.memory`, or the bundle fails. Set `requests.cpu` as well (100m is the
+operator's default); without it the daemon runs with no CPU request.
+
+Earlier releases documented overriding `limits.memory` alone, which kept
+AICR's own requests. That command now fails: add `requests.memory` and
+`requests.cpu` to it.
 
 The `helm`, `helmfile`, `terraform`, `argocd`, and `argocd-helm` deployers
 render this manifest when the bundle is generated, so the install-time overrides
 below do not reach it. A `flux` bundle ships the manifest as a template, and Flux renders
 it at install time from the values in `network-operator-post/helmrelease.yaml`.
-Edit `spec.values.network-operator.nicConfigurationOperator.configurationDaemon.resources`
-there to resize the daemon without regenerating the bundle.
+Set `spec.values.network-operator.nicConfigurationOperator.configurationDaemon.resources`
+there to resize the daemon without regenerating the bundle, with the same three
+fields: an override missing either memory value fails when Flux renders the
+release.
 
 At bundle time, scope each resources path in the table with its override key:
 
