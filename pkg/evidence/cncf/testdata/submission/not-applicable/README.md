@@ -104,7 +104,7 @@ written to the submission path.
 
 Check output is kept and the identifiers inside it are aliased, consistently
 across every file of this directory, by AICR's redaction policy
-`minimal` v10 (rules: text.alias:account, text.alias:container, text.alias:ipv4, text.alias:ipv6, text.alias:mac, text.alias:node, text.alias:uuid, text.omit:jwt).
+`minimal` v11 (rules: text.alias:account, text.alias:container, text.alias:ipv4, text.alias:ipv6, text.alias:mac, text.alias:node, text.alias:uuid, text.omit:jwt).
 Applied to this directory:
 
 - ipv4: 1 distinct value(s) aliased

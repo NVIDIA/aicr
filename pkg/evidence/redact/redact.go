@@ -80,7 +80,8 @@ const (
 	//     ID and AWS account aliases, node-name aliases, JWT removal.
 	//   - v10 added the resultSchema stamp naming the result contract the
 	//     validator image spoke.
-	PolicyVersion = "v10"
+	//   - v11 added the no-metrics-backend skipReason code.
+	PolicyVersion = "v11"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata

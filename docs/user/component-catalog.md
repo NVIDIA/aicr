@@ -1780,7 +1780,7 @@ The `aws-ebs-csi-driver` health check verifies only that the controller Deployme
 
 ### Troubleshooting provisioning failures
 
-On the stock EKS overlay, `kube-prometheus-stack` creates a PVC for Prometheus, so a missing credential path usually surfaces there first as a failing `kube-prometheus-stack` health check: the Prometheus StatefulSet never becomes ready because its PVC stays `Pending`. Any other PVC bound to `ebs-csi-default-sc` fails the same way.
+The stock EKS recipe's telemetry creates no PVC: Prometheus stores to an `emptyDir` and NKTP keeps its queues in memory. A missing credential path therefore surfaces at the first claim bound to `ebs-csi-default-sc`, from an opt-in component such as `nvsentinel-mongodb` or from a workload: the claim stays `Pending` and its pod never becomes ready.
 
 A `Pending` PVC alone does not identify the cause. Confirm it from the driver's own diagnostics:
 
@@ -2763,8 +2763,10 @@ it cannot schedule, delete the collectors while the operator still runs, then
 uninstall without hooks:
 
 ```shell
-kubectl delete opentelemetrycollectors.opentelemetry.io -n nktp --all --wait --timeout=5m
-helm uninstall nktp -n nktp --no-hooks
+NAMESPACE="nktp"  # replace with nktp's namespace: privileged-nktp with the os-talos mixin
+
+kubectl delete opentelemetrycollectors.opentelemetry.io -n "${NAMESPACE}" --all --wait --timeout=5m
+helm uninstall nktp -n "${NAMESPACE}" --no-hooks
 ```
 
 Other deployers remove `nktp` through their own resource. Follow step 2 of the
@@ -4022,9 +4024,10 @@ serves the components that query metrics at runtime
    kubectl delete service --ignore-not-found -n kube-system kube-prometheus-kubelet
    ```
 
-To roll back, uninstall `nktp` (`helm uninstall nktp -n nktp`, or remove it
+To roll back, uninstall `nktp` (`helm uninstall nktp -n nktp`, with
+`privileged-nktp` as the namespace under the `os-talos` mixin, or remove it
 through your deployer) before redeploying the previous bundle: its
 `node-exporter` and the previous `kube-prometheus-stack`'s both bind host port
-9100. The uninstall keeps the `nktp` namespace with its TLS Secrets, and the
+9100. The uninstall keeps that namespace with its TLS Secrets, and the
 `opentelemetry.io` CRDs. If it hangs on a Pending cleanup Job, see
 [NKTP Telemetry Pipeline](#nktp-telemetry-pipeline).

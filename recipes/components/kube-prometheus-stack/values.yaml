@@ -76,7 +76,7 @@ prometheusOperator:
 
 prometheus:
   serviceMonitor:
-    # The ai-service-metrics validator finds this Prometheus by the
+    # The pod-autoscaling validator finds this Prometheus by the
     # self-monitor: "true" label this sets on its Service.
     selfMonitor: true
   prometheusSpec:
