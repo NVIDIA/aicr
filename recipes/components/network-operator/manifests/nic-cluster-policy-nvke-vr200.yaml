@@ -81,13 +81,23 @@ spec:
       repository: nvcr.io/nvidia/mellanox
       version: network-operator-v26.7.1
       imagePullSecrets: []
+      # Unset by default, so the operator applies its own default
+      # (manifests/state-nic-configuration-operator/070-config-daemon.yaml).
+      # Each daemon caches every NicDevice in the cluster; 2Gi is OOM-killed
+      # at 2000 GPU nodes (#3698). The operator fills in no field of a partial
+      # override, so one must set both memory values.
+      {{- with (index .Values "network-operator").nicConfigurationOperator }}
+      {{- with .configurationDaemon }}
+      {{- with .resources }}
+      {{- if not (and .requests .requests.memory .limits .limits.memory) }}
+      {{- fail "nicConfigurationOperator.configurationDaemon.resources must set both requests.memory and limits.memory: the Network Operator applies no per-field default once resources are set" }}
+      {{- end }}
       containerResources:
         - name: nic-configuration-daemon
-          limits:
-            memory: 2Gi
-          requests:
-            cpu: 100m
-            memory: 256Mi
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
   # Addressing for the RoCE rails' IPPools. Added with
   # manifests/nvke-vr200.yaml in sriov-ib-networks; without it the SriovNetwork
   # ipam block names a pool nothing serves.

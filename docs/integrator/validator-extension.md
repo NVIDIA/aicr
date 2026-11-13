@@ -78,15 +78,15 @@ validators:
 A validator catalog entry can declare `dependencyAffinity` to control where its
 orchestrator Pod is scheduled relative to the components it queries. Use this
 when a check's correctness depends on pod-to-pod network reachability — the
-canonical case is `ai-service-metrics`, which dials Prometheus over a ClusterIP
+canonical case is `pod-autoscaling`, which dials Prometheus over a ClusterIP
 Service.
 
 ```yaml
-- name: ai-service-metrics
+- name: pod-autoscaling
   phase: conformance
   image: ghcr.io/nvidia/aicr-validators/conformance:latest
-  timeout: 5m
-  args: ["ai-service-metrics"]
+  timeout: 15m
+  args: ["pod-autoscaling"]
   dependencyAffinity:
     - componentRef: kube-prometheus-stack
       podLabelSelector:

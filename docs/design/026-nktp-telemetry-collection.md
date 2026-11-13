@@ -140,13 +140,13 @@ At bundle time, on every path (CLI, API server, and SDK), AICR takes the union
 of the enabled consumers' declarations and writes it at value paths that
 `kube-prometheus-stack`'s registry entry declares. The Prometheus server then
 selects every monitor in exactly those namespaces and in its own, whatever
-their labels, keeps only the declared series, and loads no rules, probes, or
-scrape configurations. Those paths cannot be overridden. A declared source that
-is absent or disabled fails the bundle, as does a pattern that does not
-compile. With `kube-prometheus-stack` disabled nothing is injected or checked,
-and consumers use the platform's Prometheus, as `prometheus-adapter-ocp` does
-with OpenShift's Thanos Querier. Adding an AICR consumer is a registry change
-only; overlays carry no telemetry configuration.
+their labels, and keeps only the declared series. By default it loads no rules,
+probes, or scrape configurations; the paths the bundler writes cannot be
+overridden. A declared source that is absent or disabled fails the bundle, as
+does a pattern that does not compile. With `kube-prometheus-stack` disabled
+nothing is injected or checked, and consumers use the platform's Prometheus, as
+`prometheus-adapter-ocp` does with OpenShift's Thanos Querier. Adding an AICR
+consumer is a registry change only; overlays carry no telemetry configuration.
 
 **Workload metrics.** A cluster owner can add a workload's series, for example
 to autoscale an inference server on its queue depth:
@@ -410,8 +410,8 @@ scale stay unaddressed.
   declared and bundle-supplied namespaces and series, plus the server's own
   namespace, identically through the CLI, the API server, and the SDK. The
   others inject nothing.
-- The runtime Prometheus server stores only declared and bundle-supplied
-  series, within its time and size caps.
+- By default, the runtime Prometheus server stores only declared and
+  bundle-supplied series, within its time and size caps.
 - The adapter serves both metrics APIs, and `pod-autoscaling` and
   `cluster-autoscaling` pass.
 - An HPA scales on a workload series added through `runtimeMetrics`, with its

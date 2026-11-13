@@ -28,7 +28,7 @@ The catalog lists the driver version that the default chart render carries. Vers
 ## Summary
 
 - Components: **58**
-- Unique images: **168**
+- Unique images: **158**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -62,7 +62,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
 | kai-scheduler | helm | kai-scheduler | v0.16.9 | 12 |
-| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
+| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.5.0 | 2 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
 | kueue | helm | kueue | 0.19.6 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
@@ -107,7 +107,6 @@ from the component's registry default above.
 |-----------|-----------------|-------------|--------|
 | dynamo-platform | 1.5.0 | b300-mk8s-ubuntu-inference-dynamo | 1 |
 | kai-scheduler | v0.17.1 | b300-mk8s-ubuntu-inference-dynamo | 12 |
-| kube-prometheus-stack | 83.7.0 | aks | 8 |
 | network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 23 |
 | network-operator | 26.7.1 | vr200-nvke-ubuntu-training | 23 |
 
@@ -151,7 +150,7 @@ _No images extracted._
 
 ### dra-node-labeler
 
-- `docker.io/alpine/kubectl:1.37.2@sha256:5e2de75d37e811ba6eb92e06890b1b3263eae4f0a1c17b49269edec589b1352a`
+- `docker.io/alpine/kubectl:1.37.2@sha256:1a7fc3308a8eee1c8bd177930fc521088c6dc64ad8b68c88319151fd87d79deb`
 
 ### dranet
 
@@ -248,14 +247,8 @@ _No images extracted._
 
 ### kube-prometheus-stack
 
-- `docker.io/grafana/grafana:13.0.1`
-- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.2`
-- `quay.io/kiwigrid/k8s-sidecar:2.7.1`
 - `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
-- `quay.io/prometheus/alertmanager:v0.32.0`
-- `quay.io/prometheus/node-exporter:v1.11.1`
 - `quay.io/prometheus/prometheus:v3.11.3`
-- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
 
 ### kubeflow-trainer
 
@@ -377,11 +370,11 @@ _No images extracted._
 
 ### nvsentinel-mongodb
 
-- `docker.io/percona/fluentbit:5.1.2-1@sha256:4926d7d003ca09c826a3dea5d9ccd0ba158296880471bcec82ef38f95617b913`
+- `docker.io/percona/fluentbit:5.1.4-1@sha256:037b5ea087dffd844f619c61f4d211a32bec73dae0971143795579db1a3a6992`
 - `docker.io/percona/mongodb_exporter:0.54.0@sha256:934e9db87e85e0fa63654e73c3504845993a254e898783ca905e65a68848b5a4`
-- `docker.io/percona/percona-backup-mongodb:2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5`
+- `docker.io/percona/percona-backup-mongodb:2.17.0@sha256:d3b1f82393991542ca1222c8c80a83830383a2fd51f064f6da939af776b9c01d`
 - `docker.io/percona/percona-server-mongodb:8.0.32-14@sha256:5ba5f240d2dc98bc6236ab1d79c0862c4b62dba9d98cd0ffdf716c30473d2d11`
-- `docker.io/percona/pmm-client:3.9.1@sha256:298e731652e2be172a2505596edaee1e0c014609035347599048f62efae78e5b`
+- `docker.io/percona/pmm-client:3.10.0@sha256:b407188b183bc61ab202914f2128f171dd2d0cd411396a05bb92f3e73348a416`
 
 ### prometheus-adapter
 
@@ -475,17 +468,6 @@ _No images extracted._
 - `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.17.1`
 - `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.17.1`
 - `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.17.1`
-
-### kube-prometheus-stack@83.7.0 (variant)
-
-- `docker.io/grafana/grafana:12.4.3`
-- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.1`
-- `quay.io/kiwigrid/k8s-sidecar:2.6.0`
-- `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
-- `quay.io/prometheus/alertmanager:v0.32.0`
-- `quay.io/prometheus/node-exporter:v1.11.1`
-- `quay.io/prometheus/prometheus:v3.11.2`
-- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
 
 ### network-operator@25.7.0 (variant)
 
