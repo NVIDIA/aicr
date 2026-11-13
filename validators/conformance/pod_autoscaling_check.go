@@ -50,7 +50,10 @@ import (
 // Integration contract, mirroring kubernetes-sigs/ai-conformance
 // TestHPAAutoscaling: the recipe's Prometheus scrapes pods labeled
 // hpaMetricSourceLabel on the hpaMetricsPortName port at /metrics (through
-// the PodMonitor this check creates), and the recipe's prometheus-adapter
+// the PodMonitor this check creates, in that Prometheus's own namespace: the
+// one place a cluster owner can add a workload's monitor under ADR-026, since
+// the server loads monitors only from the namespaces the bundle names and its
+// own), and the recipe's prometheus-adapter
 // serves the hpaMetricSeries gauge as the per-pod custom metric of the same
 // name (the rule ships in recipes/components/prometheus-adapter/values.yaml).
 // The gauge stands in for an inference server's per-replica queue depth; the
@@ -307,6 +310,12 @@ type hpaScenario struct {
 	listScrapePools     func(ctx context.Context) ([]byte, error)
 	newScrapePoolLister func(promURL string) func(ctx context.Context) ([]byte, error)
 
+	// monitorNamespace and monitorName locate the PodMonitor: the recipe's
+	// Prometheus namespace under a per-run name (attachPrometheus), or the
+	// test namespace when the recipe declares no kube-prometheus-stack.
+	monitorNamespace string
+	monitorName      string
+
 	pollInterval          time.Duration
 	workloadReadyTimeout  time.Duration
 	monitorLoadTimeout    time.Duration
@@ -358,6 +367,8 @@ func newHPAScenario(ctx *validators.Context, dynClient dynamic.Interface, metric
 		negativeControlWindow: defaults.HPANegativeControlWindow,
 		stabilization:         defaults.HPAScaleDownStabilization,
 		timings:               map[hpaPhase]time.Duration{},
+		monitorNamespace:      run.namespace,
+		monitorName:           hpaWorkloadName,
 	}
 	s.readMetrics = func(c context.Context) ([]byte, error) {
 		return readHPAPodMetrics(c, s.clientset, s.metricsVersion, s.testRun.namespace)
@@ -413,6 +424,12 @@ func (s *hpaScenario) attachPrometheus(ctx *validators.Context) error {
 		fmt.Sprintf("curl -sf '%s/api/v1/scrape_pools'", promURL),
 		fmt.Sprintf("Endpoint: %s\nResult:   scrape pools listed", promURL))
 	s.promURL, s.listScrapePools = promURL, listPools
+	for _, ref := range ctx.ValidationInput.ComponentRefs {
+		if ref.Name == prometheusComponentName && ref.Namespace != "" {
+			s.monitorNamespace = ref.Namespace
+			s.monitorName = hpaWorkloadName + "-" + s.testRun.token
+		}
+	}
 	return nil
 }
 
@@ -421,10 +438,9 @@ func (s *hpaScenario) attachPrometheus(ctx *validators.Context) error {
 // adapter's query rather than prometheus-operator's reconcile schedule.
 func (s *hpaScenario) waitForMonitorLoaded(ctx *validators.Context) error {
 	start := time.Now()
-	ns := s.testRun.namespace
-	prefix := scrapePoolPrefix(monitorKindPod, ns, hpaWorkloadName)
+	prefix := scrapePoolPrefix(monitorKindPod, s.monitorNamespace, s.monitorName)
 	slog.Info("waiting for Prometheus to load the PodMonitor", "scrapePool", prefix, "timeout", s.monitorLoadTimeout)
-	if err := waitForMonitorLoaded(ctx.Ctx, s.listScrapePools, monitorKindPod, ns, hpaWorkloadName,
+	if err := waitForMonitorLoaded(ctx.Ctx, s.listScrapePools, monitorKindPod, s.monitorNamespace, s.monitorName,
 		s.monitorLoadTimeout, s.pollInterval); err != nil {
 		return err
 	}
@@ -444,7 +460,7 @@ func (s *hpaScenario) waitForMonitorLoaded(ctx *validators.Context) error {
 // cleanup registered first can reconcile it (see cleanupGPUTestNamespace).
 func (s *hpaScenario) runWithCleanup(ctx *validators.Context) (err error) {
 	defer func() {
-		status, cleanupErr := cleanupHPAWorkload(s.clientset, s.dynClient, s.testRun)
+		status, cleanupErr := cleanupHPAWorkload(s.clientset, s.dynClient, s.testRun, s.monitorNamespace, s.monitorName)
 		recordRawTextArtifact(ctx, "Delete test namespace", cleanupInspectEquivalent(s.testRun.namespace), status)
 		if cleanupErr != nil && err == nil {
 			err = cleanupErr
@@ -513,8 +529,11 @@ func (s *hpaScenario) deploy(ctx *validators.Context) error {
 		buildHPAMetricConfigMap(ns, hpaBaselineValue), metav1.CreateOptions{}); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create HPA metric ConfigMap", err)
 	}
-	if _, err := s.dynClient.Resource(podMonitorGVR).Namespace(ns).Create(ctx.Ctx,
-		buildHPAPodMonitor(ns), metav1.CreateOptions{}); err != nil {
+	if s.monitorNamespace != ns {
+		pruneStaleHPAPodMonitors(ctx.Ctx, s.clientset, s.dynClient, s.monitorNamespace)
+	}
+	if _, err := s.dynClient.Resource(podMonitorGVR).Namespace(s.monitorNamespace).Create(ctx.Ctx,
+		buildHPAPodMonitor(s.monitorNamespace, s.monitorName, ns, s.testRun.token), metav1.CreateOptions{}); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
 			"failed to create PodMonitor for the HPA workload — the recipe's kube-prometheus-stack must serve monitoring.coreos.com/v1", err)
 	}
@@ -529,9 +548,9 @@ func (s *hpaScenario) deploy(ctx *validators.Context) error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create HPA workload Deployment", err)
 	}
 	recordRawTextArtifact(ctx, "HPA test resources",
-		fmt.Sprintf("kubectl get configmap,podmonitor,resourceclaimtemplate,deploy,hpa,pods -n %s", ns),
-		fmt.Sprintf("Namespace:    %s\nConfigMap:    %s (%s=%d)\nPodMonitor:   %s (scrape %s)\nDeployment:   %s (replicas %d, image %s)\nHPA:          %s (created after the baseline is established)",
-			ns, hpaWorkloadName, hpaMetricValueKey, hpaBaselineValue, hpaWorkloadName, defaults.HPAScrapeInterval,
+		fmt.Sprintf("kubectl get configmap,resourceclaimtemplate,deploy,hpa,pods -n %s; kubectl get podmonitor %s -n %s", ns, s.monitorName, s.monitorNamespace),
+		fmt.Sprintf("Namespace:    %s\nConfigMap:    %s (%s=%d)\nPodMonitor:   %s/%s (scrape %s)\nDeployment:   %s (replicas %d, image %s)\nHPA:          %s (created after the baseline is established)",
+			ns, hpaWorkloadName, hpaMetricValueKey, hpaBaselineValue, s.monitorNamespace, s.monitorName, defaults.HPAScrapeInterval,
 			hpaWorkloadName, hpaMinReplicas, defaults.PythonProbeImage, hpaWorkloadName))
 	s.timings[hpaPhaseDeploy] = time.Since(start)
 	return nil
@@ -1285,7 +1304,7 @@ func buildHPAMetricConfigMap(namespace string, value int) *corev1.ConfigMap {
 // buildHPAPodMonitor makes the recipe's Prometheus scrape the workload pods'
 // metrics port, attaching namespace and pod labels the adapter rule maps to
 // Kubernetes resources.
-func buildHPAPodMonitor(namespace string) *unstructured.Unstructured {
+func buildHPAPodMonitor(monitorNamespace, name, namespace, runToken string) *unstructured.Unstructured {
 	pm := &unstructured.Unstructured{Object: map[string]any{
 		keySpec: map[string]any{
 			"selector": map[string]any{
@@ -1303,10 +1322,41 @@ func buildHPAPodMonitor(namespace string) *unstructured.Unstructured {
 	}}
 	pm.SetAPIVersion(podMonitorGVR.GroupVersion().String())
 	pm.SetKind("PodMonitor")
-	pm.SetName(hpaWorkloadName)
-	pm.SetNamespace(namespace)
-	pm.SetLabels(map[string]string{prometheusReleaseLabel: prometheusComponentName})
+	pm.SetName(name)
+	pm.SetNamespace(monitorNamespace)
+	pm.SetLabels(map[string]string{prometheusReleaseLabel: prometheusComponentName, gpuTestRunLabel: runToken})
 	return pm
+}
+
+// pruneStaleHPAPodMonitors deletes the PodMonitors earlier runs left in the
+// Prometheus namespace: those carrying the run label whose test namespace is
+// gone. A killed run cannot clean up after itself, and deleting its test
+// namespace does not reach a PodMonitor outside it. Best effort: a failure
+// here must not fail the run that found the leftovers.
+func pruneStaleHPAPodMonitors(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, monitorNamespace string) {
+	list, err := dynClient.Resource(podMonitorGVR).Namespace(monitorNamespace).List(ctx, metav1.ListOptions{LabelSelector: gpuTestRunLabel})
+	if err != nil {
+		slog.Warn("failed to list PodMonitors left by earlier runs", "namespace", monitorNamespace, "error", err)
+		return
+	}
+	for i := range list.Items {
+		pm := &list.Items[i]
+		targets, _, _ := unstructured.NestedStringSlice(pm.Object, keySpec, "namespaceSelector", "matchNames")
+		if !strings.HasPrefix(pm.GetName(), hpaWorkloadName+"-") || len(targets) != 1 || !strings.HasPrefix(targets[0], hpaTestPrefix) {
+			continue
+		}
+		// Only a definitive NotFound proves the run is over; any other
+		// answer leaves the PodMonitor alone.
+		if _, getErr := clientset.CoreV1().Namespaces().Get(ctx, targets[0], metav1.GetOptions{}); !k8serrors.IsNotFound(getErr) {
+			continue
+		}
+		if delErr := dynClient.Resource(podMonitorGVR).Namespace(monitorNamespace).Delete(
+			ctx, pm.GetName(), metav1.DeleteOptions{}); delErr != nil && !k8serrors.IsNotFound(delErr) {
+			slog.Warn("failed to delete a PodMonitor left by an earlier run", "namespace", monitorNamespace, "name", pm.GetName(), "error", delErr)
+			continue
+		}
+		slog.Info("deleted a PodMonitor left by an earlier run", "namespace", monitorNamespace, "name", pm.GetName())
+	}
 }
 
 // buildHPAClaimTemplate returns the ResourceClaimTemplate each workload pod
@@ -1440,13 +1490,22 @@ func buildHPA(namespace string, stabilization time.Duration) *autoscalingv2.Hori
 // which takes the pods, their claims and the ConfigMap with it. Runs on its
 // own context so it completes from a deferred block whose parent is canceled;
 // see cleanupGPUTestNamespace for the status and error semantics.
-func cleanupHPAWorkload(clientset kubernetes.Interface, dynClient dynamic.Interface, run *gpuTestRun) (string, error) {
+func cleanupHPAWorkload(clientset kubernetes.Interface, dynClient dynamic.Interface, run *gpuTestRun,
+	monitorNamespace, monitorName string) (string, error) {
+
+	var monitorErr error
 	if run.nsObserved {
 		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 		defer cancel()
-		if err := dynClient.Resource(podMonitorGVR).Namespace(run.namespace).Delete(
-			ctx, hpaWorkloadName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
-			slog.Warn("failed to delete the PodMonitor before namespace cleanup", "namespace", run.namespace, "error", err)
+		if err := dynClient.Resource(podMonitorGVR).Namespace(monitorNamespace).Delete(
+			ctx, monitorName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+			slog.Warn("failed to delete the PodMonitor before namespace cleanup", "namespace", monitorNamespace, "error", err)
+			// Deleting the test namespace removes a PodMonitor inside it;
+			// one in the Prometheus namespace would be left behind.
+			if monitorNamespace != run.namespace {
+				monitorErr = errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
+					"failed to delete PodMonitor %s/%s; delete it manually", monitorNamespace, monitorName), err)
+			}
 		}
 		if err := clientset.AutoscalingV2().HorizontalPodAutoscalers(run.namespace).Delete(
 			ctx, hpaWorkloadName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
@@ -1457,7 +1516,11 @@ func cleanupHPAWorkload(clientset kubernetes.Interface, dynClient dynamic.Interf
 			slog.Warn("failed to delete the HPA workload Deployment before namespace cleanup", "namespace", run.namespace, "error", err)
 		}
 	}
-	return cleanupGPUTestNamespace(clientset, run)
+	status, err := cleanupGPUTestNamespace(clientset, run)
+	if err == nil {
+		err = monitorErr
+	}
+	return status, err
 }
 
 // waitForMetricsAPI polls probe until it returns nil or the budget elapses,

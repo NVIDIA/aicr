@@ -216,7 +216,7 @@ validators:
     env: []
   - name: ai-service-metrics
     phase: conformance
-    description: "Verify Prometheus discovers a ServiceMonitor-selected CPU stub workload and collects exactly the requests sent to it"
+    description: "Verify the monitoring system discovers a ServiceMonitor-selected CPU stub workload and collects exactly the requests sent to it"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     # 8m30s shared work budget enforced by the check's workCtx, plus 30s
     # cleanup and 60s margin; the per-wait caps (stub Ready 3m, monitor load
@@ -225,16 +225,17 @@ validators:
     timeout: 10m
     args: ["ai-service-metrics"]
     env: []
-    # Best-effort co-location: prefer the same node as Prometheus so the dial
-    # is loopback / same-node and avoids cross-Security-Group ingress filtering.
-    # Uses requirement: preferred — schedule still falls back to any node if
-    # Prometheus is unschedulable. Motivated by multi-SG clusters (e.g., DGXC
-    # EKS with separate customer/system ENI subnets) where pod-to-pod
-    # reachability is asymmetric. See https://github.com/NVIDIA/aicr/issues/933.
+    # Best-effort co-location: prefer the same node as NKTP's otel-lgtm, which
+    # the check queries, so the dial is loopback / same-node and avoids
+    # cross-Security-Group ingress filtering. Uses requirement: preferred —
+    # schedule still falls back to any node if otel-lgtm is unschedulable.
+    # Motivated by multi-SG clusters (e.g., DGXC EKS with separate
+    # customer/system ENI subnets) where pod-to-pod reachability is asymmetric.
+    # See https://github.com/NVIDIA/aicr/issues/933.
     dependencyAffinity:
-      - componentRef: kube-prometheus-stack
+      - componentRef: nktp
         podLabelSelector:
-          app.kubernetes.io/name: prometheus
+          app: lgtm
         requirement: preferred
   - name: inference-gateway
     phase: conformance
@@ -268,8 +269,8 @@ validators:
     args: ["pod-autoscaling"]
     env: []
     # The check dials Prometheus for the PodMonitor load wait when the recipe
-    # declares kube-prometheus-stack, so it takes the same best-effort
-    # co-location as ai-service-metrics (see that entry and #933).
+    # declares kube-prometheus-stack, so it prefers Prometheus's node, for the
+    # reason ai-service-metrics prefers otel-lgtm's (see that entry and #933).
     dependencyAffinity:
       - componentRef: kube-prometheus-stack
         podLabelSelector:
