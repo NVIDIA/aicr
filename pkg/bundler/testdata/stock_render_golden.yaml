@@ -3944,13 +3944,13 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   015-nvsentinel-mongodb/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvsentinel-mongodb/install.sh: a5e42338d334c4cf95cd52a11c0e95a5b1968a297410438b4e8ceb350d911360
   015-nvsentinel-mongodb/upstream.env: 13d69c43b9838f0696ff4147a0bf0ad558ccade8044e530c3a6c906e3e5391fe
-  015-nvsentinel-mongodb/values.yaml: bf6442ac6dc0539aaf88235639f9725751b18ec63d0fd5fe41939861990285d2
+  015-nvsentinel-mongodb/values.yaml: 5c678796364f12e63342fafdb5fa6bb6636dd083d130563291bab1096c18b4a9
   016-nvsentinel-mongodb-post/Chart.yaml: 4b2c16ce61ea600f15205931307484310c6e7152bc94865c00eb84e7ea18d989
   016-nvsentinel-mongodb-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel-mongodb-post/install.sh: ba394a2f72fc022673b0b854b76e5a5232eb9dd72b118ef4785de1f873d3b5c4
   016-nvsentinel-mongodb-post/templates/client-certificate.yaml: 9262bfd83508a30382c87d07871b0744e43bbd37bd34e0f9666ff47f312912d9
   016-nvsentinel-mongodb-post/templates/connection.yaml: 4797542712c21ab2b8da3d786bd063d29bc1bcc3653b03ad484051a1253ac7a9
-  016-nvsentinel-mongodb-post/values.yaml: bf6442ac6dc0539aaf88235639f9725751b18ec63d0fd5fe41939861990285d2
+  016-nvsentinel-mongodb-post/values.yaml: 5c678796364f12e63342fafdb5fa6bb6636dd083d130563291bab1096c18b4a9
   017-slinky-drainer-crds/Chart.yaml: 69af9ba1e9687c19a73ad71a0ac1bce5fb07ba922e8ef835208d56ec8d3b8057
   017-slinky-drainer-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-drainer-crds/install.sh: ad754dece702e4bfca1dd40e4a100e8c945728e2350e8445f8dca041d5023c0a
@@ -3987,7 +3987,7 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   README.md: f4f6c3254d2cfdc98d64ee15ee4c4e3ef2674eb1ec8b86a0e3f7abcb80eebf9c
   UPGRADING.md: 2b315f7d7d52c67c5756c51fa8fadb4c8efa22e82f22ba78506da1cbee6462cd
   bundle-info.yaml: f476d9291c0245b9ba139f5c25f60003bbf82613100c49a1db382d6eaa5a3de5
-  checksums.txt: 148f9cc805b700e3de8372b593774bb6f773b81cf14fd8b57cffb6744ab9a807
+  checksums.txt: 00fa90d916b7e11dc28c3c26c7637b9c3c2616bffb2e2da8f0cd1519bcddd6a3
   data/overlays/stock-render-opt-in.yaml: 328e7217055d4c00c950d690a1579830a95456e9953214a1ec0803416edaaaf3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 596e7b6afde6d3f239e0477c55f389bb47ef22edc50e3a395b7da7707fcc89d3
