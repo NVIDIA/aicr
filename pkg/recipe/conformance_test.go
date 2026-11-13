@@ -263,6 +263,44 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			wantDRAConstraint: true,
 		},
 		{
+			name: "h100-eks-amazonlinux-inference-dynamo",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorH100
+				c.OS = CriteriaOSAmazonLinux
+				c.Intent = CriteriaIntentInference
+				c.Platform = CriteriaPlatformDynamo
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"agentgateway-crds",
+				"agentgateway",
+				"grove",
+				"dynamo-platform",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"inference-gateway",
+				"robust-controller",
+				"secure-accelerator-access",
+				"driver-runtime-management",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+			},
+			wantDRAConstraint: true,
+		},
+		{
 			name: "h100-eks-ubuntu-training",
 			criteria: func() *Criteria {
 				c := NewCriteria()

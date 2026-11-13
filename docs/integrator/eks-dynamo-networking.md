@@ -1,6 +1,6 @@
 # EKS Dynamo Networking Prerequisites
 
-For `*-eks-ubuntu-inference-dynamo` recipes, AICR configures
+For `*-eks-ubuntu-inference-dynamo` and `h100-eks-amazonlinux-inference-dynamo` recipes, AICR configures
 `dynamo-platform` with Kubernetes-native discovery. As of the Dynamo 1.4+
 bump, AICR no longer installs bundled NATS by default: the request plane
 defaults to TCP and the KV event plane defaults to ZMQ
