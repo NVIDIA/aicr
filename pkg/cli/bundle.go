@@ -271,8 +271,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 	// Resolve recipe path to absolute and validate it exists early.
 	// This prevents confusing "file not found" errors when the working
 	// directory context differs from where the recipe was created.
-	if opts.recipeFilePath != "" &&
-		!strings.HasPrefix(opts.recipeFilePath, "http://") &&
+	if !strings.HasPrefix(opts.recipeFilePath, "http://") &&
 		!strings.HasPrefix(opts.recipeFilePath, "https://") &&
 		!strings.HasPrefix(opts.recipeFilePath, serializer.ConfigMapURIScheme) {
 
