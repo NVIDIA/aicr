@@ -314,6 +314,16 @@ aicr/
 │   ├── aicrd/          # API server binary
 │   ├── gate/           # Readiness-gate Chainsaw runner
 │   └── kubectl-aicr/   # kubectl plugin for Operator rollouts
+├── demos/              # Guided demos and runbooks (GitHub-only)
+├── docs/
+│   ├── contributor/    # System design docs (architecture)
+│   ├── integrator/     # CI/CD and API integration docs
+│   └── user/           # User documentation (CLI)
+├── examples/           # Example recipes and templates
+├── fern/               # Docs site configuration
+├── infra/              # UAT and shared cloud infrastructure
+├── kwok/               # KWOK simulated-cluster tests
+├── licenses/           # License-text overrides for third-party notices
 ├── pkg/
 │   ├── bundler/        # Bundle generation framework
 │   ├── cli/            # CLI commands and flags
@@ -326,11 +336,6 @@ aicr/
 │   ├── server/         # HTTP server (aicrd) + REST handlers
 │   ├── snapshotter/    # Snapshot orchestration
 │   └── validator/      # Constraint evaluation
-├── docs/
-│   ├── contributor/    # System design docs (architecture)
-│   ├── integrator/     # CI/CD and API integration docs
-│   └── user/           # User documentation (CLI)
-├── kwok/               # KWOK simulated-cluster tests
 ├── recipes/            # Recipe data: registry, overlays, mixins, components
 ├── tests/              # E2E and Chainsaw tests
 ├── tilt/               # Local dev environment
