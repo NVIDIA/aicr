@@ -161,6 +161,9 @@ func SignExisting(ctx context.Context, opts SignExistingOptions) error {
 // lockstep with bundle signing, including the Rekor v2 signing-config
 // selection (ResolveOptions.UseTUFSigningConfig).
 func signEvidenceStatement(ctx context.Context, statementJSON []byte, opts bundleattest.ResolveOptions) (*bundleattest.SignedAttestation, error) {
+	if len(statementJSON) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "empty statement")
+	}
 	if err := validateEvidenceSigningMode(opts); err != nil {
 		return nil, err
 	}
