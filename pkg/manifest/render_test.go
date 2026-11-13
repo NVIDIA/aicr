@@ -17,6 +17,9 @@ package manifest
 import (
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestRender(t *testing.T) {
@@ -228,4 +231,37 @@ func TestHelmFuncMapFunctions(t *testing.T) {
 			t.Errorf("trunc(-20, 'short') = %q, want %q", got, "short")
 		}
 	})
+}
+
+func TestRenderFail(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		wantCode errors.ErrorCode
+		wantSub  string
+	}{
+		{
+			name:     "fail reports an invalid request",
+			content:  `{{ if not .Values.app.limit }}{{ fail "app.limit is required" }}{{ end }}`,
+			wantCode: errors.ErrCodeInvalidRequest,
+			wantSub:  "app.limit is required",
+		},
+		{
+			name:     "other execution errors stay internal",
+			content:  `{{ template "missing" }}`,
+			wantCode: errors.ErrCodeInternal,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Render([]byte(tt.content), RenderInput{ComponentName: "app", Values: map[string]any{}})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			errorstest.WantReportedCode(t, err, tt.wantCode)
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantSub)
+			}
+		})
+	}
 }
