@@ -338,7 +338,8 @@ aicr/
 └── validators/         # Validator checks (built into per-phase container images)
 ```
 
-Binaries live in `cmd/` (the `aicr` CLI and `aicrd` API server, plus the Operator binaries); business logic and the
+Binaries live in `cmd/` (the `aicr` CLI, the `aicrd` API server, the Operator
+binaries, and the readiness-gate runner); business logic and the
 collectors, recipe engine, snapshotter, bundler framework, and validator live in
 the `pkg/` subdirectories shown above. For per-package responsibilities, the data
 flow between them, and component-level design, see the architecture documentation
@@ -691,7 +692,7 @@ The merge gate runs `make operator-check-generated` and `make operator-envtest-f
 | `make build` | Build binaries for current OS/arch |
 | `make image` | Build and push aicr container image (Ko) |
 | `make image-validators` | Build and push per-phase validator images (Docker) |
-| `make release` | Full release with goreleaser (CLI binaries plus the `aicr` and `aicrd` images; validator and `aicr-gate` images are built by `.github/workflows/on-tag.yaml`) |
+| `make release` | Full release with goreleaser (CLI binaries plus the `aicr` and `aicrd` images; validator, `aicr-gate`, and Operator (`aicr-operator`, `aicr-registry`) images are built by `.github/workflows/on-tag.yaml`) |
 | `make bump-major` | Bump major version (1.2.3 → 2.0.0) |
 | `make bump-minor` | Bump minor version (1.2.3 → 1.3.0) |
 | `make bump-patch` | Bump patch version (1.2.3 → 1.2.4) |

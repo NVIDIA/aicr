@@ -24,8 +24,8 @@ out only where commands or flags genuinely differ.
 * User is already authenticated to a GKE cluster with 1+ H100 (a3-megagpu-8g) nodes.
 * A CPU node pool labeled `nodeGroup=cpu-worker` for the Dynamo Frontend.
 * GKE cluster runs Container-Optimized OS (COS) with GPU drivers pre-installed.
-* Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`
-  flags are examples only. Update them to match your cluster.
+* Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`,
+  and `--system-node-selector` flags are examples only. Update them to match your cluster.
 * System nodes have no custom taints (GKE managed pods don't tolerate them).
 
 The sample workload in [Deploy Inference Workload](#deploy-inference-workload)
