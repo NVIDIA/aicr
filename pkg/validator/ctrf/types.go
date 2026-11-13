@@ -206,6 +206,10 @@ type TestResult struct {
 	// compared (see RuntimeProvenance). It survives minimal redaction after the
 	// shape and key-collapsing rules in pkg/evidence/redact; nil otherwise.
 	RuntimeProvenance *RuntimeProvenance `json:"runtimeProvenance,omitempty"`
+
+	// Images lists the images the check's pods ran, as their kubelets
+	// reported them.
+	Images []PodImage `json:"images,omitempty"`
 }
 
 // Environment describes the execution environment and build context.

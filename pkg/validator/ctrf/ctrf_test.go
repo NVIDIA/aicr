@@ -16,6 +16,7 @@ package ctrf
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -587,6 +588,23 @@ func TestBuilderAddResultCopiesRuntimeProvenance(t *testing.T) {
 	}
 	if report.Results.Tests[1].RuntimeProvenance != nil {
 		t.Errorf("RuntimeProvenance must be nil when the result carries none")
+	}
+}
+
+func TestBuilderAddResultCopiesImages(t *testing.T) {
+	b := NewBuilder("aicr", "1.0.0", testPhase)
+	src := []PodImage{{Image: "x:v1", Digest: "sha256:" + strings.Repeat("a", 64), Platform: "linux/amd64"}}
+	b.AddResult(&ValidatorResult{Name: "nccl", Phase: testPhase, Images: src})
+	b.AddResult(&ValidatorResult{Name: "plain", Phase: testPhase})
+
+	src[0].Image = "tampered"
+
+	report := b.Build()
+	if got := report.Results.Tests[0].Images; len(got) != 1 || got[0].Image != "x:v1" {
+		t.Errorf("Images = %+v, want the pre-mutation copy", got)
+	}
+	if report.Results.Tests[1].Images != nil {
+		t.Errorf("Images must be nil when the result carries none")
 	}
 }
 
