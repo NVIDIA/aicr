@@ -34,7 +34,7 @@ linting:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan (#2657).
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
-  oasdiff: 'v1.36.0'
+  oasdiff: 'v1.37.0'
   # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
   # oras pin in security_tools: the checksums.txt served beside the tarball
@@ -52,7 +52,7 @@ linting:
   #
   # linux/amd64 only: this feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oasdiff_sha256_linux_amd64: 'dba65661f6d0f178a3e4884c309f19527a849388bb9df0e81545db76dbb697d6'
+  oasdiff_sha256_linux_amd64: 'eac87307d31d08c36800c58a409c247f1c5db37fbb72e2544402f22a87cbca3c'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.15.0'
   # renovate: datasource=pypi depName=yamllint depType=linting
@@ -210,7 +210,7 @@ testing_tools:
   # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
   # serves TLS with a mkcert cert (see mkcert below).
   # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
-  ministack_image: 'ministackorg/ministack:1.5.38'
+  ministack_image: 'ministackorg/ministack:1.5.39'
   # OpenBAO: the Linux Foundation Apache-2.0 fork of HashiCorp Vault, used by the
   # Vault KMS e2e to exercise the hashivault:// signing/verification path against
   # a real Transit secrets engine. API-identical to Vault; the sigstore hashivault
@@ -275,7 +275,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v2.1.2'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
-  zarf: 'v0.89.0'
+  zarf: 'v1.0.0'
 # Quality Thresholds
 quality:
   coverage_threshold: '83'

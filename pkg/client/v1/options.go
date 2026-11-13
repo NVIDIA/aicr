@@ -406,7 +406,7 @@ type RecipeSourceOption struct {
 }
 
 // WithRecipeSource sets the recipe source on the Client. Construct the
-// argument with EmbeddedSource, FilesystemSource, or OCISource.
+// argument with EmbeddedSource, FilesystemSource, ExternalFilesystemSource, or OCISource.
 func WithRecipeSource(s RecipeSourceOption) Option {
 	return func(c *Client) {
 		c.source = s.internal
@@ -418,7 +418,7 @@ func WithRecipeSource(s RecipeSourceOption) Option {
 // Client.Close removes only the child workspace; it never removes parent.
 //
 // When omitted, the system temporary directory is used. Supplying this option
-// with EmbeddedSource or FilesystemSource is invalid.
+// with any non-OCI source is invalid.
 func WithOCISourceTempDir(parent string) Option {
 	return func(c *Client) { c.ociSource.tempDir = &parent }
 }
@@ -486,6 +486,14 @@ func FilesystemSource(path string) RecipeSourceOption {
 	}
 }
 
+// ExternalFilesystemSource uses only the catalog at path, without embedded
+// catalog merging or fallback. The directory must contain registry.yaml.
+func ExternalFilesystemSource(path string) RecipeSourceOption {
+	source := FilesystemSource(path)
+	source.internal.externalOnly = true
+	return source
+}
+
 // sourceKind is an unexported enum for recipe source variants.
 type sourceKind int
 
@@ -498,10 +506,11 @@ const (
 
 // recipeSource is the internal representation passed to the Client.
 type recipeSource struct {
-	kind     sourceKind
-	registry string
-	selector string
-	path     string
+	externalOnly bool
+	kind         sourceKind
+	registry     string
+	selector     string
+	path         string
 }
 
 type ociSourceConfig struct {

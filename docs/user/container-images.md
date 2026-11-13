@@ -81,7 +81,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nvcre | helm | cluster-readiness-engine | v0.8.2 | 4 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
-| nvsentinel | helm | nvsentinel | v1.28.0 | 6 |
+| nvsentinel | helm | nvsentinel | v1.31.0 | 6 |
 | nvsentinel-mongodb | helm | psmdb-db | 1.23.3 | 5 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
@@ -373,20 +373,20 @@ _No images extracted._
 
 ### nvsentinel
 
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.28.0-dcgm-3.x`
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.28.0-dcgm-4.x`
-- `ghcr.io/nvidia/nvsentinel/labeler:v1.28.0`
-- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.28.0`
-- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.28.0`
-- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.28.0`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.31.0-dcgm-3.x`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.31.0-dcgm-4.x`
+- `ghcr.io/nvidia/nvsentinel/labeler:v1.31.0`
+- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.31.0`
+- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.31.0`
+- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.31.0`
 
 ### nvsentinel-mongodb
 
-- `docker.io/percona/fluentbit:5.1.2-1@sha256:4926d7d003ca09c826a3dea5d9ccd0ba158296880471bcec82ef38f95617b913`
+- `docker.io/percona/fluentbit:5.1.4-1@sha256:037b5ea087dffd844f619c61f4d211a32bec73dae0971143795579db1a3a6992`
 - `docker.io/percona/mongodb_exporter:0.54.0@sha256:934e9db87e85e0fa63654e73c3504845993a254e898783ca905e65a68848b5a4`
-- `docker.io/percona/percona-backup-mongodb:2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5`
+- `docker.io/percona/percona-backup-mongodb:2.17.0@sha256:d3b1f82393991542ca1222c8c80a83830383a2fd51f064f6da939af776b9c01d`
 - `docker.io/percona/percona-server-mongodb:8.0.32-14@sha256:5ba5f240d2dc98bc6236ab1d79c0862c4b62dba9d98cd0ffdf716c30473d2d11`
-- `docker.io/percona/pmm-client:3.9.1@sha256:298e731652e2be172a2505596edaee1e0c014609035347599048f62efae78e5b`
+- `docker.io/percona/pmm-client:3.10.0@sha256:b407188b183bc61ab202914f2128f171dd2d0cd411396a05bb92f3e73348a416`
 
 ### prometheus-adapter
 
@@ -423,7 +423,7 @@ _No images extracted._
 
 ### slinky-drainer
 
-- `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.28.0@sha256:bf6ccaf1d6c035aa5f86e70a929dc6d9a18c5c05b10104d23c69aacff35bcb14`
+- `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.31.0@sha256:d839d35cc25f6ffa22c016a3a38eeeb98a3ef91a3eb32326d728b3c3fa10e646`
 
 ### slinky-drainer-crds
 
@@ -561,14 +561,14 @@ The trade-off is intentional. Pinning an image gives reproducibility; deferring 
 **Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Eleven known cases, none counted in the `nvsentinel` row's image count above. Nine set a `global.*` toggle:
 
 - The [`nvsentinel-observability` mixin](component-catalog.md#audit-logging-and-tracing) sets `global.auditLogging.enabled: true`, which conditionally adds a `fix-audit-log-permissions` init container (`docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`) to the `platform-connectors` DaemonSet and `labeler` Deployment. The chart's own default for this init container is `docker.io/bitnamilegacy/os-shell:12-debian-12-r30`, which sits in Bitnami's frozen archive and will never be patched; AICR overrides `global.initContainerImage` in `recipes/components/nvsentinel/values.yaml` to the same digest-pinned busybox it already ships in the `network-operator` manifests.
-- The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.28.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
-- The [`nvsentinel-nic-health-monitor` mixin](component-catalog.md#nic-and-fabric-fault-detection) sets `global.nicHealthMonitor.enabled`, turning on the chart's `nic-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.28.0`. Its `chown` init container reuses `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` — the same overridden `global.initContainerImage` the observability mixin above already pulls in, not a second one. Unlike the observability and object-monitor mixins, this one is referenced by the shipped `aks` and `oke-ol` overlays, so every AKS and OKE recipe deploys these images; the other families do not. The `nvsentinel-slurm-drain-monitor` mixin below is the only other one here that shipped recipes compose.
-- The [`nvsentinel-slurm-drain-monitor` mixin](component-catalog.md#slurm-drain-monitor) sets `global.slurmDrainMonitor.enabled`, turning on the chart's `slurm-drain-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.28.0`. Every `platform: slurm` recipe composes it, so those recipes deploy this image and the others do not; it is in AICR's weekly image scan for the same reason as the object monitor's.
-- The [`nvsentinel-health-events-analyzer` mixin](component-catalog.md#health-events-analyzer) sets `global.healthEventsAnalyzer.enabled`, turning on the chart's `health-events-analyzer` subchart and pulling in `ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.28.0`, with no init container on the MongoDB datastore AICR bundles. No shipped recipe composes it; it is required beside the `nvsentinel-remediation` step. It is in the weekly image scan and the mirror lane, and `TestNVSentinelHealthEventsAnalyzerChartRender` pins it against the rendered chart.
-- The [`nvsentinel-event-exporter` mixin](component-catalog.md#health-event-export) sets `global.eventExporter.enabled`, turning on the chart's `event-exporter` subchart and pulling in `ghcr.io/nvidia/nvsentinel/event-exporter:v1.28.0`, with no init container on the MongoDB datastore AICR bundles. No shipped recipe composes it; it is in the weekly image scan and the mirror lane, and `TestNVSentinelEventExporterChartRender` pins it against the rendered chart.
-- The [`nvsentinel-log-collector` mixin](component-catalog.md#diagnostics-capture) sets `global.inclusterFileServer.enabled` and `fault-remediation.logCollector.enabled`, adding five images: the collection Job's `ghcr.io/nvidia/nvsentinel/log-collector:v1.28.0`, which is named only inside `fault-remediation`'s ConfigMap, and the file server's `ghcr.io/nvidia/nvsentinel/file-server-cleanup:v1.28.0`, `docker.io/bitnamilegacy/nginx:1.27.2-debian-12-r2`, `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` (its init container) and `quay.io/martinhelmich/prometheus-nginxlog-exporter:v1.10.0`. The nginx and exporter tags are the chart's own pins, not AICR's; `bitnamilegacy` is Bitnami's frozen archive and is never patched. The busybox is AICR's: the mixin sets `incluster-file-server.initImage` to the one `nvsentinel-remediation` pins, replacing the chart's `public.ecr.aws/docker/library/busybox:1.37.0`, whose registry caps anonymous pulls by data per IP. No shipped recipe composes it; all five are in the weekly image scan and the mirror lane, and `TestNVSentinelLogCollectorChartRender` pins them against the rendered chart.
-- The [`nvsentinel-node-validation` mixin](component-catalog.md#node-validation) sets `global.lifecycleManager.enabled`, turning on the chart's `lifecycle-manager` subchart and pulling in `ghcr.io/nvidia/nvsentinel/lifecycle-manager:v1.28.0`. Its DCGM diagnostic, `nvcr.io/nvidia/cloud-native/dcgm:4.7.0-ubuntu24.04`, is in no pod spec: lifecycle-manager reads it from its ConfigMap and runs it as a Job on the node under test, so it is pulled only when a node is validated. No shipped recipe composes the mixin. Both images are in the mirror lane; the lifecycle-manager image is in the weekly image scan, and the DCGM image, an `nvcr.io` image like the GPU Operator's own, is not.
-- The [`nvsentinel-csp-health-monitor-aws` and `-gcp` mixins](component-catalog.md#cloud-maintenance-events) set `global.cspHealthMonitor.enabled`, turning on the chart's `csp-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/csp-health-monitor:v1.28.0` and its `maintenance-notifier` sidecar, `ghcr.io/nvidia/nvsentinel/maintenance-notifier:v1.28.0`, with no init container on the MongoDB datastore AICR bundles. No shipped recipe composes them; both images are in AICR's weekly image scan and the mirror lane, and `TestNVSentinelCSPHealthMonitorChartRender` pins them against the rendered chart.
+- The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.31.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
+- The [`nvsentinel-nic-health-monitor` mixin](component-catalog.md#nic-and-fabric-fault-detection) sets `global.nicHealthMonitor.enabled`, turning on the chart's `nic-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.31.0`. Its `chown` init container reuses `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` — the same overridden `global.initContainerImage` the observability mixin above already pulls in, not a second one. Unlike the observability and object-monitor mixins, this one is referenced by the shipped `aks` and `oke-ol` overlays, so every AKS and OKE recipe deploys these images; the other families do not. The `nvsentinel-slurm-drain-monitor` mixin below is the only other one here that shipped recipes compose.
+- The [`nvsentinel-slurm-drain-monitor` mixin](component-catalog.md#slurm-drain-monitor) sets `global.slurmDrainMonitor.enabled`, turning on the chart's `slurm-drain-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.31.0`. Every `platform: slurm` recipe composes it, so those recipes deploy this image and the others do not; it is in AICR's weekly image scan for the same reason as the object monitor's.
+- The [`nvsentinel-health-events-analyzer` mixin](component-catalog.md#health-events-analyzer) sets `global.healthEventsAnalyzer.enabled`, turning on the chart's `health-events-analyzer` subchart and pulling in `ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.31.0`, with no init container on the MongoDB datastore AICR bundles. No shipped recipe composes it; it is required beside the `nvsentinel-remediation` step. It is in the weekly image scan and the mirror lane, and `TestNVSentinelHealthEventsAnalyzerChartRender` pins it against the rendered chart.
+- The [`nvsentinel-event-exporter` mixin](component-catalog.md#health-event-export) sets `global.eventExporter.enabled`, turning on the chart's `event-exporter` subchart and pulling in `ghcr.io/nvidia/nvsentinel/event-exporter:v1.31.0`, with no init container on the MongoDB datastore AICR bundles. No shipped recipe composes it; it is in the weekly image scan and the mirror lane, and `TestNVSentinelEventExporterChartRender` pins it against the rendered chart.
+- The [`nvsentinel-log-collector` mixin](component-catalog.md#diagnostics-capture) sets `global.inclusterFileServer.enabled` and `fault-remediation.logCollector.enabled`, adding five images: the collection Job's `ghcr.io/nvidia/nvsentinel/log-collector:v1.31.0`, which is named only inside `fault-remediation`'s ConfigMap, and the file server's `ghcr.io/nvidia/nvsentinel/file-server-cleanup:v1.31.0`, `docker.io/bitnamilegacy/nginx:1.27.2-debian-12-r2`, `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` (its init container) and `quay.io/martinhelmich/prometheus-nginxlog-exporter:v1.10.0`. The nginx and exporter tags are the chart's own pins, not AICR's; `bitnamilegacy` is Bitnami's frozen archive and is never patched. The busybox is AICR's: the mixin sets `incluster-file-server.initImage` to the one `nvsentinel-remediation` pins, replacing the chart's `public.ecr.aws/docker/library/busybox:1.37.0`, whose registry caps anonymous pulls by data per IP. No shipped recipe composes it; all five are in the weekly image scan and the mirror lane, and `TestNVSentinelLogCollectorChartRender` pins them against the rendered chart.
+- The [`nvsentinel-node-validation` mixin](component-catalog.md#node-validation) sets `global.lifecycleManager.enabled`, turning on the chart's `lifecycle-manager` subchart and pulling in `ghcr.io/nvidia/nvsentinel/lifecycle-manager:v1.31.0`. Its DCGM diagnostic, `nvcr.io/nvidia/cloud-native/dcgm:4.7.0-ubuntu24.04`, is in no pod spec: lifecycle-manager reads it from its ConfigMap and runs it as a Job on the node under test, so it is pulled only when a node is validated. No shipped recipe composes the mixin. Both images are in the mirror lane; the lifecycle-manager image is in the weekly image scan, and the DCGM image, an `nvcr.io` image like the GPU Operator's own, is not.
+- The [`nvsentinel-csp-health-monitor-aws` and `-gcp` mixins](component-catalog.md#cloud-maintenance-events) set `global.cspHealthMonitor.enabled`, turning on the chart's `csp-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/csp-health-monitor:v1.31.0` and its `maintenance-notifier` sidecar, `ghcr.io/nvidia/nvsentinel/maintenance-notifier:v1.31.0`, with no init container on the MongoDB datastore AICR bundles. No shipped recipe composes them; both images are in AICR's weekly image scan and the mirror lane, and `TestNVSentinelCSPHealthMonitorChartRender` pins them against the rendered chart.
 
 A recipe composing any of these mixins **with `nvsentinel` still enabled** adds that mixin's images to what it deploys and mirrors; `aicr bundle`/`aicr mirror` on such a recipe surfaces them even though this static BOM cannot. A chain that disables `nvsentinel` (the OCP overlay, for example) can compose a mixin and ship none of them.
 
@@ -587,19 +587,19 @@ The three remediation mixins (see [Graded Remediation](component-catalog.md#grad
 
 | Image | Role |
 |---|---|
-| `ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.28.0` | cordons a node on a fatal fault |
-| `ghcr.io/nvidia/nvsentinel/node-drainer:v1.28.0` | drains a quarantined node |
-| `ghcr.io/nvidia/nvsentinel/fault-remediation:v1.28.0` | maps the fault to a repair action |
-| `ghcr.io/nvidia/nvsentinel/janitor:v1.28.0` | carries out the repair |
-| `ghcr.io/nvidia/nvsentinel/janitor-provider:v1.28.0` | creates the `generic` provider's reboot Job |
-| `ghcr.io/nvidia/nvsentinel/gpu-reset:v1.28.0` | GPU reset Job, named in janitor's ConfigMap rather than a pod spec |
+| `ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.31.0` | cordons a node on a fatal fault |
+| `ghcr.io/nvidia/nvsentinel/node-drainer:v1.31.0` | drains a quarantined node |
+| `ghcr.io/nvidia/nvsentinel/fault-remediation:v1.31.0` | maps the fault to a repair action |
+| `ghcr.io/nvidia/nvsentinel/janitor:v1.31.0` | carries out the repair |
+| `ghcr.io/nvidia/nvsentinel/janitor-provider:v1.31.0` | creates the `generic` provider's reboot Job |
+| `ghcr.io/nvidia/nvsentinel/gpu-reset:v1.31.0` | GPU reset Job, named in janitor's ConfigMap rather than a pod spec |
 | `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` | the `generic` provider's reboot Job, passed to janitor-provider as an environment variable |
 
 Every step also adds the `psmdb-operator` and `nvsentinel-mongodb` components, NVSentinel's datastore. Their six Percona images are pinned in those components' values files, so the BOM above lists them; NVSentinel's datastore setup Job reuses `docker.io/percona/percona-server-mongodb` from that list. The six NVIDIA images and the six Percona images are in the weekly image scan and the mirror lane. `TestNVSentinelRemediationChartRender` pins each step's images against the rendered chart, and `TestNVSentinelMongoDBChartRender` pins the two Percona components to exactly their listed images.
 
 The `nvsentinel-remediation` mixin pins the reboot Job image through `janitor-provider.csp.generic.rebootImage`, replacing the chart's `public.ecr.aws/docker/library/busybox:1.37.0` with the busybox already in the scan. `aicr mirror` cannot discover it, because janitor-provider passes it as the `GENERIC_REBOOT_IMAGE` environment variable rather than an `image:` field; mirror it yourself unless another component in the recipe already pulls it.
 
-The opt-in `nvsentinel-slinky-drainer` mixin (see [Slurm Drain Through Slinky](component-catalog.md#slurm-drain-through-slinky)) adds the image-less `slinky-drainer-crds` component and the `slinky-drainer` component, whose one image, `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.28.0`, is digest-pinned in its vendored manifest, so the BOM above lists it. Only recipes that compose the mixin deploy it. It is in the weekly image scan and the mirror lane, and `TestSlinkyDrainerImagePinnedEverywhere` keeps its tag at `nvsentinel`'s chart version.
+The opt-in `nvsentinel-slinky-drainer` mixin (see [Slurm Drain Through Slinky](component-catalog.md#slurm-drain-through-slinky)) adds the image-less `slinky-drainer-crds` component and the `slinky-drainer` component, whose one image, `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.31.0`, is digest-pinned in its vendored manifest, so the BOM above lists it. Only recipes that compose the mixin deploy it. It is in the weekly image scan and the mirror lane, and `TestSlinkyDrainerImagePinnedEverywhere` keeps its tag at `nvsentinel`'s chart version.
 
 ### Registries spanned
 

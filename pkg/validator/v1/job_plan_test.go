@@ -1515,6 +1515,86 @@ func TestOrchestratorWaitForUnobservedStart(t *testing.T) {
 	}
 }
 
+// TestBuildJobPlan_ForwardsRunaiProjectNamespaceEnv verifies the Run:ai
+// Project namespace reaches only the gang-scheduling Job, from the CLI process
+// environment and never from a catalog-pinned value: on a Run:ai recipe the
+// check runs its test pods there, and a catalog could otherwise point every
+// run at one namespace.
+func TestBuildJobPlan_ForwardsRunaiProjectNamespaceEnv(t *testing.T) {
+	values := func(entry ValidatorEntry) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == defaults.EnvRunaiProjectNamespace {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+	const project = "runai-aicr-gang"
+	entry := ValidatorEntry{Name: GangSchedulingCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+
+	tests := []struct {
+		name  string
+		env   string
+		entry ValidatorEntry
+		want  []string
+	}{
+		{name: "forwarded verbatim", env: project, entry: entry, want: []string{project}},
+		{name: "surrounding whitespace trimmed", env: "  " + project + "\n", entry: entry, want: []string{project}},
+		{name: "unset omitted", env: "", entry: entry, want: nil},
+		{name: "blank omitted", env: "   ", entry: entry, want: nil},
+		{
+			name: "not forwarded to other validators",
+			env:  project,
+			entry: ValidatorEntry{
+				Name: "dra-support", Phase: "conformance", Image: "img:v1", Timeout: time.Minute,
+			},
+			want: nil,
+		},
+		{
+			name: "catalog value cannot select the namespace",
+			env:  "",
+			entry: ValidatorEntry{
+				Name: GangSchedulingCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute,
+				Env: []EnvVar{{Name: defaults.EnvRunaiProjectNamespace, Value: project}},
+			},
+			want: nil,
+		},
+		{
+			name: "catalog value cannot override the forwarded namespace",
+			env:  project,
+			entry: ValidatorEntry{
+				Name: GangSchedulingCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute,
+				Env: []EnvVar{{Name: defaults.EnvRunaiProjectNamespace, Value: "runai-from-catalog"}},
+			},
+			want: []string{project},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(defaults.EnvRunaiProjectNamespace, tt.env)
+			got := values(tt.entry)
+			if len(got) != len(tt.want) {
+				t.Fatalf("%s env = %v, want %v", defaults.EnvRunaiProjectNamespace, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("%s env = %v, want %v", defaults.EnvRunaiProjectNamespace, got, tt.want)
+				}
+			}
+		})
+	}
+	t.Run("env-name literal locked", func(t *testing.T) {
+		if defaults.EnvRunaiProjectNamespace != "AICR_RUNAI_PROJECT_NAMESPACE" {
+			t.Errorf("EnvRunaiProjectNamespace = %q, want AICR_RUNAI_PROJECT_NAMESPACE (documented in docs/contributor/validator.md)", defaults.EnvRunaiProjectNamespace)
+		}
+	})
+}
+
 // TestBuildJobPlan_ForwardsDriverRuntimeImageEnv verifies the vanilla probe
 // image override reaches only the driver-runtime-management Job, from the CLI
 // process environment and never from a catalog-pinned value.
