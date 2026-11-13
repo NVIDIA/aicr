@@ -54,6 +54,7 @@ componentRefs: ## emitted order (as generated) — chainsaw list asserts are per
   - name: kube-prometheus-stack
   - name: network-operator
   - name: nfd
+  - name: nktp
   - name: nodewright-customizations
   - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
@@ -77,6 +78,7 @@ deploymentOrder:
   - dra-node-labeler
   - kai-scheduler
   - dynamo-platform
+  - nktp
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter

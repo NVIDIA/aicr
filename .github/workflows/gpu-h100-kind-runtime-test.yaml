@@ -130,9 +130,6 @@ jobs:
         uses: ./.github/actions/gpu-validate-conformance
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          kwok_helm_timeout: 600s
-          ko_build_timeout: 1200s
-          karpenter_helm_timeout: 600s
 
       - name: GPU Test Cleanup
         if: always()

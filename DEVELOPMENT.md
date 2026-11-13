@@ -52,6 +52,22 @@ make test
 make lint
 ```
 
+The Dev Container includes an SSH server for GitHub CLI access to a Codespace.
+After creation, `gh codespace ssh`, `gh codespace cp`, and `gh codespace logs`
+can connect to it, and SSH sessions get the same Go toolchain and tools on
+`PATH` as the Codespace terminal. Run these commands in your local terminal,
+replacing `<name>` with your Codespace name and `<local-file>` with a file on
+your machine:
+
+```bash
+gh codespace ssh -c <name> -- echo ok
+gh codespace cp -c <name> <local-file> remote:/tmp/
+gh codespace logs -c <name>
+```
+
+This SSH server is needed for those CLI commands, not for connecting through VS
+Code desktop, VS Code for the Web, or a local Dev Container.
+
 For a local equivalent, install Docker and the VS Code Dev Containers extension,
 open the checkout, and select **Dev Containers: Reopen in Container**.
 Docker-in-Docker requires privileged-container support; restrictive hosts may not
