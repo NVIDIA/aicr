@@ -120,11 +120,9 @@ func (r *Reservation) NightlyIntentsOrDefault() []string {
 	return out
 }
 
-// DaytimeAssignment is one entry in a daytime scheduler dispatch matrix: the
-// reservation to lease and the intent (flavor) to run its lifecycle with. The
-// daytime scheduler (uat-daytime.yaml) consumes a JSON array of these, from
-// [Registry.DaytimeAssignments] for up and
-// [Registry.DaytimeTeardownAssignments] for down.
+// DaytimeAssignment is a reservation and the intent (flavor) to run its
+// daytime lifecycle with, as listed by [Registry.DaytimeAssignments] and
+// [Registry.DaytimeTeardownAssignments].
 type DaytimeAssignment struct {
 	Reservation string `json:"reservation"`
 	Intent      string `json:"intent"`
