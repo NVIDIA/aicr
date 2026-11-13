@@ -685,6 +685,8 @@ paths:
         - $ref: "#/components/parameters/WorkloadGate"
         - $ref: "#/components/parameters/WorkloadSelector"
         - $ref: "#/components/parameters/BundleNodes"
+        - $ref: "#/components/parameters/RuntimeMetricsSeries"
+        - $ref: "#/components/parameters/RuntimeMetricsNamespace"
         - $ref: "#/components/parameters/VendorCharts"
         - $ref: "#/components/parameters/Serial"
         - $ref: "#/components/parameters/Split"
@@ -1230,6 +1232,38 @@ components:
         type: integer
         minimum: 0
         default: 0
+    RuntimeMetricsSeries:
+      name: runtime-metrics-series
+      in: query
+      required: false
+      description: >
+        Repeatable metric name pattern (RE2, matched against the whole name)
+        that the runtime Prometheus server keeps, in addition to the series
+        the recipe's components declare. Rejected when the recipe enables no
+        runtime Prometheus server.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+      example: ["inference_queue_depth"]
+    RuntimeMetricsNamespace:
+      name: runtime-metrics-namespace
+      in: query
+      required: false
+      description: >
+        Repeatable namespace whose ServiceMonitors and PodMonitors the runtime
+        Prometheus server loads, in addition to the namespaces of the recipe's
+        components and the server's own. Rejected when the recipe enables no
+        runtime Prometheus server.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+      example: ["inference"]
     VendorCharts:
       name: vendor-charts
       in: query

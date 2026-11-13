@@ -57,6 +57,7 @@ type bundleCmdOptions struct {
 	estimatedNodeCount         int
 	storageClass               string
 	sharedStorageClass         string
+	runtimeMetrics             config.RuntimeMetrics
 	targetRevision             string
 
 	// dynamicValues declares value paths provided at install time.
@@ -573,6 +574,8 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		}
 		opts.sharedStorageClass = sc
 	}
+
+	opts.runtimeMetrics = resolveRuntimeMetrics(cmd, bundleOpts.RuntimeMetrics)
 
 	// Validate any private Sigstore endpoints up front so a malformed
 	// --fulcio-url / --rekor-url fails before bundling instead of at sign
@@ -1092,6 +1095,16 @@ Write the same artifact as an OCI image layout without pushing, then publish it:
 	(format: component:path.to.field=<filepath>, can be repeated). The file
 	holds a single value (list, object, or scalar) for larger structures than
 	--set-json. Merge semantics match --set-json.`,
+				Category: catDeployment,
+			},
+			&cli.StringSliceFlag{
+				Name:     flagRuntimeMetricsSeries,
+				Usage:    "Metric name pattern (RE2, matched against the whole name) the runtime Prometheus server keeps, on top of the series AICR's own components declare; can be repeated. For a workload series an HPA scales on.",
+				Category: catDeployment,
+			},
+			&cli.StringSliceFlag{
+				Name:     flagRuntimeMetricsNamespace,
+				Usage:    "Namespace whose ServiceMonitors and PodMonitors the runtime Prometheus server loads, on top of AICR's own; can be repeated. A monitor in the server's own namespace needs no flag.",
 				Category: catDeployment,
 			},
 			&cli.StringSliceFlag{
@@ -1674,6 +1687,7 @@ func runBundleCmdWithDependencies(
 		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
 		config.WithStorageClass(opts.storageClass),
 		config.WithSharedStorageClass(opts.sharedStorageClass),
+		config.WithRuntimeMetrics(opts.runtimeMetrics),
 		config.WithVendorCharts(opts.vendorCharts),
 		config.WithReadinessHooks(opts.readinessHooks),
 		config.WithSerial(opts.serial),

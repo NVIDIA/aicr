@@ -18,6 +18,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -133,7 +134,51 @@ const (
 	// conformance check, the only one defaults.EnvRunaiProjectNamespace is
 	// forwarded to.
 	GangSchedulingCheckName = "gang-scheduling"
+
+	// AIServiceMetricsCheckName is the catalog name of the ai-service-metrics
+	// conformance check, the only one defaults.EnvServiceMetricsQueryURL is
+	// forwarded to.
+	AIServiceMetricsCheckName = "ai-service-metrics"
 )
+
+// ParseServiceMetricsQueryURL checks a defaults.EnvServiceMetricsQueryURL
+// value and returns it without a trailing slash. Credentials in the URL are
+// rejected: the value is written into the check's Job spec and recorded in
+// its evidence. No error repeats the value.
+func ParseServiceMetricsQueryURL(raw string) (string, error) {
+	invalid := func(problem string) error {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s is not a usable Prometheus query URL: %s", defaults.EnvServiceMetricsQueryURL, problem))
+	}
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil:
+		return "", invalid("it does not parse as a URL")
+	case u.User != nil:
+		return "", invalid("it must not carry credentials")
+	case u.Scheme != "http" && u.Scheme != "https":
+		return "", invalid("its scheme must be http or https")
+	case u.Host == "":
+		return "", invalid("it has no host")
+	case u.RawQuery != "" || u.Fragment != "":
+		return "", invalid("it must be a base URL, without a query or fragment; the check appends /api/v1/query")
+	}
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// validateForwardedEnv rejects a process environment value that must not
+// reach entry's Job spec.
+func validateForwardedEnv(entry ValidatorEntry) error {
+	if entry.Name != AIServiceMetricsCheckName {
+		return nil
+	}
+	if raw := strings.TrimSpace(os.Getenv(defaults.EnvServiceMetricsQueryURL)); raw != "" {
+		if _, err := ParseServiceMetricsQueryURL(raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // hfTokenEnvVar is the environment variable name used to forward the
 // Hugging Face API token to the inference performance validator.
@@ -285,6 +330,12 @@ func buildEnv(
 		env = append(env, corev1.EnvVar{Name: defaults.EnvRunaiProjectNamespace, Value: v})
 	}
 
+	// Forward the owner's Prometheus query URL to the ai-service-metrics check
+	// only. BuildJobPlan has already rejected a value that is not usable.
+	if v := strings.TrimSpace(os.Getenv(defaults.EnvServiceMetricsQueryURL)); v != "" && entry.Name == AIServiceMetricsCheckName {
+		env = append(env, corev1.EnvVar{Name: defaults.EnvServiceMetricsQueryURL, Value: v})
+	}
+
 	// Add catalog entry's custom env vars. Orchestrator-controlled env vars are
 	// deliberately skipped here: they must come only from the process
 	// environment (forwarded above), never from the in-repo catalog. Appending
@@ -296,6 +347,9 @@ func buildEnv(
 			continue
 		}
 		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv || e.Name == ImagePullSecretsEnv || e.Name == defaults.EnvRunaiProjectNamespace {
+			continue
+		}
+		if e.Name == defaults.EnvServiceMetricsQueryURL {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})

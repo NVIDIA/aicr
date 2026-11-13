@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -52,31 +53,45 @@ type PromQLScrapeScope struct {
 }
 
 // InjectPromQLScrapeScope writes the enabled telemetry.promql consumers'
-// union into the values of the enabled telemetry.promqlServer component
-// (ADR-026), mutating values in place. DefaultBundler.Make and
-// Client.BundleComponents both call it.
+// union, plus the bundle's own runtimeMetrics, into the values of the enabled
+// telemetry.promqlServer component (ADR-026), mutating values in place.
+// DefaultBundler.Make and Client.BundleComponents both call it.
 //
 // platform is every component the platform runs, not only those in values,
 // so a partial bundle still validates the whole platform; the server is
-// written only when values holds it. With no enabled server it writes and
-// checks nothing. It fails with ErrCodeInvalidRequest when a monitorsFrom
-// component is absent or disabled, the server has no namespace, more than one
-// server is enabled, or the server's values already hold an owned path.
+// written only when values holds it. With no enabled server it writes
+// nothing, and checks only that runtimeMetrics is empty. It fails with
+// ErrCodeInvalidRequest when a monitorsFrom component is absent or disabled,
+// the server has no namespace, more than one server is enabled, the server's
+// values already hold an owned path, or runtimeMetrics is invalid or has no
+// server to apply to.
 func InjectPromQLScrapeScope(
 	provider recipe.DataProvider,
 	platform []recipe.ComponentRef,
 	values map[string]map[string]any,
+	runtimeMetrics config.RuntimeMetrics,
 ) (PromQLScrapeScope, error) {
 
+	if err := recipe.ValidateRuntimeMetrics(runtimeMetrics.Series, runtimeMetrics.Namespaces); err != nil {
+		return PromQLScrapeScope{}, err
+	}
 	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
 		return PromQLScrapeScope{}, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 			"failed to load component registry for the PromQL scrape scope")
 	}
 
-	scope, server, err := planPromQLScrapeScope(registry, platform)
-	if err != nil || scope == nil {
+	scope, server, err := planPromQLScrapeScope(registry, platform, runtimeMetrics)
+	if err != nil {
 		return PromQLScrapeScope{}, err
+	}
+	if scope == nil {
+		if !runtimeMetrics.IsZero() {
+			return PromQLScrapeScope{}, errors.New(errors.ErrCodeInvalidRequest,
+				"runtimeMetrics is set, but this recipe enables no runtime Prometheus server "+
+					"(no enabled component declares telemetry.promqlServer), so nothing would apply it")
+		}
+		return PromQLScrapeScope{}, nil
 	}
 
 	serverValues, emitted := values[scope.Server]
@@ -95,10 +110,12 @@ func InjectPromQLScrapeScope(
 
 // planPromQLScrapeScope returns a nil scope when no server is enabled. It
 // checks only what depends on the recipe: the registry loader has already
-// validated each declaration and compiled each pattern.
+// validated each declaration and compiled each pattern, and the caller has
+// validated runtimeMetrics.
 func planPromQLScrapeScope(
 	registry *recipe.ComponentRegistry,
 	platform []recipe.ComponentRef,
+	runtimeMetrics config.RuntimeMetrics,
 ) (*PromQLScrapeScope, *recipe.ComponentConfig, error) {
 
 	namespaces := make(map[string]string, len(platform))
@@ -126,8 +143,8 @@ func planPromQLScrapeScope(
 			"component %q declares telemetry.promqlServer but has no namespace in this recipe", server.Name),
 			map[string]any{errCtxKeyComponent: server.Name})
 	}
-	scope := &PromQLScrapeScope{Server: server.Name}
-	scopeNamespaces := []string{serverNamespace}
+	scope := &PromQLScrapeScope{Server: server.Name, Series: slices.Clone(runtimeMetrics.Series)}
+	scopeNamespaces := append([]string{serverNamespace}, runtimeMetrics.Namespaces...)
 	for _, name := range enabled {
 		comp := registry.Get(name)
 		if comp == nil || !comp.Telemetry.PromQL.IsDeclared() {
@@ -197,8 +214,8 @@ func applyPromQLScrapeScope(scope *PromQLScrapeScope, paths recipe.PromQLServerC
 	for _, path := range paths.OwnedPaths() {
 		if valuePathOccupied(values, path) {
 			return errors.NewWithContext(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-				"%s values set %s, which the bundler writes from the registry's telemetry.promql declarations; "+
-					"remove it from the values file or overlay", scope.Server, path),
+				"%s values set %s, which the bundler writes from the registry's telemetry.promql declarations "+
+					"and the bundle's runtimeMetrics; remove it from the values file or overlay", scope.Server, path),
 				map[string]any{errCtxKeyComponent: scope.Server, errCtxKeyPath: path})
 		}
 	}
@@ -285,25 +302,25 @@ func (b *DefaultBundler) enforcePromQLServerOwnership(recipeResult *recipe.Recip
 		return nil
 	}
 	return b.enforceOwnedPaths(recipeResult, recipe.OwnershipDomain{
-		Name:  "the PromQL scrape scope (registry telemetry.promql declarations)",
+		Name:  "the PromQL scrape scope (registry telemetry.promql declarations and the bundle's runtimeMetrics)",
 		Paths: owned,
 	})
 }
 
-// injectPromQLScrapeScope warns when an enabled server has no consumers.
+// injectPromQLScrapeScope warns when an enabled server keeps no series.
 func (r *bundleRun) injectPromQLScrapeScope(
 	recipeResult *recipe.RecipeResult,
 	platform []recipe.ComponentRef,
 	values map[string]map[string]any,
 ) error {
 
-	scope, err := InjectPromQLScrapeScope(recipeResult.DataProvider(), platform, values)
+	scope, err := InjectPromQLScrapeScope(recipeResult.DataProvider(), platform, values, r.Config.RuntimeMetrics())
 	if err != nil {
 		return err
 	}
-	if scope.Server != "" && len(scope.Consumers) == 0 {
-		r.appendWarning(fmt.Sprintf("%s is enabled but no enabled component declares telemetry.promql, "+
-			"so its Prometheus keeps no series", scope.Server))
+	if scope.Server != "" && len(scope.Series) == 0 {
+		r.appendWarning(fmt.Sprintf("%s is enabled but no enabled component declares telemetry.promql "+
+			"and the bundle sets no runtimeMetrics.series, so its Prometheus keeps no series", scope.Server))
 	}
 	return nil
 }

@@ -199,6 +199,37 @@ func resolveDRAEvictionNodeLabel(cmd *cli.Command, fallback *bundlercfg.NodeLabe
 	return bundlercfg.NodeLabel{}, nil
 }
 
+const (
+	flagRuntimeMetricsSeries    = "runtime-metrics-series"
+	flagRuntimeMetricsNamespace = "runtime-metrics-namespace"
+)
+
+// resolveRuntimeMetrics takes each list from its CLI flag when the flag is
+// set and from the config fallback otherwise. The bundler validates the
+// result.
+func resolveRuntimeMetrics(cmd *cli.Command, fallback bundlercfg.RuntimeMetrics) bundlercfg.RuntimeMetrics {
+	out := bundlercfg.RuntimeMetrics{Series: fallback.Series, Namespaces: fallback.Namespaces}
+	lists := []struct {
+		flag string
+		list *[]string
+	}{
+		{flagRuntimeMetricsSeries, &out.Series},
+		{flagRuntimeMetricsNamespace, &out.Namespaces},
+	}
+	for _, l := range lists {
+		if !cmd.IsSet(l.flag) {
+			continue
+		}
+		raw := cmd.StringSlice(l.flag)
+		if len(*l.list) > 0 {
+			slog.Info("CLI flag replacing config value", "flag", l.flag,
+				"configCount", len(*l.list), "overrideCount", len(raw))
+		}
+		*l.list = raw
+	}
+	return out
+}
+
 // resolveTolerations returns the final tolerations slice for a flag,
 // preferring CLI input over the typed fallback (already parsed from
 // config). When neither source supplies a value, returns

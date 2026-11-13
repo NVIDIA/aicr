@@ -105,6 +105,9 @@ type BundleResolved struct {
 	// SharedStorageClass is spec.bundle.scheduling.sharedStorageClass.
 	SharedStorageClass string
 
+	// RuntimeMetrics is spec.bundle.runtimeMetrics, validated.
+	RuntimeMetrics bundlercfg.RuntimeMetrics
+
 	// Attest is spec.bundle.attestation.enabled.
 	Attest bool
 
@@ -225,6 +228,13 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 
 	if err := resolveAttestation(b.Attestation, out); err != nil {
 		return nil, err
+	}
+
+	if m := b.RuntimeMetrics; m != nil {
+		if err := recipe.ValidateRuntimeMetrics(m.Series, m.Namespaces); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.bundle.runtimeMetrics", err)
+		}
+		out.RuntimeMetrics = bundlercfg.RuntimeMetrics{Series: m.Series, Namespaces: m.Namespaces}.Clone()
 	}
 
 	if b.Registry != nil {

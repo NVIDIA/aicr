@@ -26,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // ComponentRegistryKind is the wire kind for component registry documents.
@@ -1008,6 +1009,24 @@ func ValidatePromQLSeriesPattern(pattern string) error {
 		if _, err := regexp.Compile(form); err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("series pattern %q is not valid RE2", pattern), err)
+		}
+	}
+	return nil
+}
+
+// ValidateRuntimeMetrics checks a bundle's runtimeMetrics input (ADR-026):
+// each series as a telemetry.promql.series entry, and each namespace as a
+// namespace name.
+func ValidateRuntimeMetrics(series, namespaces []string) error {
+	for _, pattern := range series {
+		if err := ValidatePromQLSeriesPattern(pattern); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid runtimeMetrics.series entry", err)
+		}
+	}
+	for _, namespace := range namespaces {
+		if problems := validation.IsDNS1123Label(namespace); len(problems) > 0 {
+			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"invalid runtimeMetrics.namespaces entry %q: %s", namespace, strings.Join(problems, "; ")))
 		}
 	}
 	return nil
