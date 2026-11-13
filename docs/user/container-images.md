@@ -27,8 +27,8 @@ The catalog lists the driver version that the default chart render carries. Vers
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **58**
-- Unique images: **168**
+- Components: **59**
+- Unique images: **166**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -41,6 +41,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 |-----------|------|-------|----------------|--------|
 | agentgateway | helm | agentgateway | v1.5.0 | 1 |
 | agentgateway-crds | helm | agentgateway-crds | v1.5.0 | 0 |
+| al2023-toolkit-hardening | manifest | — | — | 1 |
 | aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
@@ -120,6 +121,10 @@ from the component's registry default above.
 ### agentgateway-crds
 
 _No images extracted._
+
+### al2023-toolkit-hardening
+
+- `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1@sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf`
 
 ### aws-ebs-csi-driver
 
