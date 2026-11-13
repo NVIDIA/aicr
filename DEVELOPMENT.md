@@ -54,7 +54,8 @@ make lint
 
 The Dev Container includes an SSH server for GitHub CLI access to a Codespace.
 After creation, `gh codespace ssh`, `gh codespace cp`, and `gh codespace logs`
-can connect to it; for example:
+can connect to it. Run these commands in your local terminal, replacing
+`<name>` with your Codespace name:
 
 ```bash
 gh codespace ssh -c <name> -- echo ok
