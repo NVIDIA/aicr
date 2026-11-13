@@ -32,6 +32,7 @@ import (
 	protocommon "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
 	rekorv1 "github.com/sigstore/protobuf-specs/gen/pb-go/rekor/v1"
 	"github.com/sigstore/sigstore-go/pkg/sign"
+	"github.com/sigstore/sigstore/pkg/cryptoutils"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -60,8 +61,9 @@ func TestSignStatement_RejectsNilBuilder(t *testing.T) {
 }
 
 // TestExtractSignerClaims covers a single Certificate and an
-// X509CertificateChain, missing or malformed certificates, and both
-// production SAN forms (email for interactive OIDC, URI for workload OIDC).
+// X509CertificateChain, missing or malformed certificates, each SAN form
+// Fulcio issues, and the email and URI SAN precedence sigstore-go
+// verification uses.
 func TestExtractSignerClaims(t *testing.T) {
 	const oidcIssuer = "https://accounts.example.com"
 	workloadURI, err := url.Parse("https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v1.0.0")
@@ -104,6 +106,18 @@ func TestExtractSignerClaims(t *testing.T) {
 			wantIdentity: workloadURI.String(),
 		},
 		{
+			name: "URI SAN preferred over email SAN",
+			bundle: certBundle(testCertDER(t, &x509.Certificate{
+				EmailAddresses: []string{"jdoe@company.com"},
+				URIs:           []*url.URL{workloadURI},
+			})),
+			wantIdentity: workloadURI.String(),
+		},
+		{
+			name:   "Fulcio username SAN only",
+			bundle: certBundle(testCertDER(t, &x509.Certificate{ExtraExtensions: []pkix.Extension{otherNameSANExt(t, "jdoe!example.com")}})),
+		},
+		{
 			name:         "X509CertificateChain with one cert",
 			bundle:       chainBundle(&protocommon.X509Certificate{RawBytes: testCertDER(t, &x509.Certificate{EmailAddresses: []string{"chain@company.com"}})}),
 			wantIdentity: "chain@company.com",
@@ -113,7 +127,7 @@ func TestExtractSignerClaims(t *testing.T) {
 		{name: "verification material without cert", bundle: &protobundle.Bundle{VerificationMaterial: &protobundle.VerificationMaterial{}}},
 		{name: "invalid cert DER", bundle: certBundle([]byte("not a certificate"))},
 		{name: "X509CertificateChain with empty cert list", bundle: chainBundle()},
-		{name: "cert with no email or URI SAN", bundle: certBundle(testCertDER(t, &x509.Certificate{}))},
+		{name: "cert with no SAN", bundle: certBundle(testCertDER(t, &x509.Certificate{}))},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -289,6 +303,16 @@ func fulcioIssuerExt(t *testing.T, oidcIssuer string) pkix.Extension {
 		Id:    asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 8},
 		Value: encoded,
 	}
+}
+
+// otherNameSANExt encodes name as the Fulcio username OtherName SAN.
+func otherNameSANExt(t *testing.T, name string) pkix.Extension {
+	t.Helper()
+	ext, err := cryptoutils.MarshalOtherNameSAN(name, false)
+	if err != nil {
+		t.Fatalf("marshal OtherName SAN: %v", err)
+	}
+	return *ext
 }
 
 // TestSignStatementWithRejectsNilStrategies verifies SignStatementWith returns

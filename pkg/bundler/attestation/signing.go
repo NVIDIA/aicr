@@ -23,6 +23,7 @@ import (
 	"time"
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
+	"github.com/sigstore/sigstore-go/pkg/fulcio/certificate"
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/sign"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -101,9 +102,9 @@ type SignedAttestation struct {
 	BundleJSON []byte
 
 	// Identity is the SAN claim from the Fulcio cert (email for
-	// interactive OIDC, URI for workload OIDC). Empty if extraction
-	// failed or the cert has no email/URI SAN — callers must not treat
-	// empty as an error signal.
+	// interactive OIDC, URI for workload OIDC), chosen the way sigstore-go
+	// verification reports it. Empty if extraction failed or the cert has
+	// no email or URI SAN. Callers must not treat empty as an error signal.
 	Identity string
 
 	// Issuer is the OIDC issuer URL recorded in the Fulcio cert
@@ -319,9 +320,8 @@ func SignStatementWithKey(ctx context.Context, statementJSON []byte, opts Resolv
 	return SignStatementWith(ctx, statementJSON, NewKMSIdentity(opts.SigningKey), tlog)
 }
 
-// extractSignerClaims parses the Fulcio cert and returns the SAN
-// identity (email or URI) plus the OIDC issuer URL.
-// Returns empty strings when the certificate or claims are absent.
+// extractSignerClaims returns the certificateClaims of the bundle's Fulcio
+// certificate. It returns empty strings when the bundle has no certificate.
 func extractSignerClaims(bundle *protobundle.Bundle) (identity, issuer string) {
 	if bundle.GetVerificationMaterial() == nil {
 		return "", ""
@@ -343,9 +343,10 @@ func extractSignerClaims(bundle *protobundle.Bundle) (identity, issuer string) {
 }
 
 // certificateClaims returns the SAN identity and OIDC issuer of the
-// DER-encoded certificate certDER. The identity is the first email SAN,
-// else the first URI SAN. Each value is "" when the certificate does not
-// parse or lacks it.
+// DER-encoded certificate certDER. The identity is the SAN that sigstore-go
+// verification reports, the first URI SAN, else the first email SAN. Each
+// value is "" when the certificate does not parse or lacks it, and the
+// identity is "" for a certificate with only a Fulcio username SAN.
 func certificateClaims(certDER []byte) (identity, issuer string) {
 	parsed, err := x509.ParseCertificate(certDER)
 	if err != nil {
@@ -353,15 +354,15 @@ func certificateClaims(certDER []byte) (identity, issuer string) {
 		return "", ""
 	}
 	issuer = extractIssuerExtension(parsed)
-	// Fulcio puts interactive OIDC identities in an email SAN and workload
-	// identities, such as GitHub Actions, in a URI SAN.
-	switch {
-	case len(parsed.EmailAddresses) > 0:
-		return parsed.EmailAddresses[0], issuer
-	case len(parsed.URIs) > 0:
-		return parsed.URIs[0].String(), issuer
+	if len(parsed.URIs) == 0 && len(parsed.EmailAddresses) == 0 {
+		return "", issuer
 	}
-	return "", issuer
+	summary, err := certificate.SummarizeCertificate(parsed)
+	if err != nil {
+		slog.Debug("failed to read signing certificate SAN", "error", err)
+		return "", issuer
+	}
+	return summary.SubjectAlternativeName, issuer
 }
 
 // issuedCertificate is a sign.CertificateProvider that returns a certificate

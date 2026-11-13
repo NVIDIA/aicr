@@ -100,7 +100,7 @@ func (k *KeylessAttester) resolveOptions() ResolveOptions {
 // Attest returns the Sigstore bundle, as JSON, for a DSSE-signed in-toto SLSA
 // provenance statement about subject. It signs with keyless OIDC through
 // Fulcio and Rekor. The statement's builder ID is the signing certificate's
-// email or URI SAN, and Attest fails when the certificate has neither. It
+// URI or email SAN, and Attest fails when the certificate has neither. It
 // returns an ErrCodeInvalidRequest error for an invalid subject without
 // requesting a certificate.
 func (k *KeylessAttester) Attest(ctx context.Context, subject AttestSubject) ([]byte, error) {
