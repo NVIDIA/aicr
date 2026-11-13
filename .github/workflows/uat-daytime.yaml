@@ -146,12 +146,16 @@ jobs:
           if [[ "${ACTION}" == "up" ]]; then
             matrix=$(./bin/uat-broker reservations --daytime | jq -c .)
           else
-            matrix=$(UAT_BROKER=./bin/uat-broker ./.github/scripts/uat-registry-matrix.sh daytime-down infra/uat/reservations.yaml)
+            matrix=$(./bin/uat-broker reservations --daytime-down | jq -c .)
           fi
           echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
           echo "Daytime ${ACTION} set: ${matrix}"
           if [[ "${matrix}" == "[]" ]]; then
-            echo "::notice::no reservations carry a daytime-intent; nothing to ${ACTION}."
+            if [[ "${ACTION}" == "up" ]]; then
+              echo "::notice::no reservations carry a daytime-intent; nothing to up."
+            else
+              echo "::notice::the registry has no non-kind reservation; nothing to down."
+            fi
           fi
 
   # One matrix leg per enumerated reservation (parallel — independent hardware).

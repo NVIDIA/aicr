@@ -136,7 +136,7 @@ jobs:
   # .deployment.location) of the aws rows' cluster-configs, read through the
   # same uat-broker uat-run.yaml uses. uat-aws.yaml takes the account and region
   # from the cluster-config too, so a new row is covered with no second list to
-  # keep in sync. See .github/scripts/uat-registry-matrix.sh.
+  # keep in sync. See `uat-broker reservations --janitor-aws`.
   aws-targets:
     if: >-
       github.repository == 'nvidia/aicr' &&
@@ -169,7 +169,7 @@ jobs:
         id: targets
         run: |
           set -euo pipefail
-          matrix="$(./.github/scripts/uat-registry-matrix.sh janitor-aws infra/uat/reservations.yaml)"
+          matrix="$(./bin/uat-broker reservations --janitor-aws | jq -c .)"
           echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
           echo "AWS janitor legs: ${matrix}"
 

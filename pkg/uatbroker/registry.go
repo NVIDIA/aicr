@@ -248,6 +248,27 @@ func (r *Registry) DaytimeAssignments() []DaytimeAssignment {
 	return out
 }
 
+// DaytimeTeardownAssignments returns the evening daytime-down set: one entry
+// per non-kind reservation, in registry (document) order, with its
+// daytime-intent, or IntentTraining when it has none. daytime-up can be
+// dispatched against any reservation, so a teardown of only the
+// DaytimeAssignments rotation would leave such a cluster held.
+func (r *Registry) DaytimeTeardownAssignments() []DaytimeAssignment {
+	out := make([]DaytimeAssignment, 0, len(r.Reservations))
+	for i := range r.Reservations {
+		res := &r.Reservations[i]
+		if res.Cloud == CloudKind {
+			continue
+		}
+		intent := res.DaytimeIntent
+		if intent == "" {
+			intent = IntentTraining
+		}
+		out = append(out, DaytimeAssignment{Reservation: res.Name, Intent: intent})
+	}
+	return out
+}
+
 // Lookup returns the reservation row with the given name, or an
 // ErrCodeNotFound error when no row matches.
 func (r *Registry) Lookup(name string) (*Reservation, error) {

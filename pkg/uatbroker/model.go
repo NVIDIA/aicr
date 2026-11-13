@@ -120,10 +120,11 @@ func (r *Reservation) NightlyIntentsOrDefault() []string {
 	return out
 }
 
-// DaytimeAssignment is one reservation's slot in the daytime human-access
-// rotation: the reservation to lease and the intent (flavor) to stand up on
-// it. The daytime scheduler (uat-daytime.yaml) consumes a JSON array of these
-// as its dispatch matrix.
+// DaytimeAssignment is one entry in a daytime scheduler dispatch matrix: the
+// reservation to lease and the intent (flavor) to run its lifecycle with. The
+// daytime scheduler (uat-daytime.yaml) consumes a JSON array of these, from
+// [Registry.DaytimeAssignments] for up and
+// [Registry.DaytimeTeardownAssignments] for down.
 type DaytimeAssignment struct {
 	Reservation string `json:"reservation"`
 	Intent      string `json:"intent"`

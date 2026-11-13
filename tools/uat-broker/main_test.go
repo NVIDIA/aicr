@@ -210,6 +210,112 @@ func TestReservationsDaytime(t *testing.T) {
 	}
 }
 
+func TestReservationsDaytimeDown(t *testing.T) {
+	// aws-b has no daytime-intent and kind-a is not a cloud reservation.
+	const registry = `
+reservations:
+  - name: aws-b
+    slug: ab1
+    cloud: aws
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: a.yaml
+    test-config-dir: t
+  - name: kind-a
+    slug: ka1
+    cloud: kind
+    accelerator: h100
+    gpu-count: 1
+    cluster-config-path: k.yaml
+    test-config-dir: t
+  - name: gcp-h100
+    slug: gh1
+    cloud: gcp
+    reservation-id: projects/p/reservations/r
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: g.yaml
+    test-config-dir: t
+    daytime-intent: inference
+`
+	reg := filepath.Join(t.TempDir(), "reservations.yaml")
+	if err := os.WriteFile(reg, []byte(registry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := invoke("", "reservations", "--file", reg, "--daytime-down")
+	if code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, stderr)
+	}
+	var got []uatbroker.DaytimeAssignment
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("--daytime-down output is not valid JSON: %v\ngot:\n%s", err, stdout)
+	}
+	want := []uatbroker.DaytimeAssignment{
+		{Reservation: "aws-b", Intent: "training"},
+		{Reservation: "gcp-h100", Intent: "inference"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("--daytime-down = %+v, want %+v", got, want)
+	}
+}
+
+func TestReservationsJanitorAWS(t *testing.T) {
+	// Cluster-config paths resolve from the current directory, as in CI, not
+	// from the registry's directory.
+	root := t.TempDir()
+	t.Chdir(root)
+	const registry = `
+reservations:
+  - name: aws-a
+    slug: aa1
+    cloud: aws
+    accelerator: h100
+    gpu-count: 8
+    cluster-config-path: c/a.yaml
+    test-config-dir: t
+`
+	files := map[string]string{
+		"infra/uat/reservations.yaml": registry,
+		"c/a.yaml":                    "deployment:\n  tenancy: \"111111111111\"\n  location: us-east-1\n  state: tenancy\n",
+	}
+	for rel, body := range files {
+		if err := os.MkdirAll(filepath.Dir(rel), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(rel, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	code, stdout, stderr := invoke("", "reservations", "--file", "infra/uat/reservations.yaml", "--janitor-aws")
+	if code != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", code, stderr)
+	}
+	var got []uatbroker.AWSJanitorTarget
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("--janitor-aws output is not valid JSON: %v\ngot:\n%s", err, stdout)
+	}
+	want := []uatbroker.AWSJanitorTarget{{Tenancy: "111111111111", Location: "us-east-1", Config: "c/a.yaml"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("--janitor-aws = %+v, want %+v", got, want)
+	}
+
+	// A config the janitor cannot use fails with no matrix on stdout.
+	if err := os.WriteFile("c/a.yaml", []byte("deployment:\n  tenancy: \"1\"\n  location: us-east-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr = invoke("", "reservations", "--file", "infra/uat/reservations.yaml", "--janitor-aws")
+	if code != errors.ExitInvalidInput {
+		t.Errorf("exit code = %d, want %d (stderr: %s)", code, errors.ExitInvalidInput, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty on failure", stdout)
+	}
+	if !strings.Contains(stderr, ".deployment.tenancy") {
+		t.Errorf("stderr %q does not name .deployment.tenancy", stderr)
+	}
+}
+
 func TestReservationsExitCodes(t *testing.T) {
 	reg := writeRegistry(t)
 	tests := []struct {
@@ -224,6 +330,9 @@ func TestReservationsExitCodes(t *testing.T) {
 		{"list and name conflict", []string{"reservations", "--file", reg, "--list", "--name", "aws-h100"}, errors.ExitInvalidInput},
 		{"daytime and name conflict", []string{"reservations", "--file", reg, "--daytime", "--name", "aws-h100"}, errors.ExitInvalidInput},
 		{"daytime and list conflict", []string{"reservations", "--file", reg, "--daytime", "--list"}, errors.ExitInvalidInput},
+		{"daytime and daytime-down conflict", []string{"reservations", "--file", reg, "--daytime", "--daytime-down"}, errors.ExitInvalidInput},
+		{"daytime-down and janitor-aws conflict", []string{"reservations", "--file", reg, "--daytime-down", "--janitor-aws"}, errors.ExitInvalidInput},
+		{"janitor-aws and name conflict", []string{"reservations", "--file", reg, "--janitor-aws", "--name", "aws-h100"}, errors.ExitInvalidInput},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

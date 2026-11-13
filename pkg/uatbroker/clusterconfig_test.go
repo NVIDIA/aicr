@@ -301,3 +301,207 @@ func TestCommittedClusterConfigsMatchRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// deployment returns a cluster-config whose deployment block carries the given
+// raw YAML scalars, so a case can write a quoted, unquoted or null value.
+func deployment(tenancy, location, state, stateLocation string) string {
+	return "deployment:\n" +
+		"  tenancy: " + tenancy + "\n" +
+		"  location: " + location + "\n" +
+		"  state: " + state + "\n" +
+		"  stateLocation: " + stateLocation + "\n"
+}
+
+func TestAWSJanitorTargets(t *testing.T) {
+	east1 := deployment(`"111111111111"`, "us-east-1", "tenancy", `""`)
+	aws := func(name, cfg string) Reservation {
+		return Reservation{Name: name, Cloud: CloudAWS, ClusterConfigPath: cfg}
+	}
+	type testCase struct {
+		name  string
+		files map[string]string
+		rows  []Reservation
+		want  []AWSJanitorTarget
+		// wantErr lists substrings the error must contain. Empty means no error.
+		wantErr []string
+	}
+	tests := []testCase{
+		{
+			name:  "rows sharing a config collapse to one target",
+			files: map[string]string{"a.yaml": east1},
+			rows:  []Reservation{aws("a1", "a.yaml"), aws("a2", "a.yaml")},
+			want:  []AWSJanitorTarget{{Tenancy: "111111111111", Location: "us-east-1", Config: "a.yaml"}},
+		},
+		{
+			// Neither registry order nor config-name order is the sorted order.
+			name: "sorted by tenancy then location",
+			files: map[string]string{
+				"a.yaml": deployment(`"222222222222"`, "us-east-1", "tenancy", `""`),
+				"c.yaml": deployment(`"111111111111"`, "us-west-2", "tenancy", `""`),
+				"b.yaml": east1,
+			},
+			rows: []Reservation{aws("r1", "a.yaml"), aws("r2", "c.yaml"), aws("r3", "b.yaml")},
+			want: []AWSJanitorTarget{
+				{Tenancy: "111111111111", Location: "us-east-1", Config: "b.yaml"},
+				{Tenancy: "111111111111", Location: "us-west-2", Config: "c.yaml"},
+				{Tenancy: "222222222222", Location: "us-east-1", Config: "a.yaml"},
+			},
+		},
+		{
+			// q.yaml is first in registry order but not alphabetically.
+			name: "configs agreeing on state share the pair's first config",
+			files: map[string]string{
+				"q.yaml": deployment(`"111111111111"`, "us-east-2", "tenancy", "us-east-1"),
+				"p.yaml": deployment(`"111111111111"`, "us-east-2", "tenancy", "us-east-1"),
+			},
+			rows: []Reservation{aws("b1", "q.yaml"), aws("b2", "p.yaml")},
+			want: []AWSJanitorTarget{{Tenancy: "111111111111", Location: "us-east-2", Config: "q.yaml"}},
+		},
+		{
+			// Non-aws configs are absent, so reading one would fail the case.
+			name:  "only aws rows are read",
+			files: map[string]string{"a.yaml": east1},
+			rows: []Reservation{
+				{Name: "g1", Cloud: CloudGCP, ClusterConfigPath: "absent-gcp.yaml"},
+				aws("a1", "a.yaml"),
+				{Name: "z1", Cloud: CloudAzure, ClusterConfigPath: "absent-azure.yaml"},
+				{Name: "k1", Cloud: CloudKind, ClusterConfigPath: "absent-kind.yaml"},
+			},
+			want: []AWSJanitorTarget{{Tenancy: "111111111111", Location: "us-east-1", Config: "a.yaml"}},
+		},
+		{
+			name:  "unquoted tenancy keeps its digits",
+			files: map[string]string{"a.yaml": deployment("036338176747", "us-east-1", "tenancy", `""`)},
+			rows:  []Reservation{aws("a1", "a.yaml")},
+			want:  []AWSJanitorTarget{{Tenancy: "036338176747", Location: "us-east-1", Config: "a.yaml"}},
+		},
+		{
+			name: "unequal stateLocation in one pair",
+			files: map[string]string{
+				"a.yaml": east1,
+				"b.yaml": deployment(`"111111111111"`, "us-east-1", "tenancy", "us-west-2"),
+			},
+			rows:    []Reservation{aws("a1", "a.yaml"), aws("b1", "b.yaml")},
+			wantErr: []string{"b.yaml (reservation b1) and a.yaml both target 111111111111/us-east-1", ".deployment.state/.stateLocation"},
+		},
+		{
+			name: "unequal state in one pair",
+			files: map[string]string{
+				"a.yaml": east1,
+				"b.yaml": deployment(`"111111111111"`, "us-east-1", "local", `""`),
+			},
+			rows:    []Reservation{aws("a1", "a.yaml"), aws("b1", "b.yaml")},
+			wantErr: []string{"b.yaml (reservation b1) and a.yaml", `"local"/"" vs "tenancy"/""`},
+		},
+		{
+			name:    "no aws row",
+			files:   map[string]string{"a.yaml": east1},
+			rows:    []Reservation{{Name: "g1", Cloud: CloudGCP, ClusterConfigPath: "a.yaml"}},
+			wantErr: []string{"no aws reservation"},
+		},
+		{
+			name:    "missing cluster-config",
+			rows:    []Reservation{aws("a1", "absent.yaml")},
+			wantErr: []string{"open cluster-config", "absent.yaml"},
+		},
+		{
+			name:    "absolute cluster-config path",
+			rows:    []Reservation{aws("a1", "/etc/cluster-config.yaml")},
+			wantErr: []string{"reservation a1 cluster-config-path", "must be a relative path inside the repository"},
+		},
+		{
+			name:    "cluster-config path escaping the root",
+			rows:    []Reservation{aws("a1", "c/../../outside.yaml")},
+			wantErr: []string{"must be a relative path inside the repository"},
+		},
+		{
+			name:    "malformed cluster-config",
+			files:   map[string]string{"a.yaml": "deployment: [unterminated"},
+			rows:    []Reservation{aws("a1", "a.yaml")},
+			wantErr: []string{"reservation a1 cluster-config a.yaml"},
+		},
+		{
+			name:    "non-scalar tenancy",
+			files:   map[string]string{"a.yaml": deployment("[1]", "us-east-1", "tenancy", `""`)},
+			rows:    []Reservation{aws("a1", "a.yaml")},
+			wantErr: []string{"reservation a1 cluster-config a.yaml", "cannot unmarshal"},
+		},
+		{
+			name:    "no deployment block",
+			files:   map[string]string{"a.yaml": "compute: {}\n"},
+			rows:    []Reservation{aws("a1", "a.yaml")},
+			wantErr: []string{`.deployment.tenancy ""`},
+		},
+	}
+	badTenancies := []string{`""`, "null", `"12345678901"`, `"1234567890123"`, `"12345678901a"`, "abcdefghijkl"}
+	badLocations := []string{`""`, "null", `"us east-1"`, `"us-east-1;touch"`, `'$(id)'`, "US-EAST-1"}
+	rejected := make([]testCase, 0, len(badTenancies)+len(badLocations))
+	for _, tenancy := range badTenancies {
+		rejected = append(rejected, testCase{
+			name:    "tenancy " + tenancy + " is rejected",
+			files:   map[string]string{"a.yaml": deployment(tenancy, "us-east-1", "tenancy", `""`)},
+			rows:    []Reservation{aws("a1", "a.yaml")},
+			wantErr: []string{"reservation a1 cluster-config a.yaml: .deployment.tenancy"},
+		})
+	}
+	for _, location := range badLocations {
+		rejected = append(rejected, testCase{
+			name:    "location " + location + " is rejected",
+			files:   map[string]string{"a.yaml": deployment(`"111111111111"`, location, "tenancy", `""`)},
+			rows:    []Reservation{aws("a1", "a.yaml")},
+			wantErr: []string{"reservation a1 cluster-config a.yaml: .deployment.location"},
+		})
+	}
+	for _, tt := range slices.Concat(tests, rejected) {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			for rel, body := range tt.files {
+				path := filepath.Join(root, filepath.FromSlash(rel))
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reg := &Registry{Reservations: tt.rows}
+			got, err := reg.AWSJanitorTargets(root)
+			if len(tt.wantErr) == 0 {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !slices.Equal(got, tt.want) {
+					t.Errorf("AWSJanitorTargets() = %+v, want %+v", got, tt.want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("want error containing %q, got targets %+v", tt.wantErr, got)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// TestCommittedAWSJanitorTargets fails when the committed aws rows'
+// cluster-configs cannot yield the janitor's AWS matrix. It pins no pair, so
+// onboarding a reservation does not break it.
+func TestCommittedAWSJanitorTargets(t *testing.T) {
+	root := filepath.Join("..", "..")
+	reg, err := LoadRegistryFile(filepath.Join(root, "infra", "uat", "reservations.yaml"))
+	if err != nil {
+		t.Fatalf("committed reservations.yaml invalid: %v", err)
+	}
+	targets, err := reg.AWSJanitorTargets(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) == 0 {
+		t.Fatal("committed registry yields no AWS janitor targets")
+	}
+}
