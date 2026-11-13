@@ -108,11 +108,14 @@ func (k *KeylessAttester) Attest(ctx context.Context, subject AttestSubject) ([]
 		return nil, err
 	}
 	build := func(signer string) ([]byte, error) {
+		if signer == "" {
+			return nil, errors.New(errors.ErrCodeInternal, "signing certificate has no email or URI SAN to name as the builder ID")
+		}
 		metadata := subject.Metadata
 		metadata.BuilderID = signer
 		statementJSON, err := BuildStatement(subject, metadata)
 		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to build attestation statement", err)
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to build attestation statement")
 		}
 		return statementJSON, nil
 	}

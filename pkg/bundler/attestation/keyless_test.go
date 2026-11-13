@@ -112,13 +112,30 @@ func TestKeylessAttester_BuilderIDIsSigner(t *testing.T) {
 
 func TestKeylessAttester_RejectsEmptySigner(t *testing.T) {
 	var statementJSON []byte
-	attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
-	attester.signStatement = fakeKeylessSign("", &statementJSON)
+	tests := []struct {
+		name string
+		sign func(context.Context, func(string) ([]byte, error), SignOptions) (*SignedAttestation, error)
+	}{
+		{"empty signer", fakeKeylessSign("", &statementJSON)},
+		{"certificate with no SAN", func(ctx context.Context, build func(string) ([]byte, error), _ SignOptions) (*SignedAttestation, error) {
+			return signStatementFor(ctx, build, newFakeCertIdentity(t, ""), NewNoTLogPolicy())
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			statementJSON = nil
+			attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
+			attester.signStatement = tt.sign
 
-	_, err := attester.Attest(t.Context(), keylessTestSubject)
-	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
-	if statementJSON != nil {
-		t.Errorf("built a statement for an empty signer: %s", statementJSON)
+			_, err := attester.Attest(t.Context(), keylessTestSubject)
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+			if err == nil || !strings.Contains(err.Error(), "signing certificate has no email or URI SAN") {
+				t.Errorf("error = %v, want it to name the certificate", err)
+			}
+			if statementJSON != nil {
+				t.Errorf("built a statement for an empty signer: %s", statementJSON)
+			}
+		})
 	}
 }
 
