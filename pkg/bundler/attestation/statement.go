@@ -51,6 +51,7 @@ type StatementMetadata struct {
 	OutputDir string
 
 	// BuilderID identifies who created this bundle (e.g., OIDC email or workflow URI).
+	// Required. SLSA provenance needs a non-empty runDetails.builder.id.
 	BuilderID string
 
 	// ToolVersion is the aicr version that produced this bundle (e.g., "v1.0.0").
@@ -83,10 +84,15 @@ type StatementMetadata struct {
 var aicrBundleNamespace = uuid.NewSHA1(uuid.NameSpaceURL, []byte(BundleBuildType))
 
 // BuildStatement constructs an in-toto Statement v1 with a SLSA Build Provenance v1
-// predicate. Returns the statement as serialized JSON.
+// predicate. Returns the statement as serialized JSON. It returns an
+// ErrCodeInvalidRequest error for an invalid subject or an empty
+// metadata.BuilderID.
 func BuildStatement(subject AttestSubject, metadata StatementMetadata) ([]byte, error) {
 	if err := validateSubject(subject); err != nil {
 		return nil, err
+	}
+	if metadata.BuilderID == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "builder ID is required")
 	}
 
 	// Build SLSA predicate as a structpb.Struct

@@ -110,6 +110,18 @@ func TestKeylessAttester_BuilderIDIsSigner(t *testing.T) {
 	}
 }
 
+func TestKeylessAttester_RejectsEmptySigner(t *testing.T) {
+	var statementJSON []byte
+	attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
+	attester.signStatement = fakeKeylessSign("", &statementJSON)
+
+	_, err := attester.Attest(t.Context(), keylessTestSubject)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+	if statementJSON != nil {
+		t.Errorf("built a statement for an empty signer: %s", statementJSON)
+	}
+}
+
 func TestKeylessAttester_RejectsInvalidSubjectBeforeSigning(t *testing.T) {
 	attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
 	attester.signStatement = func(context.Context, func(string) ([]byte, error), SignOptions) (*SignedAttestation, error) {

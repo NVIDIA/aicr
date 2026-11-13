@@ -141,9 +141,21 @@ func TestBuildStatement(t *testing.T) {
 	}
 }
 
-func TestBuildStatement_InvalidSubject(t *testing.T) {
-	_, err := BuildStatement(AttestSubject{}, StatementMetadata{BuilderID: "jdoe@company.com"})
-	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+func TestBuildStatement_InvalidInput(t *testing.T) {
+	tests := []struct {
+		name     string
+		subject  AttestSubject
+		metadata StatementMetadata
+	}{
+		{"empty subject", AttestSubject{}, StatementMetadata{BuilderID: "jdoe@company.com"}},
+		{"empty builder ID", keylessTestSubject, StatementMetadata{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildStatement(tt.subject, tt.metadata)
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		})
+	}
 }
 
 func TestBuildStatement_WithToolVersion(t *testing.T) {
