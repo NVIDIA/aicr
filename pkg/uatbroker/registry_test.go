@@ -755,6 +755,30 @@ func TestDaytimeAssignmentsNone(t *testing.T) {
 	}
 }
 
+func TestDaytimeTeardownAssignments(t *testing.T) {
+	reg := &Registry{Reservations: []Reservation{
+		{Name: "aws-a", Cloud: CloudAWS, DaytimeIntent: IntentTraining},
+		{Name: "kind-a", Cloud: CloudKind, DaytimeIntent: IntentTraining},
+		{Name: "gcp-a", Cloud: CloudGCP, DaytimeIntent: IntentInference},
+		{Name: "aws-b", Cloud: CloudAWS},
+		{Name: "azure-a", Cloud: CloudAzure},
+	}}
+	want := []DaytimeAssignment{
+		{Reservation: "aws-a", Intent: IntentTraining},
+		{Reservation: "gcp-a", Intent: IntentInference},
+		{Reservation: "aws-b", Intent: IntentTraining},
+		{Reservation: "azure-a", Intent: IntentTraining},
+	}
+	if got := reg.DaytimeTeardownAssignments(); !slices.Equal(got, want) {
+		t.Errorf("DaytimeTeardownAssignments() = %+v, want %+v", got, want)
+	}
+
+	kindOnly := &Registry{Reservations: []Reservation{{Name: "kind-a", Cloud: CloudKind}}}
+	if got := kindOnly.DaytimeTeardownAssignments(); got == nil || len(got) != 0 {
+		t.Errorf("DaytimeTeardownAssignments() on a kind-only registry = %#v, want an empty non-nil slice", got)
+	}
+}
+
 // TestCommittedRegistryValid guards the actual checked-in registry: it must
 // parse, validate, and carry the launch reservations. A bad data edit fails
 // here before it can break the broker workflows.
