@@ -305,9 +305,15 @@ make qualify
 
 ```
 aicr/
+├── api/                # OpenAPI spec and Operator API types
+├── charts/             # Helm charts
 ├── cmd/
-│   ├── aicr/          # CLI binary
-│   └── aicrd/         # API server binary
+│   ├── aicr/           # CLI binary
+│   ├── aicr-operator/  # AICR Operator manager
+│   ├── aicr-registry/  # Operator's in-cluster OCI registry
+│   ├── aicrd/          # API server binary
+│   ├── gate/           # Readiness-gate Chainsaw runner
+│   └── kubectl-aicr/   # kubectl plugin for Operator rollouts
 ├── pkg/
 │   ├── bundler/        # Bundle generation framework
 │   ├── cli/            # CLI commands and flags
@@ -324,11 +330,15 @@ aicr/
 │   ├── contributor/    # System design docs (architecture)
 │   ├── integrator/     # CI/CD and API integration docs
 │   └── user/           # User documentation (CLI)
+├── kwok/               # KWOK simulated-cluster tests
+├── recipes/            # Recipe data: registry, overlays, mixins, components
+├── tests/              # E2E and Chainsaw tests
+├── tilt/               # Local dev environment
 ├── tools/              # Development scripts
-└── tilt/               # Local dev environment
+└── validators/         # Validator checks (built into per-phase container images)
 ```
 
-Binaries live in `cmd/` (`aicr` CLI, `aicrd` API server); business logic and the
+Binaries live in `cmd/` (the `aicr` CLI and `aicrd` API server, plus the Operator binaries); business logic and the
 collectors, recipe engine, snapshotter, bundler framework, and validator live in
 the `pkg/` subdirectories shown above. For per-package responsibilities, the data
 flow between them, and component-level design, see the architecture documentation
@@ -661,7 +671,7 @@ The merge gate runs `make operator-check-generated` and `make operator-envtest-f
 | `make qualify` | Full qualification (test-coverage, lint, tuning-check, coverage-check, e2e, scan, license-check, api-diff, openapi-diff) |
 | `make test` | Unit tests with race detector and coverage |
 | `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
-| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, chart-version pins, vendored Go proxy action digests, upgrade records, and the Dynamo runtime image tag |
+| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, chart-version pins, vendored Go proxy action digests, upgrade records, runner labels (no floating `ubuntu-latest`), and the Dynamo runtime image tag |
 | `make lint-go` | Go linting only |
 | `make lint-yaml` | YAML linting only |
 | `make e2e` | CLI end-to-end tests |
@@ -681,7 +691,7 @@ The merge gate runs `make operator-check-generated` and `make operator-envtest-f
 | `make build` | Build binaries for current OS/arch |
 | `make image` | Build and push aicr container image (Ko) |
 | `make image-validators` | Build and push per-phase validator images (Docker) |
-| `make release` | Full release with goreleaser (includes all images) |
+| `make release` | Full release with goreleaser (CLI binaries plus the `aicr` and `aicrd` images; validator and `aicr-gate` images are built by `.github/workflows/on-tag.yaml`) |
 | `make bump-major` | Bump major version (1.2.3 → 2.0.0) |
 | `make bump-minor` | Bump minor version (1.2.3 → 1.3.0) |
 | `make bump-patch` | Bump patch version (1.2.3 → 1.2.4) |

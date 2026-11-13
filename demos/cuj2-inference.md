@@ -16,7 +16,8 @@ out only where commands or flags genuinely differ.
   but not its credentials, and without them no volume can be provisioned — see
   [EBS CSI Driver Credentials](../docs/user/component-catalog.md#ebs-csi-driver-credentials).
 * Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`,
-  `--system-node-toleration` flags are examples only. Update them to match your cluster.
+  `--system-node-selector`, and `--system-node-toleration` flags are examples only.
+  Update them to match your cluster.
 
 **GKE**
 
@@ -175,7 +176,7 @@ aicr validate \
     --recipe ./bundle/recipe.yaml \
     --toleration dedicated=gpu-workload:NoSchedule \
     --toleration nvidia.com/gpu=present:NoSchedule \
-    --phase conformance \
+    --phase all \
     --output report.json
 ```
 

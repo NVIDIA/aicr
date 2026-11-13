@@ -21,7 +21,9 @@ recipes/
 │   ├── os-ubuntu.yaml             # Ubuntu OS constraints
 │   ├── platform-inference.yaml    # Inference gateway components
 │   └── platform-kubeflow.yaml     # Kubeflow trainer component
+├── artifacts/                     # Artifact bindings (bindings.yaml)
 ├── checks/                        # Component health checks
+├── evidence/                      # Recipe-evidence pointers and allowlist.yaml
 ├── validators/                    # Validator catalog (catalog.yaml)
 └── components/                    # Per-component Helm/Kustomize values
 ```

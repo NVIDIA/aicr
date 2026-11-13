@@ -34,6 +34,8 @@ This section is for integrators who:
 | [CoreWeave H100 Setup](cks-h100-setup.md) | CoreWeave-managed GPU stack for H100 Ubuntu training; Preview, awaiting live qualification |
 | [CoreWeave RTX PRO 6000 Setup](cks-rtx-pro-6000-setup.md) | CoreWeave-managed GPU stack for RTX PRO 6000 Ubuntu training; Preview, awaiting live qualification |
 | [NVKE GB200 Setup](nvke-gb200-setup.md) | NVKE (Forge/NICo) GB200 training Preview coordinate: inbox-driver posture (no DOCA-OFED, DMA-BUF GPUDirect), SR-IOV InfiniBand rails with IPoIB via nv-ipam, RDMA ULP module loading via nodewright, fabric P_Key prerequisite, and known gaps |
+| [NVKE GB300 Setup](nvke-gb300-setup.md) | NVKE bare-metal GB300 NVL72 Preview coordinates (training, Kubeflow, inference, Dynamo) on Ubuntu 26.04 arm64 |
+| [NVKE VR200 Setup](nvke-vr200-setup.md) | NVKE bare-metal VR200 (Vera Rubin) NVL72 Preview coordinates (training, Kubeflow, inference, Dynamo) on Ubuntu 26.04 arm64 |
 | [Talos Integration](talos-integration.md) | Running AICR on Talos Linux |
 | [OpenShift Deployment](openshift.md) | OpenShift/OCP-specific Helm and OLM integration and two-phase operator deployment |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |

@@ -207,6 +207,7 @@ This boundary is enforced mechanically by a CI gate — see
 | `pkg/health` | Per-recipe structural health across the criteria matrix (ADR-009) |
 | `pkg/tuning` | Nodewright tuning-status matrix per (service, accelerator); rendered by `make tuning-docs` |
 | `pkg/schema` | JSON Schema documents derived from the Go types of published artifacts |
+| `pkg/artifact` | Release artifact inventory and catalog bindings (`ArtifactInventory`, `ArtifactBindings`): types, parsing, and provenance. See [Artifact Inventories](../user/artifact-inventory.md) |
 | **Collection and validation** | |
 | `pkg/collector` | Parallel system state collection. [collector.md](collector.md) |
 | `pkg/snapshotter` | Orchestrates collectors, aggregates measurements |
