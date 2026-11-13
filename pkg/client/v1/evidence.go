@@ -73,9 +73,10 @@ type EvidenceOptions struct {
 
 	// AllowMutableValidatorTags permits emission when a validator image has
 	// no recorded digest and a moving tag (`:edge`, `:latest`, anything not a
-	// release, `:sha-<commit>` or `:uat-<run_id>` ref). Emission otherwise
-	// fails closed, because the attestation would name that image by a tag
-	// that can move.
+	// release, `:sha-<commit>` or `:uat-<run_id>` ref). Only an image under
+	// ghcr.io/nvidia/aicr-validators/ counts those tags as immutable. Any
+	// other image needs a digest-pinned ref. Emission otherwise fails closed,
+	// because the attestation would name that image by a tag that can move.
 	AllowMutableValidatorTags bool
 
 	// Commit is the build commit. It resolves the validator catalog for the

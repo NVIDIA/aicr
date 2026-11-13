@@ -78,9 +78,10 @@ type EmitOptions struct {
 
 	// AllowMutableValidatorTags lets Emit proceed when a validator image has
 	// no recorded digest and a moving tag, which the attestation would name
-	// by a ref that can later resolve to different validator code. Set it
-	// only where the ref is disposable, such as a side-loaded ko.local image
-	// or a short-lived ttl.sh repo.
+	// by a ref that can later resolve to different validator code. Every tag
+	// outside catalog.TrustedValidatorRepoPrefix counts as moving
+	// (catalog.IsImmutableRef). Set it only where the ref is disposable,
+	// such as a side-loaded ko.local image or a short-lived ttl.sh repo.
 	AllowMutableValidatorTags bool
 
 	// AICRVersion is stamped into the predicate and into the auto BOM's
