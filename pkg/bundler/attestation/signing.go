@@ -240,7 +240,7 @@ func signStatementFor(ctx context.Context, build func(signer string) ([]byte, er
 
 	statementJSON, err := build(signer)
 	if err != nil {
-		return nil, err
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to build statement")
 	}
 	if len(statementJSON) == 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "empty statement")

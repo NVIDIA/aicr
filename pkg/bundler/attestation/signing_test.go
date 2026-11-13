@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	stderrors "errors"
 	"math/big"
 	"net/url"
 	"testing"
@@ -45,6 +46,27 @@ func TestSignStatementFor_RejectsEmptyStatement(t *testing.T) {
 	_, err := signStatementFor(context.Background(), FixedStatement(nil), id, NewNoTLogPolicy())
 	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Errorf("want ErrCodeInvalidRequest for empty statement, got %v", err)
+	}
+}
+
+func TestSignStatementFor_ClassifiesBuildError(t *testing.T) {
+	tests := []struct {
+		name     string
+		buildErr error
+		want     errors.ErrorCode
+	}{
+		{"coded error propagates", errors.New(errors.ErrCodeInvalidRequest, "bad subject"), errors.ErrCodeInvalidRequest},
+		{"plain error is internal", stderrors.New("marshal failed"), errors.ErrCodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			build := func(string) ([]byte, error) { return nil, tt.buildErr }
+			_, err := signStatementFor(context.Background(), build, newFakeKeyIdentity(t, "awskms://test/key"), NewNoTLogPolicy())
+			errorstest.WantReportedCode(t, err, tt.want)
+			if !stderrors.Is(err, tt.buildErr) {
+				t.Errorf("error %v does not wrap the build error", err)
+			}
+		})
 	}
 }
 
