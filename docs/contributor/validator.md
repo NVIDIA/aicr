@@ -721,8 +721,8 @@ Three sentinels exist today, with deliberately different lifecycles:
 | Prefix | Emitted by | Parsed by | Payload | Kept in CTRF `stdout`? | Survives minimal redaction? |
 |--------|-----------|-----------|---------|------------------------|-----------------------------|
 | `RESULT:` + one space | any check (`fmt.Printf`) | `extractResultSummaries` (`pkg/validator/validator.go`) | free-form human text (throughput, bandwidth, TTFT…) | **yes** — line stays; trailing text is *also* echoed to the live CLI at INFO | **no** — dies with `stdout` under the default policy |
-| `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseExtraSentinels` (`pkg/validator/job/result.go`) | one JSON object → `TestResult.Extra` (counts / enum codes) | **no** — stripped as transport, not evidence | **yes** — allowlisted keys are published (see below) |
-| `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseExtraSentinels` (same pass) | one JSON object → `TestResult.RuntimeProvenance` (template digests + key paths) | **no** — stripped as transport | **yes** — bounded by `redact.boundRuntimeProvenance` (see "NCCL benchmark runtime provenance") |
+| `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseSentinels` (`pkg/validator/job/result.go`) | one JSON object → `TestResult.Extra` (counts / enum codes) | **no** — stripped as transport, not evidence | **yes** — allowlisted keys are published (see below) |
+| `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseSentinels` (same pass) | one JSON object → `TestResult.RuntimeProvenance` (template digests + key paths) | **no** — stripped as transport | **yes** — bounded by `redact.boundRuntimeProvenance` (see "NCCL benchmark runtime provenance") |
 
 The runner (`validators.Run`) emits one `##AICR-EXTRA##` line before the check
 starts, `resultSchema: "1"` (`ctrf.ResultSchemaVersion`): the result-contract

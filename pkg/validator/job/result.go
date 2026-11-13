@@ -339,7 +339,7 @@ func (d *Deployer) jobFailedCondition(ctx context.Context) (*batchv1.Job, batchv
 // than ValidatorMaxStdoutLines of output still survives; only then is the
 // sentinel-stripped remainder truncated and length-capped for human display.
 func processValidatorLogs(logs string) (extra map[string]string, prov *ctrf.RuntimeProvenance, stdout []string) {
-	cleaned, extra, prov := parseExtraSentinels(logs)
+	cleaned, extra, prov := parseSentinels(logs)
 	stdout = filterStdoutLines(
 		truncateLogLines(cleaned, defaults.ValidatorMaxStdoutLines),
 		defaults.ValidatorMaxStdoutLineLength,
@@ -347,13 +347,13 @@ func processValidatorLogs(logs string) (extra map[string]string, prov *ctrf.Runt
 	return extra, prov, stdout
 }
 
-// parseExtraSentinels returns logs with every ctrf.ExtraLinePrefix and
+// parseSentinels returns logs with every ctrf.ExtraLinePrefix and
 // ctrf.ProvenanceLinePrefix line removed as cleaned, the valid Extra payloads
 // merged as extra (a later value wins per key), and the last valid provenance
 // record as prov. A malformed line is logged and skipped without discarding
 // earlier payloads. extra is nil unless some line parsed to a non-empty
 // object, and prov is nil unless some record carried both digests.
-func parseExtraSentinels(logs string) (cleaned string, extra map[string]string, prov *ctrf.RuntimeProvenance) {
+func parseSentinels(logs string) (cleaned string, extra map[string]string, prov *ctrf.RuntimeProvenance) {
 	if !strings.Contains(logs, ctrf.ExtraLinePrefix) && !strings.Contains(logs, ctrf.ProvenanceLinePrefix) {
 		return logs, nil, nil
 	}
