@@ -507,11 +507,11 @@ jobs:
           - image: docker.io/percona/mongodb_exporter
             tag: 0.54.0@sha256:934e9db87e85e0fa63654e73c3504845993a254e898783ca905e65a68848b5a4
           - image: docker.io/percona/percona-backup-mongodb
-            tag: 2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5
+            tag: 2.17.0@sha256:d3b1f82393991542ca1222c8c80a83830383a2fd51f064f6da939af776b9c01d
           - image: docker.io/percona/fluentbit
-            tag: 5.1.2-1@sha256:4926d7d003ca09c826a3dea5d9ccd0ba158296880471bcec82ef38f95617b913
+            tag: 5.1.4-1@sha256:037b5ea087dffd844f619c61f4d211a32bec73dae0971143795579db1a3a6992
           - image: docker.io/percona/pmm-client
-            tag: 3.9.1@sha256:298e731652e2be172a2505596edaee1e0c014609035347599048f62efae78e5b
+            tag: 3.10.0@sha256:b407188b183bc61ab202914f2128f171dd2d0cd411396a05bb92f3e73348a416
           # Versioned independently of the nvsentinel chart -- this comes from
           # AICR's values override, not the chart's appVersion, so it does
           # not move with defaultVersion. Digest-pinned, so the tag is only
