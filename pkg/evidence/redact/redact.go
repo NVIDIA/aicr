@@ -80,7 +80,8 @@ const (
 	//     ID and AWS account aliases, node-name aliases, JWT removal.
 	//   - v10 added the resultSchema stamp naming the result contract the
 	//     validator image spoke.
-	//   - v11 added the per-test images carrier (boundImages).
+	//   - v11 added the per-test images carrier (boundImages) and the
+	//     platform extra.
 	PolicyVersion = "v11"
 )
 
@@ -337,6 +338,9 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	// check as observed either way and uses it only to word the reason. Only
 	// the versions a reader knows are publishable.
 	ctrf.ExtraKeyResultSchema: closedSet(ctrf.ResultSchemaVersion),
+
+	// The validator binary's os/arch.
+	ctrf.ExtraKeyPlatform: ctrf.IsPlatform,
 }
 
 // ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.

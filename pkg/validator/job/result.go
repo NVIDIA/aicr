@@ -75,6 +75,9 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		// so classify from its Failed condition instead of reporting a bare
 		// "pod not found" (see issue #2186).
 		result.ExitCode, result.TerminationMsg = d.missingPodOutcome(ctx, err)
+		if d.lastTerminated != nil {
+			d.recordValidatorImage(ctx, d.lastTerminated, result)
+		}
 		return result
 	}
 
@@ -85,6 +88,7 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		result.TerminationMsg = fmt.Sprintf("container %q not found (validator package contract)", ValidatorContainerName)
 		return result
 	}
+	d.recordValidatorImage(ctx, jobPod, result)
 	switch {
 	case cs.State.Terminated != nil:
 		result.ExitCode = cs.State.Terminated.ExitCode
@@ -133,7 +137,25 @@ func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, r
 	case logErr != nil:
 		slog.Warn("failed to capture pod logs", "pod", podName, "error", logErr)
 	case logs != "":
-		result.Extra, result.RuntimeProvenance, result.Stdout = processValidatorLogs(logs)
+		var reported []ctrf.PodImage
+		result.Extra, result.RuntimeProvenance, reported, result.Stdout = processValidatorLogs(logs)
+		if len(result.Images) == 1 && result.Images[0].Digest != "" && result.Images[0].Platform == "" {
+			if p := result.Extra[ctrf.ExtraKeyPlatform]; ctrf.IsPlatform(p) {
+				result.Images[0].Platform = p
+			}
+		}
+		result.Images = append(result.Images, reported...)
+	}
+}
+
+// recordValidatorImage sets result.Images to the image p's validator
+// container ran, with its registry digest when the kubelet reported one. Call
+// it before captureValidatorOutput, which appends the images the validator
+// reports and fills a platform the Node lookup left empty from the
+// validator's ctrf.ExtraKeyPlatform stamp.
+func (d *Deployer) recordValidatorImage(ctx context.Context, p *corev1.Pod, result *ctrf.ValidatorResult) {
+	if img, ok := ctrf.ContainerImage(ctx, d.config.Clientset, p, ValidatorContainerName); ok {
+		result.Images = []ctrf.PodImage{img}
 	}
 }
 
@@ -332,30 +354,34 @@ func (d *Deployer) jobFailedCondition(ctx context.Context) (*batchv1.Job, batchv
 	return nil, batchv1.JobCondition{}, false
 }
 
-// processValidatorLogs turns raw pod logs into the structured Extra map, the
-// RuntimeProvenance carrier, and the human-readable Stdout lines. Order matters
-// and is the invariant both call sites rely on: the sentinels are parsed from
-// the FULL logs BEFORE any tail-truncation, so a sentinel emitted after more
-// than ValidatorMaxStdoutLines of output still survives; only then is the
-// sentinel-stripped remainder truncated and length-capped for human display.
-func processValidatorLogs(logs string) (extra map[string]string, prov *ctrf.RuntimeProvenance, stdout []string) {
-	cleaned, extra, prov := parseSentinels(logs)
+// processValidatorLogs returns the Extra map, RuntimeProvenance record and
+// images parsed from the sentinels in logs, and the remaining lines as stdout,
+// tail-truncated and length-capped for display. Sentinels are parsed from the
+// full logs before truncation, so one emitted after more than
+// ValidatorMaxStdoutLines of output survives.
+func processValidatorLogs(logs string) (extra map[string]string, prov *ctrf.RuntimeProvenance, images []ctrf.PodImage, stdout []string) {
+	cleaned, extra, prov, images := parseSentinels(logs)
 	stdout = filterStdoutLines(
 		truncateLogLines(cleaned, defaults.ValidatorMaxStdoutLines),
 		defaults.ValidatorMaxStdoutLineLength,
 	)
-	return extra, prov, stdout
+	return extra, prov, images, stdout
 }
 
-// parseSentinels returns logs with every ctrf.ExtraLinePrefix and
-// ctrf.ProvenanceLinePrefix line removed as cleaned, the valid Extra payloads
-// merged as extra (a later value wins per key), and the last valid provenance
-// record as prov. A malformed line is logged and skipped without discarding
-// earlier payloads. extra is nil unless some line parsed to a non-empty
-// object, and prov is nil unless some record carried both digests.
-func parseSentinels(logs string) (cleaned string, extra map[string]string, prov *ctrf.RuntimeProvenance) {
-	if !strings.Contains(logs, ctrf.ExtraLinePrefix) && !strings.Contains(logs, ctrf.ProvenanceLinePrefix) {
-		return logs, nil, nil
+// parseSentinels returns logs as cleaned, with every ctrf.ExtraLinePrefix,
+// ctrf.ProvenanceLinePrefix and ctrf.ImageLinePrefix line removed, and the
+// payloads of those lines:
+//   - extra merges the Extra payloads, a later value winning per key. It is
+//     nil unless some line parsed to a non-empty object.
+//   - prov is the last provenance record carrying both digests, or nil.
+//   - images holds, in order, every record that passes ctrf.PodImage.Valid.
+//
+// A malformed line is logged and skipped without discarding earlier payloads.
+func parseSentinels(logs string) (cleaned string, extra map[string]string, prov *ctrf.RuntimeProvenance, images []ctrf.PodImage) {
+	if !strings.Contains(logs, ctrf.ExtraLinePrefix) && !strings.Contains(logs, ctrf.ProvenanceLinePrefix) &&
+		!strings.Contains(logs, ctrf.ImageLinePrefix) {
+
+		return logs, nil, nil, nil
 	}
 	lines := strings.Split(logs, "\n")
 	kept := make([]string, 0, len(lines))
@@ -382,9 +408,18 @@ func parseSentinels(logs string) (cleaned string, extra map[string]string, prov 
 			}
 			continue
 		}
+		if payload, ok := strings.CutPrefix(line, ctrf.ImageLinePrefix); ok {
+			var parsed ctrf.PodImage
+			if err := json.Unmarshal([]byte(payload), &parsed); err != nil || !parsed.Valid() {
+				slog.Warn("dropping malformed validator image sentinel", "error", err)
+			} else {
+				images = append(images, parsed)
+			}
+			continue
+		}
 		kept = append(kept, line)
 	}
-	return strings.Join(kept, "\n"), extra, prov
+	return strings.Join(kept, "\n"), extra, prov, images
 }
 
 // HandleTimeout extracts whatever result is available when the orchestrator's
@@ -434,6 +469,7 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 			waitFailureMessage(waitCause, effectiveTimeout(d.config.Entry.Timeout)), ValidatorContainerName)
 		return result
 	}
+	d.recordValidatorImage(ctx, jobPod, result)
 
 	if cs.State.Terminated != nil {
 		result.ExitCode = cs.State.Terminated.ExitCode

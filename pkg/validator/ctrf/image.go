@@ -56,7 +56,13 @@ func (r PodImage) Valid() bool {
 	if r.Digest != "" && !isSHA256Digest(r.Digest) {
 		return false
 	}
-	return r.Platform == "" || platformPattern.MatchString(r.Platform)
+	return r.Platform == "" || IsPlatform(r.Platform)
+}
+
+// IsPlatform reports whether s is an os/arch platform with an optional
+// variant.
+func IsPlatform(s string) bool {
+	return platformPattern.MatchString(s)
 }
 
 // ContainerImage returns the image that p's container named containerName
