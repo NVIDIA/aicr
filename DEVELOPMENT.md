@@ -55,9 +55,9 @@ make lint
 The Dev Container includes an SSH server for GitHub CLI access to a Codespace.
 After creation, `gh codespace ssh`, `gh codespace cp`, and `gh codespace logs`
 can connect to it, and SSH sessions get the same Go toolchain and tools on
-`PATH` as the Codespace terminal. Run these commands in your local terminal
-from a checkout of this repository. Replace `<name>` with your Codespace name
-and `<local-file>` with a file on your machine:
+`PATH` as the Codespace terminal. Run these commands in your local terminal,
+replacing `<name>` with your Codespace name and `<local-file>` with a file on
+your machine:
 
 ```bash
 gh codespace ssh -c <name> -- echo ok
