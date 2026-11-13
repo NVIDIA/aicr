@@ -31,8 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/structured-merge-diff/v6/fieldpath"
-	"sigs.k8s.io/structured-merge-diff/v6/typed"
+	"sigs.k8s.io/structured-merge-diff/v7/fieldpath"
+	"sigs.k8s.io/structured-merge-diff/v7/typed"
 
 	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
