@@ -203,12 +203,22 @@ type RecipeOutputSpec struct {
 
 // BundleSpec captures the inputs to `aicr bundle`.
 type BundleSpec struct {
-	Input       *BundleInputSpec  `yaml:"input,omitempty" json:"input,omitempty"`
-	Output      *BundleOutputSpec `yaml:"output,omitempty" json:"output,omitempty"`
-	Deployment  *DeploymentSpec   `yaml:"deployment,omitempty" json:"deployment,omitempty"`
-	Scheduling  *SchedulingSpec   `yaml:"scheduling,omitempty" json:"scheduling,omitempty"`
-	Attestation *AttestationSpec  `yaml:"attestation,omitempty" json:"attestation,omitempty"`
-	Registry    *RegistrySpec     `yaml:"registry,omitempty" json:"registry,omitempty"`
+	Input          *BundleInputSpec    `yaml:"input,omitempty" json:"input,omitempty"`
+	Output         *BundleOutputSpec   `yaml:"output,omitempty" json:"output,omitempty"`
+	Deployment     *DeploymentSpec     `yaml:"deployment,omitempty" json:"deployment,omitempty"`
+	Scheduling     *SchedulingSpec     `yaml:"scheduling,omitempty" json:"scheduling,omitempty"`
+	Attestation    *AttestationSpec    `yaml:"attestation,omitempty" json:"attestation,omitempty"`
+	Registry       *RegistrySpec       `yaml:"registry,omitempty" json:"registry,omitempty"`
+	RuntimeMetrics *RuntimeMetricsSpec `yaml:"runtimeMetrics,omitempty" json:"runtimeMetrics,omitempty"`
+}
+
+// RuntimeMetricsSpec names what the runtime Prometheus server (ADR-026) keeps
+// and loads on top of the registry's telemetry.promql declarations. Series are RE2
+// patterns matched against the whole metric name; Namespaces are namespaces
+// whose ServiceMonitors and PodMonitors are loaded.
+type RuntimeMetricsSpec struct {
+	Series     []string `yaml:"series,omitempty" json:"series,omitempty"`
+	Namespaces []string `yaml:"namespaces,omitempty" json:"namespaces,omitempty"`
 }
 
 // BundleInputSpec captures input file paths for the bundle command.

@@ -87,6 +87,31 @@ a component the bundler enabled at bundle time is not checked.
 - **Run:ai recipes** (`platform=runai`): the `gang-scheduling` conformance check runs its test pods in a Run:ai Project namespace, so export `AICR_RUNAI_PROJECT_NAMESPACE=runai-<project>` in the shell running `aicr validate`; the check fails, rather than skips, without it. The Project needs an explicit CPU and memory quota and no CPU or memory limit, and a private probe image needs its pull Secret already in that namespace. See [Run:ai cluster](component-catalog.md#runai-cluster).
 - **`NodeTopology.gpu-nodes.label` readiness constraints outside GKE** (including bare metal and `--data` services): GPU nodes are those the GPU Operator labels `nvidia.com/gpu.present=true`, so capture the snapshot after it is running. A snapshot with no such node fails readiness closed (exit 2), and GPU nodes it has not labeled are not checked.
 
+## `ai-service-metrics` on your own metrics backend
+
+By default the `ai-service-metrics` conformance check queries NKTP's bundled
+`otel-lgtm`. When NKTP exports to your own backend, or the recipe has no
+`nktp`, name that backend's Prometheus query API in the shell running
+`aicr validate`:
+
+```shell
+export AICR_SERVICE_METRICS_QUERY_URL="https://mimir.example.com/prometheus"
+aicr validate --recipe recipe.yaml --phase conformance
+```
+
+- The value is a base URL; the check appends `/api/v1/query`. It wins over
+  `otel-lgtm` whenever it is set.
+- The validator pod must reach the URL without credentials. A URL that
+  carries a user or password fails `aicr validate` before any Job is created,
+  because the URL is written into the check's Job and recorded in its
+  evidence.
+- The backend must hold what your monitoring system scrapes from a
+  ServiceMonitor in the check's test namespace, including each target's `up`
+  series.
+
+Without the variable, the check is skipped on such a cluster and the CNCF
+requirement is reported as not tested.
+
 ## Training performance validation
 
 Training performance runs an NCCL all-reduce benchmark — a Kubeflow `TrainJob`
@@ -1867,7 +1892,9 @@ not collected" means `up` arrived but the stub's own series did not within the
 collection timeout: check the collectors' logs as above.
 
 The check is skipped, and the CNCF requirement reported as not tested, when
-the recipe has no `nktp` or NKTP runs without `otel-lgtm`.
+the recipe has no `nktp` or NKTP runs without `otel-lgtm`. To run it against
+your own backend instead, see
+[`ai-service-metrics` on your own metrics backend](#ai-service-metrics-on-your-own-metrics-backend).
 
 ### Benchmark Job stuck or timed out
 

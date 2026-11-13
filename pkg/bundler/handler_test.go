@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -250,6 +251,59 @@ func TestParseBundleConfig_InvalidScheduling(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.param) {
 				t.Errorf("error %q does not name %s", err, tt.param)
+			}
+		})
+	}
+}
+
+func TestParseBundleConfig_RuntimeMetrics(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		query          url.Values
+		wantSeries     []string
+		wantNamespaces []string
+		wantErr        string
+	}{
+		{name: "absent is empty", query: url.Values{}},
+		{
+			name: "repeated parameters",
+			query: url.Values{
+				bundleQueryRuntimeMetricsSeries:    {"queue_depth", "http_requests_(total|created)"},
+				bundleQueryRuntimeMetricsNamespace: {"inference"},
+			},
+			wantSeries:     []string{"queue_depth", "http_requests_(total|created)"},
+			wantNamespaces: []string{"inference"},
+		},
+		{
+			name:    "series that is not RE2",
+			query:   url.Values{bundleQueryRuntimeMetricsSeries: {"queue_(depth"}},
+			wantErr: bundleQueryRuntimeMetricsSeries,
+		},
+		{
+			name:    "namespace that is not a name",
+			query:   url.Values{bundleQueryRuntimeMetricsNamespace: {"Team_A"}},
+			wantErr: bundleQueryRuntimeMetricsNamespace,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := ParseBundleConfig(httptest.NewRequest("POST", "/v1/bundle?"+tt.query.Encode(), nil))
+			if tt.wantErr != "" {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ParseBundleConfig() error = %v, want ErrCodeInvalidRequest naming %s", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseBundleConfig() error = %v", err)
+			}
+			got := cfg.RuntimeMetrics()
+			if !slices.Equal(got.Series, tt.wantSeries) || !slices.Equal(got.Namespaces, tt.wantNamespaces) {
+				t.Errorf("RuntimeMetrics() = %+v, want series %v and namespaces %v", got, tt.wantSeries, tt.wantNamespaces)
 			}
 		})
 	}
@@ -853,7 +907,10 @@ func TestSupportedBundleQueryParametersIncludesEveryParsedParameter(t *testing.T
 	t.Parallel()
 	// A parameter parseQueryParams reads must also pass the server's strict
 	// allowlist, or the REST surface rejects it before parsing.
-	for _, name := range []string{bundleQuerySplit, bundleQuerySerial, bundleQueryVendorCharts, bundleQueryBundlers} {
+	for _, name := range []string{
+		bundleQuerySplit, bundleQuerySerial, bundleQueryVendorCharts, bundleQueryBundlers,
+		bundleQueryRuntimeMetricsSeries, bundleQueryRuntimeMetricsNamespace,
+	} {
 		if _, ok := SupportedBundleQueryParameters()[name]; !ok {
 			t.Errorf("SupportedBundleQueryParameters() lacks %q", name)
 		}

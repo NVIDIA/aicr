@@ -164,6 +164,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
+	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/constraints"
@@ -2003,8 +2004,10 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 		}
 	}
 	// Before pinning, so the gates read the injected values. With no bundlers
-	// filter or --set here, the platform is every enabled ref.
-	scope, scopeErr := bundler.InjectPromQLScrapeScope(r.internal.DataProvider(), r.internal.ComponentRefs, helmValues)
+	// filter, --set or runtimeMetrics here, the platform is every enabled ref
+	// and the scope is the registry's declarations alone.
+	scope, scopeErr := bundler.InjectPromQLScrapeScope(
+		r.internal.DataProvider(), r.internal.ComponentRefs, helmValues, bundlerconfig.RuntimeMetrics{})
 	if scopeErr != nil {
 		return nil, scopeErr
 	}

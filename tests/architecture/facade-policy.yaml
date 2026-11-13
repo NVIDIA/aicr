@@ -112,7 +112,10 @@ constrained:
       config precedence, kept out of pkg/cli because it spans both spellings),
       and passes it with WithArgoCDSettings; the REST handler reads
       Config.LegacyDeployerNotice only to attach the per-request deprecation
-      headers, which is response presentation.
+      headers, which is response presentation. The runtime metrics additions
+      (ADR-026) follow the second use: the CLI takes each RuntimeMetrics list
+      from its --runtime-metrics-* flag or the config file and passes the
+      result with WithRuntimeMetrics; the bundler validates it.
     permanent: true
     symbols:
       ArgoCDSettings: type
@@ -141,6 +144,7 @@ constrained:
       ParseFleetMode: behavioral
       NodeLabel: type
       NodeLabel.String: behavioral
+      RuntimeMetrics: type
       ParseDeployerType: behavioral
       ParseDynamicValues: behavioral
       ParseNodeLabel: behavioral
@@ -170,6 +174,7 @@ constrained:
       WithOCISourceName: behavioral
       WithReadinessHooks: behavioral
       WithRepoURL: behavioral
+      WithRuntimeMetrics: behavioral
       WithSerial: behavioral
       WithSharedStorageClass: behavioral
       WithSplit: behavioral

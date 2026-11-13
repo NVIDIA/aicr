@@ -170,6 +170,11 @@ type BundleOptions struct {
 	StorageClass       string
 	SharedStorageClass string
 
+	// RuntimeMetrics adds series and monitor namespaces to the runtime
+	// Prometheus server's scrape scope (ADR-026), on top of the registry's
+	// declarations. MakeBundle rejects it on a recipe with no such server.
+	RuntimeMetrics config.RuntimeMetrics
+
 	// Attest enables bundle attestation and binary verification. Off
 	// (false) by default — the same default bundler.New applies when
 	// --attest is not passed, so the zero value stays a true no-op.
@@ -289,6 +294,7 @@ func (o BundleOptions) bundlerConfig() *BundleConfig {
 		config.WithEstimatedNodeCount(o.Nodes),
 		config.WithStorageClass(o.StorageClass),
 		config.WithSharedStorageClass(o.SharedStorageClass),
+		config.WithRuntimeMetrics(o.RuntimeMetrics),
 		config.WithVendorCharts(o.VendorCharts),
 		config.WithSplit(o.Split),
 		config.WithAppName(o.AppName),

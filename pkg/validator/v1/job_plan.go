@@ -267,7 +267,10 @@ func OrchestratorWaitFor(observedStart, now time.Time, checkTimeout time.Duratio
 // to namespaces.
 //
 // Returns ErrCodeInvalidRequest when entry.DependencyAffinity declares a
-// "required" component that is not present in componentRefs.
+// "required" component that is not present in componentRefs, or when the
+// entry is ai-service-metrics and defaults.EnvServiceMetricsQueryURL holds a
+// value ParseServiceMetricsQueryURL rejects, so that a credentialed URL never
+// reaches a Job spec.
 func BuildJobPlan(
 	entry ValidatorEntry,
 	runID string,
@@ -291,6 +294,10 @@ func BuildJobPlan(
 	timeout := entry.Timeout
 	if timeout == 0 {
 		timeout = defaults.ValidatorDefaultTimeout
+	}
+
+	if envErr := validateForwardedEnv(entry); envErr != nil {
+		return JobPlan{}, envErr
 	}
 
 	// Build environment variables

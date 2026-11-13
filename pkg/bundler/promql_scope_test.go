@@ -154,6 +154,7 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 		name           string
 		platform       []recipe.ComponentRef
 		serverValues   map[string]any
+		runtimeMetrics config.RuntimeMetrics
 		omitServer     bool
 		wantNamespaces []string
 		wantRegex      string // empty: the scope is zero and values are unchanged
@@ -179,6 +180,48 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 			serverValues:   nested(chartScopePaths.scrapeClasses, nil),
 			wantNamespaces: []string{"gpu-operator", "monitoring"},
 			wantRegex:      adapterRegex,
+		},
+		{
+			name:     "runtime metrics add to the registry's declarations",
+			platform: adapterPlatform,
+			runtimeMetrics: config.RuntimeMetrics{
+				Series:     []string{"queue_depth", "DCGM_FI_DEV_GPU_UTIL"},
+				Namespaces: []string{"inference", "gpu-operator"},
+			},
+			wantNamespaces: []string{"gpu-operator", "inference", "monitoring"},
+			wantRegex:      `^(?:(?:DCGM_FI_DEV_FB_USED)|(?:DCGM_FI_DEV_GPU_UTIL)|(?:queue_depth))$`,
+		},
+		{
+			name:           "runtime metrics alone, with no consumer",
+			platform:       []recipe.ComponentRef{scopeRef(testPromQLServer, "monitoring")},
+			runtimeMetrics: config.RuntimeMetrics{Series: []string{"queue_depth"}},
+			wantNamespaces: []string{"monitoring"},
+			wantRegex:      `^(?:(?:queue_depth))$`,
+		},
+		{
+			name:           "runtime metrics with the server not emitted inject nothing",
+			platform:       adapterPlatform,
+			runtimeMetrics: config.RuntimeMetrics{Series: []string{"queue_depth"}},
+			omitServer:     true,
+		},
+		{
+			name: "runtime metrics without an enabled server fail",
+			platform: []recipe.ComponentRef{disabledScopeRef(testPromQLServer, "monitoring"),
+				scopeRef("prometheus-adapter", "monitoring")},
+			runtimeMetrics: config.RuntimeMetrics{Namespaces: []string{"inference"}},
+			wantErr:        "this recipe enables no runtime Prometheus server",
+		},
+		{
+			name:           "runtime metrics series that is not RE2 fails",
+			platform:       adapterPlatform,
+			runtimeMetrics: config.RuntimeMetrics{Series: []string{"queue_(depth"}},
+			wantErr:        "invalid runtimeMetrics.series entry",
+		},
+		{
+			name:           "runtime metrics namespace that is not a name fails",
+			platform:       adapterPlatform,
+			runtimeMetrics: config.RuntimeMetrics{Namespaces: []string{"Inference_NS"}},
+			wantErr:        `invalid runtimeMetrics.namespaces entry "Inference_NS"`,
 		},
 		{
 			name: "disabled monitorsFrom source fails",
@@ -243,7 +286,7 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 				t.Fatalf("marshal: %v", err)
 			}
 
-			scope, err := InjectPromQLScrapeScope(promqlTestProvider(t), tt.platform, values)
+			scope, err := InjectPromQLScrapeScope(promqlTestProvider(t), tt.platform, values, tt.runtimeMetrics)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("error = %v, want one containing %q", err, tt.wantErr)
@@ -270,7 +313,7 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 }
 
 func TestInjectPromQLScrapeScope_RegistryLoadFailure(t *testing.T) {
-	_, err := InjectPromQLScrapeScope(failingRegistryProvider{}, nil, map[string]map[string]any{})
+	_, err := InjectPromQLScrapeScope(failingRegistryProvider{}, nil, map[string]map[string]any{}, config.RuntimeMetrics{})
 	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
 }
 
@@ -280,7 +323,7 @@ func TestInjectPromQLScrapeScope_KeepRegex(t *testing.T) {
 	scope, err := InjectPromQLScrapeScope(promqlTestProvider(t), []recipe.ComponentRef{
 		scopeRef(testPromQLServer, "monitoring"), scopeRef("gpu-operator", "gpu-operator"),
 		scopeRef("dynamo-platform", "dynamo-system"), scopeRef("gpu-dashboard", "dash"),
-	}, map[string]map[string]any{testPromQLServer: {}})
+	}, map[string]map[string]any{testPromQLServer: {}}, config.RuntimeMetrics{})
 	if err != nil {
 		t.Fatalf("InjectPromQLScrapeScope: %v", err)
 	}
@@ -313,7 +356,8 @@ func TestInjectPromQLScrapeScope_Deterministic(t *testing.T) {
 	var first []byte
 	for i := range platform {
 		values := map[string]map[string]any{testPromQLServer: {}}
-		if _, err := InjectPromQLScrapeScope(provider, append(slices.Clone(platform[i:]), platform[:i]...), values); err != nil {
+		rotated := append(slices.Clone(platform[i:]), platform[:i]...)
+		if _, err := InjectPromQLScrapeScope(provider, rotated, values, config.RuntimeMetrics{}); err != nil {
 			t.Fatalf("rotation %d: %v", i, err)
 		}
 		out, err := serializer.MarshalYAMLDeterministic(values)
@@ -470,8 +514,18 @@ func TestMake_PromQLScrapeScope(t *testing.T) {
 			wantNamespaces: []string{"monitoring"},
 			wantRegex:      `^(?:)$`,
 			wantWarning:    "no enabled component declares telemetry.promql"},
+		{name: "runtime metrics add to the declared scope", criteria: training,
+			opts: []config.Option{config.WithRuntimeMetrics(config.RuntimeMetrics{
+				Series: []string{"queue_depth"}, Namespaces: []string{"inference"},
+			})},
+			wantNamespaces: []string{"gpu-operator", "inference", "monitoring"},
+			wantRegex:      `^(?:(?:DCGM_FI_DEV_GPU_UTIL)|(?:queue_depth))$`},
 		{name: "disabling the server injects and checks nothing", criteria: training,
 			opts: []config.Option{disable(testPromQLServer, "gpuoperator")}},
+		{name: "runtime metrics with the server disabled fail", criteria: training,
+			opts: []config.Option{disable(testPromQLServer, "gpuoperator"),
+				config.WithRuntimeMetrics(config.RuntimeMetrics{Series: []string{"queue_depth"}})},
+			wantErr: "this recipe enables no runtime Prometheus server"},
 		{name: "disabling a monitorsFrom source fails", criteria: training,
 			opts: []config.Option{disable("gpuoperator")}, wantErr: `"gpu-operator" is absent or disabled`},
 		{name: "--set on an owned path fails, through an alias", criteria: training,
