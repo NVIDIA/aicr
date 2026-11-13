@@ -1246,7 +1246,7 @@ func TestParseExtraSentinels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cleaned, extra, _ := parseExtraSentinels(tt.logs)
+			cleaned, extra, _ := parseSentinels(tt.logs)
 			if cleaned != tt.wantCleaned {
 				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
 			}
@@ -1500,7 +1500,7 @@ func TestParseProvenanceSentinel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cleaned, extra, prov := parseExtraSentinels(tt.logs)
+			cleaned, extra, prov := parseSentinels(tt.logs)
 			if cleaned != tt.wantCleaned {
 				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
 			}
