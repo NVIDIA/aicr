@@ -371,7 +371,9 @@ checks the components the bundle deploys: it runs against the recipe the
 bundle records, so a component an override turns off is not required.
 
 A validator image that is not pinned in `aicr.validatorImages` at the tag AICR
-names, or a pinned tag that resolves to another digest, also fails the run.
+names, or a pinned tag that resolves to another digest, also fails the run. So
+does a recorded digest that is neither the pinned digest nor a manifest its
+image index lists.
 
 **Running AICR's other phases yourself.** Rollouts run only the deployment
 phase. To run conformance or performance against the cluster with the AICR CLI,

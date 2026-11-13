@@ -31,6 +31,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -271,6 +272,51 @@ func pushRawManifest(t *testing.T, c *Client, r Repository, tag string, manifest
 		t.Fatal(err)
 	}
 	return desc.Digest.String()
+}
+
+// IndexManifests lists the manifests an image index names, and none for a
+// single image manifest.
+func TestIndexManifests(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, repo := testRegistry(t)
+	config := blob{ocispec.DescriptorEmptyJSON, ocispec.DescriptorEmptyJSON.Data}
+	archs := []string{"amd64", "arm64"}
+	platforms := make([]ocispec.Descriptor, 0, len(archs))
+	want := make([]string, 0, len(archs))
+	for _, arch := range archs {
+		m := imageManifest(t, ocispec.Manifest{Config: ocispec.DescriptorEmptyJSON, Layers: []ocispec.Descriptor{},
+			Annotations: map[string]string{"arch": arch}})
+		d := pushRawManifest(t, c, repo, "", m, config)
+		platforms = append(platforms, ocispec.Descriptor{MediaType: ocispec.MediaTypeImageManifest, Digest: digest.Digest(d),
+			Size: int64(len(m)), Platform: &ocispec.Platform{OS: "linux", Architecture: arch}})
+		want = append(want, d)
+	}
+	index, err := json.Marshal(ocispec.Index{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: ocispec.MediaTypeImageIndex,
+		Manifests: platforms})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteRepo, err := c.repository(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desc := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageIndex, Digest: digest.FromBytes(index), Size: int64(len(index))}
+	if err = remoteRepo.Push(ctx, desc, bytes.NewReader(index)); err != nil {
+		t.Fatal(err)
+	}
+	if got, gotErr := c.IndexManifests(ctx, repo, desc.Digest.String()); gotErr != nil || !slices.Equal(got, want) {
+		t.Fatalf("IndexManifests(index) = %v, %v; want %v", got, gotErr, want)
+	}
+	if got, gotErr := c.IndexManifests(ctx, repo, want[0]); gotErr != nil || len(got) != 0 {
+		t.Fatalf("IndexManifests(image manifest) = %v, %v; want none", got, gotErr)
+	}
+	if _, err = c.IndexManifests(ctx, repo, "v1.0.0"); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		t.Fatalf("a tag as the index: %v", err)
+	}
+	if _, err = c.IndexManifests(ctx, repo, digest.FromString("missing").String()); operrors.CodeOf(err) != operrors.ErrCodeNotFound {
+		t.Fatalf("a missing index: %v", err)
+	}
 }
 
 func TestPullBundle(t *testing.T) {
