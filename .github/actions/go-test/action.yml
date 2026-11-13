@@ -119,15 +119,15 @@ runs:
     # Restore is unconditional; SAVE is not. `ok-to-test` runs on
     # `issue_comment`, so its `github.ref` resolves to the default branch and it
     # writes into main's cache scope -- while checking out an untrusted PR head
-    # that this job then executes via `make test`. GOCACHE entries are not
+    # that this action then executes via its test task. GOCACHE entries are not
     # re-verified on read (`GODEBUG=gocacheverify` is opt-in), so allowing those
     # runs to write would let a crafted PR plant an entry a later trusted run
     # consumes. The exact-key-only restore this replaces made that hard to reach
     # by accident; a prefix fallback would not, which is why adding the fallback
     # and gating the write belong in the same change.
     #
-    # Shard a is the sole writer of the shared go- key. Other shards and
-    # qualification tasks restore only, avoiding a race to save an immutable
+    # In qualification, shard a is the sole writer of the shared go- key. Other
+    # shards and tasks restore only, avoiding a race to save an immutable
     # entry. Its build cache contains only that shard's compilation work.
     # Save still waits for test execution, so setup alone cannot bank an entry.
     #
@@ -292,14 +292,13 @@ runs:
     # here is what that scope keeps until go.sum moves or the entry idles out.
     # That makes *when* to save the whole question.
     #
-    # The selected shard having run is the condition, pass or fail. Failing is fine and
-    # deliberately still saves -- the modules were downloaded and the packages
-    # compiled, which is the cost worth keeping, and a re-run of a flake should
-    # not pay it again. But a run that dies before it, at Install Helm or
-    # envtest, has a warm GOMODCACHE (`go mod tidy -diff` resolves the graph)
-    # and a nearly empty GOCACHE. Banking that would pin a cache that rebuilds
-    # all of ./... under -race on every subsequent run -- the exact cost the
-    # 15-to-30 minute bump is absorbing.
+    # Qualification saves only after shard a completes, pass or fail, retaining
+    # that shard's compilation work. Other shards and the compatibility task
+    # restore only; their work is not included in this save. Module tidiness is
+    # checked independently in compatibility and does not gate shard a's save.
+    # The default full task instead saves after `make test` completes.
+    # Neither path saves after setup alone: a failed Helm/envtest install has
+    # not produced the race-test build objects worth retaining.
     #
     # `outcome` is the pre-`continue-on-error` result, and is `skipped` when the
     # step never ran and `cancelled` on cancellation, so testing for the two

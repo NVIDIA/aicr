@@ -74,14 +74,17 @@ def stream(destination):
     try:
         for line in sys.stdin:
             event = json.loads(line)
-            if event.get("Action") == "output":
+            if event.get("Action") in ("output", "build-output"):
                 print(event.get("Output", ""), end="", flush=True)
             if event.get("Action") in ("pass", "fail", "skip"):
                 rows.append({key: event.get(key, "" if key != "Elapsed" else 0)
                              for key in ("Package", "Test", "Action", "Elapsed")})
     finally:
         Path(destination).write_text(json.dumps(rows, separators=(",", ":")) + "\n")
-        failed = Counter("tests" if row["Test"] else "packages" for row in rows if row["Action"] == "fail")
+        failures = [row for row in rows if row["Action"] == "fail"]
+        for row in failures:
+            print(f"FAIL {row['Package']} {row['Test']}".rstrip(), flush=True)
+        failed = Counter("tests" if row["Test"] else "packages" for row in failures)
         print(f"Go failures: {failed['packages']} packages, {failed['tests']} tests", flush=True)
 
 

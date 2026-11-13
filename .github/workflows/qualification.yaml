@@ -41,6 +41,7 @@ jobs:
   test:
     name: Race + coverage
     runs-on: ubuntu-24.04
+    # A cold-cache release exhausted the 15-minute budget in #2663.
     timeout-minutes: 30
     permissions:
       actions: read
@@ -78,6 +79,7 @@ jobs:
   shell:
     name: Shell and tool pins
     runs-on: ubuntu-24.04
+    # A cold-cache release exhausted the 15-minute budget in #2663.
     timeout-minutes: 30
     permissions:
       actions: read
@@ -110,6 +112,7 @@ jobs:
   compatibility:
     name: Compatibility
     runs-on: ubuntu-24.04
+    # A cold-cache release exhausted the 15-minute budget in #2663.
     timeout-minutes: 30
     permissions:
       actions: read

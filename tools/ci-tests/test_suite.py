@@ -115,6 +115,7 @@ class SuiteTest(unittest.TestCase):
     def test_stream(self):
         """Failure output stays readable and both test and package timings survive."""
         events = [
+            {"Action": "build-output", "Output": "sample_test.go:3: undefined: missing\n"},
             {"Action": "output", "Output": "assertion failed\n"},
             {"Action": "fail", "Package": "example", "Test": "TestOne", "Elapsed": 1.2},
             {"Action": "fail", "Package": "example", "Elapsed": 1.3},
@@ -125,6 +126,10 @@ class SuiteTest(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 suite.stream(destination)
         self.assertIn("assertion failed\n", output.getvalue())
+        self.assertIn("sample_test.go:3: undefined: missing\n", output.getvalue())
+        self.assertTrue(output.getvalue().endswith(
+            "FAIL example TestOne\nFAIL example\nGo failures: 1 packages, 1 tests\n"
+        ))
         self.assertIn("1 packages, 1 tests", output.getvalue())
         self.assertEqual(len(json.loads(destination.read_text())), 2)
 
