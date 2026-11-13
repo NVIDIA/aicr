@@ -32,6 +32,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -2293,9 +2294,12 @@ func TestBuildAIPerfJob_ReturnedParams(t *testing.T) {
 		// 128*8 = 1024 exceeds the 1000 floor, so the count is the scaled value
 		// — exactly the case the old log (which printed the 1000 constant) got
 		// wrong.
-		_, params, err := buildAIPerfJob("ns", "run-0", "http://ep:8000", "Qwen/Qwen3-8B", 128, nil)
+		job, params, err := buildAIPerfJob("ns", "run-0", "http://ep:8000", "Qwen/Qwen3-8B", 128, nil)
 		if err != nil {
 			t.Fatalf("buildAIPerfJob: unexpected error: %v", err)
+		}
+		if got := job.Spec.Template.Spec.Containers[0].Image; params.image != got {
+			t.Errorf("image = %q, want the container's %q", params.image, got)
 		}
 		if params.requestCount != 128*aiperfRequestsPerConcurrency {
 			t.Errorf("requestCount = %d, want %d", params.requestCount, 128*aiperfRequestsPerConcurrency)
@@ -2320,6 +2324,43 @@ func TestBuildAIPerfJob_ReturnedParams(t *testing.T) {
 			t.Errorf("warmupCount = %d, want 300", params.warmupCount)
 		}
 	})
+}
+
+func TestAIPerfPodImage(t *testing.T) {
+	const (
+		ns    = "ns"
+		name  = "aiperf-0"
+		ref   = "nvcr.io/nvidia/aiperf-bench:edge"
+		ranAs = "nvcr.io/nvidia/aiperf-bench:v1"
+	)
+	digest := "sha256:" + strings.Repeat("a", 64)
+	pod := func(container string) *v1.Pod {
+		return &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec:       v1.PodSpec{Containers: []v1.Container{{Name: container, Image: ranAs}}},
+			Status: v1.PodStatus{ContainerStatuses: []v1.ContainerStatus{
+				{Name: container, ImageID: ranAs + "@" + digest},
+			}},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		objects []runtime.Object
+		want    ctrf.PodImage
+	}{
+		{"pod digest", []runtime.Object{pod(aiperfContainerName)}, ctrf.PodImage{Image: ranAs, Digest: digest}},
+		{"pod not found", nil, ctrf.PodImage{Image: ref}},
+		{"no benchmark container", []runtime.Object{pod("other")}, ctrf.PodImage{Image: ref}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewClientset(tt.objects...)
+			if got := aiperfPodImage(t.Context(), client, ns, name, ref); got != tt.want {
+				t.Errorf("aiperfPodImage() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestResolveAiperfImage(t *testing.T) {
