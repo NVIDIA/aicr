@@ -193,9 +193,10 @@ func UnpinnedValidatorImages(images []ValidatorImage) []string {
 // images in cat of each phase in results with a test that was not skipped,
 // and every other image a test in results reports. Each appears once per
 // digest and platform recorded for it, sorted by platform and digest. It
-// appears first with an empty Digest when no digest was recorded for it, or
-// when any record of it has none, so UnpinnedValidatorImages still sees a run
-// of a mutable ref with unknown provenance. Records failing
+// appears first with an empty Digest when no digest was recorded for it, when
+// any record of it has none, or when a test of a check in cat ran with no
+// digest recorded for that check's image, so UnpinnedValidatorImages still
+// sees a run of a mutable ref with unknown provenance. Records failing
 // ctrf.PodImage.Valid are ignored.
 func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*validator.PhaseResult) []ValidatorImage {
 	notSkipped := func(tr ctrf.TestResult) bool { return tr.Status != ctrf.StatusSkipped }
@@ -205,11 +206,17 @@ func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*valid
 			ran[string(pr.Phase)] = true
 		}
 	}
+	type check struct{ phase, name string }
 	var refs []string
 	listed := map[string]bool{}
+	checkImage := map[check]string{}
 	if cat != nil {
 		for _, v := range cat.Validators {
-			if v.Image != "" && ran[v.Phase] && !listed[v.Image] {
+			if v.Image == "" {
+				continue
+			}
+			checkImage[check{v.Phase, v.Name}] = v.Image
+			if ran[v.Phase] && !listed[v.Image] {
 				listed[v.Image] = true
 				refs = append(refs, v.Image)
 			}
@@ -223,6 +230,8 @@ func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*valid
 			continue
 		}
 		for _, tr := range pr.Report.Results.Tests {
+			catalogImage := checkImage[check{string(pr.Phase), tr.Name}]
+			catalogDigested := false
 			for _, podImg := range tr.Images {
 				if !podImg.Valid() {
 					continue
@@ -239,6 +248,14 @@ func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*valid
 					seen[img] = true
 					digested[img.Image] = append(digested[img.Image], img)
 				}
+				if img.Digest != "" && img.Image == catalogImage {
+					catalogDigested = true
+				}
+			}
+			// A check that ran with no digest for its own image, including
+			// one whose pod could not be read, leaves that image unidentified.
+			if catalogImage != "" && notSkipped(tr) && !catalogDigested {
+				undigested[catalogImage] = true
 			}
 		}
 	}

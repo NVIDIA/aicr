@@ -508,16 +508,26 @@ func TestEmit_RecordedDigestPinsMutableTag(t *testing.T) {
 }
 
 func TestEmit_RejectsReportedImageWithoutDigest(t *testing.T) {
-	const ref = "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest"
+	const (
+		ref        = "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest"
+		catalogRef = "ghcr.io/nvidia/aicr-validators/performance:edge"
+	)
 	tests := []struct {
 		name  string
+		cat   *catalog.ValidatorCatalog
 		phase *validator.PhaseResult
+		ref   string
 	}{
-		{"only run has no digest", phaseWithImages(validator.PhasePerformance, []ctrf.PodImage{{Image: ref}})},
-		{"one of two runs has no digest", phaseWithImages(validator.PhasePerformance,
+		{"only run has no digest", emitCatalog("v1.0.0"),
+			phaseWithImages(validator.PhasePerformance, []ctrf.PodImage{{Image: ref}}), ref},
+		{"one of two runs has no digest", emitCatalog("v1.0.0"), phaseWithImages(validator.PhasePerformance,
 			[]ctrf.PodImage{{Image: ref, Digest: testImageDigest}},
 			[]ctrf.PodImage{{Image: ref}},
-		)},
+		), ref},
+		{"one of two catalog checks has no image record", emitCatalog("edge", "edge"), phaseWithImages(validator.PhaseConformance,
+			[]ctrf.PodImage{{Image: catalogRef, Digest: testImageDigest}},
+			nil,
+		), catalogRef},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -525,12 +535,12 @@ func TestEmit_RejectsReportedImageWithoutDigest(t *testing.T) {
 				OutDir:       t.TempDir(),
 				Recipe:       emitRecipe(),
 				Snapshot:     snapshotWithSensitiveData(),
-				Catalog:      emitCatalog("v1.0.0"),
+				Catalog:      tt.cat,
 				PhaseResults: []*validator.PhaseResult{tt.phase},
 				AICRVersion:  "v0.0.0-test",
 			})
-			if err == nil || !strings.Contains(err.Error(), ref) {
-				t.Fatalf("Emit error = %v, want a refusal naming %s", err, ref)
+			if err == nil || !strings.Contains(err.Error(), tt.ref) {
+				t.Fatalf("Emit error = %v, want a refusal naming %s", err, tt.ref)
 			}
 		})
 	}

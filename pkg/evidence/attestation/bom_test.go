@@ -118,6 +118,14 @@ func TestValidatorImagesForPredicate(t *testing.T) {
 		pr.Report.Results.Tests[0].Status = ctrf.StatusSkipped
 		return pr
 	}
+	checkCat := &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
+		{Name: "check-1", Phase: string(validator.PhaseDeployment), Image: deploy},
+	}}
+	digestedThenUnrecorded := func(status string) *validator.PhaseResult {
+		pr := deployment([]ctrf.PodImage{{Image: deploy, Digest: digA}}, nil)
+		pr.Report.Results.Tests[1].Status = status
+		return pr
+	}
 
 	tests := []struct {
 		name    string
@@ -201,6 +209,18 @@ func TestValidatorImagesForPredicate(t *testing.T) {
 				[]ctrf.PodImage{{Image: deploy}},
 			)},
 			want: []ValidatorImage{{Image: deploy}, {Image: deploy, Digest: digA, Platform: "linux/amd64"}},
+		},
+		{
+			name:    "catalog check that ran without an image record",
+			cat:     checkCat,
+			results: []*validator.PhaseResult{digestedThenUnrecorded(ctrf.StatusFailed)},
+			want:    []ValidatorImage{{Image: deploy}, {Image: deploy, Digest: digA}},
+		},
+		{
+			name:    "skipped catalog check without an image record",
+			cat:     checkCat,
+			results: []*validator.PhaseResult{digestedThenUnrecorded(ctrf.StatusSkipped)},
+			want:    []ValidatorImage{{Image: deploy, Digest: digA}},
 		},
 		{
 			name:    "nil catalog keeps reported images",
