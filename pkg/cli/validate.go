@@ -1122,11 +1122,12 @@ func validateEvidenceFlags() []cli.Flag {
 			// caused in #2873. Opting out must be argued per invocation.
 			Usage: `Emit the attestation even when a validator image has a mutable tag and no recorded digest.
 	Emission otherwise fails closed, because a moving tag (:edge, :latest) can later resolve to different validator
-	code. Images a check ran are pinned by the digest their pod reported. Others need a digest-pinned ref, or an
-	immutable tag (:vX.Y.Z, :sha-<commit>, :uat-<run-id>) on an image under ghcr.io/nvidia/aicr-validators/.
-	The usual cause is a stale AICR_VALIDATOR_IMAGE_TAG override — unset it before a conformance run rather than
-	reaching for this flag. Reserve the flag for disposable evidence (a local demo, a side-loaded smoke lane).
-	There is no environment-variable or config-file equivalent: the opt-out must be passed per invocation.`,
+	code. An image a check ran is pinned by the digest its pod reported, when one was recorded. Others need a
+	digest-pinned ref, or an immutable tag (:vX.Y.Z, :sha-<commit>, :uat-<run-id>) on an image under
+	ghcr.io/nvidia/aicr-validators/. The usual cause is a stale AICR_VALIDATOR_IMAGE_TAG override. Unset it before a
+	conformance run rather than reaching for this flag. Reserve the flag for disposable evidence (a local demo, a
+	side-loaded smoke lane). There is no environment-variable or config-file equivalent, so the opt-out must be
+	passed per invocation.`,
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
