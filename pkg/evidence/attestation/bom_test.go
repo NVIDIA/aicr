@@ -191,13 +191,22 @@ func TestValidatorImagesForPredicate(t *testing.T) {
 			want: []ValidatorImage{{Image: perf}, {Image: aiperf}},
 		},
 		{
-			name: "digested record supersedes a digest-less one",
+			name: "digest-less record is kept beside a digested one",
 			cat:  cat,
 			results: []*validator.PhaseResult{performance(
-				[]ctrf.PodImage{{Image: aiperf}},
 				[]ctrf.PodImage{{Image: aiperf, Digest: digB}},
+				[]ctrf.PodImage{{Image: aiperf}},
 			)},
-			want: []ValidatorImage{{Image: perf}, {Image: aiperf, Digest: digB}},
+			want: []ValidatorImage{{Image: perf}, {Image: aiperf}, {Image: aiperf, Digest: digB}},
+		},
+		{
+			name: "catalog image with a digested and a digest-less run",
+			cat:  cat,
+			results: []*validator.PhaseResult{deployment(
+				[]ctrf.PodImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
+				[]ctrf.PodImage{{Image: deploy}},
+			)},
+			want: []ValidatorImage{{Image: deploy}, {Image: deploy, Digest: digA, Platform: "linux/amd64"}},
 		},
 		{
 			name:    "nil catalog keeps reported images",

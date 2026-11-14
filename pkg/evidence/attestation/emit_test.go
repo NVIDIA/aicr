@@ -509,16 +509,30 @@ func TestEmit_RecordedDigestPinsMutableTag(t *testing.T) {
 
 func TestEmit_RejectsReportedImageWithoutDigest(t *testing.T) {
 	const ref = "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest"
-	_, err := Emit(context.Background(), EmitOptions{
-		OutDir:       t.TempDir(),
-		Recipe:       emitRecipe(),
-		Snapshot:     snapshotWithSensitiveData(),
-		Catalog:      emitCatalog("v1.0.0"),
-		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhasePerformance, []ctrf.PodImage{{Image: ref}})},
-		AICRVersion:  "v0.0.0-test",
-	})
-	if err == nil || !strings.Contains(err.Error(), ref) {
-		t.Fatalf("Emit error = %v, want a refusal naming %s", err, ref)
+	tests := []struct {
+		name  string
+		phase *validator.PhaseResult
+	}{
+		{"only run has no digest", phaseWithImages(validator.PhasePerformance, []ctrf.PodImage{{Image: ref}})},
+		{"one of two runs has no digest", phaseWithImages(validator.PhasePerformance,
+			[]ctrf.PodImage{{Image: ref, Digest: testImageDigest}},
+			[]ctrf.PodImage{{Image: ref}},
+		)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Emit(context.Background(), EmitOptions{
+				OutDir:       t.TempDir(),
+				Recipe:       emitRecipe(),
+				Snapshot:     snapshotWithSensitiveData(),
+				Catalog:      emitCatalog("v1.0.0"),
+				PhaseResults: []*validator.PhaseResult{tt.phase},
+				AICRVersion:  "v0.0.0-test",
+			})
+			if err == nil || !strings.Contains(err.Error(), ref) {
+				t.Fatalf("Emit error = %v, want a refusal naming %s", err, ref)
+			}
+		})
 	}
 }
 

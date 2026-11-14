@@ -194,9 +194,11 @@ func UnpinnedValidatorImages(images []ValidatorImage) []string {
 // ValidatorImagesForPredicate returns the predicate's validatorImages: the
 // images in cat of each phase in results with a test that was not skipped,
 // and every other image a test in results reports. Each appears once per
-// digest and platform recorded for it, sorted by platform and digest, or once
-// with an empty Digest when none was. Records failing ctrf.PodImage.Valid are
-// ignored.
+// digest and platform recorded for it, sorted by platform and digest. It
+// appears first with an empty Digest when no digest was recorded for it, or
+// when any record of it has none, so UnpinnedValidatorImages still sees a run
+// of a mutable ref with unknown provenance. Records failing
+// ctrf.PodImage.Valid are ignored.
 func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*validator.PhaseResult) []ValidatorImage {
 	notSkipped := func(tr ctrf.TestResult) bool { return tr.Status != ctrf.StatusSkipped }
 	ran := map[string]bool{}
@@ -216,6 +218,7 @@ func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*valid
 		}
 	}
 	digested := map[string][]ValidatorImage{}
+	undigested := map[string]bool{}
 	seen := map[ValidatorImage]bool{}
 	for _, pr := range results {
 		if pr == nil || pr.Report == nil {
@@ -231,7 +234,10 @@ func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*valid
 					refs = append(refs, podImg.Image)
 				}
 				img := ValidatorImage(podImg)
-				if img.Digest != "" && !seen[img] {
+				switch {
+				case img.Digest == "":
+					undigested[img.Image] = true
+				case !seen[img]:
 					seen[img] = true
 					digested[img.Image] = append(digested[img.Image], img)
 				}
@@ -244,14 +250,14 @@ func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*valid
 	}
 	out := make([]ValidatorImage, 0, len(refs))
 	for _, ref := range refs {
-		if imgs := digested[ref]; len(imgs) > 0 {
-			slices.SortFunc(imgs, func(a, b ValidatorImage) int {
-				return cmp.Or(strings.Compare(a.Platform, b.Platform), strings.Compare(a.Digest, b.Digest))
-			})
-			out = append(out, imgs...)
-			continue
+		imgs := digested[ref]
+		slices.SortFunc(imgs, func(a, b ValidatorImage) int {
+			return cmp.Or(strings.Compare(a.Platform, b.Platform), strings.Compare(a.Digest, b.Digest))
+		})
+		if len(imgs) == 0 || undigested[ref] {
+			out = append(out, ValidatorImage{Image: ref})
 		}
-		out = append(out, ValidatorImage{Image: ref})
+		out = append(out, imgs...)
 	}
 	return out
 }

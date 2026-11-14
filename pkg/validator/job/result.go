@@ -78,6 +78,11 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		if d.lastTerminated != nil {
 			d.recordValidatorImage(ctx, d.lastTerminated, result)
 		}
+		// The pod may have run before it was deleted, so its image is
+		// recorded with no digest rather than left out.
+		if len(result.Images) == 0 && d.config.Entry.Image != "" {
+			result.Images = []ctrf.PodImage{{Image: d.config.Entry.Image}}
+		}
 		return result
 	}
 

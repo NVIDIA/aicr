@@ -101,9 +101,12 @@ containerd reports the multi-arch index digest. Other runtimes may report the
 node platform's manifest digest, so each entry also records `platform`.
 
 A phase that did not run, or whose checks were all skipped as in a
-`--no-cluster` run, lists no catalog images. A check that started no pod, or
-an image side-loaded into kind, records no digest. Those entries get the
-mutable-tag check.
+`--no-cluster` run, lists no catalog images. A check whose pod was deleted
+before it could be read, or an image side-loaded into kind, records no digest.
+Such an image is listed with an empty digest even when another run recorded
+one, so it still gets the mutable-tag check. A catalog image that no run
+recorded, such as one whose checks started no pod, is listed with an empty
+digest too.
 
 ## The Fulcio connectivity problem
 
