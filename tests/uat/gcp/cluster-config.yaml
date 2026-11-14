@@ -28,6 +28,17 @@ deployment:
 cluster:
   gke:
     version: "1.35"
+    # The cluster's node locations, fixed instead of three zones GKE picks per
+    # create. GKE builds its temporary default pool (one e2-medium per zone)
+    # here before the actuator deletes it, so a stockout in any listed zone
+    # fails the create; run 41047800166 failed that way with us-central1-b in
+    # GKE's pick. Pools without their own `zones` (the system pool) also run
+    # here. us-central1-c is the H100 reservation's zone. Create-time only: a
+    # change reaches the next cluster, not a running one.
+    zones:
+      - us-central1-a
+      - us-central1-c
+      - us-central1-f
     controlPlane:
       authorizedNetworks:
         - cidr: 216.228.127.128/30
@@ -79,6 +90,7 @@ compute:
     nodePools:
       system:
         machineType: e2-standard-4
+        # Counts are per zone: 3 in each of cluster.gke.zones, 9 nodes in all.
         autoscaling:
           enabled: true
           minNodes: 3
@@ -98,9 +110,9 @@ compute:
         # and failed Bringup *after* the H100s were reserved, so the teardown
         # discarded them (#2764). Re-adding one is not a matter of unpinning:
         # GKE applies node counts PER ZONE, so a zone-less pool on this regional
-        # cluster provisions one node in each of us-central1-b/c/f. A
+        # cluster provisions one node in each of cluster.gke.zones. A
         # stockout-tolerant pool needs region-wide counts, and those need an
-        # actuator change first: v0.5.17 passes `totalMinNodes`/`totalMaxNodes`
+        # actuator change first: v0.5.20 passes `totalMinNodes`/`totalMaxNodes`
         # through, but emits `min_node_count`/`max_node_count` unconditionally
         # (defaulting to 1 and 3), and the provider rejects per-zone and total
         # limits together. The gpu-worker pin below must stay regardless — the
