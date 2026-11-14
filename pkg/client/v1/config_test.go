@@ -1439,6 +1439,23 @@ spec:
         cncfSubmission: true
         notApplicable:
           cluster_autoscaling: fixed-size cluster with no node autoscaler
+        vendor:
+          name: Test Vendor
+          platformName: Test Platform
+          platformVersion: 1.2.3
+          description: A GPU platform under test.
+          contactEmail: owner@vendor.example
+          websiteUrl: https://vendor.example/platform
+          documentationUrl: https://vendor.example/docs
+          repoUrl: https://github.com/vendor/platform
+          productLogoUrl: https://vendor.example/logo.svg
+          k8sConformanceUrl: https://github.com/cncf/k8s-conformance/tree/master/v1.37/test-platform
+        conformanceVersion: v1.37
+        documented:
+          driver_runtime_management:
+            evidence:
+              - https://vendor.example/docs/drivers
+            notes: Drivers are reconciled by the GPU Operator.
 `
 
 // cncfEvidenceFeaturesConfig still carries the features key the collector
@@ -1483,6 +1500,22 @@ func TestConfig_CNCFEvidenceOptions(t *testing.T) {
 	if want := map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"}; !maps.Equal(got.NotApplicable, want) {
 		t.Errorf("NotApplicable = %v, want %v", got.NotApplicable, want)
 	}
+	wantVendor := &aicr.CNCFVendor{
+		Name: "Test Vendor", PlatformName: "Test Platform", PlatformVersion: "1.2.3", Description: "A GPU platform under test.",
+		ContactEmail: "owner@vendor.example", WebsiteURL: "https://vendor.example/platform", DocumentationURL: "https://vendor.example/docs",
+		RepoURL: "https://github.com/vendor/platform", ProductLogoURL: "https://vendor.example/logo.svg",
+		K8sConformanceURL: "https://github.com/cncf/k8s-conformance/tree/master/v1.37/test-platform",
+	}
+	if got.Vendor == nil || *got.Vendor != *wantVendor {
+		t.Errorf("Vendor = %+v, want %+v", got.Vendor, wantVendor)
+	}
+	if got.ConformanceVersion != "v1.37" {
+		t.Errorf("ConformanceVersion = %q, want v1.37", got.ConformanceVersion)
+	}
+	doc, ok := got.Documented["driver_runtime_management"]
+	if !ok || doc.Notes != "Drivers are reconciled by the GPU Operator." || len(doc.Evidence) != 1 || doc.Evidence[0] != "https://vendor.example/docs/drivers" {
+		t.Errorf("Documented = %+v", got.Documented)
+	}
 }
 
 // TestConfig_CNCFEvidenceOptions_FeaturesRefused pins the one deprecation
@@ -1508,7 +1541,7 @@ func TestConfig_CNCFEvidenceOptions_Absent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CNCFEvidenceOptions on nil Config: %v", err)
 	}
-	if got.Dir != "" || got.CNCFSubmission || got.Features != nil || got.NotApplicable != nil {
+	if got.Dir != "" || got.CNCFSubmission || got.Features != nil || got.NotApplicable != nil || got.Vendor != nil || got.Documented != nil {
 		t.Errorf("got %+v, want zero value", got)
 	}
 }
@@ -1991,5 +2024,29 @@ func TestConfig_ValidateInputOptions_NilConfig(t *testing.T) {
 	}
 	if got.RecipePath != "" || got.SnapshotPath != "" || got.FailOnError != nil {
 		t.Errorf("got %+v, want zero value", got)
+	}
+}
+
+func TestConfigArtifactOptions(t *testing.T) {
+	var absent *aicr.Config
+	if got := absent.RecipeArtifacts(); got.Inventory != "" || len(got.AllowCatalogPins) != 0 {
+		t.Fatal(got)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte("apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  recipe:\n    artifacts:\n      inventory: release.yaml\n      allowCatalogPins: [cert-manager]\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := aicr.LoadConfig(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.RecipeArtifacts()
+	if got.Inventory != "release.yaml" || len(got.AllowCatalogPins) != 1 {
+		t.Fatal(got)
+	}
+	got.AllowCatalogPins[0] = "changed"
+	if cfg.RecipeArtifacts().AllowCatalogPins[0] != "cert-manager" {
+		t.Fatal("options share config slice")
 	}
 }

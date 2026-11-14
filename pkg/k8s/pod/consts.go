@@ -18,6 +18,7 @@ package pod
 const (
 	keyNamespace = "namespace"
 	keyName      = "name"
+	keyJob       = "job"
 	keyReason    = "reason"
 	keyMessage   = "message"
 	keyURI       = "uri"

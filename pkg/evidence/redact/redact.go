@@ -73,7 +73,15 @@ const (
 	//     operator-version keys, and the in-pod skipReason codes.
 	//   - v6 narrowed the fabric extra's closed set to efa.
 	//   - v7 added the nodesFailed and nodesSkipped coverage counts.
-	PolicyVersion = "v7"
+	//   - v8 added the observationOnly marker of a passed result that
+	//     demonstrates nothing.
+	//   - v9 added the text scrub (TextScrubber) the CNCF submission
+	//     directory is passed through: IP, MAC and UUID aliases, container
+	//     ID and AWS account aliases, node-name aliases, JWT removal.
+	//   - v10 added the resultSchema stamp naming the result contract the
+	//     validator image spoke.
+	//   - v11 added the no-metrics-backend skipReason code.
+	PolicyVersion = "v11"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -147,7 +155,7 @@ var snapshotAllowlist = map[measurement.Type]map[string]subtypePolicy{
 			"VERSION_ID",
 			"VERSION_CODENAME",
 		),
-		// grub, sysctl, kmod intentionally absent → dropped (tuning/hardening posture)
+		// grub, sysctl, kmod, kmod-param intentionally absent → dropped (tuning/hardening posture)
 	},
 	measurement.TypeNodeTopology: {
 		"summary": keep("node-count", "taint-count", "label-count"), // counts, not identifiers
@@ -247,6 +255,7 @@ var ctrfSkipReasons = []string{
 	"dra-driver-not-installed", // standalone run with no NVIDIA DRA driver on the cluster
 	"slurm-managed-gpus",       // GPUs are allocated by Slurm, not the Kubernetes scheduler
 	"simulated-nodes",          // the workload runs on KWOK simulated nodes
+	"no-metrics-backend",       // telemetry goes to a backend the check has no query URL for
 }
 
 // ctrfGPUAllocationPolicies holds the pkg/validator/v1 GPUAllocationPolicy*
@@ -319,6 +328,16 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	// GPU operator version gate.
 	"detectedVersion":  isVersionValue,
 	"versionSatisfied": closedSet("true", "false"),
+
+	// A passed result that recorded observations and drove no behavioral
+	// test; the CNCF aggregation renders its requirement OBSERVED, not PASSED.
+	ctrf.ExtraKeyObservationOnly: closedSet("true", "false"),
+
+	// The result contract the validator image spoke, stamped on every result;
+	// the CNCF aggregation reads an unmarked pass of an observation-only
+	// check as observed either way and uses it only to word the reason. Only
+	// the versions a reader knows are publishable.
+	ctrf.ExtraKeyResultSchema: closedSet(ctrf.ResultSchemaVersion),
 }
 
 // ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.

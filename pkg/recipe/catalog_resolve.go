@@ -57,6 +57,10 @@ type ResolveLeavesOptions struct {
 	// one, that leaf is retried once with the fixed introspection value. Nil
 	// means every leaf gets the default build plus that one retry.
 	BuildOptionsForCriteria func(*Criteria) []BuildOption
+	// ProfileForCriteria supplies a per-leaf ADR-015 profile selection in
+	// name=value form (e.g. "gpuStack=dra"); an empty string — or a nil
+	// hook — selects each declaration's default, the stock enumeration.
+	ProfileForCriteria func(*Criteria) string
 }
 
 func alwaysSatisfiedEvaluator(Constraint) ConstraintEvalResult {
@@ -67,6 +71,14 @@ func alwaysSatisfiedEvaluator(Constraint) ConstraintEvalResult {
 func buildOptionsForCriteria(fn func(*Criteria) []BuildOption, c *Criteria) []BuildOption {
 	if fn == nil {
 		return nil
+	}
+	return fn(c)
+}
+
+// profileForCriteria nil-safely resolves the per-leaf profile selection.
+func profileForCriteria(fn func(*Criteria) string, c *Criteria) string {
+	if fn == nil {
+		return ""
 	}
 	return fn(c)
 }
@@ -105,7 +117,8 @@ func ResolveLeaves(ctx context.Context, opts ResolveLeavesOptions) ([]ResolvedLe
 		if !entry.IsLeaf && (opts.RetainNonLeaf == nil || !opts.RetainNonLeaf(entry)) {
 			continue
 		}
-		result, buildErr := builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, alwaysSatisfiedEvaluator,
+		profile := profileForCriteria(opts.ProfileForCriteria, entry.Criteria)
+		result, buildErr := builder.BuildFromCriteriaWithEvaluatorAndProfile(ctx, entry.Criteria, alwaysSatisfiedEvaluator, profile,
 			buildOptionsForCriteria(opts.BuildOptionsForCriteria, entry.Criteria)...)
 		if IsMissingGKETCPXOInterfaces(buildErr) {
 			// The one catalog family with a required typed input: retry with
@@ -114,7 +127,7 @@ func ResolveLeaves(ctx context.Context, opts ResolveLeavesOptions) ([]ResolvedLe
 			// that does not ship the runtime never reaches this branch — its
 			// plain build succeeded — so external catalogs that shadow the
 			// family without the runtime are unaffected.
-			result, buildErr = builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, alwaysSatisfiedEvaluator,
+			result, buildErr = builder.BuildFromCriteriaWithEvaluatorAndProfile(ctx, entry.Criteria, alwaysSatisfiedEvaluator, profile,
 				WithGKETCPXOInterfaces(GKETCPXOIntrospectionInterfaces()))
 		}
 		leaves = append(leaves, ResolvedLeaf{Entry: entry, Result: result, Err: buildErr})

@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -230,8 +231,12 @@ func TestGetRequirement(t *testing.T) {
 		{"ai-service-metrics", Version136, false, "ai-service-metrics.md", LevelMust, false},
 		{"secure-accelerator-access", Version137, false, "secure-accelerator-access.md", LevelMust, false},
 		{"slinky-slurm-gpu-access", Version137, false, "secure-accelerator-access.md", LevelMust, false},
-		{"gpu-operator-health", Version137, true, "", "", false}, // diagnostic
-		{"platform-health", Version137, true, "", "", false},     // diagnostic
+		{"driver-runtime-management", Version137, false, "driver-runtime-management.md", LevelShould, false}, // MUST only from v1.38 (KAR-0001)
+		{"driver-runtime-management", Version135, false, "driver-runtime-management.md", LevelShould, false},
+		{"workload-sandboxing", Version137, false, "workload-sandboxing.md", LevelShould, false}, // MUST only from v1.38 (KAR-0020)
+		{"workload-sandboxing", Version136, false, "workload-sandboxing.md", "", true},           // not a requirement before v1.37: supporting evidence
+		{"gpu-operator-health", Version137, true, "", "", false},                                 // diagnostic
+		{"platform-health", Version137, true, "", "", false},                                     // diagnostic
 		{"nonexistent", Version137, true, "", "", false},
 	}
 
@@ -435,7 +440,7 @@ func TestRenderIndexListsUntestedRequirements(t *testing.T) {
 		{Name: "ai-service-metrics", Status: "passed"},
 		{Name: "inference-gateway", Status: "passed"},
 		{Name: "pod-autoscaling", Status: "passed"},
-		{Name: "cluster-autoscaling", Status: "passed"},
+		{Name: "cluster-autoscaling", Status: "passed", Extra: stamped},
 		{Name: "robust-controller", Status: "passed"},
 		{Name: "secure-accelerator-access", Status: "passed"},
 	}}}
@@ -445,7 +450,9 @@ func TestRenderIndexListsUntestedRequirements(t *testing.T) {
 		absent   []string
 	}{
 		{Version136, []string{
-			"| `driver_runtime_management` | SHOULD | | NOT TESTED (no AICR check) | |",
+			// driver_runtime_management has a check from #3615; nothing ran it
+			// in this report, so it is not run rather than uncovered.
+			"| `driver_runtime_management` | SHOULD | | NOT TESTED (not run) | |",
 			"| `gpu_sharing` | SHOULD | | NOT TESTED (no AICR check) | |",
 			"| `virtualized_accelerator` | SHOULD | | NOT TESTED (no AICR check) | |",
 			"| `advanced_inference_ingress` | SHOULD | | NOT TESTED (no AICR check) | |",
@@ -453,7 +460,9 @@ func TestRenderIndexListsUntestedRequirements(t *testing.T) {
 			"| `disaggregated_inference` | SHOULD | | NOT TESTED (no AICR check) | |",
 		}, []string{"`workload_sandboxing`", "| `gang_scheduling` | MUST | | NOT TESTED"}},
 		{Version137, []string{
-			"| `workload_sandboxing` | SHOULD | | NOT TESTED (no AICR check) | |",
+			// workload_sandboxing has a check from #3615; nothing ran it in
+			// this report, so it is not run rather than uncovered.
+			"| `workload_sandboxing` | SHOULD | | NOT TESTED (not run) | |",
 			"| `disaggregated_inference` | SHOULD | | NOT TESTED (no AICR check) | |",
 		}, []string{"| `gang_scheduling` | MUST | | NOT TESTED"}},
 	}
@@ -493,7 +502,8 @@ func TestRenderIndexListsUntestedRequirements(t *testing.T) {
 	for _, want := range []string{
 		"| `secure_accelerator_access` | MUST | | NOT TESTED (not run) | |",
 		"| `robust_controller` | MUST | | NOT TESTED (not run) | |",
-		"| `workload_sandboxing` | SHOULD | | NOT TESTED (no AICR check) | |",
+		"| `workload_sandboxing` | SHOULD | | NOT TESTED (not run) | |",
+		"| `gpu_sharing` | SHOULD | | NOT TESTED (no AICR check) | |",
 	} {
 		if !strings.Contains(string(index), want) {
 			t.Errorf("index.md missing %q:\n%s", want, index)
@@ -595,5 +605,65 @@ func TestRenderNotApplicable(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(empty); len(entries) != 0 {
 		t.Errorf("evidence dir not left empty: %v", entries)
+	}
+}
+
+// TestRenderObserved pins how an observation-only pass renders (#3681): the
+// index row and the page read OBSERVED with the check named, the index
+// header reads FAILED since the MUST is not established, no Proof line is
+// written, and the check's own CTRF status stays passed on the page.
+func TestRenderObserved(t *testing.T) {
+	// Every other MUST passed, so the observed one alone decides the run.
+	report := reportOf(withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{
+		Name: "cluster-autoscaling", Status: "passed", Extra: map[string]string{"observationOnly": "true"},
+		Stdout: []string{"OBSERVED — AKS cluster with 2 GPU node(s)"}})...)
+
+	dir := t.TempDir()
+	agg, err := New(WithOutputDir(dir), WithConformanceVersion(Version137)).RenderWithResult(context.Background(), report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca := agg.Requirement("cluster_autoscaling")
+	if ca.Status != StatusObserved || !ca.Applicable() || ca.Proof != nil {
+		t.Errorf("cluster_autoscaling = %+v", *ca)
+	}
+	if ids := incompleteIDs(agg); !slices.Equal(ids, []string{"cluster_autoscaling"}) {
+		t.Errorf("IncompleteMusts = %v, want the observed MUST alone", ids)
+	}
+	index, _ := os.ReadFile(filepath.Join(dir, "index.md")) //nolint:gosec // test-controlled path
+	for _, want := range []string{
+		"**Applicable MUSTs:** FAILED",
+		"| `cluster_autoscaling` | MUST | Cluster Autoscaling | OBSERVED (cluster-autoscaling observed, not demonstrated) | [cluster-autoscaling.md](cluster-autoscaling.md) |",
+		"| `gang_scheduling` | MUST | Gang Scheduling | PASSED | [gang-scheduling.md](gang-scheduling.md) |",
+	} {
+		if !strings.Contains(string(index), want) {
+			t.Errorf("index.md missing %q:\n%s", want, index)
+		}
+	}
+	page, _ := os.ReadFile(filepath.Join(dir, "cluster-autoscaling.md")) //nolint:gosec // test-controlled path
+	for _, want := range []string{"**Result:** OBSERVED (cluster-autoscaling observed, not demonstrated)", "- **Status:** PASSED", "OBSERVED — AKS cluster"} {
+		if !strings.Contains(string(page), want) {
+			t.Errorf("cluster-autoscaling.md missing %q:\n%s", want, page)
+		}
+	}
+	if strings.Contains(string(page), "**Proof:**") {
+		t.Errorf("an observed requirement must not claim a proof:\n%s", page)
+	}
+
+	// The declaration still takes precedence: the same report renders NOT
+	// APPLICABLE with the justification and the MUST is not counted.
+	dir = t.TempDir()
+	agg, err = New(WithOutputDir(dir), WithConformanceVersion(Version137),
+		WithNotApplicable(map[string]string{"cluster_autoscaling": "fixed-size cluster"})).RenderWithResult(context.Background(), report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !agg.Passed() {
+		t.Errorf("Passed() = false with the observed MUST declared not applicable: %v", incompleteIDs(agg))
+	}
+	index, _ = os.ReadFile(filepath.Join(dir, "index.md")) //nolint:gosec // test-controlled path
+	want := "| `cluster_autoscaling` | MUST | Cluster Autoscaling | NOT APPLICABLE (fixed-size cluster) | [cluster-autoscaling.md](cluster-autoscaling.md) |"
+	if !strings.Contains(string(index), want) || !strings.Contains(string(index), "**Applicable MUSTs:** PASSED") {
+		t.Errorf("index.md missing %q or the PASSED header:\n%s", want, index)
 	}
 }

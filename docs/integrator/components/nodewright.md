@@ -1,6 +1,6 @@
 # Nodewright
 
-Nodewright and nodewright-customizations are two halves of the integration. [Nodewright](https://github.com/NVIDIA/nodewright) is a Kubernetes Operator that applies [nodewright packages](https://github.com/NVIDIA/nodewright-packages) with consistent, repeatable, and tested lifecycles within a cluster. Nodewright-customizations are instances of the [NodeWright Custom Resource](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/nodewright-crd.yaml) (`nodewright.nvidia.com/v1alpha1`) that define one or more nodewright packages to deploy. Operator v0.18.0 renamed the kind from `Skyhook`, and AICR's manifests now declare `NodeWright`; the registry pins v0.20.0. On a cluster that predates the rename the operator mirrors each legacy Skyhook into a NodeWright of the same name and writes status only on the NodeWright, so applying these manifests adopts the mirrored object rather than creating a second one. The legacy kind is read-only from v0.18.0 on: its admission webhook rejects any spec, `pause` or `disable` change, which is why the manifests moved. See the [upstream migration guide](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md).
+Nodewright and nodewright-customizations are two halves of the integration. [Nodewright](https://github.com/NVIDIA/nodewright) is a Kubernetes Operator that applies [nodewright packages](https://github.com/NVIDIA/nodewright-packages) with consistent, repeatable, and tested lifecycles within a cluster. Nodewright-customizations are instances of the [NodeWright Custom Resource](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/nodewright-crd.yaml) (`nodewright.nvidia.com/v1alpha1`) that define one or more nodewright packages to deploy. Operator v0.18.0 renamed the kind from `Skyhook`, and AICR's manifests now declare `NodeWright`; the registry pins v0.21.0. On a cluster that predates the rename the operator mirrors each legacy Skyhook into a NodeWright of the same name and writes status only on the NodeWright, so applying these manifests adopts the mirrored object rather than creating a second one. The legacy kind is read-only from v0.18.0 on: its admission webhook rejects any spec, `pause` or `disable` change, which is why the manifests moved. See the [upstream migration guide](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md).
 
 The registry default namespace is `nodewright`. A deployment made before that moved still runs in `skyhook`, and Helm cannot relocate a release, so pass `aicr recipe --inherit-from <prior recipe or bundle> --inherit=namespace` to keep it where it is while using the new release's chart, source, manifests and object names; the health-check assertions follow the inherited namespace. These packages were selected to provide two main functions:
 1. Optimize a node for inference or training workloads via grub, sysctl and systemd service settings.
@@ -73,6 +73,8 @@ Setup generally is any configuration needed to make AI workloads work in that se
 
 Every AKS recipe also carries a second NodeWright CR, `toolkit-hardening` (`toolkit-hardening-aks.yaml`), which runs `nvidia-setup` as `aks-any` to set the NVIDIA container toolkit device-isolation keys on every GPU node. It declares no interrupt. The `aks *` row below is that CR; the AKS accelerator rows describe the `tuning` CR beside it. See [AKS GPU setup](../aks-gpu-setup.md#gpu-driver-setup).
 
+Every OKE recipe carries the same `toolkit-hardening` CR from `toolkit-hardening-oke.yaml`, running `nvidia-setup` as `oci-any` on every node OKE labels `nvidia.com/gpu=true`. The OKE rows below without a tuning package are that CR; the `oke gb300` row describes the GB300 `tuning` CR beside it. See [OKE GPU setup](../oke-gpu-setup.md).
+
 The table below is generated from the recipes by `make tuning-docs` — **do not edit it by hand**. **Setup** and **Tuning** are the pinned nodewright package versions applied for each service + accelerator. **Profile** is the tuning profile accelerator when it differs from the selected accelerator (for example, `h200` and `a100` nodes use the `h100` profile), and `-` when identical. In the **Setup** and **Tuning** columns, `-` means no such package is applied for that service + accelerator. `*` means the recipe pins no value for that dimension.
 
 {/* BEGIN AICR-TUNING */}
@@ -96,6 +98,10 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 | gke     | gb200        | -       | -                   | nvidia-tuning-gke 0.1.2 |
 | gke     | gb300        | gb200   | -                   | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                   | nvidia-tuning-gke 0.1.2 |
+| oke     | a100         | -       | nvidia-setup 0.10.0 | -                       |
+| oke     | gb200        | -       | nvidia-setup 0.10.0 | -                       |
+| oke     | gb300        | -       | -                   | nvidia-tuned 0.11.0     |
+| oke     | l40s         | -       | nvidia-setup 0.10.0 | -                       |
 | rke2    | *            | generic | -                   | nvidia-tuned 0.11.0     |
 | rke2    | vr200        | -       | -                   | nvidia-tuned 0.11.0     |
 
@@ -109,9 +115,10 @@ but AKS recipes disable it by default via `nodewright-customizations`
 for the rationale and re-enable path.
 
 The `eks` rows likewise do not apply to the `os=amazonlinux` leaves
-(`*-eks-amazonlinux-inference`). Those leaves disable
-`nodewright-customizations` entirely (`enabled: false`), so no setup or tuning
-package is rendered and host setup and tuning must come from the AMI.
+(`*-eks-amazonlinux-inference` and `h100-eks-amazonlinux-inference-dynamo`).
+Those leaves disable `nodewright-customizations` entirely (`enabled: false`),
+so no setup or tuning package is rendered and host setup and tuning must come
+from the AMI.
 
 The `tuningEnabled` gate (default `true`; only an explicit `false` disables)
 applies uniformly across the tuning manifests: on the shared `tuning.yaml` it
@@ -119,8 +126,10 @@ omits the `nvidia-tuned` package while `nvidia-setup` keeps running, and on the
 single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`,
 `tuning-gb300.yaml`) it suppresses the whole tuning CR, since the tuning
 package is that CR's only content. On `tuning-rke2.yaml` it does the same
-unless the RDMA package below is enabled. No recipe sets it outside AKS today,
-so default renderings are unchanged elsewhere.
+unless the RDMA package below is enabled. On `tuning-oke-gb300.yaml` it drops
+`nvidia-tuned` and keeps the CR with the CRI-O and VF settle packages described
+below. No recipe sets it outside AKS today, so default renderings are unchanged
+elsewhere.
 
 `tuning-rke2.yaml` also carries an optional `rdma-netns-exclusive` package,
 gated by `rdmaNetnsExclusive` (default `false`; only an explicit `true`
@@ -137,9 +146,30 @@ drops the RDMA package from the CR but does not restore shared mode on nodes
 that already have it: the package has no uninstall step, so that takes
 removing `/etc/modprobe.d/dranet-rdma-netns-exclusive.conf` and a reboot.
 
+`tuning-oke-gb300.yaml` (OKE GB300) carries a `crio-multus-default-network`
+package and an `rdma-vfs-settled` package ahead of `nvidia-tuned`. The CRI-O
+package writes `/etc/crio/crio.conf.d/99-cni-default-network.conf`, which sets
+`cni_default_network = "multus-cni-network"` so CRI-O waits for Multus before
+starting pods, and restarts CRI-O. `rdma-vfs-settled` installs a systemd unit
+that holds kubelet until the RDMA VFs have their driver bound and have stopped
+changing, so the SR-IOV device plugin's one-time scan sees all of them; it is a
+workaround until `nvidia-tuned`'s own VF gate waits for the VFs to settle
+([nodewright-packages#186](https://github.com/NVIDIA/nodewright-packages/issues/186)).
+`nvidia-tuned` runs there with `service: oci`, which takes the OCI GB300
+profile and a reboot. Its DOCA Spectrum-X congestion control is set off with
+`spcx_cc: "off"`, because Oracle Cloud Agent 1.64 runs congestion control on
+the rails itself. With `--set nodewrightcustomizations:spcxCC=on`,
+`nvidia-tuned` (0.11.0 or later) defers to OCA's units when they are running,
+and otherwise runs congestion control itself, which fails on NICs whose
+firmware lacks `USER_PROGRAMMABLE_CC`. Neither shellscript package has an
+uninstall step. Before removing `network-operator` or disabling this component,
+delete the CRI-O drop-in and restart CRI-O on each node, or CRI-O keeps waiting
+for a Multus network that no longer exists and the node stays not ready.
+
 The tuning CR is a normal release-managed resource (no Helm hooks), so once
 its gates leave no package to render (`tuningEnabled=false`, plus
-`rdmaNetnsExclusive` off on `tuning-rke2.yaml`) it is retracted on all
+`rdmaNetnsExclusive` off on `tuning-rke2.yaml`; only `enabled: false` on
+`tuning-oke-gb300.yaml`) it is retracted on all
 deployers — under Helm/Argo (which already stripped the hooks at bundle time) and under
 Flux (where a hook resource would otherwise have been orphaned on the flip,
 since `before-hook-creation` never fires when the CR leaves the render).
@@ -173,7 +203,8 @@ deployment validator renders those values and suppresses the assert only when
 they produce no CR at all — `tuningEnabled: false` on a
 `tuning-gke.yaml`/`tuning-generic.yaml`/`tuning-gb300.yaml` recipe (or on a
 `tuning-rke2.yaml` recipe without `rdmaNetnsExclusive`), or `enabled: false`
-anywhere — so a deliberately untuned cluster passes
+anywhere, including `tuning-oke-gb300.yaml`, whose CR otherwise always renders
+— so a deliberately untuned cluster passes
 rather than failing on an intentionally absent CR
 ([#1844](https://github.com/NVIDIA/aicr/issues/1844)). When a CR does render,
 completion is still required. The suppression is fail-closed: a render, read or
@@ -184,8 +215,8 @@ is unaffected by `tuningEnabled: false`: its `tuning` CR still renders with the
 Workload-gate taint key: operator v0.18.0 changed the chart default
 `runtimeRequiredTaint` from `skyhook.nvidia.com=runtime-required:NoSchedule`
 to `nodewright.nvidia.com=runtime-required:NoSchedule`. The operator recognizes
-both through v0.20.x (tolerates, removes on completion, never double-taints)
-and drops the legacy key in v0.21.0, but auto-taints newly joined nodes with
+both through v0.21.x (tolerates, removes on completion, never double-taints)
+and drops the legacy key in v0.22.0, but auto-taints newly joined nodes with
 the configured key only. The key must have no DNS prefix and be at most 53
 characters, since it names the `nodewright.nvidia.com/autoTaint_<key>` node
 annotation; `aicr bundle` rejects any other key, which operator v0.20.0 refuses
@@ -199,7 +230,7 @@ See [recipes/components/nodewright-customizations/manifests](https://github.com/
 ### Rollout pacing
 
 Every reboot-carrying tuning manifest (`tuning.yaml`, `tuning-gb300.yaml`,
-`tuning-generic.yaml`, `tuning-rke2.yaml`) pins
+`tuning-generic.yaml`, `tuning-rke2.yaml`, `tuning-oke-gb300.yaml`) pins
 `spec.interruptionBudget.count: 1`, so nodewright reboots one matched node at a
 time.
 

@@ -153,6 +153,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -160,6 +161,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
@@ -198,10 +200,11 @@ type Client struct {
 	// (multiple concurrent reads are safe), write locked by Close
 	// (exclusive while clearing). source doesn't change after
 	// construction so it doesn't need locking.
-	mu      sync.RWMutex
-	builder *recipe.Builder
-	dp      recipe.DataProvider
-	source  recipeSource
+	mu              sync.RWMutex
+	builder         *recipe.Builder
+	dp              recipe.DataProvider
+	source          recipeSource
+	artifactOptions *ArtifactOptions
 
 	// version is threaded into the Builder via recipe.WithVersion so
 	// resolved recipes carry it in Metadata.Version. Set by WithVersion;
@@ -299,6 +302,7 @@ func defaultClientDependencies() clientDependencies {
 // For FilesystemSource, the external directory is layered OVER the
 // embedded recipe data — files in the directory override embedded
 // equivalents, and recipes must include a registry.yaml at the root.
+// ExternalFilesystemSource disables all embedded catalog merging and fallback.
 //
 // OCI sources require an immutable sha256 manifest digest. One
 // defaults.OCIRecipeConstructionTimeout deadline bounds the complete OCI
@@ -363,6 +367,24 @@ func newClientWithContextAndDependencies(
 	if err != nil {
 		return nil, err
 	}
+	if c.source.kind == sourceKindOCI {
+		_, inventoryErr := dp.ReadFile(ctx, "artifacts/inventory.yaml")
+		if inventoryErr == nil {
+			return nil, joinDataProviderCleanup(artifact.Invalid("artifact-source-unsupported", "OCI catalogs cannot supply an artifact inventory"), dp)
+		}
+		if !stderrors.Is(inventoryErr, fs.ErrNotExist) && !stderrors.Is(inventoryErr, errors.New(errors.ErrCodeNotFound, "")) {
+			return nil, joinDataProviderCleanup(errors.PropagateOrWrap(inventoryErr, errors.ErrCodeInvalidRequest, "inspect OCI catalog artifact inputs"), dp)
+		}
+	}
+	var artifactOptions ArtifactOptions
+	if c.artifactOptions != nil {
+		artifactOptions = *c.artifactOptions
+	}
+	composed, composeErr := recipe.ComposeArtifacts(ctx, dp, artifactOptions)
+	if composeErr != nil {
+		return nil, joinDataProviderCleanup(composeErr, dp)
+	}
+	dp = composed
 	if err = clientConstructionContextError(ctx); err != nil {
 		return nil, joinDataProviderCleanup(err, dp)
 	}
@@ -400,6 +422,9 @@ func newClientWithContextAndDependencies(
 // validateSourceConfiguration validates the order-independent combination of
 // recipe-source and source-only options before any provider or registry I/O.
 func validateSourceConfiguration(c *Client) error {
+	if c.source.kind == sourceKindOCI && c.artifactOptions != nil {
+		return artifact.Invalid("artifact-source-unsupported", "OCI catalog composition is not supported")
+	}
 	hasOCIOptions := c.ociSource.tempDir != nil
 	if c.source.kind != sourceKindOCI {
 		if hasOCIOptions {
@@ -893,6 +918,9 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 		}
 	}
 
+	if artifactErr := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); artifactErr != nil {
+		return nil, artifactErr
+	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
 		return nil, err
@@ -936,7 +964,11 @@ func (c *Client) inheritIdentity(
 	}
 	// Empty kubeconfig is safe: inheritedRecipePath rejects cm://, the only
 	// artifact form whose load would contact a cluster.
-	priorInternal, err := recipe.LoadFromFileWithProvider(ctx, path, "", c.version, dp)
+	mode := recipe.InheritAll
+	if selection != nil {
+		mode = *selection
+	}
+	priorInternal, err := loadInheritanceSource(ctx, path, c.version, mode, dp)
 	if err != nil {
 		// The loader already returns structured errors with the right code.
 		return err
@@ -953,9 +985,10 @@ func (c *Client) inheritIdentity(
 	if criteriaErr := checkInheritCriteria(resolved.Criteria, priorInternal.Criteria, inheritFrom); criteriaErr != nil {
 		return criteriaErr
 	}
-	mode := recipe.InheritAll
-	if selection != nil {
-		mode = *selection
+	if mode == recipe.InheritAll && priorInternal.Metadata.Artifacts != nil {
+		if err := recipe.CheckArtifactInputs(priorInternal.Metadata.Artifacts, dp); err != nil {
+			return err
+		}
 	}
 	if applyErr := recipe.ApplyInheritedIdentityWithMode(resolved.ComponentRefs, priorInternal.ComponentRefs, mode); applyErr != nil {
 		return applyErr
@@ -1291,6 +1324,9 @@ func (c *Client) ResolveRecipeFromCriteriaWithOptions(
 			return nil, inheritErr
 		}
 	}
+	if artifactErr := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); artifactErr != nil {
+		return nil, artifactErr
+	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
 		return nil, err
@@ -1493,6 +1529,11 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	if applyErr := applyNVSentinelDatastoreState(ctx, internal, internalSnap); applyErr != nil {
 		return nil, applyErr
 	}
+	// The RDMA namespace mode is evidence only; CheckRDMANamespaceModeCoherent
+	// compares it with the bundle's RDMA attachment.
+	if applyErr := applyRDMANamespaceMode(ctx, internal, internalSnap); applyErr != nil {
+		return nil, applyErr
+	}
 	// Last write to the refs before the facade projection, so the emitted
 	// recipe and the Components view agree on where each component lives.
 	if resolveCfg.inheritFrom != "" {
@@ -1500,6 +1541,9 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 			ctx, resolveCfg.inheritFrom, resolveCfg.inheritMode, builder.DataProvider(), internal); inheritErr != nil {
 			return nil, inheritErr
 		}
+	}
+	if artifactErr := internal.ValidateArtifactLock(ctx, internal.ComponentRefs, nil, nil); artifactErr != nil {
+		return nil, artifactErr
 	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
@@ -1537,7 +1581,8 @@ func buildDataProvider(
 	case sourceKindFilesystem:
 		embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
 		layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
-			ExternalDir: s.path,
+			ExternalDir:  s.path,
+			ExternalOnly: s.externalOnly,
 		})
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
@@ -1796,6 +1841,9 @@ func (c *Client) LoadRecipe(ctx context.Context, path, kubeconfig string) (*Reci
 
 	loaded, err := recipe.LoadFromFileWithProvider(ctx, path, kubeconfig, c.version, dp)
 	if err != nil {
+		if c.source.kind == sourceKindOCI {
+			return nil, artifactConsumerError(err, "artifact-source-unsupported")
+		}
 		// Don't re-wrap — the loader already returns structured errors
 		// with the right code (ErrCodeInvalidRequest for a bad overlay,
 		// ErrCodeInternal for read/parse failures).
@@ -1929,6 +1977,10 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 			"recipe has no enabled components")
 	}
 
+	if artifactErr := validateArtifactFacade(r); artifactErr != nil {
+		return nil, artifactErr
+	}
+
 	// Resolve the complete Helm-value inventory ONCE, before any gate runs and
 	// before emitting any component. Two properties depend on this ordering:
 	//
@@ -1957,8 +2009,11 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 		return nil, scopeErr
 	}
 	if scope.Server != "" && len(scope.Consumers) == 0 {
-		slog.Warn("PromQL server is enabled but no enabled component declares telemetry.promql, so its Prometheus scrapes nothing",
+		slog.Warn("PromQL server is enabled but no enabled component declares telemetry.promql, so its Prometheus keeps no series",
 			"component", scope.Server)
+	}
+	if artifactErr := r.internal.ValidateArtifactLock(ctx, r.internal.ComponentRefs, helmValues, nil); artifactErr != nil {
+		return nil, artifactErr
 	}
 	pinned := r.internal.WithResolvedValues(helmValues)
 	if err := bundler.ValidateAccountingValues(pinned, helmValues); err != nil {
@@ -1986,6 +2041,10 @@ func (c *Client) BundleComponents(ctx context.Context, r *RecipeResult) ([]Compo
 		return nil, preflightErr
 	}
 
+	return encodeComponentBundles(ctx, r, dp, helmValues)
+}
+
+func encodeComponentBundles(ctx context.Context, r *RecipeResult, dp recipe.DataProvider, helmValues map[string]map[string]any) ([]ComponentBundle, error) {
 	bundles := make([]ComponentBundle, 0, len(r.Components))
 	for i := range r.Components {
 		// Bail on every iteration so a long recipe doesn't hold
@@ -2477,7 +2536,13 @@ func (c *Client) PreflightValidatorServiceAccount(ctx context.Context, opts ...V
 // snapshot, runs the selected validation phases (by default
 // PhaseDeployment, PhaseConformance, PhasePerformance) in order, and
 // returns one PhaseResult per phase run. Pass WithValidationPhases to
-// restrict the run to a subset.
+// restrict the run to a subset. On interruption, the returned results include
+// completed checks and the partial current phase alongside ErrCodeCanceled
+// (operator abort) or ErrCodeTimeout (deadline). If privileged RBAC revocation
+// also fails after an operator abort, ErrCodeInternal preserves both causes and
+// warns that the cluster-admin binding may be orphaned. Other errors may also
+// arrive with the results of phases completed before them. Callers must inspect
+// both results and error; partial results do not mean the run succeeded.
 //
 // recipe must come from a prior Client.ResolveRecipe call on this
 // Client — it carries the unexported internal recipe state needed to
@@ -2571,10 +2636,12 @@ func (c *Client) ValidateState(
 	// Apply a facade-level deadline only as opted into by WithValidationTimeout,
 	// mirroring MakeBundle. The default (cfg.timeout == nil) keeps the
 	// ValidationOperationTimeout cap (75m), which sits ABOVE the largest
-	// rendered per-check Job deadline (the 65m inference-perf catalog timeout
-	// plus the 3m30s ValidatorJobDeadlineHeadroom, i.e. 68m30s; the
-	// CheckExecutionTimeout fallback is 55m), so a single hung check fires its
-	// own per-check timeout first and surfaces as a structured check failure
+	// per-check envelope: the 65m inference-perf catalog timeout plus the 3m
+	// ValidatorJobDeadlineHeadroom, the 60s SIGTERM window and 5s margin
+	// (v1.WaitEnvelopeFor, 69m05s), the 30s result capture and the 90s pod
+	// termination wait, i.e. 71m05s; the CheckExecutionTimeout fallback is
+	// 55m. A single hung check therefore reaches its own verdict first and
+	// surfaces as a structured check failure
 	// rather than a wrapping deadline-exceeded that loses the per-check signal —
 	// the behavior controllers rely on. It is a per-check ordering guarantee and
 	// a coarse operation cap, not a bound on the serial sum of an all-phase run
@@ -2651,10 +2718,7 @@ func (c *Client) ValidateState(
 		return nil, err
 	}
 	results, err := v.ValidatePhases(ctx, internalPhases, validationInput, toInternalSnapshot(snap))
-	if err != nil {
-		return nil, err
-	}
-	return fromInternalPhaseResults(results), nil
+	return fromInternalPhaseResults(results), err
 }
 
 // loadManifestFiles concatenates the recipe-attached ManifestFiles for

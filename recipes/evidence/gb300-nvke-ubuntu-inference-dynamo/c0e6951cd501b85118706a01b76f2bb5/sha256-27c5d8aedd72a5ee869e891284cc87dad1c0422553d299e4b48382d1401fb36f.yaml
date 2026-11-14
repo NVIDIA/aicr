@@ -1,0 +1,12 @@
+attestations:
+  - attestedAt: 2026-11-10T20:03:27Z
+    bundle:
+      digest: sha256:27c5d8aedd72a5ee869e891284cc87dad1c0422553d299e4b48382d1401fb36f
+      oci: ghcr.io/xdu31/aicr-evidence:gb300-nvke-ubuntu-inference-dynamo-9e122342f97b
+      predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: https://github.com/xdu31/aicr/.github/workflows/evidence-publish.yaml@refs/heads/evidence/nvke
+      issuer: https://token.actions.githubusercontent.com
+      rekorLogIndex: 192943198
+recipe: gb300-nvke-ubuntu-inference-dynamo
+schemaVersion: 1.0.0

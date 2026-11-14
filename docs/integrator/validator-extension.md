@@ -28,6 +28,15 @@ A validator is any container that follows the exit code contract:
 | `0` | Check passed |
 | `1` | Check failed |
 | `2` | Check skipped |
+| `3` | Interrupted by SIGTERM before reaching a verdict (CTRF `other`) |
+
+Any other exit code, or a container that never terminates, maps to CTRF `other`
+(indeterminate), which blocks like `failed`. A validator that traps SIGTERM
+(Job deadline, eviction, node drain or operator cancellation) should finish its
+cleanup within the pod's 60s termination grace (30s for cleanup, 30s to write the
+termination message) and exit `3`, not `0`, because
+its verdict is incomplete. Validators built on `validators.Run` do this
+automatically.
 
 The container receives:
 
@@ -69,15 +78,15 @@ validators:
 A validator catalog entry can declare `dependencyAffinity` to control where its
 orchestrator Pod is scheduled relative to the components it queries. Use this
 when a check's correctness depends on pod-to-pod network reachability — the
-canonical case is `ai-service-metrics`, which dials Prometheus over a ClusterIP
+canonical case is `pod-autoscaling`, which dials Prometheus over a ClusterIP
 Service.
 
 ```yaml
-- name: ai-service-metrics
+- name: pod-autoscaling
   phase: conformance
   image: ghcr.io/nvidia/aicr-validators/conformance:latest
-  timeout: 5m
-  args: ["ai-service-metrics"]
+  timeout: 15m
+  args: ["pod-autoscaling"]
   dependencyAffinity:
     - componentRef: kube-prometheus-stack
       podLabelSelector:
@@ -244,7 +253,7 @@ ENTRYPOINT ["/check.sh"]
 
 - Should run as non-root (the validator Job sets no `securityContext`, so the image's own `USER` applies)
 - Must handle the mounted data paths (`/data/snapshot/`, `/data/validation/`)
-- **Must** self-terminate within the catalog `timeout` (published as `AICR_CHECK_TIMEOUT`) rather than rely on the Job — the Job's `activeDeadlineSeconds` is set to the catalog entry plus a fixed headroom, as a backstop for a check that never exits on its own. Self-termination is what preserves the logs: a pod that exited on its own is no longer *active*, so the Job controller's `deleteActivePods` leaves it in place as `Failed` for the orchestrator to read, whereas a pod still running when the backstop fires is deleted along with its verdict
+- **Must** self-terminate within the catalog `timeout` (published as `AICR_CHECK_TIMEOUT`) rather than rely on the Job — the Job's `activeDeadlineSeconds` is set to the catalog entry plus a fixed headroom, as a backstop for a check that never exits on its own. Self-termination is what preserves the logs: a pod that exited on its own is no longer *active*, so the Job controller's `deleteActivePods` leaves it in place as `Failed` for the orchestrator to read, whereas a pod still running when the backstop fires is deleted, so only its termination message and exit code (not its logs) survive. The headroom (3m) covers container startup, deferred cleanup and a result flush, and the orchestrator waits a further 60s SIGTERM window past the Job deadline
 - Should write meaningful evidence to stdout for the CTRF report
 - Must use explicit image tags (not `:latest`) for reproducibility in external catalogs
 

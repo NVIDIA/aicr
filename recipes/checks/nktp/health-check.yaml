@@ -23,7 +23,7 @@
 # its lgtm Service exists, which the chart renders only then. Deleting both
 # that Service and its Deployment by hand passes.
 #
-# Names assume release and namespace nktp, chart 0.1.1-rc.3. A recipe that
+# Names assume release and namespace nktp, chart 0.2.0. A recipe that
 # relocates the namespace, renames workloads, or disables a bundled exporter
 # must supply matching healthCheckAsserts.
 #

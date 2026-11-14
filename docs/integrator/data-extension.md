@@ -11,6 +11,46 @@ catalog. The embedded catalog is precedence-low; your directory is
 precedence-high. Adding a file under the right path either supplements (for
 catalog content) or overrides (for component files) the embedded equivalent.
 
+## Use a fully external catalog
+
+Add `--external-only` to load only the directory selected by `--data`:
+
+```bash
+aicr recipe --data ./catalog --external-only --service my-cloud --accelerator my-gpu
+aicr recipe list --data ./catalog --external-only
+aicr recipe validate --data ./catalog --external-only ./catalog/overlays/base.yaml
+```
+
+The mode is available on every `--data` command: `recipe`, `recipe list`,
+`recipe validate`, `query`, `bundle`, `validate`, and `mirror list`. In an
+`AICRConfig`, set `spec.recipe.data` and `spec.recipe.externalOnly: true`.
+An explicit `--external-only=false` overrides the config setting. Neither
+`--data` nor `--external-only` has an environment-variable equivalent.
+
+Your directory must provide `registry.yaml`, `overlays/base.yaml` for recipe
+resolution, and every referenced overlay, mixin, component values file,
+manifest, upgrade record and health-check assertion. Validator operations
+also require `validators/catalog.yaml`. Required files or entries that are
+missing produce an error naming the missing input. Optional files remain
+optional; they never inherit embedded content.
+
+The invoking CLI's catalog provider does not read, enumerate, merge or fall
+back to embedded catalog files.
+A same-path profile-only overlay therefore cannot extend an embedded overlay;
+supply the complete external declaration. The layering rules and optional
+folder layout below describe the default mode without `--external-only`.
+
+The flag controls catalog data. Deployer and renderer templates, conformance
+schemas and trust roots remain embedded implementation resources. `aicrd`
+continues to use its embedded catalog; server catalog configuration is outside
+this mode. In-cluster validator images also retain their own embedded catalogs:
+deployment checks load component values and manifests from them, and performance
+checks fall back to the embedded registry's trainer version when neither the
+recipe nor an environment override supplies a pin. The external catalog is not
+passed to these images, in either layered or external-only mode.
+Artifact-signing commands that specifically sign the shipped
+catalog do not accept `--data` or `--external-only`.
+
 ## Use cases
 
 | Need | How `--data` helps |
@@ -349,14 +389,24 @@ from a per-run namespace named `aicr-inference-perf-<run>`, so the Gateway's
 per-run namespace carries, `app.kubernetes.io/component=inference-perf`); the
 shipped agentgateway Gateway does. A listener that keeps the Gateway API
 default (`Same`) rejects the route, and the run fails at once with the
-listener's `Accepted` reason rather than as a readiness timeout.
+listener's `Accepted` reason rather than as a readiness timeout. The
+`inference-gateway` conformance check's traffic phase attaches its HTTPRoute
+from a per-run namespace `gateway-traffic-<run>` that carries the same label,
+so a listener admitting either form admits both; a listener that rejects it
+fails that check after the route-accept wait (`GatewayTrafficRouteAcceptTimeout`,
+2 minutes) with a timeout error that carries the `Accepted` reason the
+listener reported, such as `NotAllowedByListeners`.
 
 `aicr validate --cncf-submission` runs the same `inference-gateway`
 conformance check and renders its result as the `ai_inference` evidence page,
 so a recipe that declares no inference gateway leaves that requirement not
 tested rather than certifying a Gateway the recipe does not ship. `PASS`
-requires the GatewayClass `Accepted`, the Gateway `Programmed` and the
-InferencePool CRD `Established` for the declared Gateway.
+requires, for the declared Gateway, the GatewayClass `Accepted`, the Gateway
+`Programmed`, the InferencePool CRD `Established`, the gateway's network
+exposure and data-plane readiness checks, and the traffic phase: the test HTTPRoute
+`Accepted` with `ResolvedRefs` on the listener the probe targets, every
+header-matched request reaching the canary backend, and one weighted round
+splitting the rest within tolerance of the declared weights.
 
 ## Precedence rules
 
@@ -375,9 +425,10 @@ When in doubt, `aicr --debug recipe ... --data <dir>` logs the resolved source
 `recipes/overlays/aks.yaml` declares the `gpuStack` configuration profile
 (`azure-managed` default, `operator-managed` alternative) over the GPU driver/toolkit
 ownership paths, and `recipes/overlays/gke-cos.yaml` declares its own `gpuStack`
-(`gke-default` default, `bundle-installer` alternative) over device-plugin ownership —
+(`gke-default` default, `bundle-installer` and `dra` alternatives) over whole-GPU
+advertiser ownership —
 the GKE default value (`gke-default`) additionally declares
-`advertiser: external`, and both GKE values trigger the #1327
+`advertiser: external`, and every GKE value triggers the #1327
 allocation-policy closure, so their effective lock set is larger than the
 declared paths (see
 [Configuration Profiles](recipe-development.md#configuration-profiles)).

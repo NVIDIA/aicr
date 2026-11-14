@@ -253,8 +253,8 @@ reported as no drift.
 // role from a
 // `gcloud container node-pools list --cluster <cluster> --format=json`
 // dump, merged as the K8s.gke-gpu-pools.gpu-driver-installation reading.
-// It's required only when resolving the GKE `bundle-installer` gpuStack
-// value from a snapshot. The default `gke-default` value needs no pool
+// It's required only when resolving the GKE `bundle-installer` or `dra`
+// gpuStack value from a snapshot. The default `gke-default` value needs no pool
 // dump.
 // Give the Job-backed snapshot its own deadline: contexts cap the
 // configured timeouts from the parent side, so reusing the 30-second
@@ -287,7 +287,7 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Cleanup:         true,
 	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
 	OKEAddonsPath:   "/path/to/oke-addons.json",    // OKE only
-	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer only
+	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer and dra only
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
@@ -336,6 +336,31 @@ if err != nil {
 }
 for _, r := range results {
 	log.Printf("phase=%s status=%s duration=%s", r.Phase, r.Status, r.Duration)
+}
+```
+
+**Results and error together.** `ValidateState` can return non-nil
+`results` **together with** a non-nil error, so an `err != nil` check alone
+discards them. When the run is interrupted (`ErrCodeCanceled` for a canceled
+`ctx`, `ErrCodeTimeout` for a deadline), the results hold every completed phase
+plus the partial current phase. Unstarted checks in it are `skipped`, and the
+phase reports a blocking status (`other` unless already `failed`). If
+privileged RBAC revocation also fails after a cancellation, the error is
+`ErrCodeInternal`, wrapping both causes and warning that the cluster-admin
+binding may be orphaned. Other errors, such as a later phase's pre-flight
+rejection, can also arrive alongside the phases completed before it. Partial
+results never mean the run succeeded: inspect both return values, and treat a
+non-nil error as a failed run even when the results look complete.
+
+```go
+results, err := client.ValidateState(valCtx, aksResult, snap,
+	aicr.WithValidationKubeconfig("/path/to/target-kubeconfig"),
+	aicr.WithValidationTimeout(0))
+for _, r := range results { // may be non-empty even when err != nil
+	log.Printf("phase=%s status=%s", r.Phase, r.Status)
+}
+if err != nil {
+	log.Fatalf("validate state: %v", err) // the run did not complete
 }
 ```
 
@@ -516,8 +541,9 @@ with the Client's version, the same combined document `aicr validate` writes.
 
 ### CNCF AI Conformance evidence
 
-Four methods render CNCF AI Conformance evidence from a CTRF report, and a
-fifth composes the whole submission run, matching
+Four methods render CNCF AI Conformance evidence pages from a CTRF report,
+two write and pre-check the complete submission directory, and one composes
+the whole submission run, matching
 `aicr validate --phase conformance --cncf-submission --evidence-dir`:
 
 - `RenderCNCFEvidence(ctx, report, dir)` writes one markdown file per
@@ -535,6 +561,9 @@ fifth composes the whole submission run, matching
   value `Snapshot.KubernetesVersion()` returns) selects the checklist for the
   cluster's minor, or the nearest carried one with a warning when this build
   has none for it (below v1.35 renders v1.35, above v1.37 renders v1.37).
+  `Documented` attests requirements the run only observed by public
+  documentation (`spec.validate.evidence.cncf.documented`), which
+  establishes them for the verdict without changing their status;
   `NotApplicable` declares conditional MUSTs not applicable with a
   justification (`spec.validate.evidence.cncf.notApplicable`; only
   `cluster_autoscaling` today, any other id is refused with
@@ -543,7 +572,10 @@ fifth composes the whole submission run, matching
   whose requirement the selected version no longer lists (`dra_support` from
   v1.36 on) renders as supporting evidence rather than a requirement row.
 - `ValidateCNCFEvidenceOptions(opts)` checks `RenderCNCFEvidenceOptions` the
-  way the render will, without rendering: the version resolves and every
+  way the render will, without rendering: the version resolves, every
+  `Documented` entry names a requirement of that version not also in
+  `NotApplicable` and carries at least one absolute http(s) URL and a note,
+  and every
   `NotApplicable` id is a conditional MUST with a justification. `aicr
   validate` calls it before any recipe, snapshot or cluster work so a bad
   `notApplicable` key fails in milliseconds; the render repeats the check as
@@ -558,10 +590,12 @@ fifth composes the whole submission run, matching
   checklist whatever the cluster runs. The aggregate is fail-closed and
   scoped by level (see [Requirement status](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#requirement-status)):
   `Requirements` holds every requirement in checklist order with its
-  `Status` (`passed`, `failed`, `not tested`, `not applicable`), `Reason`,
-  the `Proof` checks that established a pass, and the result of every
-  expected `Checks` entry; `Passed()` reports whether every
-  applicable MUST passed and `IncompleteMusts()` lists those that did not. A
+  `Status` (`passed`, `observed`, `failed`, `not tested`, `not applicable`),
+  `Reason`, the `Proof` checks that established a pass, and the result of
+  every expected `Checks` entry; `observed` is a pass marked observation-only
+  by the check (`extra.observationOnly`) and does not establish a MUST.
+  `Passed()` reports whether every applicable MUST passed and
+  `IncompleteMusts()` lists those that did not. A
   SHOULD never fails `Passed()`. A report with no submission-required result
   writes nothing, and the aggregate reports every requirement not tested
   except those `NotApplicable` declares, which stay not applicable.
@@ -579,12 +613,83 @@ for _, r := range agg.IncompleteMusts() {
 }
 ```
 
+- `WriteCNCFSubmission(ctx, report, dir, snap, rec, opts)` writes the
+  complete submission directory `aicr validate --cncf-submission` writes:
+  `PRODUCT.yaml`, `README.md`, `junit.xml`, `e2e.log` and the evidence pages
+  under `evidence/`, redacted in one pass (`pkg/evidence/redact`), then
+  checked by the pinned upstream validator (`cncf/k8s-ai-conformance`
+  `scripts/validate.go`, compiled in at the revision recorded in the README;
+  it needs network access to the CNCF landscape and to every URL cited).
+  `opts.Vendor` (`CNCFVendor`, the PRODUCT.yaml metadata) is required;
+  `opts.Documented` (`CNCFDocumentation` per requirement id) attests
+  requirements the run only observed by public documentation, and
+  `opts.NotApplicable`, `opts.ConformanceVersion` and `opts.KubernetesVersion`
+  are `RenderCNCFEvidenceOptions`'. `snap` and `rec` supply the README's
+  platform facts (Kubernetes version, service, OS, node counts, the recipe's
+  pinned component versions) and the node names the redaction aliases. The
+  directory is written under `<dir>.incomplete` and moved to `dir` only when
+  every applicable MUST is established and the validator accepts it, so a
+  `PRODUCT.yaml` at `dir` is complete by construction (an empty directory
+  that existed before an incomplete run stays empty). Two outcomes are not
+  errors: a complete directory (`Complete` true, `Dir` the requested path),
+  and an applicable MUST that is not established (a nil error, `Complete`
+  false, `Dir` the kept staged copy under `<dir>.incomplete/`, the validator
+  not run); the exit status is then the aggregate's `Outcome`, as for the
+  pages render. Errors return a nil result: a write error before the
+  redaction pass completes removes the staging tree (nothing unredacted is
+  left behind); a write error after it, or a validator rejection, is
+  `ErrCodeInternal` with the validator's report in the message and the
+  redacted staged copy kept; a validator that cannot fetch the landscape is
+  `ErrCodeUnavailable`; a `<dir>.incomplete` that appeared since the
+  pre-flight is `ErrCodeConflict` and is never removed. The statuses, the export rule for `junit.xml` and
+  `e2e.log`, and the manual-attestation rule are documented under
+  [Submission directory](https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/index.md#submission-directory).
+- `ValidateCNCFSubmissionOptions(opts, dir)` checks `CNCFSubmissionOptions`
+  and the directory the way `WriteCNCFSubmission` will, without a run: the
+  version resolves, `NotApplicable` and `Documented` are well-formed, every
+  required vendor field is present and well-formed (absolute http(s) URLs, a
+  mail address, a `k8sConformanceUrl` in the k8s-conformance tree, no
+  bracketed placeholder), and `dir` is absent or empty with no stale
+  `.incomplete` sibling. `aicr validate` runs it before any check so a bad
+  config fails in milliseconds; whether the URLs answer and whether the vendor
+  is a CNCF member is the validator's check at the end of the run.
+
+```go
+if cncfOpts.Vendor == nil {
+	return errors.New(errors.ErrCodeInvalidRequest, "spec.validate.evidence.cncf.vendor is required for a submission run")
+}
+res, err := client.WriteCNCFSubmission(ctx, report, "./submission", snap, rec, aicr.CNCFSubmissionOptions{
+	KubernetesVersion: snap.KubernetesVersion(),
+	NotApplicable:     cncfOpts.NotApplicable,
+	Documented:        cncfOpts.Documented,
+	Vendor:            *cncfOpts.Vendor,
+})
+if err != nil {
+	return err // write, redaction or validator failure; the staged copy is kept
+}
+if !res.Complete {
+	log.Printf("incomplete; staged at %s", res.Dir)
+}
+return res.Aggregate.Outcome(report, true)
+```
+
 - `CollectCNCFEvidence(ctx, recipe, opts)` is the submission run composed
   from the methods above: `CollectSnapshot` deploys the snapshot agent,
   `ValidateState` runs the conformance phase the recipe declares,
   `MergeReports` combines the results and `RenderCNCFEvidenceWithResult`
-  writes the evidence under `opts.Dir` against the checklist of the cluster's
-  Kubernetes minor. Each stage keeps its own bound (the snapshot its 5-minute
+  writes the evidence pages under `opts.Dir` against the checklist of the
+  cluster's Kubernetes minor, or, when `opts.Vendor` is set,
+  `WriteCNCFSubmission` writes the complete submission directory there
+  instead (`opts.Documented` applies either way). With a vendor, the
+  snapshot's Kubernetes version is checked against the carried checklists
+  (`ValidateCNCFSubmissionOptions`) between the snapshot and the validator
+  run: a submission certifies the cluster's exact minor, so a minor no
+  carried checklist matches (1.34 or 1.38 alike) is refused with
+  `ErrCodeInvalidRequest` before any validator Job unless
+  `opts.ConformanceVersion` names a checklist (`"v1.37"`), which is then
+  carried into the write and recorded in the README as selected explicitly;
+  the write repeats the check as the backstop. The pages render keeps its
+  nearest-checklist fallback. Each stage keeps its own bound (the snapshot its 5-minute
   budget plus grace, the run the 75-minute `ValidateState` default), and
   `opts.Kubeconfig` and `opts.Namespace` (default `aicr-validation`, as
   `aicr validate --namespace`) apply to both the agent and the validator
@@ -612,17 +717,23 @@ for _, r := range agg.IncompleteMusts() {
 
 ```go
 err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
-	Dir:           "./cncf-evidence",
-	NotApplicable: map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"},
+	Dir:                "./cncf-evidence",
+	NotApplicable:      map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"},
+	ConformanceVersion: "", // empty: the cluster's exact minor must be a carried checklist
 })
 ```
 
 None of these methods is in v0.22.0 or earlier. `RenderCNCFEvidenceWithOptions`,
 `RenderCNCFEvidenceOptions` and `Snapshot.KubernetesVersion` are not in v1.0.0
-or earlier either, and `RenderCNCFEvidenceWithResult`,
+or earlier either; `RenderCNCFEvidenceWithResult`,
 `ValidateCNCFEvidenceOptions`, `CNCFRequirementAggregate`,
-`RenderCNCFEvidenceOptions.NotApplicable` and `CNCFEvidenceOptions.NotApplicable`
-are not in v1.2.0 or earlier.
+`RenderCNCFEvidenceOptions.NotApplicable`, `CNCFEvidenceOptions.NotApplicable`,
+`WriteCNCFSubmission`, `ValidateCNCFSubmissionOptions`, `CNCFSubmissionOptions`,
+`CNCFSubmissionResult`, `CNCFVendor`, `CNCFDocumentation`,
+`RenderCNCFEvidenceOptions.Documented`, `CNCFEvidenceOptions.Vendor`,
+`CNCFEvidenceOptions.Documented`, `CNCFCollectOptions.Vendor`,
+`CNCFCollectOptions.Documented`, `CNCFCollectOptions.ConformanceVersion` and
+`ValidateCNCFRecipeCoverage` are not in v1.2.0 or earlier.
 
 ## Recipe sources
 
@@ -1050,6 +1161,13 @@ caller can shape a response without reimplementing hydrate-then-select:
 wrap chain and would match an `ErrCodeNotFound` cause nested inside a
 hydration failure.
 
+`SummarizeRecipe(rec)` returns the overview `aicr query --summary` prints, as
+an `*aicr.RecipeSummary` (a transparent alias of `pkg/recipe.Summary`):
+identity, criteria, applied overlays, constraints, enabled components in
+deployment order, and the validation checks per phase. It performs no I/O and
+does not hydrate component values. A `nil` `*RecipeResult`, or one without
+internal recipe state, returns `ErrCodeInvalidRequest`.
+
 ### Delivering a collected snapshot
 
 `snapshotter.DeliverSnapshot(ctx, raw, snapshotter.SnapshotDelivery{...})`
@@ -1208,7 +1326,8 @@ derive step rather than the load step.
 
 `IsRequireEvidence()` is a read, like `IsCriteriaStrict()`. It does not change
 resolution. After `ResolveRecipe`, call `PublishedEvidenceRequired` to combine
-that field with a flag and `AICR_REQUIRE_EVIDENCE`, then
+that field with a flag and `AICR_REQUIRE_EVIDENCE` (named by
+`aicr.RequireEvidenceEnvVar`), then
 `Client.RequirePublishedEvidence` when it reports true. That call rejects a
 Client whose recipe source is not `EmbeddedSource()`, including
 `FilesystemSource` from `--data` or `spec.recipe.data`, before it checks the

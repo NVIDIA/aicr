@@ -537,13 +537,17 @@ var versionPinExemptions = []versionPinExemption{
 	{source: "b300-mk8s-ubuntu-inference-dynamo", component: "kai-scheduler", field: "version", expectedPin: "v0.17.1", expectedDefault: "v0.16.9", reason: "Matches the Nebius reference stack in ansjindal/ai-factory-dli PR307; other services retain the registry version."},
 	{source: "b300-mk8s-ubuntu-inference-dynamo", component: "dynamo-platform", field: "version", expectedPin: "1.5.0", expectedDefault: "1.4.2", reason: "Matches the Nebius reference stack in ansjindal/ai-factory-dli PR307; qualify the matching operator rather than an untested downgrade."},
 	{
-		source:          "aks",
-		component:       "kube-prometheus-stack",
+		source:          "vr200-nvke-ubuntu-training",
+		component:       "network-operator",
 		field:           "version",
-		expectedPin:     "83.7.0",
-		expectedDefault: "84.4.0",
-		reason: "AKS is pinned to chart 83.7.0 to match its validated working cluster " +
-			"state (#700); the registry default (84.4.0) tracks the base/EKS/GKE line and " +
-			"is installed by every non-AKS recipe, so the BOM's default is not fictional.",
+		expectedPin:     "26.7.1",
+		expectedDefault: "26.7.0",
+		reason: "ConnectX-9 needs the firmware-discovery fallback added in Mellanox " +
+			"c27f7ae (#499/#533), which 26.7.0's nic-configuration-daemon does not carry. " +
+			"Measured on a VR200 worker: 26.7.0 fails with \"failed to discover NIC " +
+			"devices\" because flint cannot read ConnectX-9, while 26.7.1 falls back to " +
+			"sysfs and discovers every port. Only this leaf ships a NicClusterPolicy with " +
+			"nicConfigurationOperator on ConnectX-9, so the registry default stays 26.7.0 " +
+			"for every other recipe rather than moving the whole fleet for one accelerator.",
 	},
 }

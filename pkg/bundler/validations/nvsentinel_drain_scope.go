@@ -336,7 +336,7 @@ func drainEntryViolations(componentName string, values map[string]any) []error {
 // that several userNamespaces entries match: it collects the namespace under
 // every matching entry's mode, then acts on Immediate before
 // DeleteAfterTimeout before AllowCompletion, whatever the entries' order
-// (node-drainer/pkg/evaluator/evaluator.go, NVSentinel v1.28.0).
+// (node-drainer/pkg/evaluator/evaluator.go, NVSentinel v1.31.0).
 func modeStrength(mode string) int {
 	return map[string]int{
 		drainscope.ModeAllowCompletion:    1,
@@ -380,11 +380,11 @@ func catchAllViolations(values map[string]any, fail func(format string, args ...
 	}
 }
 
-// podDrainPolicyViolations checks a podDrainPolicies entry's namespace glob
-// and pod selector the way node-drainer compiles them at startup
-// (node-drainer/pkg/config/pod_policies.go, NVSentinel v1.28.0), where either
-// one invalid stops it from starting. An empty namespace means every
-// namespace.
+// podDrainPolicyViolations checks a podDrainPolicies entry's namespace glob,
+// pod selector and owner kinds the way node-drainer compiles them at startup
+// (node-drainer/pkg/config/pod_policies.go, NVSentinel v1.31.0), where any one
+// invalid stops it from starting. An empty namespace means every namespace. A
+// policy needs a podSelector, ownerKinds, or both.
 func podDrainPolicyViolations(componentName, path string, i int, fields map[string]any) []error {
 	var errs []error
 	fail := drainFailer(componentName, &errs)
@@ -398,11 +398,14 @@ func podDrainPolicyViolations(componentName, path string, i int, fields map[stri
 				namespace)
 		}
 	}
+	hasOwnerKinds := ownerKindViolations(path, i, fields, fail)
 	raw, set := fields["podSelector"]
 	selector, isString := raw.(string)
 	switch {
 	case !set || raw == nil || (isString && strings.TrimSpace(selector) == ""):
-		fail("%s[%d].podSelector is unset, so node-drainer refuses to start", path, i)
+		if !hasOwnerKinds {
+			fail("%s[%d].podSelector and ownerKinds are both unset, so node-drainer refuses to start", path, i)
+		}
 	case !isString:
 		fail("%s[%d].podSelector is %v, want a label selector string", path, i, describe(raw, true))
 	default:
@@ -412,6 +415,46 @@ func podDrainPolicyViolations(componentName, path string, i int, fields map[stri
 		}
 	}
 	return errs
+}
+
+// indirectOwnerKinds maps the built-in kinds that own pods only through
+// another controller to the kind that owns them directly. node-drainer
+// compares ownerKinds with the pod's controller reference and follows no
+// further, so these never match. Kinds outside the map pass, because a custom
+// controller can own pods directly.
+var indirectOwnerKinds = map[string]string{
+	"Deployment": "ReplicaSet",
+	"CronJob":    "Job",
+}
+
+// ownerKindViolations reports a podDrainPolicies entry's ownerKinds that
+// node-drainer refuses at startup (a value that is not a list, or a kind that
+// is empty or padded with whitespace) and a built-in kind that never owns a pod
+// directly. It returns whether the policy matches on owners at all, which an
+// absent or empty list does not.
+func ownerKindViolations(path string, i int, fields map[string]any, fail func(format string, args ...any)) bool {
+	raw, set := fields["ownerKinds"]
+	if !set || raw == nil {
+		return false
+	}
+	kinds, isList := raw.([]any)
+	if !isList {
+		fail("%s[%d].ownerKinds is %v, want a list of controller kinds", path, i, describe(raw, true))
+		return false
+	}
+	for j, entry := range kinds {
+		kind, isString := entry.(string)
+		if !isString || kind == "" || strings.TrimSpace(kind) != kind {
+			fail("%s[%d].ownerKinds[%d] is %v, want a controller kind such as StatefulSet, so node-drainer refuses "+
+				"to start", path, i, j, describe(entry, true))
+			continue
+		}
+		if direct, indirect := indirectOwnerKinds[kind]; indirect {
+			fail("%s[%d].ownerKinds[%d] is %q, which is never a pod's direct controller, so the entry matches no pod; "+
+				"use %s", path, i, j, kind, direct)
+		}
+	}
+	return len(kinds) > 0
 }
 
 // validGlob reports whether pattern is a filepath.Match pattern, the form

@@ -12,6 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Hand-curated illustration of RecipeResult structure; intentionally incomplete.
+# Components, metadata, and validation differ from actual generated output.
+# Generate a current recipe with `aicr recipe` before bundling or validation.
+# Omits metadata.selectedProfile and its ownership locks for the AKS gpuStack
+# profile, as well as profile-specific overrides and readiness constraints.
+# The legacy v1 payload does not represent a current profiled AKS recipe.
+
 kind: RecipeResult
 apiVersion: aicr.run/v1
 metadata:
@@ -143,7 +150,7 @@ componentRefs:
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.20.0
+    version: v0.21.0
     valuesFile: components/nodewright-operator/values.yaml
   - name: nvidia-dra-driver-gpu
     namespace: nvidia-dra-driver

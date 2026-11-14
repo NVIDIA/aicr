@@ -62,15 +62,15 @@ aicr bundle --recipe recipe.yaml --deployer argocd --output ./bundle \
 
 Use a fresh output directory for each bundle. Setting only
 `crds.enabled=false` does not avoid collisions with the existing controllers,
-webhooks, or cluster-scoped RBAC. The pinned NodeWright v0.20.0 operator
+webhooks, or cluster-scoped RBAC. The pinned NodeWright v0.21.0 operator
 manages self-signed webhook certificates; its chart does not require
 cert-manager. Check the requirements of other workloads before omitting it.
 Apply the same ownership review to existing Prometheus Operator CRDs,
 monitoring components, and schedulers before installing the bundle; an
 offline recipe check does not establish resource ownership.
 
-CoreWeave already runs node-exporter on host port 9100, so this recipe disables
-kube-prometheus-stack's node-exporter. NVSentinel is disabled pending
+CoreWeave already runs node-exporter on host port 9100, so this recipe moves
+NKTP's node-exporter to port 9110. NVSentinel is disabled pending
 qualification of its integration with the provider GPU runtime. Prometheus
 Adapter is disabled pending a qualified scrape of CoreWeave's DCGM exporter;
 this recipe does not promise GPU metrics or GPU-based HPA.

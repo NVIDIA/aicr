@@ -24,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -274,7 +275,8 @@ func TestCheckNFDNICLabelMismatch(t *testing.T) {
 				m(values)
 			}
 
-			err = b.checkNFDNICLabelMismatch(values, map[string][]string{"nfd": tt.dynamic})
+			r := &bundleRun{DefaultBundler: b}
+			err = r.checkNFDNICLabelMismatch(values, map[string][]string{"nfd": tt.dynamic})
 			if tt.wantErr != "" {
 				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 				if got := errorMessage(err); got != tt.wantErr {
@@ -288,8 +290,8 @@ func TestCheckNFDNICLabelMismatch(t *testing.T) {
 			if tt.want != "" {
 				want = []string{tt.want}
 			}
-			if !slices.Equal(b.warnings, want) {
-				t.Errorf("warnings = %q\nwant       %q", b.warnings, want)
+			if !slices.Equal(r.warnings, want) {
+				t.Errorf("warnings = %q\nwant       %q", r.warnings, want)
 			}
 		})
 	}
@@ -300,31 +302,6 @@ func TestCheckNFDNICLabelMismatch(t *testing.T) {
 // base nfd values, and the AKS --set networkoperator:enabled=false opt-out
 // without the matching nfd override.
 func TestMakeNFDNICLabelMismatch(t *testing.T) {
-	addNetOp := func(t *testing.T, result *recipe.RecipeResult) {
-		t.Helper()
-		donorCriteria := nfdNICTestGeneric
-		donor, err := recipe.NewBuilder().BuildFromCriteria(t.Context(), &donorCriteria)
-		if err != nil {
-			t.Fatalf("BuildFromCriteria(generic) error = %v", err)
-		}
-		ref := donor.GetComponentRef(networkOperatorComponentName)
-		if ref == nil {
-			t.Fatal("generic recipe resolved without network-operator")
-		}
-		// An overlay ref names the component only; the registry fills the rest.
-		added := recipe.ComponentRef{
-			Name:           ref.Name,
-			Namespace:      ref.Namespace,
-			Chart:          ref.Chart,
-			Type:           ref.Type,
-			Source:         ref.Source,
-			Version:        ref.Version,
-			DependencyRefs: ref.DependencyRefs,
-		}
-		result.ComponentRefs = append(result.ComponentRefs, added)
-		result.DeploymentOrder = append(result.DeploymentOrder, added.Name)
-	}
-
 	tests := []struct {
 		name     string
 		criteria recipe.Criteria
@@ -336,13 +313,13 @@ func TestMakeNFDNICLabelMismatch(t *testing.T) {
 		{
 			name:     "A: overlay adds network-operator",
 			criteria: nfdNICTestEKS,
-			edit:     addNetOp,
+			edit:     addNetworkOperatorRef,
 			wantErr:  wantNFDNICErrorA,
 		},
 		{
 			name:     "A: overlay adds network-operator, --dynamic nfd extraArgs",
 			criteria: nfdNICTestEKS,
-			edit:     addNetOp,
+			edit:     addNetworkOperatorRef,
 			options: []config.Option{
 				config.WithDynamicValues(map[string][]string{"nfd": {"worker.extraArgs"}}),
 			},
@@ -401,6 +378,80 @@ func TestMakeNFDNICLabelMismatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestMake_ConcurrentCallsKeepWarningsApart runs one bundler into two
+// output directories at once, where only one recipe warns.
+func TestMake_ConcurrentCallsKeepWarningsApart(t *testing.T) {
+	criteria := nfdNICTestEKS
+	plain, err := recipe.NewBuilder().BuildFromCriteria(t.Context(), &criteria)
+	if err != nil {
+		t.Fatalf("BuildFromCriteria() error = %v", err)
+	}
+	warns, err := recipe.NewBuilder().BuildFromCriteria(t.Context(), &criteria)
+	if err != nil {
+		t.Fatalf("BuildFromCriteria() error = %v", err)
+	}
+	addNetworkOperatorRef(t, warns)
+
+	b, err := New(WithConfig(config.NewConfig(
+		config.WithVersion("v-test"),
+		config.WithDynamicValues(map[string][]string{"nfd": {"worker.extraArgs"}}),
+	)))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipes := []*recipe.RecipeResult{plain, warns}
+	notes := make([][]string, len(recipes))
+	var g errgroup.Group
+	for i, rr := range recipes {
+		dir := t.TempDir()
+		g.Go(func() error {
+			out, makeErr := b.Make(t.Context(), rr, dir)
+			if makeErr != nil {
+				return makeErr
+			}
+			notes[i] = out.Deployment.Notes
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+
+	if slices.Contains(notes[0], wantNFDNICWarningA) {
+		t.Errorf("plain recipe notes = %q, want no NFD NIC warning", notes[0])
+	}
+	if i := slices.Index(notes[1], wantNFDNICWarningA); i < 0 || slices.Contains(notes[1][i+1:], wantNFDNICWarningA) {
+		t.Errorf("network-operator recipe notes = %q, want the NFD NIC warning exactly once", notes[1])
+	}
+}
+
+// addNetworkOperatorRef adds network-operator to result the way an overlay
+// does, by name, with the registry filling in the rest.
+func addNetworkOperatorRef(t *testing.T, result *recipe.RecipeResult) {
+	t.Helper()
+	donorCriteria := nfdNICTestGeneric
+	donor, err := recipe.NewBuilder().BuildFromCriteria(t.Context(), &donorCriteria)
+	if err != nil {
+		t.Fatalf("BuildFromCriteria(generic) error = %v", err)
+	}
+	ref := donor.GetComponentRef(networkOperatorComponentName)
+	if ref == nil {
+		t.Fatal("generic recipe resolved without network-operator")
+	}
+	added := recipe.ComponentRef{
+		Name:           ref.Name,
+		Namespace:      ref.Namespace,
+		Chart:          ref.Chart,
+		Type:           ref.Type,
+		Source:         ref.Source,
+		Version:        ref.Version,
+		DependencyRefs: ref.DependencyRefs,
+	}
+	result.ComponentRefs = append(result.ComponentRefs, added)
+	result.DeploymentOrder = append(result.DeploymentOrder, added.Name)
 }
 
 // errorMessage returns the outermost StructuredError's Message, or err.Error()

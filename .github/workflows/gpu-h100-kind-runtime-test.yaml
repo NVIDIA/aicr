@@ -130,9 +130,13 @@ jobs:
         uses: ./.github/actions/gpu-validate-conformance
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          kwok_helm_timeout: 600s
-          ko_build_timeout: 1200s
-          karpenter_helm_timeout: 600s
+
+      - name: Run cluster autoscaling (Karpenter + KWOK)
+        if: inputs.run_full_validation
+        timeout-minutes: 45
+        uses: ./.github/actions/gpu-validate-cluster-autoscaling
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
       - name: GPU Test Cleanup
         if: always()
@@ -144,3 +148,6 @@ jobs:
           collect_artifacts: ${{ job.status != 'success' }}
           diagnostic_mode: ${{ inputs.intent }}
           upload_validation_artifacts: ${{ inputs.run_full_validation && steps.validate-conformance.outcome != 'skipped' }}
+          validation_artifact_paths: |
+            validation-result.yaml
+            validation-result-cluster-autoscaling.yaml

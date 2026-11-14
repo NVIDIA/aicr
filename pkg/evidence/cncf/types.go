@@ -37,9 +37,12 @@ type evidenceEntry struct {
 	Checks []checkEntry
 
 	// Status is the requirement's aggregate verdict (AggregateReport):
-	// passed only when a complete proof path passed, failed when a check
-	// failed, not tested when a check was skipped, crashed or never ran, not
-	// applicable when configuration declares it so.
+	// passed only when a complete proof path passed as a demonstration,
+	// observed when a path passed but a check marked its result
+	// observation-only (which does not establish a MUST), failed when a
+	// check failed, not tested when a check was skipped, crashed or never
+	// ran, not applicable when configuration declares it so. See the
+	// RequirementStatus constants.
 	Status RequirementStatus
 
 	// Reason explains a Status other than passed.

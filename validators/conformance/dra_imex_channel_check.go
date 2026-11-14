@@ -661,9 +661,10 @@ func buildIMEXTestPod(run *gpuTestRun, tolerations []corev1.Toleration, nodeName
 			Namespace: run.namespace,
 		},
 		Spec: corev1.PodSpec{
-			Affinity:      nodeNameAffinity(nodeNames),
-			RestartPolicy: corev1.RestartPolicyNever,
-			Tolerations:   tolerations,
+			Affinity:         nodeNameAffinity(nodeNames),
+			RestartPolicy:    corev1.RestartPolicyNever,
+			Tolerations:      tolerations,
+			ImagePullSecrets: run.imagePullSecretRefs(),
 			ResourceClaims: []corev1.PodResourceClaim{{
 				Name:                      imexPodClaimName,
 				ResourceClaimTemplateName: ptr.To(run.claimTemplateName),

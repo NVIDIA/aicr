@@ -414,3 +414,322 @@ transitions:
       - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.28.0
       - https://github.com/NVIDIA/NVSentinel/pull/1989
       - https://github.com/NVIDIA/NVSentinel/blob/v1.28.0/docs/configuration/fault-quarantine.md
+  - from: ">=1.28.0 <1.31.0"
+    to: "1.31.0"
+    verdict: manual
+    verifiedBy: >-
+      Upstream v1.29.0, v1.30.0 and v1.31.0 release notes, the v1.28.0 to
+      v1.31.0 source compare, and helm template of the v1.30.0 and v1.31.0
+      charts on 2026-11-10 with the nvsentinel values AICR hydrates for the
+      base chain, for each nvsentinel mixin alone and for the remediation
+      compositions: the renders differ only in image tags, the new default
+      fault-quarantine rule set for health-events-analyzer events, the XID 74
+      rules in the analyzer, a get on daemonsets for janitor and on nodes/pods
+      for metadata-collector, and the removal of the
+      MONGODB_PING_TIMEOUT_TOTAL_SECONDS pin; the rendered image set is
+      unchanged apart from the tag. The v1.28.0 to v1.30.0 renders were
+      compared on 2026-11-02 with the same method: image tags, a LOG_LEVEL env
+      var, the XID 45 exclusion, and metadata-collector's
+      --pod-mapper-enabled=true (its previous behavior). The chart's default
+      labeler GPU class reads gpu.nvidia.com ResourceSlices, which makes the
+      labeler wait on a resource.k8s.io/v1 informer that Kubernetes 1.32 and
+      1.33 never serve and skip every node reconcile, so the recipe pins
+      v1.28.0's classes; on Kind 1.33.1 the chart's default labeler failed to
+      list ResourceSlices and the pinned classes restored driver-label
+      recovery and NIC tracking. Live on 2026-11-10 against the v1.31.0
+      chart: six nvsentinel Kind e2e lanes (post-remediation-validation,
+      external-remediation, maintenance-request, remediation, object-monitor,
+      health-events-analyzer) and two KWOK recipes passed, the pinned
+      labeler classes passed on Kubernetes 1.32 through 1.36, and the
+      simulated-GPU UAT lane installed the h100-training-slurm bundle with all
+      four gpu-health-monitor-dcgm-4.x pods connected to DCGM with 8 GPUs each
+      while the dcgm-3.x monitor stayed inactive. The csp-health-monitor
+      mixins' claims were checked by comparing the v1.28.0 and v1.31.0 source
+      for fault-quarantine's event keying, the monitor's config minimums and
+      its AWS region handling, which are unchanged; the csp-health-monitor
+      execution scenarios (CSP_EXECUTION_SCENARIOS=true) were not re-run at
+      v1.31.0.
+    summary: >-
+      Three changes need operator action. A fatal health-events-analyzer event
+      now cordons and drains its node through a new default fault-quarantine
+      rule set, where v1.28.0 set only a node condition; it applies when the
+      analyzer's effective processingStrategy is EXECUTE_REMEDIATION. With the
+      remediation step and R610 or later drivers, XID 154 recovery actions now
+      reset the GPU or reboot the node, where v1.28.0 reported
+      CONTACT_SUPPORT. A custom generic-provider rebootImage without sh and
+      cat no longer reboots nodes.
+    precondition: >-
+      Where health-events-analyzer is deployed, its module-level
+      processingStrategy and the processing_strategy of every enabled rule are
+      neither EXECUTE_REMEDIATION nor UNSPECIFIED (an absent module value is
+      the chart default, EXECUTE_REMEDIATION, and platform-connectors converts
+      UNSPECIFIED to it), or fault-quarantine.ruleSets is set without the
+      "Health events analyzer fatal error ruleset", or you accept that fatal
+      analyzer events cordon and drain nodes from v1.31.0. Where the remediation step is composed and
+      nodes run R610 or later drivers, you accept that an XID 154 recovery
+      action resets the GPU or reboots the node, or you keep
+      syslog-health-monitor events out of remediation. Where
+      janitor-provider.csp.generic.rebootImage is a custom image, it contains
+      sh and cat.
+    reversible: true
+    reversibleNotes: >-
+      helm rollback to the previous revision restores the previous workloads;
+      the HealthEvent CRD only gains optional status fields, and the other
+      CRDs differ only in an annotation. A cordon that the new rule set
+      created survives the rollback: release it with kubectl uncordon once the
+      node is safe to return. The rollback itself was not exercised in this
+      record's lanes.
+    stepsByDeployer:
+      - deployers: [helmfile, fleet]
+        steps:
+          - id: check-analyzer-strategy
+            description: >-
+              Where health-events-analyzer is deployed, read the effective
+              strategies from the nv-sentinel values in the bundle: the
+              module-level processingStrategy, and the processing_strategy of
+              each enabled rule in health-events-analyzer.config, which
+              replaces the module value for that rule when it is set. An absent
+              module value is the chart default, EXECUTE_REMEDIATION, not
+              STORE_ONLY: only the nvsentinel-health-events-analyzer mixin sets
+              STORE_ONLY. UNSPECIFIED counts as EXECUTE_REMEDIATION too,
+              because platform-connectors converts it. Also read
+              fault-quarantine.ruleSets: when set, it replaces the chart's
+              list, and the v1.31.0 rule set that cordons for a fatal analyzer
+              event applies only while the effective list still contains
+              "Health events analyzer fatal error ruleset". If a strategy
+              above is EXECUTE_REMEDIATION and that rule set is present, a
+              fatal analyzer event cordons and drains its node: accept that,
+              or keep the v1.28.0 condition-only behavior by setting
+              fault-quarantine.ruleSets to the chart's v1.31.0 default list
+              without that rule set (carry every other rule set, since the
+              list replaces the default). Setting STORE_ONLY instead also
+              removes the node condition and the Kubernetes Event that
+              EXECUTE_REMEDIATION set, so alerts that read them stop; set it
+              at the module level and change or remove every enabled rule's
+              own processing_strategy: EXECUTE_REMEDIATION, because a rule
+              that keeps it still cordons and drains.
+            reason: >-
+              The new default rule set cordons for a fatal analyzer event, and
+              fault-quarantine reads only EXECUTE_REMEDIATION events, so that
+              strategy, set or inherited, is what turns a condition-only signal
+              into a drain.
+          - id: check-xid-154-actions
+            description: >-
+              Where the nvsentinel-remediation step is composed and any node
+              runs an R610 or later driver, expect an XID 154 recovery action
+              (PF FLR, OS Reboot, Bus Reset or System Reboot) to reset that
+              GPU or reboot the node, where v1.28.0 cordoned and drained the
+              node for the fatal event and repaired nothing. No setting
+              restores that: the monitor's action mapping has no per-XID
+              switch. To stop syslog events from acting at all, regenerate the
+              bundle with
+              --set nv-sentinel:syslog-health-monitor.processingStrategy=STORE_ONLY,
+              which also stops their cordon and drain and keeps them from the
+              analyzer's rules, since STORE_ONLY events are not analyzer input,
+              and read the processingStrategy of each NIC pattern in the monitor's config,
+              because a pattern's own value replaces the module's.
+            reason: >-
+              v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,
+              which fault-remediation acts on; v1.28.0 mapped them to
+              CONTACT_SUPPORT, which it does not.
+          - id: check-reboot-image
+            description: >-
+              Where the nvsentinel-remediation step is composed with
+              janitor-provider.csp.provider: generic, read
+              janitor-provider.csp.generic.rebootImage in the bundle. The
+              shipped BusyBox image is compatible. A custom image must contain
+              sh and cat: the v1.31.0 reboot Job first reads the host boot ID
+              with cat and refuses to reboot when it cannot, which v1.28.0 did
+              not do. Check the image with kubectl run reboot-image-check
+              --rm -i --restart=Never --image=<image> -- sh -c 'cat
+              /proc/sys/kernel/random/boot_id'.
+            reason: >-
+              A reboot image without cat makes every reboot Job exit non-zero
+              before it reboots, so RESTART_VM and RESTART_BM repairs never
+              reboot the node.
+          - id: apply-new-crds
+            description: >-
+              Apply the v1.31.0 CRDs using the CRD-apply command under
+              "Upgrading components that own CRDs" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/nvidia/nvsentinel, VERSION=v1.31.0 and
+              EXCLUDE_SUBCHARTS=mongodb-store, so the Percona CRDs
+              psmdb-operator owns are left alone.
+            reason: >-
+              helmfile and fleet never update CRDs for ownsCRDs components
+              (Fleet's Helm upgrade skips crds/). The v1.31.0 HealthEvent CRD
+              declares drainDecision and remediationDecision; the older schema
+              does not, so the API server drops those fields.
+          - id: apply
+            description: >-
+              Run helmfile apply from a bundle generated at the new pin
+              (helmfile), or push the regenerated bundle (fleet GitRepo
+              mode) or apply the regenerated helmops.yaml (fleet HelmOp
+              mode) and let Fleet reconcile it.
+            reason: >-
+              Rolls the DaemonSets and Deployments to v1.31.0.
+      - deployers: [terraform]
+        steps:
+          - id: check-analyzer-strategy
+            description: >-
+              Where health-events-analyzer is deployed, read the effective
+              strategies from the nv-sentinel values in the bundle: the
+              module-level processingStrategy, and the processing_strategy of
+              each enabled rule in health-events-analyzer.config, which
+              replaces the module value for that rule when it is set. An absent
+              module value is the chart default, EXECUTE_REMEDIATION, not
+              STORE_ONLY: only the nvsentinel-health-events-analyzer mixin sets
+              STORE_ONLY. UNSPECIFIED counts as EXECUTE_REMEDIATION too,
+              because platform-connectors converts it. Also read
+              fault-quarantine.ruleSets: when set, it replaces the chart's
+              list, and the v1.31.0 rule set that cordons for a fatal analyzer
+              event applies only while the effective list still contains
+              "Health events analyzer fatal error ruleset". If a strategy
+              above is EXECUTE_REMEDIATION and that rule set is present, a
+              fatal analyzer event cordons and drains its node: accept that,
+              or keep the v1.28.0 condition-only behavior by setting
+              fault-quarantine.ruleSets to the chart's v1.31.0 default list
+              without that rule set (carry every other rule set, since the
+              list replaces the default). Setting STORE_ONLY instead also
+              removes the node condition and the Kubernetes Event that
+              EXECUTE_REMEDIATION set, so alerts that read them stop; set it
+              at the module level and change or remove every enabled rule's
+              own processing_strategy: EXECUTE_REMEDIATION, because a rule
+              that keeps it still cordons and drains.
+            reason: >-
+              The new default rule set cordons for a fatal analyzer event, and
+              fault-quarantine reads only EXECUTE_REMEDIATION events, so that
+              strategy, set or inherited, is what turns a condition-only signal
+              into a drain.
+          - id: check-xid-154-actions
+            description: >-
+              Where the nvsentinel-remediation step is composed and any node
+              runs an R610 or later driver, expect an XID 154 recovery action
+              (PF FLR, OS Reboot, Bus Reset or System Reboot) to reset that
+              GPU or reboot the node, where v1.28.0 cordoned and drained the
+              node for the fatal event and repaired nothing. No setting
+              restores that: the monitor's action mapping has no per-XID
+              switch. To stop syslog events from acting at all, regenerate the
+              bundle with
+              --set nv-sentinel:syslog-health-monitor.processingStrategy=STORE_ONLY,
+              which also stops their cordon and drain and keeps them from the
+              analyzer's rules, since STORE_ONLY events are not analyzer input,
+              and read the processingStrategy of each NIC pattern in the monitor's config,
+              because a pattern's own value replaces the module's.
+            reason: >-
+              v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,
+              which fault-remediation acts on; v1.28.0 mapped them to
+              CONTACT_SUPPORT, which it does not.
+          - id: check-reboot-image
+            description: >-
+              Where the nvsentinel-remediation step is composed with
+              janitor-provider.csp.provider: generic, read
+              janitor-provider.csp.generic.rebootImage in the bundle. The
+              shipped BusyBox image is compatible. A custom image must contain
+              sh and cat: the v1.31.0 reboot Job first reads the host boot ID
+              with cat and refuses to reboot when it cannot, which v1.28.0 did
+              not do. Check the image with kubectl run reboot-image-check
+              --rm -i --restart=Never --image=<image> -- sh -c 'cat
+              /proc/sys/kernel/random/boot_id'.
+            reason: >-
+              A reboot image without cat makes every reboot Job exit non-zero
+              before it reboots, so RESTART_VM and RESTART_BM repairs never
+              reboot the node.
+          - id: apply-new-crds
+            description: >-
+              Apply the v1.31.0 CRDs using the CRD-apply command under
+              "Upgrading components that own CRDs" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/nvidia/nvsentinel, VERSION=v1.31.0,
+              MANAGER=terraform-provider-helm and
+              EXCLUDE_SUBCHARTS=mongodb-store, so the Percona CRDs
+              psmdb-operator owns are left alone.
+            reason: >-
+              terraform never updates CRDs for ownsCRDs components: helm_release
+              upgrades through Helm, which never applies a changed crds/. The
+              v1.31.0 HealthEvent CRD declares drainDecision and
+              remediationDecision; the older schema does not, so the API server
+              drops those fields.
+          - id: apply
+            description: >-
+              Regenerate the bundle at the new pin and run terraform apply.
+            reason: >-
+              Rolls the DaemonSets and Deployments to v1.31.0.
+      - steps:
+          - id: check-analyzer-strategy
+            description: >-
+              Where health-events-analyzer is deployed, read the effective
+              strategies from the nv-sentinel values in the bundle: the
+              module-level processingStrategy, and the processing_strategy of
+              each enabled rule in health-events-analyzer.config, which
+              replaces the module value for that rule when it is set. An absent
+              module value is the chart default, EXECUTE_REMEDIATION, not
+              STORE_ONLY: only the nvsentinel-health-events-analyzer mixin sets
+              STORE_ONLY. UNSPECIFIED counts as EXECUTE_REMEDIATION too,
+              because platform-connectors converts it. Also read
+              fault-quarantine.ruleSets: when set, it replaces the chart's
+              list, and the v1.31.0 rule set that cordons for a fatal analyzer
+              event applies only while the effective list still contains
+              "Health events analyzer fatal error ruleset". If a strategy
+              above is EXECUTE_REMEDIATION and that rule set is present, a
+              fatal analyzer event cordons and drains its node: accept that,
+              or keep the v1.28.0 condition-only behavior by setting
+              fault-quarantine.ruleSets to the chart's v1.31.0 default list
+              without that rule set (carry every other rule set, since the
+              list replaces the default). Setting STORE_ONLY instead also
+              removes the node condition and the Kubernetes Event that
+              EXECUTE_REMEDIATION set, so alerts that read them stop; set it
+              at the module level and change or remove every enabled rule's
+              own processing_strategy: EXECUTE_REMEDIATION, because a rule
+              that keeps it still cordons and drains.
+            reason: >-
+              The new default rule set cordons for a fatal analyzer event, and
+              fault-quarantine reads only EXECUTE_REMEDIATION events, so that
+              strategy, set or inherited, is what turns a condition-only signal
+              into a drain.
+          - id: check-xid-154-actions
+            description: >-
+              Where the nvsentinel-remediation step is composed and any node
+              runs an R610 or later driver, expect an XID 154 recovery action
+              (PF FLR, OS Reboot, Bus Reset or System Reboot) to reset that
+              GPU or reboot the node, where v1.28.0 cordoned and drained the
+              node for the fatal event and repaired nothing. No setting
+              restores that: the monitor's action mapping has no per-XID
+              switch. To stop syslog events from acting at all, regenerate the
+              bundle with
+              --set nv-sentinel:syslog-health-monitor.processingStrategy=STORE_ONLY,
+              which also stops their cordon and drain and keeps them from the
+              analyzer's rules, since STORE_ONLY events are not analyzer input,
+              and read the processingStrategy of each NIC pattern in the monitor's config,
+              because a pattern's own value replaces the module's.
+            reason: >-
+              v1.31.0 maps the R610 wordings to COMPONENT_RESET and RESTART_BM,
+              which fault-remediation acts on; v1.28.0 mapped them to
+              CONTACT_SUPPORT, which it does not.
+          - id: check-reboot-image
+            description: >-
+              Where the nvsentinel-remediation step is composed with
+              janitor-provider.csp.provider: generic, read
+              janitor-provider.csp.generic.rebootImage in the bundle. The
+              shipped BusyBox image is compatible. A custom image must contain
+              sh and cat: the v1.31.0 reboot Job first reads the host boot ID
+              with cat and refuses to reboot when it cannot, which v1.28.0 did
+              not do. Check the image with kubectl run reboot-image-check
+              --rm -i --restart=Never --image=<image> -- sh -c 'cat
+              /proc/sys/kernel/random/boot_id'.
+            reason: >-
+              A reboot image without cat makes every reboot Job exit non-zero
+              before it reboots, so RESTART_VM and RESTART_BM repairs never
+              reboot the node.
+          - id: apply
+            description: >-
+              Re-run install.sh (helm), or commit the regenerated bundle and
+              reconcile or sync it (flux, argocd, argocd-helm).
+            reason: >-
+              These deployers apply the chart's CRDs themselves, then roll the
+              DaemonSets and Deployments to v1.31.0.
+    references:
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.29.0
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.30.0
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.31.0
+      - https://github.com/NVIDIA/NVSentinel/blob/v1.31.0/docs/deprecations/gpu-health-monitor-dcgm-3-support-removal.md

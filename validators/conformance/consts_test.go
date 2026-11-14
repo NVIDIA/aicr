@@ -30,8 +30,8 @@ import (
 // for the two GPU allocation conformance checks (see gpuCheckWorkBudget in
 // consts.go): the fixed FALLBACK work budget + the cleanup reserve (one
 // bounded namespace cleanup + scheduling-skew/result-flush margin) must fit
-// within the embedded catalog timeout (which becomes the Job's
-// activeDeadlineSeconds). The production budgets are derived dynamically
+// within the embedded catalog timeout (AICR_CHECK_TIMEOUT, the check context's
+// deadline; the Job's activeDeadlineSeconds adds headroom on top). The production budgets are derived dynamically
 // from the check context's deadline, but the fallbacks must stay consistent
 // with the embedded catalog: raising a fallback budget or lowering a catalog
 // timeout without preserving this inequality reintroduces the
@@ -45,9 +45,12 @@ func TestGPUCheckWorkBudgetsFitCatalogTimeouts(t *testing.T) {
 	budgets := map[string]time.Duration{
 		"dra-support":               draSupportWorkBudget,
 		"secure-accelerator-access": secureAccessWorkBudget,
+		"driver-runtime-management": driverRuntimeWorkBudget,
 		"pod-autoscaling":           podAutoscalingWorkBudget,
 		"ai-service-metrics":        aiServiceMetricsWorkBudget,
 		"robust-controller":         robustControllerWorkBudget,
+		"inference-gateway":         inferenceGatewayWorkBudget,
+		"workload-sandboxing":       workloadSandboxingWorkBudget,
 	}
 	seen := map[string]bool{}
 	for _, v := range cat.Validators {

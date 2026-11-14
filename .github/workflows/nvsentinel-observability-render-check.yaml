@@ -37,9 +37,13 @@
 # its template and RBAC render only with its mixin, and that
 # kubernetes-object-monitor prints a declared policy's enabled and isFatal
 # verbatim, the maintenance-request one asserts the controller, its socket
-# mount, its webhooks and the quarantine rule set its events match, and the
-# CRD exclusion one asserts every component's ownsCRDsExcludeSubcharts
-# (nvsentinel's and nktp's) still matches its pinned chart.
+# mount, its webhooks and the quarantine rule set its events match, the
+# csp-health-monitor one asserts both images, STORE_ONLY and each cloud's
+# workload identity annotation, and the CRD exclusion one asserts every
+# component's ownsCRDsExcludeSubcharts (nvsentinel's and nktp's) still matches
+# its pinned chart. One more test (pkg/bundler) renders kube-prometheus-stack
+# with a stock bundle's values and asserts the Prometheus CR carries the
+# bundler's PromQL scrape scope.
 # All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
 # place they execute. There is no PR-blocking trigger here on purpose: these
@@ -80,7 +84,7 @@ jobs:
           cache: false
 
       - name: Set up Helm
-        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v4.3.1
+        uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e  # v4.3.1
         with:
           version: ${{ steps.versions.outputs.helm }}
 
@@ -120,6 +124,8 @@ jobs:
             TestNVSentinelNodeValidationChartRender
             TestNVSentinelPostRemediationValidationChartRender
             TestNVSentinelMaintenanceRequestChartRender
+            TestNVSentinelCSPHealthMonitorChartRender
+            TestNVSentinelLabelerChartRendersLabelClasses
           )
           pattern="^($(IFS='|'; echo "${tests[*]}"))$"
           out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?
@@ -133,3 +139,9 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Render kube-prometheus-stack with the PromQL scope
+        if: ${{ !cancelled() }}
+        run: |
+          go test ./pkg/bundler/ -run '^TestPromQLScrapeScopeRendersOnChart$' -v -count=1 | tee "${RUNNER_TEMP}/promql-render.log"
+          grep -q -- '--- PASS: TestPromQLScrapeScopeRendersOnChart' "${RUNNER_TEMP}/promql-render.log"

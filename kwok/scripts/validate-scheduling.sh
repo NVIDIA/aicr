@@ -1050,6 +1050,24 @@ generate_bundle() {
             --set "nvsentinel:event-exporter.exporter.metadata.environment=ci"
         )
     fi
+    # Placeholder per-cluster values the CSP gate requires; KWOK reaches no cloud.
+    case ",${kwok_mixins//[[:space:]]/}," in
+        *,nvsentinel-csp-health-monitor-aws,*)
+            conditional_sets+=(
+                --set "nvsentinel:csp-health-monitor.configToml.clusterName=kwok"
+                --set-json 'nvsentinel:csp-health-monitor.configToml.aws.accountId="000000000000"'
+                --set "nvsentinel:csp-health-monitor.configToml.aws.region=us-east-1"
+            )
+            ;;
+        *,nvsentinel-csp-health-monitor-gcp,*)
+            conditional_sets+=(
+                --set "nvsentinel:csp-health-monitor.configToml.clusterName=kwok"
+                --set "nvsentinel:csp-health-monitor.configToml.gcp.targetProjectId=kwok-project"
+                --set "nvsentinel:csp-health-monitor.configToml.gcp.gcpServiceAccountName=nvsentinel-csp"
+                --set 'nvsentinel:csp-health-monitor.configToml.gcp.logFilter=protoPayload.methodName="compute.instances.upcomingMaintenance"'
+            )
+            ;;
+    esac
     if grep -qx "nvsentinel-mongodb" <<< "$bundled_components"; then
         # platform-connectors tolerates every taint, so one pod lands on the
         # real Kind node, where it needs the datastore's client certificate
@@ -2473,14 +2491,14 @@ main() {
         kubectl taint nodes "$cp_node" nfd-excluded=true:NoSchedule --overwrite
     done
 
-    # nvsentinel-mongodb and nvsentinel's lifecycle-manager ship cert-manager
-    # Certificates, and cert-manager's webhook runs on a KWOK fake that serves
-    # nothing, so the create would time out. The webhook's namespaceSelector
-    # skips namespaces carrying this label; harmless under KWOK, where no
-    # certificate is really issued.
+    # nvsentinel-mongodb, nvsentinel's lifecycle-manager, and nktp ship
+    # cert-manager Certificates, and cert-manager's webhook runs on a KWOK fake
+    # that serves nothing, so the create would time out. The webhook's
+    # namespaceSelector skips namespaces carrying this label; harmless under
+    # KWOK, where no certificate is really issued.
     local cert_ns
     cert_ns=$(yq eval '.componentRefs[]
-        | select(.name == "nvsentinel-mongodb"
+        | select(.name == "nvsentinel-mongodb" or .name == "nktp"
             or (.name == "nvsentinel" and .overrides.global.lifecycleManager.enabled == true))
         | .namespace' "${WORK_DIR}/recipe.yaml" | sort -u)
     for ns in $cert_ns; do

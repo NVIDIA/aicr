@@ -33,6 +33,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	helmutil "github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -482,7 +483,7 @@ func buildFleetYAMLs(folders []localformat.Folder, appName string) ([]FleetYAML,
 				return nil, errors.New(errors.ErrCodeInternal,
 					fmt.Sprintf("folder %s is KindUpstreamHelm but Upstream is nil", f.Dir))
 			}
-			doc.Helm.Version = f.Upstream.Version
+			doc.Helm.Version = helmutil.ChartVersion(f.Upstream.Repo, f.Upstream.Version)
 			if strings.HasPrefix(f.Upstream.Repo, "oci://") {
 				// Fleet expects OCI charts as a full reference in helm.repo.
 				doc.Helm.Repo = strings.TrimSuffix(f.Upstream.Repo, "/") + "/" + f.Upstream.Chart

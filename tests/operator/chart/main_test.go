@@ -47,16 +47,17 @@ import (
 )
 
 const (
-	release      = "aicr-operator"
-	operatorNS   = "aicr-system"
-	engineNS     = "argocd"
-	jobsNS       = "aicr-jobs"
-	discoveryNS  = "aicr-discovery"
-	validationNS = "aicr-validation"
-	operatorUser = "system:serviceaccount:" + operatorNS + ":aicr-operator"
-	aicrImage    = "ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433"
-	registry     = "oci://123456789012.dkr.ecr.us-west-2.amazonaws.com/aicr/cluster"
-	helmTimeout  = 2 * time.Minute
+	release        = "aicr-operator"
+	operatorNS     = "aicr-system"
+	engineNS       = "argocd"
+	jobsNS         = "aicr-jobs"
+	discoveryNS    = "aicr-discovery"
+	validationNS   = "aicr-validation"
+	operatorUser   = "system:serviceaccount:" + operatorNS + ":aicr-operator"
+	aicrImage      = "ghcr.io/nvidia/aicr:v1.0.0@sha256:e91ba6f4916a5bfcd19d05933b5b4d07a4dd05a738a1ffebfab243a32cbff433"
+	validatorImage = "ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790"
+	registry       = "oci://123456789012.dkr.ecr.us-west-2.amazonaws.com/aicr/cluster"
+	helmTimeout    = 2 * time.Minute
 )
 
 var (
@@ -167,13 +168,13 @@ func render(ctx context.Context, set ...string) ([]unstructured.Unstructured, st
 
 // renderIn renders as render does, with ns as the release namespace.
 func renderIn(ctx context.Context, ns string, set ...string) ([]unstructured.Unstructured, string, error) {
-	return renderFiles(ctx, ns, []string{valuesFile}, set...)
+	return renderFiles(ctx, chartDir, ns, []string{valuesFile}, set...)
 }
 
-// renderFiles renders as renderIn does, with the given values files.
-func renderFiles(ctx context.Context, ns string, files []string, set ...string) ([]unstructured.Unstructured, string, error) {
+// renderFiles renders chart as renderIn does, with the given values files.
+func renderFiles(ctx context.Context, chart, ns string, files []string, set ...string) ([]unstructured.Unstructured, string, error) {
 	args := make([]string, 0, 5+2*len(files)+2*len(set))
-	args = append(args, "template", release, chartDir, "--namespace", ns)
+	args = append(args, "template", release, chart, "--namespace", ns)
 	for _, f := range files {
 		args = append(args, "-f", f)
 	}

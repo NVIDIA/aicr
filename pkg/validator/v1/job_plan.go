@@ -80,15 +80,15 @@ type JobPlan struct {
 	CheckTimeout int64
 
 	// JobDeadline is the Job's activeDeadlineSeconds. It exceeds CheckTimeout
-	// by defaults.ValidatorJobDeadlineHeadroom, which budgets for the container
-	// startup that CheckTimeout's clock does not cover, so the check normally
-	// terminates itself first and its pod survives for log extraction; a
-	// startup slower than the headroom spends that budget and lets the Job
-	// controller delete the still-active pod instead. Unlike
-	// CheckTimeout, RenderPlan reads this field directly, so it is not purely
-	// informational — but leaving it at its zero value yields a Job whose
-	// activeDeadlineSeconds is 0, which the Job controller treats as already
-	// exceeded, killing the pod instantly.
+	// by defaults.ValidatorJobDeadlineHeadroom (startup grace + cleanup grace
+	// + result flush margin), so a check that starts as late as the startup
+	// grace allows still expires its own context first and runs its deferred
+	// cleanup before the Job controller acts. The Job deadline is the backstop:
+	// the orchestrator's wait (WaitEnvelopeFor) outlives it by the SIGTERM
+	// window. Unlike CheckTimeout, RenderPlan reads this field directly, so it
+	// is not purely informational — but leaving it at its zero value yields a
+	// Job whose activeDeadlineSeconds is 0, which the Job controller treats as
+	// already exceeded, killing the pod instantly.
 	JobDeadline int64
 
 	// ServiceAccount is the Kubernetes ServiceAccount name
@@ -204,6 +204,18 @@ func JobDeadlineFor(checkTimeout time.Duration) time.Duration {
 	return checkTimeout + defaults.ValidatorJobDeadlineHeadroom
 }
 
+// WaitEnvelopeFor returns the longest the orchestrator waits for a validator
+// Job, measured from the Job's start: the Job deadline, plus the pod's
+// SIGTERM-to-SIGKILL window, plus the delivery margin. The Job deadline is the
+// backstop that signals a stuck check; the orchestrator must outlive it so a
+// check that is SIGTERMed at the deadline can run its cleanup and flush its
+// result before the run is classified.
+func WaitEnvelopeFor(checkTimeout time.Duration) time.Duration {
+	return JobDeadlineFor(checkTimeout) +
+		defaults.ValidatorTerminationGracePeriod +
+		defaults.ValidatorTerminationWaitMargin
+}
+
 // OrchestratorWaitFor returns how much longer a caller should wait for a
 // validator Job to reach a terminal state, given the Job's observed start time
 // (see the observedStart contract below) and the check's own budget.
@@ -212,54 +224,34 @@ func JobDeadlineFor(checkTimeout time.Duration) time.Duration {
 // activeDeadlineSeconds from the Job's status.startTime, whereas a caller can
 // only begin waiting once the create/apply response reaches it. Anchoring the
 // wait to observedStart instead of to now removes that delay from the
-// comparison: a wait of checkTimeout+defaults.ValidatorWaitBuffer measured from
-// observedStart ends defaults.JobEnvelopeMargin before the Job's
-// checkTimeout+defaults.ValidatorJobDeadlineHeadroom measured from the same
-// point. Without the rebase that margin is instead consumed by the response
-// delay, and a response slower than it lets the Job controller win and delete
-// the still-active pod whose logs carry the verdict (issue #2473).
+// comparison: the wait ends WaitEnvelopeFor(checkTimeout) after observedStart,
+// which is the Job deadline plus the SIGTERM window and delivery margin, so the
+// orchestrator never classifies a run as timed out while the pod is still
+// legitimately finishing its cleanup (issue #1632).
 //
 // observedStart is status.startTime when the caller has seen it, else the Job's
 // creationTimestamp — never later than status.startTime, so the fallback ends
 // the wait earlier rather than later. A zero observedStart means no start time
-// was observed at all and yields the unrebased budget; it is the one result the
-// Job-deadline bound below cannot cover, since that bound needs the same anchor.
+// was observed at all and yields the unrebased envelope.
 //
-// The rebased remainder is capped at that unrebased budget, because apiserver
-// clock skew can place observedStart in the caller's future, and floored at
-// defaults.ValidatorMinCompletionWait so a slow response does not produce a
-// wait too short to observe a terminal condition.
-//
-// Every branch is then bounded by the Job's own deadline, derived from the same
-// anchor by JobDeadlineFor so the two cannot drift: the returned wait ends at
-// least defaults.ValidatorPreDeadlineMargin before it, so no result — the floor
-// included — outlives a deadline it can still beat. When that bound is not
-// positive, because the deadline has already elapsed or is within the margin of
-// firing, no shorter wait can keep the pod alive, so the floor is returned
-// anyway. Its only remaining job is to leave WaitForJobTerminal's fast-path Get
-// room to observe the already-terminal Job, so the caller reports the Job's
-// Failed/DeadlineExceeded outcome instead of the infrastructure error a zero or
-// negative wait would produce by expiring that Get's context before it runs.
+// The rebased remainder is capped at that unrebased envelope, because
+// apiserver clock skew can place observedStart in the caller's future, and
+// floored at defaults.ValidatorMinCompletionWait so a slow response does not
+// produce a wait too short to observe a terminal condition.
 func OrchestratorWaitFor(observedStart, now time.Time, checkTimeout time.Duration) time.Duration {
-	budget := checkTimeout + defaults.ValidatorWaitBuffer
+	envelope := WaitEnvelopeFor(checkTimeout)
 	if observedStart.IsZero() {
-		return budget
+		return envelope
 	}
 
-	insideDeadline := observedStart.Add(JobDeadlineFor(checkTimeout)).Sub(now) -
-		defaults.ValidatorPreDeadlineMargin
-	if insideDeadline <= 0 {
-		return defaults.ValidatorMinCompletionWait
-	}
-
-	remaining := observedStart.Add(budget).Sub(now)
-	if remaining > budget {
-		remaining = budget
+	remaining := observedStart.Add(envelope).Sub(now)
+	if remaining > envelope {
+		remaining = envelope
 	}
 	if remaining < defaults.ValidatorMinCompletionWait {
 		remaining = defaults.ValidatorMinCompletionWait
 	}
-	return min(remaining, insideDeadline)
+	return remaining
 }
 
 // BuildJobPlan creates a JobPlan from a validator entry.
@@ -303,7 +295,7 @@ func BuildJobPlan(
 
 	// Build environment variables
 	env := buildEnv(entry, runID, version, commit, timeout, nodeSelector, tolerations,
-		imageRegistryOverride, imageTagOverride)
+		imageRegistryOverride, imageTagOverride, imagePullSecrets)
 
 	// Build volumes
 	volumes := buildVolumes(runID)

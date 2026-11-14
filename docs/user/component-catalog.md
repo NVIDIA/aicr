@@ -22,7 +22,7 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **dranet** | `core` | DRA network driver ([kubernetes-sigs/dranet](https://github.com/kubernetes-sigs/dranet)) for the ConnectX-9 RDMA fabric on VR200 (Vera Rubin NVL72) RKE2 clusters. Publishes the mlx5 NICs as `ResourceSlice`s (driver `dra.net`) and injects them into pods via NRI under `DeviceClass` `mlnx-cx9`. Manifest-only (vendored `dranet.yaml`), evaluated as a lean alternative to `network-operator`. Ships only in the VR200 RKE2 overlays, which pair it with host RDMA "exclusive" netns mode (`ib_core` `netns_mode=0`, applied by `nodewright-customizations` with `rdmaNetnsExclusive: true` and a node reboot) so a pod sees only its DRA-allocated HCA. | [DraNet](https://github.com/kubernetes-sigs/dranet) |
 | **gke-nccl-tcpxo** | `core` | NCCL TCPXO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
 | **gke-gb200-rdma** | `core` | NCCL gIB (GPUDirect-RDMA over RoCE) plugin installer for GB200 (A4X, ARM64) GKE nodes. Installs RDMA binaries and the NCCL library so workloads select `NCCL_NET=gIB` over the cluster's `gvnic-1`/`rdma-0..rdma-3` `Network` objects. GKE-specific — see [GKE GB200 Networking](../integrator/gke-gb200-networking.md). | — |
-| **gcp-driver-installer** | `core` | Google's cos-gpu-installer DaemonSet as an AICR-managed, values-gated component. Present in every GKE COS recipe; renders only under the `gpuStack=bundle-installer` profile value, where it installs the recipe-pinned NVIDIA driver on pools created with `gpu-driver-version=disabled`. GKE-specific. | — |
+| **gcp-driver-installer** | `core` | Google's cos-gpu-installer DaemonSet as an AICR-managed, values-gated component. Present in every GKE COS recipe; renders only under the `gpuStack=bundle-installer` and `gpuStack=dra` profile values, where it installs the recipe-pinned NVIDIA driver on pools created with `gpu-driver-version=disabled`. GKE-specific. | — |
 | **aws-efa** | `core` | Device plugin for AWS Elastic Fabric Adapter. Enables low-latency networking on EKS clusters with EFA-capable instances. EKS-specific. | [AWS EFA K8s Device Plugin](https://github.com/aws/eks-charts) |
 | **cert-manager** | `core` | Automates TLS certificate management. Required by several operators for webhook and API server certificates. | [cert-manager](https://github.com/cert-manager/cert-manager) |
 | **gatekeeper** | `ops` | Admission controller for Kubernetes. Enforces policies and governance across the cluster using OPA (Open Policy Agent) ConstraintTemplates and Constraints. | [Open Policy Agent Gatekeeper](https://github.com/open-policy-agent/gatekeeper) |
@@ -32,14 +32,14 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **nvsentinel** | `core` | GPU health monitoring. Detects GPU errors and publishes health events; the components that cordon, drain, reboot or terminate a node are off by default — see [NVSentinel Deployment Posture](#nvsentinel-deployment-posture). On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, the recipes set `labeler.assumeDriverInstalled` for you — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
 | **psmdb-operator** | `core` | Percona Operator for MongoDB, reconciling `nvsentinel-mongodb`. Watches only the `nvsentinel` namespace; sole owner of the `psmdb.percona.com` CRDs. Added only by the NVSentinel [remediation step mixins](#graded-remediation). CLI alias: `psmdboperator`. | [Percona Operator for MongoDB](https://github.com/percona/percona-server-mongodb-operator) |
 | **nvsentinel-mongodb** | `core` | NVSentinel's health-event datastore: a three-member Percona Server for MongoDB replica set with TLS required and x509 client auth. Added only by the NVSentinel [remediation step mixins](#graded-remediation); requires `--system-node-selector`. CLI alias: `nvsentinelmongodb`. | [Percona Helm charts](https://github.com/percona/percona-helm-charts) |
-| **slinky-drainer** | `ops` | NVSentinel's slinky-drainer plugin: drains a quarantined Slurm node through Slurm by reconciling the `DrainRequest`s `node-drainer` creates, instead of evicting the slurmd pod. Added only by the opt-in `nvsentinel-slinky-drainer` mixin; see [Slurm Drain Through Slinky](#slurm-drain-through-slinky). CLI alias: `slinkydrainer`. | [NVSentinel](https://github.com/NVIDIA/NVSentinel/tree/v1.28.0/plugins/slinky-drainer) |
-| **slinky-drainer-crds** | `ops` | The `drainrequests.nvsentinel.nvidia.com` CRD that `node-drainer` and the slinky-drainer plugin need at startup, as its own release so deployers wait for it to be Established before either starts. Added only by the opt-in `nvsentinel-slinky-drainer` mixin. CLI alias: `slinkydrainercrds`. | [NVSentinel](https://github.com/NVIDIA/NVSentinel/tree/v1.28.0/plugins/slinky-drainer/config/crd) |
+| **slinky-drainer** | `ops` | NVSentinel's slinky-drainer plugin: drains a quarantined Slurm node through Slurm by reconciling the `DrainRequest`s `node-drainer` creates, instead of evicting the slurmd pod. Added only by the opt-in `nvsentinel-slinky-drainer` mixin; see [Slurm Drain Through Slinky](#slurm-drain-through-slinky). CLI alias: `slinkydrainer`. | [NVSentinel](https://github.com/NVIDIA/NVSentinel/tree/v1.31.0/plugins/slinky-drainer) |
+| **slinky-drainer-crds** | `ops` | The `drainrequests.nvsentinel.nvidia.com` CRD that `node-drainer` and the slinky-drainer plugin need at startup, as its own release so deployers wait for it to be Established before either starts. Added only by the opt-in `nvsentinel-slinky-drainer` mixin. CLI alias: `slinkydrainercrds`. | [NVSentinel](https://github.com/NVIDIA/NVSentinel/tree/v1.31.0/plugins/slinky-drainer/config/crd) |
 | **nvidia-dra-driver-gpu** | `core` | Dynamic Resource Allocation (DRA) driver. Advertises devices via the Kubernetes `resource.k8s.io` API (`v1` on 1.34+, `v1beta1`/`v1beta2` on 1.32/1.33) — ComputeDomain/IMEX channels for MNNVL platforms, and optionally whole GPUs. Stock recipes disable whole-GPU DRA advertisement (`resources.gpus.enabled: false`) — the device plugin is the production default whole-GPU advertiser, and DRA whole-GPU allocation is an experimental recipe-level opt-in ([#1327](https://github.com/NVIDIA/aicr/issues/1327)). Whole-GPU DRA and the GPU Operator device plugin (`nvidia.com/gpu`) are mutually exclusive per node: recipe-backed validation rejects a configuration that enables both (at policy-resolution time — skipping validation bypasses the check), because the two allocators keep independent ledgers and concurrent advertisement can double-allocate the same physical GPUs (see the guidance in `recipes/components/nvidia-dra-driver-gpu/values.yaml`). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
 | **dra-node-labeler** | `core` | Applies the DRA eviction node label (`--dra-eviction-node-label`) to every node GFD reports as `nvidia.com/gpu.present=true`, so the DRA kubelet plugin's node selector and GPU Operator's Driver Manager eviction hook need no node-pool labeling. Write-once: an existing value, including the Driver Manager's `paused-for-driver-upgrade`, is never rewritten. Present in the bundle only when the eviction label is configured. | — |
 | **prometheus-operator-crds** | `core` | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
-| **kube-prometheus-stack** | `ops` | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). Prometheus selects every ServiceMonitor and PodMonitor in every namespace, with no `release` label required. Most components whose charts offer a monitor ship it enabled (NVCRE keeps its ServiceMonitor off because it is on no shipped overlay), and each one that renders its monitor at install declares a dependency on `prometheus-operator-crds`. | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
+| **kube-prometheus-stack** | `ops` | The prometheus-operator and one Prometheus that serves PromQL to the components that query metrics at runtime, such as prometheus-adapter and the Dynamo planner. It loads monitors only from the namespaces those components name and its own, and keeps only the series they declare ([runtime metrics declarations](../integrator/recipe-development.md#runtime-metrics-declarations)), on an `emptyDir`. It has no Grafana, Alertmanager, node-exporter, kube-state-metrics, or rules; cluster telemetry comes from `nktp`. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). Most components whose charts offer a monitor ship it enabled (NVCRE keeps its ServiceMonitor off because it is on no shipped overlay), and each one that renders its monitor at install declares a dependency on `prometheus-operator-crds`. | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
 | **prometheus-adapter** | `ops` | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
-| **nktp** | `ops` | NKTP, the NVKE Telemetry Pipeline: an OpenTelemetry Operator and a fixed topology of collectors that gather metrics, logs, events, and traces, with bundled `kube-state-metrics` and `node-exporter`. Its default backend, `otel-lgtm`, is for evaluation only. Available, but no stock recipe selects it yet ([ADR-026](https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md)). See [NKTP Telemetry Pipeline](#nktp-telemetry-pipeline). | [NKTP](https://github.com/dsx-ai-factory/nvke/tree/main/nktp/deploy/charts/nktp) |
+| **nktp** | `ops` | NKTP, the NVKE Telemetry Pipeline: an OpenTelemetry Operator and a fixed topology of collectors that gather metrics, logs, events, and traces, with bundled `kube-state-metrics` and `node-exporter`. Its default backend, `otel-lgtm`, is for evaluation only. Every stock recipe installs it except `ocp` and `b300-mk8s-ubuntu-inference-dynamo` ([ADR-026](https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md)). See [NKTP Telemetry Pipeline](#nktp-telemetry-pipeline). | [NKTP](https://github.com/dsx-ai-factory/nvke-telemetry-pipeline/tree/main/nktp) |
 | **aws-ebs-csi-driver** | `core` | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work without naming a class. **The driver still needs AWS credentials, which AICR does not configure** — see [EBS CSI Driver Credentials](#ebs-csi-driver-credentials). Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | `ops` | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **k8s-aibom** | `ops` | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Ships by default in two stock recipes, `h100-gke-cos-inference` and its Dynamo descendant `h100-gke-cos-inference-dynamo`; available by opt-in on any other GKE recipe with `aicr recipe --runtime-inventory enabled`, including the `b200`, `gb200`, and `gb300` GKE Dynamo recipes. On the two recipes that ship it by default, decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
@@ -75,9 +75,9 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 
 ## VR200 Preview coverage
 
-> **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists for all four coordinates at [validation.aicr.run](https://validation.aicr.run/); freshness against the current recipe is captured in the **Evidence status** note below.
+> **`service=rke2` and `service=nvke` with `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists for the four RKE2 coordinates at [validation.aicr.run](https://validation.aicr.run/); none is published yet for either NVKE coordinate. Freshness against the current recipe is captured in the **Evidence status** note below.
 
-Four coordinates ship in v1:
+Six coordinates ship in v1 — four on RKE2 and two on NVKE:
 
 | Coordinate | Evidence |
 |---|---|
@@ -85,12 +85,14 @@ Four coordinates ship in v1:
 | `rke2 / vr200 / ubuntu / training / kubeflow` | [validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow](https://validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow) |
 | `rke2 / vr200 / ubuntu / inference` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) |
 | `rke2 / vr200 / ubuntu / inference / dynamo` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
+| `nvke / vr200 / ubuntu / training` | none published yet |
+| `nvke / vr200 / ubuntu / inference` | none published yet; evidence pending in [#3695](https://github.com/NVIDIA/aicr/pull/3695) |
 
 The platform-neutral `inference` coordinate is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base. It carries the same VR200 hardware overrides as its Dynamo child.
 
 > **Evidence status.** The recipes for the three original coordinates have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat that linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. The `training / kubeflow` evidence is current — it was published from a three-phase run against the recipe as it ships today.
 
-> **Every VR200 coordinate carries the same node-level prerequisites** — the 64k-page kernel, the Skyhook kernel-cmdline reboots, and the mandatory host `nvidia-imex` masking. Other requirements differ by intent (the inference leaves additionally cap Kubernetes at `< 1.36.0`). See [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md) before deploying any of them.
+> **The four RKE2 coordinates carry the same node-level prerequisites** — the 64k-page kernel, the Skyhook kernel-cmdline reboots, and the mandatory host `nvidia-imex` masking. The two NVKE coordinates do not: they require the `nvidia-bos-64k` kernel line specifically and ship no Skyhook tuning. The training coordinate is scoped to a single NVLink domain; the inference coordinate makes no MNNVL claim and has no external LoadBalancer, so its gateway is reachable only in-cluster or via NodePort. See [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md). Other requirements differ by intent (the RKE2 inference leaves additionally cap Kubernetes at `< 1.36.0`; the NVKE leaves do not). See [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md) before deploying any RKE2 coordinate.
 
 For the definitional Preview-vs-Supported distinction, see [Preview recipes](../integrator/recipe-development.md#preview-recipes). For bare-metal cluster prerequisites, Skyhook reboot behavior, and known gaps on this coordinate, see [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md).
 
@@ -217,7 +219,7 @@ When a recipe is resolved from a snapshot (`aicr recipe --snapshot snap.yaml`, o
 
 Injection is gated on the resolved overlay already declaring `driver.enabled=false` in its merged base+valuesFile. That marker check inspects `driver.enabled` alone; the shipped preinstalled-driver overlays additionally carry coordinated ownership settings (AKS and OKE set `toolkit.enabled=false`; GKE-COS keeps the toolkit enabled with the COS-specific `toolkit.installDir` under the host-managed driver root) plus `hostPaths.driverInstallDir`, and the bundle-time `CheckDriverOwnershipCoherence` validation enforces full ownership coherence for any recipe. That scopes auto-detect to overlays like AKS, GKE-COS, and OKE where every dependent setting is already aligned. Bare EKS overlays lack the marker; the auto-detect **skips them and logs a warning** (`gpu-operator driver auto-detect: pre-installed driver observed …`) telling the operator to use a preinstalled-profile overlay rather than land a half-configured Operator (driver off, toolkit and gdrcopy still enabled with no operator-managed driver root). The case is still tracked as separate work:
 
-- **EKS** — GPU-optimized AMIs that ship an NVIDIA driver preinstalled on the AMI itself. Bare EKS overlays still warn. The `*-eks-amazonlinux-inference` leaves (`os=amazonlinux`) are the preinstalled-driver overlays: they require the NVIDIA AL2023 AMI and set `driver.enabled=false` and `toolkit.enabled=false` themselves.
+- **EKS** — GPU-optimized AMIs that ship an NVIDIA driver preinstalled on the AMI itself. Bare EKS overlays still warn. The `os=amazonlinux` leaves (`*-eks-amazonlinux-inference` and `h100-eks-amazonlinux-inference-dynamo`) are the preinstalled-driver overlays: they require the NVIDIA AL2023 AMI and set `driver.enabled=false` and `toolkit.enabled=false` themselves.
 
 On preinstalled-driver overlays whose profile does not own `driver.enabled` (GKE-COS) or that carry no profile (OKE, legacy AKS artifacts), the injection is **semantically idempotent** — the rendered `driver.enabled` value is unchanged; the resolved recipe records the override explicitly (visible in `aicr recipe -o recipe.yaml`) so the reason for the value is auditable end-to-end. On profiled AKS there is no injection at all: the `gpuStack` fragment writes the value and the injector skips the owned path (see above). The AKS default is the [AKS azure-managed profile](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-managed-profile) (`driver.enabled=false`, `toolkit.enabled=false`, `operator.runtimeClass=nvidia-container-runtime` — the Azure default, where the node image preinstalls driver and toolkit); a `--gpu-driver none` pool selects the operator-managed profile value at recipe time (`--profile gpuStack=operator-managed`, see the [GPU Operator-managed profile](../integrator/aks-gpu-setup.md#alternative-let-gpu-operator-manage-the-driver)).
 
@@ -225,7 +227,7 @@ The inverse mismatch (no NVIDIA driver loaded on the sampled GPU node while the 
 
 - **On AKS (profiled), a pool reading that mismatches the SELECTED value fails closed at resolution.** Selection comes from `--profile` (or the `azure-managed` default); the `K8s.aks-gpu-pools.gpu-driver` reading then verifies it before any driver-state post-processing. Pools reading `None` fail the azure-managed default but **qualify `--profile gpuStack=operator-managed` — rerun with that selection against the same snapshot; no pool change or recapture is needed**. `Mixed` and `Managed` reject either selection naming the observed state — fix the pools and recapture; a *missing* reading (snapshot captured without `--aks-gpu-pools`) rejects with "reading unavailable" — recapture with the pool dump (see the [AKS GPU Operator-managed profile](../integrator/aks-gpu-setup.md#alternative-let-gpu-operator-manage-the-driver)).
 - **On AKS (profiled), Install-mode pools whose sampled node has no driver loaded still enter the record-and-gate flow.** Pool mode is the ownership contract, not live state: `gpu-driver: Install` satisfies the azure-managed constraint even while a failed AKS driver install or a mid-reimage node samples no loaded driver. Resolution succeeds, records `metadata.gpuDriverState: absent`, and the bundle-time `CheckDriverOwnershipCoherence` gate blocks `aicr bundle` with the AKS remedy (repair the pools and recapture, or switch pools to `--gpu-driver none`, recapture, and regenerate with `--profile gpuStack=operator-managed`). The driver-ownership paths are profile-owned, so the pre-profile per-path `--set` override tuple is rejected at bundle time.
-- **On families without a profile (and legacy pre-profile AKS artifacts), every inverse mismatch takes that same warn-record-gate path**: resolution logs a warning, records `metadata.gpuDriverState: absent` in the recipe, and the bundle-time `CheckDriverOwnershipCoherence` validation blocks `aicr bundle` ([#1757](https://github.com/NVIDIA/aicr/issues/1757)) unless the values are flipped to operator-managed mode or the GPU pools are reprovisioned with the platform's default driver install and re-snapshotted. Ownership overrides are bundle-time flags there, so resolution itself cannot fail hard without cutting off the supported override path — bundle generation is the first point where the final effective values are known.
+- **On families without a profile (and legacy pre-profile AKS artifacts), every inverse mismatch takes that same warn-record-gate path**: resolution logs a warning, records `metadata.gpuDriverState: absent` in the recipe, and the bundle-time `CheckDriverOwnershipCoherence` validation blocks `aicr bundle` ([#1757](https://github.com/NVIDIA/aicr/issues/1757)) unless the values are flipped to operator-managed mode or the GPU pools are reprovisioned with the platform's default driver install and re-snapshotted. Ownership overrides are bundle-time flags there, so resolution itself cannot fail hard without cutting off the supported override path — bundle generation is the first point where the final effective values are known. They are bundle-time only: an `argocd-helm` bundle rejects install-time values on the ownership paths at Helm render time (see [Override values](bundling.md#override-values)).
 
 One per-OS limitation is intentionally out of the check's scope: the check verifies value *coherence* (driver ownership and driver-root lockstep), not per-OS install capability. On GKE COS node images a deliberate `--set gpuoperator:driver.enabled=true` clears the gate — the values are internally coherent — but the GPU Operator cannot install a driver on COS, so the deployment fails at deploy time, where the `gpu-operator-health` conformance-phase check is the backstop. The check's GKE remedy therefore points COS clusters at the GKE-managed driver install (`gpu-driver-version`) rather than the override tuple.
 
@@ -369,24 +371,25 @@ The output lists every component with its pinned version and configuration value
 
 ## GKE Device-Plugin Ownership
 
-**Device-plugin ownership is a configuration profile.** The GKE recipes declare an ADR-015 `gpuStack` profile with two qualified values, selected at recipe generation and recorded in `metadata.selectedProfile`:
+**Device-plugin ownership is a configuration profile.** The GKE recipes declare an ADR-015 `gpuStack` profile with three qualified values, selected at recipe generation and recorded in `metadata.selectedProfile`:
 
 - **`gke-default` (the default)** — GKE's managed device plugin is the `nvidia.com/gpu` advertiser (recorded as `advertiser: external`), and the recipe disables the GPU Operator's plugin (`devicePlugin.enabled: false`, profile-owned). Its constraint requires that **no** GPU node — identified by its `cloud.google.com/gke-accelerator` label — carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin`. This is the default GKE cluster shape: create GPU node pools normally (with `gpu-driver-version=default` or `latest` for GKE's managed driver install) and **no further cluster setup is required**.
 - **`bundle-installer`** (`aicr recipe ... --profile gpuStack=bundle-installer`) — the GPU Operator's device plugin is the sole advertiser (`devicePlugin.enabled: true`, profile-owned), and the constraint inverts: every GPU node must carry `gke-no-default-nvidia-gpu-device-plugin=true` on pools created `gpu-driver-version=disabled`. A second constraint on `K8s.gke-gpu-pools.gpu-driver-installation` (supplied via `--gke-gpu-pools <gcloud node-pools dump>`) corroborates that the pools were actually created that way, since the label alone only proves device-plugin ownership. A snapshot without that reading fails this value closed. The bundle's `gcp-driver-installer` component supplies the driver — the version is pinned in the recipe and upgrades roll with the bundle; nothing is applied by hand.
+- **`dra`** (`aicr recipe ... --profile gpuStack=dra`, experimental, [#2517](https://github.com/NVIDIA/aicr/issues/2517)) — the `bundle-installer` pool shape (same opt-out label, pool-creation, and `--gke-gpu-pools` requirements) with the NVIDIA DRA driver as the sole whole-GPU advertiser: both device plugins stay off (`devicePlugin.enabled: false`) and the recipe arms full-GPU DRA (`resources.gpus.enabled: true` with the chart's `gpuResourcesEnabledOverride` waiver — all three paths profile-owned). The resolved allocation policy is `dra-resource-claim`: workloads allocate through DRA ResourceClaims **only**, and plain `nvidia.com/gpu` requests are not served until the KEP-5004 `DRAExtendedResource` mapping (Kubernetes 1.36+, [#3282](https://github.com/NVIDIA/aicr/issues/3282)). The value carries its own `K8s.server.version >= 1.35.0` floor, Google's GKE DRA minimum, which tightens the composed chain floor at generation ([#2643](https://github.com/NVIDIA/aicr/issues/2643)).
 
 For the end-to-end setup flow (snapshot → recipe → validate), the qualification and selection-vs-verification matrices, and troubleshooting, see [GKE GPU Setup](../integrator/gke-gpu-setup.md).
 
 Why exactly one advertiser: two plugins registering `nvidia.com/gpu` on one node is not a benign overlap. Kubelet's device manager keys its endpoint and device inventory by resource name, so competing registrations and `ListAndWatch` updates replace each other. Ownership becomes nondeterministic, and one plugin's device IDs (GKE uses `nvidia0`-style names, NVIDIA uses GPU UUIDs) can reach the other plugin's `Allocate`. Expect intermittent allocation and runtime failures.
 
-**Bundle-installer cluster setup.** The opt-out label forfeits GKE's managed driver install: the managed install (`gpu-driver-version=default`/`latest`) is finalized by an init container of the **same** kube-system DaemonSet the label disables, so a labeled pool paired with `gpu-driver-version=default` comes up **driverless** — never combine the label with the managed driver install. Pools for the `bundle-installer` value must be created with `gpu-driver-version=disabled`; the bundle's `gcp-driver-installer` component carries the installer DaemonSet, so there is nothing to apply out-of-band. (AICR's GKE-COS overlays keep `driver.enabled: false` in either mode — the GPU Operator cannot install a driver on COS node images.) A previously hand-applied standalone `nvidia-driver-installer` DaemonSet must be deleted before deploying the bundle: the bundle's DaemonSet shares its name in `kube-system` and Helm will not adopt the pre-existing object. The operational procedures live in [GKE GPU Setup](../integrator/gke-gpu-setup.md#alternative-let-the-bundle-own-the-gpu-stack).
+**Bundle-installer cluster setup.** The opt-out label forfeits GKE's managed driver install: the managed install (`gpu-driver-version=default`/`latest`) is finalized by an init container of the **same** kube-system DaemonSet the label disables, so a labeled pool paired with `gpu-driver-version=default` comes up **driverless** — never combine the label with the managed driver install. Pools for the `bundle-installer` and `dra` values must be created with `gpu-driver-version=disabled`; the bundle's `gcp-driver-installer` component carries the installer DaemonSet, so there is nothing to apply out-of-band. (AICR's GKE-COS overlays keep `driver.enabled: false` in every mode — the GPU Operator cannot install a driver on COS node images.) A previously hand-applied standalone `nvidia-driver-installer` DaemonSet must be deleted before deploying the bundle: the bundle's DaemonSet shares its name in `kube-system` and Helm will not adopt the pre-existing object. The operational procedures live in [GKE GPU Setup](../integrator/gke-gpu-setup.md#alternative-let-the-bundle-own-the-gpu-stack).
 
 **`aicr validate` enforces the selected value deterministically, before any phase runs.** The selected value's `NodeTopology.gpu-nodes.label` constraint ([#1755](https://github.com/NVIDIA/aicr/issues/1755)) is verified against the snapshot at recipe generation and re-evaluated by the validate readiness pre-flight. The check fails closed: labels contradicting the selected value, mixed labels, an empty GPU-node set, and readings that `--max-nodes-per-entry` actually truncated (a cap larger than the node count truncates nothing and validates normally) all fail with exit 2 and remediation text pointing back at this section, before any check Jobs deploy. See [Validation](validation.md) for the readiness-gate mechanics.
 
-The profile also locks the ownership tuple: `devicePlugin.enabled` is profile-owned, and because both values govern advertisement, the #1327 allocation-policy paths (`devicePlugin.enabled`, DRA `resources.gpus.enabled` / `gpuResourcesEnabledOverride`) are closure-locked — a bundle- or install-time override diverging at any of them is rejected rather than warned. Switching modes is a recipe-generation decision (`--profile`), never a `--set`.
+The profile also locks the ownership tuple: `devicePlugin.enabled` is profile-owned, and because every value governs advertisement, the #1327 allocation-policy paths (`devicePlugin.enabled`, DRA `resources.gpus.enabled` / `gpuResourcesEnabledOverride`) are closure-locked — a bundle- or install-time override diverging at any of them is rejected rather than warned. Switching modes is a recipe-generation decision (`--profile`), never a `--set`.
 
 The selected constraint is the only deterministic detection point. `aicr bundle` is offline by design and cannot read node labels. The operator-health deployment check passes under the conflict because it verifies only that GPU Operator controller pods are Running — it never inspects the device plugin. Allocation probes such as `check-nvidia-smi` schedule a pod requesting `nvidia.com/gpu` on each schedulable GPU node, but skip cordoned nodes and nodes with unfinished (Pending or Running) pods that request `nvidia.com/gpu`; when they do run, they may fail nondeterministically without identifying the missing label as the cause.
 
-See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus) for the authoritative pool-creation procedures. The [NVIDIA GPU Operator GKE guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/google-gke.html) documents the same `gpu-driver-version=disabled` + installer-DaemonSet combination the `bundle-installer` value builds on ([#1716](https://github.com/NVIDIA/aicr/issues/1716)) — with AICR, that DaemonSet ships inside the bundle rather than being applied by hand, and the two values are distinguished at generation time by the opt-out pool label alone (positive vs negated), which resolved ADR-015 Deferred Decision 5 by construction.
+See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus) for the authoritative pool-creation procedures. The [NVIDIA GPU Operator GKE guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/google-gke.html) documents the same `gpu-driver-version=disabled` + installer-DaemonSet combination the `bundle-installer` and `dra` values build on ([#1716](https://github.com/NVIDIA/aicr/issues/1716)) — with AICR, that DaemonSet ships inside the bundle rather than being applied by hand, and the opt-out pool label (positive vs negated) distinguishes those values from `gke-default` at generation time, which resolved ADR-015 Deferred Decision 5 by construction (`bundle-installer` and `dra` share the pool shape and differ by explicit selection).
 
 ## OKE Device-Plugin Ownership
 
@@ -425,9 +428,9 @@ AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration:
 | `faultRemediation` | decides the remediation action |
 | `janitor` / `janitorProvider` | executes it — GPU reset, reboot or terminate |
 
-Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nvcreCertificationMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.28.0`, the version pinned in `recipes/registry.yaml`.
+Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nvcreCertificationMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.31.0`, the version pinned in `recipes/registry.yaml`.
 
-Two entries above are turned back on by AICR's shipped recipes: `nicHealthMonitor` on AKS and OKE (see [NIC and fabric fault detection](#nic-and-fabric-fault-detection)), and `slurmDrainMonitor` on every `platform: slurm` recipe (see [Slurm Drain Monitor](#slurm-drain-monitor)). The remediation components are turned on only by the opt-in [remediation steps](#graded-remediation), which bring their own datastore rather than `mongodbStore`, `healthEventsAnalyzer` only by the opt-in [analyzer mixin](#health-events-analyzer), `eventExporter` only by the opt-in [event exporter mixin](#health-event-export), `inclusterFileServer` only by the opt-in [log collector mixin](#diagnostics-capture), and `lifecycleManager` only by the opt-in [node validation mixin](#node-validation).
+Two entries above are turned back on by AICR's shipped recipes: `nicHealthMonitor` on AKS and OKE (see [NIC and fabric fault detection](#nic-and-fabric-fault-detection)), and `slurmDrainMonitor` on every `platform: slurm` recipe (see [Slurm Drain Monitor](#slurm-drain-monitor)). The remediation components are turned on only by the opt-in [remediation steps](#graded-remediation), which bring their own datastore rather than `mongodbStore`, `healthEventsAnalyzer` only by the opt-in [analyzer mixin](#health-events-analyzer), `eventExporter` only by the opt-in [event exporter mixin](#health-event-export), `inclusterFileServer` only by the opt-in [log collector mixin](#diagnostics-capture), `lifecycleManager` only by the opt-in [node validation mixin](#node-validation), and `cspHealthMonitor` only by the opt-in [CSP Health Monitor mixins](#cloud-maintenance-events).
 
 **The practical effect.** A stock AICR bundle surfaces GPU faults; it does not act on them. A node that needs a reboot is reported, not rebooted, and an operator intervenes. That is deliberate: `janitor` can reboot or terminate nodes, and enabling it without the operator having chosen to is not a safe default.
 
@@ -560,6 +563,16 @@ spec:
     - nvsentinel-preflight
 ```
 
+On a leaf that declares `runai-cluster` (the `platform=runai` leaves), compose `nvsentinel-preflight-runai` as well. The preflight controller exits until the PodGroup CRD exists, and on those leaves `runai-cluster` installs it; the companion mixin orders `nvsentinel` after `runai-cluster`, and the bundle gate fails without it:
+
+```yaml
+# your-runai-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-preflight
+    - nvsentinel-preflight-runai
+```
+
 The catalog-registration rule described under [Audit Logging and Tracing](#audit-logging-and-tracing) applies here too: the overlay must be in the resolved catalog — committed to `recipes/overlays/`, or placed at `<dir>/overlays/` and loaded with `--data <dir>`. Passing the file directly to `aicr bundle -r` or `aicr validate -r` hydrates it from `spec.criteria` alone and never reads `spec.mixins`, so the mixin cannot compose that way; AICR rejects the load with `INVALID_REQUEST`, naming the mixins that were dropped, rather than shipping a bundle without them. The "has no effect if `nvsentinel` is disabled by the chain" caveat applies equally, as does the allowlist mechanism — `nvsentinel`'s `mixinSafeOverridePaths` entry names each `preflight.*` leaf path this mixin may set, and anything outside it fails at compose time.
 
 **Two gates, not one.** Adopting the mixin only deploys the webhook. Nothing is injected until you also label the namespaces whose pods should be checked:
@@ -654,7 +667,7 @@ The entry stays in the list rather than being removed, because the webhook resol
 
 - **Rejected with `os-talos`, at bundle time.** That mixin relocates `gpu-operator` to `privileged-gpu-operator`, where `nvidia-dcgm.gpu-operator.svc:5555` does not resolve. The mixin pins that address and cannot vary it per composition — a second mixin setting the same allowlisted path collides at compose time. Rather than ship a DCGM check that cannot reach its hostengine, `CheckNVSentinelPreflightDCGMReachable` fails the bundle whenever preflight is enabled and gpu-operator is absent, disabled, relocated, or running with `dcgm.enabled: false`.
 - **The multi-node check is unusable on Grove-scheduled recipes.** Grove's gang model is hierarchical while preflight assumes one flat PodGroup per gang ([NVIDIA/NVSentinel#1354](https://github.com/NVIDIA/NVSentinel/issues/1354)), so gang discovery finds nothing there. Because the check is off by default this costs nothing unless you request it — and if you do request it on such a recipe, the pod is stranded rather than merely uncoordinated. The two single-node checks are unaffected. Every `*-inference-dynamo` leaf is affected and no other leaf is -- today that is `b200-gke-cos`, `gb200-eks-ubuntu`, `gb200-oke-ubuntu`, `gb300-eks-ubuntu`, `gb300-gke-cos`, `h100-aks-ubuntu`, `h100-eks-ubuntu`, `h100-gke-cos`, `h100-kind`, `rtx-pro-6000-eks-ubuntu` and `vr200-rke2-ubuntu`. `TestGroveLeavesAreExactlyTheDynamoLeaves` pins the correspondence -- a Grove leaf under another name, or a dynamo leaf that moves off Grove, fails there -- but it does not read the names above, so re-check them when a dynamo leaf is added.
-- **`kai-scheduler` must stay enabled, and the bundle now enforces it.** The mixin's dependency edge only orders the install — the bundler prunes an edge to a declared-but-disabled component as satisfied externally, so ordering alone would let a bundle look well-formed while `podgroups.scheduling.run.ai` never exists, crash-looping the controller and leaving `failurePolicy: Ignore` to admit every GPU pod unchecked. `CheckNVSentinelPreflightGangSchedulerRequired` blocks that at bundle time.
+- **A provider of the PodGroup CRD must stay enabled, and the bundle now enforces it.** The mixin's dependency edge only orders the install — the bundler prunes an edge to a declared-but-disabled component as satisfied externally, so ordering alone would let a bundle look well-formed while `podgroups.scheduling.run.ai` never exists, crash-looping the controller and leaving `failurePolicy: Ignore` to admit every GPU pod unchecked. `CheckNVSentinelPreflightGangSchedulerRequired` blocks that at bundle time unless `kai-scheduler` is enabled or, on the Run:ai leaves, `runai-cluster` is (its chart bundles KAI and installs the same CRD).
 - **The loopback bandwidth threshold is not enforced.** The chart's 150 GB/s is calibrated for NVLink, while its own values note PCIe parts need roughly 15 — so on `l40`, `l40s` and `rtx-pro-6000` a healthy GPU would fail it. Because the checks now gate, that would be a pod-creation outage on those recipes, so the mixin sets `SKIP_BANDWIDTH_CHECK: "true"`. The loopback *connectivity* test still runs and still gates; only its bandwidth assertion is skipped. Revisit if upstream gains per-accelerator thresholds. The all-reduce check keeps its 100 GB/s threshold, but it is off by default.
 - **A DCGM outage blocks GPU pods.** `preflight-dcgm-diag` treats an unreachable hostengine as a fatal result, so while DCGM is down every GPU pod in an opted-in namespace strands in `Init:Error`. `CheckNVSentinelPreflightDCGMReachable` catches the *configuration* cases at bundle time — gpu-operator absent, disabled, relocated, or running with `dcgm.enabled: false` (which the shipped Kind overlay does) — but it cannot catch a runtime outage. This is the main operational risk of adopting the mixin.
 
@@ -813,14 +826,14 @@ spec:
     - nvsentinel-slinky-drainer
 ```
 
-The mixin adds the `slinky-drainer` component, NVSentinel's slinky-drainer plugin at v1.28.0, and turns on `node-drainer.customDrain`. The plugin ships upstream only as Kustomize, so AICR vendors its manifests into the `nvsentinel` namespace: the `slinky-drain-template` ConfigMap `node-drainer` renders each request from and the controller Deployment, pinned by digest. Its `drainrequests.nvsentinel.nvidia.com` CRD is a separate component, `slinky-drainer-crds`, that both `slinky-drainer` and `nvsentinel` depend on, so the deployers install it, and wait for it to be Established, before the plugin or `node-drainer` starts. For each quarantined node:
+The mixin adds the `slinky-drainer` component, NVSentinel's slinky-drainer plugin at v1.31.0, and turns on `node-drainer.customDrain`. The plugin ships upstream only as Kustomize, so AICR vendors its manifests into the `nvsentinel` namespace: the `slinky-drain-template` ConfigMap `node-drainer` renders each request from and the controller Deployment, pinned by digest. Its `drainrequests.nvsentinel.nvidia.com` CRD is a separate component, `slinky-drainer-crds`, that both `slinky-drainer` and `nvsentinel` depend on, so the deployers install it, and wait for it to be Established, before the plugin or `node-drainer` starts. For each quarantined node:
 
 1. `fault-quarantine` cordons the node, and Slinky's operator marks a cordoned node DRAIN in Slurm, so Slurm starts no new job there.
 2. `node-drainer` creates a `DrainRequest` for the node instead of evicting its pods.
 3. The plugin annotates the node `nodeset.slinky.slurm.net/node-cordon-reason` with the fault, then waits until every Ready pod in the `slurm` namespace on the node reports Slurm DRAIN and idle: until the node's running jobs finish.
 4. It deletes every pod in `slurm` on the node, not-Ready ones without waiting, and marks the request `DrainComplete`. `node-drainer` records the drain as done and deletes the request, and the node moves on, to repair under `nvsentinel-remediation`.
 
-At v1.28.0 `node-drainer` records a completed custom drain as `AlreadyDrained`, which `fault-remediation` reads as drained, and leaves the node's `dgxc.nvidia.com/nvsentinel-state` label at `draining` rather than `drain-succeeded`, so under `nvsentinel-quarantine` a drained Slurm node keeps reading `draining`.
+At v1.31.0 `node-drainer` records a completed custom drain as `AlreadyDrained`, which `fault-remediation` reads as drained, and leaves the node's `dgxc.nvidia.com/nvsentinel-state` label at `draining` rather than `drain-succeeded`, so under `nvsentinel-quarantine` a drained Slurm node keeps reading `draining`.
 
 Slinky's operator drains the Slurm node with the annotation as its reason, so `scontrol show node` shows the fault, for example `Reason=slurm-operator: [T] [NVSentinel] 119 GPU:0,... - <message>`. The `slurm-operator:` prefix keeps the [Slurm Drain Monitor](#slurm-drain-monitor) from reporting the drain back to NVSentinel.
 
@@ -896,7 +909,7 @@ A leaf that composed `nvsentinel-remediation` before post-reboot validation fail
 
 On a `platform: slurm` recipe, `nvsentinel-remediation` also needs `nvsentinel-slinky-drainer`; without it the bundle fails, because the drain would skip slurmd and the node would be repaired under its running Slurm jobs. `nvsentinel-quarantine` works without it and leaves a faulty Slurm node cordoned. See [Slurm Drain Through Slinky](#slurm-drain-through-slinky).
 
-**What "repair" means.** A recoverable GPU fault (`COMPONENT_RESET`) resets the faulted GPU in place, scoped to its GPU UUID. `RESTART_VM` and `RESTART_BM` reboot the node. `REPLACE_VM` creates a `TerminateNode`, which janitor fails under the `generic` provider AICR pins, so the node stays cordoned. Actions with no mapping, such as `CONTACT_SUPPORT`, are cordoned and drained but not repaired, and the node is labeled `remediation-failed`. `fault-remediation` labels a node `remediation-succeeded` when it creates the repair request, not when the repair finishes, so a node whose `TerminateNode` or `GPUReset` failed still reads `remediation-succeeded`; the request object's status carries the outcome. At v1.28.0 janitor also sets a failed `GPUReset`'s `Complete` condition to `True`, the condition upstream's action map (`completeConditionType: Complete`) tells `fault-remediation` to wait on, so `fault-remediation` reads a failed reset as finished. Check `kubectl get gpuresets` and its `Failed` phase rather than the node label; the repair cap still applies, because it counts attempts, not outcomes. After a reboot for a fatal GPU fault (`RESTART_VM` or `RESTART_BM`) that followed a full drain, the node is not returned to service on the healthy event alone: `fault-quarantine` keeps its cordon and creates a ValidationRequest, and lifecycle-manager uncordons the node only when the DCGM diagnostic passes (see [Node Validation](#node-validation)). A GPU reset is not validated: it takes seconds and the diagnostic minutes, a reset that did not fix the GPU reports the fault again, and the analyzer's `MultipleRemediations` rule reports a node repaired again and again. `REPLACE_VM` and actions with no mapping, such as `CONTACT_SUPPORT`, get no validation rule: they are not repaired, so the node stays cordoned until an operator acts.
+**What "repair" means.** A recoverable GPU fault (`COMPONENT_RESET`) resets the faulted GPU in place, scoped to its GPU UUID. `RESTART_VM` and `RESTART_BM` reboot the node. `REPLACE_VM` creates a `TerminateNode`, which janitor fails under the `generic` provider AICR pins, so the node stays cordoned. Actions with no mapping, such as `CONTACT_SUPPORT`, are cordoned and drained but not repaired, and the node is labeled `remediation-failed`. `fault-remediation` labels a node `remediation-succeeded` when it creates the repair request, not when the repair finishes, so a node whose `TerminateNode` or `GPUReset` failed still reads `remediation-succeeded`; the request object's status carries the outcome. At v1.30.0 janitor also sets a failed `GPUReset`'s `Complete` condition to `True`, the condition upstream's action map (`completeConditionType: Complete`) tells `fault-remediation` to wait on, so `fault-remediation` reads a failed reset as finished. Check `kubectl get gpuresets` and its `Failed` phase rather than the node label; the repair cap still applies, because it counts attempts, not outcomes. After a reboot for a fatal GPU fault (`RESTART_VM` or `RESTART_BM`) that followed a full drain, the node is not returned to service on the healthy event alone: `fault-quarantine` keeps its cordon and creates a ValidationRequest, and lifecycle-manager uncordons the node only when the DCGM diagnostic passes (see [Node Validation](#node-validation)). A GPU reset is not validated: it takes seconds and the diagnostic minutes, a reset that did not fix the GPU reports the fault again, and the analyzer's `MultipleRemediations` rule reports a node repaired again and again. `REPLACE_VM` and actions with no mapping, such as `CONTACT_SUPPORT`, get no validation rule: they are not repaired, so the node stays cordoned until an operator acts. From v1.31.0, with an R610 or later driver, an XID 154 recovery action (PF FLR, OS Reboot, Bus Reset or System Reboot) maps to `COMPONENT_RESET` or `RESTART_BM`, so the GPU is reset or the node rebooted; v1.28.0 reported them as `CONTACT_SUPPORT`, cordoned and drained the node and repaired nothing. No setting restores that, because the mapping has no per-XID switch. To stop syslog events from acting at all, set `nv-sentinel:syslog-health-monitor.processingStrategy` to `STORE_ONLY` at bundle time, which also stops their cordon and drain and keeps them from the analyzer's rules, since `STORE_ONLY` events are not analyzer input, and check each NIC pattern's own `processingStrategy`, which replaces the module value. The NVSentinel upgrade record (`aicr upgrade-check`) carries the same steps.
 
 The chart's own default maps `COMPONENT_RESET` to `RebootNode`, which drains and reboots the whole node for a fault that a GPU reset clears. The `nvsentinel-observe` and `nvsentinel-remediation` mixins therefore carry upstream's `GPUReset` mapping from the chart's `values-remediation.yaml`, so recipes without a step are unchanged. Enabling `faultRemediation` any other way, such as with `--set`, gets the chart's `RebootNode` default. `TestMixinNVSentinelRemediation_ComposesOntoEveryLeaf` and `TestNVSentinelRemediationChartRender` fail if the mapping is lost.
 
@@ -926,13 +939,13 @@ With a step composed, the datastore is in NVSentinel's event path, not only its 
 - Talos: `os-talos` moves `nvsentinel` to the `privileged-nvsentinel` namespace, away from the Percona components, and the bundle gate fails closed on the mismatch.
 - Custom cluster domains: the connection URI names `svc.cluster.local`.
 - The remediation step on Kind, unless `lifecycle-manager.config.tests.dcgm-diag-test.command` is overridden: Kind runs no standalone DCGM hostengine for the post-reboot diagnostic to call, and the bundle fails (see [Node Validation](#node-validation) prerequisites).
-- The remediation step on GKE COS, under either `gpuStack` profile (`gke-default` or `bundle-installer`). In both, the driver comes from outside the GPU Operator and lives in `/home/kubernetes/bin/nvidia`. The GPU reset Job runs `nvidia-smi` by chrooting into the driver root, and that directory holds only driver files, not a complete filesystem; the `gpu-reset` image ships no `nvidia-smi` of its own. The bundle fails. The observe and quarantine steps work there.
+- The remediation step on GKE COS, under every `gpuStack` profile value (`gke-default`, `bundle-installer`, or `dra`). In all of them, the driver comes from outside the GPU Operator and lives in `/home/kubernetes/bin/nvidia`. The GPU reset Job runs `nvidia-smi` by chrooting into the driver root, and that directory holds only driver files, not a complete filesystem; the `gpu-reset` image ships no `nvidia-smi` of its own. The bundle fails. The observe and quarantine steps work there.
 
 **Bundle-time gates.** `CheckNVSentinelPostRemediationValidationCoherent` blocks post-reboot validation that would strand or skip a repaired node (see [Node Validation](#node-validation)). `CheckNVSentinelRemediationPipelineCoherent` blocks a bundle whose pipeline cannot work: quarantine, drain or remediation with the embedded `mongodbStore` on, with no `global.datastore.provider`, or with one other than `mongodb` or `postgresql`; a stage without the one before it (`node-drainer` without `fault-quarantine`, `fault-remediation` without `node-drainer`); a live `fault-remediation` without `janitor`, or without the [health events analyzer](#health-events-analyzer) and its `MultipleRemediations` rule; `janitor` without `janitor-provider`; janitor's GPU reset Job requesting a RuntimeClass other than the GPU Operator's, or any RuntimeClass where the GPU Operator runs CDI with the NRI plugin; the reset Job reading the driver from a path the GPU Operator does not populate (`/run/nvidia/driver`, or its `hostPaths.driverInstallDir`, when it installs the driver; `/` when the node image does), a reset `driverRoot` that is not an absolute, clean path, or is `/`, or the reset on GKE COS under either `gpuStack` profile; a reset service manager that waits for an operand the GPU Operator does not run, in a namespace it does not use, or with a custom spec missing its timeouts; `fault-remediation` without `metadata-collector`. When NVSentinel reads the `nvsentinel-mongodb-uri` Secret, it also requires x509 auth with the `nvsentinel-mongodb-app-client` certificate, and both Percona components deployed, enabled and in NVSentinel's namespace. `CheckNVSentinelMongoDBCoherent` blocks an `nvsentinel-mongodb` with no NVSentinel to use it, TLS below `requireTLS`, no `$external` app user or one without `readWrite` on `HealthEventsDatabase` and the `nvsentinelTTLIndex` role, sharding on, no enabled `psmdb-operator`, a `psmdb-operator` with `watchAllNamespaces` on or `disableTelemetry` off, or a `crVersion` or `initImage` off the operator image's minor. `CheckNVSentinelDatastorePrerequisites` reads the snapshot evidence above: it blocks no default StorageClass (unless one is named), another Percona cluster or operator, or unreadable evidence, and warns when the recipe carries no evidence, as a criteria-only recipe does. `CheckNVSentinelRemediationPipelineCoherent` and `CheckNVSentinelMongoDBCoherent` also reject `--dynamic` on any path they verify, since install-time edits to `cluster-values.yaml` would bypass them. The mixins satisfy those two by construction, so they catch `--set` edits and overlays that disable a dependency; `CheckNVSentinelDatastorePrerequisites` depends on the cluster. On a Slurm recipe `CheckNVSentinelSlurmCustomDrainCoherent` also applies; see [Slurm Drain Through Slinky](#slurm-drain-through-slinky). `CheckNVSentinelDrainScopeCoherent` checks the drain timing and scope; see [Drain Scope and Timing](#drain-scope-and-timing).
 
 **Health checks.** Each step gives `nvsentinel-mongodb` its own check. It asserts that the Percona cluster is `ready`, every `nvsentinel-mongodb-rs0` member is ready, the client certificate is `Ready`, the URI Secret exists, and every Deployment the step enables is available: `fault-quarantine` and `node-drainer`, plus `fault-remediation` in observe, plus `fault-remediation`, `janitor` and `janitor-provider` in remediation. The component exists only when a step is composed, so `aicr validate` fails a step whose pipeline did not come up instead of passing on its absence. `psmdb-operator`'s check asserts the operator Deployment and its CRD.
 
-**Privileges.** `janitor-provider.csp.provider: generic` reboots by running a privileged Job, on the busybox the `nvsentinel-remediation` mixin pins in `janitor-provider.csp.generic.rebootImage`, that executes `chroot /host reboot` on the target node. The GPU reset runs as a privileged Job that mounts the host's `/dev`, `/sys`, the journal socket and the driver root, sets `NVIDIA_VISIBLE_DEVICES=void` so the container runtime injects nothing, and pulls the `gpu-reset` image on every run. That avoids cloud IAM credentials but is a broad grant.
+**Privileges.** `janitor-provider.csp.provider: generic` reboots by running a privileged Job, on the busybox the `nvsentinel-remediation` mixin pins in `janitor-provider.csp.generic.rebootImage`, that executes `chroot /host reboot` on the target node. From v1.31.0 the Job first reads the host boot ID with `cat` and refuses to reboot when it cannot, so a custom `rebootImage` that worked at v1.28.0 must contain `sh` and `cat`; the shipped BusyBox does. The GPU reset runs as a privileged Job that mounts the host's `/dev`, `/sys`, the journal socket and the driver root, sets `NVIDIA_VISIBLE_DEVICES=void` so the container runtime injects nothing, and pulls the `gpu-reset` image on every run. That avoids cloud IAM credentials but is a broad grant.
 
 The reset Job runs `nvidia-smi` by chrooting into the host's driver root, so where it reads the driver from and which RuntimeClass it requests depend on the platform. The overlays set both next to the matching DRA driver root, and `CheckNVSentinelRemediationPipelineCoherent` rejects a mismatch:
 
@@ -941,12 +954,12 @@ The reset Job runs `nvidia-smi` by chrooting into the host's driver root, so whe
 | GPU Operator installs the driver (EKS except os=amazonlinux, BCM, LKE, OCP, k0s, generic) | `/run/nvidia/driver` (chart default) | `nvidia` (chart default) | — |
 | AKS `gpuStack=azure-managed` (default) | `/` | `nvidia-container-runtime` | the `gpuStack` profile |
 | AKS `gpuStack=operator-managed` | `/run/nvidia/driver` | `nvidia` | the `gpuStack` profile |
-| OKE `gpuStack=oci-managed` (default) | `/` | `nvidia` (chart default) | the `gpuStack` profile |
-| OKE `gpuStack=operator-managed` | `/run/nvidia/driver` | `nvidia` (chart default) | the `gpuStack` profile |
+| OKE `gpuStack=oci-managed` (default) | `/` | `runc` | the `gpuStack` profile |
+| OKE `gpuStack=operator-managed` | `/run/nvidia/driver` | `nvidia` | the `gpuStack` profile |
 | EKS `os=amazonlinux` leaves (require the NVIDIA AL2023 AMI) | `/` | `nvidia` (chart default) | the leaf overlay |
 | Kind (nvkind), H200 k0s | `/` | `nvidia` (chart default) | the overlay |
 | RKE2 (CDI with NRI) | `/` on VR200, the chart default elsewhere | none (`""`) | the `rke2` and VR200 overlays |
-| GKE COS (`gpuStack=gke-default` or `bundle-installer`) | not supported (see **Not supported**) | — | — |
+| GKE COS (any `gpuStack` value) | not supported (see **Not supported**) | — | — |
 
 Around each reset janitor stops the GPU Operator's operands on the node and then waits up to 10 minutes for them to come back; it waits for every operand it lists, deployed or not, so the list must match what the GPU Operator runs. Its built-in list is the device plugin, `nvidia-dcgm`, the DCGM exporter and GPU feature discovery. Kind runs no standalone DCGM and OKE's `oci-managed` profile runs no GPU Operator device plugin, so those overlays set `janitor.config.controllers.gpuReset.serviceManager.spec` to the operands they run; a reset with the built-in list there would always end in `RestoreTimeoutExceeded`.
 
@@ -971,8 +984,8 @@ AICR leaves `tls.certManagementPolicy` at Percona's default, `auto`, so the oper
 
 - In the observe step nothing is cordoned or tainted, but the node is not left untouched: `fault-quarantine` writes its quarantine annotations, and `node-drainer` and `fault-remediation` still move the `dgxc.nvidia.com/nvsentinel-state` label through `draining` to `remediation-succeeded`. `node-drainer` still waits for the node's pods outside `systemNamespaces`. Its force-delete after `deleteAfterTimeoutMinutes` is a server-side dry run that deletes nothing, so on a node running any such non-DaemonSet pod the drain finishes only when those pods exit; until then the event never reaches `fault-remediation`.
 - Moving from observe to a live step discards the faults observed so far. Each dry-run quarantine carries a `quarantineHealthEventDryRun: "True"` annotation, and when dry run is switched off `fault-quarantine` removes the dry-run annotations and cancels their events at startup, so `node-drainer` does not act on them. The cancel is best-effort and not retried: if it fails, the events stay `Quarantined` and `node-drainer` can still drain and repair the node. After switching dry run off, check `fault_quarantine_processing_errors_total{error_type="mongodb_cancel_quarantine_error"}`; if it moved, set `healtheventstatus.nodequarantined` to `Cancelled` on that node's remaining `Quarantined` events before the live step acts on them. Faults raised after the move are acted on normally. Annotations written by the observe step before v1.27.0 carry no marker, and `fault-quarantine` reads each of them once as a manual uncordon instead, annotating the node `quarantinedNodeUncordonedManually`.
-- A quarantined node stays cordoned until NVSentinel receives a healthy event for the fault. `kubectl uncordon` cancels the workflow: NVSentinel clears its taints, labels and annotations and marks the events cancelled. To keep NVSentinel off a node entirely, label it `k8saas.nvidia.com/ManagedByNVSentinel=false` or `nvsentinel.dgxc.nvidia.com/managed=false`; every fault-quarantine rule set honors both. Both are upstream's documented procedure ([Cancelling Break-Fix Workflows](https://github.com/NVIDIA/NVSentinel/blob/v1.28.0/docs/cancelling-breakfix.md)). With [External Remediation](#external-remediation), janitor removes `managed=false` from a node when a request for it is set to `True` or deleted, whoever set the label, so use `k8saas.nvidia.com/ManagedByNVSentinel=false` there (see **Interactions** under External Remediation).
-- The remediation step caps repairs at three attempts per equivalence group (for example `reset` or `restart`) within one quarantine (`fault-remediation.maxRemediationAttempts: 3`; the chart default `0` retries without limit). At the cap, NVSentinel labels the node `dgxc.nvidia.com/nvsentinel-state=remediation-failed` and leaves it cordoned for an operator; the count resets when the node leaves quarantine. Watch for that label, repair the node by hand, then `kubectl uncordon` it. A node repaired again and again across quarantines is reported by the analyzer's `MultipleRemediations` rule, which the remediation step requires (see [Health Events Analyzer](#health-events-analyzer)).
+- A quarantined node stays cordoned until NVSentinel receives a healthy event for the fault. `kubectl uncordon` cancels the workflow: NVSentinel clears its taints, labels and annotations and marks the events cancelled. To keep NVSentinel off a node entirely, label it `k8saas.nvidia.com/ManagedByNVSentinel=false` or `nvsentinel.dgxc.nvidia.com/managed=false`; every fault-quarantine rule set honors both. Both are upstream's documented procedure ([Cancelling Break-Fix Workflows](https://github.com/NVIDIA/NVSentinel/blob/v1.31.0/docs/cancelling-breakfix.md)). With [External Remediation](#external-remediation), janitor removes `managed=false` from a node when a request for it is set to `True` or deleted, whoever set the label, so use `k8saas.nvidia.com/ManagedByNVSentinel=false` there (see **Interactions** under External Remediation).
+- The remediation step caps repairs at three attempts per equivalence group (for example `reset` or `restart`) within one quarantine (`fault-remediation.maxRemediationAttempts: 3`; the chart default `0` retries without limit). At the cap, NVSentinel labels the node `dgxc.nvidia.com/nvsentinel-state=remediation-failed` and leaves it cordoned for an operator; the count resets when the node returns to service. With post-remediation validation the count survives the hand-off from quarantine and resets only when validation releases the node, so a fault found while it holds the node continues the count. Watch for that label, repair the node by hand, then `kubectl uncordon` it. A node repaired again and again across quarantines is reported by the analyzer's `MultipleRemediations` rule, which the remediation step requires (see [Health Events Analyzer](#health-events-analyzer)).
 - The GPU reset Job has a 300-second `activeDeadlineSeconds` that includes pulling the `gpu-reset` image, and the Job always re-checks the tag against the registry. A slow or unreachable registry can time the reset out, so mirror the image close to the cluster.
 - Only fatal events drive the pipeline. Every step sets `processingStrategy: EXECUTE_REMEDIATION` explicitly on `gpu-health-monitor` and `syslog-health-monitor`, the event sources it acts on, so a chart default change cannot alter that; the syslog NIC patterns, the NIC checks and the NPD object-monitor policies ship `STORE_ONLY` and are not acted on. With [preflight](#preflight-checks) composed as well, a fatal preflight result cordons the node.
 - A rebooted node that fails validation stays cordoned, labeled `nvsentinel.nvidia.com/validation-state=validation-failed`; see [Node Validation](#node-validation) for how to retest or release it. A node that was already cordoned when the fault arrived is uncordoned when its validation passes, so keep a node under maintenance out of NVSentinel's hands with `nvsentinel.dgxc.nvidia.com/managed=false` or a `NoSchedule` taint (see **After a reboot** in [Node Validation](#node-validation)). If lifecycle-manager is down when the healthy event arrives, `fault-quarantine` cannot create the request, keeps the node quarantined, and does not retry. A request created by hand at this point stays `Pending`: `fault-quarantine`'s `quarantineHealthEvent` annotation remains on the node, and lifecycle-manager's `not-under-quarantine` readiness criterion waits on it. Once lifecycle-manager runs again, validate the node before it takes work: taint it with a key your workloads do not tolerate (`kubectl taint node <node> validation-hold=true:NoSchedule`), so it takes no new pods while it is uncordoned, except pods that tolerate every taint, which a default bundle gives AICR's system components unless `--system-node-selector` keeps them off GPU nodes; `kubectl uncordon <node>`, which cancels the quarantine; wait until `fault-quarantine` has removed its `quarantineHealthEvent` and `quarantineValidationHealthEvent` annotations (`kubectl get node <node> -o jsonpath='{.metadata.annotations}'` shows neither), because a cordon before then, or a `fault-quarantine` restart in between, can leave the quarantine in place and the request `Pending`; `kubectl cordon <node>`; remove the taint (`kubectl taint node <node> validation-hold:NoSchedule-`); and create a ValidationRequest for it as described in [Node Validation](#node-validation). The pass uncordons it. To release the node untested instead, `kubectl uncordon <node>` alone.
@@ -986,7 +999,7 @@ AICR leaves `tls.certManagementPolicy` at Percona's default, `auto`, so the oper
 
 #### Drain Scope and Timing
 
-`node-drainer` skips every pod in a namespace its `systemNamespaces` pattern matches, and drains every other non-DaemonSet pod on the node that a drain rule matches, in that rule's mode: a `userNamespaces` entry for its namespace, or, when `podDrainPolicies` is set instead, the first policy whose namespace and `podSelector` match the pod. A pod no rule matches is not drained and does not hold the drain open, so repair can act under it; the `"*"` entry the bundle sets covers every namespace, but a `podDrainPolicies` list covers only the pods its selectors match. The chart's defaults protect only six namespaces and wait for a pod with no time limit, so the bundle sets both whenever a step turns `node-drainer` on. On Slurm the `nvsentinel-slinky-drainer` mixin replaces this drain and keeps `userNamespaces` empty (see [Slurm Drain Through Slinky](#slurm-drain-through-slinky)).
+`node-drainer` skips every pod in a namespace its `systemNamespaces` pattern matches, and drains every other non-DaemonSet pod on the node that a drain rule matches, in that rule's mode: a `userNamespaces` entry for its namespace, or, when `podDrainPolicies` is set instead, the first policy whose namespace, `podSelector` and `ownerKinds` all match the pod. A policy needs a `podSelector`, `ownerKinds` or both. `ownerKinds` is compared exactly with the kind in the pod's controller owner reference and does not follow owners further, so Deployment pods match `ReplicaSet`, CronJob pods match `Job`, and a pod with no controller never matches a policy that sets `ownerKinds`, however well its namespace and labels fit. A policy with only a `podSelector` still matches such a pod. A pod no rule matches is not drained and does not hold the drain open, so repair can act under it; the `"*"` entry the bundle sets covers every namespace, but a `podDrainPolicies` list covers only the pods its policies match. The chart's defaults protect only six namespaces and wait for a pod with no time limit, so the bundle sets both whenever a step turns `node-drainer` on. On Slurm the `nvsentinel-slinky-drainer` mixin replaces this drain and keeps `userNamespaces` empty (see [Slurm Drain Through Slinky](#slurm-drain-through-slinky)).
 
 **Protected namespaces.** `aicr bundle` generates `systemNamespaces` from the resolved recipe: the chart's own list (`nvsentinel`, `kube-system`, `gpu-operator`, `gmp-system`, `network-operator`, `skyhook`) plus the namespace of every component the recipe declares, as an anchored pattern such as `^(cert-manager|gpu-operator|kube-system|...|nvsentinel)$`. A new component is protected as soon as a recipe deploys it, and the list follows the recipe: the Talos `privileged-*` namespaces, for example, appear only where the recipe uses them. Names match exactly, so `network-operator` does not protect `nvidia-network-operator`; the generated pattern lists each. Protection covers eviction only: a reboot still stops those pods with the node. It also covers every pod in those namespaces, not only AICR's own, so run GPU workloads in namespaces of their own: a training job created in `kubeflow`, or slurmd in `slurm`, is never drained, and the remediation step repairs the node under it. To see the list a bundle uses, read `node-drainer.systemNamespaces` in the `nvsentinel` component's `values.yaml`.
 
@@ -1127,7 +1140,7 @@ It grants no `delete`, because deleting a request returns the node to NVSentinel
 | `ExternalRemediationComplete=False` | Nothing changes. The node stays released and cordoned, and the request keeps janitor's per-node lease, so no `GPUReset`, `RebootNode` or `TerminateNode` runs on the node until the request is set to `True` or deleted. |
 | The request is deleted | janitor removes the taint and the `managed` label before it releases its finalizer on the request. The node returns to NVSentinel and stays cordoned while its quarantine lasts. |
 
-**The cordon after `True`.** fault-quarantine uncordons the node only on a healthy event for the fault, and kubernetes-object-monitor sends that event once, when the condition clears. If the condition clears while the node is released, platform-connectors stores the healthy event `STORE_ONLY`, the monitor still counts it as sent, and the node stays cordoned after the release ends. Upstream lists this as a known limitation. Hence step 7 above: clear the condition after `status.completionTime` is set, which janitor does only after removing the taint and label; the healthy event then reaches fault-quarantine, which uncordons the node unless another fault still holds it. While the condition stays `True` the node stays cordoned, because the monitor does not raise a fault it already reported. If the healthy event was lost, confirm the node is repaired and `kubectl uncordon` it, which cancels NVSentinel's quarantine ([Cancelling Break-Fix Workflows](https://github.com/NVIDIA/NVSentinel/blob/v1.28.0/docs/cancelling-breakfix.md)).
+**The cordon after `True`.** fault-quarantine uncordons the node only on a healthy event for the fault, and kubernetes-object-monitor sends that event once, when the condition clears. If the condition clears while the node is released, platform-connectors stores the healthy event `STORE_ONLY`, the monitor still counts it as sent, and the node stays cordoned after the release ends. Upstream lists this as a known limitation. Hence step 7 above: clear the condition after `status.completionTime` is set, which janitor does only after removing the taint and label; the healthy event then reaches fault-quarantine, which uncordons the node unless another fault still holds it. While the condition stays `True` the node stays cordoned, because the monitor does not raise a fault it already reported. If the healthy event was lost, confirm the node is repaired and `kubectl uncordon` it, which cancels NVSentinel's quarantine ([Cancelling Break-Fix Workflows](https://github.com/NVIDIA/NVSentinel/blob/v1.31.0/docs/cancelling-breakfix.md)).
 
 **Forcing a release.** For a request at `False`, or one the external system abandoned, first make sure the external system has stopped work on the node, then delete the request. Its name is also the release taint's value:
 
@@ -1205,9 +1218,9 @@ spec:
 
 `CheckNVSentinelRemediationPipelineCoherent` fails a bundle that turns on the analyzer without a datastore, with the same datastore rules as the remediation stages. The analyzer also needs MongoDB: NVSentinel's PostgreSQL client cannot run the aggregation stages several of its XID 74 rules use, so a `postgresql` datastore is rejected.
 
-**Required with the remediation step.** `fault-remediation.maxRemediationAttempts` caps repairs within one quarantine, and the count resets when the node leaves quarantine. A node that is repaired, returns healthy, and fails again next week is never stopped by that cap. The analyzer's `MultipleRemediations` rule is what reports it, so `CheckNVSentinelRemediationPipelineCoherent` fails a bundle that runs `fault-remediation` live (`global.dryRun: false`) without the analyzer, or with `health-events-analyzer.enableMultipleRemediationsRule` off, or with any `health-events-analyzer.config` override. That override is a Helm template whose rules exist only after rendering, so the gate cannot verify that it still evaluates the rule; choose rules with the chart's `enable<Rule>Rule` toggles instead. The observe step's dry run makes no repairs, so it does not need the analyzer, and the quarantine step does not run `fault-remediation`. With the analyzer composed on the observe step, `MultipleRemediations` still counts its dry-run remediations: in dry run, `fault-remediation` marks each event whose repair it would have created as remediated.
+**Required with the remediation step.** `fault-remediation.maxRemediationAttempts` caps repairs within one quarantine, and the count resets when the node returns to service. With post-remediation validation the count survives the hand-off from quarantine and resets only when validation releases the node, so a fault found while it holds the node continues the count. A node that is repaired, returns healthy, and fails again next week is never stopped by that cap. The analyzer's `MultipleRemediations` rule is what reports it, so `CheckNVSentinelRemediationPipelineCoherent` fails a bundle that runs `fault-remediation` live (`global.dryRun: false`) without the analyzer, or with `health-events-analyzer.enableMultipleRemediationsRule` off, or with any `health-events-analyzer.config` override. That override is a Helm template whose rules exist only after rendering, so the gate cannot verify that it still evaluates the rule; choose rules with the chart's `enable<Rule>Rule` toggles instead. The observe step's dry run makes no repairs, so it does not need the analyzer, and the quarantine step does not run `fault-remediation`. With the analyzer composed on the observe step, `MultipleRemediations` still counts its dry-run remediations: in dry run, `fault-remediation` marks each event whose repair it would have created as remediated.
 
-**Rules.** The mixin restates every rule the pinned chart (v1.28.0) ships, all on, so the rule set is chosen in the mixin rather than inherited; none is disabled. `TestNVSentinelHealthEventsAnalyzerChartRender`, in the weekly render check, fails when a chart bump adds a rule the mixin does not name.
+**Rules.** The mixin restates every rule the pinned chart (v1.31.0) ships, all on, so the rule set is chosen in the mixin rather than inherited; none is disabled. `TestNVSentinelHealthEventsAnalyzerChartRender`, in the weekly render check, fails when a chart bump adds a rule the mixin does not name.
 
 | Group | Rules | Recommended action |
 |---|---|---|
@@ -1218,9 +1231,9 @@ spec:
 
 The analyzer skips source events that are `STORE_ONLY`. Every remediation step sets the GPU and syslog monitors to `EXECUTE_REMEDIATION`, so the XID rules see their events. AICR ships the syslog NIC patterns and the [NIC health monitor](#nic-and-fabric-fault-detection) at `STORE_ONLY`, so the two NIC rules do not fire until those sources are moved to `EXECUTE_REMEDIATION` or `STORE_AND_ANALYSE`. `STORE_AND_ANALYSE` feeds the analyzer while, like `STORE_ONLY`, setting no node condition and no Kubernetes Event for the source event. A derived event with action `NONE` is non-fatal; every other one is fatal.
 
-**Derived events are `STORE_ONLY`.** The mixin sets `health-events-analyzer.processingStrategy: STORE_ONLY`, as a first step to observe what the rules match. Derived events are written to the datastore and counted in the analyzer's `rule_matched_total{rule_name,node_name}` metric, which the chart's PodMonitor scrapes. The platform connector sets no node condition and creates no Kubernetes Event for them. The analyzer cordons nothing at either strategy: none of `fault-quarantine`'s rule sets matches events from `health-events-analyzer`.
+**Derived events are `STORE_ONLY`.** The mixin sets `health-events-analyzer.processingStrategy: STORE_ONLY`, as a first step to observe what the rules match. Derived events are written to the datastore and counted in the analyzer's `rule_matched_total{rule_name,node_name}` metric, which the chart's PodMonitor scrapes. The platform connector sets no node condition and creates no Kubernetes Event for them. The analyzer cordons nothing at `STORE_ONLY`: `fault-quarantine` acts only on `EXECUTE_REMEDIATION` events. From v1.31.0 the chart's default `Health events analyzer fatal error ruleset` cordons the node for a fatal analyzer event, so moving the strategy to `EXECUTE_REMEDIATION` makes `MultipleRemediations` and the XID 74 events cordon it.
 
-To surface matches on the node, pass `--set nv-sentinel:health-events-analyzer.processingStrategy=EXECUTE_REMEDIATION` at bundle time. The mixin owns that path, so setting it in a leaf overlay is rejected as a collision. A fatal derived event then sets a node condition named after the rule, and a non-fatal one creates a Kubernetes Event.
+To surface matches on the node, pass `--set nv-sentinel:health-events-analyzer.processingStrategy=EXECUTE_REMEDIATION` at bundle time. The mixin owns that path, so setting it in a leaf overlay is rejected as a collision. A fatal derived event then sets a node condition named after the rule, and a non-fatal one creates a Kubernetes Event. With a quarantine or remediation step composed, which the analyzer needs beside the remediation step, a fatal derived event from v1.31.0 also cordons the node and starts a drain; before v1.31.0 it set the condition only. Before upgrading, check the effective `processingStrategy` in the bundle, at the module level and in each enabled rule of `health-events-analyzer.config`, where a rule's `processing_strategy` replaces the module value: where the `nvsentinel-health-events-analyzer` mixin is not composed, the chart default is `EXECUTE_REMEDIATION`, so it applies without any `--set`, and `UNSPECIFIED` becomes `EXECUTE_REMEDIATION` in platform-connectors. Also check `fault-quarantine.ruleSets`: a list set there replaces the chart's, so the cordon applies only while it still contains `Health events analyzer fatal error ruleset`. To keep the condition-only behavior, set `fault-quarantine.ruleSets` to the chart's v1.31.0 default list without that rule set, carrying every other rule set because the list replaces the default. Setting `STORE_ONLY` instead stops the cordon but also removes the node condition and Kubernetes Event, so alerts that read them stop. Set it at the module level and change or remove every enabled rule's own `processing_strategy: EXECUTE_REMEDIATION`, because a rule that keeps it still cordons and drains.
 
 **Node conditions do not clear themselves.** The analyzer never publishes a healthy event, so a condition it sets, `MultipleRemediations` included, stays on the node until an operator removes it. After the hardware is fixed, remove it:
 
@@ -1231,6 +1244,8 @@ kubectl get node "${NODE}" -o json | \
   jq --arg rule "${RULE}" '.status.conditions |= map(select(.type != $rule))' | \
   kubectl replace -f - --subresource=status
 ```
+
+Removing the condition does not release the node. Where a fatal derived event cordoned it (v1.31.0 and later, with a quarantine or remediation step composed), the quarantine and the cordon stay until NVSentinel gets a healthy event for the fault, and the analyzer never sends one. Once the node is safe to return, release it with `kubectl uncordon "${NODE}"`, which cancels the quarantine as described under **Failure behavior and recovery** in [Graded Remediation](#graded-remediation). Check the hardware first, because the uncordon puts the node back in service.
 
 **Resources and privileges.** One replica on a system node, requesting and limited to 1 CPU and 1Gi. With a MongoDB datastore the chart runs it as root (`runAsUser: 0`), and it has a namespaced Role to read and write its own `resume-control` ConfigMap. It publishes through the platform-connector socket; the chart admits its service account for events about any node. For each unhealthy event the analyzer receives, it runs one datastore query per enabled rule whose `when` condition matches the event. `MultipleRemediations` has no `when`, so it queries on every event, and the datastore load grows with the event rate.
 
@@ -1501,6 +1516,74 @@ The CRD is not removed; delete it by hand once no request remains, if you want i
 
 **What is qualified.** The render test pins the controller, its socket mount, both webhooks and the rule set its events match against the chart. The Kind e2e (`tests/e2e/nvsentinel-maintenance-request/`) creates a request and checks the node is cordoned and drained, deletes it and checks the node is uncordoned, and checks that a request for a missing node or with a past `startTime` is rejected. A KWOK lane bundles and deploys the mixin with the remediation step.
 
+### Cloud Maintenance Events
+
+NVSentinel's CSP Health Monitor reads the cloud provider's scheduled-maintenance notices and publishes a health event for each affected node ahead of the window. AICR runs it `STORE_ONLY`: the events are recorded in the datastore and no node is quarantined for them (see **Why events are only stored**). It polls the AWS Health API on EKS and Compute Engine's upcoming-maintenance audit log entries on GKE; a `maintenance-notifier` sidecar publishes the event `triggerQuarantineWorkflowTimeLimitMinutes` before the window opens. Two mixins enable it, one per cloud, and no shipped recipe composes either, because each needs cloud identity AICR does not create. Both need the datastore, so compose one with a [remediation step](#graded-remediation):
+
+```yaml
+# your-leaf-overlay.yaml (an EKS leaf)
+spec:
+  mixins:
+    - nvsentinel-quarantine
+    - nvsentinel-csp-health-monitor-aws
+```
+
+**Platforms.**
+
+| Platform | Mixin | Status |
+|---|---|---|
+| EKS | `nvsentinel-csp-health-monitor-aws` | available `STORE_ONLY`; `us-east-1` and `us-east-2` clusters only (see **AWS regions**); the AWS Health API needs a Business, Enterprise On-Ramp or Enterprise support plan |
+| GKE | `nvsentinel-csp-health-monitor-gcp` | available `STORE_ONLY` |
+| Every other service | — | not supported: the gate accepts `aws` only on `eks` and `gcp` only on `gke` |
+
+**What it sees.** On AWS it polls scheduled EC2 maintenance: network, power and reboot maintenance on instances and dedicated hosts, and UltraServer maintenance. It does not poll instance retirement or scheduled stops. On GKE it reads Compute Engine's `upcomingMaintenance` audit log entries. A notice is published only while its window is still ahead, so one the monitor first sees after the window starts, including one posted while the monitor was down, is never published. Notices posted before the monitor first runs are not read: it starts from the time it starts, keeping its place per `clusterName`, so renaming the cluster starts it over. When you enable it, check the provider's console for maintenance already scheduled.
+
+**AWS regions.** The AWS Health API has endpoints only in `us-east-1` and `us-east-2` (commercial partition), and NVSentinel v1.31.0 uses the one `aws.region` value both to reach the API and to filter events by region, so the gate accepts only those two `aws.region` values. It cannot see the cluster's actual region: a cluster elsewhere that sets one of them reads that region's events and silently gets none of its own. `us-east-1` is AWS's active endpoint; `us-east-2` is passive, and [AWS documents](https://docs.aws.amazon.com/general/latest/gr/awshealth.html) that its data may not be current, so a `us-east-2` cluster can see notices late.
+
+**Per-cluster values come from the bundle command.** The cluster name and cloud identity differ per cluster, so neither mixin sets them and `CheckNVSentinelCSPHealthMonitorCoherent` fails the bundle until they are passed. On EKS:
+
+```shell
+aicr bundle -r recipe.yaml -o ./bundle \
+  --system-node-selector nodeGroup=system \
+  --set nv-sentinel:csp-health-monitor.configToml.clusterName=gpu-train-1 \
+  --set-json 'nv-sentinel:csp-health-monitor.configToml.aws.accountId="012345678901"' \
+  --set nv-sentinel:csp-health-monitor.configToml.aws.region=us-east-1
+```
+
+`--system-node-selector` is required by the remediation step's datastore. Pass `accountId` through `--set-json` as a quoted string: `--set` reads the twelve digits as a number, which drops a leading zero, and the gate rejects it. On GKE:
+
+```shell
+aicr bundle -r recipe.yaml -o ./bundle \
+  --system-node-selector nodeGroup=system \
+  --set nv-sentinel:csp-health-monitor.configToml.clusterName=gpu-train-1 \
+  --set nv-sentinel:csp-health-monitor.configToml.gcp.targetProjectId=my-project \
+  --set nv-sentinel:csp-health-monitor.configToml.gcp.gcpServiceAccountName=nvsentinel-csp \
+  --set 'nv-sentinel:csp-health-monitor.configToml.gcp.logFilter=logName="projects/my-project/logs/cloudaudit.googleapis.com%2Fsystem_event" AND protoPayload.methodName="compute.instances.upcomingMaintenance"'
+```
+
+**Cloud identity is the operator's to create.** AICR renders the ServiceAccount annotation that binds the pod to a cloud identity; it creates no IAM role or service account.
+
+- **EKS (IRSA).** An IAM role trusted by the cluster's OIDC provider for the `nvsentinel/csp-health-monitor` ServiceAccount, allowing `health:DescribeEvents`, `health:DescribeAffectedEntities` and `health:DescribeEventDetails`. The annotation names `<clusterName>-nvsentinel-health-monitor-assume-role-policy` unless `csp-health-monitor.configToml.aws.iamRoleName` names another role; pass the role's name, not its ARN; a role created with a path takes the path as a prefix, without its leading `/` (`teams/nvsentinel-csp`), and the path may use any printable ASCII that IAM allows in one. IAM role names are at most 64 characters, so with the default name the cluster name must be 19 characters or fewer; the gate rejects a longer one. Without a qualifying support plan every call returns `SubscriptionRequiredException`. The pod restarts only when its config changes, and `iamRoleName` is not part of it, so after changing `iamRoleName` run `kubectl -n nvsentinel rollout restart deployment/csp-health-monitor`.
+- **GKE (Workload Identity).** A Google service account `<gcpServiceAccountName>@<targetProjectId>.iam.gserviceaccount.com` (pass only the part before the `@`) holding `logging.logEntries.list` on the project, with `roles/iam.workloadIdentityUser` granted to `<cluster-project>.svc.id.goog[nvsentinel/csp-health-monitor]`, where `<cluster-project>` is the project that owns the GKE cluster's workload identity pool.
+
+Upstream's [IAM guide](https://github.com/NVIDIA/NVSentinel/blob/v1.31.0/docs/csp-health-monitor-iam.md) has the commands for both; its `AWS_REGION` does not change which `aws.region` the gate accepts (see **AWS regions**).
+
+**Bundle-time gates.** `CheckNVSentinelCSPHealthMonitorCoherent` blocks a bundle whose `cspName` is not `aws` on an `eks` recipe or `gcp` on a `gke` recipe; whose `processingStrategy` is not `STORE_ONLY`, `--set` at bundle time included (see **Why events are only stored**); with a blank `clusterName`, which the monitor refuses at startup when empty; with a timing value that is not a whole number below 1,000,000, or is below the monitor's minimum, which crash-loops it (10 for `maintenanceEventPollIntervalSeconds` and 1 for the three minute values, where 0 takes the default for each of these four; 30 for the active cloud's poll interval, `aws.pollingIntervalSeconds` or `gcp.apiPollingIntervalSeconds`, where 0 is not accepted; the other providers' intervals, `lambda.pollingIntervalSeconds` included, need only be whole numbers); on AWS, without a 12-digit string `accountId`, with an `aws.region` other than `us-east-1` or `us-east-2`, with an IRSA role name that is not a valid IAM role name, or, without `iamRoleName`, with a `/` in `clusterName`; and on GCP, without `targetProjectId`, or without `logFilter`, which the monitor joins into every query, or with a `gcpServiceAccountName` that is not a service account ID. It rejects `--dynamic` on `global.cspHealthMonitor.enabled`, and with the monitor on, also on any `csp-health-monitor` value. `CheckNVSentinelRemediationPipelineCoherent` applies the remediation steps' datastore rules. Neither gate can confirm that the IAM role or service account exists, that the AWS account has a support plan, or that `aws.region` is the cluster's own region (see **AWS regions**); the first two surface on the first poll.
+
+**Why events are only stored.** Both mixins set `csp-health-monitor.processingStrategy: STORE_ONLY`, and the gate rejects any other value, so `fault-quarantine`, which reads only `EXECUTE_REMEDIATION` events, never acts on a maintenance event: no node is cordoned or drained for maintenance. Acting on them is not safe at NVSentinel v1.31.0. `fault-quarantine` keys a quarantine by the publishing agent, check, node and instance, among other fields, never by notice, so two maintenance notices for one instance share one hold, and the first to complete releases the node while the other's maintenance is still to come. A notice stored under `STORE_ONLY` that completes after a switch to `EXECUTE_REMEDIATION` releases a hold that a newer notice set, the same way. Either way the node is uncordoned during maintenance. Quarantining for maintenance therefore waits on an upstream change that keeps every outstanding hold until its own notice ends; until then the mixins record upcoming maintenance and do not protect workloads from it. The e2e's execution scenarios (`CSP_EXECUTION_SCENARIOS=true`) reproduce both cases and must pass before the gate allows `EXECUTE_REMEDIATION`.
+
+**Lead time.** The notifier publishes a maintenance event on its first check (every `maintenanceEventPollIntervalSeconds`, 60) within `triggerQuarantineWorkflowTimeLimitMinutes` of the window's start; the mixins state the chart's 30 minutes. Under `STORE_ONLY` it decides only when the event is recorded. The mixins own every value they set, `global.cspHealthMonitor.enabled`, `cspName`, `processingStrategy` and `triggerQuarantineWorkflowTimeLimitMinutes`, so setting any of them in a leaf overlay is rejected as a collision.
+
+**After the window.** On AWS the maintenance counts as ended when the monitor sees the event closed, up to one `aws.pollingIntervalSeconds` after AWS closes it, and `postMaintenanceHealthyDelayMinutes` (15) later the notifier records a healthy event if the node is Ready. On GKE a notice the provider cancels is recorded as healthy on the notifier's next check once the node is Ready, without the post-maintenance delay. If the node is not Ready, the notifier checks again on each of its checks and gives up `nodeReadinessTimeoutMinutes` (60) after its first not-Ready check, logging an alert and marking the event `NODE_READINESS_TIMEOUT`.
+
+**Stopping.** Regenerate the bundle without the mixin and redeploy: the subchart and its ServiceAccount are removed, and stored events stay in the datastore. Because the gate admits only `STORE_ONLY`, `fault-quarantine` has consumed no event from the monitor, so no node holds a maintenance quarantine and none needs releasing.
+
+**Resources and privileges.** One replica on a system node, with two containers: the monitor (1 CPU and 1Gi limit) and the `maintenance-notifier` sidecar (500m and 512Mi limit). With a MongoDB datastore the chart runs the `maintenance-notifier` as root (`runAsUser: 0`), and the pod mounts the node's `/var/run/nvsentinel` to publish through the platform connector's socket. Its ClusterRole only reads Nodes. Outside the cluster it reads the provider's maintenance API with the identity above, and changes nothing in the cloud account. Adding or removing either mixin restarts the `platform-connectors` DaemonSet's pod on every node, because the monitor's ServiceAccount joins or leaves the identities allowed to report about other nodes; node-local monitors cannot publish while a node's pod restarts.
+
+**What is qualified.** The render tests pin both images, `STORE_ONLY` and each cloud's workload identity annotation against the chart. A KWOK lane bundles and deploys the aws mixin on an EKS leaf and the gcp mixin on a GKE leaf. The Kind e2e (`tests/e2e/nvsentinel-csp-health-monitor/`) checks four of the gate's refusals (missing per-cluster values, a numeric `accountId`, a non-EKS recipe, `EXECUTE_REMEDIATION`) and that the aws mixin deploys `STORE_ONLY` with its IRSA annotation and keeps running without a cloud identity. It then writes maintenance events into the datastore in place of the AWS poller and checks that an event inside the lead time and its completion are published and stored and give the node no `CSPMaintenance` quarantine.
+
+**Deployment validation.** The registry's `nvsentinel` check asserts that the `csp-health-monitor` Deployment is fully rolled out wherever it renders, and passes where it does not. A missing or untrusted cloud identity does not stop the rollout: the monitor logs the failure on each poll, so check `kubectl -n nvsentinel logs deploy/csp-health-monitor -c csp-health-monitor` after enabling it.
+
 ## NVSentinel on Provider-Installed-Driver Platforms
 
 The recipes configure NVSentinel for you on every platform that needs it. This section explains what they set and why, so the values are recognizable in a generated bundle and the failure signatures are diagnosable if they ever reappear.
@@ -1519,6 +1602,7 @@ The recipes now carry that value wherever it is needed ([#2181](https://github.c
 | AKS `gpuStack=operator-managed` | the operator's driver pod | `false` | the `gpuStack` profile |
 | GKE COS `gpuStack=gke-default` (default) | none the labeler can observe — the driver is finalized by an init container of GKE's kube-system DaemonSet | `true` | the `gpuStack` profile |
 | GKE COS `gpuStack=bundle-installer` | the bundle's `gcp-driver-installer` DaemonSet | `false` | the `gpuStack` profile |
+| GKE COS `gpuStack=dra` | the bundle's `gcp-driver-installer` DaemonSet | `false` | the `gpuStack` profile |
 | OKE `gpuStack=oci-managed` (default) | none — driver is in the node image; OKE's `NvidiaGpuPlugin` add-on advertises | `true` | the `gpuStack` profile |
 | OKE `gpuStack=operator-managed` | the operator's driver pod | `false` | the `gpuStack` profile |
 | EKS (except os=amazonlinux) | the operator's driver pod | unset (chart default `false`) | — |
@@ -1560,6 +1644,13 @@ The AKS `gpuStack` profile now owns these names — `gpu-operator.operator.runti
 | AKS profile value | `operator.runtimeClass` | `metadata-collector.runtimeClassName` | janitor `resetJob.runtimeClassName` |
 |---|---|---|---|
 | `azure-managed` (default) | `nvidia-container-runtime` | `nvidia-container-runtime` | `nvidia-container-runtime` |
+| `operator-managed` | `nvidia` | `nvidia` | `nvidia` |
+
+The OKE `gpuStack` profile owns the same three names. Oracle's GPU node images register no `nvidia` runtime handler; OKE's node bootstrap runs the image's container toolkit for every container through a CRI-O hook on the default `runc` runtime, so `oci-managed` points all three at `runc`:
+
+| OKE profile value | `operator.runtimeClass` | `metadata-collector.runtimeClassName` | janitor `resetJob.runtimeClassName` |
+|---|---|---|---|
+| `oci-managed` (default) | `runc` | `runc` | `runc` |
 | `operator-managed` | `nvidia` | `nvidia` | `nvidia` |
 
 Every other platform leaves `operator.runtimeClass` at the shared chart default `nvidia`, so no side needs a value. The exception is RKE2: its GPU Operator runs CDI with the NRI plugin, which registers no RuntimeClass.
@@ -1689,7 +1780,7 @@ The `aws-ebs-csi-driver` health check verifies only that the controller Deployme
 
 ### Troubleshooting provisioning failures
 
-On the stock EKS overlay, `kube-prometheus-stack` creates a PVC for Prometheus, so a missing credential path usually surfaces there first as a failing `kube-prometheus-stack` health check: the Prometheus StatefulSet never becomes ready because its PVC stays `Pending`. Any other PVC bound to `ebs-csi-default-sc` fails the same way.
+The stock EKS recipe's telemetry creates no PVC: Prometheus stores to an `emptyDir` and NKTP keeps its queues in memory. A missing credential path therefore surfaces at the first claim bound to `ebs-csi-default-sc`, from an opt-in component such as `nvsentinel-mongodb` or from a workload: the claim stays `Pending` and its pod never becomes ready.
 
 A `Pending` PVC alone does not identify the cause. Confirm it from the driver's own diagnostics:
 
@@ -1745,11 +1836,21 @@ aicr bundle -r recipe.yaml \
 
 This setting filters by source IP only; it does not add TLS or authentication to the gateway listener.
 
+### Clusters without a LoadBalancer provider
+
+On a cluster that provisions no LoadBalancer (a bare-metal NVKE or RKE2 tenant without MetalLB or kube-vip), set `agentgateway.serviceType` to `ClusterIP` so the controller programs the Gateway onto a ClusterIP Service instead:
+
+```shell
+aicr bundle -r recipe.yaml --set agentgateway:serviceType=ClusterIP
+```
+
+Accepted values are `LoadBalancer`, `ClusterIP` and `NodePort` (case-sensitive); anything else fails bundle generation. The knob avoids a Service that sits at `EXTERNAL-IP <pending>` forever and a LoadBalancer-only field the cluster cannot honor. It is not needed for the deployment health check, which asserts the recipe's Gateway is `Accepted` and `Programmed` ([#3714](https://github.com/NVIDIA/aicr/issues/3714)): on agentgateway v1.5.0 `Programmed` does not wait for an address, so the check passes either way. With `ClusterIP` or `NodePort` the bundler skips the private-by-default source ranges and the rendered Service carries no `loadBalancerSourceRanges`, because Kubernetes accepts that field only on a LoadBalancer Service; `allowedSourceRanges` passed explicitly is reported as not applying. With `ClusterIP` the gateway is reachable only from inside the cluster. With `NodePort` it is reachable by every client that can reach a node's NodePort, and that is the plaintext, unauthenticated Gateway once a route exists, so restrict access with an upstream firewall or a CNI network policy. In both cases the conformance check records "No LoadBalancer Service" rather than a source-range finding. Leave `serviceType` unset everywhere a load balancer exists.
+
 ### Exposure guardrails
 
 AICR enforces and surfaces inference-gateway exposure in two places:
 
-- **Bundle-time private-by-default.** When a bundle includes `agentgateway` and `allowedSourceRanges` is empty/unset, `aicr bundle` injects the RFC1918 private ranges so the deployed gateway denies the public internet, and records a bundle note. An invalid value (a bare-string `--set`, a non-list, an unparseable CIDR, or a non-canonical CIDR such as `1.2.3.4/24` that Kubernetes' strict validation would reject at apply time) is rejected with `ErrCodeInvalidRequest`. A scoped list passes silently; an explicit any-source CIDR (`0.0.0.0/0` or `::/0`) passes with a loud warning as a deliberate opt-in. See [#1373](https://github.com/NVIDIA/aicr/issues/1373).
+- **Bundle-time private-by-default (LoadBalancer only).** When a bundle includes `agentgateway` with the default `LoadBalancer` `serviceType` and `allowedSourceRanges` is empty/unset, `aicr bundle` injects the RFC1918 private ranges so the deployed gateway denies the public internet, and records a bundle note. With `serviceType` `ClusterIP` or `NodePort` nothing is injected, because `loadBalancerSourceRanges` is a LoadBalancer-only field; a NodePort gateway is reachable by every client that can reach a node, and an `allowedSourceRanges` list set alongside either type is ignored with a bundle warning. See [Clusters without a LoadBalancer provider](#clusters-without-a-loadbalancer-provider). For every `serviceType`, an invalid value (a bare-string `--set`, a non-list, an unparseable CIDR, or a non-canonical CIDR such as `1.2.3.4/24` that Kubernetes' strict validation would reject at apply time) is rejected with `ErrCodeInvalidRequest`. For `LoadBalancer`, a scoped list passes silently; an explicit any-source CIDR (`0.0.0.0/0` or `::/0`) passes with a loud warning as a deliberate opt-in. See [#1373](https://github.com/NVIDIA/aicr/issues/1373).
 - **Conformance check.** The `inference-gateway` conformance check (run during `aicr validate --phase conformance` on a live cluster) inspects the gateway's `LoadBalancer` Service and records its exposure as evidence — the source ranges if scoped, or an explicit "open to `0.0.0.0/0`" finding if not. Set `AICR_REQUIRE_SCOPED_INFERENCE_GATEWAY=true` on the validator environment to escalate an open gateway to a check **failure**.
 
 ## k8s-aibom Runtime Inventory
@@ -2579,11 +2680,26 @@ templates rather than manifests.
 
 `nktp` installs NKTP, the NVKE Telemetry Pipeline, in the `nktp` namespace
 ([ADR-026](https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md)).
-No stock recipe selects it yet. An overlay that adds it lists `cert-manager`,
-`prometheus-operator-crds`, and `kube-prometheus-stack` in its
-`dependencyRefs`, and turns off `kube-prometheus-stack`'s `node-exporter`,
-since both bind host port 9100. On a cluster that enforces Pod Security, label
-the namespace `privileged` for the node collector.
+Every stock recipe installs it except `ocp` and
+`b300-mk8s-ubuntu-inference-dynamo`.
+
+- Its bundled metrics-server is on only where the platform ships no resource
+  metrics API: EKS, OKE, LKE, NVKE, CKS, Kind, and generic GB300. On LKE
+  and Kind it skips kubelet certificate verification, which their kubelet
+  certificates cannot pass. On EKS it runs on the host network, so it can reach
+  kubelets when VPC CNI custom networking puts pods in a different security
+  group from their nodes.
+  Where a cluster already serves the resource metrics API, such as an OKE or
+  EKS cluster with the metrics-server add-on, turn the bundled one off with
+  `--set nktp:metrics-server.enabled=false`. Both register the same
+  `v1beta1.metrics.k8s.io` APIService, and Helm fails the `nktp` release on one
+  it does not own.
+- On Kind, each central collector runs one replica.
+- On RKE2 and CKS, its `node-exporter` listens on port 9110, since some RKE2
+  hosts and CoreWeave's own exporter use 9100.
+- On Talos, the `os-talos` mixin installs it in a privileged namespace. On any
+  other cluster that enforces Pod Security, label the `nktp` namespace
+  `privileged` for the node collector.
 
 Its bundled backend, `otel-lgtm`, is for evaluation only: one pod with every
 signal on `emptyDir`, anonymous Grafana Admin, and no alerting. NKTP collects
@@ -2595,26 +2711,51 @@ plaintext:
 
 ```shell
 BACKEND="<host:port>"   # your OTLP gRPC endpoint
-# Also set each exporter's otlp.tls block for your backend; they default to plaintext.
+# Also set each exporter's otlp_grpc.tls block for your backend; they default to plaintext.
 aicr bundle -r recipe.yaml \
   --set nktp:otel-lgtm.enabled=false \
-  --set "nktp:gateway_metrics.otelcol.config.exporters.otlp.endpoint=${BACKEND}" \
-  --set "nktp:gateway_logs.otelcol.config.exporters.otlp.endpoint=${BACKEND}" \
-  --set "nktp:gateway_traces.otelcol.config.exporters.otlp.endpoint=${BACKEND}" \
-  --set "nktp:watchdog.otelcol.config.exporters.otlp.endpoint=${BACKEND}" \
-  --set "nktp:watchdog.sidecar.otelcol.config.exporters.otlp.endpoint=${BACKEND}" \
+  --set "nktp:gateway_metrics.otelcol.config.exporters.otlp_grpc.endpoint=${BACKEND}" \
+  --set "nktp:gateway_logs.otelcol.config.exporters.otlp_grpc.endpoint=${BACKEND}" \
+  --set "nktp:gateway_traces.otelcol.config.exporters.otlp_grpc.endpoint=${BACKEND}" \
+  --set "nktp:watchdog.otelcol.config.exporters.otlp_grpc.endpoint=${BACKEND}" \
+  --set "nktp:watchdog.sidecar.otelcol.config.exporters.otlp_grpc.endpoint=${BACKEND}" \
   -o ./bundle
 ```
 
 The bundle fails if `otel-lgtm` is disabled and any of the five is unset.
 
+The gateways and watchdog keep their sending queues in memory, so telemetry
+queued during a backend outage is lost when a collector restarts. NKTP's own
+default puts those queues on a `1Gi` volume per replica, but AICR turns that
+off: the claims sit in a `volumeClaimTemplates` list that `--storage-class`
+cannot reach, so on a cluster with no default StorageClass the collectors would
+stay Pending. To turn persistent queues on, restore NKTP's queue settings for
+each of `gateway_metrics`, `gateway_logs`, `gateway_traces`, and `watchdog` in
+an overlay, with a `storageClassName` in each `volumeClaimTemplates` entry; the
+chart's README lists them.
+
+Each NKTP workload runs as its own service account. None reads Secrets outside
+the `nktp` namespace.
+
+| Service account | Scope | Permissions |
+|-----------------|-------|-------------|
+| `opentelemetry-operator` | Cluster | Creates, changes, and deletes Pods, ServiceAccounts, Services, ConfigMaps, volumes, Deployments, DaemonSets, StatefulSets, HPAs, PodDisruptionBudgets, Ingresses, NetworkPolicies, ServiceMonitors, PodMonitors, and cert-manager Issuers and Certificates in any namespace. Reads Secrets in `nktp`. It can create Pods anywhere, so treat it as highly privileged. |
+| `nktp-daemonset-targetallocator`, `nktp-large-target-metrics-targetallocator` | Cluster | Read Pods, Services, Endpoints, EndpointSlices, Namespaces, Nodes, ServiceMonitors, PodMonitors, Probes, and ScrapeConfigs, to find scrape targets. |
+| `nktp-watchdog-targetallocator` | `nktp` | Reads Pods, Services, and EndpointSlices. |
+| `nktp-daemonset-collector` | Cluster | Reads kubelet metrics (`nodes/metrics`). |
+| `nktp-large-target-metrics-collector`, `nktp-watchdog-collector` | Cluster | Read the `/metrics` endpoint. |
+| `nktp-cluster-events-collector` | Cluster | Reads Events. Updates its Lease in `nktp`. |
+| `nktp-ksm-*` (seven) | Cluster | List and watch what kube-state-metrics reports on: workloads, Pods, Services, EndpointSlices, Ingresses, NetworkPolicies, ConfigMaps, volumes, StorageClasses, Nodes, Namespaces, quotas, Leases, CertificateSigningRequests, and webhook and admission policy configurations. |
+| `nktp-metrics-server`, where enabled | Cluster | Reads kubelet metrics, Pods, Nodes, Namespaces, and ConfigMaps. Delegates authentication and authorization checks to the API server. |
+| `delete-resources-sa` | `nktp` | Deletes NKTP's OpenTelemetry resources during uninstall. |
+
 NKTP owns the `opentelemetry.io` CRDs and replaces them on upgrade (see
 [Upgrading components that own CRDs](#upgrading-components-that-own-crds)).
 The `monitoring.coreos.com` CRDs its chart bundles belong to
 `prometheus-operator-crds`, and no deployer applies them from NKTP. When that
-section's manual CRD command is needed, run it with
-`CHART="oci://ghcr.io/dsx-ai-factory/nvke/charts/nktp"`, `VERSION` set to the
-chart version, and `EXCLUDE_SUBCHARTS="prometheus-crds opentelemetry-operator"`.
+section's manual CRD command is needed, run it with `CHART="nktp"`,
+`REPO="https://helm.ngc.nvidia.com/nvidia"`, `VERSION` set to the chart
+version, and `EXCLUDE_SUBCHARTS="prometheus-crds opentelemetry-operator"`.
 
 Uninstall keeps the CRDs and deletes the collectors through a `pre-delete`
 hook whose Job takes no tolerations. For `helm` and `helmfile` bundles where
@@ -2622,8 +2763,10 @@ it cannot schedule, delete the collectors while the operator still runs, then
 uninstall without hooks:
 
 ```shell
-kubectl delete opentelemetrycollectors.opentelemetry.io -n nktp --all --wait --timeout=5m
-helm uninstall nktp -n nktp --no-hooks
+NAMESPACE="nktp"  # replace with nktp's namespace: privileged-nktp with the os-talos mixin
+
+kubectl delete opentelemetrycollectors.opentelemetry.io -n "${NAMESPACE}" --all --wait --timeout=5m
+helm uninstall nktp -n "${NAMESPACE}" --no-hooks
 ```
 
 Other deployers remove `nktp` through their own resource. Follow step 2 of the
@@ -2719,10 +2862,24 @@ re-apply an expired token on every sync:
 configuration, so the Run:ai leaves set `overrides.enabled: false` on AICR's
 `kai-scheduler` (the two ship the same CRDs and PriorityClasses). On a cluster
 that already runs AICR's `kai-scheduler`, uninstall that release before
-installing a Run:ai bundle. The `gang-scheduling` conformance check keys on
-AICR's `kai-scheduler`, which these leaves disable, so it reports Skip on them
-until it learns the Run:ai scheduler. Run:ai's support matrix covers Kubernetes
-1.35 through 1.37, and the leaves carry that floor.
+installing a Run:ai bundle. The `gang-scheduling` conformance check follows
+the recipe: on these leaves it exercises Run:ai's scheduler
+(`runai-scheduler` in the `runai` namespace) and runs its test pods in a
+Run:ai Project namespace you name with `AICR_RUNAI_PROJECT_NAMESPACE` in the
+shell running `aicr validate`. Create that Project in the control plane with
+an explicit CPU and memory quota first (a Project without one gets zero and
+nothing schedules) and no CPU or memory limit (the check's non-fitting group
+asks for more CPU than the cluster has, and a limit makes the scheduler refuse
+it on quota before gang scheduling applies); the check fails, rather than
+skips, when the variable is unset or the namespace is not a Project namespace. The check does not copy
+`--image-pull-secret` Secrets into the Project namespace, so a private probe
+image needs a Secret of the same name already there; without it the check
+fails with "gang test pods did not complete". The `nvsentinel-preflight`
+mixin accepts `runai-cluster` as the provider of the PodGroup CRD its bundle
+gate requires; compose `nvsentinel-preflight-runai` with it so that
+`nvsentinel` installs after `runai-cluster` (see
+[Preflight Checks](#preflight-checks)). Run:ai's support matrix covers Kubernetes 1.35 through 1.37,
+and the leaves carry that floor.
 
 **Prerequisites the health check expects.** The check asserts the
 `RunaiConfig` the install creates from the control plane's configuration
@@ -3219,6 +3376,39 @@ certified `v26.7` channel, whose v26.7.1 bundle ships the same
 also installs `computedomains` from its chart. This pairing has not yet been
 verified on a live OpenShift cluster; see
 [NVIDIA/aicr#2969](https://github.com/NVIDIA/aicr/issues/2969).
+
+### `gpu-operator` and `nvidia-dra-driver-gpu`: argocd-helm rejects install-time driver-ownership values
+
+An `argocd-helm` bundle that ships `gpu-operator`, `nvidia-dra-driver-gpu` or
+their `-ocp` variants now carries `templates/aicr-driver-ownership-lock.yaml`.
+The chart fails to render when an install-time value touches `driver.enabled`,
+`toolkit.enabled` or `hostPaths.driverInstallDir` under `gpuoperator`
+(`gpuoperatorocp`), or `nvidiaDriverRoot` under `dradriver` (`dradriverocp`),
+including a parent of one of these keys, a `null`, or a value identical to the
+bundled one (see [Override values](bundling.md#override-values)). Earlier
+bundles accepted these values. Sibling values such as
+`gpuoperator.driver.version` are unaffected.
+
+An existing install can still be carrying such a value without passing it
+again:
+
+- `helm upgrade --reuse-values` (or `--reset-then-reuse-values`) reapplies the
+  values supplied to the previous release, and so does a plain `helm upgrade`
+  that passes no values, so the upgrade fails on a value an earlier install
+  set. `helm get values <release>` lists them.
+- The bundle's parent Application forwards the values given to `helm install`
+  (its `helm.valuesObject`), and a root Application you maintain yourself
+  (`deployer.includeRootApp=false`) carries its own `helm` values or
+  parameters. Argo CD renders the new chart version with them, and the sync
+  fails with the same message.
+
+A failed render applies nothing, so the running release is unchanged. To
+upgrade, move each ownership value to bundle time and regenerate:
+`aicr bundle --set gpuoperator:driver.enabled=...`, or, when the recipe's
+selected profile owns the path (the AKS `gpuStack` profile), regenerate the
+recipe with `aicr recipe --profile gpuStack=...`. Then drop the value from the
+install: upgrade with `--reset-values`, passing the values you still need
+explicitly, and remove it from any Application that sets it.
 
 ### `nvidia-dra-driver-gpu`: `0.5.0` to `0.5.1`
 
@@ -3761,18 +3951,18 @@ kubectl get skyhooks.skyhook.nvidia.com \
 `aicr upgrade-check` reports every boundary. The transition record at
 `recipes/components/nodewright-operator/upgrades.yaml` describes `v0.18.0` (the
 rename, the prerequisite above, and per-deployer steps), then `v0.19.0`,
-`v0.19.1` and `v0.20.0` separately, each `safe`. Crossing the rename is
+`v0.19.1`, `v0.20.0` and `v0.21.0` separately, each `safe`. Crossing the rename is
 `manual` whatever you land on, and you do **not** have to stop at `v0.18.0` to
 get past it:
 
 ```console
 $ aicr upgrade-check --from older.yaml --to new.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.16.0  v0.20.0  manual   4 minors, 5 steps
+nodewright-operator  v0.16.0  v0.21.0  manual   5 minors, 5 steps
 
 $ aicr upgrade-check --from cur.yaml --to new.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.18.0  v0.20.0  safe     2 minors, verified
+nodewright-operator  v0.18.0  v0.21.0  safe     3 minors, verified
 ```
 
 `v0.19.0` also changes drain timing: an interrupt now begins roughly the
@@ -3787,8 +3977,57 @@ longer than 53 characters, and `aicr bundle` rejects such a `--workload-gate`
 key, so a bundle that builds carries a valid one. It also no longer uncordons a
 node it did not cordon.
 
+`v0.21.0` drains `kube-system` pods like any other namespace instead of
+skipping them, so CoreDNS and similar workloads are evicted before an
+interrupt rather than killed by the reboot. Pods that tolerate the
+`node.kubernetes.io/unschedulable` taint are still skipped, as in every
+namespace. Eviction honors any PodDisruptionBudget that covers a pod; a
+workload with no budget can lose every replica on the nodes drained together.
+A `kube-system` budget that allows no disruptions holds the drain the same way as
+in any other namespace, without bound unless the CR sets
+`spec.drainConfig.timeout`. With the default `drainConfig`, an evicted pod's
+`emptyDir` data is deleted and a pod with no controller is not recreated.
+Before upgrading, check that `kubectl get pdb -n kube-system` shows
+`ALLOWED DISRUPTIONS` of at least 1 for workloads on nodes NodeWright
+interrupts.
+
 The legacy `Skyhook` group, its `runtime-required` taint key and the
-`skyhook_*` metrics are served through `v0.20.x` and removed upstream in
-`v0.21.0`. A pin at or above that is not reachable until the remaining
+`skyhook_*` metrics are served through `v0.21.x` and removed upstream in
+`v0.22.0`. A pin at or above that is not reachable until the remaining
 `skyhook.nvidia.com` references in the `nodewright-operator` health check and
 the `vr200-rke2-ubuntu-*` overlays are migrated.
+
+### `kube-prometheus-stack`: `84.5.0` keeps only the runtime Prometheus
+
+From `84.5.0`, AICR runs only the prometheus-operator and one Prometheus, which
+serves the components that query metrics at runtime
+([ADR-026](https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md)).
+`nktp` collects cluster telemetry instead. The upgrade:
+
+- deletes Grafana, Alertmanager, `node-exporter`, `kube-state-metrics`, the
+  default rules, and the dashboards;
+- stops loading PrometheusRules, Probes, and ScrapeConfigs;
+- keeps only the series AICR components declare;
+- moves Prometheus from its PVC to an `emptyDir`, so its history is lost.
+
+1. Export any Grafana dashboards, Alertmanager configuration, and
+   PrometheusRules you still need.
+2. Deploy the new bundle, upgrading `kube-prometheus-stack` before `nktp`:
+   `nktp`'s `node-exporter` can't start while the old one holds host port
+   9100. The operator recreates Prometheus, so `prometheus-adapter`'s metrics
+   are unavailable for about 30 seconds.
+3. Delete what the release leaves behind:
+
+   ```bash
+   kubectl delete pvc --ignore-not-found -n monitoring prometheus-kube-prometheus-prometheus-db-prometheus-kube-prometheus-prometheus-0
+   kubectl delete secret --ignore-not-found -n monitoring kube-prometheus-admission
+   kubectl delete service --ignore-not-found -n kube-system kube-prometheus-kubelet
+   ```
+
+To roll back, uninstall `nktp` (`helm uninstall nktp -n nktp`, with
+`privileged-nktp` as the namespace under the `os-talos` mixin, or remove it
+through your deployer) before redeploying the previous bundle: its
+`node-exporter` and the previous `kube-prometheus-stack`'s both bind host port
+9100. The uninstall keeps that namespace with its TLS Secrets, and the
+`opentelemetry.io` CRDs. If it hangs on a Pending cleanup Job, see
+[NKTP Telemetry Pipeline](#nktp-telemetry-pipeline).

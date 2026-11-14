@@ -104,7 +104,16 @@ var (
 	The directory must contain registry.yaml (required). Registry components and
 	validator catalog entries are merged with embedded (external takes precedence
 	by name). All other files (base.yaml, overlays, component values) fully
-	replace embedded files or add new ones.`,
+	replace embedded files or add new ones. Use --external-only to disable all
+	embedded catalog merging and fallback.`,
+			Category: catInput,
+		}
+	}
+
+	externalOnlyFlag = func() cli.Flag {
+		return &cli.BoolFlag{
+			Name:     "external-only",
+			Usage:    "Use only the external catalog, without embedded merging or fallback (requires --data)",
 			Category: catInput,
 		}
 	}
@@ -338,7 +347,7 @@ func RootCommand() *cli.Command {
 func Execute() {
 	cmd := newRootCmd()
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := commandSignalContext(context.Background())
 
 	err := cmd.Run(ctx, sanitizeCompletionArgs(os.Args))
 	cancel()
@@ -346,6 +355,23 @@ func Execute() {
 		exitCode := errors.ExitCodeFromError(err)
 		slog.Error("command failed", "error", err, "exitCode", exitCode)
 		os.Exit(exitCode) //nolint:gocritic // cancel() above; os.Exit skips defers intentionally
+	}
+}
+
+// commandSignalContext restores default signal handling after the first
+// interruption, so a second signal can terminate a command stuck in cleanup.
+// release joins the watcher on normal completion as well as cancellation.
+func commandSignalContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-ctx.Done()
+		stop()
+	}()
+	return ctx, func() {
+		stop()
+		<-done
 	}
 }
 
@@ -377,8 +403,9 @@ func sanitizeCompletionArgs(args []string) []string {
 // resolved recipe data source. The data directory is read from the --data
 // flag, falling back to spec.recipe.data on the supplied Config when the
 // flag is not set (cfg may be nil; only the flag is consulted then). A
-// non-empty data dir yields a FilesystemSource (the external dir layered over
-// the embedded data); an empty data dir yields the EmbeddedSource. The CLI
+// non-empty data dir yields a filesystem source. --external-only or
+// spec.recipe.externalOnly disables embedded merging and fallback. An empty
+// data dir yields EmbeddedSource unless external-only was requested. The CLI
 // version is threaded through so resolved recipes carry it in
 // Metadata.Version.
 //
@@ -395,26 +422,21 @@ func recipeClientFromCmd(
 	cfg *aicr.Config,
 ) (*aicr.Client, error) {
 
+	dataDir, externalOnly, err := catalogInputsFromCmd(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
 	source := aicr.EmbeddedSource()
-	if dataDir := cmd.String("data"); dataDir != "" {
-		slog.Info("initializing external data provider", "directory", dataDir)
+	if dataDir != "" {
+		slog.Info("initializing external data provider", "directory", dataDir, "external_only", externalOnly)
 		source = aicr.FilesystemSource(dataDir)
-	} else if configured, ok := cfg.RecipeSource(); ok {
-		// spec.recipe.data, derived through the facade so an SDK caller
-		// building a Client from the same document gets the same source.
-		// Log the concrete directory as the --data branch does: the audit line
-		// exists so an operator can tell which catalog a run actually read, and
-		// naming only the spec field leaves that unanswered. Unwrap() here is
-		// the raw-document escape hatch documented on Config.Unwrap: the facade
-		// has no RecipeDataDir() accessor, and adding one only for a log line
-		// would be new public API for a cleanup commit. Read from the same
-		// underlying field RecipeSource() uses, so the two cannot disagree.
-		slog.Info("initializing external data provider",
-			"directory", cfg.Unwrap().Recipe().DataDir(), "source", "spec.recipe.data")
-		source = configured
+		if externalOnly {
+			source = aicr.ExternalFilesystemSource(dataDir)
+		}
 	}
 	client, err := aicr.NewClientContext(ctx,
 		aicr.WithRecipeSource(source),
+		aicr.WithArtifacts(cfg.RecipeArtifacts()),
 		aicr.WithVersion(version),
 	)
 	if err != nil {
@@ -422,6 +444,21 @@ func recipeClientFromCmd(
 			"failed to initialize data provider")
 	}
 	return client, nil
+}
+
+func catalogInputsFromCmd(cmd *cli.Command, cfg *aicr.Config) (string, bool, error) {
+	dataDir := cmd.String("data")
+	if dataDir == "" && cfg.Unwrap() != nil {
+		dataDir = cfg.Unwrap().Recipe().DataDir()
+	}
+	externalOnly := cfg.IsExternalOnly()
+	if cmd.IsSet("external-only") {
+		externalOnly = cmd.Bool("external-only")
+	}
+	if externalOnly && dataDir == "" {
+		return "", false, errors.New(errors.ErrCodeInvalidRequest, "--external-only (spec.recipe.externalOnly) requires --data or spec.recipe.data")
+	}
+	return dataDir, externalOnly, nil
 }
 
 // embeddedClient constructs an aicr.Client bound to the embedded recipe data,

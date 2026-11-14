@@ -43,8 +43,22 @@ func writeTestRegistry(t *testing.T, content string) string {
 	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
+	// Driver target resolution builds every leaf recipe, which needs a base.
+	if err := os.WriteFile(filepath.Join(dir, "overlays", "base.yaml"), []byte(testBaseOverlay), 0o644); err != nil {
+		t.Fatalf("write base.yaml: %v", err)
+	}
 	return root
 }
+
+const testBaseOverlay = `kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: base
+spec:
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32"
+`
 
 const testRegistryHelm = `apiVersion: v1
 kind: ComponentRegistry
@@ -213,7 +227,7 @@ func TestSurveyComponentHelm(t *testing.T) {
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -259,7 +273,7 @@ func TestSurveyComponentSkipHelm(t *testing.T) {
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, true)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, true, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -287,7 +301,7 @@ func TestSurveyComponentRendererError(t *testing.T) {
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -310,7 +324,7 @@ func TestSurveyComponentKustomize(t *testing.T) {
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -350,7 +364,7 @@ spec:
 		DisplayName: "My Component",
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -397,6 +411,7 @@ spec:
 		component{Name: "my-comp"},
 		&helmtest.MockRenderer{},
 		true,
+		catalogDriverTargets{},
 	)
 	if err == nil {
 		t.Fatal("surveyComponent() error = nil, want invalid structured image descriptor error")
@@ -446,7 +461,7 @@ spec:
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -832,7 +847,7 @@ func TestSurveyComponentSourceOnlyChartFallback(t *testing.T) {
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -876,7 +891,7 @@ func TestSurveyComponent_DRANodeLabelerImageInventoried(t *testing.T) {
 		DisplayName: "dra-node-labeler",
 		Helm:        helmCfg{DefaultNamespace: "gpu-operator"},
 	}
-	got, surveyErr := surveyComponent(context.Background(), repoRoot, c, nil, true)
+	got, surveyErr := surveyComponent(context.Background(), repoRoot, c, nil, true, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}

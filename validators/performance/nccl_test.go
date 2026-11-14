@@ -1080,22 +1080,31 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		},
 		{
-			name:    "NVLS OKE GB200",
+			name:    "NET OKE GB200 and GB300",
+			variant: variantNET,
+			service: recipe.CriteriaServiceOKE,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
+		},
+		{
+			name:    "NVLS OKE GB200 and GB300",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceOKE,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		},
 		{
-			name:    "NET NVKE GB200",
+			// NVKE carries both NVL72 generations on the NET variant too:
+			// GB200 over IB rails, VR200 over RoCE rails.
+			name:    "NET NVKE",
 			variant: variantNET,
 			service: recipe.CriteriaServiceNVKE,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorVR200},
 		},
 		{
-			name:    "NVLS NVKE GB200",
+			// NVKE carries three NVL72 generations on the NVLS variant.
+			name:    "NVLS NVKE",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceNVKE,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300, recipe.CriteriaAcceleratorVR200},
 		},
 		{
 			name:    "NVLS GKE GB200",
@@ -1219,6 +1228,18 @@ func TestNVKENVLSRuntimeMatchesOKE(t *testing.T) {
 	if oke != nvke {
 		t.Errorf("testdata/gb200/nvke/runtime-nvls.yaml diverged from the OKE NVLS template "+
 			"(comparing bodies after stripping leading comment headers).\nOKE:\n%s\nNVKE:\n%s", oke, nvke)
+	}
+}
+
+// TestGB300NVKENVLSRuntimeMatchesGB200 enforces the "identical to
+// gb200/nvke" contract in the header of testdata/gb300/nvke/runtime-nvls.yaml,
+// the wiring the gb300-nvke training floor was measured with.
+func TestGB300NVKENVLSRuntimeMatchesGB200(t *testing.T) {
+	gb200 := readTemplateBody(t, filepath.Join("testdata", "gb200", "nvke", "runtime-nvls.yaml"))
+	gb300 := readTemplateBody(t, filepath.Join("testdata", "gb300", "nvke", "runtime-nvls.yaml"))
+	if gb200 != gb300 {
+		t.Errorf("testdata/gb300/nvke/runtime-nvls.yaml diverged from the GB200 NVKE NVLS template "+
+			"(comparing bodies after stripping leading comment headers).\nGB200:\n%s\nGB300:\n%s", gb200, gb300)
 	}
 }
 

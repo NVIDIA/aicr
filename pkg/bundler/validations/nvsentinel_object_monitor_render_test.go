@@ -27,7 +27,7 @@ import (
 // nvsentinelObjectMonitorImage is the subchart image the Object Monitor runs,
 // as disclosed in docs/user/container-images.md. The static BOM cannot see a
 // mixin-gated subchart, so this is the only check keeping that note honest.
-const nvsentinelObjectMonitorImage = "ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.28.0"
+const nvsentinelObjectMonitorImage = "ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.31.0"
 
 // objectMonitorWatchedNamespaces returns every namespace each policy must
 // match, derived from the catalog rather than hardcoded: the registry's

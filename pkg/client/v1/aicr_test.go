@@ -1685,6 +1685,51 @@ func TestWrapResolvedIsQueryable(t *testing.T) {
 	}
 }
 
+// TestSummarizeRecipe pins the facade summary to pkg/recipe.BuildSummary, and
+// its rejection of a result that carries no internal recipe state.
+func TestSummarizeRecipe(t *testing.T) {
+	t.Parallel()
+
+	resolved := &recipe.RecipeResult{
+		APIVersion:      "aicr.run/v1",
+		Kind:            recipe.RecipeResultKind,
+		Criteria:        &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+		ComponentRefs:   []recipe.ComponentRef{{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Version: "v1.0.0"}},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+	want, err := recipe.BuildSummary(resolved)
+	if err != nil {
+		t.Fatalf("BuildSummary: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		result  *aicr.RecipeResult
+		want    *aicr.RecipeSummary
+		wantErr bool
+	}{
+		{name: "wrapped recipe", result: aicr.WrapResolved(resolved), want: want},
+		{name: "nil result", wantErr: true},
+		{name: "no internal state", result: &aicr.RecipeResult{}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := aicr.SummarizeRecipe(tt.result)
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+				return
+			}
+			if err != nil {
+				t.Fatalf("SummarizeRecipe: %v", err)
+			}
+			if len(got.Components) != 1 || !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("SummarizeRecipe = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 // componentNames extracts a slice of component names from a
 // RecipeResult, suitable for error-message diagnostics. Keeps the
 // assertion logic above readable.
@@ -1957,6 +2002,23 @@ func TestResolveRecipeFromSnapshot_OKEGpuStackQualification(t *testing.T) {
 			snap:    okeQualificationSnapshot("absent", ""),
 			wantErr: `reading "K8s.oke-legacy-plugin.nvidia-gpu-device-plugin" is unavailable`,
 		},
+		{
+			name:    "add-on on the envvar strategy fails oci-managed (the hardened toolkit refuses envvar grants)",
+			profile: "",
+			snap:    okeAddonsSnapshotWithStrategy("installed", "absent", "none", "envvar"),
+			wantErr: `constraint "K8s.oke-gpu-plugin.device-list-strategy" failed`,
+		},
+		{
+			name:    "snapshot without the strategy reading fails oci-managed closed",
+			profile: "",
+			snap:    okeAddonsSnapshotWithStrategy("installed", "absent", "none", ""),
+			wantErr: `reading "K8s.oke-gpu-plugin.device-list-strategy" is unavailable`,
+		},
+		{
+			name:    "the add-on strategy does not gate operator-managed (no add-on there)",
+			profile: "gpuStack=operator-managed",
+			snap:    okeAddonsSnapshotWithStrategy("absent", "absent", "none", "absent"),
+		},
 	}
 
 	for _, tt := range tests {
@@ -2050,6 +2112,13 @@ func TestResolveRecipeFromSnapshot_OKENetworkOperatorAddonGate(t *testing.T) {
 			wantErr:     "gb200-oke-ubuntu-training-kubeflow " + gate + " (expected absent, got installed)",
 		},
 		{
+			name:        "gb300 ubuntu add-on installed fails closed",
+			accelerator: "gb300",
+			os:          "ubuntu",
+			nnoState:    "installed",
+			wantErr:     "gb300-oke-ubuntu-training " + gate + " (expected absent, got installed)",
+		},
+		{
 			name:        "add-on mid-create fails closed",
 			accelerator: "l40s",
 			os:          "ol",
@@ -2110,15 +2179,22 @@ func okeQualificationSnapshot(addonState, legacyState string) *aicr.Snapshot {
 	return okeAddonsSnapshot(addonState, "absent", legacyState)
 }
 
-// okeAddonsSnapshot returns an OKE Snapshot at Kubernetes v1.34.0 with the
-// given NvidiaGpuPlugin, NvidiaNetworkOperator (NNO), and legacy device-plugin
-// readings. Constraints on an omitted reading fail as unavailable. Special
-// cases are:
+// okeAddonsSnapshot returns okeAddonsSnapshotWithStrategy with the add-on on
+// the volume-mounts device-list strategy that oci-managed requires.
+func okeAddonsSnapshot(addonState, nnoState, legacyState string) *aicr.Snapshot {
+	return okeAddonsSnapshotWithStrategy(addonState, nnoState, legacyState, "volume-mounts")
+}
+
+// okeAddonsSnapshotWithStrategy returns an OKE Snapshot at Kubernetes v1.34.0
+// with the given NvidiaGpuPlugin, NvidiaNetworkOperator (NNO), legacy
+// device-plugin and add-on device-list strategy readings. Constraints on an
+// omitted reading fail as unavailable. Special cases are:
 //
 //   - An empty addonState omits the oke-addons subtype, including nnoState.
 //   - An empty nnoState omits only the nvidia-network-operator key.
 //   - An empty legacyState omits the oke-legacy-plugin subtype.
-func okeAddonsSnapshot(addonState, nnoState, legacyState string) *aicr.Snapshot {
+//   - An empty strategy omits the oke-gpu-plugin subtype.
+func okeAddonsSnapshotWithStrategy(addonState, nnoState, legacyState, strategy string) *aicr.Snapshot {
 	k8s := measurement.NewMeasurement(measurement.TypeK8s).
 		WithSubtypeBuilder(
 			measurement.NewSubtypeBuilder("server").
@@ -2136,6 +2212,12 @@ func okeAddonsSnapshot(addonState, nnoState, legacyState string) *aicr.Snapshot 
 		k8s = k8s.WithSubtypeBuilder(
 			measurement.NewSubtypeBuilder("oke-legacy-plugin").
 				SetString("nvidia-gpu-device-plugin", legacyState),
+		)
+	}
+	if strategy != "" {
+		k8s = k8s.WithSubtypeBuilder(
+			measurement.NewSubtypeBuilder("oke-gpu-plugin").
+				SetString("device-list-strategy", strategy),
 		)
 	}
 	return aicr.WrapSnapshot(&snapshotter.Snapshot{
@@ -3557,6 +3639,7 @@ func TestResolveRecipeInheritNamespaceOnly(t *testing.T) {
 	prior := filepath.Join(t.TempDir(), "prior.yaml")
 	doc := fmt.Sprintf(`kind: RecipeResult
 apiVersion: aicr.run/v1
+unknownLegacyField: tolerated
 metadata:
   version: test
 componentRefs:

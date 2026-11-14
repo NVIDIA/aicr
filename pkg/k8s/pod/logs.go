@@ -78,22 +78,39 @@ func GetPodLogs(ctx context.Context, client kubernetes.Interface, namespace, pod
 	}
 	defer stream.Close()
 
+	return readLogStream(ctx, stream)
+}
+
+// readLogStream drains a completed pod's log stream into a string, checking
+// ctx between chunks. It reads fixed-size chunks rather than lines: no line
+// length may fail the read, since a check may print a large JSON document on
+// one line and the orchestrator must still see the output of a result that
+// exited 0 (#3703). Callers split the string on newlines.
+//
+// Errors:
+//   - ErrCodeTimeout or ErrCodeCanceled when ctx ends before the stream does.
+//   - ErrCodeInternal when the stream itself fails.
+func readLogStream(ctx context.Context, stream io.Reader) (string, error) {
 	var logBuffer bytes.Buffer
-	scanner := bufio.NewScanner(stream)
-	scanner.Buffer(make([]byte, defaults.LogScannerBufferSize), defaults.LogScannerBufferSize)
-	for scanner.Scan() {
+	chunk := make([]byte, defaults.LogReadChunkSize)
+	for {
 		select {
 		case <-ctx.Done():
 			return "", errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "collecting pod logs")
 		default:
 		}
-		logBuffer.WriteString(scanner.Text())
+		n, err := stream.Read(chunk)
+		logBuffer.Write(chunk[:n])
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", errors.Wrap(errors.ErrCodeInternal, "failed to read pod logs", err)
+		}
+	}
+	// Callers split on '\n' and expect the final line to be terminated.
+	if logBuffer.Len() > 0 && logBuffer.Bytes()[logBuffer.Len()-1] != '\n' {
 		logBuffer.WriteByte('\n')
 	}
-
-	if err := scanner.Err(); err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to read pod logs", err)
-	}
-
 	return logBuffer.String(), nil
 }

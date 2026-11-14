@@ -185,6 +185,7 @@ func TestExternalOverlayContributesProfileValue(t *testing.T) {
 			patch: `spec: {profile: {values: {custom: {advertiser: external, componentRefs: [
   {name: gcp-driver-installer, overrides: {installer: {enabled: false}}},
   {name: gpu-operator, overrides: {devicePlugin: {enabled: false}}},
+  {name: nvidia-dra-driver-gpu, overrides: {gpuResourcesEnabledOverride: false, resources: {gpus: {enabled: false}}}},
   {name: nvsentinel, optional: true, overrides: {labeler: {assumeDriverInstalled: true}}}]}}}}`,
 			wantSelected: map[string]string{
 				"":                          "gke-default",
@@ -197,12 +198,13 @@ func TestExternalOverlayContributesProfileValue(t *testing.T) {
 			patch: `spec: {profile: {values: {custom: {advertiser: external, componentRefs: [
   {name: gcp-driver-installer, overrides: {installer: {enabled: false}}},
   {name: gpu-operator, overrides: {devicePlugin: {enabled: false}}},
+  {name: nvidia-dra-driver-gpu, overrides: {gpuResourcesEnabledOverride: false, resources: {gpus: {enabled: false}}}},
   {name: nvsentinel, overrides: {labeler: {assumeDriverInstalled: true}}}]}}}}`,
 			wantLoadErr: "as optional in some values but not others",
 		},
 		{
 			name: "value assigning only a DRA path fails union totality at catalog load",
-			patch: `spec: {profile: {values: {dra: {componentRefs: [{name: nvidia-dra-driver-gpu,
+			patch: `spec: {profile: {values: {dra-partial: {componentRefs: [{name: nvidia-dra-driver-gpu,
   overrides: {gpuResourcesEnabledOverride: true, resources: {gpus: {enabled: true}}}}]}}}}`,
 			wantLoadErr: "union totality",
 		},
@@ -254,20 +256,16 @@ func TestExternalOverlayContributesProfileValue(t *testing.T) {
 func TestSourceFollowsTheLatestExternalRead(t *testing.T) {
 	ctx := t.Context()
 	const path = "overlays/gke-cos.yaml"
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(providertest.EmptyRegistryYAML), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	dir := providertest.WriteDir(t, map[string][]byte{
+		RegistryFileName: []byte(providertest.EmptyRegistryYAML),
+		path:             []byte(withPatch(t, "gke-cos.yaml", "spec: {profile: {values: {custom: {}}}}")),
+	})
 	write := func(content string) {
 		t.Helper()
 		if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write(withPatch(t, "gke-cos.yaml", "spec: {profile: {values: {custom: {}}}}"))
 	layered, err := NewLayeredDataProvider(
 		NewEmbeddedDataProvider(GetEmbeddedFS(), "."), LayeredProviderConfig{ExternalDir: dir})
 	if err != nil {

@@ -70,7 +70,7 @@ cluster:
 
 network:
   eks:
-    # One securityGroups.additionalRules entry, for NVSentinel's MongoDB
+    # The first securityGroups.additionalRules entry is for NVSentinel's MongoDB
     # store. AICR's own NVSentinel install leaves that store off (the chart
     # default); NVSentinel's e2e pipeline reinstalls on these clusters with
     # it on (values-aicr-aws-uat.yaml in the NVSentinel repo), pinning the
@@ -124,6 +124,23 @@ network:
           protocol: tcp
           cidrBlocks: ["10.0.128.0/17", "100.65.0.0/16"]  # worker subnet + pod CIDR
           description: "Allow NVSentinel MongoDB from GPU worker pods"
+        # nktp's node collector runs on the GPU nodes and reaches the system
+        # nodes for OTLP to its gateways and watchdog (4317, 4320) and for its
+        # Target Allocator, which serves over mTLS (8443).
+        - target: system
+          direction: ingress
+          fromPort: 4317
+          toPort: 4320
+          protocol: tcp
+          cidrBlocks: ["10.0.128.0/17", "100.65.0.0/16"]  # worker subnet + pod CIDR
+          description: "Allow NKTP OTLP from GPU worker pods"
+        - target: system
+          direction: ingress
+          fromPort: 8443
+          toPort: 8443
+          protocol: tcp
+          cidrBlocks: ["10.0.128.0/17", "100.65.0.0/16"]  # worker subnet + pod CIDR
+          description: "Allow NKTP Target Allocator from GPU worker pods"
     cidrs:
       host: 10.0.0.0/16
       pod: 100.65.0.0/16

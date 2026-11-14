@@ -53,7 +53,7 @@ func GetPodForJob(ctx context.Context, client kubernetes.Interface, namespace, j
 	})
 	if err != nil {
 		return nil, errors.WrapWithContext(errors.ErrCodeInternal, "failed to list pods for Job", err,
-			map[string]any{keyNamespace: namespace, "job": jobName})
+			map[string]any{keyNamespace: namespace, keyJob: jobName})
 	}
 
 	var (
@@ -82,5 +82,51 @@ func GetPodForJob(ctx context.Context, client kubernetes.Interface, namespace, j
 		return bestFailed, nil
 	}
 	return nil, errors.NewWithContext(errors.ErrCodeNotFound, "pod for job not found",
-		map[string]any{keyNamespace: namespace, "job": jobName})
+		map[string]any{keyNamespace: namespace, keyJob: jobName})
+}
+
+// GetTerminatedPodForJob returns the youngest pod owned by the named Job whose
+// container named containerName has terminated, including a pod in its
+// deletion grace window. GetPodForJob skips such pods on purpose, but when the
+// Job controller deletes a pod on activeDeadlineSeconds expiry the terminated
+// container status is the only record of how the check ended.
+//
+// Returns an ErrCodeNotFound StructuredError when no pod has a terminated
+// container with that name, and an ErrCodeInternal StructuredError if the List
+// call itself fails.
+func GetTerminatedPodForJob(ctx context.Context, client kubernetes.Interface, namespace, jobName, containerName string) (*corev1.Pod, error) {
+	pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: jobNameLabel + "=" + jobName,
+	})
+	if err != nil {
+		return nil, errors.WrapWithContext(errors.ErrCodeInternal, "failed to list pods for Job", err,
+			map[string]any{keyNamespace: namespace, keyJob: jobName})
+	}
+
+	var best *corev1.Pod
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if !HasTerminatedContainer(p, containerName) {
+			continue
+		}
+		if best == nil || p.CreationTimestamp.After(best.CreationTimestamp.Time) {
+			best = p
+		}
+	}
+	if best == nil {
+		return nil, errors.NewWithContext(errors.ErrCodeNotFound, "terminated pod for job not found",
+			map[string]any{keyNamespace: namespace, keyJob: jobName, "container": containerName})
+	}
+	return best, nil
+}
+
+// HasTerminatedContainer reports whether the pod's container named
+// containerName is in the Terminated state.
+func HasTerminatedContainer(p *corev1.Pod, containerName string) bool {
+	for _, cs := range p.Status.ContainerStatuses {
+		if cs.Name == containerName {
+			return cs.State.Terminated != nil
+		}
+	}
+	return false
 }

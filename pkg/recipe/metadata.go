@@ -29,6 +29,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -87,6 +88,15 @@ const (
 	MariaDBOperatorStateAPIDetected = "api-detected"
 	MariaDBOperatorStateCRsDetected = "crs-detected"
 	MariaDBOperatorStateUnknown     = "unknown"
+)
+
+// RDMANamespaceMode values recorded in RecipeResult.Metadata.RDMANamespaceMode
+// by snapshot-driven resolution, from the RDMA subsystem's network namespace
+// mode on the snapshot's node (ib_core netns_mode).
+const (
+	RDMANamespaceModeExclusive = "exclusive"
+	RDMANamespaceModeShared    = "shared"
+	RDMANamespaceModeUnknown   = "unknown"
 )
 
 // DefaultStorageClassState values recorded in
@@ -1247,6 +1257,8 @@ func (e *ExcludedOverlay) UnmarshalJSON(data []byte) error {
 // constructors can build it without re-declaring the full field list —
 // which silently breaks on every field addition.
 type RecipeResultMetadata struct {
+	// Artifacts records the release inputs required to execute this recipe.
+	Artifacts *artifact.Provenance `json:"artifacts,omitempty" yaml:"artifacts,omitempty"`
 	// Version is the recipe version (CLI version that generated this recipe).
 	Version string `json:"version,omitempty" yaml:"version,omitempty"`
 
@@ -1293,6 +1305,11 @@ type RecipeResultMetadata struct {
 	// nvsentinel-mongodb. Consumed by the bundle-time
 	// CheckNVSentinelDatastorePrerequisites validation.
 	PerconaOperatorState string `json:"perconaOperatorState,omitempty" yaml:"perconaOperatorState,omitempty"`
+
+	// RDMANamespaceMode records the RDMA subsystem's network namespace mode
+	// observed in the snapshot. Consumed by the bundle-time
+	// CheckRDMANamespaceModeCoherent validation.
+	RDMANamespaceMode string `json:"rdmaNamespaceMode,omitempty" yaml:"rdmaNamespaceMode,omitempty"`
 }
 
 // RecipeResult represents the final merged recipe output.
@@ -1502,13 +1519,15 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 		// operation's read-once view, so an independent copy resolves fresh.
 	}
 
-	// Metadata: scalar fields, the SelectedProfile
-	// pointer (cloned with its OwnedPaths map), plus three slices.
+	// Metadata's provenance, profile-owned paths and slices are copied
+	// independently of the caller's record.
 	out.Metadata.Version = r.Metadata.Version
+	out.Metadata.Artifacts = r.Metadata.Artifacts.Clone()
 	out.Metadata.GPUDriverState = r.Metadata.GPUDriverState
 	out.Metadata.MariaDBOperatorState = r.Metadata.MariaDBOperatorState
 	out.Metadata.DefaultStorageClassState = r.Metadata.DefaultStorageClassState
 	out.Metadata.PerconaOperatorState = r.Metadata.PerconaOperatorState
+	out.Metadata.RDMANamespaceMode = r.Metadata.RDMANamespaceMode
 	if r.Metadata.SelectedProfile != nil {
 		selected := *r.Metadata.SelectedProfile
 		selected.OwnedPaths = cloneOwnedPaths(r.Metadata.SelectedProfile.OwnedPaths)

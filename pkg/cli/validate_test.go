@@ -29,6 +29,42 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
+// cncfVendorYAML is a well-formed spec.validate.evidence.cncf.vendor block,
+// indented for the cncf: mapping; a submission run requires one.
+const cncfVendorYAML = `        vendor:
+          name: Test Vendor
+          platformName: Test Platform
+          platformVersion: 1.2.3
+          description: A GPU platform under test.
+          contactEmail: owner@vendor.example
+          websiteUrl: https://vendor.example/platform
+          documentationUrl: https://vendor.example/docs
+          productLogoUrl: https://vendor.example/logo.svg
+          k8sConformanceUrl: https://github.com/cncf/k8s-conformance/tree/master/v1.37/test-platform
+`
+
+// writeCNCFConfig writes an AICRConfig whose spec.validate.evidence.cncf
+// block is cncfYAML (lines indented under cncf:) and returns its path.
+func writeCNCFConfig(t *testing.T, dir, cncfYAML string) string {
+	t.Helper()
+	path := filepath.Join(dir, "config.yaml")
+	doc := "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nmetadata:\n  name: test\nspec:\n  validate:\n    evidence:\n      cncf:\n" + cncfYAML
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// testCNCFVendor is the facade form of cncfVendorYAML for runValidation
+// tests that bypass config loading.
+func testCNCFVendor() *aicr.CNCFVendor {
+	return &aicr.CNCFVendor{
+		Name: "Test Vendor", PlatformName: "Test Platform", PlatformVersion: "1.2.3", Description: "A GPU platform under test.",
+		ContactEmail: "owner@vendor.example", WebsiteURL: "https://vendor.example/platform", DocumentationURL: "https://vendor.example/docs",
+		ProductLogoURL: "https://vendor.example/logo.svg", K8sConformanceURL: "https://github.com/cncf/k8s-conformance/tree/master/v1.37/test-platform",
+	}
+}
+
 // TestValidateCmd_CNCFSubmissionRecipe covers the recipe source of a
 // --cncf-submission run. Every case fails before any check runs, so nothing
 // reaches a cluster. A run without a recipe is refused (the single runner
@@ -43,6 +79,7 @@ func TestValidateCmd_CNCFSubmissionRecipe(t *testing.T) {
 		t.Fatalf("failed to write test recipe file: %v", err)
 	}
 	missingSnapshot := filepath.Join(t.TempDir(), "missing-snapshot.yaml")
+	cfgPath := writeCNCFConfig(t, t.TempDir(), cncfVendorYAML)
 
 	tests := []struct {
 		name       string
@@ -56,8 +93,8 @@ func TestValidateCmd_CNCFSubmissionRecipe(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			app := &cli.Command{Name: "aicr", Commands: []*cli.Command{validateCmd()}}
-			args := append([]string{"aicr", "validate", "--phase", "conformance", "--cncf-submission",
-				"--evidence-dir", t.TempDir()}, tt.args...)
+			args := append([]string{"aicr", "validate", "--config", cfgPath, "--phase", "conformance", "--cncf-submission",
+				"--evidence-dir", filepath.Join(t.TempDir(), "submission")}, tt.args...)
 			err := app.Run(t.Context(), args)
 			if err == nil || !strings.Contains(err.Error(), tt.errContain) {
 				t.Fatalf("error = %v, want error containing %q", err, tt.errContain)

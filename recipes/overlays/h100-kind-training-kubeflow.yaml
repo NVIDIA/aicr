@@ -48,6 +48,7 @@ spec:
         - ai-service-metrics
         - gang-scheduling
         - secure-accelerator-access
+        - driver-runtime-management
         # pod-autoscaling is omitted: it scales accelerator pods 1 to 2, so it
         # needs two allocatable accelerators at once, and the kind GPU lanes
         # run on a single-H100 runner.
