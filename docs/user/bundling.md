@@ -519,8 +519,8 @@ recipes each row names; a row with no recipe applies to all of them. Their
 **Smaller clusters: state a GPU node count.** `aicr bundle --nodes N` lowers
 the memory of each controller that has a sizing table
 (`recipes/components/<name>/sizing.yaml`) to the measured tier covering N GPU
-nodes. Today these are the GPU Operator, the Nodewright manager, and the
-Network Operator's maintenance-operator subchart. Sizing only lowers a value:
+nodes. Today these are the GPU Operator and the Network Operator's
+maintenance-operator subchart. Sizing only lowers a value:
 each request and limit becomes the smaller of the recipe's value and the
 tier's. With no count, or a count above the highest tier, the bundle is
 unchanged. It never touches a path set by the recipe's inline overrides, a
@@ -540,11 +540,19 @@ total nodes and pods of the readings behind it.
 An `argocd-helm` bundle sizes its upstream charts at install time instead,
 from the root value `sizing.nodeCount`, which defaults to the bundle's
 `--nodes`. Generate a bundle meant for clusters of different sizes without
-`--nodes`, and set the count when installing:
+`--nodes`, and set the count when installing. `repoURL` is the registry
+namespace the bundle was published to; a bundle pushed with
+`--output oci://` already carries it:
 
 ```bash
-helm install aicr-bundle . --set sizing.nodeCount=200
+helm install aicr-bundle . \
+  --set repoURL=oci://<registry>/<namespace> \
+  --set sizing.nodeCount=200
 ```
+
+With `--vendor-charts` the charts are sized when the bundle is generated,
+like local charts, so state `--nodes` then: `sizing.nodeCount` does not
+lower them.
 
 Each sized child Application carries `aicr.nvidia.com/sizing-node-count`, and
 `aicr.nvidia.com/sizing-tier` when a tier changed its values. A component's

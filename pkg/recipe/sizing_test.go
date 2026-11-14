@@ -18,6 +18,7 @@ import (
 	"context"
 	"io/fs"
 	"path"
+	"slices"
 	"strings"
 	"testing"
 
@@ -52,8 +53,8 @@ resources:
           - sets: []
             kind: instantaneous
             gpuNodes: 50
-            max: 190Mi
-            truncatedAt: 200Mi
+            max: 140Mi
+            truncatedAt: 150Mi
             date: 2026-01-03
             ref: https://example.com/2
       - maxNodes: 200
@@ -64,6 +65,7 @@ resources:
             kind: windowed
             window: 7d
             gpuNodes: 210
+            nodes: 215
             max: 300Mi
             date: 2026-01-04
             ref: https://example.com/3
@@ -97,7 +99,10 @@ func TestParseComponentSizing(t *testing.T) {
 		{name: "missing gpuNodes", old: "            gpuNodes: 50\n", new: "", wantErr: "gpuNodes must be positive"},
 		{name: "missing max", old: "            max: 300Mi\n", new: "", wantErr: "max is required"},
 		{name: "unparseable max", old: "max: 300Mi", new: "max: big", wantErr: "max \"big\""},
-		{name: "unparseable truncatedAt", old: "truncatedAt: 200Mi", new: "truncatedAt: x", wantErr: "truncatedAt"},
+		{name: "unparseable truncatedAt", old: "truncatedAt: 150Mi", new: "truncatedAt: x", wantErr: "truncatedAt"},
+		{name: "limit not above truncatedAt", old: "truncatedAt: 150Mi", new: "truncatedAt: 200Mi", wantErr: "is not above measurement"},
+		{name: "windowed limit reading without nodes", old: "            nodes: 95\n", new: "", wantErr: "needs nodes"},
+		{name: "version is optional", old: "            date: 2026-01-02\n", new: "            date: 2026-01-02\n            version: v1.2.3\n"},
 		{name: "bad date", old: "date: 2026-01-04", new: "date: Jan 4", wantErr: "YYYY-MM-DD"},
 		{name: "ref is optional", old: "            ref: https://example.com/3\n", new: ""},
 	}
@@ -217,6 +222,39 @@ func TestRegistrySizingFilesLoad(t *testing.T) {
 		}
 		if _, err := LoadComponentSizing(context.Background(), nil, c.Name, c.Sizing.File); err != nil {
 			t.Errorf("component %q: %v", c.Name, err)
+		}
+	}
+}
+
+// TestRegistrySizingFilesShareBounds fails when two sizing files declare
+// different maxNodes sets, so one count selects the same row in each.
+func TestRegistrySizingFilesShareBounds(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first string
+	var want []int
+	for _, c := range registry.Components {
+		if c.Sizing.File == "" {
+			continue
+		}
+		sz, err := LoadComponentSizing(context.Background(), nil, c.Name, c.Sizing.File)
+		if err != nil {
+			t.Fatalf("component %q: %v", c.Name, err)
+		}
+		for _, r := range sz.Resources {
+			got := make([]int, 0, len(r.Tiers))
+			for _, tier := range r.Tiers {
+				got = append(got, tier.MaxNodes)
+			}
+			if want == nil {
+				first, want = c.Name+" "+r.Path, got
+				continue
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("%s %s declares bounds %v, but %s declares %v", c.Name, r.Path, got, first, want)
+			}
 		}
 	}
 }

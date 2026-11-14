@@ -21,10 +21,9 @@ resources:
   - path: operator.resources
     tiers:
       - maxNodes: 250
-        requests: {memory: 300Mi}
         limits: {memory: 768Mi}
         measurements:
-          - sets: [requests]
+          - sets: []
             kind: windowed
             window: 24h
             gpuNodes: 244
@@ -41,7 +40,6 @@ resources:
             date: 2026-10-14
             ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6172508390
       - maxNodes: 450
-        requests: {memory: 300Mi}
         limits: {memory: 1Gi}
         measurements:
           - sets: []
@@ -54,7 +52,7 @@ resources:
             max: 496Mi
             date: 2026-11-04
             ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6645492766
-          - sets: [requests, limits]
+          - sets: [limits]
             kind: windowed
             window: 24h
             gpuNodes: 447
@@ -64,10 +62,9 @@ resources:
             date: 2026-10-14
             ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6172508390
       - maxNodes: 700
-        requests: {memory: 300Mi}
         limits: {memory: 1Gi}
         measurements:
-          - sets: [requests, limits]
+          - sets: [limits]
             kind: windowed
             window: 24h
             gpuNodes: 656

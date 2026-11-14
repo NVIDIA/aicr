@@ -20,6 +20,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -91,8 +92,10 @@ type SizingQuantities struct {
 
 // SizingMeasurement is one reading behind a tier. Sets is empty for a reading
 // that only constrained the result. TruncatedAt is the limit in force while
-// the container was being OOM-killed, which caps what Max could show. Ref,
-// optional, links the raw data.
+// the container was being OOM-killed, which caps what Max could show. Nodes
+// is required on a windowed reading that sets a limit. Version, optional, is
+// the component's chart version on the measured cluster. Ref, optional,
+// links the raw data.
 type SizingMeasurement struct {
 	Sets        []string `yaml:"sets"`
 	Kind        string   `yaml:"kind"`
@@ -104,6 +107,7 @@ type SizingMeasurement struct {
 	Max         string   `yaml:"max"`
 	TruncatedAt string   `yaml:"truncatedAt,omitempty"`
 	Date        string   `yaml:"date"`
+	Version     string   `yaml:"version,omitempty"`
 	Ref         string   `yaml:"ref,omitempty"`
 }
 
@@ -255,6 +259,16 @@ func (t *SizingTier) validate(file, where string) error {
 				return sizingErr(file, "%s measurement %d: sets %q, which the tier does not set", where, j, s)
 			}
 			named[s] = true
+		}
+		// A limit covers clusters only up to the total nodes of its readings.
+		if m.Kind == SizingKindWindowed && m.Nodes <= 0 && slices.Contains(m.Sets, SizingFieldLimits) {
+			return sizingErr(file, "%s measurement %d: a windowed measurement that sets limits needs nodes", where, j)
+		}
+		if hasLim && m.TruncatedAt != "" {
+			if killed := resource.MustParse(m.TruncatedAt); lim.Cmp(killed) <= 0 {
+				return sizingErr(file, "%s: limits memory %s is not above measurement %d's truncatedAt %s",
+					where, lim.String(), j, killed.String())
+			}
 		}
 	}
 	for field := range qs {

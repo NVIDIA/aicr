@@ -43,12 +43,12 @@ resources:
         requests: {memory: 256Mi}
         limits: {memory: 768Mi}
         measurements:
-          - {sets: [requests, limits], kind: windowed, window: 24h, gpuNodes: 244, max: 500Mi, date: 2026-01-01, ref: x}
+          - {sets: [requests, limits], kind: windowed, window: 24h, gpuNodes: 244, nodes: 249, max: 500Mi, date: 2026-01-01, ref: x}
       - maxNodes: 450
         requests: {memory: 256Mi}
         limits: {memory: 1Gi}
         measurements:
-          - {sets: [requests, limits], kind: windowed, window: 24h, gpuNodes: 447, max: 700Mi, date: 2026-01-01, ref: x}
+          - {sets: [requests, limits], kind: windowed, window: 24h, gpuNodes: 447, nodes: 453, max: 700Mi, date: 2026-01-01, ref: x}
       - maxNodes: 2000
 `
 	sizingFixtureValuesDoc = `operator:

@@ -29,10 +29,9 @@ resources:
   - path: maintenance-operator-chart.operator.resources
     tiers:
       - maxNodes: 250
-        requests: {memory: 256Mi}
         limits: {memory: 5.5Gi}
         measurements:
-          - sets: [requests, limits]
+          - sets: [limits]
             kind: instantaneous
             gpuNodes: 1112
             max: 2345Mi
@@ -47,19 +46,17 @@ resources:
             max: 693Mi
             date: 2026-11-06
       - maxNodes: 450
-        requests: {memory: 256Mi}
         limits: {memory: 5.5Gi}
         measurements:
-          - sets: [requests, limits]
+          - sets: [limits]
             kind: instantaneous
             gpuNodes: 1112
             max: 2345Mi
             date: 2026-10-15
       - maxNodes: 700
-        requests: {memory: 256Mi}
         limits: {memory: 5.5Gi}
         measurements:
-          - sets: [requests, limits]
+          - sets: [limits]
             kind: instantaneous
             gpuNodes: 1112
             max: 2345Mi
