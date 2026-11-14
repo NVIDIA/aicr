@@ -260,6 +260,15 @@ func TestUnsatisfiableSigningFailsBeforeAnyNetworkLeg(t *testing.T) {
 		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 	})
 
+	t.Run("empty statement", func(t *testing.T) {
+		// Reaching the certificate request fails Unavailable.
+		_, err := signEvidenceStatement(context.Background(), nil, bundleattest.ResolveOptions{
+			IdentityToken: "tok",
+			FulcioURL:     "http://127.0.0.1:1",
+		})
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+
 	t.Run("signing key without a KMS scheme", func(t *testing.T) {
 		_, err := signAndPush(context.Background(), &Bundle{SummaryDir: t.TempDir()}, signPushOptions{
 			Push:        "127.0.0.1:1/aicr-evidence:tag",
