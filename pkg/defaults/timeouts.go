@@ -235,16 +235,12 @@ const (
 	// all of those carry a hard budget, so the between-checks gap has no
 	// proven bound: the window is a conservative margin over the usual gap,
 	// and a run stalled between checks for longer cannot be told from a
-	// dead one.
+	// dead one. The observation lists the run-labeled Jobs once and then
+	// watches from the list's ResourceVersion for the whole window; a watch
+	// the apiserver ends early is an anomaly (routine watch timeouts are
+	// 30+ minutes), so it aborts the apply with nothing deleted rather than
+	// re-watching.
 	ValidationSweepSettleWindow = K8sPodTerminationWaitTimeout + 2*K8sCleanupTimeout
-
-	// ValidationSweepSettleRewatchPause paces re-establishing the settle
-	// observation's Job watch after its channel closes mid-window. Routine
-	// closures (apiserver --min-request-timeout expiry) are isolated, but a
-	// flapping load balancer or an apiserver rollout can close the stream
-	// immediately on every reconnect; without pacing, the re-list/re-watch
-	// loop would hammer an already-degraded API server for the whole window.
-	ValidationSweepSettleRewatchPause = 5 * time.Second
 )
 
 // StaticValidationTimeout bounds a complete static recipe validation run.

@@ -175,6 +175,18 @@ func (c *Client) PlanValidationSweep(ctx context.Context, opts SweepOptions) (*S
 // UID, so an object replaced since planning is left alone, and a re-run is
 // idempotent.
 //
+// While run-scoped candidates remain, apply also runs the settle
+// observation before deleting any of them — a live run with cleanup on
+// shows no validator Job between its checks, so the run-labeled Jobs are
+// listed once and then watched from the list's ResourceVersion for
+// defaults.ValidationSweepSettleWindow; a run whose Job appears keeps all
+// of its objects. The wait sits between the first re-plan's reads and the
+// deletes, so a second re-plan runs after it and re-applies every guard
+// against current state. The observation fails closed: a watch the
+// apiserver ends before the window elapses (an anomaly — apiserver watch
+// timeouts are far longer) aborts the apply with ErrCodeUnavailable and
+// nothing is deleted.
+//
 // Only a report PlanValidationSweep produced is accepted: the marker is
 // unexported, so a hand-built SweepReport — or a plan that round-tripped
 // through JSON, which drops unexported fields — is rejected; re-plan first.
@@ -184,6 +196,8 @@ func (c *Client) PlanValidationSweep(ctx context.Context, opts SweepOptions) (*S
 //     PlanValidationSweep, or the re-plan rejects the plan's age floor.
 //   - ErrCodeUnauthorized when the re-plan's list is Forbidden — before
 //     anything is deleted.
+//   - ErrCodeUnavailable when the apiserver ended the settle watch early —
+//     nothing is deleted; re-run.
 //   - ErrCodeTimeout/ErrCodeCanceled when ctx dies, including during the
 //     settle window — again before anything is deleted.
 //   - ErrCodeInternal for partial delete failures, still returning the

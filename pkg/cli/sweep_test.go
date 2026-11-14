@@ -405,6 +405,64 @@ func TestSweepCmd_YAMLOutput(t *testing.T) {
 	}
 }
 
+// TestSweepCmd_YesStructuredPrintsPlanToErrWriter pins the Safety contract
+// for an unprompted apply: with --yes and --format json|yaml there is no
+// prompt, but the plan — context, server and the exact candidate list — is
+// still printed (to the error writer) before anything is deleted, while the
+// destination holds only the structured report.
+func TestSweepCmd_YesStructuredPrintsPlanToErrWriter(t *testing.T) {
+	for _, format := range []string{"json", "yaml"} {
+		t.Run(format, func(t *testing.T) {
+			rec := newScriptedAPIServer(t, sweepCluster(true))
+			kubeconfig := rec.writeKubeconfig(t, t.TempDir())
+			outPath := filepath.Join(t.TempDir(), "report."+format)
+
+			stdout, stderr, err := runSweepCapture(t, nonTerminalReader(t),
+				"--kubeconfig", kubeconfig, "--yes", "--format", format, "--output", outPath)
+			if err != nil {
+				t.Fatalf("sweep error = %v", err)
+			}
+			if stdout != "" {
+				t.Errorf("structured mode wrote the human display to the root writer:\n%s", stdout)
+			}
+			for _, fragment := range []string{"Cluster context: recording", "KIND", sweepTestNamespace} {
+				if !strings.Contains(stderr, fragment) {
+					t.Errorf("stderr does not contain %q:\n%s", fragment, stderr)
+				}
+			}
+			if strings.Contains(stderr, "[y/N]") {
+				t.Errorf("--yes must not prompt:\n%s", stderr)
+			}
+			if !sweepIssuedDelete(rec) {
+				t.Error("--yes sweep deleted nothing")
+			}
+
+			data, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatalf("read report: %v", err)
+			}
+			var report struct {
+				Objects []struct {
+					Status string `json:"status" yaml:"status"`
+				} `json:"objects" yaml:"objects"`
+			}
+			switch format {
+			case "json":
+				if err := json.Unmarshal(data, &report); err != nil {
+					t.Fatalf("report is not JSON: %v\n%s", err, data)
+				}
+			default:
+				if err := yaml.Unmarshal(data, &report); err != nil {
+					t.Fatalf("report is not YAML: %v\n%s", err, data)
+				}
+			}
+			if len(report.Objects) != 1 || report.Objects[0].Status != "deleting" {
+				t.Errorf("report objects = %+v, want the namespace deleting", report.Objects)
+			}
+		})
+	}
+}
+
 func TestSweepCmd_ForbiddenListIsUnauthorized(t *testing.T) {
 	rec := newScriptedAPIServer(t, func(method, path string) (int, string) {
 		if method == http.MethodGet && path == "/api/v1/namespaces" {
