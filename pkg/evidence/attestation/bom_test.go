@@ -55,47 +55,41 @@ func TestCatalogVersion(t *testing.T) {
 	}
 }
 
-func TestDedupValidatorImages(t *testing.T) {
+func TestBOMValidatorRefs(t *testing.T) {
+	digA := "sha256:" + strings.Repeat("a", 64)
+	digB := "sha256:" + strings.Repeat("b", 64)
 	tests := []struct {
-		name string
-		cat  *catalog.ValidatorCatalog
-		want []string
+		name   string
+		images []ValidatorImage
+		want   []string
 	}{
-		{"nil catalog", nil, nil},
-		{"no validators", &catalog.ValidatorCatalog{}, nil},
+		{"nil", nil, nil},
+		{"digest-less ref is kept as-is", []ValidatorImage{{Image: "ghcr.io/x/deployment:v1"}}, []string{"ghcr.io/x/deployment:v1"}},
 		{
-			name: "dedupes by image preserving order",
-			cat: &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-				{Name: "a", Image: "ghcr.io/x/deployment:v1"},
-				{Name: "b", Image: "ghcr.io/x/deployment:v1"},
-				{Name: "c", Image: "ghcr.io/x/performance:v1"},
-				{Name: "d", Image: "ghcr.io/x/conformance:v1"},
-			}},
+			name: "recorded digests, one per digest in order",
+			images: []ValidatorImage{
+				{Image: "ghcr.io/x/deployment:edge"},
+				{Image: "ghcr.io/x/deployment:edge", Digest: digA, Platform: "linux/amd64"},
+				{Image: "ghcr.io/x/deployment:edge", Digest: digA, Platform: "linux/arm64"},
+				{Image: "ghcr.io/x/deployment:edge", Digest: digB, Platform: "linux/arm64"},
+			},
 			want: []string{
-				"ghcr.io/x/deployment:v1",
-				"ghcr.io/x/performance:v1",
-				"ghcr.io/x/conformance:v1",
+				"ghcr.io/x/deployment:edge",
+				"ghcr.io/x/deployment:edge@" + digA,
+				"ghcr.io/x/deployment:edge@" + digB,
 			},
 		},
 		{
-			name: "skips entries with empty image",
-			cat: &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-				{Name: "a", Image: ""},
-				{Name: "b", Image: "ghcr.io/x/deployment:v1"},
-			}},
-			want: []string{"ghcr.io/x/deployment:v1"},
+			name:   "recorded digest replaces a pinned one",
+			images: []ValidatorImage{{Image: "ghcr.io/x/deployment:v1@" + digA, Digest: digB}},
+			want:   []string{"ghcr.io/x/deployment:v1@" + digB},
 		},
+		{"empty image is skipped", []ValidatorImage{{}}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := DedupValidatorImages(tt.cat)
-			if len(got) != len(tt.want) {
-				t.Fatalf("len = %d, want %d (got=%v)", len(got), len(tt.want), got)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("[%d] = %q, want %q", i, got[i], tt.want[i])
-				}
+			if got := bomValidatorRefs(tt.images); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("bomValidatorRefs() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -358,11 +352,9 @@ func TestLoadOrGenerateBOM_AutoFromRecipe(t *testing.T) {
 			{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Chart: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia", Version: "v25.10.1"},
 		},
 	}
-	cat := &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-		{Name: "operator-health", Image: "ghcr.io/x/deployment:latest"},
-	}}
+	images := []ValidatorImage{{Image: "ghcr.io/x/deployment:latest"}}
 
-	body, err := LoadOrGenerateBOM("", rec, nil, cat, "v0.1.0")
+	body, err := LoadOrGenerateBOM("", rec, nil, images, "v0.1.0")
 	if err != nil {
 		t.Fatalf("LoadOrGenerateBOM auto: %v", err)
 	}
@@ -395,13 +387,12 @@ func TestBuildAutoBOM_IncludesRecipeAndValidatorComponents(t *testing.T) {
 			{Name: "disabled-comp", Type: recipe.ComponentTypeHelm, Overrides: map[string]any{"enabled": false}},
 		},
 	}
-	cat := &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-		{Name: "a", Image: "ghcr.io/x/deployment:latest"},
-		{Name: "b", Image: "ghcr.io/x/deployment:latest"},
-		{Name: "c", Image: "ghcr.io/x/performance:latest"},
-	}}
+	images := []ValidatorImage{
+		{Image: "ghcr.io/x/deployment:latest", Digest: "sha256:" + strings.Repeat("a", 64)},
+		{Image: "ghcr.io/x/performance:latest"},
+	}
 
-	body, err := BuildAutoBOM(rec, nil, cat, "v0.1.0")
+	body, err := BuildAutoBOM(rec, nil, images, "v0.1.0")
 	if err != nil {
 		t.Fatalf("BuildAutoBOM: %v", err)
 	}

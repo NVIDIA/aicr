@@ -1133,10 +1133,10 @@ func validateEvidenceFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name: "bom",
 			Usage: `Path to a CycloneDX BOM (bom.cdx.json) to embed in the evidence bundle.
-	Optional with --emit-attestation: when omitted, aicr synthesizes a
-	recipe-bound BOM from the recipe's component refs + the validator
-	catalog images that ran. Pass an explicit path for an exhaustive
-	BOM (e.g., produced by 'make bom').`,
+	Optional with --emit-attestation. When omitted, aicr synthesizes a
+	recipe-bound BOM from the recipe's component refs and the validator
+	images that ran, each at its recorded digest if it has one. Pass an
+	explicit path for an exhaustive BOM (e.g., produced by 'make bom').`,
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
