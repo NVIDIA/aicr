@@ -51,7 +51,7 @@ type EvidenceOptions struct {
 
 	// BOMPath optionally embeds a CycloneDX BOM; when empty a recipe-bound
 	// BOM is synthesized from the recipe's component refs and the validator
-	// catalog images that ran.
+	// images the phase results recorded.
 	BOMPath string
 
 	// Push, when set, is the OCI reference to push the (optionally signed)

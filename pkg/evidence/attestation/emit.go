@@ -31,6 +31,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
 // EmitOptions controls a single Emit run. The same options struct is used
@@ -70,10 +71,7 @@ type EmitOptions struct {
 	Snapshot     *snapshotter.Snapshot
 	PhaseResults []*validator.PhaseResult
 
-	// Catalog is the validator catalog snapshot used for the predicate's
-	// validatorImages, which lists the catalog images of the checks
-	// PhaseResults show ran, and the auto-BOM, which lists the same images.
-	// A nil Catalog leaves both with only the images PhaseResults report.
+	// Catalog supplies the predicate's validatorCatalogVersion.
 	Catalog *catalog.ValidatorCatalog
 
 	// AllowMutableValidatorTags lets Emit proceed when a validator image has
@@ -175,10 +173,16 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 		}
 	}
 
+	// Minimize the backing content unless the operator opted into a full
+	// bundle. The predicate's Fingerprint/CriteriaMatch are still computed
+	// by Build from the raw opts.Snapshot, so the conformance signal is
+	// preserved; only the shipped snapshot/CTRF bytes are reduced.
+	snapshotForBundle, phaseResults, redaction := applyRedaction(opts)
+
 	// Gate the validator provenance before any work, for the same reason the
 	// push ref is parsed above: a bundle that must not be published should
 	// cost nothing to reject, and must leave nothing half-written on disk.
-	validatorImages := ValidatorImagesForPredicate(opts.Catalog, opts.PhaseResults)
+	validatorImages := ValidatorImagesForPredicate(bundledReports(phaseResults))
 	if err := checkValidatorTagProvenance(validatorImages, opts.AllowMutableValidatorTags); err != nil {
 		return nil, err
 	}
@@ -198,12 +202,6 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal recipe for evidence", err)
 	}
-
-	// Minimize the backing content unless the operator opted into a full
-	// bundle. The predicate's Fingerprint/CriteriaMatch are still computed
-	// by Build from the raw opts.Snapshot, so the conformance signal is
-	// preserved; only the shipped snapshot/CTRF bytes are reduced.
-	snapshotForBundle, phaseResults, redaction := applyRedaction(opts)
 
 	snapshotYAML, err := serializer.MarshalYAMLDeterministic(snapshotForBundle)
 	if err != nil {
@@ -314,6 +312,24 @@ func applyRedaction(opts EmitOptions) (*snapshotter.Snapshot, []*validator.Phase
 		Version: redact.PolicyVersion,
 		Applied: applied,
 	}
+}
+
+// bundledReports returns the last report in results for each phase in
+// AllPhases, which is the report the bundle carries for that phase.
+func bundledReports(results []*validator.PhaseResult) []*ctrf.Report {
+	byPhase := map[Phase]*ctrf.Report{}
+	for _, pr := range results {
+		if pr != nil && pr.Report != nil {
+			byPhase[Phase(pr.Phase)] = pr.Report
+		}
+	}
+	var out []*ctrf.Report
+	for _, p := range AllPhases {
+		if r, ok := byPhase[p]; ok {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // emitOutcome carries the artifacts the pointer file needs from the

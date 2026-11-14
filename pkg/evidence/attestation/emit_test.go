@@ -365,19 +365,17 @@ func TestSignAndPush_NoPushReturnsZeroOutcome(t *testing.T) {
 	}
 }
 
-// emitCatalog builds a validator catalog whose images carry the given tags.
 var testImageDigest = "sha256:" + strings.Repeat("1", 64)
 
-func emitCatalog(tags ...string) *catalog.ValidatorCatalog {
-	cat := &catalog.ValidatorCatalog{}
-	for i, tag := range tags {
-		cat.Validators = append(cat.Validators, catalog.ValidatorEntry{
-			Name:  fmt.Sprintf("check-%d", i),
-			Phase: "conformance",
-			Image: "ghcr.io/nvidia/aicr-validators/performance:" + tag,
-		})
+// plannedRun returns a passed conformance phase with one test per tag, each
+// recording a validator image with that tag and no digest.
+
+func plannedRun(tags ...string) *validator.PhaseResult {
+	tests := make([][]ctrf.PodImage, 0, len(tags))
+	for _, tag := range tags {
+		tests = append(tests, []ctrf.PodImage{{Image: "ghcr.io/nvidia/aicr-validators/performance:" + tag}})
 	}
-	return cat
+	return phaseWithImages(validator.PhaseConformance, tests...)
 }
 
 // phaseWithImages returns a passed phase result with one test per element of
@@ -442,8 +440,7 @@ func TestEmit_RejectsMutableValidatorTag(t *testing.T) {
 		OutDir:       dir,
 		Recipe:       emitRecipe(),
 		Snapshot:     snapshotWithSensitiveData(),
-		Catalog:      emitCatalog("v1.0.0", "edge"),
-		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, nil, nil)},
+		PhaseResults: []*validator.PhaseResult{plannedRun("v1.0.0", "edge")},
 		AICRVersion:  "v0.0.0-test",
 	})
 	if err == nil {
@@ -471,8 +468,7 @@ func TestEmit_AllowMutableValidatorTagsOptsOut(t *testing.T) {
 		OutDir:                    dir,
 		Recipe:                    emitRecipe(),
 		Snapshot:                  snapshotWithSensitiveData(),
-		Catalog:                   emitCatalog("edge"),
-		PhaseResults:              []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, nil)},
+		PhaseResults:              []*validator.PhaseResult{plannedRun("edge")},
 		AllowMutableValidatorTags: true,
 		AICRVersion:               "v0.0.0-test",
 	})
@@ -494,7 +490,6 @@ func TestEmit_RecordedDigestPinsMutableTag(t *testing.T) {
 		OutDir:       t.TempDir(),
 		Recipe:       emitRecipe(),
 		Snapshot:     snapshotWithSensitiveData(),
-		Catalog:      emitCatalog("edge"),
 		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, []ctrf.PodImage{img})},
 		AICRVersion:  "v0.0.0-test",
 	})
@@ -508,26 +503,22 @@ func TestEmit_RecordedDigestPinsMutableTag(t *testing.T) {
 }
 
 func TestEmit_RejectsReportedImageWithoutDigest(t *testing.T) {
-	const (
-		ref        = "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest"
-		catalogRef = "ghcr.io/nvidia/aicr-validators/performance:edge"
-	)
+	const ref = "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest"
 	tests := []struct {
 		name  string
-		cat   *catalog.ValidatorCatalog
 		phase *validator.PhaseResult
-		ref   string
 	}{
-		{"only run has no digest", emitCatalog("v1.0.0"),
-			phaseWithImages(validator.PhasePerformance, []ctrf.PodImage{{Image: ref}}), ref},
-		{"one of two runs has no digest", emitCatalog("v1.0.0"), phaseWithImages(validator.PhasePerformance,
+		{"only run has no digest", phaseWithImages(validator.PhasePerformance, []ctrf.PodImage{{Image: ref}})},
+		{"one of two runs has no digest", phaseWithImages(validator.PhasePerformance,
 			[]ctrf.PodImage{{Image: ref, Digest: testImageDigest}},
 			[]ctrf.PodImage{{Image: ref}},
-		), ref},
-		{"one of two catalog checks has no image record", emitCatalog("edge", "edge"), phaseWithImages(validator.PhaseConformance,
-			[]ctrf.PodImage{{Image: catalogRef, Digest: testImageDigest}},
-			nil,
-		), catalogRef},
+		)},
+		{"skipped test has no digest", &validator.PhaseResult{
+			Phase: validator.PhasePerformance, Status: ctrf.StatusPassed,
+			Report: &ctrf.Report{Results: ctrf.Results{Tests: []ctrf.TestResult{
+				{Name: "check-0", Status: ctrf.StatusSkipped, Images: []ctrf.PodImage{{Image: ref}}},
+			}}},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -535,12 +526,11 @@ func TestEmit_RejectsReportedImageWithoutDigest(t *testing.T) {
 				OutDir:       t.TempDir(),
 				Recipe:       emitRecipe(),
 				Snapshot:     snapshotWithSensitiveData(),
-				Catalog:      tt.cat,
 				PhaseResults: []*validator.PhaseResult{tt.phase},
 				AICRVersion:  "v0.0.0-test",
 			})
-			if err == nil || !strings.Contains(err.Error(), tt.ref) {
-				t.Fatalf("Emit error = %v, want a refusal naming %s", err, tt.ref)
+			if err == nil || !strings.Contains(err.Error(), ref) {
+				t.Fatalf("Emit error = %v, want a refusal naming %s", err, ref)
 			}
 		})
 	}
@@ -552,17 +542,42 @@ func TestEmit_ImmutableValidatorTagsPass(t *testing.T) {
 		OutDir:       dir,
 		Recipe:       emitRecipe(),
 		Snapshot:     snapshotWithSensitiveData(),
-		Catalog:      emitCatalog("v1.0.0", "sha-1f27c0dc6e4617db9b505eb10ee9d910a08968aa", "uat-19283746"),
-		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, nil, nil, nil)},
+		PhaseResults: []*validator.PhaseResult{plannedRun("v1.0.0", "sha-1f27c0dc6e4617db9b505eb10ee9d910a08968aa", "uat-19283746")},
 		AICRVersion:  "v0.0.0-test",
 	}); err != nil {
 		t.Fatalf("Emit with immutable validator tags: %v", err)
 	}
 }
 
+func TestEmit_CatalogImagesAreNotRecorded(t *testing.T) {
+	cat := &catalog.ValidatorCatalog{
+		Metadata: &catalog.CatalogMetadata{Version: "v1.4.2"},
+		Validators: []catalog.ValidatorEntry{
+			{Name: "check-0", Phase: "conformance", Image: "ghcr.io/nvidia/aicr-validators/performance:edge"},
+		},
+	}
+	res, err := Emit(context.Background(), EmitOptions{
+		OutDir:       t.TempDir(),
+		Recipe:       emitRecipe(),
+		Snapshot:     snapshotWithSensitiveData(),
+		Catalog:      cat,
+		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, nil)},
+		AICRVersion:  "v0.0.0-test",
+	})
+	if err != nil {
+		t.Fatalf("Emit with an unrecorded mutable catalog image: %v", err)
+	}
+	pred := res.Bundle.Predicate
+	if len(pred.ValidatorImages) != 0 {
+		t.Errorf("predicate validatorImages = %+v, want none", pred.ValidatorImages)
+	}
+	if pred.ValidatorCatalogVersion != "v1.4.2" {
+		t.Errorf("predicate validatorCatalogVersion = %q, want v1.4.2", pred.ValidatorCatalogVersion)
+	}
+}
+
 // TestEmit_NilCatalogPasses guards the documented "pass nil when no catalog
-// was loaded" contract: no catalog means no validatorImages to vouch for, and
-// the gate must not turn that into a failure.
+// was loaded" contract.
 func TestEmit_NilCatalogPasses(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Emit(context.Background(), EmitOptions{

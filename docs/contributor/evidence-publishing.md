@@ -92,20 +92,24 @@ Each check records its validator image's registry digest, taken from the pod's
 The `os/arch` is the Node's, or the validator's `platform` stamp when the
 caller cannot read Nodes. A validator reports the images of workloads it
 launches, such as the `aiperf-bench` Job, with the `##AICR-IMAGE##` sentinel.
-`validatorImages` lists the catalog image of each check that was not skipped,
-and every image a check reports, once per recorded digest and platform.
+
+`validatorImages` lists each distinct image, digest and platform in the
+bundled CTRF reports, after redaction. The catalog supplies only
+`validatorCatalogVersion`.
+
+- A check records its validator image once its Job is created, even if it
+  skips itself in its pod.
+- A check skipped before its Job was created (`--no-cluster`,
+  `--skip-check`), or whose Job failed to deploy, records nothing.
+- Cluster workload images from the snapshot are never listed.
 
 The digest is what the kubelet pulled, not what the tag resolves to now.
 containerd reports the multi-arch index digest. Other runtimes may report the
 node platform's manifest digest, so each entry also records `platform`.
 
-A check that did not run, or was skipped as in a `--no-cluster` run, lists no
-catalog image. A check whose pod was deleted
-before it could be read, or an image side-loaded into kind, records no digest.
-Such an image is listed with an empty digest even when another run recorded
-one, so it still gets the mutable-tag check. A catalog image that no run
-recorded, such as one whose checks started no pod, is listed with an empty
-digest too.
+A check whose pod could not be read, or whose image was side-loaded into kind,
+records no digest. Its image is listed with an empty digest even when another
+run recorded one, so it still gets the mutable-tag check.
 
 ## The Fulcio connectivity problem
 

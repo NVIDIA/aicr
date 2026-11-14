@@ -1270,9 +1270,10 @@ aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml"
 `--push`, `--no-sign`, `--bom`, signing and registry options) are documented in
 the [`aicr validate` flag table](cli-reference.md#aicr-validate).
 
-By default, emission fails closed with `INVALID_REQUEST` when any validator
-image is not immutably pinned (a moving tag such as `:latest`, or a non-AICR
-registry without a digest), because the attestation names validators by tag.
+By default, emission fails closed with `INVALID_REQUEST` when a validator
+image has no recorded digest and is not immutably pinned (a moving tag such as
+`:latest`, or a non-AICR registry without a digest), because the attestation
+cannot say which code that tag named.
 The usual cause is a stale `AICR_VALIDATOR_IMAGE_TAG`; unset it.
 `--allow-mutable-validator-tags` is the explicit opt-out: it emits anyway, so
 use it only for disposable evidence you will not publish. For the recommended

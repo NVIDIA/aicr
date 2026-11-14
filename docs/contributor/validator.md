@@ -1144,9 +1144,8 @@ AICR_VALIDATOR_IMAGE_TAG="sha-${SHA}" aicr validate -r recipe.yaml -s snapshot.y
 
 **Not when emitting evidence.** `aicr validate --emit-attestation` fails
 closed on a mutable tag for any image it lists with no recorded digest, such
-as a catalog image whose check started no pod. So the `:edge` form above is
-rejected there and the
-`:sha-<commit>` form is accepted. See
+as the image of a check whose pod could not be read. So the `:edge` form above
+can be rejected there and the `:sha-<commit>` form is accepted. See
 [Validator image provenance](evidence-publishing.md#validator-image-provenance).
 Drop the override for an evidence run, or pass
 `--allow-mutable-validator-tags` if the evidence is disposable.

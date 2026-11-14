@@ -32,7 +32,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
@@ -189,103 +188,39 @@ func UnpinnedValidatorImages(images []ValidatorImage) []string {
 	return out
 }
 
-// ValidatorImagesForPredicate returns the predicate's validatorImages: the
-// image in cat of each check with a test in results that was not skipped,
-// and every other image a test in results reports. Each appears once per
-// digest and platform recorded for it, sorted by platform and digest. It
-// appears first with an empty Digest when no digest was recorded for it, when
-// any record of it has none, or when a test of a check in cat ran with no
-// digest recorded for that check's image, so UnpinnedValidatorImages still
-// sees a run of a mutable ref with unknown provenance. Records failing
-// ctrf.PodImage.Valid are ignored.
-func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*validator.PhaseResult) []ValidatorImage {
-	type check struct{ phase, name string }
-	checkImage := map[check]string{}
-	if cat != nil {
-		for _, v := range cat.Validators {
-			if v.Image != "" {
-				checkImage[check{v.Phase, v.Name}] = v.Image
-			}
-		}
-	}
-	var reported []string
-	ranImage := map[string]bool{}
-	reportedImage := map[string]bool{}
-	digested := map[string][]ValidatorImage{}
-	undigested := map[string]bool{}
+// ValidatorImagesForPredicate returns the distinct image records of the tests
+// in reports, sorted by image, platform and digest. A record with an empty
+// Digest has unknown provenance. Records failing ctrf.PodImage.Valid are
+// ignored.
+func ValidatorImagesForPredicate(reports []*ctrf.Report) []ValidatorImage {
+	var out []ValidatorImage
 	seen := map[ValidatorImage]bool{}
-	for _, pr := range results {
-		if pr == nil || pr.Report == nil {
+	for _, r := range reports {
+		if r == nil {
 			continue
 		}
-		for _, tr := range pr.Report.Results.Tests {
-			catalogImage := checkImage[check{string(pr.Phase), tr.Name}]
-			if tr.Status == ctrf.StatusSkipped {
-				catalogImage = ""
-			}
-			if catalogImage != "" {
-				ranImage[catalogImage] = true
-			}
-			catalogDigested := false
-			for _, podImg := range tr.Images {
-				if !podImg.Valid() {
-					continue
-				}
-				if !reportedImage[podImg.Image] {
-					reportedImage[podImg.Image] = true
-					reported = append(reported, podImg.Image)
-				}
-				img := ValidatorImage(podImg)
-				switch {
-				case img.Digest == "":
-					undigested[img.Image] = true
-				case !seen[img]:
+		for _, tr := range r.Results.Tests {
+			for _, rec := range tr.Images {
+				img := ValidatorImage(rec)
+				if rec.Valid() && !seen[img] {
 					seen[img] = true
-					digested[img.Image] = append(digested[img.Image], img)
-				}
-				if img.Digest != "" && img.Image == catalogImage {
-					catalogDigested = true
+					out = append(out, img)
 				}
 			}
-			// A check that ran with no digest for its own image, including
-			// one whose pod could not be read, leaves that image unidentified.
-			if catalogImage != "" && !catalogDigested {
-				undigested[catalogImage] = true
-			}
 		}
 	}
-
-	var refs []string
-	listed := map[string]bool{}
-	if cat != nil {
-		for _, v := range cat.Validators {
-			if ranImage[v.Image] && !listed[v.Image] {
-				listed[v.Image] = true
-				refs = append(refs, v.Image)
-			}
-		}
-	}
-	for _, ref := range reported {
-		if !listed[ref] {
-			listed[ref] = true
-			refs = append(refs, ref)
-		}
-	}
-	if len(refs) == 0 {
-		return nil
-	}
-	out := make([]ValidatorImage, 0, len(refs))
-	for _, ref := range refs {
-		imgs := digested[ref]
-		slices.SortFunc(imgs, func(a, b ValidatorImage) int {
-			return cmp.Or(strings.Compare(a.Platform, b.Platform), strings.Compare(a.Digest, b.Digest))
-		})
-		if len(imgs) == 0 || undigested[ref] {
-			out = append(out, ValidatorImage{Image: ref})
-		}
-		out = append(out, imgs...)
-	}
+	slices.SortFunc(out, compareValidatorImages)
 	return out
+}
+
+// compareValidatorImages orders validator images by Image, then Platform,
+// then Digest.
+func compareValidatorImages(a, b ValidatorImage) int {
+	return cmp.Or(
+		strings.Compare(a.Image, b.Image),
+		strings.Compare(a.Platform, b.Platform),
+		strings.Compare(a.Digest, b.Digest),
+	)
 }
 
 // ObservedImagesFromSnapshot returns cluster-observed image refs in

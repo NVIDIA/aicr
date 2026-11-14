@@ -98,66 +98,32 @@ func TestBOMValidatorRefs(t *testing.T) {
 func TestValidatorImagesForPredicate(t *testing.T) {
 	const (
 		deploy = "ghcr.io/x/deployment:edge"
-		perf   = "ghcr.io/x/performance:edge"
 		aiperf = "nvcr.io/nvidia/aiperf-bench:1.0"
 	)
 	digA := "sha256:" + strings.Repeat("a", 64)
 	digB := "sha256:" + strings.Repeat("b", 64)
-	cat := &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-		{Name: "check-0", Phase: string(validator.PhaseDeployment), Image: deploy},
-		{Name: "check-0", Phase: string(validator.PhasePerformance), Image: perf},
-	}}
-	deployment := func(images ...[]ctrf.PodImage) *validator.PhaseResult {
-		return phaseWithImages(validator.PhaseDeployment, images...)
+	report := func(images ...[]ctrf.PodImage) *ctrf.Report {
+		return phaseWithImages(validator.PhaseDeployment, images...).Report
 	}
-	performance := func(images ...[]ctrf.PodImage) *validator.PhaseResult {
-		return phaseWithImages(validator.PhasePerformance, images...)
-	}
-	skipped := func(images []ctrf.PodImage) *validator.PhaseResult {
-		pr := deployment(images)
-		pr.Report.Results.Tests[0].Status = ctrf.StatusSkipped
-		return pr
-	}
-	checkCat := &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-		{Name: "check-1", Phase: string(validator.PhaseDeployment), Image: deploy},
-	}}
-	uncataloged := deployment(nil)
-	uncataloged.Report.Results.Tests[0].Name = "phase-interrupted"
-	digestedThenUnrecorded := func(status string) *validator.PhaseResult {
-		pr := deployment([]ctrf.PodImage{{Image: deploy, Digest: digA}}, nil)
-		pr.Report.Results.Tests[1].Status = status
-		return pr
-	}
+	skipped := report([]ctrf.PodImage{{Image: deploy, Digest: digA}})
+	skipped.Results.Tests[0].Status = ctrf.StatusSkipped
 
 	tests := []struct {
 		name    string
-		cat     *catalog.ValidatorCatalog
-		results []*validator.PhaseResult
+		reports []*ctrf.Report
 		want    []ValidatorImage
 	}{
-		{"nil catalog and results", nil, nil, nil},
-		{"no results lists nothing", cat, nil, nil},
-		{"nil phase and nil report are skipped", cat, []*validator.PhaseResult{nil, {}}, nil},
-		{"phase whose tests all skipped lists nothing", cat, []*validator.PhaseResult{skipped(nil)}, nil},
+		{"no reports", nil, nil},
+		{"nil report is ignored", []*ctrf.Report{nil}, nil},
+		{"tests without records list nothing", []*ctrf.Report{report(nil, nil)}, nil},
 		{
-			name:    "image a skipped test reports is kept",
-			cat:     cat,
-			results: []*validator.PhaseResult{skipped([]ctrf.PodImage{{Image: deploy, Digest: digA}})},
-			want:    []ValidatorImage{{Image: deploy, Digest: digA}},
-		},
-		{"phase that ran lists its catalog image", cat, []*validator.PhaseResult{deployment(nil)}, []ValidatorImage{{Image: deploy}}},
-		{
-			name: "recorded digest fills its catalog image",
-			cat:  cat,
-			results: []*validator.PhaseResult{deployment(
-				[]ctrf.PodImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
-			)},
-			want: []ValidatorImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
+			name:    "record without a digest is listed",
+			reports: []*ctrf.Report{report([]ctrf.PodImage{{Image: deploy}})},
+			want:    []ValidatorImage{{Image: deploy}},
 		},
 		{
-			name: "repeated runs dedupe and platforms sort",
-			cat:  cat,
-			results: []*validator.PhaseResult{deployment(
+			name: "repeated records dedupe and sort by platform and digest",
+			reports: []*ctrf.Report{report(
 				[]ctrf.PodImage{{Image: deploy, Digest: digB, Platform: "linux/arm64"}},
 				[]ctrf.PodImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
 				[]ctrf.PodImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
@@ -168,86 +134,31 @@ func TestValidatorImagesForPredicate(t *testing.T) {
 			},
 		},
 		{
-			name: "image outside the catalog is appended",
-			cat:  cat,
-			results: []*validator.PhaseResult{performance([]ctrf.PodImage{
-				{Image: perf, Digest: digA},
-				{Image: aiperf, Digest: digB, Platform: "linux/amd64"},
-			})},
-			want: []ValidatorImage{
-				{Image: perf, Digest: digA},
-				{Image: aiperf, Digest: digB, Platform: "linux/amd64"},
-			},
-		},
-		{
-			name:    "invalid record is ignored",
-			cat:     cat,
-			results: []*validator.PhaseResult{deployment([]ctrf.PodImage{{Image: deploy, Digest: "sha256:short"}})},
-			want:    []ValidatorImage{{Image: deploy}},
-		},
-		{
-			name: "reported image without a digest is listed by reference",
-			cat:  cat,
-			results: []*validator.PhaseResult{performance(
-				[]ctrf.PodImage{{Image: aiperf}},
-				[]ctrf.PodImage{{Image: aiperf}},
-			)},
-			want: []ValidatorImage{{Image: perf}, {Image: aiperf}},
-		},
-		{
-			name: "digest-less record is kept beside a digested one",
-			cat:  cat,
-			results: []*validator.PhaseResult{performance(
-				[]ctrf.PodImage{{Image: aiperf, Digest: digB}},
-				[]ctrf.PodImage{{Image: aiperf}},
-			)},
-			want: []ValidatorImage{{Image: perf}, {Image: aiperf}, {Image: aiperf, Digest: digB}},
-		},
-		{
-			name: "catalog image with a digested and a digest-less run",
-			cat:  cat,
-			results: []*validator.PhaseResult{deployment(
-				[]ctrf.PodImage{{Image: deploy, Digest: digA, Platform: "linux/amd64"}},
+			name: "record without a digest is kept beside a digested one",
+			reports: []*ctrf.Report{report(
+				[]ctrf.PodImage{{Image: deploy, Digest: digA}},
 				[]ctrf.PodImage{{Image: deploy}},
 			)},
-			want: []ValidatorImage{{Image: deploy}, {Image: deploy, Digest: digA, Platform: "linux/amd64"}},
+			want: []ValidatorImage{{Image: deploy}, {Image: deploy, Digest: digA}},
 		},
 		{
-			name:    "catalog check that ran without an image record",
-			cat:     checkCat,
-			results: []*validator.PhaseResult{digestedThenUnrecorded(ctrf.StatusFailed)},
-			want:    []ValidatorImage{{Image: deploy}, {Image: deploy, Digest: digA}},
+			name: "records across tests and reports merge sorted by image",
+			reports: []*ctrf.Report{
+				report([]ctrf.PodImage{{Image: deploy, Digest: digA}, {Image: aiperf, Digest: digB}}),
+				report([]ctrf.PodImage{{Image: aiperf, Digest: digB}}),
+			},
+			want: []ValidatorImage{{Image: deploy, Digest: digA}, {Image: aiperf, Digest: digB}},
 		},
+		{"skipped test's record is listed", []*ctrf.Report{skipped}, []ValidatorImage{{Image: deploy, Digest: digA}}},
 		{
-			name:    "skipped catalog check without an image record",
-			cat:     checkCat,
-			results: []*validator.PhaseResult{digestedThenUnrecorded(ctrf.StatusSkipped)},
-			want:    []ValidatorImage{{Image: deploy, Digest: digA}},
-		},
-		{
-			name: "skipped check's image is left out when another check in its phase ran",
-			cat: &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-				{Name: "check-0", Phase: string(validator.PhaseDeployment), Image: deploy},
-				{Name: "check-1", Phase: string(validator.PhaseDeployment), Image: perf},
-			}},
-			results: []*validator.PhaseResult{digestedThenUnrecorded(ctrf.StatusSkipped)},
-			want:    []ValidatorImage{{Image: deploy, Digest: digA}},
-		},
-		{
-			name:    "test outside the catalog lists no catalog image",
-			cat:     cat,
-			results: []*validator.PhaseResult{uncataloged},
-			want:    nil,
-		},
-		{
-			name:    "nil catalog keeps reported images",
-			results: []*validator.PhaseResult{performance([]ctrf.PodImage{{Image: aiperf, Digest: digB}})},
-			want:    []ValidatorImage{{Image: aiperf, Digest: digB}},
+			name:    "invalid record is ignored",
+			reports: []*ctrf.Report{report([]ctrf.PodImage{{Image: deploy, Digest: "sha256:short"}, {Image: aiperf}})},
+			want:    []ValidatorImage{{Image: aiperf}},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ValidatorImagesForPredicate(tt.cat, tt.results)
+			got := ValidatorImagesForPredicate(tt.reports)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ValidatorImagesForPredicate() = %+v, want %+v", got, tt.want)
 			}

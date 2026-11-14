@@ -16,7 +16,7 @@ package attestation
 
 import (
 	"encoding/json"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -65,16 +65,7 @@ func BuildPredicate(in PredicateInputs) *Predicate {
 	}
 
 	images := append([]ValidatorImage(nil), in.ValidatorImages...)
-	sort.Slice(images, func(i, j int) bool {
-		a, b := images[i], images[j]
-		if a.Image != b.Image {
-			return a.Image < b.Image
-		}
-		if a.Platform != b.Platform {
-			return a.Platform < b.Platform
-		}
-		return a.Digest < b.Digest
-	})
+	slices.SortFunc(images, compareValidatorImages)
 
 	// Filters to the canonical phase set. Any key in in.Phases outside
 	// AllPhases is silently dropped.
