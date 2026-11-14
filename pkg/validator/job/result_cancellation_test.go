@@ -16,6 +16,7 @@ package job
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -93,12 +94,17 @@ func TestWaitFailureMessageAndHandleTimeout(t *testing.T) {
 // pod in its deletion grace window or from the last status the deployer
 // observed. The verdict stays failed and carries the check's message.
 func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
-	const checkMsg = "terminated by SIGTERM before the check completed"
+	const (
+		checkMsg = "terminated by SIGTERM before the check completed"
+		image    = "ghcr.io/x/deployment:edge"
+	)
 	terminated := func(deleting bool) *corev1.Pod {
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "ns", Labels: map[string]string{"batch.kubernetes.io/job-name": "job"}},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: ValidatorContainerName, Image: image}}},
 			Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
-				Name: ValidatorContainerName,
+				Name:    ValidatorContainerName,
+				ImageID: "ghcr.io/x/deployment@" + testDigestA,
 				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
 					ExitCode: 3, Message: checkMsg,
 				}},
@@ -124,10 +130,11 @@ func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
 		listed       *corev1.Pod
 		lastObserved *corev1.Pod
 		wantCheckMsg bool
+		wantImages   []ctrf.PodImage
 	}{
-		{"terminating pod is still listed", terminated(true), nil, true},
-		{"pod deleted, last observed status survives", nil, terminated(false), true},
-		{"nothing observed keeps the generic message", nil, nil, false},
+		{"terminating pod is still listed", terminated(true), nil, true, []ctrf.PodImage{{Image: image, Digest: testDigestA}}},
+		{"pod deleted, last observed status survives", nil, terminated(false), true, []ctrf.PodImage{{Image: image, Digest: testDigestA}}},
+		{"nothing observed keeps the generic message", nil, nil, false, []ctrf.PodImage{{Image: image}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -137,11 +144,15 @@ func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			d := NewDeployer(Config{Clientset: cs, Namespace: "ns", Entry: catalog.ValidatorEntry{Name: "check", Phase: "deployment", Timeout: time.Minute}})
+			d := NewDeployer(Config{Clientset: cs, Namespace: "ns", Entry: catalog.ValidatorEntry{Name: "check", Phase: "deployment", Image: image, Timeout: time.Minute}})
 			d.jobName = "job"
 			d.lastTerminated = tt.lastObserved
 
 			result := d.ExtractResult(t.Context())
+
+			if !slices.Equal(result.Images, tt.wantImages) {
+				t.Errorf("images=%+v, want %+v", result.Images, tt.wantImages)
+			}
 
 			if result.ExitCode != validatorExitFailed || result.CTRFStatus() != ctrf.StatusFailed {
 				t.Errorf("exit=%d status=%s, want failed (exit %d)", result.ExitCode, result.CTRFStatus(), validatorExitFailed)

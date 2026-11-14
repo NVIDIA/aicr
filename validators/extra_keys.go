@@ -71,6 +71,7 @@ const (
 
 	ExtraKeyObservationOnly = ctrf.ExtraKeyObservationOnly
 	ExtraKeyResultSchema    = ctrf.ExtraKeyResultSchema
+	ExtraKeyPlatform        = ctrf.ExtraKeyPlatform
 )
 
 // ImagePullSecretsEnv carries the names of the --image-pull-secret Secrets

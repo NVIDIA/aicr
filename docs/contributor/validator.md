@@ -716,17 +716,24 @@ lines** — stdout lines with a reserved prefix that a specific parser recognize
 and pulls out. Plain (non-prefixed) stdout is unaffected and flows into the CTRF
 `stdout` array as before.
 
-Three sentinels exist today, with deliberately different lifecycles:
+Four sentinels exist today, with deliberately different lifecycles:
 
 | Prefix | Emitted by | Parsed by | Payload | Kept in CTRF `stdout`? | Survives minimal redaction? |
 |--------|-----------|-----------|---------|------------------------|-----------------------------|
 | `RESULT:` + one space | any check (`fmt.Printf`) | `extractResultSummaries` (`pkg/validator/validator.go`) | free-form human text (throughput, bandwidth, TTFT…) | **yes** — line stays; trailing text is *also* echoed to the live CLI at INFO | **no** — dies with `stdout` under the default policy |
-| `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseExtraSentinels` (`pkg/validator/job/result.go`) | one JSON object → `TestResult.Extra` (counts / enum codes) | **no** — stripped as transport, not evidence | **yes** — allowlisted keys are published (see below) |
-| `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseExtraSentinels` (same pass) | one JSON object → `TestResult.RuntimeProvenance` (template digests + key paths) | **no** — stripped as transport | **yes** — bounded by `redact.boundRuntimeProvenance` (see "NCCL benchmark runtime provenance") |
+| `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseSentinels` (`pkg/validator/job/result.go`) | one JSON object → `TestResult.Extra` (counts / enum codes) | **no** — stripped as transport, not evidence | **yes** — allowlisted keys are published (see below) |
+| `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseSentinels` (same pass) | one JSON object → `TestResult.RuntimeProvenance` (template digests + key paths) | **no** — stripped as transport | **yes** — bounded by `redact.boundRuntimeProvenance` (see "NCCL benchmark runtime provenance") |
+| `##AICR-IMAGE##` + one space | `validators.EmitImage` | `parseSentinels` (same pass) | one `ctrf.PodImage` (image, digest, platform) → appended to `TestResult.Images` | **no**, stripped as transport | **yes**, if `PodImage.Valid` |
+
+The orchestrator also adds the validator container's own image to
+`TestResult.Images`, with its registry digest when its pod reports one. See
+[Recorded validator digests](evidence-publishing.md#recorded-validator-digests).
 
 The runner (`validators.Run`) emits one `##AICR-EXTRA##` line before the check
-starts, `resultSchema: "1"` (`ctrf.ResultSchemaVersion`): the result-contract
-version this image speaks. The stamp is written before anything else, so a
+starts, `resultSchema: "1"` (`ctrf.ResultSchemaVersion`), the result-contract
+version this image speaks, and `platform`, the binary's `GOOS/GOARCH`. The
+orchestrator uses `platform` for its own image record when it cannot read the
+Node. The stamp is written before anything else, so a
 result carries it whenever the stamp write succeeded, a skip, a failure or a
 context-load failure included; a stamp that cannot be written fails the check
 (exit 1, no marker), and a pod whose logs the orchestrator could not read
@@ -793,9 +800,9 @@ Keep the human-readable stdout lines too, for `--full` and live output.
 
 Keys, skip codes, and value formatters live in `validators/extra_keys.go`. A
 test there fails when a key has no redaction allowlist entry. The keys the
-evidence readers consume by name (`skipReason`, `observationOnly`,
-`resultSchema`) are declared once in `pkg/validator/ctrf/extra_keys.go` and
-re-exported by `validators`, so `pkg/evidence/cncf` and the validator images
+orchestrator and evidence readers consume by name (`skipReason`,
+`observationOnly`, `resultSchema`, `platform`) are declared once in
+`pkg/validator/ctrf/extra_keys.go` and re-exported by `validators`, so `pkg/evidence/cncf` and the validator images
 cannot drift apart; `TestExtraKeysPinned` freezes the strings.
 
 **Low-cardinality + allowlist contract.** `extra` values MUST be low-cardinality
@@ -812,6 +819,7 @@ fails its key's shape (an IP under `nodesTotal`, `305.44` under
 | signed decimal (`+1.8`, `-12.3`) | `passMargin` (percent above or below `thresholdGbps`) |
 | `true` or `false` | `nodeLocal`, `versionSatisfied`, `observationOnly` |
 | `v` plus one to three numeric parts, optional `-alpha`, `-beta`, or `-rc` suffix (`v25.3.0-rc.1`) | `detectedVersion` |
+| `os/arch` with an optional variant (`linux/arm64`) | `platform` |
 | closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`), `resultSchema` (the versions a reader knows, today `1`) |
 
 Codes are closed sets rather than a shape regex, because a kebab-case regex
@@ -848,7 +856,7 @@ page are the contract.
 | `check-nvidia-smi` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
 | `cluster-autoscaling`, on every passing path | `observationOnly` |
 | any check, on an in-pod skip | `skipReason` |
-| any check, on every result whose stamp write succeeded (every `passed` and `skipped` result an image that stamps produces) | `resultSchema`, stamped by the runner before the check starts |
+| any check, on every result whose stamp write succeeded (every `passed` and `skipped` result an image that stamps produces) | `resultSchema` and `platform`, stamped by the runner before the check starts |
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the
   benchmark runs, so a failed run still records its scope. `fabric` appears
@@ -1134,10 +1142,10 @@ SHA="0123456789abcdef0123456789abcdef01234567"  # replace with the full SHA of a
 AICR_VALIDATOR_IMAGE_TAG="sha-${SHA}" aicr validate -r recipe.yaml -s snapshot.yaml --phase performance
 ```
 
-**Not when emitting evidence.** `aicr validate --emit-attestation` refuses a
-mutable validator tag and fails closed, because the attestation records
-validator images by tag alone — so the `:edge` form above is rejected there
-while the `:sha-<commit>` form is accepted. See
+**Not when emitting evidence.** `aicr validate --emit-attestation` fails
+closed on a mutable tag for any image it lists with no recorded digest, such
+as the image of a check whose pod could not be read. So the `:edge` form above
+can be rejected there and the `:sha-<commit>` form is accepted. See
 [Validator image provenance](evidence-publishing.md#validator-image-provenance).
 Drop the override for an evidence run, or pass
 `--allow-mutable-validator-tags` if the evidence is disposable.

@@ -25,6 +25,7 @@ import (
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry/remote"
 
+	"github.com/NVIDIA/aicr/pkg/operator/defaults"
 	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
 )
 
@@ -47,6 +48,33 @@ func fetchManifest(ctx context.Context, repo *remote.Repository, r Repository, r
 		return desc, ocispec.Manifest{}, invalid("%s is not an OCI manifest: %v", at, err)
 	}
 	return desc, m, nil
+}
+
+// IndexManifests returns the digests of the manifests the image index with
+// digest dgst in r lists, and none when dgst names a single image manifest.
+func (c *Client) IndexManifests(ctx context.Context, r Repository, dgst string) ([]string, error) {
+	if !digestPattern.MatchString(dgst) {
+		return nil, invalid("image index %q is not a sha256 digest", dgst)
+	}
+	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
+	defer cancel()
+	repo, err := c.repository(r)
+	if err != nil {
+		return nil, err
+	}
+	_, data, err := oras.FetchBytes(ctx, repo, dgst, oras.FetchBytesOptions{MaxBytes: maxManifestBytes})
+	if err != nil {
+		return nil, classify(err, fmt.Sprintf("fetch manifest %s@%s", r, dgst))
+	}
+	var index ocispec.Index
+	if err = json.Unmarshal(data, &index); err != nil {
+		return nil, invalid("%s@%s is not an OCI manifest: %v", r, dgst, err)
+	}
+	out := make([]string, 0, len(index.Manifests))
+	for _, m := range index.Manifests {
+		out = append(out, m.Digest.String())
+	}
+	return out, nil
 }
 
 // blob is content a manifest references.

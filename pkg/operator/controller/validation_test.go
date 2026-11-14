@@ -67,6 +67,9 @@ type fakeEvidence struct {
 	attestation []byte
 	// signatures are the Sigstore bundle referrers of each evidence digest.
 	signatures map[string][][]byte
+	// indexes are the manifests each image index digest lists, set before
+	// the reconciler runs.
+	indexes map[string][]string
 }
 
 func newFakeEvidence() *fakeEvidence {
@@ -105,6 +108,10 @@ func (f *fakeEvidence) PullBundle(_ context.Context, _ registry.Repository, d st
 	return nil, operrors.New(operrors.ErrCodeNotFound, d+" not found")
 }
 
+func (f *fakeEvidence) IndexManifests(_ context.Context, _ registry.Repository, d string) ([]string, error) {
+	return f.indexes[d], nil
+}
+
 func (f *fakeEvidence) Describe(_ context.Context, _ registry.Repository, d string) (ocispec.Descriptor, error) {
 	return ocispec.Descriptor{MediaType: ocispec.MediaTypeImageManifest, Digest: digest.Digest(d), Size: 512}, nil
 }
@@ -127,7 +134,8 @@ func (f *fakeEvidence) PushStatement(_ context.Context, r registry.Repository, t
 }
 
 // pushEvidence stores the evidence AICR would push for a run: its
-// statement names the recipe and validators, with the checks' results.
+// statement names the recipe and validators, with the checks' results. A
+// validator given as image@digest records that digest.
 func (f *fakeEvidence) pushEvidence(t *testing.T, runID, recipe string, failed int, validators ...string) string {
 	t.Helper()
 	version := f.aicrVersion
@@ -136,7 +144,8 @@ func (f *fakeEvidence) pushEvidence(t *testing.T, runID, recipe string, failed i
 	}
 	images := make([]map[string]string, 0, len(validators))
 	for _, v := range validators {
-		images = append(images, map[string]string{"image": v, "digest": ""})
+		image, dgst, _ := strings.Cut(v, "@")
+		images = append(images, map[string]string{"image": image, "digest": dgst})
 	}
 	statement, err := json.Marshal(map[string]any{
 		"_type":         evidence.StatementType,
@@ -606,8 +615,8 @@ func TestValidationFailureFailsRollout(t *testing.T) {
 }
 
 // Evidence naming a validator image that is not pinned, a mutable tag, a
-// pinned tag that moved, another recipe or a failed check fails the
-// rollout, even when the run exited 0.
+// digest the pinned image does not hold, a pinned tag that moved, another
+// recipe or a failed check fails the rollout, even when the run exited 0.
 func TestValidationRejectsEvidence(t *testing.T) {
 	for name, tc := range map[string]struct {
 		recipe     string
@@ -617,6 +626,7 @@ func TestValidationRejectsEvidence(t *testing.T) {
 		want       string
 	}{
 		"mutable tag":   {recipe: "h100", validators: []string{"ghcr.io/nvidia/aicr-validators/deployment:latest"}, want: "validator images differ"},
+		"other digest":  {recipe: "h100", validators: []string{deploymentValidator + "@" + conformanceDigest}, want: "validator images differ"},
 		"unpinned":      {recipe: "h100", validators: []string{deploymentValidator, "ghcr.io/nvidia/aicr-validators/performance:v1.0.0"}, want: "is not pinned"},
 		"moved tag":     {recipe: "h100", validators: []string{deploymentValidator}, moved: true, want: "not the pinned"},
 		"other recipe":  {recipe: "other", validators: []string{deploymentValidator}, want: "not the plan's h100"},
@@ -640,6 +650,29 @@ func TestValidationRejectsEvidence(t *testing.T) {
 				t.Fatalf("rollout = %v %v %+v", ro.Labels, ro.Annotations, ro.Status)
 			}
 		})
+	}
+}
+
+// Evidence recording the manifest digest of each node's platform, as CRI-O
+// reports it, passes when the pinned image index lists those manifests, and
+// the binding records the pinned digest.
+func TestValidationAcceptsPlatformManifests(t *testing.T) {
+	ctx := testContext(t)
+	validatedRuntime(t, ctx)
+	r, f := newValidating(t, newEngine(), true)
+	amd64, arm64 := digest.FromString("amd64").String(), digest.FromString("arm64").String()
+	f.indexes = map[string][]string{deploymentDigest: {amd64, arm64}}
+	job := untilValidating(t, ctx, r)
+	f.pushEvidence(t, job.Labels[v1alpha1.LabelRunID], "h100", 0, deploymentValidator+"@"+amd64, deploymentValidator+"@"+arm64)
+	succeed(t, ctx, job, nil)
+	reconcileRollout(t, ctx, r)
+	ro := rollout(t, ctx)
+	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseSucceeded) {
+		t.Fatalf("rollout = %v %+v", ro.Labels, ro.Status)
+	}
+	got := f.binding(t, ro.Annotations[v1alpha1.AnnotationEvidence]).Predicate.ValidatorImages
+	if want := []evidence.ValidatorImage{{Image: deploymentValidator, Digest: deploymentDigest}}; !slices.Equal(got, want) {
+		t.Fatalf("binding validators = %+v, want %+v", got, want)
 	}
 }
 

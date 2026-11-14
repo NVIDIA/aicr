@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -96,18 +97,18 @@ func Run(checks map[string]CheckFunc) {
 	os.Exit(exitCode)
 }
 
-// runCheck publishes the result-contract stamp, loads context, runs the
-// check, and returns the exit code. Separated from Run so defer works
-// correctly before os.Exit.
+// runCheck publishes the result-contract and platform stamps, loads context,
+// runs the check, and returns the exit code. Separated from Run so defer
+// works correctly before os.Exit.
 //
-// The stamp goes out first, before anything that can fail or exit, so every
-// result the orchestrator reads from this image carries it: a pass, a skip, a
-// failure, and a context-load failure alike. A stamp that cannot be written
-// fails the check, because a result the orchestrator would otherwise credit
+// The stamps go out first, before anything that can fail or exit, so every
+// result the orchestrator reads from this image carries them: a pass, a skip,
+// a failure, and a context-load failure alike. Stamps that cannot be written
+// fail the check, because a result the orchestrator would otherwise credit
 // without the contract marker is the gap #3703 closes.
 func runCheck(checkFn CheckFunc) int {
-	if err := publishResultSchema(); err != nil {
-		writeTerminationLog("failed to publish result schema: %v", err)
+	if err := publishStamps(); err != nil {
+		writeTerminationLog("failed to publish result stamps: %v", err)
 		return 1
 	}
 	ctx, err := LoadContext()
@@ -149,12 +150,15 @@ func handleTerminated(checkErr error) int {
 	return exitCodeTerminated
 }
 
-// publishResultSchema stamps ctrf.ExtraKeyResultSchema on the result.
+// publishStamps stamps ExtraKeyResultSchema and ExtraKeyPlatform on the
+// result.
 //
 // Errors:
 //   - ErrCodeInternal when the sentinel line could not be written to stdout.
-func publishResultSchema() error {
-	return EmitExtra(ResultSchemaExtra())
+func publishStamps() error {
+	stamps := ResultSchemaExtra()
+	stamps[ExtraKeyPlatform] = runtime.GOOS + "/" + runtime.GOARCH
+	return EmitExtra(stamps)
 }
 
 // handleCheckResult maps a CheckFunc return value to an exit code and

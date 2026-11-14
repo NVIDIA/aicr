@@ -149,3 +149,28 @@ func TestEmitRuntimeProvenance(t *testing.T) {
 		t.Errorf("round-trip = %+v", got)
 	}
 }
+
+func TestEmitImage(t *testing.T) {
+	var buf bytes.Buffer
+	orig := extrasOut
+	extrasOut = &buf
+	defer func() { extrasOut = orig }()
+
+	in := ctrf.PodImage{Image: "nvcr.io/nvidia/aiperf-bench:1.0",
+		Digest: "sha256:" + strings.Repeat("a", 64), Platform: "linux/amd64"}
+	if err := EmitImage(in); err != nil {
+		t.Fatal(err)
+	}
+	line := strings.TrimSuffix(buf.String(), "\n")
+	payload, ok := strings.CutPrefix(line, ctrf.ImageLinePrefix)
+	if !ok {
+		t.Fatalf("line %q lacks the image prefix", line)
+	}
+	var got ctrf.PodImage
+	if err := json.Unmarshal([]byte(payload), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got != in {
+		t.Errorf("round-trip = %+v, want %+v", got, in)
+	}
+}

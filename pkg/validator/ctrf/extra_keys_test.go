@@ -29,6 +29,7 @@ func TestExtraKeysPinned(t *testing.T) {
 		{"ExtraKeySkipReason", ExtraKeySkipReason, "skipReason"},
 		{"ExtraKeyObservationOnly", ExtraKeyObservationOnly, "observationOnly"},
 		{"ExtraKeyResultSchema", ExtraKeyResultSchema, "resultSchema"},
+		{"ExtraKeyPlatform", ExtraKeyPlatform, "platform"},
 		{"ExtraValueTrue", ExtraValueTrue, "true"},
 		{"ResultSchemaVersion", ResultSchemaVersion, "1"},
 	}
