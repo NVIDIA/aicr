@@ -59,12 +59,12 @@ type PromQLScrapeScope struct {
 //
 // platform is every component the platform runs, not only those in values,
 // so a partial bundle still validates the whole platform; the server is
-// written only when values holds it. With no enabled server it writes
-// nothing, and checks only that runtimeMetrics is empty. It fails with
-// ErrCodeInvalidRequest when a monitorsFrom component is absent or disabled,
-// the server has no namespace, more than one server is enabled, the server's
-// values already hold an owned path, or runtimeMetrics is invalid or has no
-// server to apply to.
+// written only when values holds it. With no enabled server, or one that
+// values leaves out, it writes nothing, and checks only that runtimeMetrics
+// is empty. It fails with ErrCodeInvalidRequest when a monitorsFrom component
+// is absent or disabled, the server has no namespace, more than one server is
+// enabled, the server's values already hold an owned path, or runtimeMetrics
+// is invalid or has no server in values to apply to.
 func InjectPromQLScrapeScope(
 	provider recipe.DataProvider,
 	platform []recipe.ComponentRef,
@@ -96,6 +96,12 @@ func InjectPromQLScrapeScope(
 
 	serverValues, emitted := values[scope.Server]
 	if !emitted {
+		if !runtimeMetrics.IsZero() {
+			return PromQLScrapeScope{}, errors.NewWithContext(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"runtimeMetrics is set, but this bundle leaves out %s, the runtime Prometheus server "+
+					"that would apply it; include %s in the bundled components", scope.Server, scope.Server),
+				map[string]any{errCtxKeyComponent: scope.Server})
+		}
 		return PromQLScrapeScope{}, nil
 	}
 	if serverValues == nil {

@@ -296,7 +296,7 @@ func BuildJobPlan(
 		timeout = defaults.ValidatorDefaultTimeout
 	}
 
-	if envErr := validateForwardedEnv(entry); envErr != nil {
+	if envErr := ValidateForwardedEnv(entry); envErr != nil {
 		return JobPlan{}, envErr
 	}
 

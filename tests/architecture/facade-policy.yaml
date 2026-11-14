@@ -96,7 +96,7 @@ constrained:
       presentation-layer input parsing, not resolution. Second,
       pkg/client/v1.BundleOptions.Config (aliased as BundleConfig) is a
       documented escape hatch: see the "Two ways to supply the bundler
-      configuration" comment in pkg/client/v1/bundle.go. The facade's 19 flat
+      configuration" comment in pkg/client/v1/bundle.go. The facade's 20 flat
       BundleOptions fields cover everything spec.bundle can express, but the
       CLI has flags with no spec.bundle counterpart (Version, TargetRevision,
       ReadinessHooks, Serial, Flux/OCI naming, typed value overrides), so it

@@ -288,7 +288,7 @@ func TestStability_Bundle(t *testing.T) {
 	// configuration" godoc); the CLI's own bundle-generation call and the
 	// aicrd /v1/bundle handler both rely on it.
 	requireType[*aicr.BundleConfig](aicr.BundleOptions{}.Config)
-	// The 19 flat fields Config.BundleOptions derives from spec.bundle.
+	// The 20 flat fields Config.BundleOptions derives from spec.bundle.
 	// Pinned by name and type together: a bare zero-value literal above
 	// would still compile through a rename or retype of any one of them.
 	_ = aicr.BundleOptions{
@@ -306,6 +306,7 @@ func TestStability_Bundle(t *testing.T) {
 		Nodes:                      0,
 		StorageClass:               "",
 		SharedStorageClass:         "",
+		RuntimeMetrics:             bundlerconfig.RuntimeMetrics{},
 		Attest:                     false,
 		CertIDRegexp:               "",
 		VendorCharts:               false,
