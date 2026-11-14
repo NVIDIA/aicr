@@ -695,7 +695,7 @@ func (p *LayeredDataProvider) getMergedRegistry(ctx context.Context) ([]byte, er
 // embedded items with the same name. New items from external are appended.
 // Embedded order is preserved.
 func mergeByName[T any](embedded, external []T, getName func(T) string) []T {
-	result := make([]T, 0, len(embedded)+len(external))
+	result := make([]T, 0, len(embedded))
 
 	extByName := make(map[string]T, len(external))
 	for _, item := range external {
