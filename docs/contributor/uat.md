@@ -75,7 +75,7 @@ An unrecognized `intent` (or a missing sibling config) fails closed in the pipel
 
 ### Nightly intent cadence (both intents, all three clouds)
 
-The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both intents on every nightly-enrolled reservation**, so training *and* inference are exercised nightly on AWS, GCP, and Azure (see the table below). (Note: the `phase_serve` serving-CUJ step is live in `uat-gcp.yaml` (#1644) and still commented out in `uat-aws.yaml` and `uat-azure.yaml`, so an AWS or Azure inference cell provisions and validates the inference platform without executing the serving request path.) The set of intents per reservation is data — the `nightly-intents` list in `infra/uat/reservations.yaml` (absent defaults to `[training]`; an explicit empty list `[]` opts the reservation out of the nightly batch entirely — bring-up mode, manual dispatch only):
+The single nightly cron (`uat-nightly-batch.yaml`, `0 4 * * *`) runs **both intents on every nightly-enrolled reservation**, so training *and* inference are exercised nightly on AWS, GCP, and Azure (see the table below). (Note: the `phase_serve` serving-CUJ step is live in `uat-gcp.yaml` (#1644) and still commented out in `uat-aws.yaml` and `uat-azure.yaml`, so an AWS or Azure inference cell provisions and validates the inference platform without executing the serving request path.) The set of intents per reservation is data — the `nightly-intents` list in `infra/uat/reservations.yaml` (absent defaults to `[training]`; an explicit empty list `[]` opts the reservation out of the nightly batch entirely — bring-up mode; the evening `daytime-down` still covers every non-kind row):
 
 | Reservation | Cloud | `nightly-intents` | Nightly CUJs |
 |-------------|-------|-------------------|--------------|
@@ -386,7 +386,7 @@ The unit of sequencing is the *reservation*, so a new GPU type in an existing cl
 
 Onboarding a new *cloud* (rather than a new pool in an existing cloud) is a code change on top of the row: a `run-<cloud>` job in `uat-run.yaml`, a `uat-<cloud>.yaml` pipeline, and account federation under `infra/uat-<cloud>-account/`. During bring-up, set `nightly-intents: []` (explicit empty list — absent defaults to `[training]`) so the reservation is manually dispatchable via `uat-run.yaml` but skipped by the nightly batch; flip it once the pipeline has green runs.
 
-Capacity offered by an outside provider follows [Contributing Validation Capacity](../integrator/validation-capacity.md). Its row starts manual-only (`nightly-intents: []`) during integration, acceptance runs are dispatched through `uat-run.yaml` with it, and the agreed cadence is enabled only after the guide's acceptance checks pass.
+Capacity offered by an outside provider follows [Contributing Validation Capacity](../integrator/validation-capacity.md). Its row starts out of the nightly batch (`nightly-intents: []`) during integration, acceptance runs are dispatched through `uat-run.yaml` with it, and the agreed cadence is enabled only after the guide's acceptance checks pass. Like every non-kind row, it still gets the 02:00 UTC evening `daytime-down`, which assumes into the account and takes the `uat-<row>` lease even when no daytime cluster is held.
 
 The values in this file are identifiers, **not secrets** — a reservation-id grants no access on its own; access to the reserved capacity is governed by cloud IAM/ACLs bound to the CI federation identity (see `infra/uat-aws-account/`, `infra/uat-gcp-account/`, and `infra/uat-azure-account/`). They are safe to commit.
 
