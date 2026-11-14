@@ -199,10 +199,11 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 			wantRegex:      `^(?:(?:queue_depth))$`,
 		},
 		{
-			name:           "runtime metrics with the server not emitted inject nothing",
+			name:           "runtime metrics with the server not emitted fail",
 			platform:       adapterPlatform,
 			runtimeMetrics: config.RuntimeMetrics{Series: []string{"queue_depth"}},
 			omitServer:     true,
+			wantErr:        "this bundle leaves out " + testPromQLServer,
 		},
 		{
 			name: "runtime metrics without an enabled server fail",
@@ -522,6 +523,10 @@ func TestMake_PromQLScrapeScope(t *testing.T) {
 			wantRegex:      `^(?:(?:DCGM_FI_DEV_GPU_UTIL)|(?:queue_depth))$`},
 		{name: "disabling the server injects and checks nothing", criteria: training,
 			opts: []config.Option{disable(testPromQLServer, "gpuoperator")}},
+		{name: "runtime metrics with the server left out by the bundlers filter fail", criteria: training,
+			opts: []config.Option{config.WithBundlers([]string{"prometheus-adapter"}),
+				config.WithRuntimeMetrics(config.RuntimeMetrics{Namespaces: []string{"inference"}})},
+			wantErr: "this bundle leaves out " + testPromQLServer},
 		{name: "runtime metrics with the server disabled fail", criteria: training,
 			opts: []config.Option{disable(testPromQLServer, "gpuoperator"),
 				config.WithRuntimeMetrics(config.RuntimeMetrics{Series: []string{"queue_depth"}})},

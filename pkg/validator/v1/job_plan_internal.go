@@ -166,9 +166,10 @@ func ParseServiceMetricsQueryURL(raw string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
-// validateForwardedEnv rejects a process environment value that must not
-// reach entry's Job spec.
-func validateForwardedEnv(entry ValidatorEntry) error {
+// ValidateForwardedEnv rejects a process environment value that must not
+// reach entry's Job spec. The orchestrator calls it for every check a run
+// would deploy before it deploys any; BuildJobPlan repeats it per Job.
+func ValidateForwardedEnv(entry ValidatorEntry) error {
 	if entry.Name != AIServiceMetricsCheckName {
 		return nil
 	}

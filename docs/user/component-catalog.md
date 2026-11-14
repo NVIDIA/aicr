@@ -2829,7 +2829,8 @@ Another workload that exposes a series the bundle already keeps, and the
 adapter already has a rule for, needs no new bundle, only a monitor in a
 loaded namespace. A new series, or a new rule, needs a new bundle. The bundle
 fails if either flag is set on a recipe with no runtime Prometheus server,
-such as `ocp`.
+such as `ocp`, or when the `bundlers` filter of `/v1/bundle` leaves that
+server out.
 
 The filter matches metric names only. Whoever can create a monitor in a loaded
 namespace can supply any kept series, the GPU series included, so treat that

@@ -103,8 +103,8 @@ aicr validate --recipe recipe.yaml --phase conformance
   `otel-lgtm` whenever it is set.
 - The validator pod must reach the URL without credentials. A URL that
   carries a user or password fails `aicr validate` before any Job is created,
-  because the URL is written into the check's Job and recorded in its
-  evidence.
+  when the run includes this check, because the URL is written into the
+  check's Job and recorded in its evidence.
 - The backend must hold what your monitoring system scrapes from a
   ServiceMonitor in the check's test namespace, including each target's `up`
   series.

@@ -61,7 +61,7 @@ type BundleArtifact = *result.Output
 //
 // # Two ways to supply the bundler configuration
 //
-// The 19 flat fields below (Deployer through ArgoCD) are what
+// The 20 flat fields below (Deployer through ArgoCD) are what
 // Config.BundleOptions derives from spec.bundle, field by field, so a
 // config-driven caller (the CLI in particular) can read and override
 // individual settings with its own flag precedence instead of reaching into
@@ -75,14 +75,14 @@ type BundleArtifact = *result.Output
 // spec.bundle counterpart) and the aicrd /v1/bundle handler (built from HTTP
 // query parameters via bundler.ParseBundleConfig, then mutated in place with
 // bundlercfg.WithAttest once the request's signing decision is known). When
-// Config is non-nil, it WINS outright over the 19 flat fields it supersedes
+// Config is non-nil, it WINS outright over the 20 flat fields it supersedes
 // (Deployer through ArgoCD — bundlerConfig's own inputs) — the same
 // derive-don't-apply precedence Attester already documents against
 // OIDCResolve. Config.BundleOptions never sets Config, so a config-driven
 // derivation always routes through the flat fields.
 //
 // Config does NOT reach Attester, OIDCResolve, BinaryAttestation, OutputDir
-// or Timeout: bundlerConfig() only ever reads Config in place of the 19
+// or Timeout: bundlerConfig() only ever reads Config in place of the 20
 // bundler-config fields, so these five stay caller-supplied regardless of
 // Config. The REST /v1/bundle handler depends on this split — it sets Config
 // and OutputDir/Timeout in the same BundleOptions literal and requires both
@@ -104,7 +104,7 @@ type BundleArtifact = *result.Output
 // Attest and Attester together.
 type BundleOptions struct {
 	// Config carries an already-built bundler configuration and, when
-	// non-nil, wins over the 19 flat fields below (Deployer through ArgoCD)
+	// non-nil, wins over the 20 flat fields below (Deployer through ArgoCD)
 	// and over Split: a split set then needs config.WithSplit on the Config,
 	// and MakeBundle rejects Split=true with a Config that lacks it rather
 	// than silently producing an ordinary bundle.
