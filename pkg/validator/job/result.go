@@ -61,10 +61,7 @@ const (
 // This method must be called after WaitForCompletion returns, when the Job is
 // in a terminal state (Complete or Failed).
 func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
-	result := &ctrf.ValidatorResult{
-		Name:  d.config.Entry.Name,
-		Phase: d.config.Entry.Phase,
-	}
+	result := d.newResult()
 
 	// Find the pod for this Job
 	jobPod, err := d.getPodForJob(ctx)
@@ -146,6 +143,20 @@ func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, r
 		}
 		result.Images = append(result.Images, reported...)
 	}
+}
+
+// newResult returns an empty result for d's check that records the Job's
+// planned image with no digest. A check with a Job may have run even when its
+// pod cannot be read.
+func (d *Deployer) newResult() *ctrf.ValidatorResult {
+	result := &ctrf.ValidatorResult{
+		Name:  d.config.Entry.Name,
+		Phase: d.config.Entry.Phase,
+	}
+	if d.config.Entry.Image != "" {
+		result.Images = []ctrf.PodImage{{Image: d.config.Entry.Image}}
+	}
+	return result
 }
 
 // recordValidatorImage sets result.Images to the image p's validator
@@ -436,10 +447,7 @@ func parseSentinels(logs string) (cleaned string, extra map[string]string, prov 
 // carrying ErrCodeCanceled renders as an interrupted run. A nil waitCause is
 // treated as a timeout for backward compatibility.
 func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.ValidatorResult {
-	result := &ctrf.ValidatorResult{
-		Name:  d.config.Entry.Name,
-		Phase: d.config.Entry.Phase,
-	}
+	result := d.newResult()
 
 	// Try to find the pod
 	jobPod, err := d.getPodForJob(ctx)

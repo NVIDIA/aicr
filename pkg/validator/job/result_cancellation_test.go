@@ -134,7 +134,7 @@ func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
 	}{
 		{"terminating pod is still listed", terminated(true), nil, true, []ctrf.PodImage{{Image: image, Digest: testDigestA}}},
 		{"pod deleted, last observed status survives", nil, terminated(false), true, []ctrf.PodImage{{Image: image, Digest: testDigestA}}},
-		{"nothing observed keeps the generic message", nil, nil, false, nil},
+		{"nothing observed keeps the generic message", nil, nil, false, []ctrf.PodImage{{Image: image}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

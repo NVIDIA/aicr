@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1661,6 +1662,42 @@ func TestExtractResultRecordsImages(t *testing.T) {
 				if result.Images[i] != tt.want[i] {
 					t.Errorf("Images[%d] = %+v, want %+v", i, result.Images[i], tt.want[i])
 				}
+			}
+		})
+	}
+}
+
+// TestResultRecordsPlannedImageWithoutPod verifies a check whose Job exists
+// records its planned image with no digest when no pod shows what ran.
+func TestResultRecordsPlannedImageWithoutPod(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  *corev1.PodStatus
+		extract func(*Deployer) *ctrf.ValidatorResult
+	}{
+		{"pod not found", nil, func(d *Deployer) *ctrf.ValidatorResult {
+			return d.ExtractResult(context.Background())
+		}},
+		{"validator container status missing", &corev1.PodStatus{}, func(d *Deployer) *ctrf.ValidatorResult {
+			return d.ExtractResult(context.Background())
+		}},
+		{"pod not found at timeout", nil, func(d *Deployer) *ctrf.ValidatorResult {
+			return d.HandleTimeout(context.Background(), context.DeadlineExceeded)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := createUniqueNamespace(t)
+			d := deployTestJob(t, ns, testEntry())
+			if tt.status != nil {
+				createPodForJob(t, ns, d.JobName(), *tt.status)
+			}
+
+			result := tt.extract(d)
+
+			want := []ctrf.PodImage{{Image: testEntry().Image}}
+			if !slices.Equal(result.Images, want) {
+				t.Errorf("Images = %+v, want %+v", result.Images, want)
 			}
 		})
 	}
