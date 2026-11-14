@@ -16,15 +16,16 @@ out only where commands or flags genuinely differ.
   but not its credentials, and without them no volume can be provisioned — see
   [EBS CSI Driver Credentials](../docs/user/component-catalog.md#ebs-csi-driver-credentials).
 * Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`,
-  `--system-node-toleration` flags are examples only. Update them to match your cluster.
+  `--system-node-selector`, and `--system-node-toleration` flags are examples only.
+  Update them to match your cluster.
 
 **GKE**
 
 * User is already authenticated to a GKE cluster with 1+ H100 (a3-megagpu-8g) nodes.
 * A CPU node pool labeled `nodeGroup=cpu-worker` for the Dynamo Frontend.
 * GKE cluster runs Container-Optimized OS (COS) with GPU drivers pre-installed.
-* Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`
-  flags are examples only. Update them to match your cluster.
+* Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`,
+  and `--system-node-selector` flags are examples only. Update them to match your cluster.
 * System nodes have no custom taints (GKE managed pods don't tolerate them).
 
 The sample workload in [Deploy Inference Workload](#deploy-inference-workload)
@@ -175,7 +176,7 @@ aicr validate \
     --recipe ./bundle/recipe.yaml \
     --toleration dedicated=gpu-workload:NoSchedule \
     --toleration nvidia.com/gpu=present:NoSchedule \
-    --phase conformance \
+    --phase all \
     --output report.json
 ```
 
