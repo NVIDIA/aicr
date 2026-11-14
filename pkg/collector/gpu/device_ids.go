@@ -116,6 +116,7 @@ var gpuDeviceIDToSKU = map[string]string{
 	"25b6": skuA16,  // A2 / A16
 
 	// Hopper.
+	"2321": skuH100,  // H100 NVL (H100L 94GB)
 	"2330": skuH100,  // H100 SXM5 80GB
 	"2331": skuH100,  // H100 PCIe
 	"2336": skuH100,  // H100

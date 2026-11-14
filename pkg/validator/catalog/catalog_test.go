@@ -1244,18 +1244,24 @@ func TestEmbeddedCatalog_AIServiceMetricsHasDependencyAffinity(t *testing.T) {
 	if entry == nil {
 		t.Fatal("ai-service-metrics not found in embedded catalog")
 	}
-	if len(entry.DependencyAffinity) != 1 {
-		t.Fatalf("expected 1 dependencyAffinity, got %d", len(entry.DependencyAffinity))
+	// The check queries NKTP's otel-lgtm.
+	want := []struct{ component, labelKey, labelValue string }{
+		{"nktp", "app", "lgtm"},
 	}
-	dep := entry.DependencyAffinity[0]
-	if dep.ComponentRef != "kube-prometheus-stack" {
-		t.Errorf("componentRef = %q, want kube-prometheus-stack", dep.ComponentRef)
+	if len(entry.DependencyAffinity) != len(want) {
+		t.Fatalf("expected %d dependencyAffinity, got %d", len(want), len(entry.DependencyAffinity))
 	}
-	if dep.PodLabelSelector["app.kubernetes.io/name"] != "prometheus" {
-		t.Errorf("podLabelSelector = %v, expected app.kubernetes.io/name=prometheus", dep.PodLabelSelector)
-	}
-	if dep.RequirementOrDefault() != v1.DependencyRequirementPreferred {
-		t.Errorf("requirement = %q, want preferred", dep.RequirementOrDefault())
+	for i, w := range want {
+		dep := entry.DependencyAffinity[i]
+		if dep.ComponentRef != w.component {
+			t.Errorf("componentRef[%d] = %q, want %s", i, dep.ComponentRef, w.component)
+		}
+		if dep.PodLabelSelector[w.labelKey] != w.labelValue {
+			t.Errorf("podLabelSelector[%d] = %v, expected %s=%s", i, dep.PodLabelSelector, w.labelKey, w.labelValue)
+		}
+		if dep.RequirementOrDefault() != v1.DependencyRequirementPreferred {
+			t.Errorf("requirement[%d] = %q, want preferred", i, dep.RequirementOrDefault())
+		}
 	}
 }
 

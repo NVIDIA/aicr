@@ -277,6 +277,7 @@ The config's `spec.bundle.deployment.set` fits the bundle to this cluster; its h
 
 - `slinkyslurm:nodesets.slinky.replicas=4`: one slurmd pod per worker, so the leaf's `blockSizes: [2]` fills two blocks. The leaf itself ships one replica.
 - `gpuoperator:enabled=false` and `dradriver:enabled=false`: gpu-operator needs the `nvidia` container runtime and the DRA driver needs a driver root on the node, and `kindest/node` has neither, so neither would become ready. `aicr bundle` prints a deprecation notice for these two keys, which the config header explains.
+- `prometheusadapter:enabled=false`: prometheus-adapter reads gpu-operator's GPU metrics, so the bundle fails if it stays enabled without gpu-operator.
 
 Install the bundle and check the topology and the GPU health monitors, in place of the `deploy.sh` step under [Install Bundle](#install-bundle):
 
@@ -308,7 +309,7 @@ The automated run of the Kind path is the `uat-kind-sim` workflow, dispatched ma
 
 ### Storage class
 
-Set `--storage-class` to a StorageClass that exists (`kubectl get storageclass`). The kube-prometheus-stack overlay uses a `volumeClaimTemplate` without a default `storageClassName`; a missing/default SC leaves PVCs Pending.
+Set `--storage-class` to a StorageClass that exists (`kubectl get storageclass`). The Slurm accounting database's PVC has no default `storageClassName`; a missing/default SC leaves it Pending.
 
 ## Install Bundle
 

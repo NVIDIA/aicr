@@ -50,6 +50,7 @@ componentRefs: ## emitted order (as generated) — chainsaw list asserts are per
   - name: kubeflow-trainer
   - name: network-operator
   - name: nfd
+  - name: nktp
   - name: nodewright-customizations
   - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
@@ -58,18 +59,19 @@ componentRefs: ## emitted order (as generated) — chainsaw list asserts are per
   - name: prometheus-operator-crds
 
 deploymentOrder:
-  - cert-manager
-  - nfd
-  - network-operator
   - nodewright-operator
   - nodewright-customizations
   - prometheus-operator-crds
+  - cert-manager
   - kube-prometheus-stack
+  - k8s-ephemeral-storage-metrics
+  - nfd
+  - network-operator
   - gpu-operator
   - dra-node-labeler
-  - k8s-ephemeral-storage-metrics
   - kai-scheduler
   - kubeflow-trainer
+  - nktp
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter

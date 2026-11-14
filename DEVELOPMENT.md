@@ -29,6 +29,160 @@ make build          # Build binaries
 make qualify        # Full check: test-coverage + lint + tuning-check + coverage-check + e2e + scan + license-check + api-diff + openapi-diff
 ```
 
+## GitHub Codespaces and Dev Containers
+
+The optional [Dev Container](.devcontainer/devcontainer.json) provides a Linux
+development environment without changing your local tool installations.
+No NVIDIA GPU or cloud-cluster credentials are required to build, test, or
+generate deployment artifacts.
+
+1. Open the repository (or your fork) on GitHub, select **Code > Codespaces >
+  Create codespace on main**, and wait for the post-create setup to finish.
+  Your GitHub account or organization must allow Codespaces and have available quota.
+2. Select at least 4 CPUs, 16 GB RAM, and 32 GB storage, as requested by the
+  container configuration. For the full race-enabled test suite or Kind/Tilt,
+  prefer 8 CPUs, 32 GB RAM, and 128 GB storage where available.
+3. Run the normal development commands in the Codespace terminal:
+
+```bash
+make tools-check
+unset GITLAB_TOKEN
+make build
+make test
+make lint
+```
+
+The Dev Container includes an SSH server for GitHub CLI access to a Codespace.
+After creation, `gh codespace ssh`, `gh codespace cp`, and `gh codespace logs`
+can connect to it, and SSH sessions get the same Go toolchain and tools on
+`PATH` as the Codespace terminal. Run these commands in your local terminal,
+replacing `<name>` with your Codespace name and `<local-file>` with a file on
+your machine:
+
+```bash
+gh codespace ssh -c <name> -- echo ok
+gh codespace cp -c <name> <local-file> remote:/tmp/
+gh codespace logs -c <name>
+```
+
+This SSH server is needed for those CLI commands, not for connecting through VS
+Code desktop, VS Code for the Web, or a local Dev Container.
+
+For a local equivalent, install Docker and the VS Code Dev Containers extension,
+open the checkout, and select **Dev Containers: Reopen in Container**.
+Docker-in-Docker requires privileged-container support; restrictive hosts may not
+permit it. Use only a trusted checkout: setup executes repository scripts and the
+development container has passwordless sudo and a privileged Docker daemon.
+This is not a production container.
+
+### How Container Setup Works
+
+The container wraps the existing local workflow rather than maintaining a
+second installer. The [Dockerfile](.devcontainer/Dockerfile) supplies Ubuntu
+bootstrap packages, including the C compiler required by Go's race detector,
+Python virtual environments for yamllint, and `bc` for the coverage gate.
+These system packages follow Ubuntu security updates instead of exact package
+pins; the Dockerfile's scoped Hadolint exception applies only to that install.
+
+Dev Container features provide bootstrap Go, Node.js for the documentation
+checks, and Docker-in-Docker. The Go feature's `latest` setting is only a
+bootstrap: [post-create.sh](.devcontainer/post-create.sh) selects the exact
+toolchain from `.go-version` before installing AICR tools and persists that
+selection for terminal commands. It then runs `AUTO_MODE=true make tools-setup`
+and `make tools-check`. AICR tool versions still come from `.settings.yaml` and
+`go.mod`; update those existing sources rather than adding container-only pins.
+
+Docker-in-Docker avoids mounting a host Docker socket and keeps the optional
+Kind cluster and local registry inside the development environment. The daemon
+still needs elevated privileges. Cluster creation is deliberately opt-in so
+contributors exploring recipes do not pay the startup and resource cost of
+running Kubernetes.
+
+Initial creation needs internet access to container registries, Go module
+proxies, GitHub releases, and upstream tool download sites. Installing the full
+toolset and compiling module-built tools can take several minutes. Go caches
+are reused when stopping and restarting the Codespace, but may be lost when
+rebuilding the container. Docker images, module caches, and race builds can
+consume tens of gigabytes; stop unused Codespaces and delete them when finished
+to avoid compute and storage charges.
+
+After pulling tool-pin changes, run `make tools-update` and `make tools-check`.
+If `.go-version` or the Dev Container files changed, rebuild the container to
+repeat setup. If setup failed because a download was unavailable, retry
+`bash .devcontainer/post-create.sh` after resolving the network failure; do not
+treat an incomplete setup as ready.
+
+### Generate Artifacts Without GPUs
+
+Run from the repository root. These commands generate configuration for a
+target GPU cluster, but do not access or deploy to one:
+
+```bash
+go run ./cmd/aicr recipe \
+  --service eks --accelerator h100 --os ubuntu \
+  --intent training --platform kubeflow \
+  --output /tmp/aicr-recipe.yaml
+
+go run ./cmd/aicr bundle \
+  --recipe /tmp/aicr-recipe.yaml \
+  --output /tmp/aicr-bundle \
+  --system-node-selector nodeGroup=system-pool \
+  --accelerated-node-selector nodeGroup=customer-gpu \
+  --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+```
+
+Inspect the generated values, manifests, and deployment scripts under
+`/tmp/aicr-bundle`; do not run its deployment script without an intended target
+cluster. Chart rendering may require access to upstream Helm repositories or OCI
+registries, but not GPU hardware. When validating against a saved snapshot, use
+`--no-cluster` to avoid deploying validation jobs. Hardware probes, NCCL, and
+real GPU conformance checks still require an appropriately provisioned cluster.
+
+### Kind and Tilt in Codespaces
+
+Docker-in-Docker gives Kind its own daemon inside the development container.
+This keeps the Kubernetes API endpoint, the registry at `localhost:5001`, and
+Tilt's port forwards reachable from the same container, rather than from a
+separate host Docker network. The existing two-node Kind configuration is
+unchanged. A cluster is not started automatically.
+
+```bash
+docker info
+make dev-env
+# After stopping Tilt with Ctrl-C:
+make dev-env-clean
+```
+
+The layout is intended to support Kind/Tilt, but a successful run depends on
+the Codespaces host's nested-container, cgroup, networking, and resource support;
+it is not a GPU environment. If Kind cannot start or builds are killed, inspect
+Docker/Kind logs and increase the machine size, or use the cluster-free workflow
+above. CPU-only Kind cannot validate a real NVIDIA driver or GPU workload.
+
+Open the **Ports** tab for the forwarded Tilt UI (10350) and AICR API (8080).
+Keep both ports at **Private** visibility; this is their only access protection.
+Do not set ports 10350 or 8080 to **Public** or **Organization**. Do not forward
+the Docker socket, Kubernetes API, or local registry publicly. Codespace
+suspension interrupts running processes, so check `docker info` and restart
+`make dev-env` after resuming as needed.
+
+An external Kubernetes cluster is also optional: authenticate using your
+provider's CLI and an untracked kubeconfig, verify the current context before
+deploying, and keep credentials out of the repository and public forwarded
+ports. Cloud-provider authentication is not performed during container setup.
+
+### Qualification Requirements
+
+Run `unset GITLAB_TOKEN` then `make qualify` as usual; there is no reduced
+Codespaces qualification target. It runs race-enabled coverage, lint and docs
+checks, CLI e2e builds, vulnerability scanning, license checks, and compatibility
+checks. The standard CLI e2e tests use `--no-cluster`; GPU/UAT lanes are separate.
+Qualification needs sufficient RAM/disk, upstream downloads and vulnerability
+database access, and Git release tags for the SDK compatibility baseline
+(`git fetch --tags` if missing). Use a larger machine if necessary. Codespaces
+does not supply GPU capacity, private-registry credentials, or remote-cluster
+access, and a passing local qualification does not replace those CI/UAT lanes.
+
 ## Prerequisites
 
 ### Required Tools
