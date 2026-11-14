@@ -80,9 +80,10 @@ const (
 	//     ID and AWS account aliases, node-name aliases, JWT removal.
 	//   - v10 added the resultSchema stamp naming the result contract the
 	//     validator image spoke.
-	//   - v11 added the per-test images carrier (boundImages) and the
+	//   - v11 added the no-metrics-backend skipReason code.
+	//   - v12 added the per-test images carrier (boundImages) and the
 	//     platform extra.
-	PolicyVersion = "v11"
+	PolicyVersion = "v12"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -256,6 +257,7 @@ var ctrfSkipReasons = []string{
 	"dra-driver-not-installed", // standalone run with no NVIDIA DRA driver on the cluster
 	"slurm-managed-gpus",       // GPUs are allocated by Slurm, not the Kubernetes scheduler
 	"simulated-nodes",          // the workload runs on KWOK simulated nodes
+	"no-metrics-backend",       // telemetry goes to a backend the check has no query URL for
 }
 
 // ctrfGPUAllocationPolicies holds the pkg/validator/v1 GPUAllocationPolicy*

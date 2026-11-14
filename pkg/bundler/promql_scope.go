@@ -60,8 +60,8 @@ type PromQLScrapeScope struct {
 // so a partial bundle still validates the whole platform; the server is
 // written only when values holds it. With no enabled server it writes and
 // checks nothing. It fails with ErrCodeInvalidRequest when a monitorsFrom
-// component is absent or disabled, more than one server is enabled, or the
-// server's values already hold an owned path.
+// component is absent or disabled, the server has no namespace, more than one
+// server is enabled, or the server's values already hold an owned path.
 func InjectPromQLScrapeScope(
 	provider recipe.DataProvider,
 	platform []recipe.ComponentRef,
@@ -117,8 +117,17 @@ func planPromQLScrapeScope(
 		return nil, nil, err
 	}
 
+	// The server's own namespace is always selected: a monitor there may
+	// select targets in any namespace, which is how a cluster owner adds a
+	// workload without a new bundle (ADR-026).
+	serverNamespace := namespaces[server.Name]
+	if serverNamespace == "" {
+		return nil, nil, errors.NewWithContext(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"component %q declares telemetry.promqlServer but has no namespace in this recipe", server.Name),
+			map[string]any{errCtxKeyComponent: server.Name})
+	}
 	scope := &PromQLScrapeScope{Server: server.Name}
-	var scopeNamespaces []string
+	scopeNamespaces := []string{serverNamespace}
 	for _, name := range enabled {
 		comp := registry.Get(name)
 		if comp == nil || !comp.Telemetry.PromQL.IsDeclared() {
@@ -294,7 +303,7 @@ func (r *bundleRun) injectPromQLScrapeScope(
 	}
 	if scope.Server != "" && len(scope.Consumers) == 0 {
 		r.appendWarning(fmt.Sprintf("%s is enabled but no enabled component declares telemetry.promql, "+
-			"so its Prometheus scrapes nothing", scope.Server))
+			"so its Prometheus keeps no series", scope.Server))
 	}
 	return nil
 }

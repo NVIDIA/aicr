@@ -27,7 +27,7 @@ spec:
 
 When `aicr bundle` resolves that recipe, the `os-talos` mixin:
 
-1. Overrides the install namespace of five components to
+1. Overrides the install namespace of six components to
    `privileged-<component>`.
 2. Attaches a per-component `manifests/talos-namespace.yaml` manifest (a
    Namespace resource with PSA-privileged labels) via the
@@ -57,6 +57,7 @@ the right order.
 | nvsentinel | `privileged-nvsentinel` | `recipes/components/nvsentinel/manifests/talos-namespace.yaml` |
 | nvidia-dra-driver-gpu | `privileged-nvidia-dra-driver-gpu` | `recipes/components/nvidia-dra-driver-gpu/manifests/talos-namespace.yaml` |
 | nodewright-operator | `privileged-nodewright-operator` | `recipes/components/nodewright-operator/manifests/talos-namespace.yaml` |
+| nktp | `privileged-nktp` | `recipes/components/nktp/manifests/talos-namespace.yaml` |
 
 ## Why these components run privileged
 
@@ -73,6 +74,8 @@ the right order.
 - **nodewright-operator** — controller managing kernel-tuning
   Customization CRDs. The operator itself is the gate for
   privileged actions on managed nodes.
+- **nktp** — its node collector and `node-exporter` read host logs,
+  `/proc`, and `/sys` with host networking.
 
 ## Pod Security Standards label set
 
@@ -135,11 +138,6 @@ Talos, please open an issue against [#565](https://github.com/NVIDIA/aicr/issues
 - **`nodewright-customizations`** — the Customization CRDs the
   nodewright-operator manages; out of scope until their per-node
   privileged story is settled.
-- **`kube-prometheus-stack`** — only the `node-exporter` daemon
-  needs privileged. The right fix is a chart-level override
-  (`nodeExporter.enabled: false` or a custom Helm value pointing
-  the daemon at a separate namespace), not a whole-chart namespace
-  move.
 
 ## Snapshot agent on Talos
 

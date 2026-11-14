@@ -21,7 +21,8 @@ spec:
   # Inherits from base (implicit when spec.base is empty).
   # BCM 11.x (`cm-kubernetes-setup`) provisions only the base platform —
   # Kubernetes control plane, CNI (tigera-operator/calico by default), DNS,
-  # and MetalLB. The NVIDIA runtime stack (GPU Operator, NFD, cert-manager,
+  # MetalLB, and by default metrics-server, so nktp's stays off. The NVIDIA
+  # runtime stack (GPU Operator, NFD, cert-manager,
   # Prometheus, nvsentinel, DRA driver, etc.) is delivered by AICR via
   # base.yaml and applied with the `helmfile` deployer
   # (`aicr bundle -r recipe.yaml --deployer helmfile -o ./bundles`).
@@ -40,22 +41,6 @@ spec:
   # in addition to the upstream `node-role.kubernetes.io/control-plane`,
   # and ships `local-path` as the default StorageClass.
   componentRefs:
-    # Persist Prometheus on the BCM-provisioned local-path StorageClass.
-    - name: kube-prometheus-stack
-      type: Helm
-      overrides:
-        prometheus:
-          prometheusSpec:
-            storageSpec:
-              emptyDir: null
-              volumeClaimTemplate:
-                spec:
-                  accessModes: ["ReadWriteOnce"]
-                  storageClassName: local-path
-                  resources:
-                    requests:
-                      storage: 50Gi
-
     # Tolerate the BCM `master` label so control-plane workloads that
     # already tolerate `control-plane` schedule on BCM masters as well.
     # Mirrored onto kubeletPlugin so DRA's kubelet plugin DaemonSet still

@@ -44,6 +44,12 @@ const (
 	prometheusComponentName = "kube-prometheus-stack"
 	prometheusDefaultPort   = 9090
 
+	// otel-lgtm is the backend NKTP exports to on a stock bundle; its Service
+	// serves the Prometheus query API on otelLGTMPrometheusPort.
+	nktpComponentName      = "nktp"
+	otelLGTMServiceName    = "lgtm"
+	otelLGTMPrometheusPort = 9090
+
 	// aiMetricsTestPrefix names the per-run test namespace; leftovers from
 	// interrupted runs are found by this prefix.
 	aiMetricsTestPrefix    = "ai-metrics-test-"
@@ -162,12 +168,11 @@ Server(("::" if Server.address_family == socket.AF_INET6 else "", PORT), Handler
 //
 //  1. deploy: a CPU stub workload (no accelerator) exposing a request counter,
 //     a latency histogram and a queue-depth gauge labeled with a per-run id,
-//     its Service, and a ServiceMonitor carrying the recipe's Prometheus
-//     selector label;
-//  2. baseline: wait until Prometheus has loaded the ServiceMonitor into its
-//     scrape pools, then until it has collected all three series; the
-//     collection clock starts at the load, not at the ServiceMonitor's
-//     creation, so prometheus-operator's reconcile schedule does not consume it;
+//     its Service, and a ServiceMonitor;
+//  2. baseline: wait until the backend reports the stub's target as scraped
+//     (its up series), then until it has collected all three series; the
+//     collection clock starts at the discovery, not at the ServiceMonitor's
+//     creation, so the pipeline's discovery schedule does not consume it;
 //  3. traffic: send exactly defaults.AIServiceMetricsRequestCount requests
 //     through the Service; any failure aborts, since the expected count would
 //     be ambiguous;
@@ -175,19 +180,61 @@ Server(("::" if Server.address_family == socket.AF_INET6 else "", PORT), Handler
 //     requests sent. A value above that fails at once: something else sent
 //     traffic, and the collection cannot be attributed.
 //
-// The check does not depend on a model being served; it passes on every
-// recipe that carries kube-prometheus-stack and fails when Prometheus does not
-// load the ServiceMonitor within the monitor-load timeout or, once loaded,
-// does not collect its series within the collection timeout.
+// The monitoring system is NKTP and the backend it exports to (ADR-026), so
+// the check queries otel-lgtm. kube-prometheus-stack's Prometheus is no
+// substitute: it keeps only the series its consumers declare. The check skips
+// when the recipe has no nktp, or NKTP exports to a backend the check has no
+// query URL for.
+//
+// The check does not depend on a model being served; it fails when NKTP does
+// not discover the ServiceMonitor within the monitor-load timeout or, once it
+// has, the backend does not hold its series within the collection timeout.
 func CheckAIServiceMetrics(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
-	promURL, err := discoverPrometheusURL(ctx)
+	if !validators.RecipeDeclares(ctx, nktpComponentName) {
+		return validators.SkipWithReason(validators.SkipReasonNoMetricsBackend,
+			"the recipe has no "+nktpComponentName+", so it ships no monitoring system that collects a workload's metrics")
+	}
+	backendURL, err := discoverTelemetryBackendURL(ctx)
 	if err != nil {
 		return err
 	}
-	return checkAIServiceMetricsWithURL(ctx, promURL)
+	return checkAIServiceMetricsWithURL(ctx, backendURL)
+}
+
+// discoverTelemetryBackendURL returns the Prometheus query API of otel-lgtm
+// in nktp's namespace, and skips when the recipe's NKTP runs without it: the
+// owner's backend has no address the check knows.
+func discoverTelemetryBackendURL(ctx *validators.Context) (string, error) {
+	var namespace string
+	for _, ref := range ctx.ValidationInput.ComponentRefs {
+		if ref.Name == nktpComponentName {
+			namespace = ref.Namespace
+			break
+		}
+	}
+	if namespace == "" {
+		return "", errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("component %q has no namespace in the recipe", nktpComponentName))
+	}
+	svc, err := ctx.Clientset.CoreV1().Services(namespace).Get(ctx.Ctx, otelLGTMServiceName, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		return "", validators.SkipWithReason(validators.SkipReasonNoMetricsBackend, fmt.Sprintf(
+			"NKTP's otel-lgtm (Service %s/%s) is not installed, so NKTP exports to a backend this check has no query URL for",
+			namespace, otelLGTMServiceName))
+	}
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to read NKTP's otel-lgtm Service", err)
+	}
+	for _, port := range svc.Spec.Ports {
+		if port.Port == int32(otelLGTMPrometheusPort) {
+			return fmt.Sprintf("http://%s.%s.svc:%d", svc.Name, namespace, otelLGTMPrometheusPort), nil
+		}
+	}
+	return "", errors.New(errors.ErrCodeNotFound, fmt.Sprintf(
+		"Service %s/%s has no port %d for the Prometheus query API", namespace, otelLGTMServiceName, otelLGTMPrometheusPort))
 }
 
 // discoverPrometheusURL finds the Prometheus service URL by looking up the
@@ -239,7 +286,7 @@ func discoverPrometheusURL(ctx *validators.Context) (string, error) {
 }
 
 // checkAIServiceMetricsWithURL is the testable implementation that accepts the
-// Prometheus base URL.
+// base URL of the backend's Prometheus query API.
 func checkAIServiceMetricsWithURL(ctx *validators.Context, promBaseURL string) error {
 	// Bound all work so one bounded namespace cleanup plus the skew/flush
 	// margin fit inside the check's deadline (see gpuCheckWorkBudget).
@@ -261,14 +308,14 @@ func checkAIServiceMetricsWithURL(ctx *validators.Context, promBaseURL string) e
 	if err != nil {
 		return err
 	}
-	// Preflight BEFORE creating anything: a Prometheus that cannot answer
+	// Preflight BEFORE creating anything: a backend that cannot answer
 	// vector(1) is an environment problem, not a collection failure.
 	if err := s.preflight(ctx.Ctx); err != nil {
 		return err
 	}
 	recordRawTextArtifact(ctx, "Prometheus API preflight",
-		fmt.Sprintf("curl -sf '%s/api/v1/query?query=vector(1)'; curl -sf '%s/api/v1/scrape_pools'", promBaseURL, promBaseURL),
-		fmt.Sprintf("Endpoint: %s\nResult:   vector(1) = 1; scrape pools listed", promBaseURL))
+		fmt.Sprintf("curl -sf '%s/api/v1/query?query=vector(1)'", promBaseURL),
+		fmt.Sprintf("Endpoint: %s (the backend NKTP exports to)\nResult:   vector(1) = 1", promBaseURL))
 	return s.runWithCleanup(ctx)
 }
 
@@ -285,9 +332,14 @@ type aiMetricsScenario struct {
 	// buildHPADeployment does.
 	tolerations []corev1.Toleration
 
-	query           func(ctx context.Context, promql string) ([]byte, error)
-	listScrapePools func(ctx context.Context) ([]byte, error)
-	sendRequest     func(ctx context.Context) error
+	query       func(ctx context.Context, promql string) ([]byte, error)
+	sendRequest func(ctx context.Context) error
+
+	// targetUpQuery returns 1 once the backend holds the stub target's up
+	// series. A backend that a telemetry pipeline writes to has no scrape
+	// pool to list; the per-run namespace keeps the query from matching
+	// another run's target.
+	targetUpQuery string
 
 	pollInterval       time.Duration
 	readyTimeout       time.Duration
@@ -323,7 +375,7 @@ func newAIMetricsScenario(clientset kubernetes.Interface, dynClient dynamic.Inte
 	s.query = func(c context.Context, promql string) ([]byte, error) {
 		return httpGet(c, s.promURL+"/api/v1/query?"+url.Values{"query": {promql}}.Encode())
 	}
-	s.listScrapePools = promScrapePoolLister(promURL)
+	s.targetUpQuery = fmt.Sprintf("max(up{namespace=%q})", s.testRun.namespace)
 	s.sendRequest = func(c context.Context) error {
 		_, err := httpGet(c, fmt.Sprintf("http://%s.%s.svc:%d/v1/infer", aiMetricsWorkloadName, s.testRun.namespace, aiMetricsPort))
 		return err
@@ -331,14 +383,13 @@ func newAIMetricsScenario(clientset kubernetes.Interface, dynClient dynamic.Inte
 	return s, nil
 }
 
-// preflight requires the query API to evaluate vector(1) and the scrape pool
-// API to answer, so a Prometheus that cannot be observed fails before any
-// resource is created.
+// preflight requires the query API to evaluate vector(1), so a backend that
+// cannot be observed fails before any resource is created.
 func (s *aiMetricsScenario) preflight(ctx context.Context) error {
 	body, err := s.query(ctx, "vector(1)")
 	if err != nil {
 		return wrapWithCode(err, errors.ErrCodeUnavailable, fmt.Sprintf(
-			"Prometheus unreachable at %s — verify network connectivity (security groups, network policies) between validator pod and Prometheus service",
+			"metrics backend unreachable at %s — verify network connectivity (security groups, network policies) between the validator pod and NKTP's otel-lgtm Service",
 			s.promURL))
 	}
 	v, found, err := parsePromSingleSample(body)
@@ -349,7 +400,7 @@ func (s *aiMetricsScenario) preflight(ctx context.Context) error {
 		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
 			"Prometheus query API preflight failed: vector(1) returned found=%t value=%v, want 1", found, v))
 	}
-	return preflightScrapePools(ctx, s.promURL, s.listScrapePools)
+	return nil
 }
 
 // runWithCleanup creates the per-run namespace, runs the cycle, and always
@@ -386,7 +437,7 @@ func (s *aiMetricsScenario) run(ctx *validators.Context) error {
 		return err
 	}
 	s.phase = aiMetricsPhaseBaseline
-	if err := s.waitForMonitorLoaded(ctx); err != nil {
+	if err := s.waitForTargetUp(ctx); err != nil {
 		return err
 	}
 	baselines, err := s.waitForBaselines(ctx)
@@ -432,13 +483,13 @@ func (s *aiMetricsScenario) deploy(ctx *validators.Context) error {
 	if _, err := s.dynClient.Resource(serviceMonitorGVR).Namespace(ns).Create(ctx.Ctx,
 		buildAIMetricsServiceMonitor(ns), metav1.CreateOptions{}); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
-			"failed to create ServiceMonitor for the metrics stub — the recipe's kube-prometheus-stack must serve monitoring.coreos.com/v1", err)
+			"failed to create ServiceMonitor for the metrics stub — the cluster must serve monitoring.coreos.com/v1", err)
 	}
 	recordRawTextArtifact(ctx, "AI service metrics test resources",
 		fmt.Sprintf("kubectl get pod,svc,servicemonitor -n %s", ns),
-		fmt.Sprintf("Namespace:       %s\nPod:             %s (image %s, no accelerator, run id %s)\nService:         %s (port %s/%d)\nServiceMonitor:  %s (label %s=%s, scrape %s)\nSeries:          %s, %s, %s",
+		fmt.Sprintf("Namespace:       %s\nPod:             %s (image %s, no accelerator, run id %s)\nService:         %s (port %s/%d)\nServiceMonitor:  %s (scrape %s)\nSeries:          %s, %s, %s",
 			ns, aiMetricsWorkloadName, defaults.PythonProbeImage, s.runID, aiMetricsWorkloadName, aiMetricsPortName, aiMetricsPort,
-			aiMetricsWorkloadName, prometheusReleaseLabel, prometheusComponentName, defaults.AIServiceMetricsScrapeInterval,
+			aiMetricsWorkloadName, defaults.AIServiceMetricsScrapeInterval,
 			aiMetricRequestsTotal, aiMetricLatency, aiMetricQueueDepth))
 
 	if _, err := waitForPodReady(ctx.Ctx, s.clientset, ns, aiMetricsWorkloadName, s.readyTimeout); err != nil {
@@ -464,21 +515,53 @@ func aiMetricExpectations(runID string) []aiMetricExpectation {
 	}
 }
 
-// waitForMonitorLoaded holds the baseline until Prometheus has loaded the
-// ServiceMonitor, so the collection timeout that follows measures scraping
-// rather than prometheus-operator's reconcile schedule (#3671).
-func (s *aiMetricsScenario) waitForMonitorLoaded(ctx *validators.Context) error {
+// waitForTargetUp holds the baseline until the backend reports the stub's
+// target as scraped, so the collection timeout that follows measures
+// collection rather than the pipeline's discovery schedule.
+func (s *aiMetricsScenario) waitForTargetUp(ctx *validators.Context) error {
 	start := time.Now()
-	ns := s.testRun.namespace
-	prefix := scrapePoolPrefix(monitorKindService, ns, aiMetricsWorkloadName)
-	slog.Info("waiting for Prometheus to load the ServiceMonitor", "scrapePool", prefix, "timeout", s.monitorLoadTimeout)
-	if err := waitForMonitorLoaded(ctx.Ctx, s.listScrapePools, monitorKindService, ns, aiMetricsWorkloadName,
-		s.monitorLoadTimeout, s.pollInterval); err != nil {
-		return err
+	slog.Info("waiting for the telemetry pipeline to discover the stub", "query", s.targetUpQuery, "timeout", s.monitorLoadTimeout)
+	var last string
+	err := wait.PollUntilContextTimeout(ctx.Ctx, s.pollInterval, s.monitorLoadTimeout, true, func(c context.Context) (bool, error) {
+		if intactErr := checkAIMetricsWorkloadIntact(c, s.clientset, s.testRun.namespace); intactErr != nil {
+			return false, intactErr
+		}
+		body, queryErr := s.query(c, s.targetUpQuery)
+		if queryErr != nil {
+			if c.Err() == nil {
+				last = fmt.Sprintf("query error: %v", queryErr)
+			}
+			return false, nil
+		}
+		v, found, parseErr := parsePromSingleSample(body)
+		switch {
+		case parseErr != nil:
+			last = parseErr.Error()
+		case !found:
+			last = "no up series yet"
+		case v != 1:
+			last = fmt.Sprintf("up = %v, want 1 (the target is discovered but its scrape fails)", v)
+		default:
+			return true, nil
+		}
+		return false, nil
+	})
+	switch {
+	case err == nil:
+	case ctx.Ctx.Err() != nil:
+		return errors.WrapCtxErr(ctx.Ctx.Err(), errors.ErrCodeTimeout,
+			"check budget exhausted while waiting for the telemetry pipeline to discover the stub")
+	case wait.Interrupted(err):
+		return errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf(
+			"the telemetry pipeline did not report the stub's target as up within %s (%s): %s. "+
+				"NKTP needs no monitor label; check the ServiceMonitor's selector and port, and the collectors' logs for failed scrapes",
+			s.monitorLoadTimeout, s.targetUpQuery, last), err)
+	default:
+		return wrapWithCode(err, errors.ErrCodeInternal, "failed while waiting for the telemetry pipeline to discover the stub")
 	}
-	recordRawTextArtifact(ctx, "AI service metrics: ServiceMonitor loaded",
-		fmt.Sprintf("curl -sf '%s/api/v1/scrape_pools' | grep '%s'", s.promURL, prefix),
-		fmt.Sprintf("Scrape pool:   %s*\nLoaded after:  %s", prefix, time.Since(start).Round(time.Second)))
+	recordRawTextArtifact(ctx, "AI service metrics: target discovered",
+		fmt.Sprintf("curl -sf '%s/api/v1/query?query=%s'", s.promURL, url.QueryEscape(s.targetUpQuery)),
+		fmt.Sprintf("Query:             %s = 1\nDiscovered after:  %s", s.targetUpQuery, time.Since(start).Round(time.Second)))
 	return nil
 }
 
@@ -489,7 +572,7 @@ func (s *aiMetricsScenario) waitForBaselines(ctx *validators.Context) ([]float64
 		return fmt.Sprintf("collected (baseline %v)", v), true, nil
 	})
 	if err != nil {
-		return nil, wrapWithCode(err, errors.ErrCodeNotFound, "Prometheus loaded the ServiceMonitor but the workload metrics were not collected")
+		return nil, wrapWithCode(err, errors.ErrCodeNotFound, "the monitoring system discovered the ServiceMonitor but the workload metrics were not collected")
 	}
 	s.timings[aiMetricsPhaseBaseline] = time.Since(start)
 	recordRawTextArtifact(ctx, "AI service metrics: baseline collection",
@@ -613,8 +696,8 @@ func (s *aiMetricsScenario) pollMetrics(ctx context.Context, checks []aiMetricEx
 	case wait.Interrupted(err):
 		return nil, status, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf(
 			"not collected within %s:\n  %s\n  If the scrape interval or ingestion delay is long, raise the collection timeout; "+
-				"also check the stub's target health at %s/api/v1/targets",
-			s.collectionTimeout, strings.Join(status, "\n  "), s.promURL), err)
+				"also check NKTP's collector logs for failed scrapes or exports",
+			s.collectionTimeout, strings.Join(status, "\n  ")), err)
 	default:
 		return nil, status, wrapWithCode(err, errors.ErrCodeInternal, "failed while waiting for collection")
 	}
@@ -750,8 +833,8 @@ func buildAIMetricsWorkload(ns, runID string, collectionTimeout time.Duration, t
 	return pod, svc
 }
 
-// buildAIMetricsServiceMonitor selects the stub's Service by its app label
-// and carries the recipe's Prometheus selector label.
+// buildAIMetricsServiceMonitor selects the stub's Service by its app label.
+// It carries no selector label: NKTP discovers every ServiceMonitor.
 func buildAIMetricsServiceMonitor(ns string) *unstructured.Unstructured {
 	sm := &unstructured.Unstructured{Object: map[string]any{
 		keySpec: map[string]any{
@@ -772,7 +855,6 @@ func buildAIMetricsServiceMonitor(ns string) *unstructured.Unstructured {
 	sm.SetKind("ServiceMonitor")
 	sm.SetName(aiMetricsWorkloadName)
 	sm.SetNamespace(ns)
-	sm.SetLabels(map[string]string{prometheusReleaseLabel: prometheusComponentName})
 	return sm
 }
 

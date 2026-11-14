@@ -21,13 +21,10 @@
 # 2. The Prometheus CR (kube-prometheus-prometheus) reports Available=True.
 #    This explicitly catches operator-level reconcile stalls (e.g., webhook
 #    rejections) where a target StatefulSet might never be created at all.
-# 3. The Alertmanager CR (kube-prometheus-alertmanager) reports Available=True.
-# 4. The Prometheus StatefulSet (prometheus-kube-prometheus-prometheus) has
+# 3. The Prometheus StatefulSet (prometheus-kube-prometheus-prometheus) has
 #    reached full rollout: readyReplicas >= replicas, with a replicas > 0
 #    vacuous-pass guard so a missing StatefulSet does not silently pass.
-# 5. The Alertmanager StatefulSet (alertmanager-kube-prometheus-alertmanager)
-#    reaches the same full-rollout threshold.
-# 6. No stack operator pods (label-scoped to app.kubernetes.io/name:
+# 4. No stack operator pods (label-scoped to app.kubernetes.io/name:
 #    kube-prometheus-stack) are stuck in Pending, Failed, Unknown, or a
 #    known-bad container-waiting reason (CrashLoopBackOff, ImagePullBackOff,
 #    ErrImagePull, CreateContainerConfigError).
@@ -78,21 +75,6 @@ spec:
               status:
                 (conditions[?type == 'Available']):
                   - status: "True"
-    - name: validate-alertmanager-cr-available
-      try:
-        # Assert the Alertmanager CR has been reconciled by the operator.
-        # CR name kube-prometheus-alertmanager derives from the chart's
-        # fullnameOverride=kube-prometheus + the chart's -alertmanager suffix.
-        - assert:
-            resource:
-              apiVersion: monitoring.coreos.com/v1
-              kind: Alertmanager
-              metadata:
-                name: kube-prometheus-alertmanager
-                namespace: monitoring
-              status:
-                (conditions[?type == 'Available']):
-                  - status: "True"
     - name: validate-prometheus-statefulset-ready
       try:
         # Assert the Prometheus StatefulSet created by the operator has
@@ -108,23 +90,6 @@ spec:
               kind: StatefulSet
               metadata:
                 name: prometheus-kube-prometheus-prometheus
-                namespace: monitoring
-              status:
-                (replicas > `0`): true
-                (readyReplicas >= replicas): true
-    - name: validate-alertmanager-statefulset-ready
-      try:
-        # Assert the Alertmanager StatefulSet has reached full rollout.
-        # Same pattern as Prometheus above. StatefulSet name
-        # alertmanager-kube-prometheus-alertmanager is <workload>-<cr-name>
-        # per prometheus-operator convention, verified from
-        # tests/chainsaw/ai-conformance/common/assert-monitoring.yaml.
-        - assert:
-            resource:
-              apiVersion: apps/v1
-              kind: StatefulSet
-              metadata:
-                name: alertmanager-kube-prometheus-alertmanager
                 namespace: monitoring
               status:
                 (replicas > `0`): true
