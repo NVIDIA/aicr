@@ -18,6 +18,8 @@ executable bits or `./script.sh` invocation.
 **Purpose**: Set up Go and Helm, verify the module manifests are tidy, and run unit tests with race detection and coverage
 **When to use**: Go CI workflows that use the repository's `make test` target
 **Inputs**:
+- `task` (optional): `full` (default), `shard`, `shell`, or `compatibility`
+- `shard` (required for `task: shard`): `recipe`, `a`, or `b`
 - `go_version` (required): Go version to install
 - `coverage_report` (optional): Whether to generate a coverage report (default: "false")
 - `coverage_threshold` (optional): Minimum coverage percentage (default: empty)
@@ -51,6 +53,25 @@ without being shown.
 
 Callers that set `apidiff_version` must check out full history with
 `fetch-depth: 0` so `make api-diff` can resolve a reachable stable release tag.
+
+Qualification runs three race/atomic-coverage shards, shell/tool-pin checks, and
+compatibility checks as independent jobs. Tool pins run before the shell loop.
+`tools/ci-tests/suite.py` assigns recipe alone and balances the other two shards
+using measured package durations; new packages receive a default weight and are
+automatically included. Each shard uploads its package manifest, atomic coverage,
+and compact per-package/per-test JSON timings. Output events stream to the job
+log, and pipeline failure status is preserved.
+
+The `Test` aggregation job requires all shards to succeed, verifies that current
+`make test-packages` output appears exactly once across the downloaded manifests,
+and checks terminal package results before merging coverage. Duplicate coverage
+blocks sum execution counts without double-counting statements. Validator lines
+are excluded exactly as in local `make test`; the existing threshold remains
+required. The enclosing qualification result still gates `Merge Gate / gate`.
+Only shard `a` writes the shared Go cache, under the existing trust guard; the
+other jobs restore only. This keeps one cache writer, though a newly saved cache
+contains compilation work from only that shard. Local `make test` still runs the
+whole suite, and the composite's default `task: full` preserves existing callers.
 
 #### `security-scan/`
 **Purpose**: Anchore/Grype vulnerability scanning with SARIF upload
