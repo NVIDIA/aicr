@@ -17,6 +17,7 @@ package diff
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -81,7 +82,7 @@ func WriteTable(w io.Writer, result *Result) error {
 		baseline := renderCell(c.Baseline)
 		target := renderCell(c.Target)
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			strings.ToUpper(string(c.Kind)), c.Path, baseline, target); err != nil {
+			strings.ToUpper(string(c.Kind)), escapeCell(c.Path), baseline, target); err != nil {
 			return wrapTableErr(err)
 		}
 	}
@@ -107,7 +108,17 @@ func renderCell(p *string) string {
 	if *p == "" {
 		return `""`
 	}
-	return *p
+	return escapeCell(*p)
+}
+
+// escapeCell quotes s when it holds a character that tabwriter reads as a cell
+// or row break (tab, vertical tab, newline, form feed, carriage return) or an
+// ESC that a terminal would start an escape sequence with.
+func escapeCell(s string) string {
+	if strings.ContainsAny(s, "\t\v\n\f\r\x1b") {
+		return strconv.Quote(s)
+	}
+	return s
 }
 
 func wrapTableErr(err error) error {

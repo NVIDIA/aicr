@@ -1157,6 +1157,73 @@ func TestWriteTable_DriftDetected(t *testing.T) {
 	}
 }
 
+// TestWriteTable_ControlCharactersStayInCell pins that a value or path holding
+// a table-breaking control character or ESC renders escaped inside its own cell.
+func TestWriteTable_ControlCharactersStayInCell(t *testing.T) {
+	tests := []struct {
+		name   string
+		change Change
+		want   []string
+	}{
+		{
+			name: "tab-separated sysctl value",
+			change: Change{Kind: Modified, Severity: SeverityInfo, Path: "OS.sysctl./proc/sys/fs/file-nr",
+				Baseline: strPtr("2656\t0\t9223372036854775807"), Target: strPtr("2912\t0\t9223372036854775807")},
+			want: []string{"MODIFIED", "OS.sysctl./proc/sys/fs/file-nr", `"2656\t0\t9223372036854775807"`, `"2912\t0\t9223372036854775807"`},
+		},
+		{
+			name: "multi-line value",
+			change: Change{Kind: Added, Severity: SeverityInfo, Path: "OS.kmod.params",
+				Target: strPtr("line1\nMODIFIED  K8s.server.version  v1.30  v1.31\r")},
+			want: []string{"ADDED", "OS.kmod.params", "-", `"line1\nMODIFIED  K8s.server.version  v1.30  v1.31\r"`},
+		},
+		{
+			name: "path with a tab",
+			change: Change{Kind: Removed, Severity: SeverityInfo, Path: "OS.sysctl.a\tb",
+				Baseline: strPtr("1")},
+			want: []string{"REMOVED", `"OS.sysctl.a\tb"`, "1", "-"},
+		},
+		{
+			name: "vertical tab and form feed",
+			change: Change{Kind: Modified, Severity: SeverityInfo, Path: "OS.kmod.params",
+				Baseline: strPtr("a\vb"), Target: strPtr("c\fd")},
+			want: []string{"MODIFIED", "OS.kmod.params", `"a\vb"`, `"c\fd"`},
+		},
+		{
+			name: "terminal escape sequence",
+			change: Change{Kind: Added, Severity: SeverityInfo, Path: "OS.kmod.params",
+				Target: strPtr("\x1b[31mred\x1b[0m")},
+			want: []string{"ADDED", "OS.kmod.params", "-", `"\x1b[31mred\x1b[0m"`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := &Result{Changes: []Change{tt.change}}
+			var buf bytes.Buffer
+			if err := WriteTable(&buf, result); err != nil {
+				t.Fatalf("WriteTable failed: %v", err)
+			}
+
+			// CHANGES line, header, separator, one row, blank line, footer.
+			lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+			if len(lines) != 6 {
+				t.Fatalf("got %d lines, want 6:\n%s", len(lines), buf.String())
+			}
+			row := lines[3]
+			for _, cell := range tt.want {
+				if !strings.Contains(row, cell) {
+					t.Errorf("row %q does not contain cell %q", row, cell)
+				}
+			}
+			header := lines[1]
+			if got, want := strings.Index(row, tt.want[3]), strings.Index(header, "TARGET"); got != want {
+				t.Errorf("target cell starts at column %d, TARGET header at %d:\n%s", got, want, buf.String())
+			}
+		})
+	}
+}
+
 // failingWriter returns an error after N successful writes. Used to simulate
 // broken pipes and full disks during table output.
 type failingWriter struct {
