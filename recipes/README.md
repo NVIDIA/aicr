@@ -23,7 +23,7 @@ recipes/
 │   └── platform-kubeflow.yaml     # Kubeflow trainer component
 ├── artifacts/                     # Artifact bindings (bindings.yaml)
 ├── checks/                        # Component health checks
-├── evidence/                      # Recipe-evidence pointers and allowlist.yaml
+├── evidence/                      # Recipe-evidence pointers and allowlist.yaml (not embedded; read by evidence CI tooling)
 ├── validators/                    # Validator catalog (catalog.yaml)
 └── components/                    # Per-component Helm/Kustomize values
 ```
