@@ -34,6 +34,50 @@ aicr bundle --recipe recipe.yaml --deployer argocd \
   --output ./bundles
 ```
 
+## Output directory
+
+`--output` defaults to the current directory. The bundle renders in a private
+`.aicr-stage-*` directory, inside the output directory when it exists and
+beside it when it does not, and reaches the output directory only once it is
+complete. A run that fails while rendering, or is interrupted with Ctrl-C or
+`SIGTERM` before the bundle starts moving into place, leaves the output
+directory as it found it. An interrupt that arrives after that does not stop
+the move.
+
+Bundling into a directory that holds an earlier bundle replaces it. Every
+top-level folder named like a component folder, three digits and a hyphen such
+as `001-gpu-operator/`, is replaced or removed whatever it holds, even one you
+created. So is a top-level file the new bundle also writes, such as
+`README.md`, along with
+`provenance.yaml`, `undeploy.sh` and an empty `static/` or `sources/`. Any
+other file, including one under a directory such as `data/`, is replaced or
+removed only when the new bundle writes a file at the same path, or the
+earlier bundle's `checksums.txt` lists it and its content still matches, such
+as a dropped `--data` file. The earlier bundle's attestation files are
+replaced or removed whatever they hold, because `checksums.txt` cannot list
+the files that sign it. The run fails and changes nothing if the directory
+holds anything else, such as a file you added under `data/`, because
+`checksums.txt` must list the whole tree. An earlier bundle with no
+`checksums.txt`, such as one made through the Go library with checksums off,
+is not recognized, so any of its files the new bundle does not write, such as
+a dropped `--data` file, fail the run. Bundle into a new directory, or remove
+the earlier bundle first. An `argocd-helm` bundle that omits the GPU Operator
+or the NVIDIA DRA driver also fails, before anything is written, when the
+directory holds that component's output from an earlier bundle. Bundle it
+into a new directory.
+
+A run that is killed outright, for example by `SIGKILL` or the out-of-memory
+killer, cannot clean up after itself. A run that fails while moving the
+finished bundle into an existing output directory keeps what it has not moved
+yet, and its error names the directory holding it. Either can leave
+a `.aicr-stage-*` directory behind, and the output directory partly replaced.
+Delete the `.aicr-stage-*` directory and bundle again. If that run reports an
+unexpected file, the partial replacement removed the `checksums.txt` that
+listed it, so bundle into a new directory instead.
+
+A `--split` set needs a path that does not exist yet. See
+[Split a bundle by class](#split-a-bundle-by-class).
+
 ## Bundle layout
 
 This is the canonical description of what a bundle contains. The trees below

@@ -15,7 +15,6 @@
 package bundler
 
 import (
-	stderrors "errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -80,10 +79,12 @@ func TestArtifactBundleCaptureRetainsOriginalInputs(t *testing.T) {
 }
 
 func TestArtifactBundleReusePreservesInputsOnFailure(t *testing.T) {
+	bindings := []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactBindings\ncharts: {}\nimages: {}\nignoredArtifacts:\n  notes: {reason: release notes}\n")
+	inventory := []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactInventory\nartifacts:\n- name: notes\n  type: other\n  reference: oci://example.test/notes\n  version: v2\n  manifestDigest: sha256:" + strings.Repeat("a", 64) + "\n")
 	dir := providertest.WriteDir(t, map[string][]byte{
 		"registry.yaml":            []byte(providertest.EmptyRegistryYAML),
-		"artifacts/bindings.yaml":  []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactBindings\ncharts: {}\nimages: {}\nignoredArtifacts:\n  notes: {reason: release notes}\n"),
-		"artifacts/inventory.yaml": []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactInventory\nartifacts:\n- name: notes\n  type: other\n  reference: oci://example.test/notes\n  version: v2\n  manifestDigest: sha256:" + strings.Repeat("a", 64) + "\n"),
+		"artifacts/bindings.yaml":  bindings,
+		"artifacts/inventory.yaml": inventory,
 	})
 	layered, err := recipe.NewLayeredDataProvider(recipe.NewEmbeddedDataProvider(recipes.FS, ""), recipe.LayeredProviderConfig{ExternalDir: dir})
 	if err != nil {
@@ -121,23 +122,33 @@ func TestArtifactBundleReusePreservesInputsOnFailure(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			// Force generation to fail if copying mistakenly permits reuse.
+			// A directory the bundle does not own makes the rerun fail
+			// before it publishes.
 			if blockDeployer {
 				if err := os.Mkdir(filepath.Join(dest, "deploy.sh"), 0o750); err != nil {
 					t.Fatal(err)
 				}
 			}
 			_, err := b.Make(t.Context(), rr, dest)
-			if !stderrors.Is(err, os.ErrExist) {
-				t.Fatalf("want no-overwrite failure, got %v", err)
+			want := old
+			switch {
+			case blockDeployer && err == nil:
+				t.Fatal("want failure with a stray deploy.sh directory, got nil")
+			case !blockDeployer && err != nil:
+				t.Fatalf("rerun over an earlier bundle: %v", err)
+			case !blockDeployer:
+				want = map[string][]byte{
+					"data/artifacts/inventory.yaml": inventory,
+					"data/artifacts/bindings.yaml":  bindings,
+				}
 			}
-			for name, want := range old {
+			for name, w := range want {
 				got, err := os.ReadFile(filepath.Join(dest, name))
 				if err != nil {
 					t.Fatal(err)
 				}
-				if string(got) != string(want) {
-					t.Errorf("%s changed after failed bundle: %q", name, got)
+				if string(got) != string(w) {
+					t.Errorf("%s = %q, want %q", name, got, w)
 				}
 			}
 		})

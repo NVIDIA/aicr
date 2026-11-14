@@ -1888,9 +1888,8 @@ func TestGenerate_StaticDirCreatedOnlyWhenPopulated(t *testing.T) {
 			wantStaticDir: false,
 		},
 		{
-			// A pre-fix failed run leaves an empty static/ in --output, and
-			// generation does not clear the directory between runs, so the
-			// retry must remove it rather than fail the same way again.
+			// A Generator called directly can write into a directory where an
+			// earlier run left an empty static/, which fails validateExactTree.
 			name:           "stale empty static dir from a prior run is removed",
 			refs:           localOnlyRefs,
 			values:         localOnlyValues,
@@ -2034,14 +2033,8 @@ func TestGenerate_StaleStaticPathIsNotDestroyed(t *testing.T) {
 			// directions -- including the no-ErrCodeInternal check that keeps
 			// the CLI exit code at 2. Do not relax those.
 			//
-			// For the validator subtest only: production builds this Generator
-			// with IncludeChecksums false (the argocdhelm.Generator literal in
-			// DefaultBundler.buildDeployer) and reaches the same validator from
-			// DefaultBundler.runDeployer instead, so the wrapper around that
-			// failure differs from the shipped CLI. Its assertion is on
-			// validateExactTree's message, identical on both routes; its
-			// surrounding error code is not pinned. End-to-end coverage of the
-			// production path lives in tests/chainsaw/cli/bundle-ocp.
+			// DefaultBundler generates into a new staging directory, so only
+			// a Generator called directly can meet a stale static/.
 			IncludeChecksums: true,
 		}
 	}

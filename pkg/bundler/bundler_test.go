@@ -16,10 +16,12 @@ package bundler
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	stderrors "errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -193,8 +195,8 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 
 	t.Run("final inventory includes and binds recipe", func(t *testing.T) {
 		dir := t.TempDir()
-		output, err := newRun(t).runDeployer(
-			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, nil, time.Now())
+		output, _, err := newRun(t).runDeployer(
+			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
 		}
@@ -239,10 +241,11 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		)
 		attester := &closedWorldTestAttester{}
 		b := &DefaultBundler{Config: cfg, Attester: attester}
+		dir := t.TempDir()
 		r := &bundleRun{DefaultBundler: b}
-		_, err := r.runDeployer(
+		_, _, err := r.runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
-			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
+			closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
@@ -261,8 +264,8 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		b := &DefaultBundler{Config: cfg, Attester: attester}
 		dir := t.TempDir()
 		r := &bundleRun{DefaultBundler: b}
-		output, err := r.runDeployer(
-			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, nil, time.Now())
+		output, _, err := r.runDeployer(
+			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
 		}
@@ -294,9 +297,10 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 	})
 
 	t.Run("unmanaged executable is rejected", func(t *testing.T) {
-		_, err := newRun(t).runDeployer(
+		dir := t.TempDir()
+		_, _, err := newRun(t).runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
-			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
+			closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
@@ -305,8 +309,9 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 	t.Run("canceled context cannot finalize", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := newRun(t).runDeployer(
-			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
+		dir := t.TempDir()
+		_, _, err := newRun(t).runDeployer(
+			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("runDeployer() error = %v, want ErrCodeTimeout", err)
 		}
@@ -337,7 +342,7 @@ func TestAttestBundle_PropagatesCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		attester := &closedWorldTestAttester{}
-		files, err := newBundler(attester).attestBundle(ctx, dir, nil, closedWorldRecipeResult())
+		files, err := newBundler(attester).attestBundleAt(ctx, dir, dir, nil, closedWorldRecipeResult())
 		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("attestBundle() error = %v, want ErrCodeTimeout", err)
 		}
@@ -353,8 +358,8 @@ func TestAttestBundle_PropagatesCancellation(t *testing.T) {
 		attester := &closedWorldTestAttester{
 			attestErr: errors.New(errors.ErrCodeTimeout, "signing timed out"),
 		}
-		files, err := newBundler(attester).attestBundle(
-			context.Background(), dir, nil, closedWorldRecipeResult())
+		files, err := newBundler(attester).attestBundleAt(
+			context.Background(), dir, dir, nil, closedWorldRecipeResult())
 		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Fatalf("attestBundle() error = %v, want ErrCodeTimeout", err)
 		}
@@ -374,8 +379,9 @@ func TestAttestBundle_RequiresChecksums(t *testing.T) {
 		Attester: attester,
 	}
 
-	files, err := b.attestBundle(
-		context.Background(), t.TempDir(), nil, closedWorldRecipeResult())
+	dir := t.TempDir()
+	files, err := b.attestBundleAt(
+		context.Background(), dir, dir, nil, closedWorldRecipeResult())
 	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("attestBundle() error = %v, want ErrCodeInvalidRequest", err)
 	}
@@ -387,11 +393,192 @@ func TestAttestBundle_RequiresChecksums(t *testing.T) {
 	}
 }
 
-func TestMake_ClosedWorldPrewriteGuard(t *testing.T) {
+// writeTestBundle bundles closedWorldRecipeResult into dir.
+func writeTestBundle(t *testing.T, dir string, opts ...config.Option) {
+	t.Helper()
+	b, err := New(WithConfig(config.NewConfig(opts...)))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := b.Make(t.Context(), closedWorldRecipeResult(), dir); err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+}
+
+// treeSnapshot maps each path under dir to its content, or its mode for
+// anything but a regular file.
+func treeSnapshot(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	snap := make(map[string]string)
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(dir, p)
+		if relErr != nil {
+			return relErr
+		}
+		if !d.Type().IsRegular() {
+			snap[rel] = d.Type().String()
+			return nil
+		}
+		data, readErr := os.ReadFile(p)
+		snap[rel] = string(data)
+		return readErr
+	})
+	if err != nil {
+		t.Fatalf("snapshot %s: %v", dir, err)
+	}
+	return snap
+}
+
+func TestMake_ReusesOutputDir(t *testing.T) {
+	writeFile := func(name string) func(t *testing.T, dir string) {
+		return func(t *testing.T, dir string) {
+			t.Helper()
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("stale"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// earlierBundle writes a bundle that carries a --data file and, when
+	// attested, attestation metadata, then applies edit to it.
+	earlierBundle := func(attested bool, edit string) func(t *testing.T, dir string) {
+		return func(t *testing.T, dir string) {
+			t.Helper()
+			b, err := New(WithConfig(config.NewConfig(config.WithAttest(attested))),
+				WithVerifiedBinaryAttestation([]byte("stub")), WithAttester(&recordingAttester{}))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			rr := closedWorldRecipeResult()
+			rr.BindDataProvider(dataDirProvider(t, providertest.WriteDir(t, map[string][]byte{
+				recipe.RegistryFileName: []byte(providertest.EmptyRegistryYAML),
+				"extra/a.yaml":          []byte("a: 1\n"),
+			})))
+			if _, err := b.Make(t.Context(), rr, dir); err != nil {
+				t.Fatalf("Make() error = %v", err)
+			}
+			if edit != "" {
+				writeFile(edit)(t, dir)
+			}
+		}
+	}
+	// earlierData is the --data output of earlierBundle, which a rerun
+	// without checksums keeps.
+	earlierData := []string{
+		"data", filepath.Join("data", recipe.RegistryFileName),
+		filepath.Join("data", "extra"), filepath.Join("data", "extra", "a.yaml"),
+	}
+	fresh := t.TempDir()
+	writeTestBundle(t, fresh)
+	want := slices.Sorted(maps.Keys(treeSnapshot(t, fresh)))
+
 	tests := []struct {
 		name  string
 		setup func(t *testing.T, dir string)
+		opts  []config.Option
+		// wantErr expects ErrCodeInvalidRequest and an unchanged directory.
+		wantErr bool
+		// survivors are the entries kept beside the bundle.
+		survivors []string
 	}{
+		{name: "previous bundle", setup: func(t *testing.T, dir string) {
+			t.Helper()
+			writeTestBundle(t, dir)
+		}},
+		{name: "stale file under a component folder", setup: writeFile(filepath.Join("001-gpu-operator", "stale.txt"))},
+		{name: "stale provenance", setup: writeFile(localformat.ProvenanceFileName)},
+		{name: "stale undeploy script", setup: writeFile("undeploy.sh")},
+		{name: "empty static directory", setup: func(t *testing.T, dir string) {
+			t.Helper()
+			if err := os.Mkdir(filepath.Join(dir, "static"), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "earlier bundle with data files the new one drops", setup: earlierBundle(false, "")},
+		{name: "attested earlier bundle", setup: earlierBundle(true, "")},
+		{name: "edited file of an earlier bundle", setup: earlierBundle(false, filepath.Join("data", "extra", "a.yaml")), wantErr: true},
+		{name: "foreign file in an earlier bundle directory", setup: earlierBundle(false, filepath.Join("data", "extra", "notes.txt")), wantErr: true},
+		{name: "foreign file", setup: writeFile("stale.txt"), wantErr: true},
+		{name: "foreign file in a populated static directory", setup: writeFile(filepath.Join("static", "stale.txt")), wantErr: true},
+		{name: "foreign directory in place of a bundle file", setup: writeFile(filepath.Join("README.md", "stale.txt")), wantErr: true},
+		{
+			name:      "foreign file without checksums",
+			setup:     writeFile("stale.txt"),
+			opts:      []config.Option{config.WithIncludeChecksums(false)},
+			survivors: []string{"stale.txt"},
+		},
+		{
+			name:      "attested earlier bundle without checksums",
+			setup:     earlierBundle(true, ""),
+			opts:      []config.Option{config.WithIncludeChecksums(false)},
+			survivors: earlierData,
+		},
+		{
+			name:  "foreign attestation file without checksums",
+			setup: earlierBundle(true, filepath.Join(attestation.AttestationDir, "notes.txt")),
+			opts:  []config.Option{config.WithIncludeChecksums(false)},
+			survivors: append(slices.Clone(earlierData),
+				attestation.AttestationDir, filepath.Join(attestation.AttestationDir, "notes.txt")),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.setup(t, dir)
+			before := treeSnapshot(t, dir)
+			b, err := New(WithConfig(config.NewConfig(tt.opts...)))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			_, err = b.Make(t.Context(), closedWorldRecipeResult(), dir)
+			if tt.wantErr {
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				if after := treeSnapshot(t, dir); !reflect.DeepEqual(after, before) {
+					t.Errorf("rejected run changed the directory:\nbefore %v\nafter  %v",
+						slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Make() error = %v", err)
+			}
+			wantTree := want
+			if len(tt.survivors) > 0 {
+				noChecksums := t.TempDir()
+				writeTestBundle(t, noChecksums, tt.opts...)
+				wantTree = slices.Sorted(slices.Values(append(
+					slices.Collect(maps.Keys(treeSnapshot(t, noChecksums))), tt.survivors...)))
+			}
+			if got := slices.Sorted(maps.Keys(treeSnapshot(t, dir))); !reflect.DeepEqual(got, wantTree) {
+				t.Errorf("output directory holds %v, want %v", got, wantTree)
+			}
+		})
+	}
+}
+
+func TestMake_RejectsInvalidOutputRoot(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, dir string)
+		// output is the path under dir passed to Make, dir itself when empty.
+		output string
+	}{
+		{
+			name:   "output path is a file",
+			output: "out",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dir, "out"), []byte("mine"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
 		{
 			name: "nested symlink",
 			setup: func(t *testing.T, dir string) {
@@ -420,33 +607,196 @@ func TestMake_ClosedWorldPrewriteGuard(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
-			_, err = b.Make(context.Background(), closedWorldRecipeResult(), dir)
-			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
-				t.Errorf("Make() error = %v, want ErrCodeInvalidRequest", err)
-			}
-			if _, statErr := os.Stat(filepath.Join(dir, "README.md")); !stderrors.Is(statErr, os.ErrNotExist) {
-				t.Errorf("deployer wrote README.md before prewrite rejection: %v", statErr)
+			before := treeSnapshot(t, dir)
+			_, err = b.Make(context.Background(), closedWorldRecipeResult(), filepath.Join(dir, tt.output))
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if after := treeSnapshot(t, dir); !reflect.DeepEqual(after, before) {
+				t.Errorf("rejected run changed the directory:\nbefore %v\nafter  %v",
+					slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))
 			}
 		})
 	}
+}
 
-	t.Run("ordinary stale file reaches exact finalization", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, "stale.txt"), []byte("stale"), 0600); err != nil {
-			t.Fatal(err)
+func TestBundleStagePublish_ExistingDir(t *testing.T) {
+	writeFiles := func(t *testing.T, root string, files map[string]string) {
+		t.Helper()
+		for name, content := range files {
+			p := filepath.Join(root, name)
+			if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
 		}
-		b, err := New()
-		if err != nil {
-			t.Fatalf("New() error = %v", err)
+	}
+	earlier := map[string]string{
+		"README.md":                         "old",
+		filepath.Join("sub", "a.txt"):       "old",
+		filepath.Join("001-old", "v.yaml"):  "old",
+		localformat.ProvenanceFileName:      "old",
+		filepath.Join("002-gone", "v.yaml"): "old",
+	}
+	published := map[string]string{
+		".":                           "d---------",
+		"README.md":                   "new",
+		"sub":                         "d---------",
+		filepath.Join("sub", "a.txt"): "new",
+	}
+	publishedWithNotes := maps.Clone(published)
+	publishedWithNotes["notes.txt"] = "mine"
+
+	tests := []struct {
+		name    string
+		foreign []string
+		exact   bool
+		// want is the published tree, nil when publish must fail and leave
+		// dir unchanged.
+		want map[string]string
+	}{
+		{name: "replaces an earlier bundle", exact: true, want: published},
+		{name: "exact rejects a foreign file", foreign: []string{"notes.txt"}, exact: true},
+		{name: "exact rejects a foreign file in a bundle directory", foreign: []string{filepath.Join("sub", "notes.txt")}, exact: true},
+		{
+			name:    "keeps top-level foreign entries",
+			foreign: []string{"notes.txt", filepath.Join("sub", "notes.txt")},
+			want:    publishedWithNotes,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFiles(t, dir, earlier)
+			for _, name := range tt.foreign {
+				writeFiles(t, dir, map[string]string{name: "mine"})
+			}
+			before := treeSnapshot(t, dir)
+
+			s, err := stageBundle(t.Context(), dir)
+			if err != nil {
+				t.Fatalf("stageBundle: %v", err)
+			}
+			if filepath.Dir(s.path) != dir {
+				t.Fatalf("stage %s is not inside %s", s.path, dir)
+			}
+			writeFiles(t, s.path, map[string]string{"README.md": "new", filepath.Join("sub", "a.txt"): "new"})
+			want := maps.Clone(tt.want)
+			var inventory *checksum.Inventory
+			if tt.exact {
+				files := []string{filepath.Join(s.path, "README.md"), filepath.Join(s.path, "sub", "a.txt")}
+				if sumErr := checksum.GenerateChecksums(t.Context(), s.path, files); sumErr != nil {
+					t.Fatalf("GenerateChecksums: %v", sumErr)
+				}
+				_, inventory, _, err = checksum.ReadAndVerifyBundle(t.Context(), s.path, checksum.InventoryOptions{})
+				if err != nil {
+					t.Fatalf("ReadAndVerifyBundle: %v", err)
+				}
+				if want != nil {
+					want[checksum.ChecksumFileName] = treeSnapshot(t, s.path)[checksum.ChecksumFileName]
+				}
+			}
+			pubErr := s.publish(t.Context(), inventory)
+			s.discard()
+
+			got := treeSnapshot(t, dir)
+			if want == nil {
+				errorstest.WantReportedCode(t, pubErr, errors.ErrCodeInvalidRequest)
+				if !reflect.DeepEqual(got, before) {
+					t.Errorf("rejected publish changed the directory:\nbefore %v\nafter  %v", before, got)
+				}
+				return
+			}
+			if pubErr != nil {
+				t.Fatalf("publish: %v", pubErr)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("output directory holds %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestBundleStagePublish_KeepsStageOnFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root removes files from a read-only directory")
+	}
+	dir := t.TempDir()
+	locked := filepath.Join(dir, "001-old", "locked")
+	if err := os.MkdirAll(locked, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "v.yaml"), []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0755) })
+
+	s, err := stageBundle(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("stageBundle: %v", err)
+	}
+	stage := s.path
+	if err = os.WriteFile(filepath.Join(stage, "README.md"), []byte("new"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	pubErr := s.publish(t.Context(), nil)
+	s.discard()
+
+	errorstest.WantReportedCode(t, pubErr, errors.ErrCodeInternal)
+	if pubErr == nil || !strings.Contains(pubErr.Error(), stage) {
+		t.Errorf("publish error = %v, want it to name the stage %s", pubErr, stage)
+	}
+	if _, statErr := os.Stat(filepath.Join(stage, "README.md")); statErr != nil {
+		t.Errorf("failed publish removed the staged bundle: %v", statErr)
+	}
+}
+
+func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
+	// helm and helmfile ignore the repo URL; the GitOps deployers need one.
+	tests := allDeployerCases()
+
+	for _, tt := range tests {
+		for _, checksums := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/checksums=%t", tt.name, checksums), func(t *testing.T) {
+				dir := t.TempDir()
+				stale := filepath.Join(dir, localformat.ProvenanceFileName)
+				if err := os.WriteFile(stale, []byte("charts: []\n"), 0600); err != nil {
+					t.Fatalf("plant stale provenance: %v", err)
+				}
+
+				b, err := New(WithConfig(tt.configFor(
+					config.WithRepoURL("https://github.com/example/bundles.git"),
+					config.WithIncludeChecksums(checksums),
+					config.WithVendorCharts(false),
+				)))
+				if err != nil {
+					t.Fatalf("New: %v", err)
+				}
+				if _, makeErr := b.Make(context.Background(), closedWorldRecipeResult(), dir); makeErr != nil {
+					t.Fatalf("Make: %v", makeErr)
+				}
+
+				info, err := bundleinfo.Read(context.Background(), dir)
+				if err != nil {
+					t.Fatalf("Read: %v", err)
+				}
+				if info.Build.Settings.VendorCharts {
+					t.Fatal("vendorCharts is true; the run this asserts against must not vendor")
+				}
+				if info.Layout.Provenance != "" {
+					t.Errorf("layout.provenance = %q for a run that vendored nothing", info.Layout.Provenance)
+				}
+				if _, statErr := os.Lstat(stale); !stderrors.Is(statErr, os.ErrNotExist) {
+					t.Errorf("stale provenance.yaml survived the run: %v", statErr)
+				}
+			})
 		}
-		_, err = b.Make(context.Background(), closedWorldRecipeResult(), dir)
-		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
-			t.Errorf("Make() error = %v, want ErrCodeInvalidRequest", err)
-		}
-		if _, statErr := os.Stat(filepath.Join(dir, "README.md")); statErr != nil {
-			t.Errorf("deployer did not run before stale-file finalization failure: %v", statErr)
-		}
-	})
+	}
 }
 
 func TestMake_ClosedWorldAllDeployers(t *testing.T) {
@@ -680,62 +1030,6 @@ func TestBundleWritesBundleInfo(t *testing.T) {
 			}
 			if !strings.Contains(string(manifest), bundleinfo.FileName) {
 				t.Errorf("checksums.txt does not cover %s:\n%s", bundleinfo.FileName, manifest)
-			}
-		})
-	}
-}
-
-// TestBundleInfoIgnoresStaleProvenance covers the one bundle-root file that
-// does not self-heal on a rerun into the same directory.
-//
-// provenance.yaml is written only when a run vendors charts, and
-// localformat.pruneStaleFolders removes NNN-<name>/ directories and nothing
-// else. Bundle with --vendor-charts and then without, into the same output
-// directory, and the file from the first run survives into the second. A
-// record derived from the directory rather than from the run then claims
-// layout.provenance beside build.settings.vendorCharts=false, pointing a
-// consumer at a file this run neither wrote nor covered by its checksums.txt
-// — outside the bundle's own attestation subject.
-//
-// Vendoring needs upstream chart bytes, so the stale file is planted directly
-// rather than produced by a first run. Checksums are off because the exact
-// inventory finalization rejects any unexpected bundle file before the record
-// can be observed; that path fails loudly, and this one is the quiet one.
-func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
-	// helm and helmfile ignore the repo URL; the GitOps deployers need one.
-	tests := allDeployerCases()
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			stale := filepath.Join(dir, localformat.ProvenanceFileName)
-			if err := os.WriteFile(stale, []byte("charts: []\n"), 0600); err != nil {
-				t.Fatalf("plant stale provenance: %v", err)
-			}
-
-			b, err := New(WithConfig(tt.configFor(
-				config.WithRepoURL("https://github.com/example/bundles.git"),
-				config.WithIncludeChecksums(false),
-				config.WithVendorCharts(false),
-			)))
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
-			if _, makeErr := b.Make(context.Background(), closedWorldRecipeResult(), dir); makeErr != nil {
-				t.Fatalf("Make: %v", makeErr)
-			}
-
-			info, err := bundleinfo.Read(context.Background(), dir)
-			if err != nil {
-				t.Fatalf("Read: %v", err)
-			}
-			if info.Build.Settings.VendorCharts {
-				t.Fatal("vendorCharts is true; the run this asserts against must not vendor")
-			}
-			if info.Layout.Provenance != "" {
-				t.Errorf("layout.provenance = %q for a run that vendored nothing; the record "+
-					"indexes a file left behind by an earlier run, which this run's "+
-					"checksums.txt does not cover", info.Layout.Provenance)
 			}
 		})
 	}
@@ -1032,7 +1326,7 @@ func TestAttestBundle_EmbedsInjectedBinaryAttestation(t *testing.T) {
 		verifiedBinaryAttestation: fixture,
 	}
 
-	files, err := b.attestBundle(context.Background(), dir, nil, closedWorldRecipeResult())
+	files, err := b.attestBundleAt(context.Background(), dir, dir, nil, closedWorldRecipeResult())
 	if err != nil {
 		t.Fatalf("attestBundle() error = %v", err)
 	}
@@ -3496,16 +3790,7 @@ components:
           - controller.podSpec.nodeSelector
         requireNodeSelector: true
 `)
-	tmpData := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: registryYAML})
-
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
-	if err != nil {
-		t.Fatalf("NewLayeredDataProvider: %v", err)
-	}
-	recipe.EvictCachedRegistry(layered)
-	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
-	return layered
+	return dataDirProvider(t, providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: registryYAML}))
 }
 
 // requireNodeSelectorIfStorageClassSetFixtureComponent is a synthetic
@@ -3539,16 +3824,7 @@ components:
           - controller.podSpec.nodeSelector
         requireNodeSelectorIfStorageClassSet: true
 `)
-	tmpData := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: registryYAML})
-
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
-	if err != nil {
-		t.Fatalf("NewLayeredDataProvider: %v", err)
-	}
-	recipe.EvictCachedRegistry(layered)
-	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
-	return layered
+	return dataDirProvider(t, providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: registryYAML}))
 }
 
 // failingRegistryProvider is a recipe.DataProvider whose ReadFile always
@@ -4198,17 +4474,7 @@ func TestApplyNodeSchedulingOverrides_BoundProvider(t *testing.T) {
 		"          - " + nodeSelectorPath + "\n"
 	tmpDir := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: []byte(registryYAML)})
 
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	layered, layeredErr := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
-		ExternalDir: tmpDir,
-	})
-	if layeredErr != nil {
-		t.Fatalf("NewLayeredDataProvider: %v", layeredErr)
-	}
-	// Drop any cached registry for this provider identity so the test
-	// registry YAML is the source of truth on first read.
-	recipe.EvictCachedRegistry(layered)
-	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
+	layered := dataDirProvider(t, tmpDir)
 
 	// Sanity check: the embedded (global) registry must NOT know about the
 	// unique component, otherwise the assertion below cannot distinguish
@@ -4288,17 +4554,7 @@ func TestBundler_Make_BoundProviderEndToEnd(t *testing.T) {
 		"components/gpu-operator/values.yaml": valuesContent,
 	})
 
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
-		ExternalDir: tmpData,
-	})
-	if err != nil {
-		t.Fatalf("NewLayeredDataProvider: %v", err)
-	}
-	// Drop any cached registry for this provider identity so the merged
-	// external registry is the source of truth on first read.
-	recipe.EvictCachedRegistry(layered)
-	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
+	layered := dataDirProvider(t, tmpData)
 
 	// Build a recipe through the bound provider. Criteria selects
 	// h100-eks-ubuntu-training, which inherits gpu-operator from eks-training.
@@ -4818,15 +5074,7 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 			recipe.RegistryFileName: []byte(providertest.EmptyRegistryYAML),
 		})
 
-		embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-		layered, layeredErr := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
-			ExternalDir: tmpDir,
-		})
-		if layeredErr != nil {
-			t.Fatalf("NewLayeredDataProvider: %v", layeredErr)
-		}
-
-		recipeResult.BindDataProvider(layered)
+		recipeResult.BindDataProvider(dataDirProvider(t, tmpDir))
 
 		_, err := bundler.collectComponentManifests(context.Background(), recipeResult)
 		if err == nil {
@@ -6001,6 +6249,259 @@ func TestMake_RejectsDeployerConfigBeforeOutput(t *testing.T) {
 			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 			if _, statErr := os.Stat(outputDir); !stderrors.Is(statErr, os.ErrNotExist) {
 				t.Fatalf("output directory exists after rejection: %v", statErr)
+			}
+		})
+	}
+}
+
+// dataDirProvider returns a provider that layers dataDir over the embedded
+// data, as --data does, with its cached registry evicted.
+func dataDirProvider(t *testing.T, dataDir string) *recipe.LayeredDataProvider {
+	t.Helper()
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: dataDir})
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+	recipe.EvictCachedRegistry(layered)
+	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
+	return layered
+}
+
+// TestMake_DeployerFailureLeavesNoOutput covers deployers that reject the
+// bundle inside Generate, after the --data copy.
+func TestMake_DeployerFailureLeavesNoOutput(t *testing.T) {
+	const nestedData = "components/x/vals.yaml"
+	layered := dataDirProvider(t, providertest.WriteDir(t, map[string][]byte{
+		recipe.RegistryFileName: []byte(providertest.EmptyRegistryYAML),
+		"overlays/extra.yaml":   []byte("kind: RecipeMetadata\n"),
+		nestedData:              []byte("a: 1\n"),
+	}))
+
+	prefix := "t1-"
+	argo := func(deployerType config.DeployerType, appName string) []config.Option {
+		return []config.Option{
+			config.WithDeployer(deployerType),
+			config.WithRepoURL("https://github.com/example/gitops.git"),
+			config.WithAppName(appName),
+			config.WithArgoCDSettings(config.ArgoCDSettings{NamePrefix: &prefix}),
+		}
+	}
+	tests := []struct {
+		name      string
+		rejected  []config.Option
+		corrected []config.Option
+		errSubstr string
+	}{
+		{
+			name:      "argocd child name collides with the app name",
+			rejected:  argo(config.DeployerArgoCD, "t1-gpu-operator"),
+			corrected: argo(config.DeployerArgoCD, "good"),
+			errSubstr: "collides",
+		},
+		{
+			name:      "argocd-helm child name collides with the app name",
+			rejected:  argo(config.DeployerArgoCDHelm, "t1-gpu-operator"),
+			corrected: argo(config.DeployerArgoCDHelm, "good"),
+			errSubstr: "collides",
+		},
+		{
+			name: "fleet helmop with vendored charts",
+			rejected: []config.Option{
+				config.WithDeployer(config.DeployerFleet),
+				config.WithFleetMode(config.FleetModeHelmOp),
+				config.WithVendorCharts(true),
+			},
+			corrected: []config.Option{config.WithDeployer(config.DeployerFleet)},
+			errSubstr: "--fleet-mode helmop",
+		},
+	}
+
+	makeBundle := func(t *testing.T, dir string, att *recordingAttester, opts []config.Option) error {
+		t.Helper()
+		cfg := config.NewConfig(append([]config.Option{config.WithAttest(true)}, opts...)...)
+		b, err := New(WithConfig(cfg), WithVerifiedBinaryAttestation([]byte("stub")), WithAttester(att))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		rr := closedWorldRecipeResult()
+		rr.BindDataProvider(layered)
+		_, err = b.Make(t.Context(), rr, dir)
+		return err
+	}
+
+	for _, tt := range tests {
+		wantReject := func(t *testing.T, dir string) {
+			t.Helper()
+			err := makeBundle(t, dir, &recordingAttester{}, tt.rejected)
+			if err == nil || !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Fatalf("Make() error = %v, want it to mention %q", err, tt.errSubstr)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		}
+
+		t.Run(tt.name+": rejected run creates nothing and a corrected rerun succeeds", func(t *testing.T) {
+			parent := t.TempDir()
+			dir := filepath.Join(parent, "out")
+			wantReject(t, dir)
+			if entries, readErr := os.ReadDir(parent); readErr != nil || len(entries) != 0 {
+				t.Fatalf("rejected run left %v in the parent directory (err %v)", entries, readErr)
+			}
+
+			att := &recordingAttester{}
+			if err := makeBundle(t, dir, att, tt.corrected); err != nil {
+				t.Fatalf("corrected rerun: %v", err)
+			}
+			bundled := "data/" + nestedData
+			if _, statErr := os.Stat(filepath.Join(dir, filepath.FromSlash(bundled))); statErr != nil {
+				t.Errorf("bundle is missing %s: %v", bundled, statErr)
+			}
+			sums, readErr := os.ReadFile(filepath.Join(dir, checksum.ChecksumFileName))
+			if readErr != nil {
+				t.Fatalf("read checksums: %v", readErr)
+			}
+			if !strings.Contains(string(sums), bundled) {
+				t.Errorf("checksums do not track %s:\n%s", bundled, sums)
+			}
+			if att.subject == nil {
+				t.Fatal("attester was not called")
+			}
+			uris := make([]string, 0, len(att.subject.ResolvedDependencies))
+			for _, dep := range att.subject.ResolvedDependencies {
+				uris = append(uris, dep.URI)
+			}
+			if !slices.Contains(uris, "file://"+bundled) {
+				t.Errorf("attestation dependencies = %v, want file://%s", uris, bundled)
+			}
+		})
+
+		t.Run(tt.name+": rejected run leaves an existing empty directory empty", func(t *testing.T) {
+			dir := t.TempDir()
+			wantReject(t, dir)
+			entries, readErr := os.ReadDir(dir)
+			if readErr != nil {
+				t.Fatalf("read output directory: %v", readErr)
+			}
+			if len(entries) != 0 {
+				t.Errorf("rejection left %d entries in the output directory, first %q", len(entries), entries[0].Name())
+			}
+		})
+	}
+}
+
+func TestMake_CopiesOnlyTrackedDataFiles(t *testing.T) {
+	dataDir := providertest.WriteDir(t, map[string][]byte{
+		recipe.RegistryFileName:  []byte(providertest.EmptyRegistryYAML),
+		"components/x/vals.yaml": []byte("a: 1\n"),
+		"hooks/run.sh":           []byte("#!/bin/sh\n"),
+	})
+	if err := os.Chmod(filepath.Join(dataDir, "hooks", "run.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dataDir, "empty", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := New(WithConfig(config.NewConfig(config.WithIncludeChecksums(true))))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rr := closedWorldRecipeResult()
+	rr.BindDataProvider(dataDirProvider(t, dataDir))
+	dir := filepath.Join(t.TempDir(), "out")
+	if _, makeErr := b.Make(t.Context(), rr, dir); makeErr != nil {
+		t.Fatalf("Make: %v", makeErr)
+	}
+
+	data := filepath.Join(dir, "data")
+	if _, statErr := os.Stat(filepath.Join(data, "empty")); !stderrors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("bundle holds the data directory with no files: %v", statErr)
+	}
+	if got, readErr := os.ReadFile(filepath.Join(data, "components", "x", "vals.yaml")); readErr != nil || string(got) != "a: 1\n" {
+		t.Errorf("data/components/x/vals.yaml = %q, %v, want %q", got, readErr, "a: 1\n")
+	}
+	info, err := os.Stat(filepath.Join(data, "hooks", "run.sh"))
+	if err != nil {
+		t.Fatalf("stat data/hooks/run.sh: %v", err)
+	}
+	if info.Mode().Perm()&0o100 == 0 {
+		t.Errorf("data/hooks/run.sh mode = %v, want the execute bit kept", info.Mode())
+	}
+}
+
+func TestMake_OutputNamesPublishedDir(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  func(t *testing.T) (arg, abs string)
+	}{
+		{name: "default directory", dir: func(t *testing.T) (string, string) {
+			d := t.TempDir()
+			t.Chdir(d)
+			return "", d
+		}},
+		{name: "current directory", dir: func(t *testing.T) (string, string) {
+			d := t.TempDir()
+			t.Chdir(d)
+			return ".", d
+		}},
+		{name: "missing nested directory", dir: func(t *testing.T) (string, string) {
+			d := filepath.Join(t.TempDir(), "a", "b")
+			return d, d
+		}},
+		{name: "missing directory with a trailing separator", dir: func(t *testing.T) (string, string) {
+			d := filepath.Join(t.TempDir(), "out")
+			return d + string(filepath.Separator), d
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			arg, abs := tt.dir(t)
+			before, beforeErr := os.Stat(abs)
+			b, err := New(WithConfig(config.NewConfig(config.WithIncludeChecksums(true))))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			out, err := b.Make(t.Context(), closedWorldRecipeResult(), arg)
+			if err != nil {
+				t.Fatalf("Make: %v", err)
+			}
+			if beforeErr == nil {
+				if after, statErr := os.Stat(abs); statErr != nil || !os.SameFile(before, after) {
+					t.Errorf("bundling into an existing empty directory replaced it (stat error %v)", statErr)
+				}
+			}
+			want := filepath.Clean(cmp.Or(arg, "."))
+			if out.OutputDir != want {
+				t.Errorf("OutputDir = %q, want %q", out.OutputDir, want)
+			}
+			reported := append(append([]string{}, out.Deployment.Steps...), out.Deployment.Notes...)
+			for _, r := range out.Results {
+				reported = append(reported, r.Files...)
+			}
+			for _, s := range reported {
+				if strings.Contains(s, bundleStagePrefix) {
+					t.Errorf("output names the staging directory: %q", s)
+				}
+			}
+			for _, f := range out.Results[0].Files {
+				if _, statErr := os.Stat(f); statErr != nil {
+					t.Errorf("reported file is not published: %v", statErr)
+				}
+			}
+			for _, d := range []string{abs, filepath.Dir(abs)} {
+				entries, readErr := os.ReadDir(d)
+				if readErr != nil {
+					t.Fatalf("ReadDir: %v", readErr)
+				}
+				for _, e := range entries {
+					if strings.HasPrefix(e.Name(), bundleStagePrefix) {
+						t.Errorf("staging directory %s survived in %s", e.Name(), d)
+					}
+				}
+			}
+			opts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
+			if _, _, _, verifyErr := checksum.ReadAndVerifyBundle(t.Context(), abs, opts); verifyErr != nil {
+				t.Errorf("published bundle does not verify: %v", verifyErr)
 			}
 		})
 	}
