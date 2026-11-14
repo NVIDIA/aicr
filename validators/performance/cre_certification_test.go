@@ -119,6 +119,53 @@ func TestBuildCRECertificationIsDiscoverable(t *testing.T) {
 	}
 }
 
+// An entry's Image reaches CRE only as the category's options.image; without
+// it the category carries no options and CRE pulls the catalog's tags.
+func TestBuildCRECertificationWorkloadImage(t *testing.T) {
+	const pinned = "registry.example/nccl-tests:v1@sha256:" +
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	tests := []struct {
+		name        string
+		image       string
+		wantOptions bool
+	}{
+		{name: "pinned image", image: pinned, wantOptions: true},
+		{name: "no image", image: "", wantOptions: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := testCatalogEntry
+			entry.Image = tt.image
+			obj, err := buildCRECertification(creTestNamespace, "aicr-cre-image", twoNodeGPUConfig(), entry)
+			if err != nil {
+				t.Fatalf("buildCRECertification() error = %v", err)
+			}
+			categories, found, err := unstructured.NestedSlice(obj.Object, "spec", "categories")
+			if err != nil || !found || len(categories) != 1 {
+				t.Fatalf("spec.categories = %v (found %v, err %v), want one category", categories, found, err)
+			}
+			category, ok := categories[0].(map[string]any)
+			if !ok {
+				t.Fatalf("spec.categories[0] = %T, want an object", categories[0])
+			}
+			image, found, err := unstructured.NestedString(category, "options", "image")
+			if err != nil {
+				t.Fatalf("categories[0].options.image: %v", err)
+			}
+			if found != tt.wantOptions || image != tt.image {
+				t.Errorf("categories[0].options.image = %q (found %v), want %q (found %v)",
+					image, found, tt.image, tt.wantOptions)
+			}
+			if _, hasOptions := category["options"]; hasOptions != tt.wantOptions {
+				t.Errorf("categories[0] has options = %v, want %v", hasOptions, tt.wantOptions)
+			}
+			if _, found, _ := unstructured.NestedString(obj.Object, "spec", "image"); found {
+				t.Error("spec.image is set; the pin belongs to the category, not every category")
+			}
+		})
+	}
+}
+
 func twoNodeGPUConfig() *gpuConfiguration {
 	return &gpuConfiguration{
 		WorkerCount:     2,

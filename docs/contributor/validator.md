@@ -1491,9 +1491,13 @@ package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
 checks: `nccl-cre-all-reduce-bw` and `cre-training-goodput`. Neither branches on
 service or accelerator — `creQualifiedEntries` in
 `validators/performance/cre_qualification.go` records which combinations are
-qualified and the catalog entry and node cap each was measured with, so a new
-combination is an entry there plus a measured threshold rather than a new code
-path. `nccl-cre-all-reduce-bw` is qualified on `eks` x `h100` with
+qualified and the catalog entry, node cap and workload image each was measured
+with, so a new combination is an entry there plus a measured threshold rather
+than a new code path. The image is pinned by digest and submitted as the
+category's `options.image`; it must match
+`recipes/components/nvcre/workload-images.yaml`, which
+`TestCREQualifiedImagesMatchWorkloadClosure` enforces, so a chart bump that
+re-derives that file also moves the pins. `nccl-cre-all-reduce-bw` is qualified on `eks` x `h100` with
 `communication/nccl-all-reduce`, and `cre-training-goodput` on the same
 combination with `training/nemotron5-8b`, each capped at two nodes. A
 combination with no entry skips. Both create the
