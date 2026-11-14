@@ -15,6 +15,7 @@
 package constraints
 
 import (
+	stderrors "errors"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -275,6 +276,71 @@ func TestEvaluate_NilSnapshot(t *testing.T) {
 			}
 			if result.Passed {
 				t.Error("Passed = true on a nil snapshot, want false")
+			}
+		})
+	}
+}
+
+// TestEvaluate_ItemPredicateCodes pins the codes Evaluate reports for an item
+// predicate. A predicate that matches no entry is a missing reading and stays
+// ErrCodeNotFound. A predicate that matches several entries is an authoring
+// error (ErrCodeConflict) and must not carry NotFound anywhere in its chain:
+// pkg/recipe tests the whole chain for NotFound and silently excludes the
+// overlay when it finds one.
+func TestEvaluate_ItemPredicateCodes(t *testing.T) {
+	t.Parallel()
+
+	snap := &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeNetworkTopology,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "pfs",
+						Items: []measurement.ItemEntry{
+							{Data: map[string]measurement.Reading{"rail": measurement.Int(3), "pciAddress": measurement.Str("0000:0c:00.0")}},
+							{Data: map[string]measurement.Reading{"rail": measurement.Int(3), "pciAddress": measurement.Str("0000:0d:00.0")}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name         string
+		constraint   recipe.Constraint
+		wantCode     errors.ErrorCode
+		wantNotFound bool
+	}{
+		{
+			name:         "predicate matching no item yields NotFound",
+			constraint:   recipe.Constraint{Name: "NetworkTopology.pfs[rail=7].pciAddress", Value: "0000:0c:00.0"},
+			wantCode:     errors.ErrCodeNotFound,
+			wantNotFound: true,
+		},
+		{
+			name:       "predicate matching several items yields Conflict",
+			constraint: recipe.Constraint{Name: "NetworkTopology.pfs[rail=3].pciAddress", Value: "0000:0c:00.0"},
+			wantCode:   errors.ErrCodeConflict,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := Evaluate(tt.constraint, snap)
+			if result.Error == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if result.Passed {
+				t.Error("Passed = true, want false")
+			}
+			errorstest.WantReportedCode(t, result.Error, tt.wantCode)
+			notFound := stderrors.Is(result.Error, errors.New(errors.ErrCodeNotFound, ""))
+			if notFound != tt.wantNotFound {
+				t.Errorf("errors.Is(err, NotFound) = %v, want %v: %v", notFound, tt.wantNotFound, result.Error)
 			}
 		})
 	}
