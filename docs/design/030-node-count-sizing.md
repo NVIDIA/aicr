@@ -283,8 +283,9 @@ fractional `sizing.nodeCount` rather than truncating it into a lower tier.
 
 `recipes/components/<name>/sizing.yaml`, referenced from the registry
 entry's `sizing.file`. An illustrative file showing every kind of
-measurement. Its component and values are examples only; the shipped
-tiers are in the files themselves:
+measurement. Its component and values are examples only, for a path
+whose values file sets 2000Mi / 12Gi; the shipped tiers are in the files
+themselves:
 
 ```yaml
 apiVersion: aicr.run/v1beta1
@@ -294,7 +295,7 @@ resources:
   - path: controller.resources
     tiers:
       - maxNodes: 250
-        requests: {memory: 2000Mi}
+        # No requests: the requirement (2163Mi) is above today's 2000Mi.
         limits: {memory: 3Gi}
         measurements:
           - sets: []
@@ -306,7 +307,7 @@ resources:
             max: 1024Mi
             date: 2026-10-14
             ref: https://github.com/NVIDIA/aicr/issues/3214
-          - sets: [requests]
+          - sets: []
             kind: instantaneous
             gpuNodes: 118
             nodes: 436
@@ -326,11 +327,9 @@ resources:
             date: 2026-11-04
             ref: https://github.com/NVIDIA/aicr/issues/3214
       - maxNodes: 450
-        requests: {memory: 2000Mi}
         limits: {memory: 3Gi}
         measurements: [...]
       - maxNodes: 700
-        requests: {memory: 2000Mi}
         limits: {memory: 3Gi}
         measurements: [...]
       - maxNodes: 2000
@@ -389,10 +388,10 @@ replace it.
 - **Request:** the highest p90 among the covering reading and every
   reading inside the tier, using a reading's max when p90 was not kept and
   a truncated reading's value as it stands. Where a windowed p90 sets the
-  request and no cap lowers it, the pod stays under its request, and out
-  of the kubelet's first eviction group, about 90% of the time. A request
-  capped at the top tier's, or taken from an instantaneous or truncated
-  reading, carries no such figure. Not the limit, as GKE [recommends](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/vertical-pod-autoscaling):
+  request, the pod stays under its request, and out of the kubelet's
+  first eviction group, about 90% of the time. A request taken from an
+  instantaneous or truncated reading, or left at today's value because
+  its requirement is higher, carries no such figure. Not the limit, as GKE [recommends](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/vertical-pod-autoscaling):
   that would reserve the peak on every system node.
 - **Limit:** the highest peak among the covering reading and every reading
   inside the tier, times 1.3. The 30% covers spikes above p90 and some drift
@@ -402,7 +401,11 @@ replace it.
   not a limit candidate. If a tier holds one, the nearest reading above
   the bound whose peak exceeds the limit that killed it joins the
   candidates. The limit is still the highest peak among all of them, so
-  a higher untruncated peak inside the tier is never discarded.
+  a higher untruncated peak inside the tier is never discarded. If no
+  reading above the bound exceeds the killing limit, the tier leaves the
+  limit out and today's value applies, until such a reading exists. A
+  tier's limit is therefore always above every `truncatedAt` recorded in
+  it.
 - **Instantaneous readings:** the reading stands in for p90, and reading ×
   1.7 for the peak, so it contributes reading × 1.7 × 1.3 to a limit. 1.7 is
   the largest max-to-p90 ratio measured on any controller.
@@ -410,18 +413,22 @@ replace it.
   of each pod's p90, and the limit uses the largest single-pod peak.
 - **Rounding:** round up to a multiple of 256Mi below 2Gi, and of 512Mi
   from 2Gi.
-- **Ordering:** derive tiers from the lowest up. A tier's limit is at
-  least the limit of the tier below it, so a requirement measured in a
-  lower tier carries upward and is never clamped down to fit. A tier may
-  equal the tier above.
-- **Today's values are the ceiling:** no request is above the top
-  tier's, and a field whose requirement is at or above today's value is
-  left out of the tier, and of every tier above it, so today's value
-  applies. Two cases differ. If today's value is below a measured peak,
-  the default itself is undersized: that is a defect in the values file,
-  fixed there, not by sizing. If it is at or above the peak but below
-  peak × 1.3, the tier keeps today's value with a thinner margin, and
-  the measurement stays in the file to show it.
+- **Ordering:** derive tiers from the lowest up. A tier's request and
+  limit are each at least the tier below's, so a requirement measured in
+  a lower tier carries upward and is never clamped down to fit. A tier
+  may equal the tier above.
+- **Today's values are the ceiling:** a request or limit whose
+  requirement is at or above today's value is left out of the tier, and
+  of every tier above it, so today's value applies. Where values files
+  set different values for a path, today's value is the highest of them;
+  a file that sets less is covered when sizing runs, which takes the
+  smaller of the resolved value and the tier's. For a limit, two cases
+  differ. If the values file of the platform a reading was taken on sets
+  a limit below that reading's peak, that file's default is undersized: a
+  defect fixed in that file, not by sizing, and no finding about another
+  platform's file. If the limit is at or above the peak but below peak ×
+  1.3, the tier keeps today's value with a thinner margin, and the
+  measurement stays in the file to show it.
 - **Same bounds:** every component's file declares the same `maxNodes`
   set, so one count selects the same row in each. A unit test over the
   registry enforces it.
@@ -440,6 +447,7 @@ replace it.
 - a quantity that does not parse;
 - a limit below its request;
 - a tier value above the same field in the next higher tier;
+- a limit at or below a `truncatedAt` recorded in the same tier;
 - a tier that sets `requests` or `limits` with no measurement whose `sets`
   names it;
 - a measurement missing `kind`, `gpuNodes`, `max` or `date`, a windowed
