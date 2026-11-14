@@ -31,6 +31,7 @@ import (
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator/labels"
 	v1 "aicr.run/pkg/validator/v1"
 	"aicr.run/validators"
 	appsv1 "k8s.io/api/apps/v1"
@@ -1092,8 +1093,8 @@ func TestHPAScenarioDeployCreatesScrapeConfig(t *testing.T) {
 	if targets, _, _ := unstructured.NestedStringSlice(pm.Object, "spec", "namespaceSelector", "matchNames"); !slices.Equal(targets, []string{cp.ns}) {
 		t.Errorf("PodMonitor selects namespaces %v, want [%s]", targets, cp.ns)
 	}
-	if pm.GetLabels()[gpuTestRunLabel] != s.testRun.token {
-		t.Errorf("PodMonitor labels = %v, want %s=%s", pm.GetLabels(), gpuTestRunLabel, s.testRun.token)
+	if pm.GetLabels()[labels.GPUTestRun] != s.testRun.token {
+		t.Errorf("PodMonitor labels = %v, want %s=%s", pm.GetLabels(), labels.GPUTestRun, s.testRun.token)
 	}
 	if pm.GetLabels()[prometheusReleaseLabel] != prometheusComponentName {
 		t.Errorf("PodMonitor labels = %v, want %s=%s", pm.GetLabels(), prometheusReleaseLabel, prometheusComponentName)

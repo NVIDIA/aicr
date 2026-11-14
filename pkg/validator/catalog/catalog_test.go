@@ -58,6 +58,29 @@ func TestCatalogTimeoutsFitFacadeBudget(t *testing.T) {
 	}
 }
 
+// TestCatalogTimeoutsFitSweepMinAge asserts every catalog entry's full
+// per-check envelope stays below ValidationSweepMinAge, the `aicr sweep`
+// --older-than default: a namespace or run-scoped object younger than the
+// floor may still belong to a run whose cleanup has not reached it, so the
+// sweeper's age guard must outlast anything a check can legitimately keep.
+func TestCatalogTimeoutsFitSweepMinAge(t *testing.T) {
+	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	for _, v := range catalog.Validators {
+		timeout := v.Timeout
+		if timeout == 0 {
+			timeout = defaults.ValidatorDefaultTimeout
+		}
+		envelope := v1.WaitEnvelopeFor(timeout) + defaults.K8sCleanupTimeout + defaults.K8sPodTerminationWaitTimeout
+		if envelope >= defaults.ValidationSweepMinAge {
+			t.Errorf("%s: per-check envelope %v (wait + capture + termination wait) must stay under ValidationSweepMinAge (%v)",
+				v.Name, envelope, defaults.ValidationSweepMinAge)
+		}
+	}
+}
+
 // TestDeploymentPhaseEnvelopeFitsOperatorJobDeadline asserts that the
 // operator's `aicr validate --phase deployment` Job can run every deployment
 // check to the end of its wait envelope (v1.WaitEnvelopeFor) plus the result

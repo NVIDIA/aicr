@@ -52,6 +52,30 @@ const (
 	// gang-scheduling conformance check creates.
 	GangSchedulingTestNamespacePrefix = "gang-scheduling-test-"
 
+	// The gang-scheduling object name prefixes below are the names the
+	// conformance check writes for one run: prefix + the run's 16-byte hex
+	// token (+ a decimal member index for pods). `aicr sweep` matches
+	// residue in Run:ai Project namespaces by exactly these names, not by
+	// label alone, so a rename must move the check and the sweeper together.
+	GangSchedulingPodPrefix           = "gang-worker-"
+	GangSchedulingNegativePodPrefix   = "gang-neg-worker-"
+	GangSchedulingGroupPrefix         = "gang-group-"
+	GangSchedulingNegativeGroupPrefix = "gang-neg-group-"
+
+	// GPUTestNamespacePrefix prefixes the PER-RUN test namespace the GPU
+	// conformance checks create. A fresh namespace per run makes cleanup a
+	// single bounded operation — delete the namespace and wait — and closes
+	// the ambiguous-create leak window: once the namespace is Terminating,
+	// the NamespaceLifecycle admission plugin rejects subsequent Creates in
+	// it, and the namespace deletion controller durably garbage-collects any
+	// content that still lands before finalizing.
+	GPUTestNamespacePrefix = "aicr-gpu-test-"
+
+	// ClusterAutoscalingTestNamespacePrefix prefixes the per-run namespace
+	// the cluster-autoscaling conformance check creates. Unlike the other
+	// per-run namespaces its token is 4 random bytes (8 hex chars), not 16.
+	ClusterAutoscalingTestNamespacePrefix = "cluster-auto-test-"
+
 	// EnvRunaiProjectNamespace names the Run:ai Project namespace the
 	// gang-scheduling conformance check runs its test pods in.
 	EnvRunaiProjectNamespace = "AICR_RUNAI_PROJECT_NAMESPACE"
