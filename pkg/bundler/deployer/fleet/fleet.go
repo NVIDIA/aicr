@@ -328,9 +328,13 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
+	lfComponents, err := g.toLocalformatComponents(ctx, sortedRefs)
+	if err != nil {
+		return nil, err
+	}
 	writeResult, err := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
-		Components:             toLocalformatComponents(sortedRefs, g.ComponentValues, g.DynamicValues),
+		Components:             lfComponents,
 		AICRVersion:            g.Version,
 		ComponentPreManifests:  g.ComponentPreManifests,
 		ComponentPostManifests: g.ComponentPostManifests,
@@ -614,11 +618,19 @@ func valuesFilesFor(f localformat.Folder) []string {
 	return out
 }
 
-func toLocalformatComponents(
+func (g *Generator) toLocalformatComponents(
+	ctx context.Context,
 	refs []recipe.ComponentRef,
-	values map[string]map[string]any,
-	dynamic map[string][]string,
-) []localformat.Component {
+) ([]localformat.Component, error) {
+
+	var chartDigests map[string]string
+	if g.VendorCharts {
+		var err error
+		chartDigests, err = deployer.ResolveChartDigests(ctx, g.RecipeResult.DataProvider(), refs)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	out := make([]localformat.Component, 0, len(refs))
 	for _, ref := range refs {
@@ -628,14 +640,15 @@ func toLocalformatComponents(
 			Repository:   ref.Source,
 			ChartName:    ref.EffectiveChart(),
 			Version:      ref.Version,
+			ChartDigest:  chartDigests[ref.Name],
 			IsOCI:        strings.HasPrefix(ref.Source, "oci://"),
 			Tag:          ref.Tag,
 			Path:         ref.Path,
-			Values:       values[ref.Name],
-			DynamicPaths: dynamic[ref.Name],
+			Values:       g.ComponentValues[ref.Name],
+			DynamicPaths: g.DynamicValues[ref.Name],
 		})
 	}
-	return out
+	return out, nil
 }
 
 func (g *Generator) writeReadme(outputDir string, folders []localformat.Folder, docs []FleetYAML,
