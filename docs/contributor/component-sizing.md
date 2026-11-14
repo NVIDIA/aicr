@@ -51,37 +51,44 @@ resources:
   - path: operator.resources          # a resources block, as --set writes it
     tiers:
       - maxNodes: 250
-        requests: {memory: 300Mi}
+        requests: {memory: 256Mi}     # leave a field out to keep the values file's
         limits: {memory: 768Mi}
         measurements:
-          - sets: [requests]          # which fields this reading set; [] if it only constrained
+          - sets: [requests, limits]  # which fields this reading set; [] if it only constrained
             kind: windowed            # or instantaneous
             window: 24h               # windowed only
             gpuNodes: 244
-            nodes: 249                # total nodes, optional
+            nodes: 249                # total nodes; required on a windowed reading that sets limits
             pods: 11029               # optional
-            p90: 300Mi                # optional
+            p90: 250Mi                # optional
             max: 365Mi
-            truncatedAt: 2Gi          # optional: the limit in force while OOM-killed
+            # truncatedAt: 512Mi      # only on a reading taken while OOM-killed: the limit then in force
             date: 2026-10-14
+            version: v26.3.0          # optional: the component's chart version on that cluster
             ref: https://github.com/NVIDIA/aicr/issues/3214   # optional link to the raw data
       - maxNodes: 2000                # a bound with no values changes nothing
 ```
 
-The loader fails closed on: a malformed `path`; a `basis` other than
-`gpuNodes`; `maxNodes` values that do not strictly ascend; an unparseable
-quantity; a limit below its request; a tier value above the same field in the
-next higher tier; a tier that sets `requests` or `limits` with no measurement
+The loader fails closed on: an `apiVersion` or `kind` other than
+`aicr.run/v1beta1` and `ComponentSizing`; a malformed `path`; a `basis` other
+than `gpuNodes`; `maxNodes` values that do not strictly ascend; an
+unparseable quantity; a limit below its request; a tier value above the same
+field in the next higher tier; a limit at or below a `truncatedAt` recorded
+in the same tier; a tier that sets `requests` or `limits` with no measurement
 whose `sets` names it; and a measurement missing `kind`, `gpuNodes`, `max` or
-`date`, or a windowed one missing `window`.
+`date`, a windowed one missing `window`, or a windowed one that sets `limits`
+missing `nodes`.
 
 `TestRegistrySizingPathsAreSet` fails when a sizing path sets memory in none
 of the component's `values*.yaml` files, so a key renamed by a chart bump
 cannot turn sizing into a silent no-op. No unit test asserts a real tier's
 values; they are validated against measurements, not pinned in the suite.
 
-Keep the same `maxNodes` bounds in every component's file, so one count
-selects the same row everywhere.
+Every component's file declares the same `maxNodes` bounds, so one count
+selects the same row everywhere; `TestRegistrySizingFilesShareBounds` fails
+otherwise. Do not name a path that one of the component's bundle-rendered
+manifests reads: those are rendered at generation time and cannot follow
+`sizing.nodeCount`.
 
 ## Deriving a tier
 
@@ -94,9 +101,11 @@ selects the same row everywhere.
   truncated reading's value as it stands.
 - **Limit:** the highest peak among the covering reading and every reading
   inside the tier, × 1.3.
-- **Truncated readings.** If a reading inside the tier was taken while the
-  container was being OOM-killed, take the limit from the nearest reading
-  above the bound whose peak exceeds the limit that killed it.
+- **Truncated readings.** A reading taken while the container was being
+  OOM-killed is not a limit candidate. If the tier holds one, add the nearest
+  reading above the bound whose peak exceeds the limit that killed it; the
+  limit is still the highest peak among all candidates. With no such reading
+  above the bound, leave the limit out of the tier.
 - **Instantaneous readings** stand in for p90 as they are, and × 1.7 for the
   peak.
 - **DaemonSets:** the request uses the median across pods of each pod's p90;
@@ -104,8 +113,13 @@ selects the same row everywhere.
 - **Drift.** For a controller whose peak grows at a constant node count, use
   the drifted peak.
 - **Rounding:** up to a multiple of 256Mi below 2Gi, of 512Mi from 2Gi.
-- **Caps:** no value above the same field in the tier above, and no request
-  above the values file's. A tier may equal the tier above.
+- **Ordering:** derive tiers from the lowest up. A tier's request and limit
+  are each at least the tier below's; a tier may equal the tier above.
+- **The values files are the ceiling:** leave out a request or limit whose
+  requirement is at or above the values file's, in that tier and every tier
+  above it. Where values files differ for a path, use the highest. A values
+  file whose limit is below a peak measured on its own platform is undersized:
+  fix that file.
 
 Record every reading the derivation used in `measurements`, with `sets`
 naming the fields it decided. A reading that only constrained the result,
