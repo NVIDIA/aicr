@@ -71,7 +71,7 @@ type EmitOptions struct {
 	PhaseResults []*validator.PhaseResult
 
 	// Catalog is the validator catalog snapshot used for the predicate's
-	// validatorImages, which lists the catalog images of the phases
+	// validatorImages, which lists the catalog images of the checks
 	// PhaseResults show ran, and the auto-BOM, which lists the same images.
 	// A nil Catalog leaves both with only the images PhaseResults report.
 	Catalog *catalog.ValidatorCatalog

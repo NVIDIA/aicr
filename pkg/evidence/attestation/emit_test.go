@@ -443,7 +443,7 @@ func TestEmit_RejectsMutableValidatorTag(t *testing.T) {
 		Recipe:       emitRecipe(),
 		Snapshot:     snapshotWithSensitiveData(),
 		Catalog:      emitCatalog("v1.0.0", "edge"),
-		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, nil)},
+		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, nil, nil)},
 		AICRVersion:  "v0.0.0-test",
 	})
 	if err == nil {
@@ -553,7 +553,7 @@ func TestEmit_ImmutableValidatorTagsPass(t *testing.T) {
 		Recipe:       emitRecipe(),
 		Snapshot:     snapshotWithSensitiveData(),
 		Catalog:      emitCatalog("v1.0.0", "sha-1f27c0dc6e4617db9b505eb10ee9d910a08968aa", "uat-19283746"),
-		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, nil)},
+		PhaseResults: []*validator.PhaseResult{phaseWithImages(validator.PhaseConformance, nil, nil, nil)},
 		AICRVersion:  "v0.0.0-test",
 	}); err != nil {
 		t.Fatalf("Emit with immutable validator tags: %v", err)

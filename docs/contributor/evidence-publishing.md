@@ -92,16 +92,15 @@ Each check records its validator image's registry digest, taken from the pod's
 The `os/arch` is the Node's, or the validator's `platform` stamp when the
 caller cannot read Nodes. A validator reports the images of workloads it
 launches, such as the `aiperf-bench` Job, with the `##AICR-IMAGE##` sentinel.
-`validatorImages` lists the catalog images of each phase where some check was
-not skipped, and every image a check reports, once per recorded digest and
-platform.
+`validatorImages` lists the catalog image of each check that was not skipped,
+and every image a check reports, once per recorded digest and platform.
 
 The digest is what the kubelet pulled, not what the tag resolves to now.
 containerd reports the multi-arch index digest. Other runtimes may report the
 node platform's manifest digest, so each entry also records `platform`.
 
-A phase that did not run, or whose checks were all skipped as in a
-`--no-cluster` run, lists no catalog images. A check whose pod was deleted
+A check that did not run, or was skipped as in a `--no-cluster` run, lists no
+catalog image. A check whose pod was deleted
 before it could be read, or an image side-loaded into kind, records no digest.
 Such an image is listed with an empty digest even when another run recorded
 one, so it still gets the mutable-tag check. A catalog image that no run

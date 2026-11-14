@@ -104,8 +104,8 @@ func TestValidatorImagesForPredicate(t *testing.T) {
 	digA := "sha256:" + strings.Repeat("a", 64)
 	digB := "sha256:" + strings.Repeat("b", 64)
 	cat := &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-		{Name: "a", Phase: string(validator.PhaseDeployment), Image: deploy},
-		{Name: "b", Phase: string(validator.PhasePerformance), Image: perf},
+		{Name: "check-0", Phase: string(validator.PhaseDeployment), Image: deploy},
+		{Name: "check-0", Phase: string(validator.PhasePerformance), Image: perf},
 	}}
 	deployment := func(images ...[]ctrf.PodImage) *validator.PhaseResult {
 		return phaseWithImages(validator.PhaseDeployment, images...)
@@ -121,6 +121,8 @@ func TestValidatorImagesForPredicate(t *testing.T) {
 	checkCat := &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
 		{Name: "check-1", Phase: string(validator.PhaseDeployment), Image: deploy},
 	}}
+	uncataloged := deployment(nil)
+	uncataloged.Report.Results.Tests[0].Name = "phase-interrupted"
 	digestedThenUnrecorded := func(status string) *validator.PhaseResult {
 		pr := deployment([]ctrf.PodImage{{Image: deploy, Digest: digA}}, nil)
 		pr.Report.Results.Tests[1].Status = status
@@ -221,6 +223,21 @@ func TestValidatorImagesForPredicate(t *testing.T) {
 			cat:     checkCat,
 			results: []*validator.PhaseResult{digestedThenUnrecorded(ctrf.StatusSkipped)},
 			want:    []ValidatorImage{{Image: deploy, Digest: digA}},
+		},
+		{
+			name: "skipped check's image is left out when another check in its phase ran",
+			cat: &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
+				{Name: "check-0", Phase: string(validator.PhaseDeployment), Image: deploy},
+				{Name: "check-1", Phase: string(validator.PhaseDeployment), Image: perf},
+			}},
+			results: []*validator.PhaseResult{digestedThenUnrecorded(ctrf.StatusSkipped)},
+			want:    []ValidatorImage{{Image: deploy, Digest: digA}},
+		},
+		{
+			name:    "test outside the catalog lists no catalog image",
+			cat:     cat,
+			results: []*validator.PhaseResult{uncataloged},
+			want:    nil,
 		},
 		{
 			name:    "nil catalog keeps reported images",

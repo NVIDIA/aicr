@@ -190,7 +190,7 @@ func UnpinnedValidatorImages(images []ValidatorImage) []string {
 }
 
 // ValidatorImagesForPredicate returns the predicate's validatorImages: the
-// images in cat of each phase in results with a test that was not skipped,
+// image in cat of each check with a test in results that was not skipped,
 // and every other image a test in results reports. Each appears once per
 // digest and platform recorded for it, sorted by platform and digest. It
 // appears first with an empty Digest when no digest was recorded for it, when
@@ -199,29 +199,18 @@ func UnpinnedValidatorImages(images []ValidatorImage) []string {
 // sees a run of a mutable ref with unknown provenance. Records failing
 // ctrf.PodImage.Valid are ignored.
 func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*validator.PhaseResult) []ValidatorImage {
-	notSkipped := func(tr ctrf.TestResult) bool { return tr.Status != ctrf.StatusSkipped }
-	ran := map[string]bool{}
-	for _, pr := range results {
-		if pr != nil && pr.Report != nil && slices.ContainsFunc(pr.Report.Results.Tests, notSkipped) {
-			ran[string(pr.Phase)] = true
-		}
-	}
 	type check struct{ phase, name string }
-	var refs []string
-	listed := map[string]bool{}
 	checkImage := map[check]string{}
 	if cat != nil {
 		for _, v := range cat.Validators {
-			if v.Image == "" {
-				continue
-			}
-			checkImage[check{v.Phase, v.Name}] = v.Image
-			if ran[v.Phase] && !listed[v.Image] {
-				listed[v.Image] = true
-				refs = append(refs, v.Image)
+			if v.Image != "" {
+				checkImage[check{v.Phase, v.Name}] = v.Image
 			}
 		}
 	}
+	var reported []string
+	ranImage := map[string]bool{}
+	reportedImage := map[string]bool{}
 	digested := map[string][]ValidatorImage{}
 	undigested := map[string]bool{}
 	seen := map[ValidatorImage]bool{}
@@ -231,14 +220,20 @@ func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*valid
 		}
 		for _, tr := range pr.Report.Results.Tests {
 			catalogImage := checkImage[check{string(pr.Phase), tr.Name}]
+			if tr.Status == ctrf.StatusSkipped {
+				catalogImage = ""
+			}
+			if catalogImage != "" {
+				ranImage[catalogImage] = true
+			}
 			catalogDigested := false
 			for _, podImg := range tr.Images {
 				if !podImg.Valid() {
 					continue
 				}
-				if !listed[podImg.Image] {
-					listed[podImg.Image] = true
-					refs = append(refs, podImg.Image)
+				if !reportedImage[podImg.Image] {
+					reportedImage[podImg.Image] = true
+					reported = append(reported, podImg.Image)
 				}
 				img := ValidatorImage(podImg)
 				switch {
@@ -254,12 +249,28 @@ func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog, results []*valid
 			}
 			// A check that ran with no digest for its own image, including
 			// one whose pod could not be read, leaves that image unidentified.
-			if catalogImage != "" && notSkipped(tr) && !catalogDigested {
+			if catalogImage != "" && !catalogDigested {
 				undigested[catalogImage] = true
 			}
 		}
 	}
 
+	var refs []string
+	listed := map[string]bool{}
+	if cat != nil {
+		for _, v := range cat.Validators {
+			if ranImage[v.Image] && !listed[v.Image] {
+				listed[v.Image] = true
+				refs = append(refs, v.Image)
+			}
+		}
+	}
+	for _, ref := range reported {
+		if !listed[ref] {
+			listed[ref] = true
+			refs = append(refs, ref)
+		}
+	}
 	if len(refs) == 0 {
 		return nil
 	}
