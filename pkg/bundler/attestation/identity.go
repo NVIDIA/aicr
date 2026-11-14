@@ -38,9 +38,9 @@ type SigningIdentity interface {
 	// for keyless signing, or (nil, nil) for key-based signing.
 	CertProvider() (sign.CertificateProvider, *sign.CertificateProviderOptions)
 
-	// FallbackIdentity is the audit identity known before signing: the KMS
-	// key URI for KMS, "" for keyless (whose identity is the post-sign
-	// Fulcio SAN). SignStatement prefers the cert-extracted SAN and falls
-	// back to this when the cert path produced none.
+	// FallbackIdentity is the signer identity when no Fulcio certificate is
+	// issued. It is the KMS key URI for KMS and "" for keyless, where
+	// signing takes the SAN of the certificate issued before the statement
+	// is built.
 	FallbackIdentity() string
 }

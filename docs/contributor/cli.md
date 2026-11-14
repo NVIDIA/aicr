@@ -52,7 +52,7 @@ Subcommands registered in `pkg/cli/root.go` (`Commands:` slice on
 | `evidence verify` | `evidence_verify.go` | Verify integrity claims on an evidence bundle (offline or registry). |
 | `upgrade-check` | `upgrade_check.go` | Report whether moving between two recipes or bundles, or from what a cluster has installed (`--from cluster`), is safe to apply, with an advisory scan for live objects the upgrade could destroy (`--scan-cluster`). |
 | `diff` | `diff.go` | Compare two snapshots field-by-field, reporting added, removed, and modified readings (optionally failing on drift). |
-| `mirror` / `mirror list` | `mirror.go` | Mirror charts and images referenced by a recipe to an air-gapped registry; list what would be mirrored. |
+| `mirror` / `mirror list` | `mirror.go` | Discover the container images and Helm charts a recipe references and emit them (yaml, json, hauler, or zarf) for external air-gap mirroring tools. AICR does not push to a registry itself. |
 | `trust update` | `trust.go` | Refresh the Sigstore TUF trust root used by `verify` / `evidence verify`. |
 | `skill` | `skill.go` | Generate an agent skill file (Claude Code, Codex) from the live CLI command tree. |
 

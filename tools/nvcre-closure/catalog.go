@@ -191,16 +191,22 @@ func splitBlocks(entry string) []block {
 
 	blocks = append(blocks, block{body: strings.Join(lines[:overridesAt], "\n")})
 
+	addOverride := func(item []string) {
+		body := strings.Join(item, "\n")
+		blocks = append(blocks, block{sel: parseSelector(body), body: body})
+	}
 	start := -1
-	for i := overridesAt + 1; i <= len(lines); i++ {
-		isItem := i < len(lines) && strings.HasPrefix(lines[i], "- ")
-		if isItem || i == len(lines) {
-			if start != -1 {
-				body := strings.Join(lines[start:i], "\n")
-				blocks = append(blocks, block{sel: parseSelector(body), body: body})
-			}
-			start = i
+	for i := overridesAt + 1; i < len(lines); i++ {
+		if !strings.HasPrefix(lines[i], "- ") {
+			continue
 		}
+		if start != -1 {
+			addOverride(lines[start:i])
+		}
+		start = i
+	}
+	if start != -1 {
+		addOverride(lines[start:])
 	}
 	return blocks
 }

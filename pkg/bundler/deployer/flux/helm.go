@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	helmutil "github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -198,7 +199,7 @@ func (g *Generator) generateHelmComponent(ref recipe.ComponentRef, compDir strin
 	// verbatim, so stripping the v prefix produces a tag that does not
 	// exist in the registry. HTTPS Helm repos use index.yaml with SemVer
 	// matching, so normalize only there.
-	version := ref.Version
+	version := helmutil.ChartVersion(ref.Source, ref.Version)
 	if !strings.HasPrefix(ref.Source, "oci://") {
 		version = deployer.NormalizeVersion(version)
 	}
@@ -456,7 +457,7 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 	output.TotalSize += int64(len(tgz))
 
 	// Write wrapper Chart.yaml declaring the upstream as a dependency.
-	version := deployer.NormalizeVersionWithDefault(ref.Version)
+	version := deployer.NormalizeVersionWithDefault(helmutil.ChartVersion(ref.Source, ref.Version))
 	wrapperYAML, err := localformat.RenderWrapperChartYAML(localformat.WrapperChartInput{
 		Name:           ref.Name,
 		Parent:         ref.Name,

@@ -96,20 +96,6 @@ spec:
       dependencyRefs:
         - nodewright-operator
 
-    # Prometheus persistent storage (provide --storage-class at bundle time, e.g. oci-bv)
-    - name: kube-prometheus-stack
-      type: Helm
-      overrides:
-        prometheus:
-          prometheusSpec:
-            storageSpec:
-              emptyDir: null
-              volumeClaimTemplate:
-                spec:
-                  accessModes: ["ReadWriteOnce"]
-                  resources:
-                    requests:
-                      storage: 50Gi
     # NVSentinel's labeler.assumeDriverInstalled is owned by the gpuStack
     # profile below (#2175): whether a driver pod exists for the labeler to
     # watch depends on the selected value, so the polarity is per value —
@@ -118,6 +104,14 @@ spec:
     # No overlay-level value here.
     - name: nvsentinel
       type: Helm
+
+    # nktp: OKE's metrics-server is an optional cluster add-on, not deployed
+    # by default.
+    - name: nktp
+      type: Helm
+      overrides:
+        metrics-server:
+          enabled: true
 
     # OKE DRA driver: host-installed driver root, compute domains enabled
     - name: nvidia-dra-driver-gpu

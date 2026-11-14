@@ -91,7 +91,9 @@ type ValidatorEntry struct {
 
 	// Timeout is the maximum execution time for this validator.
 	// Published to the container as AICR_CHECK_TIMEOUT; the Job's
-	// activeDeadlineSeconds adds defaults.ValidatorJobDeadlineHeadroom on top.
+	// activeDeadlineSeconds adds defaults.ValidatorJobDeadlineHeadroom on top
+	// (startup, cleanup and result-flush grace); the orchestrator then waits
+	// out the SIGTERM window (v1.WaitEnvelopeFor).
 	Timeout time.Duration `json:"timeout" yaml:"timeout"`
 
 	// Args are the container arguments.

@@ -28,7 +28,7 @@ const (
 	// eventExporterImage is the image docs/user/container-images.md
 	// discloses for the mixin. The static BOM cannot see a mixin-gated
 	// subchart, so this assertion is what keeps that note honest.
-	eventExporterImage = "ghcr.io/nvidia/nvsentinel/event-exporter:v1.28.0"
+	eventExporterImage = "ghcr.io/nvidia/nvsentinel/event-exporter:v1.31.0"
 )
 
 // TestNVSentinelEventExporterChartRender renders the pinned nvsentinel chart

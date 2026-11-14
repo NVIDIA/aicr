@@ -345,13 +345,13 @@ func TestBundleVerifyCmd_IgnoreTLogRequiresKey(t *testing.T) {
 func TestBundleVerifyCmd_RejectsUnmanagedFile(t *testing.T) {
 	dir := t.TempDir()
 	valuesPath := filepath.Join(dir, "values.yaml")
-	if err := os.WriteFile(valuesPath, []byte("replicas: 1\n"), 0600); err != nil {
+	if err := os.WriteFile(valuesPath, []byte("replicas: 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := checksum.GenerateChecksums(context.Background(), dir, []string{valuesPath}); err != nil {
 		t.Fatalf("GenerateChecksums: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "unmanaged.txt"), []byte("unexpected"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "unmanaged.txt"), []byte("unexpected"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

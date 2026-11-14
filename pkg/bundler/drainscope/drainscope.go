@@ -16,7 +16,7 @@
 // long it waits: the namespaces a drain never evicts from, and the default
 // drain mode.
 //
-// Values verified against NVSentinel chart v1.28.0
+// Values verified against NVSentinel chart v1.31.0
 // (charts/node-drainer/values.yaml, templates/configmap.yaml, and
 // node-drainer/pkg/config/config.go, pkg/informers/informers.go):
 // node-drainer compiles systemNamespaces with Go's regexp at startup, so an

@@ -15,7 +15,8 @@
 # NVSentinel's slinky-drainer plugin: reconciles the DrainRequests node-drainer
 # creates in customDrain mode against Slinky, so a quarantined Slurm node is
 # drained through Slurm instead of by pod eviction. Vendored from NVSentinel
-# v1.28.0 (plugins/slinky-drainer/config/{rbac,manager}, commit 5b438529),
+# v1.30.0 (plugins/slinky-drainer/config/{rbac,manager}, commit 13ba7f453e10;
+# unchanged in v1.31.0 apart from go.mod),
 # which ships the plugin only as Kustomize. Differences from upstream:
 #
 #   - namespace is the release namespace, which must be NVSentinel's: the
@@ -127,7 +128,7 @@ spec:
           # Literal, not templated from values: tools/bom and aicr mirror read
           # embedded manifests without rendering them. Moves with nvsentinel's
           # defaultVersion (TestSlinkyDrainerImagePinnedEverywhere).
-          image: ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.28.0@sha256:bf6ccaf1d6c035aa5f86e70a929dc6d9a18c5c05b10104d23c69aacff35bcb14
+          image: ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.31.0@sha256:d839d35cc25f6ffa22c016a3a38eeeb98a3ef91a3eb32326d728b3c3fa10e646
           imagePullPolicy: IfNotPresent
           args:
             - --pod-check-interval=5s

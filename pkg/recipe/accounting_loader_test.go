@@ -35,7 +35,7 @@ func TestConfiguredRecipeResultVersionAndStrictDecode(t *testing.T) {
 	}{
 		{
 			name: "v1alpha3 requires configuration",
-			wantErr: "requires metadata.selectedProfile or " +
+			wantErr: "requires metadata.selectedProfile, metadata.artifacts or " +
 				"configuration.slurm.accounting",
 			body: `apiVersion: aicr.run/v1beta2
 kind: RecipeResult

@@ -555,17 +555,18 @@ func TestWarnPeermemReadinessDisabled(t *testing.T) {
 			}
 			delete(values, tt.removeComponent)
 
-			if err := b.warnPeermemReadinessDisabled(t.Context(), result, values); err != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if err := r.warnPeermemReadinessDisabled(t.Context(), result, values); err != nil {
 				t.Fatalf("warnPeermemReadinessDisabled() error = %v", err)
 			}
 
-			if got := len(b.warnings); got != boolCount(tt.wantWarning) {
-				t.Fatalf("warnings = %v, want warning=%v", b.warnings, tt.wantWarning)
+			if got := len(r.warnings); got != boolCount(tt.wantWarning) {
+				t.Fatalf("warnings = %v, want warning=%v", r.warnings, tt.wantWarning)
 			}
 			if !tt.wantWarning {
 				return
 			}
-			warning := b.warnings[0]
+			warning := r.warnings[0]
 			for _, want := range []string{
 				"Warning: ", tt.wantGPUOperator, tt.wantNetworkOp,
 				gpuDriverEnabledValuePath + "=true",

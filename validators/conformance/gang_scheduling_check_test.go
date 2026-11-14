@@ -44,7 +44,7 @@ import (
 // its own per-run namespace, so a "complete" tools/cleanup run
 // (or a fresh install) is not left with residue. See issue #1672.
 func TestCleanupGangTestResourcesDeletesNamespace(t *testing.T) {
-	run, err := newGangTestRun()
+	run, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatalf("newGangTestRun: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestFailOnGangCleanup(t *testing.T) {
 // implausible.
 func TestGangTestRunTokenAndLabel(t *testing.T) {
 	t.Setenv(validators.ImagePullSecretsEnv, "") // an inherited value must not shape the run
-	run, err := newGangTestRun()
+	run, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestGangTestRunTokenAndLabel(t *testing.T) {
 // TestGangMemberPodsCarryImagePullSecrets pins that the gang namespace gets
 // the forwarded Secrets and both member pod kinds reference them.
 func TestGangMemberPodsCarryImagePullSecrets(t *testing.T) {
-	run, err := newGangTestRun()
+	run, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,11 +169,11 @@ func TestGangMemberPodsCarryImagePullSecrets(t *testing.T) {
 // distinct namespaces. A shared namespace is what made the cleanup below
 // destructive: names are randomized per run, but the namespace was not.
 func TestGangTestRunNamespaceIsPerRun(t *testing.T) {
-	runA, err := newGangTestRun()
+	runA, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatalf("newGangTestRun (A): %v", err)
 	}
-	runB, err := newGangTestRun()
+	runB, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatalf("newGangTestRun (B): %v", err)
 	}
@@ -194,11 +194,11 @@ func TestGangTestRunNamespaceIsPerRun(t *testing.T) {
 // derived per run, cleanup deleted the single shared namespace and took the
 // other run's live resources with it, failing a healthy cluster.
 func TestCleanupGangTestResourcesPreservesConcurrentRun(t *testing.T) {
-	runA, err := newGangTestRun()
+	runA, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatalf("newGangTestRun (A): %v", err)
 	}
-	runB, err := newGangTestRun()
+	runB, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatalf("newGangTestRun (B): %v", err)
 	}
@@ -289,7 +289,7 @@ func TestWaitForGangTestPodsRetriesTransientReads(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			run, err := newGangTestRun()
+			run, err := newGangTestRun(kaiGangTarget())
 			if err != nil {
 				t.Fatalf("newGangTestRun: %v", err)
 			}
@@ -352,7 +352,7 @@ func TestWaitForGangTestPodsFailsClosedOnTerminalRead(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			run, err := newGangTestRun()
+			run, err := newGangTestRun(kaiGangTarget())
 			if err != nil {
 				t.Fatalf("newGangTestRun: %v", err)
 			}
@@ -380,7 +380,7 @@ func TestWaitForGangTestPodsFailsClosedOnTerminalRead(t *testing.T) {
 // NotFound means the pod genuinely went away — it must abort, not retry until
 // the bound expires.
 func TestWaitForGangTestPodsNotFoundIsTerminal(t *testing.T) {
-	run, err := newGangTestRun()
+	run, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatalf("newGangTestRun: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestWaitForDeploymentAvailableRecoveredReadNotReportedAsUnreadable(t *testi
 // property for the pod poll: a blip that recovers, then pods that simply never
 // reach a terminal phase, must time out as "did not complete", not "unreadable".
 func TestWaitForGangTestPodsRecoveredReadNotReportedAsUnreadable(t *testing.T) {
-	run, err := newGangTestRun()
+	run, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatalf("newGangTestRun: %v", err)
 	}
@@ -567,7 +567,7 @@ func TestReadFailedBecauseContextEnded(t *testing.T) {
 }
 
 func TestWaitForGangTestPodsParentCanceledDuringRead(t *testing.T) {
-	run, err := newGangTestRun()
+	run, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatalf("newGangTestRun: %v", err)
 	}

@@ -38,29 +38,34 @@ Examples:
   aicr recipe validate --data recipes --external-only --format json`,
 		Flags: []cli.Flag{
 			dataFlag(),
-			&cli.BoolFlag{Name: "external-only", Usage: "Validate only the catalog in --data, without embedded fallback (no FILE)", Category: catInput},
+			externalOnlyFlag(),
+			configFlag(),
 			&cli.StringFlag{Name: flagFormat, Value: verifyFormatText, Usage: "Output format (text or json)", Category: catOutput},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, flagFormat, "data"); err != nil {
+			if err := validateSingleValueFlags(cmd, flagFormat, "data", "config"); err != nil {
 				return err
 			}
-			if cmd.Args().Len() > 1 || (cmd.Args().Len() == 0 && cmd.String("data") == "") {
-				return errors.New(errors.ErrCodeInvalidRequest, "provide one file or --data <directory>")
+			cfg, err := loadFacadeConfig(ctx, cmd)
+			if err != nil {
+				return err
 			}
-			if cmd.Bool("external-only") && (cmd.String("data") == "" || cmd.Args().Len() != 0) {
-				return errors.New(errors.ErrCodeInvalidRequest, "--external-only requires --data and no file argument")
+			dataDir, externalOnly, err := catalogInputsFromCmd(cmd, cfg)
+			if err != nil {
+				return err
+			}
+			if cmd.Args().Len() > 1 || (cmd.Args().Len() == 0 && dataDir == "" && cfg.RecipeArtifacts().Inventory == "") {
+				return errors.New(errors.ErrCodeInvalidRequest, "provide one file or --data <directory>")
 			}
 			format := cmd.String(flagFormat)
 			if format != verifyFormatText && format != verifyFormatJSON {
 				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("unknown output format %q, valid formats are: text, json", format))
 			}
 			var diagnostics []aicr.RecipeDiagnostic
-			var err error
-			if cmd.Bool("external-only") {
-				diagnostics, err = aicr.ValidateRecipeCatalogDirectory(ctx, cmd.String("data"))
+			if externalOnly {
+				diagnostics, err = aicr.ValidateExternalRecipeCatalogWithArtifacts(ctx, cmd.Args().First(), dataDir, cfg.RecipeArtifacts())
 			} else {
-				diagnostics, err = aicr.ValidateRecipeCatalog(ctx, cmd.Args().First(), cmd.String("data"))
+				diagnostics, err = aicr.ValidateRecipeCatalogWithArtifacts(ctx, cmd.Args().First(), dataDir, cfg.RecipeArtifacts())
 			}
 			if err != nil {
 				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to validate recipe data")

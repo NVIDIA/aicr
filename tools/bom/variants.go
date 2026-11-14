@@ -364,11 +364,12 @@ func surveyVariant(
 	base component,
 	r helm.Renderer,
 	skipHelm bool,
+	driverTargets catalogDriverTargets,
 ) (bom.VariantResult, error) {
 
 	variantComponent := base
 	variantComponent.Helm.DefaultVersion = v.Version
-	res, err := surveyComponent(ctx, repoRoot, variantComponent, r, skipHelm)
+	res, err := surveyComponent(ctx, repoRoot, variantComponent, r, skipHelm, driverTargets)
 	if err != nil {
 		return v, errors.PropagateOrWrap(
 			err,

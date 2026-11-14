@@ -1,6 +1,6 @@
 # EKS Dynamo Networking Prerequisites
 
-For `*-eks-ubuntu-inference-dynamo` recipes, AICR configures
+For `*-eks-ubuntu-inference-dynamo` and `h100-eks-amazonlinux-inference-dynamo` recipes, AICR configures
 `dynamo-platform` with Kubernetes-native discovery. As of the Dynamo 1.4+
 bump, AICR no longer installs bundled NATS by default: the request plane
 defaults to TCP and the KV event plane defaults to ZMQ
@@ -124,22 +124,23 @@ through the deployment — checking immediately after the Pod reaches
 networking failure. Then probe that specific port from the other side.
 
 The conformance validator's `ai-service-metrics` check, and `pod-autoscaling`
-when the recipe declares `kube-prometheus-stack`, add a third requirement: they
-dial Prometheus over the cluster Service (typically
-`kube-prometheus-prometheus.monitoring.svc:9090`), `ai-service-metrics` for its
-queries and both for the scrape-pool API that tells them when Prometheus has
-loaded the monitor they created. The orchestrator Job that runs either check
-tolerates every taint and sets a *preferred* `dependencyAffinity` toward
-Prometheus, so the scheduler co-locates it with the Prometheus pod when
-possible. The preference is best-effort, not required, so it
-can still fall back to any worker node (e.g. if the Prometheus node is
+when the recipe declares `kube-prometheus-stack`, add a third requirement: each
+dials a metrics endpoint over a cluster Service on port 9090.
+`ai-service-metrics` queries NKTP's `otel-lgtm` (typically
+`lgtm.nktp.svc:9090`), and `pod-autoscaling` asks Prometheus (typically
+`kube-prometheus-prometheus.monitoring.svc:9090`) for the scrape-pool API that
+tells it when Prometheus has loaded the PodMonitor it created. The orchestrator
+Job that runs either check tolerates every taint and sets a *preferred*
+`dependencyAffinity` toward the pod it dials, so the scheduler co-locates the
+two when possible. The preference is best-effort, not required, so it
+can still fall back to any worker node (e.g. if that pod's node is
 unschedulable) — including one whose ENI is in a security group that cannot
-reach the Prometheus pod.
+reach it.
 
 When that happens, the dial times out at 5 s and the check is marked `failed`:
 
 ```text
-[SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
+[SERVICE_UNAVAILABLE] metrics backend unreachable at http://lgtm.nktp.svc:9090 — verify network connectivity
 ```
 
 `pod-autoscaling` fails the same way at its preflight, before creating any
@@ -189,11 +190,12 @@ regardless of where Frontend and Worker land (`recipes/registry.yaml`'s
 group), so this rule is needed **even when Frontend and Worker are
 co-located** — it is not part of the Frontend↔Worker relationship above.
 
-Allow ingress on TCP `9090` (Prometheus, required for the `ai-service-metrics`
-conformance check, and for `pod-autoscaling` when the recipe declares
-`kube-prometheus-stack`) from **every security group that can host the
+Allow ingress on TCP `9090` (required for the `ai-service-metrics` conformance
+check, which dials NKTP's `otel-lgtm`, and for `pod-autoscaling`, which dials
+Prometheus when the recipe declares `kube-prometheus-stack`) from **every security group that can host the
 conformance orchestrator Job** into the **Prometheus/system security
-group**. The orchestrator Job tolerates every taint (can schedule on any
+group**. NKTP's `otel-lgtm` runs on the same system node group, so the one
+rule covers both. The orchestrator Job tolerates every taint (can schedule on any
 node group) and only *prefers* — via best-effort `dependencyAffinity` — to
 co-locate with Prometheus; on a fallback placement it can land on any
 worker node. Every node group whose pods can host the orchestrator must

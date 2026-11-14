@@ -143,8 +143,9 @@ const (
 // check bounds all of its resource-creating work — allocation-mode discovery,
 // namespace/claim/pod creation, pod waits, log collection, and validation —
 // to a budget, so that inside the catalog timeout (which becomes the check
-// context's deadline via AICR_CHECK_TIMEOUT — the Job's activeDeadlineSeconds
-// is this value plus defaults.ValidatorJobDeadlineHeadroom) there is always
+// context's deadline via AICR_CHECK_TIMEOUT, kept bare — the Job's
+// activeDeadlineSeconds is this value plus defaults.ValidatorJobDeadlineHeadroom)
+// there is always
 // room left for ONE bounded namespace cleanup plus scheduling-skew/result-
 // flush margin.
 // secure-accelerator-access applies the budget at entry; dra-support first
@@ -182,11 +183,13 @@ const (
 // resources needing reconciliation — not a validator-wide lifecycle change.
 // It is not an absolute guarantee: startup skew beyond the margin, or a
 // SIGKILL, can still cut cleanup off. Leaked per-run namespaces carry the
-// gpuTestRunLabel ownership label for external sweeping; Job-deadline
-// headroom (defaults.ValidatorJobDeadlineHeadroom, #2473) now covers the
-// validator-wide lifecycle hardening this note used to defer — the
-// remaining gap is signal-aware cancellation. The fallback-budget-vs-
-// catalog-timeout arithmetic is asserted in
+// gpuTestRunLabel ownership label for external sweeping (no sweeper exists
+// yet). The validator-wide lifecycle is covered elsewhere: Job-deadline
+// headroom (defaults.ValidatorJobDeadlineHeadroom) keeps the check's own
+// context first, SIGTERM cancels the running check with a grace window above
+// the cleanup budget (defaults.ValidatorTerminationGracePeriod), and the
+// orchestrator waits out that window (v1.WaitEnvelopeFor). The
+// fallback-budget-vs-catalog-timeout arithmetic is asserted in
 // TestGPUCheckWorkBudgetsFitCatalogTimeouts.
 const (
 	// gpuCheckSkewAndFlushMargin absorbs pod scheduling/startup skew (the

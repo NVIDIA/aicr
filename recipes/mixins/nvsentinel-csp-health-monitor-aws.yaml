@@ -30,7 +30,7 @@ spec:
             enabled: true
         csp-health-monitor:
           cspName: aws
-          # The only value the gate admits: at NVSentinel v1.28.0 acting on a
+          # The only value the gate admits: at NVSentinel v1.31.0 acting on a
           # maintenance event can release a node another notice still holds.
           processingStrategy: STORE_ONLY
           configToml:

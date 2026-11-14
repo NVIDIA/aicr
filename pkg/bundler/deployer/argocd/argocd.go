@@ -55,6 +55,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	helmutil "github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -930,7 +931,7 @@ func buildApplicationData(comp recipe.ComponentRef, f localformat.Folder, syncWa
 		// use index.yaml with non-prefixed conventions, so normalize there.
 		if strings.HasPrefix(comp.Source, "oci://") {
 			data.Repository = strings.TrimRight(comp.Source, "/") + "/" + chart
-			data.Version = comp.Version
+			data.Version = helmutil.ChartVersion(comp.Source, comp.Version)
 		} else {
 			data.Repository = comp.Source
 			data.Version = deployer.NormalizeVersion(comp.Version)

@@ -39,19 +39,127 @@ permissions:
 jobs:
 
   test:
-    name: Test
+    name: Race + coverage
     runs-on: ubuntu-24.04
-    # 15 minutes was sized for a warm Go module cache: the same job finished in
-    # 9m59s on the v0.21.0 tag with a cache hit, and was killed at the wall on
-    # v0.21.1 with a miss, after 13.6 minutes of `go: downloading` stalls. The
-    # prefix fallback added in go-test makes a total miss far less likely, but a
-    # budget that only holds when the cache hits is the wrong shape for the one
-    # place a failure is most expensive -- a release run (#2663).
+    # A cold-cache release exhausted the 15-minute budget in #2663.
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [recipe, a, b]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run Race + coverage
+        uses: ./.github/actions/go-test
+        with:
+          task: shard
+          shard: ${{ matrix.shard }}
+          go_version: ${{ steps.versions.outputs.go }}
+          setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
+          setup_envtest_sha256: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
+          helm_version: ${{ steps.versions.outputs.helm }}
+          apidiff_version: ${{ steps.versions.outputs.apidiff }}
+          oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
+          oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
+          privileged_ci: ${{ inputs.privileged_ci }}
+
+  shell:
+    name: Shell and tool pins
+    runs-on: ubuntu-24.04
+    # A cold-cache release exhausted the 15-minute budget in #2663.
     timeout-minutes: 30
     permissions:
       actions: read
       contents: read
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run Shell and tool pins
+        uses: ./.github/actions/go-test
+        with:
+          task: shell
+          go_version: ${{ steps.versions.outputs.go }}
+          setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
+          setup_envtest_sha256: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
+          helm_version: ${{ steps.versions.outputs.helm }}
+          apidiff_version: ${{ steps.versions.outputs.apidiff }}
+          oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
+          oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
+          privileged_ci: ${{ inputs.privileged_ci }}
+
+  compatibility:
+    name: Compatibility
+    runs-on: ubuntu-24.04
+    # A cold-cache release exhausted the 15-minute budget in #2663.
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ inputs.ref || '' }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run Compatibility
+        uses: ./.github/actions/go-test
+        with:
+          task: compatibility
+          go_version: ${{ steps.versions.outputs.go }}
+          setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
+          setup_envtest_sha256: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
+          helm_version: ${{ steps.versions.outputs.helm }}
+          apidiff_version: ${{ steps.versions.outputs.apidiff }}
+          oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
+          oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
+          privileged_ci: ${{ inputs.privileged_ci }}
+
+      - name: Check Upgrade Record Coverage
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          AICR_UPGRADE_BASE_REF: origin/${{ github.base_ref }}
+        run: ./tools/check-upgrade-records
+
+  coverage:
+    name: Test
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Require all shards to succeed
+        env:
+          SHARD_RESULT: ${{ needs.test.result }}
+        run: test "$SHARD_RESULT" = success
 
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -64,29 +172,60 @@ jobs:
         id: versions
         uses: ./.github/actions/load-versions
 
-      - name: Run Go Tests
-        uses: ./.github/actions/go-test
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
-          go_version: ${{ steps.versions.outputs.go }}
-          coverage_report: ${{ inputs.coverage_report }}
-          coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}
-          setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
-          setup_envtest_sha256: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
-          helm_version: ${{ steps.versions.outputs.helm }}
-          apidiff_version: ${{ steps.versions.outputs.apidiff }}
-          oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
-          oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
-          privileged_ci: ${{ inputs.privileged_ci }}
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
 
-      # The merge-base half of the ADR-021 upgrade record coverage gate; `make
-      # test` above already ran the half that needs no history. Pull requests
-      # only: a push's merge base with main is the commit itself.
-      - name: Check Upgrade Record Coverage
-        if: github.event_name == 'pull_request'
-        shell: bash
+      - name: Resolve Go cache paths
+        id: gocache
+        run: |
+          echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "buildcache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go modules and build output
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: |
+            ${{ steps.gocache.outputs.modcache }}
+            ${{ steps.gocache.outputs.buildcache }}
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.go }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.go }}-
+
+      - name: Download recipe shard
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: test-shard-recipe
+          path: ${{ runner.temp }}/test-results/recipe
+
+      - name: Download a shard
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: test-shard-a
+          path: ${{ runner.temp }}/test-results/a
+
+      - name: Download b shard
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: test-shard-b
+          path: ${{ runner.temp }}/test-results/b
+
+      - name: Verify package manifest and merge coverage
         env:
-          AICR_UPGRADE_BASE_REF: origin/${{ github.base_ref }}
-        run: ./tools/check-upgrade-records
+          TEST_RESULTS: ${{ runner.temp }}/test-results
+        run: |
+          set -euo pipefail
+          make --no-print-directory test-packages > "$RUNNER_TEMP/all-packages.txt"
+          python3 tools/ci-tests/suite.py merge "$RUNNER_TEMP/all-packages.txt" "$TEST_RESULTS" coverage.out
+
+      - name: Enforce merged coverage threshold
+        if: inputs.coverage_report
+        uses: ./.github/actions/go-coverage
+        with:
+          coverage_file: ./coverage.out
+          threshold: ${{ steps.versions.outputs.coverage_threshold }}
 
   lint:
     name: Lint

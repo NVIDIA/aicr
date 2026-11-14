@@ -19,29 +19,15 @@ inputs:
   cluster_name:
     description: 'Kind cluster name'
     required: true
-  kwok_helm_timeout:
-    description: 'Timeout for KWOK controller Helm install'
-    required: false
-    default: '300s'
-  ko_build_timeout:
-    description: 'Timeout for Karpenter KWOK provider ko build'
-    required: false
-    default: '900s'
-  karpenter_helm_timeout:
-    description: 'Timeout for Karpenter Helm install'
-    required: false
-    default: '300s'
 
+# No Karpenter/KWOK on this real-GPU cluster. Validator pods tolerate every
+# taint, so they schedule onto KWOK simulated nodes, where KWOK fakes a
+# successful exit without running them and serves no logs (#3818). Without
+# Karpenter, cluster-autoscaling records a skip here; it runs alone afterwards
+# in gpu-validate-cluster-autoscaling.
 runs:
   using: 'composite'
   steps:
-    - name: Install Karpenter + KWOK
-      uses: ./.github/actions/install-karpenter-kwok
-      with:
-        cluster_name: ${{ inputs.cluster_name }}
-        kwok_helm_timeout: ${{ inputs.kwok_helm_timeout }}
-        ko_build_timeout: ${{ inputs.ko_build_timeout }}
-        karpenter_helm_timeout: ${{ inputs.karpenter_helm_timeout }}
     - name: Build conformance validator image
       uses: ./.github/actions/aicr-build
       env:

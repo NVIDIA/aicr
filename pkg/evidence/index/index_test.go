@@ -216,6 +216,80 @@ func TestEmbeddedClassesAreAllowlisted(t *testing.T) {
 	}
 }
 
+func TestSignerClassesOf(t *testing.T) {
+	tests := []struct {
+		name    string
+		doc     map[string][]sourcePointer
+		want    map[string][]allowlist.Class
+		wantErr bool
+	}{
+		{
+			name: "distinct classes in allowlist order",
+			doc: map[string][]sourcePointer{
+				"mixed": {
+					{Slug: "a", Class: "partner"},
+					{Slug: "b", Class: "community"},
+					{Slug: "c", Class: "community"},
+				},
+				"single": {{Slug: "d", Class: "community"}},
+			},
+			want: map[string][]allowlist.Class{
+				"mixed":  {allowlist.ClassCommunity, allowlist.ClassPartner},
+				"single": {allowlist.ClassCommunity},
+			},
+		},
+		{
+			name:    "unknown class fails closed",
+			doc:     map[string][]sourcePointer{"bad": {{Slug: "a", Class: "trusted"}}},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := signerClassesOf(tt.doc)
+			if tt.wantErr {
+				if errorstest.ReportedCode(err) != errors.ErrCodeInternal {
+					t.Fatalf("signerClassesOf code = %v, want %s (%v)", errorstest.ReportedCode(err), errors.ErrCodeInternal, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("signerClassesOf: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("signerClassesOf = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSignerClassesCoversEmbeddedIndex(t *testing.T) {
+	classes, err := SignerClasses()
+	if err != nil {
+		t.Fatalf("SignerClasses: %v", err)
+	}
+	doc, err := decodeDocument(pointersYAML)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(classes) != len(doc.Recipes) {
+		t.Fatalf("SignerClasses has %d recipes, embedded index has %d", len(classes), len(doc.Recipes))
+	}
+	for _, recipeEntry := range doc.Recipes {
+		if len(classes[recipeEntry.ID]) == 0 {
+			t.Errorf("SignerClasses is missing recipe %s", recipeEntry.ID)
+		}
+	}
+	classes["mutated"] = nil
+	again, err := SignerClasses()
+	if err != nil {
+		t.Fatalf("SignerClasses: %v", err)
+	}
+	if _, ok := again["mutated"]; ok {
+		t.Fatal("SignerClasses returned a shared map")
+	}
+}
+
 func evidenceRoot(t *testing.T) string {
 	t.Helper()
 	return filepath.Join("..", "..", "..", "recipes", "evidence")

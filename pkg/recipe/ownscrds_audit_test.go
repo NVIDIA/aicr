@@ -44,7 +44,7 @@ var auditedOwnsCRDs = map[string]string{
 	"k8s-aibom":      "1.6.2",
 	"nktp":           "0.2.0",
 	"nvcre":          "v0.8.2",
-	"nvsentinel":     "v1.28.0",
+	"nvsentinel":     "v1.31.0",
 	"psmdb-operator": "1.23.2",
 }
 

@@ -448,6 +448,7 @@ Generate recipes using an `AICRConfig` document. The same file format also drive
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
+| `--external-only` | | bool | Use only `--data`, without embedded catalog merging or fallback |
 
 The config file uses a Kubernetes-style envelope:
 
@@ -529,6 +530,7 @@ Generate recipes using direct system parameters:
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
+| `--external-only` | | bool | Use only `--data`, without embedded catalog merging or fallback |
 | `--criteria-strict` | | bool | Reject criteria values not in the embedded OSS catalog; ignores values registered from `--data`. Also honored via `AICR_CRITERIA_STRICT=1` or `spec.recipe.criteriaStrict: true` in `--config`. Intended for OSS CI gates. |
 | `--require-evidence` | | bool | Fail when the resolved recipe has no committed evidence pointer. The check is offline presence for the resolved id, including the selected profile value. It does not verify a signature or contact a registry. A pointer on a base id does not cover a profiled resolve. Resolving with external data (`--data` or `spec.recipe.data`) fails, even when the leaf overlay is still the embedded one. Also honored via `AICR_REQUIRE_EVIDENCE` (`1`, `true`, `yes`, `on`) or `spec.recipe.requireEvidence: true` in `--config`. Any one of the three enables it. An explicit false does not turn off an environment value that is already on. Applies to `aicr recipe` and `aicr query`; `aicr query --recipe` is rejected while it is on. |
 
@@ -547,7 +549,7 @@ node shape the resolved recipe targets. See
 
 > **`--service cks` is Preview**, covering H100 and RTX PRO 6000 on Ubuntu for training. Pass the service explicitly, including with a snapshot; CKS auto-detection is not implemented. See [CoreWeave H100 Setup](../integrator/cks-h100-setup.md) and [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md) for provider ownership and qualification gaps.
 
-> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training`, `nvke / gb200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / training`, `nvke / vr200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / inference`, `nvke / vr200 / ubuntu / inference / dynamo`, `nvke / gb300 / ubuntu / training`, `nvke / gb300 / ubuntu / training / kubeflow`, `nvke / gb300 / ubuntu / inference` and `nvke / gb300 / ubuntu / inference / dynamo` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md), [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md) and [NVKE GB300 Setup](../integrator/nvke-gb300-setup.md) for their prerequisites and known gaps. The VR200 coordinates require an `nvidia-bos-64k` kernel, which the recipe's constraints cannot express — check it before deploying.
+> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training`, `nvke / gb200 / ubuntu / training / kubeflow`, `nvke / gb200 / ubuntu / inference`, `nvke / gb200 / ubuntu / inference / dynamo`, `nvke / vr200 / ubuntu / training`, `nvke / vr200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / inference`, `nvke / vr200 / ubuntu / inference / dynamo`, `nvke / gb300 / ubuntu / training`, `nvke / gb300 / ubuntu / training / kubeflow`, `nvke / gb300 / ubuntu / inference` and `nvke / gb300 / ubuntu / inference / dynamo` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md), [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md) and [NVKE GB300 Setup](../integrator/nvke-gb300-setup.md) for their prerequisites and known gaps. The VR200 coordinates require an `nvidia-bos-64k` kernel, which the recipe's constraints cannot express — check it before deploying.
 
 > **`--platform runai` is Preview**, covering the `eks / h100 / ubuntu / training / runai` and `gke / h100 / cos / training / runai` coordinates. See [Run:ai cluster](component-catalog.md#runai-cluster) for its per-cluster inputs and known gaps.
 
@@ -792,15 +794,16 @@ checks emit error diagnostics; errors cause a non-zero exit status.
 **Synopsis:**
 
 ```text
-aicr recipe validate [--data DIR] [--external-only] [--format text|json] [FILE]
+aicr recipe validate [--data DIR] [--config FILE] [--external-only] [--format text|json] [FILE]
 ```
 
 **Flags:**
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--data` | | string | | Catalog directory used to resolve references; required when no FILE is given |
-| `--external-only` | | bool | false | Validate the complete external catalog without embedded fallback; requires `--data` and no FILE |
+| `--config` | | string | | AICRConfig path or URL; supplies `spec.recipe.data`, `spec.recipe.externalOnly`, and artifact inventory options |
+| `--data` | | string | | Catalog directory used to resolve references; falls back to `spec.recipe.data`. Without FILE, supply a catalog directory or a configured inventory |
+| `--external-only` | | bool | false | Validate the file or complete external catalog without embedded fallback; requires a catalog directory |
 | `--format` | | string | text | Output format: `text` or `json` |
 
 **Examples:**
@@ -845,7 +848,9 @@ aicr recipe list [flags]
 | `--os` | | string | | Filter by worker-node OS (e.g. ubuntu, rhel, cos) |
 | `--platform` | | string | | Filter by platform/framework type (e.g. dynamo, kubeflow, nim) |
 | `--format` | `-t` | string | table | Output format: json, yaml, table |
+| `--config` | | string | | AICRConfig path or URL; `spec.recipe.data` and `spec.recipe.externalOnly` select the catalog |
 | `--data` | | string | | External data directory to include alongside embedded overlays |
+| `--external-only` | | bool | false | Use only `--data`, without embedded catalog merging or fallback |
 | `--no-health` | `--skip-health` | bool | false | Skip per-leaf structural-health computation; render only the enumeration columns/fields |
 
 Filter flags narrow the output to overlays whose criteria carry that exact value.
@@ -1092,7 +1097,7 @@ gpu-operator                   Helm  v26.7.2  gpu-operator            nfd,cert-m
 dra-node-labeler               Helm  -        gpu-operator            gpu-operator
 kai-scheduler                  Helm  v0.16.9  kai-scheduler           gpu-operator
 nvidia-dra-driver-gpu          Helm  0.5.1    nvidia-dra-driver       gpu-operator,dra-node-labeler
-nvsentinel                     Helm  v1.28.0  nvsentinel              cert-manager,gpu-operator,prometheus-operator-crds
+nvsentinel                     Helm  v1.31.0  nvsentinel              cert-manager,gpu-operator,prometheus-operator-crds
 prometheus-adapter             Helm  5.3.0    monitoring              kube-prometheus-stack
 
 VALIDATION
@@ -1189,19 +1194,19 @@ aicr query --service eks --accelerator h100 --intent training --selector .
 **Advanced Examples:**
 
 ```shell
-# Cross-cloud comparison: Prometheus storage across providers
-# EKS provisions a 50Gi persistent EBS volume (gp3, via the cluster-default ebs-csi-default-sc)
+# Cross-cloud comparison: NKTP's bundled metrics-server across providers
+# EKS ships no resource metrics API, so the bundled one is on, on the host network
 aicr query --service eks --intent training \
-  --selector components.kube-prometheus-stack.values.prometheus.prometheusSpec.storageSpec
-# GKE also provisions a 50Gi persistent volume, but only under the COS overlay —
-# GKE has no OS-agnostic recipe, so os=cos must be stated explicitly
+  --selector components.nktp.values.metrics-server
+# GKE ships its own, so it is off. GKE has no OS-agnostic recipe, so os=cos
+# must be stated explicitly
 aicr query --service gke --os cos --intent training \
-  --selector components.kube-prometheus-stack.values.prometheus.prometheusSpec.storageSpec
+  --selector components.nktp.values.metrics-server
 
 # Compare deployment order across clouds
-# EKS deploys 15 components (includes aws-ebs-csi-driver, aws-efa, nodewright-customizations)
+# EKS deploys 16 components (includes aws-ebs-csi-driver, aws-efa, nodewright-customizations)
 aicr query --service eks --accelerator h100 --intent training --selector deploymentOrder
-# GKE (COS) deploys 15 components (includes gke-nccl-tcpxo and gcp-driver-installer; storage is otherwise platform-managed)
+# GKE (COS) deploys 16 components (includes gke-nccl-tcpxo and gcp-driver-installer; storage is otherwise platform-managed)
 aicr query --service gke --os cos --accelerator h100 --intent training --selector deploymentOrder
 
 # Pin the exact driver version into Terraform/Pulumi variables
@@ -1290,6 +1295,7 @@ aicr validate [flags]
 | `--signing-config` | | string | | Sign the evidence bundle with a custom Sigstore signing config JSON instead of the default Rekor v2 config. The file is read and parsed before anything runs. Mutually exclusive with `--rekor-url`. Reads no environment variable. |
 | `--yes` | `--assume-yes` | bool | false | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 | `--data` | | string | | External data directory to overlay on embedded data |
+| `--external-only` | | bool | false | Use only `--data`, without embedded catalog merging or fallback |
 
 **Input Sources:**
 - **File**: Local file path (`./recipe.yaml`, `./snapshot.yaml`)
@@ -1976,7 +1982,8 @@ aicr bundle [flags]
 | `--set-file` | | string[] | Override a value by reading JSON/YAML from a file (repeatable, format: `component:path=<filepath>`). For larger structures than `--set-json`; same merge and absent-component-rejection semantics (no `enabled` exemption on the typed path). |
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, `helmfile`, `terraform`, and `fleet` deployers. A declaration whose component is absent from the generated bundle is rejected (no path is exempt — a dynamic path is never a removal idiom); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). Certain gate- or contract-owned paths on **present** components cannot be declared dynamic either — driver-ownership paths (e.g. `gpuoperator:driver.enabled`), GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled **and** the eviction contract is opted into with `--dra-eviction-node-label`, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths — because an install-time edit there would undo what AICR verified or made consistent; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Dynamic Install-Time Values](#dynamic-install-time-values). A path the registry lists in `requiredValues` counts as supplied when declared here; a path in `installTimeSecretPaths` may only be supplied this way, and only with the `helm` deployer. See [Required and install-time secret inputs](bundling.md#required-and-install-time-secret-inputs). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
-| `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable). Optional in general, but some components (e.g. `slinky-slurm`, `slurm-accounting-mariadb`) declare `requireNodeSelector` in the registry and fail the bundle if this is omitted and no overlay opts their paths out. `kube-prometheus-stack` declares the conditional `requireNodeSelectorIfStorageClassSet` instead, so it only fails once the component ends up with a non-empty value at a declared `storageClassPaths`/`sharedStorageClassPaths` entry, whether from `--storage-class`, a per-component `--set` override, or an overlay's own `storageClassName` default. See [`nodeScheduling.system` vs `accelerated`](../contributor/component.md#nodeschedulingsystem-vs-accelerated). |
+| `--external-only` | | bool | Use only `--data`, without embedded catalog merging or fallback |
+| `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable). Optional in general, but some components (e.g. `slinky-slurm`, `slurm-accounting-mariadb`) declare `requireNodeSelector` in the registry and fail the bundle if this is omitted and no overlay opts their paths out. A component that declares the conditional `requireNodeSelectorIfStorageClassSet` instead (none in the stock registry today) only fails once it ends up with a non-empty value at a declared `storageClassPaths`/`sharedStorageClassPaths` entry, whether from `--storage-class`, a per-component `--set` override, or an overlay's own `storageClassName` default. See [`nodeScheduling.system` vs `accelerated`](../contributor/component.md#nodeschedulingsystem-vs-accelerated). |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable). With `--readiness-hooks`, this (keyed tolerations only) and `--system-node-selector` also place the readiness gate Jobs; see [Readiness Gates](#readiness-gates). |
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable). Same `requireNodeSelector` caveat as `--system-node-selector` above applies to components that declare it on their accelerated paths. |
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
@@ -1984,7 +1991,7 @@ aicr bundle [flags]
 | `--workload-gate` | | string | Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). The key must have no DNS prefix (no `/`) and be at most 53 characters. This is a day 2 option for cluster scaling operations. |
 | `--workload-selector` | | string[] | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when nodewright-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
-| `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. For a component declaring the conditional `requireNodeSelectorIfStorageClassSet` (e.g. `kube-prometheus-stack`), setting this to a non-empty value (or providing a non-empty value through a per-component `--set` override or an overlay's own `storageClassName` default) also starts requiring `--system-node-selector`/`--accelerated-node-selector`; see the `--system-node-selector` row above. |
+| `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. For a component declaring the conditional `requireNodeSelectorIfStorageClassSet` (none in the stock registry today), setting this to a non-empty value (or providing a non-empty value through a per-component `--set` override or an overlay's own `storageClassName` default) also starts requiring `--system-node-selector`/`--accelerated-node-selector`; see the `--system-node-selector` row above. |
 | `--shared-storage-class` | | string | RWX-capable Kubernetes StorageClass for opt-in shared filesystem PVCs. Written to registry-declared `sharedStorageClassPaths`; never falls back to `--storage-class`. |
 | `--vendor-charts` | | bool | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Requires `helm` on `$PATH`. A chart that keeps its registry pin must match the entry's `helm.defaultDigest`, when set, or the bundle fails. See [Vendoring Charts for Air-Gap](#vendoring-charts-for-air-gap). |
 | `--readiness-hooks` | | bool | Emit a per-component readiness gate (`NNN-<name>-readiness/`) for each component that ships a `recipes/components/<name>/readiness.yaml` Chainsaw test. The gate runs as a post-component Job so the deploy blocks on component-specific readiness signals (e.g. `ClusterPolicy` state). Supported with `--deployer helm`, `argocd`, `argocd-helm`, and `terraform`. Off by default. See [Readiness Gates](#readiness-gates). |
@@ -2381,7 +2388,7 @@ The `--deployer` flag controls how deployment artifacts are generated:
 
 > **Note:** `--dynamic` declarations targeting the GPU allocation-policy keys (`nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride`, `gpu-operator`(`-ocp`) `devicePlugin.enabled`, or those components' `enabled` toggle) are rejected: validators verify the recipe-resolved allocation policy, so its value cannot be deferred to install time. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
 
-> **Note:** `--dynamic` is rejected on a path that equals, contains, or is contained by a path a component's `requireNodeSelector` (or its conditional `requireNodeSelectorIfStorageClassSet` counterpart, e.g. `kube-prometheus-stack`) marks as required (e.g. `slinky-slurm`, `slurm-accounting-mariadb`), or by a declared `storageClassPaths`/`sharedStorageClassPaths` path that conditions `requireNodeSelectorIfStorageClassSet`. This holds regardless of whether a storage class is configured yet, since one could be added later without rebuilding the bundle. The flag defers the value to install time, the same unpinned state `requireNodeSelector` exists to reject. Supply `--system-node-selector` / `--accelerated-node-selector` instead. See [`nodeScheduling.system` vs `accelerated`](../contributor/component.md#nodeschedulingsystem-vs-accelerated).
+> **Note:** `--dynamic` is rejected on a path that equals, contains, or is contained by a path a component's `requireNodeSelector` (or its conditional `requireNodeSelectorIfStorageClassSet` counterpart) marks as required (e.g. `slinky-slurm`, `slurm-accounting-mariadb`), or by a declared `storageClassPaths`/`sharedStorageClassPaths` path that conditions `requireNodeSelectorIfStorageClassSet`. This holds regardless of whether a storage class is configured yet, since one could be added later without rebuilding the bundle. The flag defers the value to install time, the same unpinned state `requireNodeSelector` exists to reject. Supply `--system-node-selector` / `--accelerated-node-selector` instead. See [`nodeScheduling.system` vs `accelerated`](../contributor/component.md#nodeschedulingsystem-vs-accelerated).
 
 **Deployment Order:**
 
@@ -3737,7 +3744,10 @@ the recipe was resolved with `--data <dir>`, both values and manifests are read
 through the overlay so overlay-shadowed paths take precedence over embedded.
 Recognized mapping-valued image descriptors with null, empty, or non-scalar
 members are rejected so the command cannot succeed with a known-incomplete
-image set.
+image set. GPU and DOCA driver images are listed with the OS-qualified tag the
+operator pulls on a node; a driver whose tag the recipe does not determine is
+named in the component's `warnings` instead (see
+[Air-Gapped Mirroring](air-gap-mirror.md#overriding-component-values)).
 
 For an end-to-end walkthrough covering Hauler and Zarf workflows, see
 [Air-Gapped Mirroring](air-gap-mirror.md).
@@ -3761,6 +3771,7 @@ aicr mirror list [flags]
 | `--inherit` | | string | `all` | Select what to keep from `--inherit-from`: `all` preserves full component identity; `namespace` preserves only namespaces and rebinds health checks, leaving chart, source, path, manifest sets and object names as newly resolved. Requires `--inherit-from`; cannot be combined with `--recipe`. |
 | `--set` | | string[] | | Override values that affect image discovery (format: `component:path.to.field=value`). Repeatable. |
 | `--data` | | string | | External data directory to overlay on embedded data. Overlay-provided component values and manifests both feed image discovery (see [External Data](#external-data-directory)). |
+| `--external-only` | | bool | false | Use only `--data`, without embedded catalog merging or fallback |
 | `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |
 | `--output` | `-o` | string | stdout | Output file path |
 
@@ -4577,6 +4588,16 @@ aicr --debug bundle -r recipe.yaml
 ## External Data Directory
 
 The `--data` flag enables extending or overriding the embedded recipe data with external files. This allows customization without rebuilding the CLI.
+
+Add `--external-only` to use a complete external catalog instead. This disables
+all embedded catalog reads, enumeration, merges and fallbacks. It requires
+`--data` or `spec.recipe.data`; missing required inputs fail with their names.
+The mode applies to every command accepting `--data`, including file and
+whole-directory `recipe validate`. `spec.recipe.externalOnly` is its config
+equivalent; an explicit `--external-only=false` overrides it. Neither flag has
+an environment-variable equivalent. See [fully external catalogs](../integrator/data-extension.md#use-a-fully-external-catalog)
+for the required files and scope. The layering rules below apply when the mode
+is unset.
 
 ### Overview
 

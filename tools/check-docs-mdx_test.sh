@@ -84,11 +84,51 @@ RC=$?
 check_rc_nonzero "awk-preflight-exits-nonzero"
 check_contains   "awk-preflight-is-diagnostic" "awk must support POSIX interval expressions"
 
+# mawk 1.3.4 (the Debian/Ubuntu default awk) passes a bare interval but panics
+# compiling an interval inside an alternation group, which the fence-opener
+# regex uses (#3780). The preflight must catch that and name the fix.
+DIR_AWK_MAWK="${TMPDIR_TEST}/awk-mawk-like"
+mkdir -p "${DIR_AWK_MAWK}/bin" "${DIR_AWK_MAWK}/docs"
+REAL_AWK="$(command -v awk)"
+cat >"${DIR_AWK_MAWK}/bin/awk" <<SH
+#!/usr/bin/env bash
+if [[ "\${1:-}" == *'(\`{3,}|~{3,})'* ]]; then
+  echo "REcompile() - panic:  values still on machine stack" >&2
+  exit 100
+fi
+exec "${REAL_AWK}" "\$@"
+SH
+cat >"${DIR_AWK_MAWK}/docs/doc.md" <<'MD'
+# Safe document
+MD
+chmod +x "${DIR_AWK_MAWK}/bin/awk"
+OUT="$(PATH="${DIR_AWK_MAWK}/bin:${PATH}" "${CHECK}" "${DIR_AWK_MAWK}/docs" 2>&1)"
+RC=$?
+check_rc_nonzero "awk-mawk-like-exits-nonzero"
+check_contains   "awk-mawk-like-is-diagnostic" "intervals inside alternation groups"
+check_contains   "awk-mawk-like-names-gawk"    "install gawk"
+check_absent     "awk-mawk-like-no-panic-noise" "REcompile"
+
+# The behavioral fixtures below need the host awk to pass the preflight. Stop
+# with one actionable failure instead of reporting every fixture as broken.
+DIR_HOST_AWK="${TMPDIR_TEST}/host-awk"
+mkdir -p "${DIR_HOST_AWK}"
+cat >"${DIR_HOST_AWK}/doc.md" <<'MD'
+# Safe document
+MD
+run "${DIR_HOST_AWK}"
+if [[ "${OUT}" == *"awk must support POSIX interval expressions"* ]]; then
+    fail "host-awk-supported" "${OUT}"
+    echo "${fails} test(s) failed"
+    exit 1
+fi
+pass "host-awk-supported"
+
 DIR_AWK_FAIL="${TMPDIR_TEST}/awk-check1-failure"
 mkdir -p "${DIR_AWK_FAIL}/bin" "${DIR_AWK_FAIL}/docs"
 cat >"${DIR_AWK_FAIL}/bin/awk" <<'SH'
 #!/usr/bin/env bash
-if [[ "${1:-}" == 'BEGIN { exit ("aaa" ~ /^a{3}$/ ? 0 : 1) }' ]]; then
+if [[ "${1:-}" == 'BEGIN {'* ]]; then
   exit 0
 fi
 exit 42

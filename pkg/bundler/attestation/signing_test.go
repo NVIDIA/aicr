@@ -15,6 +15,7 @@
 package attestation
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -22,6 +23,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	stderrors "errors"
 	"math/big"
 	"net/url"
 	"testing"
@@ -31,6 +33,7 @@ import (
 	protocommon "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
 	rekorv1 "github.com/sigstore/protobuf-specs/gen/pb-go/rekor/v1"
 	"github.com/sigstore/sigstore-go/pkg/sign"
+	"github.com/sigstore/sigstore/pkg/cryptoutils"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -38,59 +41,126 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
-func TestSignStatement_RejectsEmptyStatement(t *testing.T) {
-	_, err := SignStatement(context.Background(), nil, SignOptions{OIDCToken: "tok"})
-	if err == nil {
-		t.Errorf("expected error for empty statement")
+func TestSignStatementFor_RejectsEmptyStatement(t *testing.T) {
+	id := newFakeKeyIdentity(t, "awskms://test/key")
+	_, err := signStatementFor(context.Background(), FixedStatement(nil), id, NewNoTLogPolicy())
+	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
+		t.Errorf("want ErrCodeInvalidRequest for empty statement, got %v", err)
+	}
+}
+
+func TestSignStatementFor_ClassifiesBuildError(t *testing.T) {
+	tests := []struct {
+		name     string
+		buildErr error
+		want     errors.ErrorCode
+	}{
+		{"coded error propagates", errors.New(errors.ErrCodeInvalidRequest, "bad subject"), errors.ErrCodeInvalidRequest},
+		{"plain error is internal", stderrors.New("marshal failed"), errors.ErrCodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			build := func(string) ([]byte, error) { return nil, tt.buildErr }
+			_, err := signStatementFor(context.Background(), build, newFakeKeyIdentity(t, "awskms://test/key"), NewNoTLogPolicy())
+			errorstest.WantReportedCode(t, err, tt.want)
+			if !stderrors.Is(err, tt.buildErr) {
+				t.Errorf("error %v does not wrap the build error", err)
+			}
+		})
 	}
 }
 
 func TestSignStatement_RejectsMissingOIDCToken(t *testing.T) {
-	_, err := SignStatement(context.Background(), []byte("{}"), SignOptions{})
+	_, err := SignStatement(context.Background(), FixedStatement([]byte("{}")), SignOptions{})
 	if err == nil {
 		t.Errorf("expected error when OIDCToken is unset")
 	}
 }
 
-func TestExtractSignerClaims_FromEmail(t *testing.T) {
-	bundle := bundleWithEmailCert(t, "jdoe@company.com", "")
-	identity, issuer := extractSignerClaims(bundle)
-	if identity != "jdoe@company.com" {
-		t.Errorf("identity = %q, want jdoe@company.com", identity)
-	}
-	if issuer != "" {
-		t.Errorf("issuer = %q, want empty (no extension)", issuer)
-	}
+func TestSignStatement_RejectsNilBuilder(t *testing.T) {
+	_, err := SignStatement(context.Background(), nil, SignOptions{OIDCToken: "test-oidc-token"})
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 }
 
-func TestExtractSignerClaims_FromURI(t *testing.T) {
-	u, err := url.Parse("https://github.com/login/oauth")
+// TestExtractSignerClaims covers a single Certificate and an
+// X509CertificateChain, missing or malformed certificates, each SAN form
+// Fulcio issues, and the email and URI SAN precedence sigstore-go
+// verification uses.
+func TestExtractSignerClaims(t *testing.T) {
+	const oidcIssuer = "https://accounts.example.com"
+	workloadURI, err := url.Parse("https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	bundle := bundleWithURICert(t, u, "")
-	identity, _ := extractSignerClaims(bundle)
-	if identity != u.String() {
-		t.Errorf("identity = %q, want %q", identity, u.String())
+	chainBundle := func(certs ...*protocommon.X509Certificate) *protobundle.Bundle {
+		return &protobundle.Bundle{
+			VerificationMaterial: &protobundle.VerificationMaterial{
+				Content: &protobundle.VerificationMaterial_X509CertificateChain{
+					X509CertificateChain: &protocommon.X509CertificateChain{Certificates: certs},
+				},
+			},
+		}
 	}
-}
 
-func TestExtractSignerClaims_PullsIssuerFromExtension(t *testing.T) {
-	const oidcIssuer = "https://accounts.example.com"
-	bundle := bundleWithEmailCert(t, "jdoe@company.com", oidcIssuer)
-	identity, issuer := extractSignerClaims(bundle)
-	if identity != "jdoe@company.com" {
-		t.Errorf("identity = %q", identity)
+	tests := []struct {
+		name         string
+		bundle       *protobundle.Bundle
+		wantIdentity string
+		wantIssuer   string
+	}{
+		{
+			name:         "email SAN (interactive OIDC)",
+			bundle:       certBundle(testCertDER(t, &x509.Certificate{EmailAddresses: []string{"jdoe@company.com"}})),
+			wantIdentity: "jdoe@company.com",
+		},
+		{
+			name: "email SAN with Fulcio issuer extension",
+			bundle: certBundle(testCertDER(t, &x509.Certificate{
+				EmailAddresses:  []string{"jdoe@company.com"},
+				ExtraExtensions: []pkix.Extension{fulcioIssuerExt(t, oidcIssuer)},
+			})),
+			wantIdentity: "jdoe@company.com",
+			wantIssuer:   oidcIssuer,
+		},
+		{
+			name:         "URI SAN (workload OIDC)",
+			bundle:       certBundle(testCertDER(t, &x509.Certificate{URIs: []*url.URL{workloadURI}})),
+			wantIdentity: workloadURI.String(),
+		},
+		{
+			name: "URI SAN preferred over email SAN",
+			bundle: certBundle(testCertDER(t, &x509.Certificate{
+				EmailAddresses: []string{"jdoe@company.com"},
+				URIs:           []*url.URL{workloadURI},
+			})),
+			wantIdentity: workloadURI.String(),
+		},
+		{
+			name:   "Fulcio username SAN only",
+			bundle: certBundle(testCertDER(t, &x509.Certificate{ExtraExtensions: []pkix.Extension{otherNameSANExt(t, "jdoe!example.com")}})),
+		},
+		{
+			name:         "X509CertificateChain with one cert",
+			bundle:       chainBundle(&protocommon.X509Certificate{RawBytes: testCertDER(t, &x509.Certificate{EmailAddresses: []string{"chain@company.com"}})}),
+			wantIdentity: "chain@company.com",
+		},
+		{name: "nil bundle pointer", bundle: nil},
+		{name: "bundle without verification material", bundle: &protobundle.Bundle{}},
+		{name: "verification material without cert", bundle: &protobundle.Bundle{VerificationMaterial: &protobundle.VerificationMaterial{}}},
+		{name: "invalid cert DER", bundle: certBundle([]byte("not a certificate"))},
+		{name: "X509CertificateChain with empty cert list", bundle: chainBundle()},
+		{name: "cert with no SAN", bundle: certBundle(testCertDER(t, &x509.Certificate{}))},
 	}
-	if issuer != oidcIssuer {
-		t.Errorf("issuer = %q, want %q", issuer, oidcIssuer)
-	}
-}
-
-func TestExtractSignerClaims_NilBundle(t *testing.T) {
-	identity, issuer := extractSignerClaims(&protobundle.Bundle{})
-	if identity != "" || issuer != "" {
-		t.Errorf("expected empty claims for empty bundle; got %q / %q", identity, issuer)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			identity, issuer := extractSignerClaims(tc.bundle)
+			if identity != tc.wantIdentity {
+				t.Errorf("identity = %q, want %q", identity, tc.wantIdentity)
+			}
+			if issuer != tc.wantIssuer {
+				t.Errorf("issuer = %q, want %q", issuer, tc.wantIssuer)
+			}
+		})
 	}
 }
 
@@ -210,40 +280,36 @@ func TestExtractRekorLogIndex(t *testing.T) {
 
 // --- helpers ---
 
-// bundleWithEmailCert produces a Sigstore bundle containing a self-signed
-// X.509 cert with an email SAN and an optional Fulcio OIDC-issuer
-// extension (OID 1.3.6.1.4.1.57264.1.8). Used by claim-extraction tests.
-func bundleWithEmailCert(t *testing.T, email, oidcIssuer string) *protobundle.Bundle {
+// testCertDER returns a DER-encoded self-signed certificate with the SANs
+// and extensions in template. It overwrites the serial number, subject and
+// validity in template.
+func testCertDER(t *testing.T, template *x509.Certificate) []byte {
 	t.Helper()
-	template := &x509.Certificate{
-		SerialNumber:   big.NewInt(1),
-		Subject:        pkix.Name{CommonName: "test"},
-		NotBefore:      time.Now(),
-		NotAfter:       time.Now().Add(time.Hour),
-		EmailAddresses: []string{email},
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
 	}
-	if oidcIssuer != "" {
-		template.ExtraExtensions = []pkix.Extension{fulcioIssuerExt(t, oidcIssuer)}
+	template.SerialNumber = big.NewInt(1)
+	template.Subject = pkix.Name{CommonName: "test"}
+	template.NotBefore = time.Now().Add(-time.Hour)
+	template.NotAfter = time.Now().Add(time.Hour)
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create cert: %v", err)
 	}
-	return bundleFromTemplate(t, template)
+	return der
 }
 
-// bundleWithURICert produces a Sigstore bundle containing a self-signed
-// X.509 cert with a URI SAN — used to exercise the workload-OIDC path
-// (GitHub Actions, Kubernetes service account, etc.).
-func bundleWithURICert(t *testing.T, u *url.URL, oidcIssuer string) *protobundle.Bundle {
-	t.Helper()
-	template := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
-		Subject:      pkix.Name{CommonName: "test-uri"},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(time.Hour),
-		URIs:         []*url.URL{u},
+// certBundle returns a Sigstore bundle whose verification material is
+// certDER.
+func certBundle(certDER []byte) *protobundle.Bundle {
+	return &protobundle.Bundle{
+		VerificationMaterial: &protobundle.VerificationMaterial{
+			Content: &protobundle.VerificationMaterial_Certificate{
+				Certificate: &protocommon.X509Certificate{RawBytes: certDER},
+			},
+		},
 	}
-	if oidcIssuer != "" {
-		template.ExtraExtensions = []pkix.Extension{fulcioIssuerExt(t, oidcIssuer)}
-	}
-	return bundleFromTemplate(t, template)
 }
 
 // fulcioIssuerExt encodes the OIDC issuer for the current Fulcio
@@ -261,23 +327,14 @@ func fulcioIssuerExt(t *testing.T, oidcIssuer string) pkix.Extension {
 	}
 }
 
-func bundleFromTemplate(t *testing.T, template *x509.Certificate) *protobundle.Bundle {
+// otherNameSANExt encodes name as the Fulcio username OtherName SAN.
+func otherNameSANExt(t *testing.T, name string) pkix.Extension {
 	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ext, err := cryptoutils.MarshalOtherNameSAN(name, false)
 	if err != nil {
-		t.Fatalf("generate key: %v", err)
+		t.Fatalf("marshal OtherName SAN: %v", err)
 	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	if err != nil {
-		t.Fatalf("create cert: %v", err)
-	}
-	return &protobundle.Bundle{
-		VerificationMaterial: &protobundle.VerificationMaterial{
-			Content: &protobundle.VerificationMaterial_Certificate{
-				Certificate: &protocommon.X509Certificate{RawBytes: der},
-			},
-		},
-	}
+	return *ext
 }
 
 // TestSignStatementWithRejectsNilStrategies verifies SignStatementWith returns
@@ -332,6 +389,115 @@ func TestSignStatementWithKeyOnlyNoTLog(t *testing.T) {
 	}
 }
 
+// TestSignStatementFor_PassesSigner checks the signer that the statement
+// builder receives. Keyless signing passes the issued certificate's SAN, and
+// key signing passes the fallback identity. Both cases run offline with no
+// transparency log.
+func TestSignStatementFor_PassesSigner(t *testing.T) {
+	const email = "jdoe@company.com"
+	tests := []struct {
+		name string
+		id   SigningIdentity
+		want string
+	}{
+		{"keyless", newFakeCertIdentity(t, email), email},
+		{"key", newFakeKeyIdentity(t, "awskms://test/signer"), "awskms://test/signer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			build := func(signer string) ([]byte, error) {
+				got = signer
+				return statementJSONFor(t, signer), nil
+			}
+			res, err := signStatementFor(context.Background(), build, tt.id, NewNoTLogPolicy())
+			if err != nil {
+				t.Fatalf("signStatementFor: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("build signer = %q, want %q", got, tt.want)
+			}
+			if res.Identity != tt.want {
+				t.Errorf("Identity = %q, want %q", res.Identity, tt.want)
+			}
+			var b protobundle.Bundle
+			if err := protojson.Unmarshal(res.BundleJSON, &b); err != nil {
+				t.Fatalf("unmarshal bundle: %v", err)
+			}
+			stmt := decodeStatement(t, b.GetDsseEnvelope().GetPayload())
+			if id := stmt.Predicate.RunDetails.Builder.ID; id != tt.want {
+				t.Errorf("signed builder.id = %q, want %q", id, tt.want)
+			}
+		})
+	}
+}
+
+// TestSignStatementFor_ReusesIssuedCertificate checks that keyless signing
+// retries a failed certificate request, requests one certificate per
+// successful issuance, and signs the bundle with that certificate.
+func TestSignStatementFor_ReusesIssuedCertificate(t *testing.T) {
+	tests := []struct {
+		name      string
+		failures  int
+		wantCalls int
+	}{
+		{"first request succeeds", 0, 1},
+		{"first request fails", 1, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base, ok := newFakeCertIdentity(t, "jdoe@company.com").(fakeCertIdentity)
+			if !ok {
+				t.Fatal("newFakeCertIdentity did not return a fakeCertIdentity")
+			}
+			provider := &countingCertProvider{inner: base.provider, failures: tt.failures}
+			id := fakeCertIdentity{kp: base.kp, provider: provider}
+
+			res, err := signStatementFor(context.Background(), func(signer string) ([]byte, error) {
+				return statementJSONFor(t, signer), nil
+			}, id, NewNoTLogPolicy())
+			if err != nil {
+				t.Fatalf("signStatementFor: %v", err)
+			}
+			if provider.calls != tt.wantCalls {
+				t.Errorf("GetCertificate calls = %d, want %d", provider.calls, tt.wantCalls)
+			}
+			if len(provider.issued) != 1 {
+				t.Fatalf("issued %d certificates, want 1", len(provider.issued))
+			}
+			var b protobundle.Bundle
+			if err := protojson.Unmarshal(res.BundleJSON, &b); err != nil {
+				t.Fatalf("unmarshal bundle: %v", err)
+			}
+			if got := b.GetVerificationMaterial().GetCertificate().GetRawBytes(); !bytes.Equal(got, provider.issued[0]) {
+				t.Error("bundle certificate differs from the issued certificate")
+			}
+		})
+	}
+}
+
+// countingCertProvider wraps a sign.CertificateProvider. It returns an error
+// for its first failures calls and records each certificate inner issues.
+type countingCertProvider struct {
+	inner    sign.CertificateProvider
+	failures int
+	calls    int
+	issued   [][]byte
+}
+
+func (p *countingCertProvider) GetCertificate(ctx context.Context, kp sign.Keypair, opts *sign.CertificateProviderOptions) ([]byte, error) {
+	p.calls++
+	if p.calls <= p.failures {
+		return nil, errors.New(errors.ErrCodeUnavailable, "simulated Fulcio failure")
+	}
+	der, err := p.inner.GetCertificate(ctx, kp, opts)
+	if err != nil {
+		return nil, err
+	}
+	p.issued = append(p.issued, der)
+	return der, nil
+}
+
 // fakeKeyIdentity is a test SigningIdentity backed by a local ECDSA signer
 // (no KMS, no network) with no Fulcio certificate provider. It mirrors the
 // production kmsIdentity contract: public-key signing with a fixed fallback
@@ -368,6 +534,13 @@ func (f *fakeKeyIdentity) FallbackIdentity() string { return f.uri }
 // package's BuildStatement so the payload is spec-valid (no hand-rolled JSON).
 func validStatementJSON(t *testing.T) []byte {
 	t.Helper()
+	return statementJSONFor(t, "awskms://test/key")
+}
+
+// statementJSONFor builds a valid in-toto statement whose builder ID is
+// builderID.
+func statementJSONFor(t *testing.T, builderID string) []byte {
+	t.Helper()
 	stmt, err := BuildStatement(
 		AttestSubject{
 			Name:   "checksums.txt",
@@ -376,7 +549,7 @@ func validStatementJSON(t *testing.T) []byte {
 		StatementMetadata{
 			Recipe:      "test-recipe",
 			ToolVersion: "v0.0.0-test",
-			BuilderID:   "awskms://test/key",
+			BuilderID:   builderID,
 		},
 	)
 	if err != nil {

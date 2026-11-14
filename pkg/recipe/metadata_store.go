@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
@@ -206,6 +207,11 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 			return nil
 		}
 
+		// Artifact documents are parsed only by activated composition or explicit
+		// static validation, never by the recipe metadata scanner.
+		if path == artifactBindingsPath || path == artifactInventoryPath {
+			return nil
+		}
 		filename := filepath.Base(path)
 
 		// Skip health check assert files (not recipe metadata)
@@ -448,7 +454,7 @@ func classifyRecipeMetadataCatalogHeader(
 
 func isKnownNonMetadataAICRKind(kind string) bool {
 	switch kind {
-	case "AICRConfig", "BundleProvenance", ComponentRegistryKind,
+	case artifact.InventoryKind, artifact.BindingsKind, "AICRConfig", "BundleProvenance", ComponentRegistryKind,
 		RecipeCriteriaKind, RecipeMixinKind, RecipeResultKind,
 		string(header.KindRecipe), string(header.KindSnapshot):
 
@@ -1086,6 +1092,10 @@ func finalizeRecipeResult(provider DataProvider, criteria *Criteria, mergedSpec 
 		provider:        provider,
 	}
 	result.Metadata.AppliedOverlays = appliedOverlays
+	if composed, ok := provider.(*ArtifactProvider); ok {
+		result.Metadata.Artifacts = composed.ArtifactProvenance()
+		result.APIVersion = header.ProfileGroupVersion
+	}
 
 	// Reject duplicate component-ref names before they reach ValidateCoherence
 	// or any caller of BuildRecipeResult/ResolveRecipe. RecipeMetadataSpec.Merge

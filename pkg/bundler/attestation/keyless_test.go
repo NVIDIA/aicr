@@ -15,20 +15,13 @@
 package attestation
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"math/big"
-	"net/url"
+	"context"
+	"strings"
 	"testing"
-	"time"
-
-	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
-	protocommon "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
 func TestNewKeylessAttester(t *testing.T) {
@@ -83,6 +76,79 @@ func TestKeylessAttester_Identity(t *testing.T) {
 	}
 }
 
+// fakeKeylessSign returns a stand-in for SignStatement that skips signing.
+// It passes signer to build, stores the statement in got, and returns signer
+// as the attestation's identity.
+func fakeKeylessSign(signer string, got *[]byte) func(context.Context, func(string) ([]byte, error), SignOptions) (*SignedAttestation, error) {
+	return func(_ context.Context, build func(string) ([]byte, error), _ SignOptions) (*SignedAttestation, error) {
+		statementJSON, err := build(signer)
+		if err != nil {
+			return nil, err
+		}
+		*got = statementJSON
+		return &SignedAttestation{BundleJSON: []byte("{}"), Identity: signer}, nil
+	}
+}
+
+var keylessTestSubject = AttestSubject{
+	Name:   "checksums.txt",
+	Digest: map[string]string{"sha256": strings.Repeat("ab", 32)},
+}
+
+func TestKeylessAttester_BuilderIDIsSigner(t *testing.T) {
+	const signer = "jdoe@company.com"
+	var statementJSON []byte
+	attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
+	attester.signStatement = fakeKeylessSign(signer, &statementJSON)
+
+	if _, err := attester.Attest(t.Context(), keylessTestSubject); err != nil {
+		t.Fatalf("Attest() error = %v", err)
+	}
+
+	if got := decodeStatement(t, statementJSON).Predicate.RunDetails.Builder.ID; got != signer {
+		t.Errorf("builder.id = %q, want %q", got, signer)
+	}
+}
+
+func TestKeylessAttester_RejectsEmptySigner(t *testing.T) {
+	var statementJSON []byte
+	tests := []struct {
+		name string
+		sign func(context.Context, func(string) ([]byte, error), SignOptions) (*SignedAttestation, error)
+	}{
+		{"empty signer", fakeKeylessSign("", &statementJSON)},
+		{"certificate with no SAN", func(ctx context.Context, build func(string) ([]byte, error), _ SignOptions) (*SignedAttestation, error) {
+			return signStatementFor(ctx, build, newFakeCertIdentity(t, ""), NewNoTLogPolicy())
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			statementJSON = nil
+			attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
+			attester.signStatement = tt.sign
+
+			_, err := attester.Attest(t.Context(), keylessTestSubject)
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+			if err == nil || !strings.Contains(err.Error(), "signing certificate has no email or URI SAN") {
+				t.Errorf("error = %v, want it to name the certificate", err)
+			}
+			if statementJSON != nil {
+				t.Errorf("built a statement for an empty signer: %s", statementJSON)
+			}
+		})
+	}
+}
+
+func TestKeylessAttester_RejectsInvalidSubjectBeforeSigning(t *testing.T) {
+	attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
+	attester.signStatement = func(context.Context, func(string) ([]byte, error), SignOptions) (*SignedAttestation, error) {
+		t.Error("signStatement called for an invalid subject")
+		return nil, errors.New(errors.ErrCodeInternal, "unexpected sign")
+	}
+	_, err := attester.Attest(t.Context(), AttestSubject{Name: "checksums.txt"})
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+}
+
 func TestKeylessAttester_HasRekorEntry(t *testing.T) {
 	attester := NewKeylessAttester("test-oidc-token", "", "", "", false)
 
@@ -93,140 +159,4 @@ func TestKeylessAttester_HasRekorEntry(t *testing.T) {
 
 func TestKeylessAttester_ImplementsAttester(t *testing.T) {
 	var _ Attester = (*KeylessAttester)(nil)
-}
-
-// createTestCert generates a self-signed X.509 certificate with the given SANs.
-func createTestCert(t *testing.T, emails []string, uris []*url.URL) []byte {
-	t.Helper()
-
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	template := &x509.Certificate{
-		SerialNumber:   big.NewInt(1),
-		Subject:        pkix.Name{CommonName: "test"},
-		NotBefore:      time.Now().Add(-time.Hour),
-		NotAfter:       time.Now().Add(time.Hour),
-		EmailAddresses: emails,
-		URIs:           uris,
-	}
-
-	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return certDER
-}
-
-// buildTestBundle creates a protobuf Bundle with the given certificate DER bytes.
-func buildTestBundle(certDER []byte) *protobundle.Bundle {
-	return &protobundle.Bundle{
-		VerificationMaterial: &protobundle.VerificationMaterial{
-			Content: &protobundle.VerificationMaterial_Certificate{
-				Certificate: &protocommon.X509Certificate{
-					RawBytes: certDER,
-				},
-			},
-		},
-	}
-}
-
-// TestExtractSignerClaims_Identity covers identity extraction across every
-// shape of bundle VerificationMaterial the function has to handle: single
-// Certificate vs X509CertificateChain, nil/missing/malformed certs, and the
-// two production SAN forms (email for interactive OIDC, URI for workload
-// OIDC). The companion TestExtractSignerClaims_PullsIssuerFromExtension in
-// signing_test.go covers the issuer side.
-func TestExtractSignerClaims_Identity(t *testing.T) {
-	workloadURI, _ := url.Parse("https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v1.0.0")
-
-	tests := []struct {
-		name   string
-		bundle func(t *testing.T) *protobundle.Bundle
-		want   string
-	}{
-		{
-			name: "email SAN (interactive OIDC)",
-			bundle: func(t *testing.T) *protobundle.Bundle {
-				return buildTestBundle(createTestCert(t, []string{"jdoe@company.com"}, nil))
-			},
-			want: "jdoe@company.com",
-		},
-		{
-			name: "URI SAN (workload OIDC)",
-			bundle: func(t *testing.T) *protobundle.Bundle {
-				return buildTestBundle(createTestCert(t, nil, []*url.URL{workloadURI}))
-			},
-			want: workloadURI.String(),
-		},
-		{
-			name:   "nil bundle pointer",
-			bundle: func(_ *testing.T) *protobundle.Bundle { return nil },
-			want:   "",
-		},
-		{
-			name: "verification material without cert",
-			bundle: func(_ *testing.T) *protobundle.Bundle {
-				return &protobundle.Bundle{
-					VerificationMaterial: &protobundle.VerificationMaterial{},
-				}
-			},
-			want: "",
-		},
-		{
-			name: "invalid cert DER",
-			bundle: func(_ *testing.T) *protobundle.Bundle {
-				return buildTestBundle([]byte("not a certificate"))
-			},
-			want: "",
-		},
-		{
-			name: "X509CertificateChain with one cert",
-			bundle: func(t *testing.T) *protobundle.Bundle {
-				certDER := createTestCert(t, []string{"chain@company.com"}, nil)
-				return &protobundle.Bundle{
-					VerificationMaterial: &protobundle.VerificationMaterial{
-						Content: &protobundle.VerificationMaterial_X509CertificateChain{
-							X509CertificateChain: &protocommon.X509CertificateChain{
-								Certificates: []*protocommon.X509Certificate{{RawBytes: certDER}},
-							},
-						},
-					},
-				}
-			},
-			want: "chain@company.com",
-		},
-		{
-			name: "X509CertificateChain with empty cert list",
-			bundle: func(_ *testing.T) *protobundle.Bundle {
-				return &protobundle.Bundle{
-					VerificationMaterial: &protobundle.VerificationMaterial{
-						Content: &protobundle.VerificationMaterial_X509CertificateChain{
-							X509CertificateChain: &protocommon.X509CertificateChain{
-								Certificates: []*protocommon.X509Certificate{},
-							},
-						},
-					},
-				}
-			},
-			want: "",
-		},
-		{
-			name: "cert with no email or URI SAN",
-			bundle: func(t *testing.T) *protobundle.Bundle {
-				return buildTestBundle(createTestCert(t, nil, nil))
-			},
-			want: "",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, _ := extractSignerClaims(tc.bundle(t))
-			if got != tc.want {
-				t.Errorf("identity = %q, want %q", got, tc.want)
-			}
-		})
-	}
 }

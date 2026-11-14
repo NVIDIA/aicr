@@ -98,11 +98,28 @@ type observingPods struct {
 	observe func(string, context.Context)
 }
 
+// isTerminalPodObservation reports a request from the Job pod observer, which
+// selects terminal-phase pods by field selector. It runs alongside the waits
+// these tests assert on and is not one of them, so it is answered without
+// reaching the fake client's reactors.
+//
+// The literal mirrors terminalPodFieldSelector in pkg/k8s/pod/observe.go; it is
+// matched exactly so an unrelated field-selected pod request is not swallowed.
+func isTerminalPodObservation(opts metav1.ListOptions) bool {
+	return opts.FieldSelector == "status.phase!=Pending,status.phase!=Running"
+}
+
 func (c observingPods) List(ctx context.Context, opts metav1.ListOptions) (*corev1.PodList, error) {
+	if isTerminalPodObservation(opts) {
+		return &corev1.PodList{}, nil
+	}
 	c.observe("capture pod", ctx)
 	return c.PodInterface.List(ctx, opts)
 }
 func (c observingPods) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+	if isTerminalPodObservation(opts) {
+		return watch.NewRaceFreeFake(), nil
+	}
 	c.observe("wait pod", ctx)
 	return c.PodInterface.Watch(ctx, opts)
 }

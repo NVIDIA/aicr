@@ -13,18 +13,26 @@
 # limitations under the License.
 
 name: 'Go Test'
-description: 'Setup Go, verify manifests are tidy, run unit tests with race detector and coverage'
+description: 'Run one independently gated part of Go qualification'
 
 inputs:
   go_version:
     description: 'Go version to install (e.g., 1.25)'
     required: true
+  task:
+    description: 'Qualification task: full (local make test), shard, shell, or compatibility'
+    required: false
+    default: 'full'
+  shard:
+    description: 'Package shard (recipe, a, b); only used by task=shard'
+    required: false
+    default: ''
   coverage_report:
-    description: 'Whether to generate coverage report (true/false)'
+    description: 'Whether to report coverage for task=full'
     required: false
     default: 'false'
   coverage_threshold:
-    description: 'Minimum coverage percentage required'
+    description: 'Minimum coverage percentage for task=full'
     required: false
     default: ''
   helm_version:
@@ -64,6 +72,13 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Validate qualification task
+      shell: bash
+      env:
+        TASK: ${{ inputs.task }}
+      run: |
+        case "$TASK" in full|shard|shell|compatibility) ;; *) echo "Unknown qualification task" >&2; exit 1;; esac
+
     - name: Setup Go
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
       with:
@@ -104,18 +119,17 @@ runs:
     # Restore is unconditional; SAVE is not. `ok-to-test` runs on
     # `issue_comment`, so its `github.ref` resolves to the default branch and it
     # writes into main's cache scope -- while checking out an untrusted PR head
-    # that this job then executes via `make test`. GOCACHE entries are not
+    # that this action then executes via its test task. GOCACHE entries are not
     # re-verified on read (`GODEBUG=gocacheverify` is opt-in), so allowing those
     # runs to write would let a crafted PR plant an entry a later trusted run
     # consumes. The exact-key-only restore this replaces made that hard to reach
     # by accident; a prefix fallback would not, which is why adding the fallback
     # and gating the write belong in the same change.
     #
-    # This job is the only writer of the `go-` key: #2670 moved qualification's
-    # `lint` and `e2e` onto it as restore-only consumers, so the save gated
-    # below decides the contents every later run restores -- which is why it
-    # waits for `make test` rather than banking a GOCACHE with no -race test
-    # objects in it.
+    # In qualification, shard a is the sole writer of the shared go- key. Other
+    # shards and tasks restore only, avoiding a race to save an immutable
+    # entry. Its build cache contains only that shard's compilation work.
+    # Save still waits for test execution, so setup alone cannot bank an entry.
     #
     # Note what this gate is and is not. On the ok-to-test path the action file
     # you are reading is itself checked out from the fork (ok-to-test.yaml
@@ -151,6 +165,7 @@ runs:
     # the committed go.sum on every build, with sum.golang.org consulted when a
     # module is first added.
     - name: Verify go.mod and go.sum are tidy
+      if: inputs.task == 'compatibility' || inputs.task == 'full'
       shell: bash
       run: |
         go mod tidy -diff \
@@ -162,6 +177,7 @@ runs:
     # setup-build-tools step replaces any preinstalled binary that does not
     # match the pin and fails the job if the install fails.
     - name: Install Helm
+      if: inputs.task == 'shard' || inputs.task == 'full'
       uses: ./.github/actions/setup-build-tools
       with:
         install_helm: 'true'
@@ -171,6 +187,7 @@ runs:
     # lets an upstream release change what every PR is tested against with no
     # commit here. Kept in step with sigs.k8s.io/controller-runtime in go.mod.
     - name: Install setup-envtest
+      if: inputs.task == 'shard' || inputs.task == 'full'
       uses: ./.github/actions/setup-build-tools
       with:
         install_setup_envtest: 'true'
@@ -181,6 +198,7 @@ runs:
     # binaries (etcd, kube-apiserver) that setup-envtest manages, which is a
     # different artifact from setup-envtest itself.
     - name: Fetch envtest control-plane binaries
+      if: inputs.task == 'shard' || inputs.task == 'full'
       shell: bash
       # stdout is the resolved path and is not needed; stderr is kept so a failed
       # control-plane download says why instead of only "exit code 1".
@@ -197,7 +215,7 @@ runs:
     # Measured against a logging proxy: the `go install` form requests
     # /sumdb/sum.golang.org/supported, this form makes no /sumdb/ request at all.
     - name: Install API-diff tool
-      if: inputs.apidiff_version != ''
+      if: inputs.task != 'shard' && inputs.apidiff_version != ''
       shell: bash
       run: |
         set -euo pipefail
@@ -213,30 +231,59 @@ runs:
     # tools/openapi-diff_test.sh, which exercises the real oasdiff rather than a
     # stub and fails in CI when it is missing.
     - name: Install OpenAPI-diff tool
+      if: inputs.task != 'shard'
       uses: ./.github/actions/setup-build-tools
       with:
         install_oasdiff: 'true'
         oasdiff_version: '${{ inputs.oasdiff_version }}'
         oasdiff_sha256: '${{ inputs.oasdiff_sha256 }}'
 
-    - name: Run Tests with Coverage
-      id: gotest
+    - name: Run full local suite
+      if: inputs.task == 'full'
+      id: fulltest
       shell: bash
       run: make test
 
-    - name: Coverage Report
-      if: inputs.coverage_report == 'true'
+    - name: Report full local coverage
+      if: inputs.task == 'full' && inputs.coverage_report == 'true'
       uses: ./.github/actions/go-coverage
       with:
         coverage_file: ./coverage.out
         threshold: ${{ inputs.coverage_threshold }}
 
+    - name: Run race and atomic coverage shard
+      if: inputs.task == 'shard'
+      id: gotest
+      shell: bash
+      env:
+        SHARD: ${{ inputs.shard }}
+        TEST_RESULTS: ${{ runner.temp }}/test-results
+      run: make test-shard
+
+    - name: Upload shard coverage, manifest, and timings
+      if: always() && inputs.task == 'shard'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+      with:
+        name: test-shard-${{ inputs.shard }}
+        path: ${{ runner.temp }}/test-results/${{ inputs.shard }}/
+        if-no-files-found: error
+        retention-days: 7
+
+    - name: Check tool pins before shell tests
+      if: inputs.task == 'shell'
+      shell: bash
+      run: |
+        set -euo pipefail
+        make test-tool-pins
+        make test-shell
+
     - name: Check SDK API compatibility
-      if: inputs.apidiff_version != ''
+      if: (inputs.task == 'compatibility' || inputs.task == 'full') && inputs.apidiff_version != ''
       shell: bash
       run: make api-diff
 
     - name: Check REST contract compatibility
+      if: inputs.task == 'compatibility' || inputs.task == 'full'
       shell: bash
       run: make openapi-diff
 
@@ -245,14 +292,13 @@ runs:
     # here is what that scope keeps until go.sum moves or the entry idles out.
     # That makes *when* to save the whole question.
     #
-    # `make test` having run is the condition, pass or fail. Failing is fine and
-    # deliberately still saves -- the modules were downloaded and the packages
-    # compiled, which is the cost worth keeping, and a re-run of a flake should
-    # not pay it again. But a run that dies before it, at Install Helm or
-    # envtest, has a warm GOMODCACHE (`go mod tidy -diff` resolves the graph)
-    # and a nearly empty GOCACHE. Banking that would pin a cache that rebuilds
-    # all of ./... under -race on every subsequent run -- the exact cost the
-    # 15-to-30 minute bump is absorbing.
+    # Qualification saves only after shard a completes, pass or fail, retaining
+    # that shard's compilation work. Other shards and the compatibility task
+    # restore only; their work is not included in this save. Module tidiness is
+    # checked independently in compatibility and does not gate shard a's save.
+    # The default full task instead saves after `make test` completes.
+    # Neither path saves after setup alone: a failed Helm/envtest install has
+    # not produced the race-test build objects worth retaining.
     #
     # `outcome` is the pre-`continue-on-error` result, and is `skipped` when the
     # step never ran and `cancelled` on cancellation, so testing for the two
@@ -261,8 +307,10 @@ runs:
       if: >-
         always()
         && inputs.privileged_ci == 'true'
+        && (inputs.task == 'full' || (inputs.task == 'shard' && inputs.shard == 'a'))
         && steps.gocache-restore.outputs.cache-hit != 'true'
-        && (steps.gotest.outcome == 'success' || steps.gotest.outcome == 'failure')
+        && (steps.gotest.outcome == 'success' || steps.gotest.outcome == 'failure'
+            || steps.fulltest.outcome == 'success' || steps.fulltest.outcome == 'failure')
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: |

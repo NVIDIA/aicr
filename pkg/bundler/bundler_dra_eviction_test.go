@@ -110,7 +110,8 @@ func TestInjectDRAEvictionLabel(t *testing.T) {
 				{Name: tt.draName},
 			}}
 
-			if err := b.injectDRAEvictionLabel(values, rr); err != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if err := r.injectDRAEvictionLabel(values, rr); err != nil {
 				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 			}
 
@@ -154,7 +155,8 @@ func TestInjectDRAEvictionLabel_CreatesMissingManagedPaths(t *testing.T) {
 		{Name: draComponentName},
 	}}
 
-	if err := b.injectDRAEvictionLabel(values, rr); err != nil {
+	r := &bundleRun{DefaultBundler: b}
+	if err := r.injectDRAEvictionLabel(values, rr); err != nil {
 		t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 	}
 	if got := dig(values[draComponentName], "kubeletPlugin", "nodeSelector", defaults.DRAEvictionNodeLabelKey); got != defaults.DRAEvictionNodeLabelValue {
@@ -184,7 +186,8 @@ func TestInjectDRAEvictionLabel_PreservesStringMapNodeSelector(t *testing.T) {
 		{Name: draComponentName},
 	}}
 
-	if err := b.injectDRAEvictionLabel(values, rr); err != nil {
+	r := &bundleRun{DefaultBundler: b}
+	if err := r.injectDRAEvictionLabel(values, rr); err != nil {
 		t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 	}
 	if got := dig(values[draComponentName], "kubeletPlugin", "nodeSelector", "example.com/existing"); got != "yes" {
@@ -254,7 +257,8 @@ func TestInjectDRAEvictionLabel_RejectsMalformedManagedPaths(t *testing.T) {
 				{Name: draComponentName},
 			}}
 
-			err = b.injectDRAEvictionLabel(values, rr)
+			r := &bundleRun{DefaultBundler: b}
+			err = r.injectDRAEvictionLabel(values, rr)
 			if errorstest.ReportedCode(err) != aicrerrors.ErrCodeInvalidRequest {
 				t.Fatalf("injectDRAEvictionLabel() error = %v, want ErrCodeInvalidRequest", err)
 			}
@@ -290,7 +294,8 @@ func TestInjectDRAEvictionLabel_RequiresBothComponents(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
-			if err := b.injectDRAEvictionLabel(tt.values, &recipe.RecipeResult{ComponentRefs: tt.refs}); err != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if err := r.injectDRAEvictionLabel(tt.values, &recipe.RecipeResult{ComponentRefs: tt.refs}); err != nil {
 				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 			}
 			for name, values := range tt.values {
@@ -673,7 +678,8 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 				values[ref.Name] = map[string]any{}
 			}
 
-			if err := b.injectDRAEvictionLabel(values, &recipe.RecipeResult{ComponentRefs: tt.refs}); err != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if err := r.injectDRAEvictionLabel(values, &recipe.RecipeResult{ComponentRefs: tt.refs}); err != nil {
 				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 			}
 
@@ -681,7 +687,7 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 			// one and breaking cannot tell a correct single emission from a
 			// regression that emits the same warning twice.
 			var matched []string
-			for _, w := range b.warnings {
+			for _, w := range r.warnings {
 				if strings.Contains(w, "kubelet plugin only on nodes labeled") {
 					matched = append(matched, w)
 				}
@@ -699,7 +705,7 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 			}
 
 			if got == "" {
-				t.Fatalf("missing DRA node-label warning; warnings = %v", b.warnings)
+				t.Fatalf("missing DRA node-label warning; warnings = %v", r.warnings)
 			}
 			wantCount := tt.wantCount
 			if wantCount == 0 {
@@ -771,7 +777,8 @@ func TestInjectDRAEvictionLabel_OptOutByDefault(t *testing.T) {
 				{Name: tt.gpuName}, {Name: tt.draName},
 			}}
 
-			if err := b.injectDRAEvictionLabel(values, rr); err != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if err := r.injectDRAEvictionLabel(values, rr); err != nil {
 				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 			}
 
@@ -825,18 +832,19 @@ func TestWarnDRAEvictionNotConfigured(t *testing.T) {
 				{Name: gpuOperatorComponentName}, {Name: draComponentName},
 			}}
 
-			if err := b.injectDRAEvictionLabel(values, rr); err != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if err := r.injectDRAEvictionLabel(values, rr); err != nil {
 				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 			}
 
 			var found bool
-			for _, w := range b.warnings {
+			for _, w := range r.warnings {
 				if strings.Contains(w, "did not configure automatic eviction") {
 					found = true
 				}
 			}
 			if found != tt.wantWarning {
-				t.Errorf("opt-out warning present = %v, want %v; warnings = %v", found, tt.wantWarning, b.warnings)
+				t.Errorf("opt-out warning present = %v, want %v; warnings = %v", found, tt.wantWarning, r.warnings)
 			}
 		})
 	}
@@ -921,12 +929,13 @@ func TestWarnDRAEvictionNotConfigured_OCPAndMixedOperators(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
-			if err := b.injectDRAEvictionLabel(tt.components, &recipe.RecipeResult{ComponentRefs: tt.refs}); err != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if err := r.injectDRAEvictionLabel(tt.components, &recipe.RecipeResult{ComponentRefs: tt.refs}); err != nil {
 				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 			}
 
 			var optOut, placement bool
-			for _, w := range b.warnings {
+			for _, w := range r.warnings {
 				if strings.Contains(w, "did not configure automatic eviction") {
 					optOut = true
 				}
@@ -935,12 +944,12 @@ func TestWarnDRAEvictionNotConfigured_OCPAndMixedOperators(t *testing.T) {
 				}
 			}
 			if optOut != tt.wantWarning {
-				t.Errorf("opt-out warning = %v, want %v; warnings = %v", optOut, tt.wantWarning, b.warnings)
+				t.Errorf("opt-out warning = %v, want %v; warnings = %v", optOut, tt.wantWarning, r.warnings)
 			}
 			// The placement warning belongs to the opt-in path only; it must
 			// never accompany the opt-out warning.
 			if placement {
-				t.Errorf("placement warning emitted without opt-in; warnings = %v", b.warnings)
+				t.Errorf("placement warning emitted without opt-in; warnings = %v", r.warnings)
 			}
 		})
 	}

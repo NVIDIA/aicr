@@ -142,13 +142,14 @@ func TestCheckAIServiceMetricsPrerequisites(t *testing.T) {
 		err := CheckAIServiceMetrics(&validators.Context{Ctx: context.Background()})
 		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 	})
-	t.Run("kube-prometheus-stack not in recipe", func(t *testing.T) {
+	// kube-prometheus-stack's Prometheus is no monitoring system for a
+	// workload's metrics, so a recipe with it but without nktp skips.
+	t.Run("nktp not in recipe skips", func(t *testing.T) {
 		t.Parallel()
 		err := CheckAIServiceMetrics(&validators.Context{Ctx: context.Background(), Clientset: k8sfake.NewClientset(),
-			ValidationInput: &v1.ValidationInput{ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}}}})
-		errorstest.WantReportedCode(t, err, errors.ErrCodeNotFound)
-		if !strings.Contains(err.Error(), prometheusComponentName) {
-			t.Errorf("error %q does not name the missing component", err.Error())
+			ValidationInput: &v1.ValidationInput{ComponentRefs: []recipe.ComponentRef{{Name: prometheusComponentName, Namespace: "monitoring"}}}})
+		if !validators.IsSkip(err) {
+			t.Fatalf("error = %v, want a skip", err)
 		}
 	})
 	t.Run("Prometheus Service discovered by label", func(t *testing.T) {
@@ -165,9 +166,9 @@ func TestCheckAIServiceMetricsPrerequisites(t *testing.T) {
 	})
 }
 
-// fakeMonitoring stands in for the stub workload and Prometheus: requests the
-// check sends are counted as served, and a scraper goroutine copies served to
-// collected so queries lag the traffic the way a scrape does.
+// fakeMonitoring stands in for the stub workload and the backend NKTP exports
+// to: requests the check sends are counted as served, and a scraper goroutine
+// copies served to collected so queries lag the traffic the way a scrape does.
 type fakeMonitoring struct {
 	mu        sync.Mutex
 	served    float64
@@ -181,14 +182,14 @@ type fakeMonitoring struct {
 	// excess-traffic case cannot pass by chance on a mid-run scrape.
 	extraTraffic float64
 	extraLanded  bool
-	// poolNamespace is the run namespace the ServiceMonitor's scrape pool
-	// is reported in; poolLoadedAfter delays that pool's appearance from the
-	// fake's creation, standing in for prometheus-operator's reconcile gap,
-	// and poolNever withholds it. No sample is collected before the pool is
-	// loaded, as no scrape can happen before the configuration is.
-	poolNamespace   string
-	poolLoadedAfter time.Duration
-	poolNever       bool
+	// targetNamespace is the run namespace the stub target's up series
+	// carries; discoveredAfter delays that series from the fake's creation,
+	// standing in for the pipeline's discovery gap, and neverDiscovered
+	// withholds it. No sample is collected before the target is discovered,
+	// as no scrape can happen before then.
+	targetNamespace string
+	discoveredAfter time.Duration
+	neverDiscovered bool
 	start           time.Time
 	stop            chan struct{}
 }
@@ -210,24 +211,16 @@ func newFakeMonitoring(scrapes bool) *fakeMonitoring {
 	return f
 }
 
-// poolLoaded reports whether Prometheus has the ServiceMonitor's scrape pool.
-func (f *fakeMonitoring) poolLoaded() bool {
-	return !f.poolNever && time.Since(f.start) >= f.poolLoadedAfter
-}
-
-// scrapePools renders the scrape_pools response: an unrelated pool always,
-// the ServiceMonitor's once loaded.
-func (f *fakeMonitoring) scrapePools() []byte {
-	pools := []string{"serviceMonitor/monitoring/kube-prometheus-stack-kubelet/0"}
-	if f.poolLoaded() {
-		pools = append(pools, scrapePoolPrefix(monitorKindService, f.poolNamespace, aiMetricsWorkloadName)+"0")
-	}
-	return promScrapePools(pools...)
+// discovered reports whether the pipeline has discovered the stub target.
+func (f *fakeMonitoring) discovered() bool {
+	return !f.neverDiscovered && time.Since(f.start) >= f.discoveredAfter
 }
 
 func (f *fakeMonitoring) handler(w http.ResponseWriter, r *http.Request) {
+	// The backend is one a telemetry pipeline writes to: it has no scrape
+	// pool for the stub, and the check must not ask for one.
 	if r.URL.Path == "/api/v1/scrape_pools" {
-		_, _ = w.Write(f.scrapePools())
+		http.NotFound(w, r)
 		return
 	}
 	q := r.URL.Query().Get("query")
@@ -235,7 +228,15 @@ func (f *fakeMonitoring) handler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(promVector(1))
 		return
 	}
-	if !f.scrapes || !f.poolLoaded() {
+	if strings.HasPrefix(q, "max(up{") {
+		if f.discovered() && strings.Contains(q, f.targetNamespace) {
+			_, _ = w.Write(promVector(1))
+			return
+		}
+		_, _ = w.Write(promVector())
+		return
+	}
+	if !f.scrapes || !f.discovered() {
 		_, _ = w.Write(promVector())
 		return
 	}
@@ -272,31 +273,32 @@ func readyOnCreate(c *k8sfake.Clientset) {
 }
 
 // TestAIMetricsScenarioPhases drives the cycle against the fake monitoring
-// and pins which phase produces each verdict: a loaded ServiceMonitor with
-// exactly the sent traffic passes, also when Prometheus loads it only after
-// the collection timeout would have expired (#3671); a ServiceMonitor never
-// loaded fails at baseline naming the load; one loaded but never scraped
+// and pins which phase produces each verdict: a discovered target with
+// exactly the sent traffic passes, also when the pipeline discovers it only
+// after the collection timeout would have expired; a target never discovered
+// fails at baseline naming the discovery; one discovered but never collected
 // fails at baseline naming the collection; foreign traffic above baseline
-// plus N fails the increase phase.
+// plus N fails the increase phase. The backend has no scrape pool API, and
+// the check must not ask for one.
 func TestAIMetricsScenarioPhases(t *testing.T) {
 	t.Parallel()
 	const collectionTimeout = 200 * time.Millisecond
 	tests := []struct {
-		name      string
-		scrapes   bool
-		poolAfter time.Duration
-		poolNever bool
-		extra     float64
-		wantPhase aiMetricsPhase
-		wantCode  errors.ErrorCode
-		wantMsg   string
+		name            string
+		scrapes         bool
+		discoveredAfter time.Duration
+		neverDiscovered bool
+		extra           float64
+		wantPhase       aiMetricsPhase
+		wantCode        errors.ErrorCode
+		wantMsg         string
 	}{
 		{name: "exact count passes", scrapes: true, wantPhase: aiMetricsPhaseIncrease},
-		{name: "ServiceMonitor loaded after the collection timeout passes", scrapes: true, poolAfter: 3 * collectionTimeout, wantPhase: aiMetricsPhaseIncrease},
-		{name: "ServiceMonitor never loaded fails at baseline", scrapes: true, poolNever: true, wantPhase: aiMetricsPhaseBaseline,
-			wantCode: errors.ErrCodeNotFound, wantMsg: "Prometheus did not load the ServiceMonitor"},
-		{name: "ServiceMonitor loaded but not scraped fails at baseline", scrapes: false, wantPhase: aiMetricsPhaseBaseline,
-			wantCode: errors.ErrCodeNotFound, wantMsg: "Prometheus loaded the ServiceMonitor but the workload metrics were not collected"},
+		{name: "target discovered after the collection timeout passes", scrapes: true, discoveredAfter: 3 * collectionTimeout, wantPhase: aiMetricsPhaseIncrease},
+		{name: "target never discovered fails at baseline", scrapes: true, neverDiscovered: true, wantPhase: aiMetricsPhaseBaseline,
+			wantCode: errors.ErrCodeNotFound, wantMsg: "did not report the stub's target as up"},
+		{name: "target discovered but not collected fails at baseline", scrapes: false, wantPhase: aiMetricsPhaseBaseline,
+			wantCode: errors.ErrCodeNotFound, wantMsg: "discovered the ServiceMonitor but the workload metrics were not collected"},
 		{name: "traffic above baseline plus N fails the increase", scrapes: true, extra: float64(defaults.AIServiceMetricsRequestCount), wantPhase: aiMetricsPhaseIncrease,
 			wantCode: errors.ErrCodeInternal, wantMsg: "extra requests reached the workload"},
 	}
@@ -306,7 +308,7 @@ func TestAIMetricsScenarioPhases(t *testing.T) {
 			mon := newFakeMonitoring(tt.scrapes)
 			defer close(mon.stop)
 			mon.extraTraffic = tt.extra
-			mon.poolLoadedAfter, mon.poolNever = tt.poolAfter, tt.poolNever
+			mon.discoveredAfter, mon.neverDiscovered = tt.discoveredAfter, tt.neverDiscovered
 			srv := httptest.NewServer(http.HandlerFunc(mon.handler))
 			defer srv.Close()
 
@@ -318,7 +320,7 @@ func TestAIMetricsScenarioPhases(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newAIMetricsScenario: %v", err)
 			}
-			mon.poolNamespace = s.testRun.namespace
+			mon.targetNamespace = s.testRun.namespace
 			s.sendRequest = mon.sendRequest
 			s.pollInterval = 2 * time.Millisecond
 			s.readyTimeout = time.Second
@@ -487,30 +489,22 @@ func TestCheckAIMetricsWorkloadIntact(t *testing.T) {
 }
 
 // TestAIMetricsScenarioPreflight pins the preflight's verdicts: a query API
-// that does not evaluate vector(1), a scrape pool API that answers an error
-// (a Prometheus older than v2.42 has none), and an unreachable Prometheus
-// each fail before any resource is created, naming what was probed.
+// that does not evaluate vector(1) and an unreachable backend each fail
+// before any resource is created, naming what was probed.
 func TestAIMetricsScenarioPreflight(t *testing.T) {
 	t.Parallel()
 	var (
-		mu         sync.Mutex
-		vectorOK   bool
-		poolsOK    bool
-		poolsReply = promScrapePools("kubelet/0")
+		mu       sync.Mutex
+		vectorOK bool
 	)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
-		switch {
-		case r.URL.Path == "/api/v1/scrape_pools" && poolsOK:
-			_, _ = w.Write(poolsReply)
-		case r.URL.Path == "/api/v1/scrape_pools":
-			http.NotFound(w, r)
-		case vectorOK:
+		if vectorOK {
 			_, _ = w.Write(promVector(1))
-		default:
-			_, _ = w.Write(promVector())
+			return
 		}
+		_, _ = w.Write(promVector())
 	}))
 	defer srv.Close()
 	s, err := newAIMetricsScenario(k8sfake.NewClientset(), nil, srv.URL, nil)
@@ -526,27 +520,21 @@ func TestAIMetricsScenarioPreflight(t *testing.T) {
 	mu.Lock()
 	vectorOK = true
 	mu.Unlock()
-	err = s.preflight(context.Background())
-	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
-	if err == nil || !strings.Contains(err.Error(), "scrape pools") || !strings.Contains(err.Error(), "HTTP 404") {
-		t.Errorf("error %v does not describe the scrape pool preflight", err)
-	}
-
-	mu.Lock()
-	poolsOK = true
-	mu.Unlock()
 	if err = s.preflight(context.Background()); err != nil {
-		t.Errorf("preflight with both APIs answering: %v", err)
+		t.Errorf("preflight with the query API answering: %v", err)
 	}
 
 	srv.Close()
 	err = s.preflight(context.Background())
 	errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
+	if !strings.Contains(err.Error(), "metrics backend unreachable") {
+		t.Errorf("error %q does not name the unreachable backend", err.Error())
+	}
 }
 
 // TestBuildAIMetricsWorkload pins the stub's shape: CPU only, restricted
 // security context, the run id in its environment, and a ServiceMonitor that
-// selects the Service by app label and carries the release label.
+// selects the Service by app label and carries no selector label.
 func TestBuildAIMetricsWorkload(t *testing.T) {
 	t.Parallel()
 	pod, svc := buildAIMetricsWorkload("ns", "run123", time.Minute, nil, nil)
@@ -573,8 +561,8 @@ func TestBuildAIMetricsWorkload(t *testing.T) {
 		t.Errorf("service = %+v", svc.Spec)
 	}
 	sm := buildAIMetricsServiceMonitor("ns")
-	if sm.GetLabels()[prometheusReleaseLabel] != prometheusComponentName {
-		t.Errorf("ServiceMonitor labels = %v, want %s=%s", sm.GetLabels(), prometheusReleaseLabel, prometheusComponentName)
+	if len(sm.GetLabels()) != 0 {
+		t.Errorf("ServiceMonitor labels = %v, want none: NKTP discovers every ServiceMonitor", sm.GetLabels())
 	}
 	endpoints, _, _ := unstructured.NestedSlice(sm.Object, "spec", "endpoints")
 	if len(endpoints) != 1 || endpoints[0].(map[string]any)["port"] != aiMetricsPortName {
@@ -634,6 +622,52 @@ func TestAIMetricsScenarioRunWithCleanup_NamespaceCreateFailure(t *testing.T) {
 			assertNamespaceCreateFailureCleanup(t, c, s.testRun.namespace, out, err, tt.persists || tt.surfacesLate, tt.deleteErr, tt.wantDeleted, tt.wantStatus)
 			if s.phase != "" {
 				t.Errorf("phase = %q, want none — the cycle must not start without a namespace", s.phase)
+			}
+		})
+	}
+}
+
+// TestDiscoverTelemetryBackendURL pins where the check reads when the recipe
+// ships NKTP: otel-lgtm's Prometheus port in nktp's namespace, a skip when
+// NKTP runs without otel-lgtm, and a failure when the Service lacks the port.
+func TestDiscoverTelemetryBackendURL(t *testing.T) {
+	t.Parallel()
+	lgtm := func(port int32) *corev1.Service {
+		return &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: otelLGTMServiceName, Namespace: "nktp"},
+			Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: port}}},
+		}
+	}
+	tests := []struct {
+		name     string
+		refs     []recipe.ComponentRef
+		objects  []runtime.Object
+		wantURL  string
+		wantSkip bool
+		wantCode errors.ErrorCode
+	}{
+		{name: "otel-lgtm installed", refs: []recipe.ComponentRef{{Name: nktpComponentName, Namespace: "nktp"}},
+			objects: []runtime.Object{lgtm(otelLGTMPrometheusPort)}, wantURL: "http://lgtm.nktp.svc:9090"},
+		{name: "otel-lgtm disabled skips", refs: []recipe.ComponentRef{{Name: nktpComponentName, Namespace: "nktp"}}, wantSkip: true},
+		{name: "Service without the Prometheus port fails", refs: []recipe.ComponentRef{{Name: nktpComponentName, Namespace: "nktp"}},
+			objects: []runtime.Object{lgtm(3000)}, wantCode: errors.ErrCodeNotFound},
+		{name: "nktp without a namespace fails", refs: []recipe.ComponentRef{{Name: nktpComponentName}}, wantCode: errors.ErrCodeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := &validators.Context{Ctx: context.Background(), Clientset: k8sfake.NewClientset(tt.objects...),
+				ValidationInput: &v1.ValidationInput{ComponentRefs: tt.refs}}
+			got, err := discoverTelemetryBackendURL(ctx)
+			switch {
+			case tt.wantSkip:
+				if !validators.IsSkip(err) {
+					t.Fatalf("error = %v, want a skip", err)
+				}
+			case tt.wantCode != "":
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+			case err != nil || got != tt.wantURL:
+				t.Fatalf("got %q, %v; want %q", got, err, tt.wantURL)
 			}
 		})
 	}

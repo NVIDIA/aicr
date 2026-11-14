@@ -428,46 +428,46 @@ func TestPodWaitingStatus(t *testing.T) {
 }
 
 func TestNewGangTestRun(t *testing.T) {
-	run, err := newGangTestRun()
+	run, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
-		t.Fatalf("newGangTestRun() error = %v", err)
+		t.Fatalf("newGangTestRun(kaiGangTarget()) error = %v", err)
 	}
 
 	if run.suffix == "" {
-		t.Error("newGangTestRun() suffix is empty")
+		t.Error("newGangTestRun(kaiGangTarget()) suffix is empty")
 	}
 	if len(run.suffix) != 32 {
-		t.Errorf("newGangTestRun() suffix length = %d, want 32 hex chars (a 128-bit token)", len(run.suffix))
+		t.Errorf("newGangTestRun(kaiGangTarget()) suffix length = %d, want 32 hex chars (a 128-bit token)", len(run.suffix))
 	}
 	if run.groupName == "" {
-		t.Error("newGangTestRun() groupName is empty")
+		t.Error("newGangTestRun(kaiGangTarget()) groupName is empty")
 	}
 	if !strings.HasPrefix(run.groupName, gangGroupPrefix) {
-		t.Errorf("newGangTestRun() groupName = %q, want prefix %q", run.groupName, gangGroupPrefix)
+		t.Errorf("newGangTestRun(kaiGangTarget()) groupName = %q, want prefix %q", run.groupName, gangGroupPrefix)
 	}
 	for i := range gangMinMembers {
 		if run.pods[i] == "" {
-			t.Errorf("newGangTestRun() pods[%d] is empty", i)
+			t.Errorf("newGangTestRun(kaiGangTarget()) pods[%d] is empty", i)
 		}
 		if !strings.HasPrefix(run.pods[i], gangPodPrefix) {
-			t.Errorf("newGangTestRun() pods[%d] = %q, want prefix %q", i, run.pods[i], gangPodPrefix)
+			t.Errorf("newGangTestRun(kaiGangTarget()) pods[%d] = %q, want prefix %q", i, run.pods[i], gangPodPrefix)
 		}
 	}
 
 	// Two calls should produce different suffixes.
-	run2, err := newGangTestRun()
+	run2, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
-		t.Fatalf("newGangTestRun() second call error = %v", err)
+		t.Fatalf("newGangTestRun(kaiGangTarget()) second call error = %v", err)
 	}
 	if run.suffix == run2.suffix {
-		t.Error("newGangTestRun() two calls produced identical suffixes")
+		t.Error("newGangTestRun(kaiGangTarget()) two calls produced identical suffixes")
 	}
 }
 
 func TestBuildGangTestPodUsesCPUOnlyWorkload(t *testing.T) {
-	run, err := newGangTestRun()
+	run, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
-		t.Fatalf("newGangTestRun() error = %v", err)
+		t.Fatalf("newGangTestRun(kaiGangTarget()) error = %v", err)
 	}
 
 	pod := buildGangTestPod(run, 0, nil)

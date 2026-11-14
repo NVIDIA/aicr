@@ -537,16 +537,6 @@ var versionPinExemptions = []versionPinExemption{
 	{source: "b300-mk8s-ubuntu-inference-dynamo", component: "kai-scheduler", field: "version", expectedPin: "v0.17.1", expectedDefault: "v0.16.9", reason: "Matches the Nebius reference stack in ansjindal/ai-factory-dli PR307; other services retain the registry version."},
 	{source: "b300-mk8s-ubuntu-inference-dynamo", component: "dynamo-platform", field: "version", expectedPin: "1.5.0", expectedDefault: "1.4.2", reason: "Matches the Nebius reference stack in ansjindal/ai-factory-dli PR307; qualify the matching operator rather than an untested downgrade."},
 	{
-		source:          "aks",
-		component:       "kube-prometheus-stack",
-		field:           "version",
-		expectedPin:     "83.7.0",
-		expectedDefault: "84.4.0",
-		reason: "AKS is pinned to chart 83.7.0 to match its validated working cluster " +
-			"state (#700); the registry default (84.4.0) tracks the base/EKS/GKE line and " +
-			"is installed by every non-AKS recipe, so the BOM's default is not fictional.",
-	},
-	{
 		source:          "vr200-nvke-ubuntu-training",
 		component:       "network-operator",
 		field:           "version",

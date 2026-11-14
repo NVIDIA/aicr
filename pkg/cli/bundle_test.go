@@ -1866,7 +1866,7 @@ func writeVerifiedCLITestBundle(t *testing.T, dir string, files map[string][]byt
 		}
 		paths = append(paths, rel)
 	}
-	slicesSort(paths)
+	slices.Sort(paths)
 	var manifest strings.Builder
 	for _, rel := range paths {
 		digest := sha256.Sum256(files[rel])
@@ -1877,14 +1877,6 @@ func writeVerifiedCLITestBundle(t *testing.T, dir string, files map[string][]byt
 	}
 	if err := os.WriteFile(filepath.Join(dir, checksum.ChecksumFileName), []byte(manifest.String()), 0o600); err != nil {
 		t.Fatalf("WriteFile(checksums) error = %v", err)
-	}
-}
-
-func slicesSort(values []string) {
-	for i := 1; i < len(values); i++ {
-		for j := i; j > 0 && values[j] < values[j-1]; j-- {
-			values[j], values[j-1] = values[j-1], values[j]
-		}
 	}
 }
 
