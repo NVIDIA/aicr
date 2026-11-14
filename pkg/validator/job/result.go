@@ -75,13 +75,8 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		// so classify from its Failed condition instead of reporting a bare
 		// "pod not found" (see issue #2186).
 		result.ExitCode, result.TerminationMsg = d.missingPodOutcome(ctx, err)
-		if d.lastTerminated != nil {
-			d.recordValidatorImage(ctx, d.lastTerminated, result)
-		}
-		// The pod may have run before it was deleted, so its image is
-		// recorded with no digest rather than left out.
-		if len(result.Images) == 0 && d.config.Entry.Image != "" {
-			result.Images = []ctrf.PodImage{{Image: d.config.Entry.Image}}
+		if termPod := d.terminatedPod(ctx); termPod != nil {
+			d.recordValidatorImage(ctx, termPod, result)
 		}
 		return result
 	}

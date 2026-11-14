@@ -16,6 +16,7 @@ package job
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -129,11 +130,11 @@ func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
 		listed       *corev1.Pod
 		lastObserved *corev1.Pod
 		wantCheckMsg bool
-		wantImage    ctrf.PodImage
+		wantImages   []ctrf.PodImage
 	}{
-		{"terminating pod is still listed", terminated(true), nil, true, ctrf.PodImage{Image: image}},
-		{"pod deleted, last observed status survives", nil, terminated(false), true, ctrf.PodImage{Image: image, Digest: testDigestA}},
-		{"nothing observed keeps the generic message", nil, nil, false, ctrf.PodImage{Image: image}},
+		{"terminating pod is still listed", terminated(true), nil, true, []ctrf.PodImage{{Image: image, Digest: testDigestA}}},
+		{"pod deleted, last observed status survives", nil, terminated(false), true, []ctrf.PodImage{{Image: image, Digest: testDigestA}}},
+		{"nothing observed keeps the generic message", nil, nil, false, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -149,8 +150,8 @@ func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
 
 			result := d.ExtractResult(t.Context())
 
-			if len(result.Images) != 1 || result.Images[0] != tt.wantImage {
-				t.Errorf("images=%+v, want [%+v]", result.Images, tt.wantImage)
+			if !slices.Equal(result.Images, tt.wantImages) {
+				t.Errorf("images=%+v, want %+v", result.Images, tt.wantImages)
 			}
 
 			if result.ExitCode != validatorExitFailed || result.CTRFStatus() != ctrf.StatusFailed {
