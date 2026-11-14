@@ -47,3 +47,27 @@ func TestRendererCommitLinkRequiresSHA(t *testing.T) {
 		}
 	}
 }
+
+func TestRendererServiceLabels(t *testing.T) {
+	html := string(rendererHTML)
+	for _, want := range []string{
+		`displayName: g.displayName || g.service`,
+		`o.value=v; o.textContent=criteriaLabel(axis, v);`,
+		`${esc(serviceDisplayName(g.name))}`,
+		`${esc(serviceLabel(currentGroup))}`,
+		`serviceLabel(currentGroup);`,
+		`open ${serviceLabel(g.name)} dashboard`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing service label contract %q", want)
+		}
+	}
+	if got := strings.Count(html, `${esc(serviceLabel(cp.service))}`); got != 2 {
+		t.Errorf("service breadcrumbs = %d, want grid and history", got)
+	}
+	for _, unwanted := range []string{"cloud service", "g.name.slice(0,3)", "g.name.toUpperCase()", "currentGroup.toUpperCase()"} {
+		if strings.Contains(html, unwanted) {
+			t.Errorf("renderer retains obsolete service label %q", unwanted)
+		}
+	}
+}

@@ -16,11 +16,16 @@ package recipe
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1744,4 +1749,102 @@ spec:
 			t.Errorf("error does not identify the request body as the source: %v", err)
 		}
 	})
+}
+
+func TestCriteriaServiceDisplayName(t *testing.T) {
+	tests := []struct {
+		service CriteriaServiceType
+		want    string
+	}{
+		{CriteriaServiceMK8s, "Nebius Managed Service for Kubernetes"},
+		{CriteriaServiceCKS, "CoreWeave Kubernetes Service"},
+		{CriteriaServiceKind, "kind"},
+		{CriteriaServiceK0s, "k0s"},
+		{CriteriaServiceAny, "Any service"},
+		{"", ""},
+		{"Custom-Service", "Custom-Service"},
+		{" <custom>&\"' ", " <custom>&\"' "},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.service), func(t *testing.T) {
+			if got := tt.service.DisplayName(); got != tt.want {
+				t.Errorf("DisplayName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCriteriaServiceDisplayNamesExhaustive(t *testing.T) {
+	declared := declaredServiceTypes(t)
+	for service := range declared {
+		name, ok := serviceDisplayNames[service]
+		if !ok || strings.TrimSpace(name) == "" {
+			t.Errorf("service constant %q has no display name", service)
+		}
+		if service != CriteriaServiceAny && !slices.Contains(GetCriteriaServiceTypes(), string(service)) {
+			t.Errorf("service constant %q is absent from GetCriteriaServiceTypes", service)
+		}
+	}
+	for service := range serviceDisplayNames {
+		if !declared[service] {
+			t.Errorf("display name for undeclared service %q", service)
+		}
+	}
+	for _, id := range GetCriteriaServiceTypes() {
+		service := CriteriaServiceType(id)
+		if !declared[service] || service.DisplayName() != serviceDisplayNames[service] {
+			t.Errorf("built-in service %q has no canonical display name", id)
+		}
+	}
+}
+
+// Read declarations independently of both the display map and the public list,
+// so a new constant cannot be forgotten in both places and still pass.
+func declaredServiceTypes(t *testing.T) map[CriteriaServiceType]bool {
+	t.Helper()
+	paths, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := make(map[CriteriaServiceType]bool)
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range file.Decls {
+			group, ok := decl.(*ast.GenDecl)
+			if !ok || group.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range group.Specs {
+				value := spec.(*ast.ValueSpec)
+				typ, _ := value.Type.(*ast.Ident)
+				for i, name := range value.Names {
+					if !strings.HasPrefix(name.Name, "CriteriaService") && (typ == nil || typ.Name != "CriteriaServiceType") {
+						continue
+					}
+					if i >= len(value.Values) {
+						t.Fatalf("%s: service constant %s must declare its ID", path, name.Name)
+					}
+					literal, ok := value.Values[i].(*ast.BasicLit)
+					if !ok || literal.Kind != token.STRING {
+						t.Fatalf("%s: service constant %s must declare a string ID", path, name.Name)
+					}
+					id, err := strconv.Unquote(literal.Value)
+					if err != nil {
+						t.Fatal(err)
+					}
+					services[CriteriaServiceType(id)] = true
+				}
+			}
+		}
+	}
+	if len(services) == 0 {
+		t.Fatal("no service constants found")
+	}
+	return services
 }

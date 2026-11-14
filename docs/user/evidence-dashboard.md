@@ -38,11 +38,16 @@ The dashboard shares its first four CSP-first addressing levels with the
 
 | Level | Value | Example |
 |-------|-------|---------|
-| **Group** | service (the CSP) | `eks` |
+| **Group** | Kubernetes service or platform | `eks` |
 | **Dashboard** | accelerator + OS | `h100-ubuntu` |
 | **Tab** | intent, optionally with platform | `training-kubeflow` |
 | **Row** | validation `<phase>/<check>` | `conformance/gpu-operator-health` |
 | **Source column** | one signer | one allowlisted party (or a verified-but-unknown reported signer) |
+
+Service labels show the full name first and the unchanged service ID second.
+Custom services and older dashboard data without a display name show the exact
+ID. The selectors, copied CLI/configuration, and bookmarked routes continue to
+use IDs; display names do not change recipe selection or evidence grouping.
 
 The overview defaults to service cards. Switch **Overview layout** to
 **all recipes** to scan every matching recipe in one page-scrolling grid. That

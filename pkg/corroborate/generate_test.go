@@ -25,6 +25,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 const fixtureGCS = "testdata/gcs"
@@ -64,6 +66,38 @@ func readIndex(t *testing.T, path string) Index {
 		t.Fatalf("parse index.json: %v", err)
 	}
 	return idx
+}
+
+func TestGenerateServiceDisplayNames(t *testing.T) {
+	out, idx := generateInto(t, "")
+	data, err := os.ReadFile(filepath.Join(out, "data", "index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Groups []struct {
+			Service     string `json:"service"`
+			DisplayName string `json:"displayName"`
+		} `json:"groups"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"eks": "Amazon Elastic Kubernetes Service", "gke": "Google Kubernetes Engine"}
+	if len(payload.Groups) != len(want) {
+		t.Fatalf("groups = %d, want %d", len(payload.Groups), len(want))
+	}
+	for _, group := range payload.Groups {
+		if group.DisplayName != want[group.Service] {
+			t.Errorf("service %q displayName = %q, want %q", group.Service, group.DisplayName, want[group.Service])
+		}
+	}
+	if !reflect.DeepEqual(idx.Criteria[AxisService], []string{"eks", "gke"}) {
+		t.Errorf("service filter IDs changed: %v", idx.Criteria[AxisService])
+	}
+	if idx.Schema != "aicr-corroboration/v1" {
+		t.Errorf("schema changed: %q", idx.Schema)
+	}
 }
 
 // findRow returns the row from the NEWEST-version grid (Versions[0]) — the
@@ -1084,5 +1118,29 @@ func TestOrderVersionsNewestFirst(t *testing.T) {
 				t.Errorf("orderVersionsNewestFirst(%v) = %v, want %v", tt.versions, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAssembleGroupsServiceDisplayNames(t *testing.T) {
+	services := append(recipe.GetCriteriaServiceTypes(), "", "any", "Custom-Service", "<custom>&\"'")
+	for _, id := range services {
+		t.Run(id, func(t *testing.T) {
+			coord := map[string]string{AxisService: id, AxisAccelerator: "h100", AxisOS: "ubuntu", AxisIntent: "training"}
+			tab := Tab{Recipe: "unchanged-recipe", Coord: coord}
+			groups := assembleGroups([]recipeTab{{coord: recipe.Coordinate{Group: id, Dashboard: "h100-ubuntu"}, tab: tab}})
+			if len(groups) != 1 {
+				t.Fatalf("groups = %v, want one", groups)
+			}
+			group := groups[0]
+			if group.Service != id || group.DisplayName != recipe.CriteriaServiceType(id).DisplayName() {
+				t.Errorf("group = %+v, want unchanged ID and canonical name", group)
+			}
+			if !reflect.DeepEqual(group.Dashboards[0].Tabs[0], tab) {
+				t.Errorf("display name changed tab identity: %+v", group.Dashboards[0].Tabs[0])
+			}
+		})
+	}
+	if got := assembleGroups(nil); len(got) != 0 {
+		t.Errorf("empty input produced groups: %v", got)
 	}
 }
