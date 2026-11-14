@@ -273,3 +273,13 @@ func (h *Header) InitWithTime(kind Kind, apiVersion string, version string, ts t
 		h.Metadata["version"] = version
 	}
 }
+
+// IsSupportedArtifactInventory accepts only the ADR-031 producer contract.
+func IsSupportedArtifactInventory(kind, version string) bool {
+	return kind == "ArtifactInventory" && version == GroupVersionV1Beta1
+}
+
+// IsSupportedArtifactBindings accepts only the ADR-031 catalog contract.
+func IsSupportedArtifactBindings(kind, version string) bool {
+	return kind == "ArtifactBindings" && version == GroupVersionV1Beta1
+}

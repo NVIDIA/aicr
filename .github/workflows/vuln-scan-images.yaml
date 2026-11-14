@@ -366,8 +366,10 @@ jobs:
           # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
           # (#2611), remediation, nvsentinel-slinky-drainer (#2615),
           # nvsentinel-health-events-analyzer (#2618), nvsentinel-event-exporter
-          # (#2621), nvsentinel-log-collector (#2619) and
-          # nvsentinel-node-validation (#3088) mixins, and no other job
+          # (#2621), nvsentinel-log-collector (#2619),
+          # nvsentinel-node-validation (#3088), and
+          # nvsentinel-csp-health-monitor-aws and -gcp (#2620) mixins, and no
+          # other job
           # scans a mixin-gated image, so nothing else would surface a CVE in
           # them.
           # Because they are not built by this workflow they carry their
@@ -391,6 +393,8 @@ jobs:
           - ghcr.io/nvidia/nvsentinel/log-collector
           - ghcr.io/nvidia/nvsentinel/file-server-cleanup
           - ghcr.io/nvidia/nvsentinel/lifecycle-manager
+          - ghcr.io/nvidia/nvsentinel/csp-health-monitor
+          - ghcr.io/nvidia/nvsentinel/maintenance-notifier
           # The nvsentinel-log-collector mixin's file server, at the nvsentinel
           # chart's own pins; its init container's busybox is the AICR pin
           # below. bitnamilegacy is Bitnami's frozen archive and is never
@@ -437,49 +441,55 @@ jobs:
           # TestRemediationImagesPinnedEverywhere,
           # TestSlinkyDrainerImagePinnedEverywhere,
           # TestHealthEventsAnalyzerImagePinnedEverywhere,
-          # TestEventExporterImagePinnedEverywhere and
-          # TestLogCollectorImagesPinnedEverywhere fail if these drift apart.
+          # TestEventExporterImagePinnedEverywhere,
+          # TestLogCollectorImagesPinnedEverywhere and
+          # TestCSPHealthMonitorImagesPinnedEverywhere fail if these drift
+          # apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/preflight
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
-            tag: v1.28.0
+            tag: v1.31.0
             large: true
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
-            tag: v1.28.0
+            tag: v1.31.0
             large: true
           - image: ghcr.io/nvidia/nvsentinel/nic-health-monitor
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/slurm-drain-monitor
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/fault-quarantine
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/node-drainer
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/fault-remediation
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/janitor
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/janitor-provider
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/gpu-reset
-            tag: v1.28.0
+            tag: v1.31.0
           # Pinned by digest in recipes/components/slinky-drainer/manifests.
           - image: ghcr.io/nvidia/nvsentinel/slinky-drainer
-            tag: v1.28.0@sha256:bf6ccaf1d6c035aa5f86e70a929dc6d9a18c5c05b10104d23c69aacff35bcb14
+            tag: v1.31.0@sha256:d839d35cc25f6ffa22c016a3a38eeeb98a3ef91a3eb32326d728b3c3fa10e646
           - image: ghcr.io/nvidia/nvsentinel/health-events-analyzer
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/event-exporter
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/log-collector
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/file-server-cleanup
-            tag: v1.28.0
+            tag: v1.31.0
           - image: ghcr.io/nvidia/nvsentinel/lifecycle-manager
-            tag: v1.28.0
+            tag: v1.31.0
+          - image: ghcr.io/nvidia/nvsentinel/csp-health-monitor
+            tag: v1.31.0
+          - image: ghcr.io/nvidia/nvsentinel/maintenance-notifier
+            tag: v1.31.0
           # The nvsentinel chart's own pins for the file server's third-party
           # images. The weekly TestNVSentinelLogCollectorChartRender fails if a
           # chart bump moves them; TestLogCollectorImagesPinnedEverywhere then
@@ -497,11 +507,11 @@ jobs:
           - image: docker.io/percona/mongodb_exporter
             tag: 0.54.0@sha256:934e9db87e85e0fa63654e73c3504845993a254e898783ca905e65a68848b5a4
           - image: docker.io/percona/percona-backup-mongodb
-            tag: 2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5
+            tag: 2.17.0@sha256:d3b1f82393991542ca1222c8c80a83830383a2fd51f064f6da939af776b9c01d
           - image: docker.io/percona/fluentbit
-            tag: 5.1.2-1@sha256:4926d7d003ca09c826a3dea5d9ccd0ba158296880471bcec82ef38f95617b913
+            tag: 5.1.4-1@sha256:037b5ea087dffd844f619c61f4d211a32bec73dae0971143795579db1a3a6992
           - image: docker.io/percona/pmm-client
-            tag: 3.9.1@sha256:298e731652e2be172a2505596edaee1e0c014609035347599048f62efae78e5b
+            tag: 3.10.0@sha256:b407188b183bc61ab202914f2128f171dd2d0cd411396a05bb92f3e73348a416
           # Versioned independently of the nvsentinel chart -- this comes from
           # AICR's values override, not the chart's appVersion, so it does
           # not move with defaultVersion. Digest-pinned, so the tag is only

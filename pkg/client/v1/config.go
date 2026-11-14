@@ -20,6 +20,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
@@ -177,7 +178,9 @@ func (c *Config) BundleVerifyOptions() (BundleVerifyOptions, error) {
 // This is the piece that lets a committed config stand up a Client at all: a
 // non-empty data directory yields a FilesystemSource layered over the embedded
 // recipe data, matching `aicr recipe --data`. When false is returned the
-// caller supplies its own source, normally EmbeddedSource.
+// caller supplies its own source, normally EmbeddedSource. externalOnly selects
+// ExternalFilesystemSource instead; a missing directory then fails at Client
+// construction rather than falling back to embedded data.
 //
 // Deliberately NOT folded into a Client option. Recipe source is fixed at
 // construction — a Client owns its DataProvider for its whole lifetime — so
@@ -188,10 +191,18 @@ func (c *Config) RecipeSource() (RecipeSourceOption, bool) {
 		return RecipeSourceOption{}, false
 	}
 	dir := c.internal.Recipe().DataDir()
+	if c.IsExternalOnly() {
+		return ExternalFilesystemSource(dir), true
+	}
 	if dir == "" {
 		return RecipeSourceOption{}, false
 	}
 	return FilesystemSource(dir), true
+}
+
+// IsExternalOnly reports spec.recipe.externalOnly.
+func (c *Config) IsExternalOnly() bool {
+	return c != nil && c.internal != nil && c.internal.Recipe().IsExternalOnly()
 }
 
 // RecipeCriteria derives resolve criteria from spec.recipe.criteria, parsed
@@ -864,6 +875,21 @@ type CNCFEvidenceOptions struct {
 	// MUST requirements declared not applicable, keyed by upstream id with
 	// the justification as value. It is RenderCNCFEvidenceOptions.NotApplicable.
 	NotApplicable map[string]string
+
+	// ConformanceVersion is spec.validate.evidence.cncf.conformanceVersion,
+	// the checklist a submission certifies against instead of the cluster's
+	// minor. It is CNCFSubmissionOptions.ConformanceVersion.
+	ConformanceVersion string
+
+	// Vendor is spec.validate.evidence.cncf.vendor, the PRODUCT.yaml
+	// metadata of a submission; nil when unset. It is
+	// CNCFSubmissionOptions.Vendor, and a submission run requires it.
+	Vendor *CNCFVendor
+
+	// Documented is spec.validate.evidence.cncf.documented: requirements
+	// the run only observed, attested by public documentation. It is
+	// RenderCNCFEvidenceOptions.Documented.
+	Documented map[string]CNCFDocumentation
 }
 
 // CNCFEvidenceOptions derives spec.validate.evidence.cncf.
@@ -883,11 +909,33 @@ func (c *Config) CNCFEvidenceOptions() (CNCFEvidenceOptions, error) {
 	if resolved.EvidenceCNCF == nil {
 		return CNCFEvidenceOptions{}, nil
 	}
-	return CNCFEvidenceOptions{
-		Dir:            resolved.EvidenceCNCF.Dir,
-		CNCFSubmission: resolved.EvidenceCNCF.CNCFSubmission,
-		NotApplicable:  resolved.EvidenceCNCF.NotApplicable,
-	}, nil
+	out := CNCFEvidenceOptions{
+		Dir:                resolved.EvidenceCNCF.Dir,
+		CNCFSubmission:     resolved.EvidenceCNCF.CNCFSubmission,
+		NotApplicable:      resolved.EvidenceCNCF.NotApplicable,
+		ConformanceVersion: resolved.EvidenceCNCF.ConformanceVersion,
+	}
+	if v := resolved.EvidenceCNCF.Vendor; v != nil {
+		out.Vendor = &CNCFVendor{
+			Name:              v.Name,
+			PlatformName:      v.PlatformName,
+			PlatformVersion:   v.PlatformVersion,
+			Description:       v.Description,
+			ContactEmail:      v.ContactEmail,
+			WebsiteURL:        v.WebsiteURL,
+			DocumentationURL:  v.DocumentationURL,
+			RepoURL:           v.RepoURL,
+			ProductLogoURL:    v.ProductLogoURL,
+			K8sConformanceURL: v.K8sConformanceURL,
+		}
+	}
+	if d := resolved.EvidenceCNCF.Documented; len(d) > 0 {
+		out.Documented = make(map[string]CNCFDocumentation, len(d))
+		for id, entry := range d {
+			out.Documented[id] = CNCFDocumentation{Evidence: append([]string(nil), entry.Evidence...), Notes: entry.Notes}
+		}
+	}
+	return out, nil
 }
 
 // SnapshotAgentConfig derives Client.CollectSnapshot's AgentConfig from
@@ -1108,4 +1156,14 @@ func (c *Config) RecipeOutputOptions() RecipeOutputOptions {
 		Path:   c.internal.Recipe().OutputPath(),
 		Format: c.internal.Recipe().OutputFormat(),
 	}
+}
+
+// RecipeArtifacts derives inventory choices without sharing mutable config slices.
+func (c *Config) RecipeArtifacts() artifact.Options {
+	if c == nil || c.internal == nil || c.internal.Spec.Recipe == nil || c.internal.Spec.Recipe.Artifacts == nil {
+		return artifact.Options{}
+	}
+	result := *c.internal.Spec.Recipe.Artifacts
+	result.AllowCatalogPins = append([]string(nil), result.AllowCatalogPins...)
+	return result
 }

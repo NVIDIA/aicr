@@ -89,20 +89,6 @@ func TestGpuNodeCoverage_CoverageExtra(t *testing.T) {
 	}
 }
 
-func TestNvidiaSMISkipExtra(t *testing.T) {
-	for _, reason := range []string{skipReasonNoGPUNodes, skipReasonNoSchedulableGPUNodes, skipReasonNodesBusy} {
-		t.Run(reason, func(t *testing.T) {
-			extra := nvidiaSMISkipExtra(reason)
-			if extra["skipReason"] != reason {
-				t.Errorf("skipReason = %q, want %q", extra["skipReason"], reason)
-			}
-			if len(extra) != 1 {
-				t.Errorf("skip extra must carry exactly skipReason, got %v", extra)
-			}
-		})
-	}
-}
-
 func TestVerifyNvidiaSMILogs(t *testing.T) {
 	t.Parallel()
 

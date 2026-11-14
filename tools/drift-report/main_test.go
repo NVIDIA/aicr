@@ -39,7 +39,7 @@ const runFixtureReport = `{
                 "depName": "ghcr.io/nvidia/nvsentinel",
                 "depType": "registry-chart",
                 "datasource": "docker",
-                "currentValue": "v1.28.0",
+                "currentValue": "v1.31.0",
                 "updates": []
               }
             ]

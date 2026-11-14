@@ -134,6 +134,7 @@ func recipeCmdFlags() []cli.Flag {
 		},
 		configFlag(),
 		dataFlag(),
+		externalOnlyFlag(),
 		outputFlag(),
 		formatFlag(),
 		kubeconfigFlag(),

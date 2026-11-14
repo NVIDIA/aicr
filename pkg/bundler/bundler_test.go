@@ -179,7 +179,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestRunDeployer_ClosedWorld(t *testing.T) {
-	newBundler := func(t *testing.T) *DefaultBundler {
+	newRun := func(t *testing.T) *bundleRun {
 		t.Helper()
 		b, err := New(WithConfig(config.NewConfig(
 			config.WithDeployer(config.DeployerHelm),
@@ -188,12 +188,12 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
 		}
-		return b
+		return &bundleRun{DefaultBundler: b}
 	}
 
 	t.Run("final inventory includes and binds recipe", func(t *testing.T) {
 		dir := t.TempDir()
-		output, err := newBundler(t).runDeployer(
+		output, err := newRun(t).runDeployer(
 			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
@@ -239,7 +239,8 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		)
 		attester := &closedWorldTestAttester{}
 		b := &DefaultBundler{Config: cfg, Attester: attester}
-		_, err := b.runDeployer(
+		r := &bundleRun{DefaultBundler: b}
+		_, err := r.runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
 			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
@@ -259,7 +260,8 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		attester := &closedWorldTestAttester{writeMetadata: true}
 		b := &DefaultBundler{Config: cfg, Attester: attester}
 		dir := t.TempDir()
-		output, err := b.runDeployer(
+		r := &bundleRun{DefaultBundler: b}
+		output, err := r.runDeployer(
 			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
@@ -292,7 +294,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 	})
 
 	t.Run("unmanaged executable is rejected", func(t *testing.T) {
-		_, err := newBundler(t).runDeployer(
+		_, err := newRun(t).runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
 			closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
@@ -303,7 +305,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 	t.Run("canceled context cannot finalize", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := newBundler(t).runDeployer(
+		_, err := newRun(t).runDeployer(
 			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), t.TempDir(), nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("runDeployer() error = %v, want ErrCodeTimeout", err)
@@ -1753,7 +1755,7 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 		state       string
 		refs        []recipe.ComponentRef
 		cfgOpts     []config.Option
-		wantWarning string // substring expected in b.warnings; "" = no warning
+		wantWarning string // substring expected in r.warnings, or "" for none
 	}{
 		{
 			name:  "disabled via --set + absent state → warning",
@@ -1829,20 +1831,21 @@ func TestFilterEnabledComponents_ExcludedDriverInstallerWarning(t *testing.T) {
 			}
 			recipeResult.Metadata.GPUDriverState = tt.state
 
-			if _, filterErr := b.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if _, filterErr := r.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
 			}
 
 			if tt.wantWarning == "" {
-				if len(b.warnings) != 0 {
-					t.Fatalf("warnings = %v, want none", b.warnings)
+				if len(r.warnings) != 0 {
+					t.Fatalf("warnings = %v, want none", r.warnings)
 				}
 				return
 			}
-			joined := strings.Join(b.warnings, "\n")
+			joined := strings.Join(r.warnings, "\n")
 			for _, want := range []string{tt.wantWarning, "driverless", "gpu-operator"} {
 				if !strings.Contains(joined, want) {
-					t.Errorf("warnings = %v, want substring %q", b.warnings, want)
+					t.Errorf("warnings = %v, want substring %q", r.warnings, want)
 				}
 			}
 		})
@@ -1866,6 +1869,7 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 			ManifestFiles: manifests, Overrides: overrides}
 	}
 	hardening := []string{aksToolkitHardeningManifest}
+	okeHardening := []string{okeToolkitHardeningManifest}
 	disableSet := []config.Option{config.WithValueOverrides(map[string]map[string]string{
 		"nodewrightcustomizations": {"enabled": "false"},
 	})}
@@ -1874,7 +1878,8 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 		name        string
 		refs        []recipe.ComponentRef
 		cfgOpts     []config.Option
-		wantWarning string // substring expected in b.warnings; "" = no warning
+		wantWarning string // substring expected in r.warnings, or "" for none
+		oke         bool   // OKE hardening: the AKS-only accelerator=generic tip must be absent
 	}{
 		{
 			name:        "disabled via --set, azure-managed",
@@ -1946,6 +1951,25 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 			wantWarning: "could not be resolved",
 		},
 		{
+			name:        "OKE disabled via --set, oci-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(okeHardening, nil)},
+			cfgOpts:     disableSet,
+			wantWarning: "disabled via --set",
+			oke:         true,
+		},
+		{
+			name:        "OKE excluded by bundlers filter, oci-managed",
+			refs:        []recipe.ComponentRef{gpuOp(false), nwc(okeHardening, nil)},
+			cfgOpts:     []config.Option{config.WithBundlers([]string{"gpu-operator"})},
+			wantWarning: "excluded by the bundlers filter",
+			oke:         true,
+		},
+		{
+			name:    "OKE disabled via --set, operator-managed",
+			refs:    []recipe.ComponentRef{gpuOp(true), nwc(okeHardening, nil)},
+			cfgOpts: disableSet,
+		},
+		{
 			name:    "disabled without the hardening manifest",
 			refs:    []recipe.ComponentRef{gpuOp(false), nwc(nil, nil)},
 			cfgOpts: disableSet,
@@ -1970,20 +1994,27 @@ func TestFilterEnabledComponents_ExcludedToolkitHardeningWarning(t *testing.T) {
 				Criteria:      &recipe.Criteria{Service: "aks", Intent: "training"},
 				ComponentRefs: tt.refs,
 			}
-			if _, filterErr := b.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if _, filterErr := r.filterEnabledComponents(t.Context(), recipeResult); filterErr != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
 			}
 
 			if tt.wantWarning == "" {
-				if len(b.warnings) != 0 {
-					t.Fatalf("warnings = %v, want none", b.warnings)
+				if len(r.warnings) != 0 {
+					t.Fatalf("warnings = %v, want none", r.warnings)
 				}
 				return
 			}
-			joined := strings.Join(b.warnings, "\n")
-			for _, want := range []string{tt.wantWarning, "device-isolation", "accelerator=generic"} {
+			joined := strings.Join(r.warnings, "\n")
+			wants := []string{tt.wantWarning, "device-isolation"}
+			if !tt.oke {
+				wants = append(wants, "accelerator=generic")
+			} else if strings.Contains(joined, "accelerator=generic") {
+				t.Errorf("warnings = %v, want no AKS accelerator=generic tip for OKE", r.warnings)
+			}
+			for _, want := range wants {
 				if !strings.Contains(joined, want) {
-					t.Errorf("warnings = %v, want substring %q", b.warnings, want)
+					t.Errorf("warnings = %v, want substring %q", r.warnings, want)
 				}
 			}
 		})
@@ -2995,12 +3026,12 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetComponentRegistry() error = %v", err)
 	}
-	comp := registry.Get("kube-prometheus-stack")
+	comp := registry.Get("slurm-accounting-mariadb")
 	if comp == nil || len(comp.GetStorageClassPaths()) == 0 {
-		t.Fatalf("registry missing kube-prometheus-stack or storageClassPaths: cannot run storage class path test")
+		t.Fatalf("registry missing slurm-accounting-mariadb or storageClassPaths: cannot run storage class path test")
 	}
 
-	const scPath = "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName"
+	const scPath = "mariadb.storage.storageClassName"
 
 	tests := []struct {
 		name          string
@@ -3027,8 +3058,7 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 			cfgOpts: []config.Option{
 				config.WithStorageClass("my-storage-class"),
 				config.WithValueOverrides(map[string]map[string]string{
-					// "prometheus" is the valueOverrideKey for kube-prometheus-stack.
-					"prometheus": {scPath: "explicit-gp2"},
+					"slurmaccountingmariadb": {scPath: "explicit-gp2"},
 				}),
 			},
 			initialValues: map[string]string{scPath: "explicit-gp2"},
@@ -3052,7 +3082,7 @@ func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
 				}
 			}
 
-			b.applyNodeSchedulingOverrides("kube-prometheus-stack", values, nil, schedulingPathPolicy{})
+			b.applyNodeSchedulingOverrides("slurm-accounting-mariadb", values, nil, schedulingPathPolicy{})
 
 			got, ok := component.GetValueByPath(values, scPath)
 			if ok != tt.wantPresent {
@@ -3828,10 +3858,10 @@ func TestApplyNodeSchedulingOverrides_RequireNodeSelector(t *testing.T) {
 
 // TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet
 // covers requireNodeSelectorIfStorageClassSet (registry.yaml), the
-// conditional counterpart to requireNodeSelector for a chart, like
-// kube-prometheus-stack, whose zone-pinning PVC only exists once a storage
-// class is configured. Real opt-ins are covered by their own
-// component-specific tests; this exercises the mechanism in isolation.
+// conditional counterpart to requireNodeSelector for a chart whose
+// zone-pinning PVC only exists once a storage class is configured. Real
+// opt-ins are covered by their own component-specific tests; this exercises
+// the mechanism in isolation.
 func TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet(t *testing.T) {
 	provider := requireNodeSelectorIfStorageClassSetFixtureProvider(t)
 
@@ -4348,11 +4378,11 @@ func TestBundler_Make_BoundProviderEndToEnd(t *testing.T) {
 }
 
 func TestWarnMissingStorageClassForPVCs(t *testing.T) {
-	const scPath = "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName"
-	const pvcSizePath = "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage"
+	const scPath = "mariadb.storage.storageClassName"
+	const pvcSizePath = "mariadb.storage.size"
 
 	recipeResult := &recipe.RecipeResult{
-		ComponentRefs: []recipe.ComponentRef{{Name: "kube-prometheus-stack"}},
+		ComponentRefs: []recipe.ComponentRef{{Name: "slurm-accounting-mariadb"}},
 	}
 
 	tests := []struct {
@@ -4364,14 +4394,14 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 		{
 			name: "warns when rendered PVC omits storageClassName",
 			setupValues: func(values map[string]any) {
-				component.SetValueByPath(values, pvcSizePath, "50Gi")
+				component.SetValueByPath(values, pvcSizePath, "20Gi")
 			},
 			wantWarning: true,
 		},
 		{
 			name: "warns when rendered PVC has blank storageClassName",
 			setupValues: func(values map[string]any) {
-				component.SetValueByPath(values, pvcSizePath, "50Gi")
+				component.SetValueByPath(values, pvcSizePath, "20Gi")
 				component.SetValueByPath(values, scPath, " ")
 			},
 			wantWarning: true,
@@ -4383,16 +4413,16 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 			},
 		},
 		{
-			name: "does not warn for emptyDir storage",
+			name: "does not warn when no PVC is rendered",
 			setupValues: func(values map[string]any) {
-				component.SetValueByPath(values, "prometheus.prometheusSpec.storageSpec.emptyDir.sizeLimit", "10Gi")
+				component.SetValueByPath(values, "mariadb.replicas", 1)
 			},
 		},
 		{
 			name:    "warns when explicit blank override wins over global storageClass",
 			cfgOpts: []config.Option{config.WithStorageClass("gp3")},
 			setupValues: func(values map[string]any) {
-				component.SetValueByPath(values, pvcSizePath, "50Gi")
+				component.SetValueByPath(values, pvcSizePath, "20Gi")
 				component.SetValueByPath(values, scPath, " ")
 			},
 			wantWarning: true,
@@ -4401,7 +4431,7 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 			name:    "does not warn when global storageClass was injected",
 			cfgOpts: []config.Option{config.WithStorageClass("gp3")},
 			setupValues: func(values map[string]any) {
-				component.SetValueByPath(values, pvcSizePath, "50Gi")
+				component.SetValueByPath(values, pvcSizePath, "20Gi")
 				component.SetValueByPath(values, scPath, "gp3")
 			},
 		},
@@ -4417,24 +4447,25 @@ func TestWarnMissingStorageClassForPVCs(t *testing.T) {
 			values := map[string]any{}
 			tt.setupValues(values)
 
-			err = b.warnMissingStorageClassForPVCs(context.Background(), recipeResult, map[string]map[string]any{
-				"kube-prometheus-stack": values,
+			r := &bundleRun{DefaultBundler: b}
+			err = r.warnMissingStorageClassForPVCs(context.Background(), recipeResult, map[string]map[string]any{
+				"slurm-accounting-mariadb": values,
 			})
 			if err != nil {
 				t.Fatalf("warnMissingStorageClassForPVCs() error = %v", err)
 			}
 
-			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
-				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
+			if gotWarning := len(r.warnings) > 0; gotWarning != tt.wantWarning {
+				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, r.warnings)
 			}
 
 			if tt.wantWarning {
-				warning := b.warnings[0]
+				warning := r.warnings[0]
 				for _, want := range []string{
-					"Warning: kube-prometheus-stack renders a PVC without storageClassName",
+					"Warning: slurm-accounting-mariadb renders a PVC without storageClassName",
 					scPath,
 					"--storage-class <name>",
-					"--set kube-prometheus-stack:" + scPath + "=<name>",
+					"--set slurm-accounting-mariadb:" + scPath + "=<name>",
 				} {
 					if !strings.Contains(warning, want) {
 						t.Errorf("warning = %q, want substring %q", warning, want)
@@ -4468,8 +4499,63 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 		present     bool
 		wantErr     bool
 		wantWarning bool
-		wantDefault bool // expects allowedSourceRanges defaulted to the RFC1918 set
+		wantDefault bool   // expects allowedSourceRanges defaulted to the RFC1918 set
+		wantNoRange bool   // expects allowedSourceRanges left absent (non-LoadBalancer serviceType)
+		wantReach   string // substring of the reach guidance expected in the warning
 	}{
+		{
+			name:        "ClusterIP serviceType skips the private default and notes that ranges do not apply",
+			values:      map[string]any{"serviceType": "ClusterIP"},
+			present:     true,
+			wantWarning: true,
+			wantNoRange: true,
+			wantReach:   "only from inside the cluster",
+		},
+		{
+			name:        "NodePort serviceType with explicit ranges warns that they are not rendered",
+			values:      map[string]any{"serviceType": "NodePort", "allowedSourceRanges": []any{"10.0.0.0/8"}},
+			present:     true,
+			wantWarning: true,
+			wantReach:   "every client that can reach a node",
+		},
+		{
+			name:    "ClusterIP serviceType still rejects an invalid allowedSourceRanges value",
+			values:  map[string]any{"serviceType": "ClusterIP", "allowedSourceRanges": "10.0.0.0/8"},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:        "explicit LoadBalancer serviceType keeps the private default",
+			values:      map[string]any{"serviceType": "LoadBalancer"},
+			present:     true,
+			wantWarning: true,
+			wantDefault: true,
+		},
+		{
+			name:        "empty serviceType keeps the private default",
+			values:      map[string]any{"serviceType": ""},
+			present:     true,
+			wantWarning: true,
+			wantDefault: true,
+		},
+		{
+			name:    "errors on a serviceType outside LoadBalancer, ClusterIP, NodePort",
+			values:  map[string]any{"serviceType": "ExternalName"},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "errors on a lowercase serviceType (case-sensitive)",
+			values:  map[string]any{"serviceType": "clusterip"},
+			present: true,
+			wantErr: true,
+		},
+		{
+			name:    "errors on a non-string serviceType",
+			values:  map[string]any{"serviceType": true},
+			present: true,
+			wantErr: true,
+		},
 		{
 			name:        "defaults to private ranges when allowedSourceRanges is unset",
 			values:      map[string]any{"fullnameOverride": "agentgateway"},
@@ -4560,7 +4646,8 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 				componentValues[agentgatewayComponentName] = tt.values
 			}
 
-			gotErr := b.resolveAgentgatewayExposure(componentValues)
+			r := &bundleRun{DefaultBundler: b}
+			gotErr := r.resolveAgentgatewayExposure(componentValues)
 			if (gotErr != nil) != tt.wantErr {
 				t.Fatalf("resolveAgentgatewayExposure() error = %v, wantErr %v", gotErr, tt.wantErr)
 			}
@@ -4570,15 +4657,25 @@ func TestResolveAgentgatewayExposure(t *testing.T) {
 				}
 			}
 
-			if gotWarning := len(b.warnings) > 0; gotWarning != tt.wantWarning {
-				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, b.warnings)
+			if gotWarning := len(r.warnings) > 0; gotWarning != tt.wantWarning {
+				t.Fatalf("warning present = %v, want %v; warnings = %v", gotWarning, tt.wantWarning, r.warnings)
 			}
 			if tt.wantWarning {
-				warning := b.warnings[0]
+				warning := r.warnings[0]
 				for _, want := range []string{"inference-gateway", "allowedSourceRanges"} {
 					if !strings.Contains(warning, want) {
 						t.Errorf("warning = %q, want substring %q", warning, want)
 					}
+				}
+			}
+
+			if tt.wantReach != "" && !strings.Contains(r.warnings[0], tt.wantReach) {
+				t.Errorf("warning = %q, want reach guidance %q", r.warnings[0], tt.wantReach)
+			}
+
+			if tt.wantNoRange {
+				if got, ok := componentValues[agentgatewayComponentName][agentgatewaySourceRangesPath]; ok {
+					t.Errorf("allowedSourceRanges = %#v, want it left absent for a non-LoadBalancer serviceType", got)
 				}
 			}
 

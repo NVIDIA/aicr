@@ -285,6 +285,25 @@ func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) error {
 	return rbacErr
 }
 
+// clusterCleanupError preserves existing error precedence except when operator
+// cancellation coincides with a failed privileged revocation: both causes must
+// reach the caller with the potentially orphaned binding classified as internal.
+func (v *Validator) clusterCleanupError(runErr, cleanupErr error) error {
+	if cleanupErr == nil {
+		return runErr
+	}
+	if runErr == nil {
+		return cleanupErr
+	}
+	if reported, ok := stderrors.AsType[*errors.StructuredError](runErr); ok && reported.Code == errors.ErrCodeCanceled {
+		return errors.WrapWithContext(errors.ErrCodeInternal,
+			"validation canceled and privileged RBAC revocation failed; cluster-admin binding may be orphaned",
+			stderrors.Join(runErr, cleanupErr),
+			map[string]any{"runID": v.RunID, "namespace": v.Namespace})
+	}
+	return runErr
+}
+
 // rollbackRBAC revokes the per-run RBAC created earlier in prepareCluster when a
 // later preparation step fails. It uses a fresh bounded context because the
 // caller's ctx may already be canceled — the very condition that can trigger the
@@ -376,15 +395,9 @@ func (v *Validator) ValidatePhases(
 		return nil, err
 	}
 	defer close(cs.stopCh)
-	// Promote a privileged (RBAC) cleanup failure into the run's error, but only
-	// when there is no prior real error — a genuine phase failure takes
-	// precedence over a cleanup problem.
-	//
 	//nolint:contextcheck // deferClusterCleanup uses a fresh context: parent may be canceled
 	defer func() {
-		if cleanupErr := v.deferClusterCleanup(cs.clientset); cleanupErr != nil && err == nil {
-			err = cleanupErr
-		}
+		err = v.clusterCleanupError(err, v.deferClusterCleanup(cs.clientset))
 	}()
 
 	results, err = v.runPhases(ctx, func(phase Phase) (*PhaseResult, error) {
@@ -415,7 +428,17 @@ func (v *Validator) runPhases(
 	for _, phase := range phases {
 		select {
 		case <-ctx.Done():
-			return results, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "iterating validation phases")
+			// Hand the next phase to the runner, which records it as
+			// interrupted, so the report does not end on a completed phase
+			// and read as passing.
+			pr, phaseErr := runner(phase)
+			if pr != nil {
+				results = append(results, pr)
+			}
+			if phaseErr == nil {
+				phaseErr = errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "iterating validation phases")
+			}
+			return results, phaseErr
 		default:
 		}
 
@@ -428,6 +451,11 @@ func (v *Validator) runPhases(
 
 		pr, phaseErr := runner(phase)
 		if phaseErr != nil {
+			// A phase interrupted mid-run hands back the results gathered so
+			// far; dropping them would discard completed validators' verdicts.
+			if pr != nil {
+				results = append(results, pr)
+			}
 			return results, phaseErr
 		}
 		results = append(results, pr)
@@ -489,15 +517,9 @@ func (v *Validator) ValidatePhase(
 		return nil, err
 	}
 	defer close(cs.stopCh)
-	// Promote a privileged (RBAC) cleanup failure into the run's error, but only
-	// when there is no prior real error — a genuine phase failure takes
-	// precedence over a cleanup problem.
-	//
 	//nolint:contextcheck // deferClusterCleanup uses a fresh context: parent may be canceled
 	defer func() {
-		if cleanupErr := v.deferClusterCleanup(cs.clientset); cleanupErr != nil && err == nil {
-			err = cleanupErr
-		}
+		err = v.clusterCleanupError(err, v.deferClusterCleanup(cs.clientset))
 	}()
 
 	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validationInput)
@@ -594,7 +616,7 @@ func (v *Validator) runPhase(
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "running dependencyAffinity pre-flight")
+			return v.cancelPhase(ctx, clientset, builder, phase, entries, start)
 		default:
 		}
 		if err := v1.ValidateDependencyAffinity(entry.DependencyAffinity, validationInput.GetComponentRefs()); err != nil {
@@ -608,10 +630,10 @@ func (v *Validator) runPhase(
 	// principal-review sweep because parallelism interacts with shared-
 	// namespace ConfigMap writes, RBAC cleanup ordering, and GPU resource
 	// contention; the change needs its own PR with e2e validation.
-	for _, entry := range entries {
+	for i, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "evaluating validator entries")
+			return v.cancelPhase(ctx, clientset, builder, phase, entries[i:], start)
 		default:
 		}
 
@@ -643,6 +665,24 @@ func (v *Validator) runPhase(
 				ExitCode:       -1,
 				TerminationMsg: fmt.Sprintf("failed to deploy Job: %v", deployErr),
 			})
+			if ctx.Err() != nil {
+				// An interrupted apply may have persisted the Job before its
+				// response was lost. Its run-scoped name is already known.
+				cleanupCtx, cleanupCancel := detachedCleanupContext(ctx)
+				var deleted time.Time
+				if v.Cleanup {
+					if cleanupErr := deployer.CleanupJob(cleanupCtx); cleanupErr != nil {
+						slog.Warn("failed to cleanup interrupted Job apply", "name", entry.Name, "error", cleanupErr)
+					}
+					deleted = time.Now()
+				}
+				partial, cancelErr := v.interruptedPhase(ctx, cleanupCtx, clientset, builder, phase, entries[i+1:], start)
+				if v.Cleanup {
+					waitForInterruptedPodTermination(cleanupCtx, deployer, entry.Name, deleted)
+				}
+				cleanupCancel()
+				return partial, cancelErr
+			}
 			continue
 		}
 
@@ -654,18 +694,34 @@ func (v *Validator) runPhase(
 
 		waitErr := deployer.WaitForCompletion(ctx, timeout)
 
+		// Without cancellation, normal capture and Job deletion keep the
+		// caller's context (the CLI leaves it uncapped), and timeout/infra
+		// capture keeps its own fresh cleanup window. Once cancellation is
+		// observed, capture, deletion and report persistence share that one
+		// detached budget, which the interrupted pod wait extends only to
+		// cover the pod's SIGTERM grace from Job deletion.
+		live := waitErr == nil && ctx.Err() == nil
+		captureCtx, captureCancel := ctx, context.CancelFunc(func() {})
+		if !live {
+			captureCtx, captureCancel = detachedCleanupContext(ctx)
+		}
 		var result *ctrf.ValidatorResult
 		if waitErr != nil {
-			// Timeout or infra error — extract what we can with a fresh context.
+			// Timeout or infra error — extract what we can.
 			// Thread waitErr so the rendered message reflects the ACTUAL cause
 			// (infra/unavailable vs a genuine deadline), not always the
 			// configured catalog timeout (issue #1966).
-			captureCtx, captureCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout) //nolint:contextcheck // Fresh context: parent may be canceled
-			result = deployer.HandleTimeout(captureCtx, waitErr)                                               //nolint:contextcheck // Uses fresh context above
-			captureCancel()
+			result = deployer.HandleTimeout(captureCtx, waitErr)
 		} else {
 			// Normal completion — extract exit code, termination msg, stdout
-			result = deployer.ExtractResult(ctx)
+			result = deployer.ExtractResult(captureCtx)
+		}
+		if live && ctx.Err() != nil {
+			// Cancellation may have cut the live capture short; repeat it
+			// within the detached budget rather than lose the verdict.
+			live = false
+			captureCtx, captureCancel = detachedCleanupContext(ctx)
+			result = deployer.ExtractResult(captureCtx)
 		}
 
 		builder.AddResult(result)
@@ -679,37 +735,65 @@ func (v *Validator) runPhase(
 		}
 
 		// Cleanup Job
+		var deleted time.Time
 		if v.Cleanup {
-			if cleanupErr := deployer.CleanupJob(ctx); cleanupErr != nil {
+			cleanupErr := deployer.CleanupJob(captureCtx)
+			if live && ctx.Err() != nil {
+				// Cancellation may have cut the live delete short.
+				live = false
+				captureCtx, captureCancel = detachedCleanupContext(ctx)
+				cleanupErr = deployer.CleanupJob(captureCtx)
+			}
+			if cleanupErr != nil {
 				slog.Warn("failed to cleanup Job", "name", entry.Name, "error", cleanupErr)
 			}
-			termCtx, termCancel := context.WithTimeout(context.Background(), defaults.K8sPodTerminationWaitTimeout) //nolint:contextcheck // Fresh context: parent may be canceled
-			if termErr := deployer.WaitForPodTermination(termCtx); termErr != nil {                                 //nolint:contextcheck // Uses fresh context above
+			deleted = time.Now()
+		}
+
+		if ctx.Err() != nil {
+			if live {
+				captureCtx, captureCancel = detachedCleanupContext(ctx)
+			}
+			partial, cancelErr := v.interruptedPhase(ctx, captureCtx, clientset, builder, phase, entries[i+1:], start)
+			if v.Cleanup {
+				waitForInterruptedPodTermination(captureCtx, deployer, entry.Name, deleted)
+			}
+			captureCancel()
+			return partial, cancelErr
+		}
+		captureCancel()
+
+		if v.Cleanup {
+			termCtx, termCancel := context.WithTimeout(ctx, defaults.K8sPodTerminationWaitTimeout)
+			if termErr := deployer.WaitForPodTermination(termCtx); termErr != nil {
 				slog.Warn("failed to wait for pod termination", "name", entry.Name, "error", termErr)
 			}
 			termCancel()
 		}
+
+		if ctx.Err() != nil {
+			// Cancellation can interrupt the normal termination watch after
+			// capture's budget ended. Persist first, then resume the known
+			// pod wait within the same fresh phase budget, extended only to
+			// cover the pod's grace from the earlier Job deletion.
+			cleanupCtx, cleanupCancel := detachedCleanupContext(ctx)
+			partial, cancelErr := v.interruptedPhase(ctx, cleanupCtx, clientset, builder, phase, entries[i+1:], start)
+			if v.Cleanup {
+				waitForInterruptedPodTermination(cleanupCtx, deployer, entry.Name, deleted)
+			}
+			cleanupCancel()
+			return partial, cancelErr
+		}
 	}
 
 	report := builder.Build()
-
-	// Write CTRF ConfigMap
-	if writeErr := ctrf.WriteCTRFConfigMap(ctx, clientset, v.Namespace, v.RunID, string(phase), report); writeErr != nil {
-		slog.Warn("failed to write CTRF ConfigMap", "phase", phase, "error", writeErr)
+	v.writeCTRFReport(ctx, clientset, phase, report)
+	if ctx.Err() != nil {
+		// The write may have been cut short; interruptedPhase rewrites the
+		// report within a detached cleanup budget.
+		return v.cancelPhase(ctx, clientset, builder, phase, nil, start)
 	}
-
-	// Derive phase status from summary
-	var status string
-	switch {
-	case report.Results.Summary.Failed > 0:
-		status = ctrf.StatusFailed
-	case report.Results.Summary.Other > 0:
-		status = ctrf.StatusOther
-	case report.Results.Summary.Tests == 0:
-		status = ctrf.StatusSkipped
-	default:
-		status = ctrf.StatusPassed
-	}
+	status := phaseStatus(report)
 
 	duration := time.Since(start)
 	slog.Info("phase completed",
@@ -732,6 +816,126 @@ func (v *Validator) runPhase(
 		Duration: duration,
 	}, nil
 }
+
+// detachedCleanupContext bounds cleanup and capture independently of a
+// parent that may have been canceled by the operator.
+func detachedCleanupContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), defaults.K8sCleanupTimeout)
+}
+
+// waitForInterruptedPodTermination waits, after an interrupted run deleted the
+// Job at deleted, until the Job's pods are terminal or absent. It keeps the
+// shared phase deadline, extending it only as far as the pod's full SIGTERM
+// grace from Job deletion plus a delivery margin, so per-run RBAC is not
+// revoked while a cooperative check is still running its in-grace cleanup.
+// The wait still returns as soon as the pods stop.
+func waitForInterruptedPodTermination(shared context.Context, deployer *job.Deployer, name string, deleted time.Time) {
+	waitCtx := shared
+	graceEnd := deleted.Add(defaults.ValidatorTerminationGracePeriod + defaults.ValidatorTerminationWaitMargin)
+	if d, ok := shared.Deadline(); ok && d.Before(graceEnd) {
+		var cancel context.CancelFunc
+		waitCtx, cancel = context.WithDeadline(context.WithoutCancel(shared), graceEnd)
+		defer cancel()
+	}
+	if err := deployer.WaitForPodTermination(waitCtx); err != nil {
+		slog.Warn("failed to wait for interrupted pod termination", "name", name, "error", err)
+	}
+}
+
+// writeCTRFReport persists the report within the caller's cleanup budget.
+func (v *Validator) writeCTRFReport(ctx context.Context, clientset kubernetes.Interface, phase Phase, report *ctrf.Report) {
+	if err := ctrf.WriteCTRFConfigMap(ctx, clientset, v.Namespace, v.RunID, string(phase), report); err != nil {
+		slog.Warn("failed to write CTRF ConfigMap", "phase", phase, "error", err)
+	}
+}
+
+// phaseStatus derives a phase's status from its report summary.
+func phaseStatus(report *ctrf.Report) string {
+	switch {
+	case report.Results.Summary.Failed > 0:
+		return ctrf.StatusFailed
+	case report.Results.Summary.Other > 0:
+		return ctrf.StatusOther
+	case report.Results.Summary.Tests == 0:
+		return ctrf.StatusSkipped
+	default:
+		return ctrf.StatusPassed
+	}
+}
+
+// cancelPhase finalizes a phase interrupted outside an in-flight Job.
+func (v *Validator) cancelPhase(
+	ctx context.Context,
+	clientset kubernetes.Interface,
+	builder *ctrf.Builder,
+	phase Phase,
+	notRun []catalog.ValidatorEntry,
+	start time.Time,
+) (*PhaseResult, error) {
+
+	cleanupCtx, cancel := detachedCleanupContext(ctx)
+	defer cancel()
+	return v.interruptedPhase(ctx, cleanupCtx, clientset, builder, phase, notRun, start)
+}
+
+// interruptedPhase preserves completed verdicts and records unstarted entries
+// within the existing cleanup budget, returning both the report and cause.
+func (v *Validator) interruptedPhase(
+	ctx context.Context,
+	cleanupCtx context.Context,
+	clientset kubernetes.Interface,
+	builder *ctrf.Builder,
+	phase Phase,
+	notRun []catalog.ValidatorEntry,
+	start time.Time,
+) (*PhaseResult, error) {
+
+	reason := notRunCanceledReason
+	if stderrors.Is(ctx.Err(), context.DeadlineExceeded) {
+		reason = "not run: validation timed out"
+	}
+	for _, entry := range notRun {
+		builder.AddSkipped(entry.Name, entry.Phase, reason)
+	}
+	report := builder.Build()
+	if !ctrf.IsFailingStatus(phaseStatus(report)) {
+		// No entry records the interruption when it landed outside an
+		// in-flight check, so the persisted and merged CTRF summary would
+		// read as passing. Record it as an indeterminate entry instead.
+		message := "canceled: validation run was interrupted before the phase completed"
+		if stderrors.Is(ctx.Err(), context.DeadlineExceeded) {
+			message = "timeout: validation deadline expired before the phase completed"
+		}
+		builder.AddResult(&ctrf.ValidatorResult{
+			Name:           interruptedTestName,
+			Phase:          string(phase),
+			ExitCode:       -1,
+			TerminationMsg: message,
+		})
+		report = builder.Build()
+	}
+	v.writeCTRFReport(cleanupCtx, clientset, phase, report)
+
+	status := phaseStatus(report)
+	slog.Warn("validation phase interrupted",
+		"phase", phase, "status", status, "notRun", len(notRun), "cause", ctx.Err())
+
+	return &PhaseResult{
+		Phase:    phase,
+		Status:   status,
+		Report:   report,
+		Duration: time.Since(start),
+	}, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "validation interrupted before all validators ran")
+}
+
+// notRunCanceledReason is the CTRF message for a validator that never started
+// because the run was interrupted first.
+const notRunCanceledReason = "not run: validation canceled"
+
+// interruptedTestName names the synthetic CTRF entry, with status other, that
+// records an interrupted phase when no check entry already blocks it. It is
+// not a catalog validator.
+const interruptedTestName = "validation-interrupted"
 
 // resultSummaryPrefix marks check stdout lines that should be surfaced to the
 // CLI's own output (not only the CTRF stdout array). Any check may emit one

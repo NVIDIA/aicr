@@ -65,6 +65,12 @@ type Renderer struct {
 	// notApplicable maps a conditional MUST id to the justification that
 	// renders it not applicable; see WithNotApplicable.
 	notApplicable map[string]string
+	// documented maps a requirement id to the vendor documentation that
+	// attests it when the run only observed it; see WithDocumented.
+	documented map[string]Documentation
+	// noIndex skips index.md: the submission directory's README.md is its
+	// index, see WithoutIndex.
+	noIndex bool
 }
 
 // Option configures a Renderer.
@@ -105,6 +111,26 @@ func WithConformanceVersion(v Version) Option {
 func WithNotApplicable(notApplicable map[string]string) Option {
 	return func(r *Renderer) {
 		r.notApplicable = notApplicable
+	}
+}
+
+// WithDocumented attaches vendor documentation to requirements the run only
+// observed, keyed by upstream id: the validate config key
+// spec.validate.evidence.cncf.documented. An observed requirement with an
+// entry is established by it (RequirementResult.Established); a requirement
+// in any other status ignores its entry. Render reports a malformed map with
+// ErrCodeInvalidRequest (ValidateDocumented).
+func WithDocumented(documented map[string]Documentation) Option {
+	return func(r *Renderer) {
+		r.documented = documented
+	}
+}
+
+// WithoutIndex renders the evidence pages only, no index.md. The submission
+// directory sets it because README.md carries the requirement index there.
+func WithoutIndex() Option {
+	return func(r *Renderer) {
+		r.noIndex = true
 	}
 }
 
@@ -163,7 +189,7 @@ func (r *Renderer) RenderWithResult(ctx context.Context, report *ctrf.Report) (*
 	if r.outputDir == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "evidence output directory not set")
 	}
-	agg, err := AggregateReport(r.Version(), report, r.notApplicable)
+	agg, err := AggregateSubmission(r.Version(), report, AggregateOptions{NotApplicable: r.notApplicable, Documented: r.documented})
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +238,9 @@ func (r *Renderer) RenderWithResult(ctx context.Context, report *ctrf.Report) (*
 	case <-ctx.Done():
 		return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout, "rendering evidence")
 	default:
+	}
+	if r.noIndex {
+		return agg, nil
 	}
 	if err := r.renderIndex(entries, agg, renderNow); err != nil {
 		return nil, err
@@ -388,6 +417,9 @@ func templateFuncs() template.FuncMap {
 		"add":    func(a, b int) int { return a + b },
 		"join":   strings.Join,
 		"result": formatResult,
+		"cell":   tableCell,
+		"trimV":  func(v Version) string { return strings.TrimPrefix(string(v), "v") },
+		"links":  evidenceLinks,
 	}
 }
 
@@ -398,6 +430,26 @@ func templateFuncs() template.FuncMap {
 func tableCell(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	return strings.ReplaceAll(s, "|", `\|`)
+}
+
+// evidenceLinks renders PRODUCT.yaml evidence references as Markdown links
+// in one table cell: a URL links to itself, a local reference to its file
+// (the fragment, which names a testcase, is shown and dropped from the
+// target). Empty evidence reads as a dash.
+func evidenceLinks(refs []string) string {
+	if len(refs) == 0 {
+		return "-"
+	}
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
+			out = append(out, "["+ref+"]("+ref+")")
+			continue
+		}
+		target, _, _ := strings.Cut(ref, "#")
+		out = append(out, "[`"+ref+"`]("+target+")")
+	}
+	return strings.Join(out, ", ")
 }
 
 // formatResult renders a verdict cell: the status in upper case, followed by

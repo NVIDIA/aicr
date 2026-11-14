@@ -1,0 +1,90 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# vr200-nvke-ubuntu-inference plus the Dynamo serving platform. The base leaf
+# declares the Gateway API surface and nothing that serves a model; this is the
+# leaf that serves one, and the leaf that declares robust-controller.
+#
+# robust_controller is a v1.36 MUST, and robust_controller_check.go takes its
+# subject from the recipe -- kubeflow-trainer, else dynamo-platform, else skip.
+# The plain inference leaf declares no AI operator, so the check is never
+# scheduled and the requirement renders as "not tested". Follows
+# vr200-rke2-ubuntu-inference-dynamo and gb300-eks-ubuntu-inference-dynamo.
+#
+# WHAT IT ESTABLISHES, measured 2026-11-07 on a VR200 NVKE tenant cluster
+# deployed from this leaf's own bundle: robust_controller is Implemented, from
+# the Dynamo path, with no documented entry needed. The check logs
+# "validating Dynamo operator (dynamo-platform in recipe)" and establishes the
+# requirement on operator pods, an Established CRD and a webhook that rejects
+# an invalid custom resource. Only the CR-reconciliation extra is
+# observation-only, because a DynamoGraphDeployment cannot reach a terminal
+# condition without a model and GPU workers; the Kubeflow path adds a TrainJob
+# reconciled to Complete on top of that same base. Both paths establish the
+# MUST.
+#
+# NO performance block. The gb300-eks and gb200 Dynamo leaves gate
+# inference-perf on measured throughput and TTFT floors; nothing has been
+# measured on VR200 under Dynamo, and vr200-rke2-ubuntu-inference-dynamo
+# carries none either. A floor copied from another accelerator would be a
+# claim about hardware this leaf has never run on.
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: vr200-nvke-ubuntu-inference-dynamo
+
+spec:
+  base: vr200-nvke-ubuntu-inference
+
+  criteria:
+    service: nvke
+    accelerator: vr200
+    os: ubuntu
+    intent: inference
+    platform: dynamo
+
+  # Restated from the base: snapshot resolution checks a leaf's own
+  # constraints. The kernel floor is load-bearing on VR200 -- the generic
+  # nvidia-64k kernel brings no GPU up at all.
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "26.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 7.0"
+
+  componentRefs:
+    - name: grove
+      type: Helm
+      valuesFile: components/grove/values.yaml
+      dependencyRefs:
+        - prometheus-operator-crds
+    - name: dynamo-platform
+      type: Helm
+      valuesFile: components/dynamo-platform/values.yaml
+      dependencyRefs:
+        - grove
+        - cert-manager
+        - prometheus-operator-crds
+        - gpu-operator
+        - kai-scheduler
+
+  validation:
+    conformance:
+      # Union-merged onto the base, which already declares gang-scheduling,
+      # inference-gateway and secure-accelerator-access.
+      checks:
+        - robust-controller

@@ -16,11 +16,19 @@ The image set below is regenerated from the live Helm chart catalog and the embe
 
 A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by `make bom` and published as a release asset. Tooling that consumes SBOMs (Trivy, Grype, Cosign attestation, in-toto) should prefer the JSON; this Markdown is the human-readable view.
 
+## Driver images
+
+The GPU Operator and Network Operator build their driver image tags on each node, so the version in a recipe is not itself a published tag. The GPU driver tag is `<version>-<os><os-version>` (for example `580.173.02-ubuntu24.04`); for `rhel` the GPU Operator uses only the major version (for example `580.173.02-rhel9`). The DOCA driver tag is `<version>-<os><os-version>-<arch>` (for example `doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`). The GPU Operator completes the GDRCopy (`gdrdrv`), GDS (`nvidia-fs`) and vGPU Manager (`vgpuManager`) tags the same way as the GPU driver, for example `gdrdrv:v2.6-ubuntu24.04`. No shipped recipe enables vGPU Manager, so the catalog lists none.
+
+This list names the tags for the OS version (and, for DOCA, the architecture) that the recipes deploying that driver pin. Tags that also name each node's kernel (a GPU driver with `usePrecompiled: true`, such as the SUSE driver in `rke2-sles`, or a DOCA driver with `forcePrecompiled: true`) are not listed. A DOCA driver with `forcePrecompiled: false` uses a kernel-specific precompiled tag when the registry has one and otherwise builds from the listed standard tag on the node. The standard tag is therefore enough for a mirror, but the precompiled images it may pull from nvcr.io are not listed. A driver pinned by digest needs no extra tag. GDRCopy and GDS are containers of the operator-managed driver pod, so they are listed only for recipes that enable them and deploy that driver.
+
+The catalog lists the driver version that the default chart render carries. Versions that a leaf recipe pins (such as `595.91.07` and `615.71.09`) are not listed; `aicr mirror list` gives the tags for one recipe.
+
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
 - Components: **58**
-- Unique images: **160**
+- Unique images: **158**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -45,7 +53,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-gb200-rdma | manifest | — | — | 2 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.7.2 | 14 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.7.2 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.13 | 1 |
@@ -54,25 +62,25 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
 | kai-scheduler | helm | kai-scheduler | v0.16.9 | 12 |
-| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
+| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.5.0 | 2 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
 | kueue | helm | kueue | 0.19.6 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.1 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.7.0 | 17 |
+| network-operator | helm | nvidia/network-operator | 26.7.0 | 23 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.20.1 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
-| nktp | helm | nktp | 0.1.1-rc.3 | 8 |
+| nktp | helm | nktp | 0.2.0 | 8 |
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
 | nodewright-customizations | manifest | — | — | 6 |
-| nodewright-operator | helm | nodewright | v0.20.0 | 2 |
+| nodewright-operator | helm | nodewright | v0.21.0 | 2 |
 | nvcre | helm | cluster-readiness-engine | v0.8.2 | 4 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
-| nvsentinel | helm | nvsentinel | v1.28.0 | 6 |
+| nvsentinel | helm | nvsentinel | v1.31.0 | 6 |
 | nvsentinel-mongodb | helm | psmdb-db | 1.23.3 | 5 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
@@ -99,8 +107,8 @@ from the component's registry default above.
 |-----------|-----------------|-------------|--------|
 | dynamo-platform | 1.5.0 | b300-mk8s-ubuntu-inference-dynamo | 1 |
 | kai-scheduler | v0.17.1 | b300-mk8s-ubuntu-inference-dynamo | 12 |
-| kube-prometheus-stack | 83.7.0 | aks | 8 |
-| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 17 |
+| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 23 |
+| network-operator | 26.7.1 | vr200-nvke-ubuntu-training | 23 |
 
 ## Images by component
 
@@ -142,7 +150,7 @@ _No images extracted._
 
 ### dra-node-labeler
 
-- `docker.io/alpine/kubectl:1.37.2@sha256:5e2de75d37e811ba6eb92e06890b1b3263eae4f0a1c17b49269edec589b1352a`
+- `docker.io/alpine/kubectl:1.37.2@sha256:1a7fc3308a8eee1c8bd177930fc521088c6dc64ad8b68c88319151fd87d79deb`
 
 ### dranet
 
@@ -179,14 +187,15 @@ _No images extracted._
 ### gpu-operator
 
 - `nvcr.io/nvidia/cloud-native/dcgm:4.6.1-1-ubuntu24.04`
-- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6`
+- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu24.04`
+- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu26.04`
 - `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.4`
 - `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.12.1`
 - `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.1`
-- `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4`
+- `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4-ubuntu24.04`
 - `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.5`
 - `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.1`
-- `nvcr.io/nvidia/driver:580.173.02`
+- `nvcr.io/nvidia/driver:580.173.02-ubuntu24.04`
 - `nvcr.io/nvidia/gpu-operator:v26.7.2`
 - `nvcr.io/nvidia/k8s-device-plugin:v0.20.1`
 - `nvcr.io/nvidia/k8s/container-toolkit:v1.20.1`
@@ -238,14 +247,8 @@ _No images extracted._
 
 ### kube-prometheus-stack
 
-- `docker.io/grafana/grafana:13.0.1`
-- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.2`
-- `quay.io/kiwigrid/k8s-sidecar:2.7.1`
 - `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
-- `quay.io/prometheus/alertmanager:v0.32.0`
-- `quay.io/prometheus/node-exporter:v1.11.1`
 - `quay.io/prometheus/prometheus:v3.11.3`
-- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
 
 ### kubeflow-trainer
 
@@ -268,7 +271,7 @@ _No images extracted._
 
 ### network-operator
 
-- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0`
+- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0-ubuntu24.04-amd64`
 - `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
 - `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
 - `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
@@ -279,12 +282,18 @@ _No images extracted._
 - `ghcr.io/mellanox/nvidia-k8s-ipam@sha256:47e1bb84ac97f9af49f97b49c2de44b4ba82b890b487880edc5c9adf86a176f7`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.7.0`
 - `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
+- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
+- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
+- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.0@sha256:d3235d1f7be1fe825f23feddd714bc44acd0bad305ca598b365cd134f14ae28e`
 
 ### network-operator-ocp
 
@@ -311,11 +320,11 @@ _No images extracted._
 - `busybox:latest`
 - `ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator:0.161.0`
 - `ghcr.io/open-telemetry/opentelemetry-operator/target-allocator:0.161.0`
-- `grafana/otel-lgtm:0.32.0`
-- `otel/opentelemetry-collector-k8s:0.162.0`
+- `grafana/otel-lgtm:0.38.0`
+- `otel/opentelemetry-collector-k8s:0.164.0`
 - `quay.io/prometheus/node-exporter:v1.12.1`
-- `rancher/kubectl:v1.34.1`
 - `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0`
+- `registry.k8s.io/kubectl:v1.35.10`
 
 ### node-problem-detector
 
@@ -333,7 +342,7 @@ _No images extracted._
 ### nodewright-operator
 
 - `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
-- `ghcr.io/nvidia/nodewright/operator:v0.20.0@sha256:5ddfc211d3de8861c5c1721c61139f65e0a733c35bad4b31960dd8fe44d545a9`
+- `ghcr.io/nvidia/nodewright/operator:v0.21.0@sha256:d9ff4e5bd44e21b24baf727f8e2a0b57f0d5f4cf17b9a90b2a4b307930b238cd`
 
 ### nvcre
 
@@ -352,20 +361,20 @@ _No images extracted._
 
 ### nvsentinel
 
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.28.0-dcgm-3.x`
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.28.0-dcgm-4.x`
-- `ghcr.io/nvidia/nvsentinel/labeler:v1.28.0`
-- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.28.0`
-- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.28.0`
-- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.28.0`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.31.0-dcgm-3.x`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.31.0-dcgm-4.x`
+- `ghcr.io/nvidia/nvsentinel/labeler:v1.31.0`
+- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.31.0`
+- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.31.0`
+- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.31.0`
 
 ### nvsentinel-mongodb
 
-- `docker.io/percona/fluentbit:5.1.2-1@sha256:4926d7d003ca09c826a3dea5d9ccd0ba158296880471bcec82ef38f95617b913`
+- `docker.io/percona/fluentbit:5.1.4-1@sha256:037b5ea087dffd844f619c61f4d211a32bec73dae0971143795579db1a3a6992`
 - `docker.io/percona/mongodb_exporter:0.54.0@sha256:934e9db87e85e0fa63654e73c3504845993a254e898783ca905e65a68848b5a4`
-- `docker.io/percona/percona-backup-mongodb:2.15.0@sha256:12dcba7f1b55e00eb1b49dac51427d942c221b826d621d6bfad926a9d959a7c5`
+- `docker.io/percona/percona-backup-mongodb:2.17.0@sha256:d3b1f82393991542ca1222c8c80a83830383a2fd51f064f6da939af776b9c01d`
 - `docker.io/percona/percona-server-mongodb:8.0.32-14@sha256:5ba5f240d2dc98bc6236ab1d79c0862c4b62dba9d98cd0ffdf716c30473d2d11`
-- `docker.io/percona/pmm-client:3.9.1@sha256:298e731652e2be172a2505596edaee1e0c014609035347599048f62efae78e5b`
+- `docker.io/percona/pmm-client:3.10.0@sha256:b407188b183bc61ab202914f2128f171dd2d0cd411396a05bb92f3e73348a416`
 
 ### prometheus-adapter
 
@@ -402,7 +411,7 @@ _No images extracted._
 
 ### slinky-drainer
 
-- `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.28.0@sha256:bf6ccaf1d6c035aa5f86e70a929dc6d9a18c5c05b10104d23c69aacff35bcb14`
+- `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.31.0@sha256:d839d35cc25f6ffa22c016a3a38eeeb98a3ef91a3eb32326d728b3c3fa10e646`
 
 ### slinky-drainer-crds
 
@@ -460,20 +469,9 @@ _No images extracted._
 - `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.17.1`
 - `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.17.1`
 
-### kube-prometheus-stack@83.7.0 (variant)
-
-- `docker.io/grafana/grafana:12.4.3`
-- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.1`
-- `quay.io/kiwigrid/k8s-sidecar:2.6.0`
-- `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
-- `quay.io/prometheus/alertmanager:v0.32.0`
-- `quay.io/prometheus/node-exporter:v1.11.1`
-- `quay.io/prometheus/prometheus:v3.11.2`
-- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
-
 ### network-operator@25.7.0 (variant)
 
-- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0`
+- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0-ubuntu24.04-amd64`
 - `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
 - `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
 - `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
@@ -484,12 +482,44 @@ _No images extracted._
 - `ghcr.io/mellanox/nvidia-k8s-ipam@sha256:47e1bb84ac97f9af49f97b49c2de44b4ba82b890b487880edc5c9adf86a176f7`
 - `nvcr.io/nvidia/cloud-native/network-operator:v25.7.0`
 - `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
+- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
+- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
+- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.0@sha256:d3235d1f7be1fe825f23feddd714bc44acd0bad305ca598b365cd134f14ae28e`
+
+### network-operator@26.7.1 (variant)
+
+- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0-ubuntu24.04-amd64`
+- `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
+- `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
+- `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
+- `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin@sha256:cabce074d10a0f1d62135e2cc5442d65b49094b95b8297fdd024a1a5f461319f`
+- `ghcr.io/mellanox/k8s-rdma-shared-dev-plugin@sha256:9f468fdc4449e65e4772575f83aa85840a00f97165f9a00ba34695c91d610fbd`
+- `ghcr.io/mellanox/nic-configuration-operator-daemon@sha256:35e38f05004116ee3c0489c9da9dc0639d69e0a75e9a5b90a5a44be2cdee72bd`
+- `ghcr.io/mellanox/nic-configuration-operator@sha256:8e2247c3832bdbd8f046731a2be1cfbf446e2ff8eb1b173b7dea8965ed470796`
+- `ghcr.io/mellanox/nvidia-k8s-ipam@sha256:47e1bb84ac97f9af49f97b49c2de44b4ba82b890b487880edc5c9adf86a176f7`
+- `nvcr.io/nvidia/cloud-native/network-operator:v26.7.1`
+- `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
+- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
+- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
+- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
+- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.0@sha256:d3235d1f7be1fe825f23feddd714bc44acd0bad305ca598b365cd134f14ae28e`
 
 <!-- END AICR-BOM -->
 
@@ -505,20 +535,21 @@ Air-gapped OpenShift deployments must separately mirror the relevant Red Hat cer
 
 The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
 
-**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Ten known cases, none counted in the `nvsentinel` row's image count above. Eight set a `global.*` toggle:
+**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Eleven known cases, none counted in the `nvsentinel` row's image count above. Nine set a `global.*` toggle:
 
 - The [`nvsentinel-observability` mixin](component-catalog.md#audit-logging-and-tracing) sets `global.auditLogging.enabled: true`, which conditionally adds a `fix-audit-log-permissions` init container (`docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`) to the `platform-connectors` DaemonSet and `labeler` Deployment. The chart's own default for this init container is `docker.io/bitnamilegacy/os-shell:12-debian-12-r30`, which sits in Bitnami's frozen archive and will never be patched; AICR overrides `global.initContainerImage` in `recipes/components/nvsentinel/values.yaml` to the same digest-pinned busybox it already ships in the `network-operator` manifests.
-- The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.28.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
-- The [`nvsentinel-nic-health-monitor` mixin](component-catalog.md#nic-and-fabric-fault-detection) sets `global.nicHealthMonitor.enabled`, turning on the chart's `nic-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.28.0`. Its `chown` init container reuses `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` — the same overridden `global.initContainerImage` the observability mixin above already pulls in, not a second one. Unlike the observability and object-monitor mixins, this one is referenced by the shipped `aks` and `oke-ol` overlays, so every AKS and OKE recipe deploys these images; the other families do not. The `nvsentinel-slurm-drain-monitor` mixin below is the only other one here that shipped recipes compose.
-- The [`nvsentinel-slurm-drain-monitor` mixin](component-catalog.md#slurm-drain-monitor) sets `global.slurmDrainMonitor.enabled`, turning on the chart's `slurm-drain-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.28.0`. Every `platform: slurm` recipe composes it, so those recipes deploy this image and the others do not; it is in AICR's weekly image scan for the same reason as the object monitor's.
-- The [`nvsentinel-health-events-analyzer` mixin](component-catalog.md#health-events-analyzer) sets `global.healthEventsAnalyzer.enabled`, turning on the chart's `health-events-analyzer` subchart and pulling in `ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.28.0`, with no init container on the MongoDB datastore AICR bundles. No shipped recipe composes it; it is required beside the `nvsentinel-remediation` step. It is in the weekly image scan and the mirror lane, and `TestNVSentinelHealthEventsAnalyzerChartRender` pins it against the rendered chart.
-- The [`nvsentinel-event-exporter` mixin](component-catalog.md#health-event-export) sets `global.eventExporter.enabled`, turning on the chart's `event-exporter` subchart and pulling in `ghcr.io/nvidia/nvsentinel/event-exporter:v1.28.0`, with no init container on the MongoDB datastore AICR bundles. No shipped recipe composes it; it is in the weekly image scan and the mirror lane, and `TestNVSentinelEventExporterChartRender` pins it against the rendered chart.
-- The [`nvsentinel-log-collector` mixin](component-catalog.md#diagnostics-capture) sets `global.inclusterFileServer.enabled` and `fault-remediation.logCollector.enabled`, adding five images: the collection Job's `ghcr.io/nvidia/nvsentinel/log-collector:v1.28.0`, which is named only inside `fault-remediation`'s ConfigMap, and the file server's `ghcr.io/nvidia/nvsentinel/file-server-cleanup:v1.28.0`, `docker.io/bitnamilegacy/nginx:1.27.2-debian-12-r2`, `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` (its init container) and `quay.io/martinhelmich/prometheus-nginxlog-exporter:v1.10.0`. The nginx and exporter tags are the chart's own pins, not AICR's; `bitnamilegacy` is Bitnami's frozen archive and is never patched. The busybox is AICR's: the mixin sets `incluster-file-server.initImage` to the one `nvsentinel-remediation` pins, replacing the chart's `public.ecr.aws/docker/library/busybox:1.37.0`, whose registry caps anonymous pulls by data per IP. No shipped recipe composes it; all five are in the weekly image scan and the mirror lane, and `TestNVSentinelLogCollectorChartRender` pins them against the rendered chart.
-- The [`nvsentinel-node-validation` mixin](component-catalog.md#node-validation) sets `global.lifecycleManager.enabled`, turning on the chart's `lifecycle-manager` subchart and pulling in `ghcr.io/nvidia/nvsentinel/lifecycle-manager:v1.28.0`. Its DCGM diagnostic, `nvcr.io/nvidia/cloud-native/dcgm:4.7.0-ubuntu24.04`, is in no pod spec: lifecycle-manager reads it from its ConfigMap and runs it as a Job on the node under test, so it is pulled only when a node is validated. No shipped recipe composes the mixin. Both images are in the mirror lane; the lifecycle-manager image is in the weekly image scan, and the DCGM image, an `nvcr.io` image like the GPU Operator's own, is not.
+- The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.31.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
+- The [`nvsentinel-nic-health-monitor` mixin](component-catalog.md#nic-and-fabric-fault-detection) sets `global.nicHealthMonitor.enabled`, turning on the chart's `nic-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.31.0`. Its `chown` init container reuses `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` — the same overridden `global.initContainerImage` the observability mixin above already pulls in, not a second one. Unlike the observability and object-monitor mixins, this one is referenced by the shipped `aks` and `oke-ol` overlays, so every AKS and OKE recipe deploys these images; the other families do not. The `nvsentinel-slurm-drain-monitor` mixin below is the only other one here that shipped recipes compose.
+- The [`nvsentinel-slurm-drain-monitor` mixin](component-catalog.md#slurm-drain-monitor) sets `global.slurmDrainMonitor.enabled`, turning on the chart's `slurm-drain-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.31.0`. Every `platform: slurm` recipe composes it, so those recipes deploy this image and the others do not; it is in AICR's weekly image scan for the same reason as the object monitor's.
+- The [`nvsentinel-health-events-analyzer` mixin](component-catalog.md#health-events-analyzer) sets `global.healthEventsAnalyzer.enabled`, turning on the chart's `health-events-analyzer` subchart and pulling in `ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.31.0`, with no init container on the MongoDB datastore AICR bundles. No shipped recipe composes it; it is required beside the `nvsentinel-remediation` step. It is in the weekly image scan and the mirror lane, and `TestNVSentinelHealthEventsAnalyzerChartRender` pins it against the rendered chart.
+- The [`nvsentinel-event-exporter` mixin](component-catalog.md#health-event-export) sets `global.eventExporter.enabled`, turning on the chart's `event-exporter` subchart and pulling in `ghcr.io/nvidia/nvsentinel/event-exporter:v1.31.0`, with no init container on the MongoDB datastore AICR bundles. No shipped recipe composes it; it is in the weekly image scan and the mirror lane, and `TestNVSentinelEventExporterChartRender` pins it against the rendered chart.
+- The [`nvsentinel-log-collector` mixin](component-catalog.md#diagnostics-capture) sets `global.inclusterFileServer.enabled` and `fault-remediation.logCollector.enabled`, adding five images: the collection Job's `ghcr.io/nvidia/nvsentinel/log-collector:v1.31.0`, which is named only inside `fault-remediation`'s ConfigMap, and the file server's `ghcr.io/nvidia/nvsentinel/file-server-cleanup:v1.31.0`, `docker.io/bitnamilegacy/nginx:1.27.2-debian-12-r2`, `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` (its init container) and `quay.io/martinhelmich/prometheus-nginxlog-exporter:v1.10.0`. The nginx and exporter tags are the chart's own pins, not AICR's; `bitnamilegacy` is Bitnami's frozen archive and is never patched. The busybox is AICR's: the mixin sets `incluster-file-server.initImage` to the one `nvsentinel-remediation` pins, replacing the chart's `public.ecr.aws/docker/library/busybox:1.37.0`, whose registry caps anonymous pulls by data per IP. No shipped recipe composes it; all five are in the weekly image scan and the mirror lane, and `TestNVSentinelLogCollectorChartRender` pins them against the rendered chart.
+- The [`nvsentinel-node-validation` mixin](component-catalog.md#node-validation) sets `global.lifecycleManager.enabled`, turning on the chart's `lifecycle-manager` subchart and pulling in `ghcr.io/nvidia/nvsentinel/lifecycle-manager:v1.31.0`. Its DCGM diagnostic, `nvcr.io/nvidia/cloud-native/dcgm:4.7.0-ubuntu24.04`, is in no pod spec: lifecycle-manager reads it from its ConfigMap and runs it as a Job on the node under test, so it is pulled only when a node is validated. No shipped recipe composes the mixin. Both images are in the mirror lane; the lifecycle-manager image is in the weekly image scan, and the DCGM image, an `nvcr.io` image like the GPU Operator's own, is not.
+- The [`nvsentinel-csp-health-monitor-aws` and `-gcp` mixins](component-catalog.md#cloud-maintenance-events) set `global.cspHealthMonitor.enabled`, turning on the chart's `csp-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/csp-health-monitor:v1.31.0` and its `maintenance-notifier` sidecar, `ghcr.io/nvidia/nvsentinel/maintenance-notifier:v1.31.0`, with no init container on the MongoDB datastore AICR bundles. No shipped recipe composes them; both images are in AICR's weekly image scan and the mirror lane, and `TestNVSentinelCSPHealthMonitorChartRender` pins them against the rendered chart.
 
 A recipe composing any of these mixins **with `nvsentinel` still enabled** adds that mixin's images to what it deploys and mirrors; `aicr bundle`/`aicr mirror` on such a recipe surfaces them even though this static BOM cannot. A chain that disables `nvsentinel` (the OCP overlay, for example) can compose a mixin and ship none of them.
 
-The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#preflight-checks)) is the ninth case. Setting `global.preflight.enabled: true` on `nvsentinel` adds four images, all from `ghcr.io/nvidia/nvsentinel/` at the chart's own version and therefore already covered by the NVIDIA mirroring path — but none of them appear in the `nvsentinel` row above:
+The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#preflight-checks)) is the tenth case. Setting `global.preflight.enabled: true` on `nvsentinel` adds four images, all from `ghcr.io/nvidia/nvsentinel/` at the chart's own version and therefore already covered by the NVIDIA mirroring path — but none of them appear in the `nvsentinel` row above:
 
 | Image | Role |
 |---|---|
@@ -529,23 +560,23 @@ The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#pr
 
 `TestNVSentinelPreflightChartRender` pins all four against the rendered chart, so a bump that changes a repository fails there rather than silently diverging from this table.
 
-The three remediation mixins (see [Graded Remediation](component-catalog.md#graded-remediation)) are the tenth case. They turn on NVSentinel's remediation subcharts, so they add images rather than values. `nvsentinel-remediation`, the widest step, pulls all seven below; `nvsentinel-observe` pulls all but `janitor`, `janitor-provider`, `gpu-reset` and the reboot Job's busybox, and `nvsentinel-quarantine` additionally drops `fault-remediation`.
+The three remediation mixins (see [Graded Remediation](component-catalog.md#graded-remediation)) are the eleventh case. They turn on NVSentinel's remediation subcharts, so they add images rather than values. `nvsentinel-remediation`, the widest step, pulls all seven below; `nvsentinel-observe` pulls all but `janitor`, `janitor-provider`, `gpu-reset` and the reboot Job's busybox, and `nvsentinel-quarantine` additionally drops `fault-remediation`.
 
 | Image | Role |
 |---|---|
-| `ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.28.0` | cordons a node on a fatal fault |
-| `ghcr.io/nvidia/nvsentinel/node-drainer:v1.28.0` | drains a quarantined node |
-| `ghcr.io/nvidia/nvsentinel/fault-remediation:v1.28.0` | maps the fault to a repair action |
-| `ghcr.io/nvidia/nvsentinel/janitor:v1.28.0` | carries out the repair |
-| `ghcr.io/nvidia/nvsentinel/janitor-provider:v1.28.0` | creates the `generic` provider's reboot Job |
-| `ghcr.io/nvidia/nvsentinel/gpu-reset:v1.28.0` | GPU reset Job, named in janitor's ConfigMap rather than a pod spec |
+| `ghcr.io/nvidia/nvsentinel/fault-quarantine:v1.31.0` | cordons a node on a fatal fault |
+| `ghcr.io/nvidia/nvsentinel/node-drainer:v1.31.0` | drains a quarantined node |
+| `ghcr.io/nvidia/nvsentinel/fault-remediation:v1.31.0` | maps the fault to a repair action |
+| `ghcr.io/nvidia/nvsentinel/janitor:v1.31.0` | carries out the repair |
+| `ghcr.io/nvidia/nvsentinel/janitor-provider:v1.31.0` | creates the `generic` provider's reboot Job |
+| `ghcr.io/nvidia/nvsentinel/gpu-reset:v1.31.0` | GPU reset Job, named in janitor's ConfigMap rather than a pod spec |
 | `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4` | the `generic` provider's reboot Job, passed to janitor-provider as an environment variable |
 
 Every step also adds the `psmdb-operator` and `nvsentinel-mongodb` components, NVSentinel's datastore. Their six Percona images are pinned in those components' values files, so the BOM above lists them; NVSentinel's datastore setup Job reuses `docker.io/percona/percona-server-mongodb` from that list. The six NVIDIA images and the six Percona images are in the weekly image scan and the mirror lane. `TestNVSentinelRemediationChartRender` pins each step's images against the rendered chart, and `TestNVSentinelMongoDBChartRender` pins the two Percona components to exactly their listed images.
 
 The `nvsentinel-remediation` mixin pins the reboot Job image through `janitor-provider.csp.generic.rebootImage`, replacing the chart's `public.ecr.aws/docker/library/busybox:1.37.0` with the busybox already in the scan. `aicr mirror` cannot discover it, because janitor-provider passes it as the `GENERIC_REBOOT_IMAGE` environment variable rather than an `image:` field; mirror it yourself unless another component in the recipe already pulls it.
 
-The opt-in `nvsentinel-slinky-drainer` mixin (see [Slurm Drain Through Slinky](component-catalog.md#slurm-drain-through-slinky)) adds the image-less `slinky-drainer-crds` component and the `slinky-drainer` component, whose one image, `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.28.0`, is digest-pinned in its vendored manifest, so the BOM above lists it. Only recipes that compose the mixin deploy it. It is in the weekly image scan and the mirror lane, and `TestSlinkyDrainerImagePinnedEverywhere` keeps its tag at `nvsentinel`'s chart version.
+The opt-in `nvsentinel-slinky-drainer` mixin (see [Slurm Drain Through Slinky](component-catalog.md#slurm-drain-through-slinky)) adds the image-less `slinky-drainer-crds` component and the `slinky-drainer` component, whose one image, `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.31.0`, is digest-pinned in its vendored manifest, so the BOM above lists it. Only recipes that compose the mixin deploy it. It is in the weekly image scan and the mirror lane, and `TestSlinkyDrainerImagePinnedEverywhere` keeps its tag at `nvsentinel`'s chart version.
 
 ### Registries spanned
 

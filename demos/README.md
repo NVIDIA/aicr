@@ -31,6 +31,27 @@ needs one only for its snapshot step.
 | [private-signing.md](private-signing.md) | Private/enterprise signing & verification (self-hosted Sigstore, KMS-backed, headless OIDC) |
 | [examples/CUJ2-Test-Report.md](examples/CUJ2-Test-Report.md) | Dated historical capture (2026-03-13) of a CUJ2 inference run — example test report, not a runbook |
 
+## KubeCon NA 2026: Presentation and Demos
+
+Recordings from the KubeCon + CloudNativeCon North America 2026 talk *One Recipe,
+Five Clouds, One Query: Portable GPU Configuration with a Queryable Audit Layer*,
+captured on a real EKS GB300 cluster with AICR v1.1.0.
+Slides: [kubecon-na-2026-one-recipe-five-clouds-one-query.pdf](https://cdn.jsdelivr.net/gh/NVIDIA/aicr@main/demos/kubecon-na-2026-one-recipe-five-clouds-one-query.pdf)
+opens in your browser, where the play buttons on slides 15 and 25 start the demos
+([view on GitHub](kubecon-na-2026-one-recipe-five-clouds-one-query.pdf); its viewer does not follow PDF links).
+
+**End-to-end workflow (2:13).** Install, snapshot, recipe, a signed bundle and its
+verification, deploy, and validation across the deployment, conformance, and
+performance phases. The deploy chapter replays the output of a `deploy.sh` dry run,
+because the cluster was already deployed; every other step ran against the cluster.
+
+https://github.com/user-attachments/assets/ca147a43-e5fc-49f7-85d0-9f210b8abf7c
+
+**Audit trail (1:34).** `aicr query`, `aicr diff`, `aicr upgrade-check`, and
+`aicr evidence verify` on the same cluster.
+
+https://github.com/user-attachments/assets/77127851-16d9-4e71-92d7-464f26928685
+
 ## Workload Samples
 
 Deployable manifests used by the demos above and by conformance evidence collection. Each carries its prerequisites and setup commands in its header.

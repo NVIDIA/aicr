@@ -27,6 +27,7 @@ This section is for users who:
 | [API Reference](api-reference.md) | REST API quick start and endpoint documentation |
 | [Agent Deployment](agent-deployment.md) | Deploy the Kubernetes agent for automated cluster snapshots |
 | [Validation](validation.md) | Task-oriented walkthrough: validate a cluster against a recipe, both training and inference performance phases |
+| [Artifact Inventories](artifact-inventory.md) | Bind release chart and image identities to a catalog and preserve composition provenance |
 | [Component Catalog](component-catalog.md) | Every component that can appear in a recipe |
 | [Slurm Accounting](slinky-slurm-accounting.md) | Configure Slinky Slurm accounting with a customer-operated MariaDB database |
 | [Slurm Enroot Configuration](slinky-slurm-enroot.md) | Configure cluster-wide Enroot settings and job-level environment overrides for Slinky Slurm |

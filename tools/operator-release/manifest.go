@@ -28,7 +28,7 @@ import (
 	"sort"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // Manifest is a candidate's identity: everything qualification binds and

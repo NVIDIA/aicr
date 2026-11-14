@@ -32,22 +32,30 @@ func valid() Config {
 	return c
 }
 
+// parse binds c's flags and parses args over c.
+func parse(c *Config, args ...string) error {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	c.BindFlags(fs)
+	return fs.Parse(args)
+}
+
 func TestFlagsOverrideDefaults(t *testing.T) {
 	t.Parallel()
 	c := Defaults()
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	c.BindFlags(fs)
-	err := fs.Parse([]string{
-		"--aicr-version=v1.0.0", "--aicr-image=" + image, "--registry-repository=oci://r.example.com/x",
+	err := parse(&c,
+		"--aicr-version=v1.0.0", "--aicr-image="+image, "--registry-repository=oci://r.example.com/x",
 		"--registry-plain-http", "--development-bypass-approvals", "--jobs-namespace=jobs", "--engine=ArgoCD",
 		"--engine-namespace=gitops", "--engine-project=p", "--development-skip-discovery", "--snapshot-agent-requests=cpu=250m",
-	})
+		"--allow-prerelease-aicr",
+	)
 	if err != nil {
 		t.Fatalf("Parse() = %v", err)
 	}
 	if c.JobsNamespace != "jobs" || !c.RegistryPlainHTTP || !c.BypassApprovals || c.Engine != plan.EngineArgoCD ||
 		c.EngineNamespace != "gitops" || c.EngineProject != "p" || c.OperatorNamespace != "aicr-system" ||
-		!c.SkipDiscovery || c.SnapshotAgentRequests != "cpu=250m" || c.SnapshotAgentServiceAccount != "aicr-snapshot-agent" {
+		!c.SkipDiscovery || c.SnapshotAgentRequests != "cpu=250m" || c.SnapshotAgentServiceAccount != "aicr-snapshot-agent" ||
+		!c.AllowPrereleaseAICR {
 
 		t.Fatalf("config = %+v", c)
 	}
@@ -65,52 +73,50 @@ func TestFlagsOverrideDefaults(t *testing.T) {
 	}
 	for value, want := range map[string][]string{"gpu-operator, cert-manager,": {"gpu-operator", "cert-manager"}, "": nil} {
 		c = Defaults()
-		fs = flag.NewFlagSet("test", flag.ContinueOnError)
-		c.BindFlags(fs)
-		if err = fs.Parse([]string{"--component-namespaces=" + value}); err != nil || !c.RestrictNamespaces || !slices.Equal(c.ComponentNamespaces, want) {
+		if err = parse(&c, "--component-namespaces="+value); err != nil || !c.RestrictNamespaces || !slices.Equal(c.ComponentNamespaces, want) {
 			t.Errorf("--component-namespaces=%q: %v %t %v", value, err, c.RestrictNamespaces, c.ComponentNamespaces)
 		}
 	}
 }
 
-// TestValidate checks that Validate rejects each invalid configuration,
-// accepts development settings only in a development build, and passes an
-// out-of-range AICR version so the resolver can report it as a stalled runtime.
+// TestValidate checks which configurations Validate accepts. An out-of-range
+// AICR version passes, so the resolver can report it as a stalled runtime.
 func TestValidate(t *testing.T) {
 	t.Parallel()
-	tests := map[string]func(*Config){
-		"bypass without development": func(c *Config) { c.BypassApprovals = true },
-		"skip without development":   func(c *Config) { c.SkipDiscovery = true },
-		"no snapshot account":        func(c *Config) { c.SnapshotServiceAccount = "" },
-		"unpinned image":             func(c *Config) { c.AICRImage = "ghcr.io/nvidia/aicr:v1.0.0" },
-		"no AICR version":            func(c *Config) { c.AICRVersion = "" },
-		"Flux":                       func(c *Config) { c.Engine = plan.EngineFlux },
-		"no jobs namespace":          func(c *Config) { c.JobsNamespace = "" },
-		"no project":                 func(c *Config) { c.EngineProject = "" },
-		"registry without path":      func(c *Config) { c.RegistryRepository = "oci://registry.example.com" },
-		"unknown provider":           func(c *Config) { c.RegistryAuthProvider = "gcp" },
-		"aws without ECR":            func(c *Config) { c.RegistryAuthProvider = "aws" },
-		"aws with a static Secret": func(c *Config) {
+	tests := map[string]struct {
+		wantErr     bool
+		development bool
+		mutate      func(*Config)
+	}{
+		"prerelease without opt-in":  {wantErr: true, mutate: func(c *Config) { c.AICRVersion = "v1.3.0-rc.1" }},
+		"prerelease with opt-in":     {wantErr: false, mutate: func(c *Config) { c.AICRVersion, c.AllowPrereleaseAICR = "v1.3.0-rc.1", true }},
+		"unprefixed version":         {wantErr: true, mutate: func(c *Config) { c.AICRVersion = "1.0.0" }},
+		"out-of-range version":       {wantErr: false, mutate: func(c *Config) { c.AICRVersion = "v2.0.0" }},
+		"bypass without development": {wantErr: true, mutate: func(c *Config) { c.BypassApprovals = true }},
+		"skip without development":   {wantErr: true, mutate: func(c *Config) { c.SkipDiscovery = true }},
+		"development settings in a development build": {wantErr: false, development: true,
+			mutate: func(c *Config) { c.BypassApprovals, c.SkipDiscovery = true, true }},
+		"no snapshot account":   {wantErr: true, mutate: func(c *Config) { c.SnapshotServiceAccount = "" }},
+		"unpinned image":        {wantErr: true, mutate: func(c *Config) { c.AICRImage = "ghcr.io/nvidia/aicr:v1.0.0" }},
+		"no AICR version":       {wantErr: true, mutate: func(c *Config) { c.AICRVersion = "" }},
+		"Flux":                  {wantErr: true, mutate: func(c *Config) { c.Engine = plan.EngineFlux }},
+		"no jobs namespace":     {wantErr: true, mutate: func(c *Config) { c.JobsNamespace = "" }},
+		"no project":            {wantErr: true, mutate: func(c *Config) { c.EngineProject = "" }},
+		"registry without path": {wantErr: true, mutate: func(c *Config) { c.RegistryRepository = "oci://registry.example.com" }},
+		"unknown provider":      {wantErr: true, mutate: func(c *Config) { c.RegistryAuthProvider = "gcp" }},
+		"aws without ECR":       {wantErr: true, mutate: func(c *Config) { c.RegistryAuthProvider = "aws" }},
+		"aws with a static Secret": {wantErr: true, mutate: func(c *Config) {
 			c.RegistryAuthProvider, c.RegistryCredentialsSecret = "aws", "registry-auth"
 			c.RegistryRepository = "oci://123456789012.dkr.ecr.us-west-2.amazonaws.com/aicr/cluster"
-		},
+		}},
 	}
-	for name, mutate := range tests {
+	for name, tt := range tests {
 		c := valid()
-		mutate(&c)
-		if err := c.Validate(false); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
-			t.Errorf("%s: Validate() = %v, want INVALID_REQUEST", name, err)
+		tt.mutate(&c)
+		err := c.Validate(tt.development)
+		if (err != nil) != tt.wantErr || (err != nil && operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest) {
+			t.Errorf("%s: Validate() = %v, wantErr %t", name, err, tt.wantErr)
 		}
-	}
-	c := valid()
-	c.AICRVersion = "v2.0.0"
-	if err := c.Validate(false); err != nil {
-		t.Errorf("out-of-range version refused at startup: %v", err)
-	}
-	c = valid()
-	c.BypassApprovals, c.SkipDiscovery = true, true
-	if err := c.Validate(true); err != nil {
-		t.Errorf("development build refused development settings: %v", err)
 	}
 }
 
@@ -121,10 +127,8 @@ const validator = "ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8
 func TestValidateValidation(t *testing.T) {
 	t.Parallel()
 	c := valid()
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	c.BindFlags(fs)
 	conformance := "ghcr.io/nvidia/aicr-validators/conformance:v1.0.0@sha256:e091d51f600255c2166e5c1b42afd556880d498f2a9bb913a32da38fa28e038b"
-	if err := fs.Parse([]string{"--validation-enabled", "--validator-images=" + validator + ", " + conformance}); err != nil {
+	if err := parse(&c, "--validation-enabled", "--validator-images="+validator+", "+conformance); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Validate(false); err != nil {
@@ -163,13 +167,11 @@ func TestValidateValidation(t *testing.T) {
 func TestValidateSigning(t *testing.T) {
 	t.Parallel()
 	c := valid()
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	c.BindFlags(fs)
 	if !c.ValidationTransparencyLog {
 		t.Fatal("the transparency log is off by default")
 	}
-	err := fs.Parse([]string{"--aicr-version=v1.1.0", "--validation-enabled", "--validator-images=" + validator,
-		"--validation-signing-key=awskms:///alias/aicr-evidence", "--validation-transparency-log=false"})
+	err := parse(&c, "--aicr-version=v1.1.0", "--validation-enabled", "--validator-images="+validator,
+		"--validation-signing-key=awskms:///alias/aicr-evidence", "--validation-transparency-log=false")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,12 +211,10 @@ func TestValidateAWSProvider(t *testing.T) {
 // none by default.
 func TestJobPlacementFlags(t *testing.T) {
 	c := Defaults()
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	c.BindFlags(fs)
-	err := fs.Parse([]string{
+	err := parse(&c,
 		`--job-node-selector={"node-role":"system"}`,
 		`--job-tolerations=[{"key":"CriticalAddonsOnly","operator":"Exists","effect":"NoSchedule"}]`,
-	})
+	)
 	if err != nil {
 		t.Fatalf("Parse() = %v", err)
 	}
@@ -225,11 +225,8 @@ func TestJobPlacementFlags(t *testing.T) {
 		t.Fatalf("default placement = %v %v", d.JobNodeSelector, d.JobTolerations)
 	}
 	for _, bad := range []string{`--job-node-selector=[1]`, `--job-tolerations={}`} {
-		fs = flag.NewFlagSet("test", flag.ContinueOnError)
-		fs.SetOutput(io.Discard)
 		fresh := Defaults()
-		fresh.BindFlags(fs)
-		if err = fs.Parse([]string{bad}); err == nil {
+		if err = parse(&fresh, bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
 	}

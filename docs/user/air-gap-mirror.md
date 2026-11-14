@@ -261,6 +261,27 @@ aicr mirror list --recipe recipe.yaml \
   --set gpuoperator:driver.version=570.86.16
 ```
 
+The GPU driver, GDRCopy, GDS, vGPU Manager and DOCA driver images are listed
+with the tag the operator pulls on a node: `<version>-<os><os-version>` for the
+GPU driver, GDRCopy (`gdrdrv`), GDS (`nvidia-fs`) and vGPU Manager
+(`vgpuManager`, when enabled) (for example `570.86.16-ubuntu24.04` and
+`v2.6-ubuntu24.04`) and `<version>-<os><os-version>-<arch>` for the DOCA
+driver. `mirror list` reads the OS from the recipe's `OS.release.ID` and
+`OS.release.VERSION_ID` constraints (`ubuntu` and `rhel` are supported; for
+`rhel` the GPU Operator tags use only the major version, for example
+`580.173.02-rhel9`) and the DOCA architecture from the accelerator (`gb200`, `gb300`, and `vr200` are
+`arm64`; other accelerators are `amd64`). A driver whose tag cannot be resolved
+for the recipe is not listed. This happens when the recipe does not pin one OS,
+the OS has no known tag pattern, the accelerator is `any` (DOCA driver only),
+or the driver is precompiled (its tags also name the node kernel). That driver is named in the
+component's `warnings` instead, so mirror the tag for your nodes yourself. The
+Hauler and Zarf formats carry no warnings, so there the driver is simply absent
+while the command still exits 0 (the warning is also logged to stderr). Run the
+YAML or JSON format first to see which driver tags you must add. A
+driver switched off with `driver.enabled=false` is not listed, and neither are
+its GDRCopy and GDS containers. GDRCopy and GDS also follow their own `enabled`
+flag.
+
 The override key format is `component:path.to.field=value`, where the component
 name matches either the component name in the recipe or its `valueOverrideKeys`
 alias from the registry (e.g., `gpuoperator` for `gpu-operator`).
@@ -281,10 +302,11 @@ generate the deployment-specific manifest for a specific deployment.
 
 > **Completeness caveat:** discovery is best-effort, not all-or-nothing. A
 > per-component failure to load values, render the chart (`helm template`), or
-> extract images from a manifest is **non-fatal** — the component's images are
-> omitted and the failure is recorded as a warning, but the command still
-> exits 0. The YAML and JSON outputs carry these warnings in a `warnings`
-> field; the Hauler and Zarf outputs **omit them entirely**. Treat a
+> extract images from a manifest, or a driver tag the recipe does not determine
+> (see above), is **non-fatal** — the component's images (for an undetermined
+> driver tag, only that driver image) are omitted and the failure is recorded
+> as a warning, but the command still exits 0. The YAML and JSON outputs carry
+> these warnings in a `warnings` field; the Hauler and Zarf outputs **omit them entirely**. Treat a
 > tool-specific manifest as authoritative only after confirming the YAML/JSON
 > run reported no warnings — otherwise the mirrored set may be silently
 > incomplete. Invalid members in a recognized mapping-valued `image` or
@@ -312,6 +334,14 @@ the images AICR itself runs in the cluster, so mirror these separately:
   `performance`, `conformance`, and `aiperf-bench` for inference performance
   checks), run by `aicr validate`.
 
+A CNCF submission run (`aicr validate --cncf-submission`) cannot complete
+offline: its last step runs the upstream submission validator on the machine
+`aicr` runs on, which fetches the CNCF landscape from
+`raw.githubusercontent.com` and requests every vendor and documentation URL
+the submission cites. Without that egress the run exits 6
+(`SERVICE_UNAVAILABLE`); see
+[Exit status of a submission run](validation.md#exit-status-of-a-submission-run).
+
 Release builds use each image at the CLI's own version tag. Copy them into your
 registry, then point AICR at the copies:
 
@@ -333,9 +363,15 @@ segment, so `ghcr.io/nvidia/aicr-validators/conformance` resolves to
 `${REGISTRY}/aicr-validators/conformance`. If your mirroring tool keeps the
 source path (`${REGISTRY}/nvidia/aicr-validators/...`), set the variable to
 `${REGISTRY}/nvidia` instead. Add `--image-pull-secret` when the registry needs
-credentials. Some benchmark checks pin workload images the variable does not
+credentials; the conformance checks that create a per-run namespace copy the
+named Secrets into it for their probe pods, and the copies are deleted with the
+namespace. Some benchmark checks pin workload images the variable does not
 rewrite, such as the NCCL runtime image (override it with
-`AICR_NCCL_RUNTIME_IMAGE`); see [Validation](validation.md).
+`AICR_NCCL_RUNTIME_IMAGE`) and the vanilla `docker.io/library/ubuntu:22.04`
+probe image of the `driver-runtime-management` and `workload-sandboxing`
+conformance checks (override it with `AICR_DRIVER_RUNTIME_IMAGE` and
+`AICR_SANDBOX_PROBE_IMAGE`, each a full reference to your copy); see
+[Validation](validation.md).
 
 The inference performance check also runs the Dynamo runtime images
 `nvcr.io/nvidia/ai-dynamo/vllm-runtime` and

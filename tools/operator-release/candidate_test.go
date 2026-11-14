@@ -18,12 +18,14 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"os"
 	"path"
 	"path/filepath"
@@ -35,7 +37,7 @@ import (
 	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/registry/remote"
@@ -593,5 +595,38 @@ func TestAICRFlags(t *testing.T) {
 		if _, err := aicrFlags(args[0], args[1], args[2]); err == nil {
 			t.Errorf("%s: aicrFlags(%q) accepted", name, args)
 		}
+	}
+}
+
+// Closing an unrelated test server must not evict this repository's connection.
+func TestRepositoryTransportIsolation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", ocispec.MediaTypeImageManifest)
+		w.Header().Set("Docker-Content-Digest", "sha256:"+strings.Repeat("a", 64))
+		w.Header().Set("Content-Length", "2")
+	}))
+	t.Cleanup(srv.Close)
+	repo, err := repository(strings.TrimPrefix(srv.URL, "http://")+"/test/image", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), pushTimeout)
+	defer cancel()
+	if _, err = repo.Resolve(ctx, "v1"); err != nil {
+		t.Fatal(err)
+	}
+
+	other := httptest.NewServer(http.NotFoundHandler())
+	other.Close()
+
+	var reused atomic.Bool
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) { reused.Store(info.Reused) },
+	})
+	if _, err = repo.Resolve(ctx, "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if !reused.Load() {
+		t.Fatal("closing an unrelated server evicted the repository connection")
 	}
 }

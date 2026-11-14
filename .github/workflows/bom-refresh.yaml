@@ -62,7 +62,7 @@ jobs:
           cache: false
 
       - name: Set up Helm
-        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v4.3.1
+        uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e  # v4.3.1
         with:
           version: ${{ steps.versions.outputs.helm }}
 
@@ -70,7 +70,7 @@ jobs:
         run: make bom-docs
 
       - name: Open or update refresh PR if BOM drifted
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1  # v8.1.3
         with:
           # The bot reuses GITHUB_TOKEN; the repo's /ok reviewer-comment
           # policy re-fires CI on bot PRs (matches the renovate.yaml setup).

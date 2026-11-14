@@ -46,3 +46,4 @@ spec:
       checks:
         - robust-controller
         - secure-accelerator-access
+        - driver-runtime-management

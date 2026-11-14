@@ -30,6 +30,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd/argocdtest"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -1478,9 +1479,9 @@ func TestBuildApplicationData_OCIHandling(t *testing.T) {
 			name:           "OCI source: chart appended, v preserved (nvsentinel pattern)",
 			source:         "oci://ghcr.io/nvidia",
 			chart:          "nvsentinel",
-			recipeVer:      "v1.3.0",
+			recipeVer:      "v1.3.0_build.1",
 			wantRepository: "oci://ghcr.io/nvidia/nvsentinel",
-			wantVersion:    "v1.3.0",
+			wantVersion:    "v1.3.0+build.1",
 		},
 		{
 			name:           "OCI source: chart appended even when org name == chart name (kai-scheduler pattern)",
@@ -2626,45 +2627,17 @@ func TestGenerate_ProjectReservedScalarQuoted(t *testing.T) {
 // release-name cap and names that collide with the parent Application
 // are rejected with ErrCodeInvalidRequest before any output is written.
 func TestGenerate_ChildNameLimits(t *testing.T) {
-	tests := []struct {
-		name      string
-		mutate    func(*Generator)
-		errSubstr string
-	}{
-		{
-			// prefix (50) + "gpu-operator" (12) = 62 > 53, but each label
-			// stays DNS-1123-valid so only the release-name cap fires.
-			name:      "composed name exceeds Helm release-name cap",
-			mutate:    func(g *Generator) { g.NamePrefix = strings.Repeat("a", 49) + "-" },
-			errSubstr: "53",
-		},
-		{
-			name: "child name collides with parent app name",
-			mutate: func(g *Generator) {
-				g.AppName = "tenant-gpu-operator"
-				g.NamePrefix = "tenant-"
-			},
-			errSubstr: "collides",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, tt := range argocdtest.ChildNameCases() {
+		t.Run(tt.Name, func(t *testing.T) {
 			g := newTestGenerator(t)
-			tt.mutate(g)
+			g.AppName, g.NamePrefix = tt.AppName, tt.NamePrefix
+			g.ComponentPreManifests, g.ComponentPostManifests, g.ComponentReadiness = tt.PreManifests, tt.PostManifests, tt.Readiness
 			outputDir := filepath.Join(t.TempDir(), "bundle")
-			_, err := g.Generate(context.Background(), outputDir)
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
+			_, genErr := g.Generate(context.Background(), outputDir)
 			if _, statErr := os.Stat(outputDir); !os.IsNotExist(statErr) {
 				t.Errorf("rejected bundle left output behind: stat error = %v", statErr)
 			}
-			if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
-				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
-			}
-			if !strings.Contains(err.Error(), tt.errSubstr) {
-				t.Errorf("error %q does not mention %q", err.Error(), tt.errSubstr)
-			}
+			argocdtest.WantRejected(t, "Generate", genErr, tt.ErrSubstr)
 		})
 	}
 }

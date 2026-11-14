@@ -39,7 +39,7 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"

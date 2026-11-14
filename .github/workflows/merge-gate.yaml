@@ -213,6 +213,7 @@ jobs:
               # modules, the actions that set up the job, the Makefile target
               # and this workflow are listed so a change to the check runs it.
               - 'recipes/*.go'
+              - 'recipes/artifacts/**'
               - 'recipes/registry.yaml'
               - 'recipes/overlays/**'
               - 'recipes/mixins/**'
@@ -222,6 +223,7 @@ jobs:
               - 'recipes/components/*/manifests/**'
               - 'tools/crd-inventory/**'
               - 'pkg/allocpolicy/*.go'
+              - 'pkg/artifact/*.go'
               - 'pkg/chainsaw/*.go'
               - 'pkg/chainsaw/validation/*.go'
               - 'pkg/constraints/expr/*.go'
@@ -486,11 +488,11 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
-      - uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26  # v4.39.2
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
         with:
           languages: go
       - run: go build ./...
-      - uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26  # v4.39.2
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
 
   analyze-skip:
     needs: [check-paths]

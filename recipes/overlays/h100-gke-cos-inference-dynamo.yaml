@@ -118,3 +118,4 @@ spec:
         - cluster-autoscaling
         - robust-controller
         - secure-accelerator-access
+        - driver-runtime-management

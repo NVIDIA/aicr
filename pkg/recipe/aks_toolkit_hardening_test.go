@@ -30,9 +30,17 @@ const aksToolkitHardeningManifest = "components/nodewright-customizations/manife
 // or nil when the values suppress it.
 func renderAKSToolkitHardening(t *testing.T, values map[string]any) map[string]any {
 	t.Helper()
-	content, err := GetEmbeddedFS().ReadFile(aksToolkitHardeningManifest)
+	return renderToolkitHardening(t, aksToolkitHardeningManifest, values)
+}
+
+// renderToolkitHardening renders a toolkit-hardening manifest with the given
+// nodewright-customizations values and returns the parsed NodeWright CR, or nil
+// when the values suppress it.
+func renderToolkitHardening(t *testing.T, path string, values map[string]any) map[string]any {
+	t.Helper()
+	content, err := GetEmbeddedFS().ReadFile(path)
 	if err != nil {
-		t.Fatalf("read %s: %v", aksToolkitHardeningManifest, err)
+		t.Fatalf("read %s: %v", path, err)
 	}
 	rendered, err := manifest.Render(content, manifest.RenderInput{
 		ComponentName: "nodewright-customizations",
@@ -42,7 +50,7 @@ func renderAKSToolkitHardening(t *testing.T, values map[string]any) map[string]a
 		Values:        values,
 	})
 	if err != nil {
-		t.Fatalf("render %s: %v", aksToolkitHardeningManifest, err)
+		t.Fatalf("render %s: %v", path, err)
 	}
 	var cr map[string]any
 	if err := yaml.Unmarshal(rendered, &cr); err != nil {

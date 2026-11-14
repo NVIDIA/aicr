@@ -12,8 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Example recipe demonstrating multi-phase validation configuration
-# This shows how to configure validation checks for different deployment phases
+# Hand-curated illustration of RecipeResult structure; intentionally incomplete.
+# Components, metadata, and validation differ from actual generated output.
+# Generate a current recipe with `aicr recipe` before bundling or validation.
+# Shows authored severity/remediation examples and selected deployment and
+# performance checks; conformance and parts of the component graph are omitted.
 
 kind: RecipeResult
 apiVersion: aicr.run/v1
@@ -54,7 +57,7 @@ constraints:
 # Multi-phase validation configuration
 validation:
   # Readiness phase: Constraint-only gate (evaluated inline from snapshot, no Jobs)
-  # Constraints are defined at the top level (spec.constraints) and evaluated
+  # Constraints are defined at the top level (constraints) and evaluated
   # during readiness. No checks or Jobs needed.
 
   # Deployment phase: Validate component deployment
@@ -149,7 +152,7 @@ componentRefs:
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.20.0
+    version: v0.21.0
     valuesFile: components/nodewright-operator/values.yaml
     overrides:
       customization: ubuntu

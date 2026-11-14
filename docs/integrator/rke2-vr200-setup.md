@@ -58,13 +58,26 @@ the `< 1.36.0` Kubernetes cap and the Gateway API / LoadBalancer prerequisites
   default before deploying the `inference-dynamo` bundle.
 - **LoadBalancer (inference chain only).** RKE2 provisions no LoadBalancer
   controller, and the `inference-gateway` Service the `rke2-inference` base
-  installs is `type: LoadBalancer`. Install a bare-metal LB implementation
-  (e.g. MetalLB or kube-vip) before deploying the `inference` or
-  `inference-dynamo` bundle. Without one the Service sits at
-  `EXTERNAL-IP <pending>` and the chain's conformance check gates on
-  `Gateway.status.conditions[?type=='Programmed'].status == 'True'` — it
-  will not go green. (Until an LB exists the gateway is still reachable via
-  its NodePort / ClusterIP for smoke tests.)
+  installs is `type: LoadBalancer`. Either install a bare-metal LB
+  implementation (e.g. MetalLB or kube-vip) before deploying the `inference`
+  or `inference-dynamo` bundle, or generate the bundle with
+  `--set agentgateway:serviceType=ClusterIP` so the controller programs the
+  Gateway onto a ClusterIP Service and the conformance check records
+  "No LoadBalancer Service". Without either, the Service sits at
+  `EXTERNAL-IP <pending>` forever, though the gateway stays reachable via its
+  NodePort / ClusterIP for smoke tests. A pending LoadBalancer Service still
+  allocates a NodePort, and `loadBalancerSourceRanges` does not filter it: any
+  client that can reach a node's NodePort reaches the plaintext,
+  unauthenticated Gateway once a route exists. Restrict NodePort access with an
+  upstream firewall or a CNI network policy. Neither choice decides the
+  `agentgateway` health check, which asserts
+  `agentgateway-system/inference-gateway` exists with `Accepted=True` and
+  `Programmed=True` ([#3714](https://github.com/NVIDIA/aicr/issues/3714)):
+  on agentgateway v1.5.0 `Programmed` does not wait for an address. The check
+  detects a missing or unprogrammed Gateway, not which deployment created it;
+  a healthy Gateway left by an earlier deployment satisfies it.
+  Never edit the generated bundle to switch the Service type; `aicr verify`
+  checksums every file in it.
 - **Mask the host `nvidia-imex` service on every GPU node.** The Vera Rubin
   reference image installs the host-managed 615 driver stack, which enables
   an `nvidia-imex` systemd service by default. All four shipped coordinates

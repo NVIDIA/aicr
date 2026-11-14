@@ -39,18 +39,25 @@ spec:
 
   # Run:ai 3.0's support matrix covers upstream Kubernetes 1.35 through 1.37,
   # with GKE following upstream. Tighter than the parent's 1.32 floor.
+  # Full precision deliberately: the gpuStack dra value's own ">= 1.35.0"
+  # floor intersects this one (#2643), and same-direction bounds at
+  # different precisions do not order — ">= 1.35" would reject the dra
+  # selection as a precision mismatch. Evaluation is unchanged (versions
+  # compare at the lower precision, so 1.35 and 1.35.0 admit the same
+  # actuals).
   constraints:
     - name: K8s.server.version
-      value: ">= 1.35"
+      value: ">= 1.35.0"
 
   componentRefs:
     # runai-cluster bundles KAI Scheduler 0.18 through its
     # kai-resource-management subchart and its operator owns the scheduler's
     # configuration. It ships the same CRDs and PriorityClasses as AICR's
     # kai-scheduler, so the two cannot coexist (same shape as ocp.yaml).
-    # Consequence: the gang-scheduling conformance check keys on AICR's
-    # kai-scheduler, which this leaf disables, so it reports Skip until it
-    # learns the Run:ai scheduler (Phase 1.6 of #3302).
+    # The gang-scheduling conformance check follows the recipe: with
+    # runai-cluster declared it exercises runai-scheduler in the runai
+    # namespace and runs its test pods in the Run:ai Project namespace named
+    # by AICR_RUNAI_PROJECT_NAMESPACE (docs/contributor/validator.md).
     - name: kai-scheduler
       type: Helm
       overrides:

@@ -15,8 +15,9 @@
 package chart
 
 import (
-	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -27,14 +28,16 @@ import (
 	"testing"
 	"time"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
 	"github.com/NVIDIA/aicr/pkg/operator/defaults"
+	"github.com/NVIDIA/aicr/pkg/operator/manager"
 )
 
 // The chart renders exactly the AICR versions the operator supports, and
@@ -66,7 +69,7 @@ func TestAICRVersionRange(t *testing.T) {
 	for _, allow := range []bool{false, true} {
 		for _, v := range versions {
 			_, out, renderErr := render(ctx, "aicr.version="+v, fmt.Sprintf("aicr.allowPrerelease=%t", allow))
-			supported := aicrjob.CheckSupportedVersion(v, allow) == nil
+			supported := aicrjob.CheckSupportedVersion(v) == nil && aicrjob.CheckPrereleaseAllowed(v, allow) == nil
 			switch {
 			case supported && renderErr != nil:
 				t.Errorf("%s, allowPrerelease %t: the operator supports it, the chart fails: %s", v, allow, out)
@@ -92,31 +95,12 @@ func TestAICRVersionRange(t *testing.T) {
 		if err != nil {
 			t.Fatal(out)
 		}
-		if args := managerArgs(t, objs); !slices.Contains(args, "--allow-prerelease-aicr=true") ||
+		if args := deploymentArgs(t, objs); !slices.Contains(args, "--allow-prerelease-aicr=true") ||
 			!slices.Contains(args, "--aicr-version=v1.3.0-rc.1") {
 
 			t.Errorf("operator args %v do not carry the prerelease and its opt-in", args)
 		}
 	}
-}
-
-// managerArgs returns the operator container's arguments.
-func managerArgs(t *testing.T, objs []unstructured.Unstructured) []string {
-	t.Helper()
-	for _, o := range objs {
-		if o.GetKind() != "Deployment" || o.GetName() != release {
-			continue
-		}
-		containers, _, _ := unstructured.NestedSlice(o.Object, "spec", "template", "spec", "containers")
-		for _, c := range containers {
-			if c := c.(map[string]any); c["name"] == "manager" {
-				args, _, _ := unstructured.NestedStringSlice(c, "args")
-				return args
-			}
-		}
-	}
-	t.Fatal("no operator Deployment rendered")
-	return nil
 }
 
 // Layouts the chart cannot install fail at render time.
@@ -146,6 +130,9 @@ func TestLayoutChecks(t *testing.T) {
 		{"unknown value", operatorNS, []string{"aicr.gateImage=x"}, "gateImage"},
 		{"validation without validator images", operatorNS, []string{"aicr.validatorImages=null"}, "needs aicr.validatorImages"},
 		{"mutable validator image", operatorNS, []string{"aicr.validatorImages[0]=ghcr.io/nvidia/aicr-validators/deployment:latest"}, "/aicr/validatorImages/0"},
+		{"validator repository pinned twice", operatorNS, []string{"aicr.validatorImages[0]=" + validatorImage, "aicr.validatorImages[1]=" + otherValidatorTag},
+			"pins the validator repository ghcr.io/nvidia/aicr-validators/deployment twice"},
+		{"aws provider outside ECR", operatorNS, []string{"registry.repository=oci://ghcr.io/nvidia/aicr"}, "a private Amazon ECR registry"},
 		{"signing key without validation", operatorNS, []string{"aicr.version=v1.1.0", "validation.enabled=false", "validation.signingKey=" + signingKey}, "needs validation.enabled"},
 		{"signing key not a KMS key", operatorNS, []string{"aicr.version=v1.1.0", "validation.signingKey=file:///cosign.key"}, "key URI"},
 		{"signing key on AICR v1.0.x", operatorNS, []string{"validation.signingKey=" + signingKey}, "needs AICR v1.1.0"},
@@ -171,13 +158,11 @@ func TestNoArgoCDSettings(t *testing.T) {
 			if o.GetKind() == "ConfigMap" {
 				t.Errorf("%v: ConfigMap %s rendered", set, o.GetName())
 			}
-			if o.GetKind() != "Role" && o.GetKind() != "ClusterRole" {
-				continue
-			}
-			rules, _, _ := unstructured.NestedSlice(o.Object, "rules")
-			for _, r := range rules {
-				if names, _, _ := unstructured.NestedStringSlice(r.(map[string]any), "resourceNames"); slices.Contains(names, "argocd-cm") {
-					t.Errorf("%v: %s %s grants access to argocd-cm", set, o.GetKind(), o.GetName())
+		}
+		for _, r := range decodeKinds[rbacv1.ClusterRole](t, objs, "Role", "ClusterRole") {
+			for _, rule := range r.Rules {
+				if slices.Contains(rule.ResourceNames, "argocd-cm") {
+					t.Errorf("%v: %s %s grants access to argocd-cm", set, r.Kind, r.Name)
 				}
 			}
 		}
@@ -217,16 +202,12 @@ func TestValidationIdentities(t *testing.T) {
 	ctx := ctxFor(t)
 	clusterAdmins := func(objs []unstructured.Unstructured) []string {
 		var subjects []string
-		for _, o := range objs {
-			if o.GetKind() != "ClusterRoleBinding" && o.GetKind() != "RoleBinding" {
+		for _, b := range decodeKinds[rbacv1.ClusterRoleBinding](t, objs, "RoleBinding", "ClusterRoleBinding") {
+			if b.RoleRef.Name != "cluster-admin" {
 				continue
 			}
-			if name, _, _ := unstructured.NestedString(o.Object, "roleRef", "name"); name != "cluster-admin" {
-				continue
-			}
-			list, _, _ := unstructured.NestedSlice(o.Object, "subjects")
-			for _, s := range list {
-				subjects = append(subjects, s.(map[string]any)["name"].(string))
+			for _, s := range b.Subjects {
+				subjects = append(subjects, s.Name)
 			}
 		}
 		sort.Strings(subjects)
@@ -265,14 +246,10 @@ func TestSnapshotNamespaceGrant(t *testing.T) {
 			t.Fatal(out)
 		}
 		var namespaceRules []string
-		for _, o := range objs {
-			if o.GetKind() != "ClusterRole" {
-				continue
-			}
-			rules, _, _ := unstructured.NestedSlice(o.Object, "rules")
-			for _, r := range rules {
-				if slices.Contains(r.(map[string]any)["resources"].([]any), any("namespaces")) {
-					namespaceRules = append(namespaceRules, o.GetName())
+		for _, r := range decodeKinds[rbacv1.ClusterRole](t, objs, "ClusterRole") {
+			for _, rule := range r.Rules {
+				if slices.Contains(rule.Resources, "namespaces") {
+					namespaceRules = append(namespaceRules, r.Name)
 				}
 			}
 		}
@@ -288,22 +265,18 @@ func TestSnapshotNamespaceGrant(t *testing.T) {
 // as aicr-validation to either role, so no binding reuses that name.
 func TestBindingsKeepTheirRoleRef(t *testing.T) {
 	ctx := ctxFor(t)
-	roleRefs := map[string]map[string]any{"ClusterRoleBinding//aicr-validation": nil}
+	roleRefs := map[string]*rbacv1.RoleRef{"ClusterRoleBinding//aicr-validation": nil}
 	for _, version := range []string{"v1.0.0", "v1.1.0"} {
 		objs, out, err := render(ctx, "aicr.version="+version)
 		if err != nil {
 			t.Fatal(out)
 		}
-		for _, o := range objs {
-			if o.GetKind() != "ClusterRoleBinding" && o.GetKind() != "RoleBinding" {
-				continue
+		for _, b := range decodeKinds[rbacv1.ClusterRoleBinding](t, objs, "RoleBinding", "ClusterRoleBinding") {
+			key := b.Kind + "/" + b.Namespace + "/" + b.Name
+			if prev, ok := roleRefs[key]; ok && (prev == nil || *prev != b.RoleRef) {
+				t.Errorf("%s: roleRef %v with %s, %v before", key, b.RoleRef, version, prev)
 			}
-			key := o.GetKind() + "/" + o.GetNamespace() + "/" + o.GetName()
-			ref, _, _ := unstructured.NestedMap(o.Object, "roleRef")
-			if prev, ok := roleRefs[key]; ok && !reflect.DeepEqual(prev, ref) {
-				t.Errorf("%s: roleRef %v with %s, %v before", key, ref, version, prev)
-			}
-			roleRefs[key] = ref
+			roleRefs[key] = &b.RoleRef
 		}
 	}
 }
@@ -317,27 +290,21 @@ func TestRolesStayExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(out)
 	}
-	for _, o := range objs {
-		if o.GetKind() != "ClusterRole" && o.GetKind() != "Role" {
-			continue
-		}
-		for k := range o.GetLabels() {
+	for _, r := range decodeKinds[rbacv1.ClusterRole](t, objs, "Role", "ClusterRole") {
+		for k := range r.Labels {
 			if strings.HasPrefix(k, "rbac.authorization.k8s.io/aggregate-to-") {
-				t.Errorf("%s %s aggregates through %s", o.GetKind(), o.GetName(), k)
+				t.Errorf("%s %s aggregates through %s", r.Kind, r.Name, k)
 			}
 		}
-		rules, _, _ := unstructured.NestedSlice(o.Object, "rules")
-		for _, r := range rules {
-			rule := r.(map[string]any)
-			for _, field := range []string{"apiGroups", "resources", "verbs"} {
-				for _, v := range rule[field].([]any) {
-					s := v.(string)
-					if s == "*" {
-						t.Errorf("%s %s has a wildcard in %s", o.GetKind(), o.GetName(), field)
-					}
-					if field == "verbs" && slices.Contains([]string{"escalate", "bind", "impersonate"}, s) {
-						t.Errorf("%s %s grants %s", o.GetKind(), o.GetName(), s)
-					}
+		for _, rule := range r.Rules {
+			for field, values := range map[string][]string{"apiGroups": rule.APIGroups, "resources": rule.Resources, "verbs": rule.Verbs} {
+				if slices.Contains(values, "*") {
+					t.Errorf("%s %s has a wildcard in %s", r.Kind, r.Name, field)
+				}
+			}
+			for _, verb := range rule.Verbs {
+				if slices.Contains([]string{"escalate", "bind", "impersonate"}, verb) {
+					t.Errorf("%s %s grants %s", r.Kind, r.Name, verb)
 				}
 			}
 		}
@@ -385,13 +352,13 @@ func TestDeploymentFlags(t *testing.T) {
 	}
 	args := deploymentArgs(t, objs)
 	for _, want := range []string{
-		"--aicr-version=v1.0.0", "--aicr-image=" + aicrImage, "--operator-namespace=" + operatorNS,
+		"--aicr-version=v1.0.0", "--allow-prerelease-aicr=false", "--aicr-image=" + aicrImage, "--operator-namespace=" + operatorNS,
 		"--jobs-namespace=" + jobsNS, "--discovery-namespace=" + discoveryNS, "--validation-namespace=" + validationNS,
 		"--engine=ArgoCD", "--engine-namespace=" + engineNS, "--engine-project=aicr",
 		"--registry-repository=" + registry, "--registry-auth-provider=aws", "--engine-repo-creds-secret=aicr-registry",
 		"--development-bypass-approvals=true", "--snapshot-agent-requests=cpu=1",
 		"--component-namespaces=gpu-operator,cert-manager,kube-system", "--validation-enabled=true",
-		"--validator-images=ghcr.io/nvidia/aicr-validators/deployment:v1.0.0@sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790",
+		"--validator-images=" + validatorImage,
 		"--validation-signing-key=", "--validation-transparency-log=true",
 	} {
 		if !slices.Contains(args, want) {
@@ -418,14 +385,8 @@ func TestOperatorPodRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(out)
 	}
-	raw, err := find(t, objs, "Deployment", "aicr-operator").MarshalJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
 	d := &appsv1.Deployment{}
-	if err = json.Unmarshal(raw, d); err != nil {
-		t.Fatal(err)
-	}
+	decode(t, find(t, objs, "Deployment", release), d)
 	pod := d.Spec.Template.Spec
 	if g := pod.TerminationGracePeriodSeconds; g == nil || time.Duration(*g)*time.Second <= defaults.GracefulShutdownTimeout {
 		t.Errorf("terminationGracePeriodSeconds %v is not above the %s graceful shutdown", g, defaults.GracefulShutdownTimeout)
@@ -447,29 +408,165 @@ func TestOperatorPodRuntime(t *testing.T) {
 // signingKey is a KMS key URI that signs evidence.
 const signingKey = "awskms:///alias/aicr-evidence"
 
+// otherValidatorTag pins validatorImage's repository at a second tag, and
+// untaggedValidator is validatorImage without its tag.
+var (
+	otherValidatorTag = strings.Replace(validatorImage, "@", ".1@", 1)
+	untaggedValidator = regexp.MustCompile(`:[^:/@]+@`).ReplaceAllString(validatorImage, "@")
+)
+
+// deploymentArgs returns the operator container's arguments.
 func deploymentArgs(t *testing.T, objs []unstructured.Unstructured) []string {
 	t.Helper()
-	d := find(t, objs, "Deployment", "aicr-operator")
+	d := find(t, objs, "Deployment", release)
 	containers, _, _ := unstructured.NestedSlice(d.Object, "spec", "template", "spec", "containers")
-	raw := containers[0].(map[string]any)["args"].([]any)
-	args := make([]string, 0, len(raw))
-	for _, a := range raw {
-		args = append(args, a.(string))
+	for _, c := range containers {
+		if c, ok := c.(map[string]any); ok && c["name"] == "manager" {
+			args, _, _ := unstructured.NestedStringSlice(c, "args")
+			return args
+		}
 	}
-	return args
+	t.Fatal("the operator Deployment has no manager container")
+	return nil
 }
 
-// The chart README's values table covers every key in values.yaml, and names
-// no key the chart does not have; a row covers the keys nested under it.
-func TestValuesReferenceIsComplete(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(chartDir, "values.yaml"))
+// parseOperatorFlags parses the operator Deployment's arguments and
+// validates the result, as the operator does at startup.
+func parseOperatorFlags(t *testing.T, objs []unstructured.Unstructured) (manager.Flags, error) {
+	t.Helper()
+	fs := flag.NewFlagSet(release, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	f, err := manager.ParseFlags(fs, deploymentArgs(t, objs))
+	if err != nil {
+		return f, err
+	}
+	if err = f.Options.Validate(); err != nil {
+		return f, err
+	}
+	return f, f.Config.Validate(false)
+}
+
+// The chart renders only configurations the operator starts with. Each case
+// probes one of the operator's startup checks.
+func TestRenderedConfigurationsStart(t *testing.T) {
+	ctx := ctxFor(t)
+	cases := []struct {
+		name  string
+		files []string
+		set   []string
+	}{
+		{"defaults", nil, nil},
+		{"in-cluster registry", []string{inClusterValuesFile}, nil},
+		{"validation disabled", nil, []string{"validation.enabled=false"}},
+		{"validator image without a tag", nil, []string{"aicr.validatorImages[0]=" + untaggedValidator}},
+		{"validator repository pinned twice", nil, []string{"aicr.validatorImages[0]=" + validatorImage, "aicr.validatorImages[1]=" + otherValidatorTag}},
+		{"signing key", nil, []string{"aicr.version=v1.1.0", "validation.signingKey=" + signingKey}},
+		{"no AICR version", nil, []string{"aicr.version="}},
+		{"aws provider with a registry outside ECR", nil, []string{"registry.repository=oci://ghcr.io/nvidia/aicr"}},
+		{"aws provider without a repo-creds Secret", nil, []string{"registry.auth.repoCredsSecret="}},
+		{"static provider", nil, []string{"registry.auth.provider=static", "registry.auth.staticSecretRef=x"}},
+		{"anonymous static provider", nil, []string{"registry.auth.provider=static"}},
+		{"unknown provider", nil, []string{"registry.auth.provider=gcp"}},
+		{"no jobs namespace", nil, []string{"namespaces.jobs="}},
+		{"no discovery namespace", nil, []string{"namespaces.discovery="}},
+		{"no validation namespace", nil, []string{"namespaces.validation="}},
+		{"no engine namespace", nil, []string{"engine.namespace="}},
+		{"no engine project", nil, []string{"engine.project="}},
+	}
+	rendered := 0
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			objs, _, err := renderFiles(ctx, chartDir, operatorNS, append([]string{valuesFile}, tc.files...), tc.set...)
+			if err != nil {
+				return
+			}
+			rendered++
+			if _, err = parseOperatorFlags(t, objs); err != nil {
+				t.Errorf("the chart renders, the operator refuses to start: %v", err)
+			}
+		})
+	}
+	if rendered == 0 {
+		t.Error("no case rendered")
+	}
+}
+
+// helm upgrade --reuse-values renders the new chart with the previous
+// release's chart defaults in place of its own, so a key added since is
+// missing from both those defaults and the release's values. With any one
+// key missing, the chart fails naming it, or configures the operator as the
+// key's default does.
+func TestValuesFromAnEarlierChart(t *testing.T) {
+	ctx := ctxFor(t)
+	chartValues := filepath.Join(chartDir, "values.yaml")
+	for _, key := range valueKeys(readValues(t, chartValues)) {
+		t.Run(key, func(t *testing.T) {
+			dir := t.TempDir()
+			earlier := filepath.Join(dir, release)
+			if err := os.CopyFS(earlier, os.DirFS(chartDir)); err != nil {
+				t.Fatal(err)
+			}
+			copyValuesWithout(t, chartValues, filepath.Join(earlier, "values.yaml"), key)
+			user := filepath.Join(dir, "user.yaml")
+			copyValuesWithout(t, valuesFile, user, key)
+
+			objs, out, err := renderFiles(ctx, earlier, operatorNS, []string{user})
+			if err != nil {
+				if leaf := key[strings.LastIndex(key, ".")+1:]; !strings.Contains(out, leaf) {
+					t.Errorf("the render fails without naming %s: %s", key, out)
+				}
+				return
+			}
+			got, err := parseOperatorFlags(t, objs)
+			if err != nil {
+				t.Fatalf("the operator rejects its arguments: %v", err)
+			}
+			if objs, out, err = renderFiles(ctx, chartDir, operatorNS, []string{user}); err != nil {
+				t.Fatalf("renders without %s, fails with its default: %s", key, out)
+			}
+			want, err := parseOperatorFlags(t, objs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("operator configuration without %s:\n%+v\nwith its default:\n%+v", key, got, want)
+			}
+		})
+	}
+}
+
+// readValues parses the values file at path.
+func readValues(t *testing.T, path string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var values map[string]any
+	values := map[string]any{}
 	if err = yaml.Unmarshal(raw, &values); err != nil {
 		t.Fatal(err)
 	}
+	return values
+}
+
+// copyValuesWithout writes the values file src to dst with key, a dotted
+// path, removed.
+func copyValuesWithout(t *testing.T, src, dst, key string) {
+	t.Helper()
+	values := readValues(t, src)
+	unstructured.RemoveNestedField(values, strings.Split(key, ".")...)
+	raw, err := yaml.Marshal(values)
+	if err == nil {
+		err = os.WriteFile(dst, raw, 0o600)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// valueKeys returns the dotted path of every leaf in values, sorted. An empty
+// map is a leaf.
+func valueKeys(values map[string]any) []string {
 	var keys []string
 	var walk func(prefix string, m map[string]any)
 	walk = func(prefix string, m map[string]any) {
@@ -482,6 +579,14 @@ func TestValuesReferenceIsComplete(t *testing.T) {
 		}
 	}
 	walk("", values)
+	sort.Strings(keys)
+	return keys
+}
+
+// The chart README's values table covers every key in values.yaml, and names
+// no key the chart does not have. A row covers the keys nested under it.
+func TestValuesReferenceIsComplete(t *testing.T) {
+	keys := valueKeys(readValues(t, filepath.Join(chartDir, "values.yaml")))
 
 	readme, err := os.ReadFile(filepath.Join(chartDir, "README.md"))
 	if err != nil {

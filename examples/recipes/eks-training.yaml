@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Hand-curated illustration of RecipeResult structure; intentionally incomplete.
+# Components, metadata, and validation differ from actual generated output.
+# Generate a current recipe with `aicr recipe` before bundling or validation.
+# Shows selected training components; omits validation and resolved metadata.
+
 kind: RecipeResult
 apiVersion: aicr.run/v1
 metadata:
@@ -59,7 +64,7 @@ componentRefs:
     chart: nodewright
     type: Helm
     source: oci://ghcr.io/nvidia/nodewright/charts
-    version: v0.20.0
+    version: v0.21.0
     valuesFile: components/nodewright-operator/values.yaml
   - name: prometheus-operator-crds
     namespace: monitoring

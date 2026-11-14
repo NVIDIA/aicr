@@ -43,7 +43,7 @@ The Kind GPU workflows use these leaf recipes instead:
 - `h100-kind-inference-dynamo`
 - `h100-kind-training-kubeflow`
 
-## Cluster Inference Components (18)
+## Cluster Inference Components (19)
 
 | Component | Namespace | Type | What is Validated |
 |-----------|-----------|------|-------------------|
@@ -53,8 +53,9 @@ The Kind GPU workflows use these leaf recipes instead:
 | nvsentinel | nvsentinel | Helm | Controller Deployment, platform-connector DaemonSet |
 | nodewright-operator | nodewright | Helm | Controller-manager Deployment |
 | prometheus-operator-crds | monitoring | Helm | CRDs only (`Alertmanager`, `Prometheus`, `ServiceMonitor`, etc. — `monitoring.coreos.com/v1`) |
-| kube-prometheus-stack | monitoring | Helm | 3 Deployments (operator, grafana, kube-state-metrics), 2 StatefulSets (prometheus, alertmanager), node-exporter DaemonSet (CRDs installed by `prometheus-operator-crds`) |
+| kube-prometheus-stack | monitoring | Helm | operator Deployment, prometheus StatefulSet (CRDs installed by `prometheus-operator-crds`) |
 | k8s-ephemeral-storage-metrics | monitoring | Helm | Deployment |
+| nktp | nktp | Helm | Kind suites only: operator, metrics gateway, node collector, `lgtm`, and the `v1beta1.metrics.k8s.io` APIService |
 | prometheus-adapter | monitoring | Helm | Deployment |
 | aws-ebs-csi-driver | kube-system | Helm | **Disabled by default** (EKS managed addon) |
 | aws-efa | kube-system | Helm | Device plugin DaemonSet |
@@ -75,12 +76,13 @@ tests/chainsaw/ai-conformance/
 │   ├── assert-cert-manager.yaml         # cert-manager healthy
 │   ├── assert-dra-driver.yaml           # DRA driver healthy
 │   ├── assert-kai-scheduler.yaml        # KAI scheduler healthy
-│   ├── assert-monitoring.yaml           # Prometheus stack healthy with Grafana
+│   ├── assert-monitoring.yaml           # Prometheus stack healthy
 │   └── assert-skyhook.yaml              # Skyhook operator healthy
 ├── kind-common/                         # Shared Kind-only assertions
 │   ├── assert-gpu-operator.yaml         # GPU operator healthy on kind
-│   ├── assert-monitoring.yaml           # Prometheus stack healthy without Grafana
+│   ├── assert-monitoring.yaml           # Prometheus stack healthy on kind
 │   ├── assert-network-operator.yaml     # Network operator healthy on kind
+│   ├── assert-nktp.yaml                 # NKTP and the metrics API healthy on kind
 │   └── assert-nvsentinel.yaml           # NVSentinel healthy on kind
 ├── kind-inference-dynamo/               # Kind + H100 + inference + dynamo leaf suite
 │   ├── chainsaw-test.yaml               # Inference leaf health check orchestration

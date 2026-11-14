@@ -27,13 +27,15 @@ This section is for integrators who:
 | [GKE A4X Max Networking](gke-a4x-max-networking.md) | DRANET/MNNVL prerequisites for GB300 (A4X Max) GKE overlays |
 | [AKS GPU Setup](aks-gpu-setup.md) | AKS prerequisites: Kubernetes 1.34+ (DRA GA), GPU driver setup, DRA configuration |
 | [GKE GPU Setup](gke-gpu-setup.md) | GKE device-plugin ownership: the `gpuStack` profile, node-pool setup for both values, verification, and troubleshooting |
-| [OKE GPU Setup](oke-gpu-setup.md) | OKE GPU stack ownership: the `gpuStack` profile (two values), the device-plugin add-on / disable label, and bring-your-own-image pools |
+| [OKE GPU Setup](oke-gpu-setup.md) | OKE GPU stack ownership: the `gpuStack` profile (two values), the device-plugin add-on / disable label, bring-your-own-image pools, and GB300 RoCE node preparation |
 | [RKE2 VR200 Setup](rke2-vr200-setup.md) | Bare-metal RKE2 setup for the VR200 (Vera Rubin) NVL72 Preview coordinates: cluster prerequisites (K8s window, StorageClass, LoadBalancer, host `nvidia-imex` mask), Skyhook reboot behavior, and known gaps |
 | [Nebius B300 Inference](nebius-b300.md) | MK8s reference configuration, operator ownership, shared RDMA and qualification limits |
 | [k0s H200 Setup](k0s-h200-setup.md) | k0s setup for the H200 training Preview coordinate: host-provided driver posture, k0s's bundled containerd wiring, StorageClass note, and known gaps |
 | [CoreWeave H100 Setup](cks-h100-setup.md) | CoreWeave-managed GPU stack for H100 Ubuntu training; Preview, awaiting live qualification |
 | [CoreWeave RTX PRO 6000 Setup](cks-rtx-pro-6000-setup.md) | CoreWeave-managed GPU stack for RTX PRO 6000 Ubuntu training; Preview, awaiting live qualification |
-| [NVKE GB200 Setup](nvke-gb200-setup.md) | NVKE (Forge/NICo) GB200 training Preview coordinate: inbox-driver posture (no DOCA-OFED, DMA-BUF GPUDirect), SR-IOV InfiniBand rails with IPoIB via nv-ipam, RDMA ULP module loading via nodewright, fabric P_Key prerequisite, and known gaps |
+| [NVKE GB200 Setup](nvke-gb200-setup.md) | NVKE (Forge/NICo) GB200 Preview coordinates (training, Kubeflow, inference, Dynamo): inbox-driver posture (no DOCA-OFED, DMA-BUF GPUDirect); the training leaves add SR-IOV InfiniBand rails with IPoIB via nv-ipam, RDMA ULP module loading via nodewright, and the fabric P_Key prerequisite; known gaps |
+| [NVKE GB300 Setup](nvke-gb300-setup.md) | NVKE bare-metal GB300 NVL72 Preview coordinates (training, Kubeflow, inference, Dynamo) on Ubuntu 26.04 arm64 |
+| [NVKE VR200 Setup](nvke-vr200-setup.md) | NVKE bare-metal VR200 (Vera Rubin) NVL72 Preview coordinates (training, Kubeflow, inference, Dynamo) on Ubuntu 26.04 arm64 |
 | [Talos Integration](talos-integration.md) | Running AICR on Talos Linux |
 | [OpenShift Deployment](openshift.md) | OpenShift/OCP-specific Helm and OLM integration and two-phase operator deployment |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |

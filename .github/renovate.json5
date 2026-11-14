@@ -277,6 +277,32 @@
     },
 
     // ---- Grouping: bundle related bumps into single PRs ----
+    // Catch-all first: every named gomod group below is a later rule, and
+    // Renovate's last-rule-wins semantics let it take its packages back out.
+    // Majors stay one PR each because they usually need code changes.
+    {
+      groupName: "go-modules",
+      matchManagers: ["gomod"],
+      matchUpdateTypes: ["minor", "patch", "digest"],
+    },
+    // Each image rotation in a component manifest moves
+    // stock_render_golden.yaml, and after render-golden-refresh commits the
+    // new golden a maintainer still has to rebind the PR's checks
+    // (.github/RENOVATE.md), so batching costs that step once per run instead
+    // of once per image (ubuntu, alpine/kubectl and busybox opened ~25
+    // separate PRs between July and November).
+    {
+      groupName: "component-manifest-digests",
+      matchManagers: ["kubernetes"],
+      matchUpdateTypes: ["digest", "pin"],
+    },
+    // The mdx validator's remark/micromark packages move together.
+    {
+      groupName: "mdx-tools",
+      matchManagers: ["npm"],
+      matchFileNames: ["tools/mdx/package.json"],
+      matchUpdateTypes: ["minor", "patch", "pin", "digest"],
+    },
     // These groups were transcribed from dependabot's gomod config so the two
     // bots produced identically-shaped PRs during the migration. That migration
     // is now finished — the gomod ecosystem was removed from
@@ -296,6 +322,27 @@
       groupName: "opencontainers",
       matchManagers: ["gomod"],
       matchPackageNames: ["github.com/opencontainers/**"],
+    },
+    // The github.com/sigstore/sigstore KMS provider modules are tagged in
+    // lockstep, and every one of them rewrites the same go.sum lines, so as
+    // separate PRs each merge left the next conflicted (#3763-#3767).
+    {
+      groupName: "sigstore-modules",
+      matchManagers: ["gomod"],
+      matchPackageNames: ["github.com/sigstore/**"],
+    },
+    // aws-sdk-go-v2 releases every service module in one train.
+    {
+      groupName: "aws-sdk-go-v2",
+      matchManagers: ["gomod"],
+      matchPackageNames: ["github.com/aws/aws-sdk-go-v2", "github.com/aws/aws-sdk-go-v2/**"],
+    },
+    // The Percona images in the psmdb-operator and nvsentinel-mongodb values
+    // are one MongoDB stack that Percona releases together (#3179-#3184 opened
+    // five PRs in one day).
+    {
+      groupName: "percona",
+      matchPackageNames: ["docker.io/percona/**"],
     },
     // Cross-manager: requirements.txt (pip_requirements) and the Dockerfile
     // ARG (custom.regex) must move together; see the aiperf customManager.

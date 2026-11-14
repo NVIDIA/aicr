@@ -34,7 +34,10 @@ import (
 	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
 )
 
-const ecrHost = "123456789012.dkr.ecr.us-west-2.amazonaws.com"
+const (
+	ecrHost       = "123456789012.dkr.ecr.us-west-2.amazonaws.com"
+	ecrRepository = "oci://" + ecrHost + "/aicr/cluster"
+)
 
 // A failed refresh is retried with backoff instead of waiting out the
 // interval: one failed mint on a fresh install no longer leaves Argo CD
@@ -43,7 +46,7 @@ func TestRepoCredsRefresherRetriesAFailure(t *testing.T) {
 	ctx := testContext(t)
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "argocd", Name: "aicr-registry-retry", Labels: map[string]string{"argocd.argoproj.io/secret-type": "repo-creds"}},
-		StringData: map[string]string{"type": "oci", "url": "oci://" + ecrHost + "/aicr/cluster"},
+		StringData: map[string]string{"type": "oci", "url": ecrRepository},
 	}
 	if err := k8s.Create(ctx, secret); err != nil {
 		t.Fatal(err)
@@ -108,7 +111,7 @@ func TestRepoCredsRefresher(t *testing.T) {
 	}
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "argocd", Name: "aicr-registry", Labels: map[string]string{"argocd.argoproj.io/secret-type": "repo-creds"}},
-		StringData: map[string]string{"type": "oci", "url": "oci://" + ecrHost + "/aicr/cluster"},
+		StringData: map[string]string{"type": "oci", "url": ecrRepository},
 	}
 	if err := k8s.Create(ctx, secret); err != nil {
 		t.Fatal(err)
@@ -183,7 +186,7 @@ func TestRepoCredsRefresherRidesOutAMintFailure(t *testing.T) {
 	clock := now
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "argocd", Name: "aicr-registry-ride-out", Labels: map[string]string{"argocd.argoproj.io/secret-type": "repo-creds"}},
-		StringData: map[string]string{"type": "oci", "url": "oci://" + ecrHost + "/aicr/cluster"},
+		StringData: map[string]string{"type": "oci", "url": ecrRepository},
 	}
 	if err := k8s.Create(ctx, secret); err != nil {
 		t.Fatal(err)

@@ -100,3 +100,4 @@ spec:
         - pod-autoscaling
         - cluster-autoscaling
         - secure-accelerator-access
+        - driver-runtime-management
