@@ -45,6 +45,10 @@
 #     file:              Path to a ComponentUpgrades YAML file, relative to
 #                        the data directory (e.g.,
 #                        "components/nodewright-operator/upgrades.yaml")
+#   sizing:            Node-count memory sizing tiers (ADR-030)
+#     file:              Path to a ComponentSizing YAML file, relative to
+#                        the data directory (e.g.,
+#                        "components/gpu-operator/sizing.yaml")
 #   telemetry:         Runtime metrics contract (ADR-026)
 #     promql:            monitorsFrom (components exposing the data) and series
 #                        (RE2 patterns) a component queries from Prometheus
@@ -126,6 +130,8 @@ components:
       assertFile: checks/gpu-operator/health-check.yaml
     upgrades:
       file: components/gpu-operator/upgrades.yaml
+    sizing:
+      file: components/gpu-operator/sizing.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator
@@ -218,9 +224,13 @@ components:
       assertFile: checks/network-operator/health-check.yaml
     upgrades:
       file: components/network-operator/upgrades.yaml
+    sizing:
+      file: components/network-operator/sizing.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/network-operator
+      # Moving to 26.10.0 or later: measure operator.resources for
+      # components/network-operator/sizing.yaml (see its header).
       # renovate: datasource=helm depName=network-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
       defaultVersion: "26.7.0"
       defaultNamespace: nvidia-network-operator

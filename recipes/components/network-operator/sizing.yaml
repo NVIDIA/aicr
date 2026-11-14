@@ -1,0 +1,64 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Node-count memory tiers (ADR-030). Derivation rules and how to refine a
+# tier: docs/contributor/component-sizing.md.
+#
+# operator.resources is not sized. network-operator before v26.10.0 caches
+# every Pod in the cluster (Mellanox/network-operator#3173, fixed by #3174),
+# so its memory tracks pods, not GPU nodes. Measure it and add it here when
+# the registry pin reaches 26.10.0.
+apiVersion: aicr.run/v1beta1
+kind: ComponentSizing
+basis: gpuNodes
+resources:
+  # maintenance-operator also caches every Pod
+  # (Mellanox/maintenance-operator#275); re-measure when that is fixed. Every
+  # tier rests on one instantaneous reading, the nearest above 700 GPU nodes.
+  - path: maintenance-operator-chart.operator.resources
+    tiers:
+      - maxNodes: 250
+        limits: {memory: 5.5Gi}
+        measurements:
+          - sets: [limits]
+            kind: instantaneous
+            gpuNodes: 1112
+            max: 2345Mi
+            date: 2026-10-15
+          - sets: []
+            kind: windowed
+            window: 18h
+            gpuNodes: 159
+            nodes: 165
+            pods: 5744
+            p90: 666Mi
+            max: 693Mi
+            date: 2026-11-06
+      - maxNodes: 450
+        limits: {memory: 5.5Gi}
+        measurements:
+          - sets: [limits]
+            kind: instantaneous
+            gpuNodes: 1112
+            max: 2345Mi
+            date: 2026-10-15
+      - maxNodes: 700
+        limits: {memory: 5.5Gi}
+        measurements:
+          - sets: [limits]
+            kind: instantaneous
+            gpuNodes: 1112
+            max: 2345Mi
+            date: 2026-10-15
+      - maxNodes: 2000

@@ -509,14 +509,60 @@ LoadBalancer provider, `--set agentgateway:serviceType=ClusterIP` gives the
 gateway a ClusterIP Service instead, to which source ranges do not apply. See
 [Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
 
-### Size controllers for large clusters
+### Size controller memory to the cluster
 
 Some controllers' memory grows with node count. The controllers below ship
 default memory **limits** that cover clusters of about 2500 nodes, in the
 recipes each row names; a row with no recipe applies to all of them. Their
-**requests** are sized for small clusters, so a large cluster schedules them
-with far less reserved than they use. On large clusters, raise the requests so
-the scheduler reserves memory on the system nodes:
+**requests** are sized for small clusters.
+
+**Smaller clusters: state a GPU node count.** `aicr bundle --nodes N` lowers
+the memory of each controller that has a sizing table
+(`recipes/components/<name>/sizing.yaml`) to the measured tier covering N GPU
+nodes. Today these are the GPU Operator and the Network Operator's
+maintenance-operator subchart. Sizing only lowers a value:
+each request and limit becomes the smaller of the recipe's value and the
+tier's. With no count, or a count above the highest tier, the bundle is
+unchanged. It never touches a path set by the recipe's inline overrides, a
+profile-locked path, or a `--set`, `--set-json` or `--set-file` override, and
+a bundle whose override leaves a sized request above its limit fails.
+
+```bash
+aicr bundle --recipe recipe.yaml --nodes 200 --output ./bundles
+```
+
+Count the GPU nodes the cluster will reach before you next regenerate the
+bundle: a count too high only keeps the default values, while one too low
+risks OOM kills. A cluster with a large CPU pool or far more pods per node
+than usual should state a higher count or override; each tier records the
+total nodes and pods of the readings behind it.
+
+An `argocd-helm` bundle sizes its upstream charts at install time instead,
+from the root value `sizing.nodeCount`, which defaults to the bundle's
+`--nodes`. Generate a bundle meant for clusters of different sizes without
+`--nodes`, and set the count when installing. `repoURL` is the registry
+namespace the bundle was published to; a bundle pushed with
+`--output oci://` already carries it:
+
+```bash
+helm install aicr-bundle . \
+  --set repoURL=oci://ghcr.io/myorg \
+  --set sizing.nodeCount=200
+```
+
+With `--vendor-charts` the charts are sized when the bundle is generated,
+like local charts, so state `--nodes` then: `sizing.nodeCount` does not
+lower them.
+
+Each sized child Application carries `aicr.nvidia.com/sizing-node-count`, and
+`aicr.nvidia.com/sizing-tier` when a tier changed its values. A component's
+own root-chart values still win over the tier. The chart does not compare
+quantities, so an install-time request above the selected limit is rejected
+by the API server when Argo CD syncs, not by `helm install`.
+
+**Large clusters: raise the requests** so the scheduler reserves memory on
+the system nodes. A large cluster otherwise schedules these controllers with
+far less reserved than they use:
 
 | Controller | Override key | Resources path |
 |---|---|---|

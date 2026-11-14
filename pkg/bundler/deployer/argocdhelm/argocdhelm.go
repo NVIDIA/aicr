@@ -200,6 +200,25 @@ const (
 // component name or override key (guard test in pkg/recipe). See #1625.
 const rootValuesDeployerKey = "deployer"
 
+// rootValuesSizingKey is the root values map holding nodeCount, the GPU node
+// count install-time sizing selects a row with.
+const rootValuesSizingKey = "sizing"
+
+const (
+	sizingFileSuffix             = "-sizing"
+	annotationSizingNodeCount    = "aicr.nvidia.com/sizing-node-count"
+	annotationSizingTier         = "aicr.nvidia.com/sizing-tier"
+	sizingTierAnnotationSentinel = "__aicr_sizing_tier__"
+)
+
+// SizingRow is one tier of a component's install-time sizing: the values
+// merged over its static values when sizing.nodeCount is at most MaxNodes
+// and above the previous row's MaxNodes. Empty Values change nothing.
+type SizingRow struct {
+	MaxNodes int
+	Values   map[string]any
+}
+
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
 
@@ -312,6 +331,16 @@ type Generator struct {
 	// See #904.
 	ComponentReadiness map[string]map[string][]byte
 
+	// SizingRows maps a component sized at install time to its rows,
+	// ordered by MaxNodes. Each is written to static/<name>-sizing.yaml,
+	// and the child template merges the row sizing.nodeCount selects
+	// between the static and root-chart values (ADR-030).
+	SizingRows map[string][]SizingRow
+
+	// SizingNodeCount is the default sizing.nodeCount in the root
+	// values.yaml: the bundle's --nodes, or 0.
+	SizingNodeCount int
+
 	// VendorCharts pulls upstream Helm chart bytes into the bundle at
 	// bundle time so the resulting artifact is air-gap deployable.
 	// Forwarded to the delegated argocd.Generator. Off by default.
@@ -351,25 +380,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
-	// Defense-in-depth: validate AppName at the deployer boundary so a
-	// direct library caller (bypassing CLI/API validation) cannot ship a
-	// chart whose rendered Application would be rejected by apiserver
-	// admission. Empty resolves to DefaultAppName via the template's
-	// `.Values.appName | default` fallback at render time.
-	if err := bundlercfg.ValidateAppName(g.AppName); err != nil {
-		return nil, err
-	}
-	if err := bundlercfg.ValidateNamePrefix(g.NamePrefix); err != nil {
-		return nil, err
-	}
-	if err := bundlercfg.ValidateDestinationServer(g.DestinationServer); err != nil {
-		return nil, err
-	}
-	// ValidateProject (not ValidateAppName) is load-bearing: it mirrors
-	// IsDNS1123Subdomain exactly, matching the install-time
-	// values.schema.json pattern, so a baked Project default can never
-	// make the generated bundle fail its own schema at install time.
-	if err := bundlercfg.ValidateProject(g.Project); err != nil {
+	if err := g.validateOptions(); err != nil {
 		return nil, err
 	}
 
@@ -663,6 +674,33 @@ func (g *Generator) writeLockTemplates(
 		}
 	}
 	return nil
+}
+
+// validateOptions rejects deployer options and install-time sizing the
+// chart could not render, before anything is written.
+func (g *Generator) validateOptions() error {
+	// Defense-in-depth: validate AppName at the deployer boundary so a
+	// direct library caller (bypassing CLI/API validation) cannot ship a
+	// chart whose rendered Application would be rejected by apiserver
+	// admission. Empty resolves to DefaultAppName via the template's
+	// `.Values.appName | default` fallback at render time.
+	if err := bundlercfg.ValidateAppName(g.AppName); err != nil {
+		return err
+	}
+	if err := bundlercfg.ValidateNamePrefix(g.NamePrefix); err != nil {
+		return err
+	}
+	if err := bundlercfg.ValidateDestinationServer(g.DestinationServer); err != nil {
+		return err
+	}
+	// ValidateProject (not ValidateAppName) is load-bearing: it mirrors
+	// IsDNS1123Subdomain exactly, matching the install-time
+	// values.schema.json pattern, so a baked Project default can never
+	// make the generated bundle fail its own schema at install time.
+	if err := bundlercfg.ValidateProject(g.Project); err != nil {
+		return err
+	}
+	return g.validateSizing()
 }
 
 // writeProfileLockTemplate emits a Helm-render-time guard for profiled
@@ -987,6 +1025,13 @@ func (g *Generator) writeValuesFiles(outputDir string, output *deployer.Output) 
 
 	dynamicOnlyValues[rootValuesDeployerKey] = g.deployerValues()
 
+	if _, taken := dynamicOnlyValues[rootValuesSizingKey]; taken {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"a component's --dynamic values use the root key %q, which argocd-helm reserves for sizing.nodeCount",
+			rootValuesSizingKey))
+	}
+	dynamicOnlyValues[rootValuesSizingKey] = map[string]any{"nodeCount": g.SizingNodeCount}
+
 	valuesPath, valuesSize, err := writeRootValuesFile(dynamicOnlyValues, outputDir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write root values.yaml", err)
@@ -1148,6 +1193,16 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		}
 		files = append(files, staticPath)
 		totalSize += staticSize
+
+		if rows := g.SizingRows[ref.Name]; len(rows) > 0 {
+			sizingPath, sizingSize, sizingErr := deployer.WriteValuesFile(sizingRowsDocument(rows), staticDir, ref.Name+sizingFileSuffix+".yaml")
+			if sizingErr != nil {
+				return nil, 0, nil, errors.Wrap(errors.ErrCodeInternal,
+					fmt.Sprintf("failed to write sizing rows for %s", ref.Name), sizingErr)
+			}
+			files = append(files, sizingPath)
+			totalSize += sizingSize
+		}
 	}
 
 	// Generation writes directly into --output and the directory is not
@@ -1259,6 +1314,17 @@ type valuesSchemaProperty struct {
 	Type      string `json:"type"`
 	Pattern   string `json:"pattern,omitempty"`
 	MaxLength int    `json:"maxLength,omitempty"`
+	Minimum   *int   `json:"minimum,omitempty"`
+}
+
+type valuesSchemaSizingProps struct {
+	NodeCount valuesSchemaProperty `json:"nodeCount"`
+}
+
+type valuesSchemaSizing struct {
+	Type                 string                  `json:"type"`
+	AdditionalProperties bool                    `json:"additionalProperties"`
+	Properties           valuesSchemaSizingProps `json:"properties"`
 }
 
 type valuesSchemaDeployerProps struct {
@@ -1276,6 +1342,7 @@ type valuesSchemaDeployer struct {
 
 type valuesSchemaRootProps struct {
 	Deployer valuesSchemaDeployer `json:"deployer"`
+	Sizing   valuesSchemaSizing   `json:"sizing"`
 }
 
 type valuesSchema struct {
@@ -1295,17 +1362,20 @@ type valuesSchema struct {
 // is deliberately omitted — it is bundle-time only, so an install-time
 // `--set deployer.cascadeDelete=...` fails this schema by design.
 func writeValuesSchema(outputDir string) (string, int64, error) {
-	const schemaTypeString = "string"
+	const (
+		schemaTypeString = "string"
+		schemaTypeObject = "object"
+	)
 	schemaPath, err := deployer.SafeJoin(outputDir, "values.schema.json")
 	if err != nil {
 		return "", 0, err
 	}
 	schema := valuesSchema{
 		Schema: "http://json-schema.org/draft-07/schema#",
-		Type:   "object",
+		Type:   schemaTypeObject,
 		Properties: valuesSchemaRootProps{
 			Deployer: valuesSchemaDeployer{
-				Type:                 "object",
+				Type:                 schemaTypeObject,
 				AdditionalProperties: false,
 				Properties: valuesSchemaDeployerProps{
 					NamePrefix: valuesSchemaProperty{
@@ -1346,6 +1416,15 @@ func writeValuesSchema(outputDir string) (string, int64, error) {
 					IncludeRootApp: valuesSchemaProperty{
 						Type: "boolean",
 					},
+				},
+			},
+			// An integer type makes Helm reject a fractional or string count
+			// before the child templates' int64 conversion could truncate it.
+			Sizing: valuesSchemaSizing{
+				Type:                 schemaTypeObject,
+				AdditionalProperties: false,
+				Properties: valuesSchemaSizingProps{
+					NodeCount: valuesSchemaProperty{Type: "integer", Minimum: new(0)},
 				},
 			},
 		},
@@ -1391,6 +1470,14 @@ const rootValuesInstallHeader = `# Generated by AICR
 #                                root Application already points at this
 #                                chart, so only children render and the two
 #                                roots do not fight over the same apps.
+#
+#   sizing.nodeCount   GPU nodes in the target cluster. Lowers the memory
+#                      of controllers that publish a sizing table to the
+#                      tier for that count (ADR-030); 0, or a count above
+#                      every tier, keeps the bundle's values. Defaults to
+#                      the bundle's --nodes. Root-chart values for a
+#                      component still win, and a request set here above
+#                      the selected limit fails at sync, not at install.
 #
 #   deployer.cascadeDelete is intentionally NOT an install-time value —
 #   it is bundle-time only (aicr bundle --argocd-cascade-delete);
@@ -1661,8 +1748,9 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 		if keyErr != nil {
 			return keyErr
 		}
+		sized := folderComponent == parentComponent && len(g.SizingRows[parentComponent]) > 0
 		tmplPath, tmplSize, transformErr := transformApplication(
-			tmpDir, templatesDir, folderName, folderComponent, overrideKey, reservedTemplates,
+			tmpDir, templatesDir, folderName, folderComponent, overrideKey, reservedTemplates, sized,
 		)
 		if transformErr != nil {
 			return transformErr
@@ -1687,6 +1775,7 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 func transformApplication(
 	srcDir, templatesDir, folderName, componentName, overrideKey string,
 	reservedTemplates []string,
+	sized bool,
 ) (string, int64, error) {
 
 	if !deployer.IsSafePathComponent(componentName) {
@@ -1731,11 +1820,15 @@ func transformApplication(
 	// Detect input shape and apply the matching transformation.
 	switch {
 	case spec["sources"] != nil:
-		if transformErr := convertToSingleSourceWithValues(app, componentName, overrideKey); transformErr != nil {
+		if transformErr := convertToSingleSourceWithValues(app, componentName, overrideKey, sized); transformErr != nil {
 			return "", 0, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to transform multi-source application for %s", componentName), transformErr)
 		}
 	case spec["source"] != nil:
+		if sized {
+			return "", 0, errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("component %s has install-time sizing rows but renders as a path-based Application", componentName))
+		}
 		if transformErr := injectValuesIntoSingleSource(app, overrideKey); transformErr != nil {
 			return "", 0, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to inject values into single-source application for %s", componentName), transformErr)
@@ -1748,6 +1841,11 @@ func transformApplication(
 	if deployerErr := applyDeployerTemplates(app, componentName); deployerErr != nil {
 		return "", 0, deployerErr
 	}
+	if sized {
+		if annotateErr := addSizingAnnotations(app); annotateErr != nil {
+			return "", 0, annotateErr
+		}
+	}
 
 	// helm.values is a *yaml.Node with LiteralStyle, so yaml.Marshal emits
 	// the raw Helm template as a block scalar that Helm evaluates at render
@@ -1756,6 +1854,12 @@ func transformApplication(
 	if marshalErr != nil {
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to marshal transformed application for %s", componentName), marshalErr)
+	}
+	if sized {
+		if out, err = renderSizingTierAnnotation(out); err != nil {
+			return "", 0, err
+		}
+		out = append([]byte(sizingSelector(componentName)), out...)
 	}
 	out = append([]byte(childNameGuard(componentName)), out...)
 
@@ -2105,7 +2209,7 @@ func copyFolderContent(srcDir, outputDir, folderName string, skip ...string) ([]
 // All Helm components use the merge pattern — every value is overridable at
 // install time via --set, not just paths declared with --dynamic. Profile-owned
 // and driver-ownership paths are rejected by the lock templates, not here.
-func convertToSingleSourceWithValues(app map[string]any, componentName, overrideKey string) error {
+func convertToSingleSourceWithValues(app map[string]any, componentName, overrideKey string, sized bool) error {
 	spec, ok := app["spec"].(map[string]any)
 	if !ok {
 		return errors.New(errors.ErrCodeInternal, "application manifest missing 'spec'")
@@ -2152,11 +2256,16 @@ func convertToSingleSourceWithValues(app map[string]any, componentName, override
 	// helm=8, values=12). nindent 16 indents content to column 16 — safely
 	// inside the block. Smaller values (e.g. 8) cause toYaml output to land as
 	// siblings of `helm:` and break Application schema validation.
+	merge := "$static $dynamic"
+	if sized {
+		// $aicrSizingRow is set by sizingSelector at the top of the file.
+		merge = "$static $aicrSizingRow $dynamic"
+	}
 	valuesTmpl := fmt.Sprintf(
 		`{{- $static := (.Files.Get "static/%s.yaml") | fromYaml | default dict -}}`+"\n"+
 			`{{- $dynamic := index .Values %q | default dict -}}`+"\n"+
-			`{{- mustMergeOverwrite $static $dynamic | toYaml | nindent 16 }}`,
-		componentName, overrideKey)
+			`{{- mustMergeOverwrite %s | toYaml | nindent 16 }}`,
+		componentName, overrideKey, merge)
 
 	// Replace multi-source with single source + values. The values template is
 	// wrapped in a yaml.Node with LiteralStyle so yaml.Marshal emits it as a
@@ -2322,6 +2431,8 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 	buf.WriteString("`cascadeDelete` is bundle-time only (finalizers cannot round-trip as\n" +
 		"a template expression): `aicr bundle --argocd-cascade-delete`. Child\n" +
 		"sync retry is bundle-time only too: `aicr bundle --argocd-sync-retry-limit`.\n")
+
+	g.writeSizingReadme(&buf)
 
 	if len(g.DynamicValues) > 0 {
 		buf.WriteString("\n## Dynamic Values\n\n")
