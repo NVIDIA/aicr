@@ -46,6 +46,17 @@ summary and opt-out gate (an explicit empty list skips the leg); the actual
 per-cell intents come from the broker's `schedule` output, further gated per
 version by the harness-compat floors (see [`compat`](#compat)).
 
+`uat-run.yaml` also passes the dispatch's `--lifecycle` and `--skip-delete`
+(`true` or `false`, given together). The broker then refuses
+`skip_delete=true` on a cloud reservation unless the lifecycle is
+`daytime-up` or `daytime-down` (#3670), printing no row, so the refused run
+publishes no cloud. The kind lane keeps the flag:
+
+```sh
+uat-broker reservations --name aws-h100 --lifecycle nightly --skip-delete true
+# exit 2: skip_delete=true is refused for lifecycle=nightly on reservation aws-h100 ...
+```
+
 List every reservation name (one per line):
 
 ```sh
