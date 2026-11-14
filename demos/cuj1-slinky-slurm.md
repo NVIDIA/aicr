@@ -95,7 +95,7 @@ AICR injects placement from bundle flags using each component's registry paths:
 
 **Registry default for `slinky-slurm`:** `controller`, `restapi`, and `loginsets.slinky` use the **system** paths; `nodesets.slinky` uses **accelerated** paths. On split clusters (system pool + GPU pool), override the control plane onto the pool you want with `--set-json` (runs **after** selector injection and wins on those paths).
 
-**Operator note:** slurm-operator chart v1.2.0 honors `nodeSelector`, `tolerations`, and `affinity` for both the operator and webhook. AICR's `--system-node-selector` and `--system-node-toleration` flags fan out to both deployments. Set affinity through `--set-json slurmoperator:operator.affinity=...` and `--set-json slurmoperator:webhook.affinity=...`. On EKS, include **both** `NoSchedule` and `NoExecute` for each taint key — nodes often carry both effects.
+**Operator note:** the pinned slurm-operator chart (see `defaultVersion` in `recipes/registry.yaml`) honors `nodeSelector`, `tolerations`, and `affinity` for both the operator and webhook. AICR's `--system-node-selector` and `--system-node-toleration` flags fan out to both deployments. Set affinity through `--set-json slurmoperator:operator.affinity=...` and `--set-json slurmoperator:webhook.affinity=...`. On EKS, include **both** `NoSchedule` and `NoExecute` for each taint key — nodes often carry both effects.
 
 **Override aliases:** `slinkyslurm`, `slurmcluster` (cluster chart); `slurm`, `slurmoperator`, `slinkyslurmoperator` (operator chart). See `valueOverrideKeys` in `recipes/registry.yaml`.
 
