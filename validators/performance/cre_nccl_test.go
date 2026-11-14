@@ -332,3 +332,48 @@ func TestEmitCREBandwidthExtras(t *testing.T) {
 		t.Errorf("extras = %v, want %v", got, want)
 	}
 }
+
+func TestVerifyCRETransport(t *testing.T) {
+	const (
+		libfabricLog = "NCCL INFO Using network Libfabric\n"
+		socketLog    = "NCCL INFO Using network Socket\n"
+		noBannerLog  = "NCCL INFO NET/FasTrak ... SCTP Closed\n"
+	)
+	logReadFailed := errors.New(errors.ErrCodeNotFound, "no CRE launcher pods found")
+
+	tests := []struct {
+		name     string
+		logs     string
+		logErr   error
+		recorded []string
+		wantErr  bool
+	}{
+		{"log banner names a transport", libfabricLog, nil, nil, false},
+		{"log banner wins over a clean record", socketLog, nil, []string{"FasTrak"}, true},
+		{"log banner passing wins over a Socket record", libfabricLog, nil, []string{"Socket"}, false},
+		{"banner rotated out, record names a transport", noBannerLog, nil, []string{"FasTrak"}, false},
+		{"banner rotated out, record is Socket", noBannerLog, nil, []string{"Socket"}, true},
+		{"banner rotated out, record mixes Socket in", noBannerLog, nil, []string{"FasTrak", "Socket"}, true},
+		{"banner rotated out, nothing recorded", noBannerLog, nil, nil, true},
+		{"log unreadable, record names a transport", "", logReadFailed, []string{"FasTrak"}, false},
+		{"log unreadable, nothing recorded", "", logReadFailed, nil, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := verifyCRETransport(tt.logs, tt.logErr, tt.recorded)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("verifyCRETransport() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestVerifyCRETransportKeepsLogReadError(t *testing.T) {
+	logReadFailed := errors.New(errors.ErrCodeNotFound, "no CRE launcher pods found")
+	err := verifyCRETransport("", logReadFailed, nil)
+	if err == nil || !strings.Contains(err.Error(), "CRE launcher logs required for transport assertion") {
+		t.Fatalf("error = %v, want the launcher-logs-required message", err)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+}
