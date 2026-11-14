@@ -1549,8 +1549,9 @@ aicr evidence verify "recipes/evidence/${RECIPE}/${SRC}/${DIGEST}.yaml"
 ```
 
 Exit 0 means the signature verified, the predicate parsed, every
-manifest/file hash matched, and the per-phase CTRF report digests
-matched the predicate. The fingerprint and BOM are only *surfaced*
+manifest/file hash matched, the per-phase CTRF report digests
+matched the predicate, and the predicate's `validatorImages` matched the
+image records in those reports. The fingerprint and BOM are only *surfaced*
 in the report (signer identity, fingerprint dimensions, phase counts,
 BOM info) — they are not cross-checked against the recipe criteria or
 registry. A non-zero exit writes a structured

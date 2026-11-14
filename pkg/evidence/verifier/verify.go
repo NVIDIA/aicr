@@ -146,6 +146,9 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 		// claim disagrees with the committed report — fail closed.
 		record(r, stepInventory, StepFailed, phaseErr.Error(), phaseRows)
 		recordFailure(r, stepInventory, phaseErr)
+	} else if imageRows, imageErr := checkValidatorImages(ctx, mat, pred); imageErr != nil {
+		record(r, stepInventory, StepFailed, imageErr.Error(), imageRows)
+		recordFailure(r, stepInventory, imageErr)
 	} else if idErr := checkRecipeIdentity(recipeYAML, pointer, pred, predType); idErr != nil {
 		// Content-bound identity: the pointer/predicate recipe name,
 		// profile claim (presence, selection, advertiser, descriptor
@@ -157,7 +160,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 		recordFailure(r, stepInventory, idErr)
 	} else {
 		record(r, stepInventory, StepPassed,
-			"manifest digest matches predicate; bundle files, phase digests, and recipe identity (name/profile/digest) verified", nil)
+			"manifest digest matches predicate; bundle files, phase digests, validator images, and recipe identity (name/profile/digest) verified", nil)
 	}
 
 	// Surface recorded phase failures as the informational exit-1 signal.

@@ -4129,7 +4129,7 @@ aicr evidence sign recipes/evidence/h100-eks-ubuntu-training.yaml --relocate
 
 ### aicr evidence verify
 
-Verify a recipe-evidence bundle (predicateType v3 for newly produced evidence; v1 and v2 remain verifiable) produced by `aicr validate --emit-attestation`. When the bundle carries a signature, verifies it against the Sigstore trusted root and extracts the cryptographically anchored predicate. Recomputes every manifest-listed payload file's sha256 against `manifest.json` (which the predicate's `manifest.digest` field anchors), and surfaces the predicate's fingerprint, phase counts, and BOM info.
+Verify a recipe-evidence bundle (predicateType v3 for newly produced evidence; v1 and v2 remain verifiable) produced by `aicr validate --emit-attestation`. When the bundle carries a signature, verifies it against the Sigstore trusted root and extracts the cryptographically anchored predicate. Recomputes every manifest-listed payload file's sha256 against `manifest.json` (which the predicate's `manifest.digest` field anchors), checks that the predicate's `validatorImages` match the image records in the bundled CTRF reports, and surfaces the predicate's fingerprint, phase counts, and BOM info. Older bundles, whose reports record no images and which list images by tag only, pass the image check.
 
 It does not replay the recipe's inline constraints against the bundled snapshot.
 
