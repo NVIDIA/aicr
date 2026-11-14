@@ -36,6 +36,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
@@ -59,6 +60,8 @@ const (
 	bundleQueryDynamic                   = "dynamic"
 	bundleQueryNodes                     = "nodes"
 	bundleQueryRepo                      = "repo"
+	bundleQueryRuntimeMetricsNamespace   = "runtime-metrics-namespace"
+	bundleQueryRuntimeMetricsSeries      = "runtime-metrics-series"
 	bundleQuerySerial                    = "serial"
 	bundleQuerySet                       = "set"
 	bundleQuerySplit                     = "split"
@@ -89,6 +92,8 @@ var supportedBundleQueryParameters = map[string]struct{}{
 	bundleQueryDynamic:                   {},
 	bundleQueryNodes:                     {},
 	bundleQueryRepo:                      {},
+	bundleQueryRuntimeMetricsNamespace:   {},
+	bundleQueryRuntimeMetricsSeries:      {},
 	bundleQuerySerial:                    {},
 	bundleQuerySet:                       {},
 	bundleQuerySplit:                     {},
@@ -138,6 +143,7 @@ func bundleConfigFromParams(params *bundleParams) *config.Config {
 		config.WithWorkloadGateTaint(params.workloadGateTaint),
 		config.WithWorkloadSelector(params.workloadSelector),
 		config.WithEstimatedNodeCount(params.estimatedNodeCount),
+		config.WithRuntimeMetrics(params.runtimeMetrics),
 		config.WithDeployer(params.deployer),
 		config.WithRepoURL(params.repoURL),
 		config.WithVendorCharts(params.vendorCharts),
@@ -356,6 +362,7 @@ type bundleParams struct {
 	workloadGateTaint          *corev1.Taint
 	workloadSelector           map[string]string
 	estimatedNodeCount         int
+	runtimeMetrics             config.RuntimeMetrics
 	deployer                   config.DeployerType
 	repoURL                    string
 	vendorCharts               bool
@@ -447,6 +454,15 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	params.workloadSelector, err = snapshotter.ParseNodeSelectors(query[bundleQueryWorkloadSelector])
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid workload-selector parameter", err)
+	}
+
+	params.runtimeMetrics = config.RuntimeMetrics{
+		Series:     query[bundleQueryRuntimeMetricsSeries],
+		Namespaces: query[bundleQueryRuntimeMetricsNamespace],
+	}
+	if err = recipe.ValidateRuntimeMetrics(params.runtimeMetrics.Series, params.runtimeMetrics.Namespaces); err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+			"Invalid "+bundleQueryRuntimeMetricsSeries+" or "+bundleQueryRuntimeMetricsNamespace+" parameter", err)
 	}
 
 	// Parse nodes (estimated node count; 0 = unset)

@@ -20,12 +20,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -181,10 +183,11 @@ Server(("::" if Server.address_family == socket.AF_INET6 else "", PORT), Handler
 //     traffic, and the collection cannot be attributed.
 //
 // The monitoring system is NKTP and the backend it exports to (ADR-026), so
-// the check queries otel-lgtm. kube-prometheus-stack's Prometheus is no
-// substitute: it keeps only the series its consumers declare. The check skips
-// when the recipe has no nktp, or NKTP exports to a backend the check has no
-// query URL for.
+// the check queries otel-lgtm, or the Prometheus query API that
+// defaults.EnvServiceMetricsQueryURL names when the owner's backend is
+// another. kube-prometheus-stack's Prometheus is no substitute: it keeps only
+// the series its consumers declare. Without that URL the check skips when the
+// recipe has no nktp, or NKTP runs without otel-lgtm.
 //
 // The check does not depend on a model being served; it fails when NKTP does
 // not discover the ServiceMonitor within the monitor-load timeout or, once it
@@ -193,15 +196,26 @@ func CheckAIServiceMetrics(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
-	if !validators.RecipeDeclares(ctx, nktpComponentName) {
-		return validators.SkipWithReason(validators.SkipReasonNoMetricsBackend,
-			"the recipe has no "+nktpComponentName+", so it ships no monitoring system that collects a workload's metrics")
-	}
-	backendURL, err := discoverTelemetryBackendURL(ctx)
+	backendURL, err := resolveMetricsBackendURL(ctx)
 	if err != nil {
 		return err
 	}
 	return checkAIServiceMetricsWithURL(ctx, backendURL)
+}
+
+// resolveMetricsBackendURL returns the owner's query URL when
+// defaults.EnvServiceMetricsQueryURL names one, whatever the recipe, and
+// otherwise otel-lgtm's.
+func resolveMetricsBackendURL(ctx *validators.Context) (string, error) {
+	if raw := strings.TrimSpace(os.Getenv(defaults.EnvServiceMetricsQueryURL)); raw != "" {
+		return validatorv1.ParseServiceMetricsQueryURL(raw)
+	}
+	if !validators.RecipeDeclares(ctx, nktpComponentName) {
+		return "", validators.SkipWithReason(validators.SkipReasonNoMetricsBackend, fmt.Sprintf(
+			"the recipe has no %s, so it ships no monitoring system that collects a workload's metrics; "+
+				"set %s to test your own", nktpComponentName, defaults.EnvServiceMetricsQueryURL))
+	}
+	return discoverTelemetryBackendURL(ctx)
 }
 
 // discoverTelemetryBackendURL returns the Prometheus query API of otel-lgtm
@@ -222,8 +236,8 @@ func discoverTelemetryBackendURL(ctx *validators.Context) (string, error) {
 	svc, err := ctx.Clientset.CoreV1().Services(namespace).Get(ctx.Ctx, otelLGTMServiceName, metav1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return "", validators.SkipWithReason(validators.SkipReasonNoMetricsBackend, fmt.Sprintf(
-			"NKTP's otel-lgtm (Service %s/%s) is not installed, so NKTP exports to a backend this check has no query URL for",
-			namespace, otelLGTMServiceName))
+			"NKTP's otel-lgtm (Service %s/%s) is not installed, so NKTP exports to a backend this check has no query URL for; "+
+				"set %s to that backend's Prometheus query URL", namespace, otelLGTMServiceName, defaults.EnvServiceMetricsQueryURL))
 	}
 	if err != nil {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to read NKTP's otel-lgtm Service", err)
@@ -315,7 +329,7 @@ func checkAIServiceMetricsWithURL(ctx *validators.Context, promBaseURL string) e
 	}
 	recordRawTextArtifact(ctx, "Prometheus API preflight",
 		fmt.Sprintf("curl -sf '%s/api/v1/query?query=vector(1)'", promBaseURL),
-		fmt.Sprintf("Endpoint: %s (the backend NKTP exports to)\nResult:   vector(1) = 1", promBaseURL))
+		fmt.Sprintf("Endpoint: %s\nResult:   vector(1) = 1", promBaseURL))
 	return s.runWithCleanup(ctx)
 }
 
@@ -389,7 +403,7 @@ func (s *aiMetricsScenario) preflight(ctx context.Context) error {
 	body, err := s.query(ctx, "vector(1)")
 	if err != nil {
 		return wrapWithCode(err, errors.ErrCodeUnavailable, fmt.Sprintf(
-			"metrics backend unreachable at %s — verify network connectivity (security groups, network policies) between the validator pod and NKTP's otel-lgtm Service",
+			"metrics backend unreachable at %s — verify network connectivity (security groups, network policies) between the validator pod and the backend",
 			s.promURL))
 	}
 	v, found, err := parsePromSingleSample(body)

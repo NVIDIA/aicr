@@ -672,3 +672,53 @@ func TestDiscoverTelemetryBackendURL(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveMetricsBackendURL pins that the owner's query URL wins over
+// otel-lgtm and applies whatever the recipe, and that a malformed one fails
+// instead of falling back to a backend the owner did not name.
+func TestResolveMetricsBackendURL(t *testing.T) {
+	const owner = "https://mimir.example.com/prometheus"
+	nktp := []recipe.ComponentRef{{Name: nktpComponentName, Namespace: "nktp"}}
+	lgtm := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: otelLGTMServiceName, Namespace: "nktp"},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: otelLGTMPrometheusPort}}},
+	}
+	tests := []struct {
+		name     string
+		env      string
+		refs     []recipe.ComponentRef
+		objects  []runtime.Object
+		wantURL  string
+		wantSkip bool
+		wantCode errors.ErrorCode
+	}{
+		{name: "owner URL on a recipe without nktp", env: owner, wantURL: owner},
+		{name: "owner URL wins over otel-lgtm", env: " " + owner + "/ ", refs: nktp, objects: []runtime.Object{lgtm}, wantURL: owner},
+		{name: "malformed owner URL fails", env: "mimir.example.com", refs: nktp, objects: []runtime.Object{lgtm},
+			wantCode: errors.ErrCodeInvalidRequest},
+		{name: "unset falls back to otel-lgtm", refs: nktp, objects: []runtime.Object{lgtm}, wantURL: "http://lgtm.nktp.svc:9090"},
+		{name: "blank on a recipe without nktp skips", env: "  ", wantSkip: true},
+		{name: "unset with nktp and no otel-lgtm skips", refs: nktp, wantSkip: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(defaults.EnvServiceMetricsQueryURL, tt.env)
+			ctx := &validators.Context{Ctx: context.Background(), Clientset: k8sfake.NewClientset(tt.objects...),
+				ValidationInput: &v1.ValidationInput{ComponentRefs: tt.refs}}
+			got, err := resolveMetricsBackendURL(ctx)
+			switch {
+			case tt.wantSkip:
+				if !validators.IsSkip(err) {
+					t.Fatalf("error = %v, want a skip", err)
+				}
+			case tt.wantCode != "":
+				if validators.IsSkip(err) {
+					t.Fatalf("error = %v, want a failure, not a skip", err)
+				}
+				errorstest.WantReportedCode(t, err, tt.wantCode)
+			case err != nil || got != tt.wantURL:
+				t.Fatalf("got %q, %v; want %q", got, err, tt.wantURL)
+			}
+		})
+	}
+}

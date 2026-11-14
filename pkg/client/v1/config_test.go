@@ -20,6 +20,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -720,6 +721,11 @@ spec:
       nodes: 12
       storageClass: fast
       sharedStorageClass: shared
+    runtimeMetrics:
+      series:
+        - queue_depth
+      namespaces:
+        - inference
     attestation:
       enabled: true
       certificateIdentityRegexp: ^https://github\.com/NVIDIA/.*$
@@ -766,6 +772,11 @@ func TestConfig_BundleOptions(t *testing.T) {
 	}
 	if got, want := opts.SharedStorageClass, "shared"; got != want {
 		t.Errorf("SharedStorageClass = %q, want %q", got, want)
+	}
+	if got := opts.RuntimeMetrics; !slices.Equal(got.Series, []string{"queue_depth"}) ||
+		!slices.Equal(got.Namespaces, []string{"inference"}) {
+
+		t.Errorf("RuntimeMetrics = %+v, want series [queue_depth] and namespaces [inference]", got)
 	}
 	if !opts.VendorCharts {
 		t.Error("VendorCharts = false, want true")

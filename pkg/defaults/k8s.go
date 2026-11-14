@@ -55,6 +55,11 @@ const (
 	// EnvRunaiProjectNamespace names the Run:ai Project namespace the
 	// gang-scheduling conformance check runs its test pods in.
 	EnvRunaiProjectNamespace = "AICR_RUNAI_PROJECT_NAMESPACE"
+
+	// EnvServiceMetricsQueryURL names the base URL of the Prometheus query
+	// API the ai-service-metrics conformance check reads instead of NKTP's
+	// otel-lgtm (the upstream -service-metrics-query-url flag).
+	EnvServiceMetricsQueryURL = "AICR_SERVICE_METRICS_QUERY_URL"
 )
 
 // K8sAccessReviewConcurrency bounds how many Self/SubjectAccessReview

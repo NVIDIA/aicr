@@ -189,6 +189,9 @@ spec:
       nodes: 2
       storageClass: ""
       sharedStorageClass: ""          # RWX class for opt-in shared filesystems
+    runtimeMetrics:
+      series: []                      # metric name patterns the runtime Prometheus keeps
+      namespaces: []                  # namespaces whose monitors it loads
     attestation:
       enabled: false
       certificateIdentityRegexp: ""
@@ -319,6 +322,7 @@ Inputs to `aicr bundle`.
 | `deployment.appName` | string | Argo CD parent `Application` name override (multi-bundle installs sharing a namespace) |
 | `deployment.argocd` | object | Argo CD bundle settings for `argocd` and `argocd-helm`: `namePrefix`, `destinationServer`, `project`, `cascadeDelete`, and `syncRetry` (`limit`, `backoff.duration`, `backoff.factor`, `backoff.maxDuration`). Each mirrors an `--argocd-*` flag, which overrides it field by field. Setting a field that a `deployer:<key>` entry in `deployment.set` also sets is rejected. See [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options) |
 | `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `draEvictionNodeLabel`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`, `sharedStorageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings. `draEvictionNodeLabel` accepts one `key=value` label and has no default: setting it opts in to DRA eviction coordination, which AICR applies only when DRA and GPU Operator are both enabled. |
+| `runtimeMetrics.series` / `.namespaces` | []string | Metric name patterns (RE2) the runtime Prometheus server keeps, and namespaces whose ServiceMonitors and PodMonitors it loads, on top of what AICR's components declare. `--runtime-metrics-series` and `--runtime-metrics-namespace` each replace their own list. See [Autoscaling on a workload metric](component-catalog.md#autoscaling-on-a-workload-metric). |
 | `attestation.enabled` | bool | Enable bundle attestation (signing); keyless OIDC by default, KMS-backed when `signingKey` is set |
 | `attestation.certificateIdentityRegexp` | string | Expected signer identity |
 | `attestation.oidcDeviceFlow` | bool | Device-code flow for headless signing |

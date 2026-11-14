@@ -106,6 +106,25 @@ func TestConfigSharedStorageClass(t *testing.T) {
 	}
 }
 
+func TestConfigRuntimeMetrics(t *testing.T) {
+	if got := NewConfig().RuntimeMetrics(); !got.IsZero() {
+		t.Errorf("RuntimeMetrics() = %+v, want zero by default", got)
+	}
+
+	in := RuntimeMetrics{Series: []string{"queue_depth"}, Namespaces: []string{"inference"}}
+	cfg := NewConfig(WithRuntimeMetrics(in))
+	in.Series[0], in.Namespaces[0] = testValueModified, testValueModified
+
+	got := cfg.RuntimeMetrics()
+	if got.IsZero() || got.Series[0] != "queue_depth" || got.Namespaces[0] != "inference" {
+		t.Fatalf("RuntimeMetrics() = %+v, want the values given to the option, unaffected by the caller's slices", got)
+	}
+	got.Series[0] = testValueModified
+	if again := cfg.RuntimeMetrics(); again.Series[0] != "queue_depth" {
+		t.Errorf("RuntimeMetrics() = %+v after mutating a returned copy, want it unchanged", again)
+	}
+}
+
 func TestConfigVendorCharts(t *testing.T) {
 	tests := []struct {
 		name string

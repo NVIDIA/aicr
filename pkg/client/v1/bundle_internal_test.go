@@ -15,6 +15,7 @@
 package aicr
 
 import (
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -60,10 +61,13 @@ func TestBundleOptions_BundlerConfig_FoldsFlatFields(t *testing.T) {
 		Nodes:                12,
 		StorageClass:         "sc-main",
 		SharedStorageClass:   "sc-shared",
-		Attest:               true,
-		CertIDRegexp:         `^https://github\.com/NVIDIA/.*$`,
-		VendorCharts:         true,
-		AppName:              "fleet-gpu",
+		RuntimeMetrics: bundlerconfig.RuntimeMetrics{
+			Series: []string{"queue_depth"}, Namespaces: []string{"inference"},
+		},
+		Attest:       true,
+		CertIDRegexp: `^https://github\.com/NVIDIA/.*$`,
+		VendorCharts: true,
+		AppName:      "fleet-gpu",
 		ArgoCD: bundlerconfig.ArgoCDSettings{
 			Project:        &argoProject,
 			SyncRetryLimit: &argoRetryLimit,
@@ -91,6 +95,11 @@ func TestBundleOptions_BundlerConfig_FoldsFlatFields(t *testing.T) {
 	}
 	if got, want := bc.SharedStorageClass(), "sc-shared"; got != want {
 		t.Errorf("SharedStorageClass = %q, want %q", got, want)
+	}
+	if got := bc.RuntimeMetrics(); !slices.Equal(got.Series, []string{"queue_depth"}) ||
+		!slices.Equal(got.Namespaces, []string{"inference"}) {
+
+		t.Errorf("RuntimeMetrics = %+v, want series [queue_depth] and namespaces [inference]", got)
 	}
 	if !bc.VendorCharts() {
 		t.Error("VendorCharts = false, want true")

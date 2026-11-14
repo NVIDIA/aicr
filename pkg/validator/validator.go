@@ -384,6 +384,9 @@ func (v *Validator) ValidatePhases(
 	if err = v.preflightSkipChecks(cat, phases, validationInput); err != nil {
 		return nil, err
 	}
+	if err = v.preflightForwardedEnv(cat, phases, validationInput); err != nil {
+		return nil, err
+	}
 
 	// --no-cluster: report all as skipped, no K8s calls
 	if v.NoCluster {
@@ -507,6 +510,9 @@ func (v *Validator) ValidatePhase(
 	if err = v.preflightSkipChecks(cat, []Phase{phase}, validationInput); err != nil {
 		return nil, err
 	}
+	if err = v.preflightForwardedEnv(cat, []Phase{phase}, validationInput); err != nil {
+		return nil, err
+	}
 
 	if v.NoCluster {
 		return v.phaseSkipped(cat, phase, "skipped - no-cluster mode"), nil
@@ -575,6 +581,29 @@ func (v *Validator) preflightDeclaredChecks(
 	return errors.New(errors.ErrCodeInvalidRequest,
 		"validation declares checks that do not match the validator catalog:\n  - "+
 			strings.Join(problems, "\n  - "))
+}
+
+// preflightForwardedEnv fails closed, before the cluster is prepared or any
+// Job is deployed, when the process environment holds a value that must not
+// reach the Job of a check this run would deploy. A check that is not
+// declared, or is named in skipChecks, deploys no Job and is not judged.
+func (v *Validator) preflightForwardedEnv(
+	cat *catalog.ValidatorCatalog,
+	phases []Phase,
+	validationInput *v1.ValidationInput,
+) error {
+
+	for _, phase := range phases {
+		for _, entry := range v1.FilterEntriesByValidation(cat.ForPhase(phase), phase, validationInput) {
+			if v.skipsCheck(entry.Name) {
+				continue
+			}
+			if err := v1.ValidateForwardedEnv(entry); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // runPhase executes all validators for a single phase sequentially.
