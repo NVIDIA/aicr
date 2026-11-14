@@ -324,7 +324,7 @@ func buildVolumes(runID string) []corev1.Volume {
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: fmt.Sprintf("aicr-snapshot-%s", runID),
+						Name: defaults.SnapshotConfigMapPrefix + runID,
 					},
 				},
 			},
@@ -334,7 +334,7 @@ func buildVolumes(runID string) []corev1.Volume {
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: fmt.Sprintf("aicr-validation-%s", runID),
+						Name: defaults.ValidationConfigMapPrefix + runID,
 					},
 				},
 			},

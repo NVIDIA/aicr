@@ -86,6 +86,8 @@ func TestTimeoutConstants(t *testing.T) {
 		{"ValidatorTerminationGracePeriod", ValidatorTerminationGracePeriod, 10 * time.Second, 60 * time.Second},
 		{"ValidatorTerminationWaitMargin", ValidatorTerminationWaitMargin, 1 * time.Second, 15 * time.Second},
 		{"ValidatorMinCompletionWait", ValidatorMinCompletionWait, 10 * time.Second, 60 * time.Second},
+		{"ValidationSweepMinAge", ValidationSweepMinAge, 90 * time.Minute, 4 * time.Hour},
+		{"ValidationSweepSettleWindow", ValidationSweepSettleWindow, 2 * time.Minute, 5 * time.Minute},
 
 		// ConfigMap read/write budgets — held as distinct constants so the
 		// read path (serializer resolving cm:// URIs) and the write path
@@ -347,6 +349,33 @@ func TestValidatorTimeoutRelationships(t *testing.T) {
 	// Max stdout lines must be positive.
 	if ValidatorMaxStdoutLines <= 0 {
 		t.Errorf("ValidatorMaxStdoutLines (%d) should be positive", ValidatorMaxStdoutLines)
+	}
+}
+
+// TestValidationSweepMinAgeInvariant guards the `aicr sweep` age floor: an
+// object younger than ValidationSweepMinAge may still belong to a live
+// validation run, so the floor must exceed ValidationOperationTimeout — the
+// facade-level cap on one whole Client.ValidateState, which itself covers the
+// largest per-check wait envelope. The per-check envelope half of that
+// invariant (against the shipped catalog) lives in
+// pkg/validator/catalog/catalog_test.go, which may import both packages.
+func TestValidationSweepMinAgeInvariant(t *testing.T) {
+	if ValidationSweepMinAge <= ValidationOperationTimeout {
+		t.Errorf("ValidationSweepMinAge (%v) must exceed ValidationOperationTimeout (%v)",
+			ValidationSweepMinAge, ValidationOperationTimeout)
+	}
+}
+
+// TestValidationSweepSettleWindowInvariant pins the floor of the `aicr
+// sweep` settle observation — at least one pod-termination wait plus one
+// bounded API call. The real
+// between-checks gap adds unbudgeted work (the phase-boundary result write,
+// the dependency-affinity scan, the Job apply), so the window is a
+// conservative margin and this test pins a floor, not a derivation.
+func TestValidationSweepSettleWindowInvariant(t *testing.T) {
+	if min := K8sPodTerminationWaitTimeout + K8sCleanupTimeout; ValidationSweepSettleWindow < min {
+		t.Errorf("ValidationSweepSettleWindow (%v) must be at least one pod-termination wait plus a bounded API call (%v)",
+			ValidationSweepSettleWindow, min)
 	}
 }
 

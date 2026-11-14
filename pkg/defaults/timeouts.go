@@ -205,6 +205,42 @@ const (
 	// browser or device-code OIDC flow, so a fixed cap there would cut short
 	// an interactive run that works today.
 	VerifyOperationTimeout = 5 * time.Minute
+
+	// ValidationSweepMinAge is the default minimum age an object must reach
+	// before `aicr sweep` will delete it (the --older-than default). It must
+	// exceed ValidationOperationTimeout, the facade-level cap on an entire
+	// Client.ValidateState run, and with it the largest per-check wait
+	// envelope (v1.WaitEnvelopeFor of the largest catalog timeout plus result
+	// capture and pod termination wait — see ValidationOperationTimeout
+	// above): anything younger may still belong to a run whose own cleanup
+	// has simply not reached it yet, and the sweeper must never race a live
+	// run. That bound covers a per-run test namespace, whose life is one
+	// check; it does NOT bound a whole `aicr validate` — the CLI runs
+	// uncapped (WithValidationTimeout(0)), so an all-phase run can outlive
+	// this floor. Run-scoped objects therefore rely on the Job liveness
+	// guard plus the apply-time settle observation
+	// (ValidationSweepSettleWindow), and this floor is the backstop for
+	// everything those cannot see. The relationship to the facade cap and
+	// the catalog envelopes is pinned in pkg/validator/catalog/catalog_test.go.
+	ValidationSweepMinAge = 2 * time.Hour
+
+	// ValidationSweepSettleWindow is how long `aicr sweep` watches for a
+	// validator Job to appear before deleting run-scoped objects. With
+	// cleanup on, a run deletes each validator Job right after its check —
+	// a foreground delete, so the Job stays visible, with a deletion
+	// timestamp, while its pods terminate — and the next check's Job appears
+	// only after the remaining pod-termination wait
+	// (K8sPodTerminationWaitTimeout) plus, between phases, the result
+	// ConfigMap write, the dependency-affinity scan and the Job apply. Not
+	// all of those carry a hard budget, so the between-checks gap has no
+	// proven bound: the window is a conservative margin over the usual gap,
+	// and a run stalled between checks for longer cannot be told from a
+	// dead one. The observation lists the run-labeled Jobs once and then
+	// watches from the list's ResourceVersion for the whole window; a watch
+	// the apiserver ends early is an anomaly (routine watch timeouts are
+	// 30+ minutes), so it aborts the apply with nothing deleted rather than
+	// re-watching.
+	ValidationSweepSettleWindow = K8sPodTerminationWaitTimeout + 2*K8sCleanupTimeout
 )
 
 // StaticValidationTimeout bounds a complete static recipe validation run.

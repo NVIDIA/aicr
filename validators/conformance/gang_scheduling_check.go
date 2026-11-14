@@ -29,6 +29,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -46,10 +47,10 @@ import (
 
 const (
 	gangTestNSPrefix        = defaults.GangSchedulingTestNamespacePrefix
-	gangPodPrefix           = "gang-worker-"
-	gangGroupPrefix         = "gang-group-"
-	gangNegativePodPrefix   = "gang-neg-worker-"
-	gangNegativeGroupPrefix = "gang-neg-group-"
+	gangPodPrefix           = defaults.GangSchedulingPodPrefix
+	gangGroupPrefix         = defaults.GangSchedulingGroupPrefix
+	gangNegativePodPrefix   = defaults.GangSchedulingNegativePodPrefix
+	gangNegativeGroupPrefix = defaults.GangSchedulingNegativeGroupPrefix
 	gangMinMembers          = 2
 
 	// gangTerminationGracePeriod bounds how long a deleted member lingers. A
@@ -68,10 +69,10 @@ const (
 	gangWorkerCPURequest    = "100m"
 	gangWorkerMemoryRequest = "128Mi"
 
-	// gangPhaseLabel marks which phase a test pod or PodGroup belongs to; its
-	// values are gangPhasePositive and gangPhaseNegative. gpuTestRunLabel,
-	// carrying the run's suffix, marks which run.
-	gangPhaseLabel    = "gang-scheduling.aicr.nvidia.com/phase"
+	// gangPhasePositive and gangPhaseNegative are the values of
+	// labels.GangSchedulingPhase, which marks which phase a test pod or
+	// PodGroup belongs to; labels.GPUTestRun, carrying the run's suffix,
+	// marks which run.
 	gangPhasePositive = "positive"
 	gangPhaseNegative = "negative"
 
@@ -103,10 +104,6 @@ const (
 	runaiSchedulerName         = "runai-scheduler"
 	runaiKAIOperatorDeployment = "kai-operator"
 	runaiSchedulerShardPrefix  = runaiSchedulerName + "-"
-
-	// runaiQueueLabel is the Project namespace label whose value is the
-	// Project's queue (the queueLabelKey of Run:ai's KAI).
-	runaiQueueLabel = "runai/queue"
 
 	// kaiGangRefusalFormat is the affirmative all-or-nothing refusal KAI writes
 	// to PodGroup status.schedulingConditions when fewer members fit than
@@ -175,7 +172,7 @@ type gangTarget struct {
 	deployments []string
 	shardPrefix string
 	// queue is the PodGroup queue; empty means it is read from the test
-	// namespace's runaiQueueLabel once the namespace is known to exist.
+	// namespace's labels.RunAIQueue once the namespace is known to exist.
 	queue string
 	// testNamespace, when set, is an existing namespace the test pods run in
 	// and the check does not own; empty means a per-run namespace the check
@@ -236,7 +233,7 @@ func resolveGangTarget(ctx *validators.Context, projectNamespace string) (gangTa
 }
 
 // resolveRunaiQueue returns the queue of the Run:ai Project that owns
-// namespace, read from its runaiQueueLabel. A namespace without the label is
+// namespace, read from its labels.RunAIQueue. A namespace without the label is
 // not a Project namespace, so KAI would resolve no queue for the PodGroups
 // created there: that is a configuration error, not a scheduler failure, and
 // is reported as one.
@@ -250,12 +247,12 @@ func resolveRunaiQueue(ctx context.Context, clientset kubernetes.Interface, name
 		}
 		return "", classifyK8sReadError(err, fmt.Sprintf("Run:ai Project namespace %s", namespace))
 	}
-	queue := ns.Labels[runaiQueueLabel]
+	queue := ns.Labels[labels.RunAIQueue]
 	if queue == "" {
 		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"namespace %s carries no %s label, so it is not a Run:ai Project namespace and the scheduler would resolve "+
 				"no queue for the test PodGroups; set %s to the Project's runai-<project> namespace",
-			namespace, runaiQueueLabel, defaults.EnvRunaiProjectNamespace))
+			namespace, labels.RunAIQueue, defaults.EnvRunaiProjectNamespace))
 	}
 	return queue, nil
 }
@@ -546,7 +543,7 @@ func CheckGangScheduling(ctx *validators.Context) (err error) {
 		target.queue = queue
 		recordRawTextArtifact(ctx, "Run:ai Project namespace",
 			fmt.Sprintf("kubectl get namespace %s --show-labels", target.testNamespace),
-			fmt.Sprintf("Namespace: %s\nQueue (%s): %s\n", target.testNamespace, runaiQueueLabel, queue))
+			fmt.Sprintf("Namespace: %s\nQueue (%s): %s\n", target.testNamespace, labels.RunAIQueue, queue))
 	}
 
 	// 3. Functional test, two phases in one namespace: per-run on KAI, the
@@ -617,14 +614,14 @@ func recordGangVerdict(ctx *validators.Context, run *gangTestRun, outcomes map[s
 }
 
 // createGangTestNamespace creates the per-run namespace (idempotent), stamped
-// with the shared ownership label (gpuTestRunLabel=token) so an external
-// sweeper can tell a leaked gang namespace from a foreign one, as it can for
-// the GPU test namespaces.
+// with the shared ownership label (labels.GPUTestRun=token) so `aicr sweep`
+// can tell a leaked gang namespace from a foreign one, as it can for the GPU
+// test namespaces.
 func createGangTestNamespace(ctx context.Context, clientset kubernetes.Interface, run *gangTestRun) error {
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   run.namespace,
-			Labels: map[string]string{gpuTestRunLabel: run.suffix},
+			Labels: map[string]string{labels.GPUTestRun: run.suffix},
 		},
 	}
 	if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); k8s.IgnoreAlreadyExists(err) != nil {
@@ -640,8 +637,9 @@ func createGangTestNamespace(ctx context.Context, clientset kubernetes.Interface
 
 // gangCleanupArtifact returns the title, the equivalent command and the
 // outcome text of the cleanup artifact. A failed cleanup is reported as such
-// rather than as a success: in the run's own namespace tools/cleanup is the
-// backstop, in a Run:ai Project namespace only the equivalent command is.
+// rather than as a success: in the run's own namespace `aicr sweep` (and the
+// dev-only tools/cleanup) is the backstop, in a Run:ai Project namespace
+// `aicr sweep` and the equivalent command are.
 // That command names the PodGroup resource in full because another PodGroup
 // CRD (scheduler-plugins, Volcano) makes the short name ambiguous.
 func gangCleanupArtifact(run *gangTestRun, cleanupErr error) (title, equivalent, result string) {
@@ -662,7 +660,7 @@ func gangCleanupArtifact(run *gangTestRun, cleanupErr error) (title, equivalent,
 	equivalent = fmt.Sprintf("kubectl delete namespace %s --ignore-not-found", run.namespace)
 	if cleanupErr != nil {
 		return title, equivalent, fmt.Sprintf(
-			"Deleted gang test pods and PodGroups; namespace deletion FAILED (residue may remain, rerun tools/cleanup): %v",
+			"Deleted gang test pods and PodGroups; namespace deletion FAILED (residue may remain; rerun `aicr sweep`, or tools/cleanup for the dev workflow): %v",
 			cleanupErr)
 	}
 	return title, equivalent, fmt.Sprintf("Deleted gang test pods, PodGroups, and the %s namespace.", run.namespace)
@@ -828,7 +826,7 @@ func nodeIsReady(node *corev1.Node) bool {
 }
 
 func gangPhaseSelector(phase string) string {
-	return gangPhaseLabel + "=" + phase
+	return labels.GangSchedulingPhase + "=" + phase
 }
 
 // phaseSelector selects this run's members of one phase. The run label is
@@ -841,7 +839,7 @@ func (run *gangTestRun) phaseSelector(phase string) string {
 
 // runSelector selects every pod and PodGroup this run created.
 func (run *gangTestRun) runSelector() string {
-	return gpuTestRunLabel + "=" + run.suffix
+	return labels.GPUTestRun + "=" + run.suffix
 }
 
 // gangBoundPodViolation reports why a pod breaks the all-or-nothing contract:
@@ -1621,8 +1619,8 @@ func newPodGroup(run *gangTestRun, name, phase string, minMember int) *unstructu
 				keyName:      name,
 				keyNamespace: run.namespace,
 				"labels": map[string]any{
-					gangPhaseLabel:  phase,
-					gpuTestRunLabel: run.suffix,
+					labels.GangSchedulingPhase: phase,
+					labels.GPUTestRun:          run.suffix,
 				},
 			},
 			keySpec: map[string]any{
@@ -1669,10 +1667,10 @@ func newGangMemberPod(run *gangTestRun, name, groupName, phase string, command [
 				podGroupNameAnnotation: groupName,
 			},
 			Labels: map[string]string{
-				podGroupNameLabel: groupName,
-				podGroupIDLabel:   groupName,
-				gangPhaseLabel:    phase,
-				gpuTestRunLabel:   run.suffix,
+				podGroupNameLabel:          groupName,
+				podGroupIDLabel:            groupName,
+				labels.GangSchedulingPhase: phase,
+				labels.GPUTestRun:          run.suffix,
 			},
 		},
 		Spec: corev1.PodSpec{

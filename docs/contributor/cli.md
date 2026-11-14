@@ -46,6 +46,7 @@ Subcommands registered in `pkg/cli/root.go` (`Commands:` slice on
 | `bundle` | `bundle.go` | Render per-component deployment artifacts from a recipe via a chosen deployer (`helm`, `helmfile`, `argocd`, `argocd-helm`, `flux`, `terraform`, `fleet`). |
 | `verify` | `bundle_verify.go` | Verify a bundle's checksums, attestation signatures, and provenance chain; report the achieved trust level and enforce a `--min-trust-level` / creator / CLI-version policy. |
 | `validate` | `validate.go` | Evaluate recipe constraints against a snapshot or live cluster; optionally emit evidence. |
+| `sweep` | `sweep.go` | Delete stale per-run validation resources (test namespaces, Run:ai residue, run-scoped RBAC/ConfigMaps) a crashed or `--no-cleanup` run left behind; label-and-shape selection, age floor plus liveness guards, UID-pinned deletes. |
 | `evidence digest` | `evidence_digest.go` | Print the canonical digest of a resolved recipe (offline). |
 | `evidence sign` | `evidence_sign.go` | Sign an emitted evidence bundle. |
 | `evidence publish` | `evidence_publish.go` | Sign and push an already-emitted evidence bundle; write its pointer. |

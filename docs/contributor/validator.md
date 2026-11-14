@@ -542,15 +542,15 @@ probe image needs a Secret of the same name already in the Project namespace.
 And no namespace delete sweeps up after the check, so it confirms its pods
 and PodGroups are gone and fails, even when both phases passed, if any remain
 that are not already being deleted. A run killed before its cleanup still
-leaves its pods and PodGroups behind,
-where `tools/cleanup` does not look (it sweeps the `gang-scheduling-test-`
-namespace prefix); the negative-phase pods stay `Pending` against the
-Project's quota until deleted. Every pod and PodGroup the check creates
-carries two labels: `aicr.run/gpu-test-run`, set to the run's suffix, which
-scopes each phase's observation and the check's own cleanup to that run, so a
-second validation of the same Project or an earlier run's leftovers cannot
-fail a healthy scheduler; and `gang-scheduling.aicr.nvidia.com/phase`, which
-every run shares. Remove the leftovers of all runs with:
+leaves its pods and PodGroups behind;
+the negative-phase pods stay `Pending` against the Project's quota until
+deleted. Every pod and PodGroup the check creates carries two labels:
+`aicr.run/gpu-test-run`, set to the run's suffix, which scopes each phase's
+observation and the check's own cleanup to that run, so a second validation
+of the same Project or an earlier run's leftovers cannot fail a healthy
+scheduler; and `gang-scheduling.aicr.nvidia.com/phase`, which every run
+shares. `aicr sweep` removes the leftovers of all runs — object-level only;
+the Project namespace is never touched — or do it directly with:
 
 ```shell
 PROJECT_NAMESPACE="runai-team-a"  # replace with your Run:ai Project namespace
@@ -1224,8 +1224,9 @@ flush margin intact. Other paths are not guaranteed to complete within grace:
 AIPerf/workload cleanups can consume sequential 30s windows, and CRE's
 `teardownCRECertification` allows 10m. These existing paths may be SIGKILLed
 before cleanup returns or the termination message is written. Their bounds are
-not changed here. SIGKILL, OOM and crashes cannot run defers; an external orphan
-sweeper remains outside this implementation.
+not changed here. SIGKILL, OOM and crashes cannot run defers; the orphaned
+per-run resources those paths leave are reclaimed by `aicr sweep` (see
+[Sweeping orphaned per-run resources](#sweeping-orphaned-per-run-resources-aicr-sweep)).
 
 The Job's `activeDeadlineSeconds` is the catalog timeout plus
 `ValidatorJobDeadlineHeadroom` (3m = `ValidatorStartupGrace` 2m +
@@ -1309,6 +1310,65 @@ in evidence handling. Neither interruption path renders,
 signs or pushes evidence. A second SIGINT/SIGTERM force-terminates the CLI and
 may cut cleanup or blocked output short. `--no-cleanup` still leaves resources
 for inspection.
+
+#### Sweeping orphaned per-run resources (`aicr sweep`)
+
+The cooperative paths above cannot run on SIGKILL, OOM or node loss, and
+`--no-cleanup` skips them deliberately. The orphans those paths leave are
+reclaimed by `aicr sweep`, the label-based sweeper in `pkg/validator/sweep`
+(CLI reference: [`aicr sweep`](../user/cli-reference.md#aicr-sweep)). It
+selects, per family, by label AND shape: the `aicr.run/gpu-test-run` test
+namespaces (name must reconstruct from the label value's hex token), the
+gang-scheduling pods and PodGroups in Run:ai Project namespaces (objects only;
+the Project namespace is never touched), and the validation namespace's
+run-scoped RBAC and ConfigMaps, including the per-run cluster-admin
+ClusterRoleBinding. For the run-scoped families the shape half is the exact
+name the producer writes for the label's run ID: the data ConfigMaps
+(`defaults.SnapshotConfigMapPrefix` / `defaults.ValidationConfigMapPrefix` +
+run ID) and the three per-phase CTRF reports (`ctrf.ConfigMapName`), the
+snapshot agent's namespaced objects (the bare run ID or a name ending in
+`-<run-id>` — its prefix is caller-configurable), and its ClusterRole and
+ClusterRoleBinding (exactly `defaults.AgentClusterRoleName` + `-` + run ID).
+A candidate must be older than the age floor
+(`defaults.ValidationSweepMinAge`, 2h — above `ValidationOperationTimeout` and
+every catalog wait envelope, pinned in `pkg/defaults/timeouts_test.go` and
+`pkg/validator/catalog/catalog_test.go`) and pass a liveness guard: no
+non-terminal pods in a test namespace, and no validator Job carrying the run's
+`aicr.run/run-id` label in any namespace for run-scoped objects (a run started
+with `-n another-ns` still owns cluster-scoped agent RBAC). The floor bounds a
+test namespace's life, not a whole `aicr validate` — the CLI uncaps the
+facade timeout, so an all-phase run can outlive 2h. And Job existence is a
+point-in-time signal: with cleanup on, the validator deletes each Job right
+after its check — a foreground delete, so the Job stays visible, with a
+deletion timestamp, while its pods terminate — and the next check's Job
+appears only after the remaining pod-termination wait plus, between phases,
+the result ConfigMap write, the dependency-affinity scan and the Job apply,
+so a live run can show no Job at all. `Execute` therefore re-plans
+against current cluster state before deleting and, while run-scoped
+candidates remain, lists the run-labeled Jobs and watches from the list's
+ResourceVersion for the settle window
+(`defaults.ValidationSweepSettleWindow`, ~2m30s — a conservative margin over
+the usual between-checks gap; that gap has no proven bound, since not all of
+the work in it is budgeted) for a Job to appear; a run that reappears keeps
+all of its objects, and a run suspended
+while idle between checks for longer than the window cannot be told from a
+dead one. The observation fails closed: an apiserver watch outlasts the
+window by far, so a watch that ends early (a closed channel or an error
+event) aborts the apply with `ErrCodeUnavailable` and nothing is deleted.
+And because the wait sits between the re-plan's reads and the deletes,
+`Execute` re-plans once more after it, re-applying every guard against
+current state. Deletes are pinned with
+`Preconditions{UID}`; a NotFound means the object was already gone, and a
+Conflict — the delete was refused, which does not by itself prove the object
+was replaced — leaves it alone with a skipped status, so a re-run is safe.
+Terminating namespaces are reported with their
+remaining finalizers and never force-stripped. The facade entry points are
+`Client.PlanValidationSweep` (read-only) and `Client.ApplyValidationSweep`
+(re-plans with the plan's namespace and floor before AND after the settle
+observation, then deletes only the intersection — so a stale or tampered
+report cannot
+widen the deletion set; a report `PlanValidationSweep` did not produce is
+rejected outright).
 
 ### `PodLifecycle` helper
 

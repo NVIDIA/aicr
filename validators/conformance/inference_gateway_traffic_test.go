@@ -916,8 +916,8 @@ func TestGatewayTrafficNamespaceCarriesListenerSelectorLabel(t *testing.T) {
 	if ns.Labels[labels.Component] != labels.ValueInferencePerf {
 		t.Errorf("namespace labels = %v, want %s=%s", ns.Labels, labels.Component, labels.ValueInferencePerf)
 	}
-	if ns.Labels[gpuTestRunLabel] != s.testRun.token {
-		t.Errorf("namespace labels = %v, want the ownership label %s=%s", ns.Labels, gpuTestRunLabel, s.testRun.token)
+	if ns.Labels[labels.GPUTestRun] != s.testRun.token {
+		t.Errorf("namespace labels = %v, want the ownership label %s=%s", ns.Labels, labels.GPUTestRun, s.testRun.token)
 	}
 	if _, managed := ns.Labels[labels.ManagedBy]; managed {
 		t.Errorf("namespace carries %s, which the performance validator's prune selects on: %v", labels.ManagedBy, ns.Labels)

@@ -26,10 +26,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
@@ -979,7 +981,7 @@ func TestCheckSecureAcceleratorAccess_DevicePluginPath(t *testing.T) {
 		t.Fatalf("failed to list namespaces: %v", err)
 	}
 	for _, ns := range namespaces.Items {
-		if strings.HasPrefix(ns.Name, gpuTestNamespacePrefix) {
+		if strings.HasPrefix(ns.Name, defaults.GPUTestNamespacePrefix) {
 			t.Errorf("per-run test namespace %s leaked after a successful run", ns.Name)
 		}
 	}
@@ -1308,8 +1310,8 @@ func TestBuildDevicePluginTestPod(t *testing.T) {
 	if pod.Name != run.podName || pod.Namespace != run.namespace {
 		t.Errorf("pod = %s/%s, want %s/%s", pod.Namespace, pod.Name, run.namespace, run.podName)
 	}
-	if !strings.HasPrefix(run.namespace, gpuTestNamespacePrefix) {
-		t.Errorf("run namespace = %q, want per-run namespace with prefix %q", run.namespace, gpuTestNamespacePrefix)
+	if !strings.HasPrefix(run.namespace, defaults.GPUTestNamespacePrefix) {
+		t.Errorf("run namespace = %q, want per-run namespace with prefix %q", run.namespace, defaults.GPUTestNamespacePrefix)
 	}
 	// Required node affinity over ALL detected device-plugin nodes — not a
 	// single spec.nodeName pin (which false-fails when that node's GPUs are
@@ -1449,7 +1451,7 @@ func assertNoLeakedTestResources(t *testing.T, clientset *k8sfake.Clientset) {
 		t.Fatalf("failed to list namespaces: %v", err)
 	}
 	for _, ns := range namespaces.Items {
-		if strings.HasPrefix(ns.Name, gpuTestNamespacePrefix) {
+		if strings.HasPrefix(ns.Name, defaults.GPUTestNamespacePrefix) {
 			t.Errorf("per-run test namespace %s leaked after cleanup", ns.Name)
 		}
 	}
@@ -1528,7 +1530,7 @@ func ownedNamespace(run *gpuTestRun) *corev1.Namespace {
 	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name:   run.namespace,
 		UID:    run.nsUID,
-		Labels: map[string]string{gpuTestRunLabel: run.token},
+		Labels: map[string]string{labels.GPUTestRun: run.token},
 	}}
 }
 
@@ -1542,7 +1544,7 @@ func ownedNamespace(run *gpuTestRun) *corev1.Namespace {
 // Creates, and the namespace deletion controller durably garbage-collects
 // content that still lands before finalizing.
 func TestCleanupGPUTestNamespace_ReconcilesUntilAbsent(t *testing.T) {
-	run := observedTestRun(gpuTestNamespacePrefix+"reconcile", "uid-reconcile")
+	run := observedTestRun(defaults.GPUTestNamespacePrefix+"reconcile", "uid-reconcile")
 	clientset := k8sfake.NewClientset(ownedNamespace(run))
 	deletes := 0
 	clientset.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -1579,7 +1581,7 @@ func TestCleanupGPUTestNamespace_BudgetBounded(t *testing.T) {
 	cleanupTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { cleanupTimeout = oldTimeout })
 
-	run := observedTestRun(gpuTestNamespacePrefix+"stuck", "uid-stuck")
+	run := observedTestRun(defaults.GPUTestNamespacePrefix+"stuck", "uid-stuck")
 	clientset := k8sfake.NewClientset(ownedNamespace(run))
 	clientset.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, nil // deletion accepted; the namespace never finalizes
@@ -1614,7 +1616,7 @@ func TestCleanupGPUTestNamespace_PersistentDeleteErrorReportsFailure(t *testing.
 	cleanupTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { cleanupTimeout = oldTimeout })
 
-	run := observedTestRun(gpuTestNamespacePrefix+"forbidden", "uid-forbidden")
+	run := observedTestRun(defaults.GPUTestNamespacePrefix+"forbidden", "uid-forbidden")
 	clientset := k8sfake.NewClientset(ownedNamespace(run))
 	clientset.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, k8serrors.NewForbidden(schema.GroupResource{Resource: "namespaces"},
@@ -1647,14 +1649,14 @@ func TestCleanupGPUTestNamespace_PersistentDeleteErrorReportsFailure(t *testing.
 func TestCleanupGPUTestNamespace_AmbiguousCreateSurfacesLate(t *testing.T) {
 	run := &gpuTestRun{
 		token:     "0123456789abcdef0123456789abcdef",
-		namespace: gpuTestNamespacePrefix + "late",
+		namespace: defaults.GPUTestNamespacePrefix + "late",
 		// nsObserved=false: the Create was ambiguous, nothing was ever
 		// positively observed.
 	}
 	lateNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name:   run.namespace,
 		UID:    "uid-late",
-		Labels: map[string]string{gpuTestRunLabel: run.token},
+		Labels: map[string]string{labels.GPUTestRun: run.token},
 	}}
 	clientset := k8sfake.NewClientset()
 	gets := 0
@@ -1695,7 +1697,7 @@ func TestCleanupGPUTestNamespace_AmbiguousCreateNeverSurfaces(t *testing.T) {
 
 	run := &gpuTestRun{
 		token:     "0123456789abcdef0123456789abcdef",
-		namespace: gpuTestNamespacePrefix + "never",
+		namespace: defaults.GPUTestNamespacePrefix + "never",
 	}
 	clientset := k8sfake.NewClientset() // the namespace never appears
 
@@ -1703,9 +1705,9 @@ func TestCleanupGPUTestNamespace_AmbiguousCreateNeverSurfaces(t *testing.T) {
 	if !strings.Contains(status, "may still surface later") {
 		t.Errorf("status = %q, want a report that the namespace may surface later", status)
 	}
-	if !strings.Contains(status, gpuTestRunLabel+"="+run.token) {
+	if !strings.Contains(status, labels.GPUTestRun+"="+run.token) {
 		t.Errorf("status = %q, want the ownership label %s=%s named for external sweeping",
-			status, gpuTestRunLabel, run.token)
+			status, labels.GPUTestRun, run.token)
 	}
 	if strings.Contains(status, "confirmed absent") || strings.Contains(status, "CLEANUP FAILED") {
 		t.Errorf("status = %q — never-observed must be its own terminal state", status)
@@ -1735,7 +1737,7 @@ func TestCleanupGPUTestNamespace_ConflictNotConfirmedAbsent(t *testing.T) {
 	}
 
 	t.Run("same UID still present → cleanup failed, not absence", func(t *testing.T) {
-		run := observedTestRun(gpuTestNamespacePrefix+"conflict", "uid-conflict")
+		run := observedTestRun(defaults.GPUTestNamespacePrefix+"conflict", "uid-conflict")
 		clientset := k8sfake.NewClientset(ownedNamespace(run))
 		conflictReactor(clientset, run.namespace)
 
@@ -1756,7 +1758,7 @@ func TestCleanupGPUTestNamespace_ConflictNotConfirmedAbsent(t *testing.T) {
 	})
 
 	t.Run("different UID at the name → confirmed absent, foreign left untouched", func(t *testing.T) {
-		run := observedTestRun(gpuTestNamespacePrefix+"reused", "uid-ours")
+		run := observedTestRun(defaults.GPUTestNamespacePrefix+"reused", "uid-ours")
 		// The name is now occupied by a DIFFERENT namespace (recreated by
 		// someone else) — the UID precondition 409s and the Get proves ours
 		// is gone.
@@ -1790,7 +1792,7 @@ func TestCleanupGPUTestNamespace_ConflictNotConfirmedAbsent(t *testing.T) {
 func TestCleanupGPUTestNamespace_DefinitiveCreateRejection(t *testing.T) {
 	run := &gpuTestRun{
 		token:     "0123456789abcdef0123456789abcdef",
-		namespace: gpuTestNamespacePrefix + "rejected",
+		namespace: defaults.GPUTestNamespacePrefix + "rejected",
 	}
 	clientset := k8sfake.NewClientset()
 	clientset.PrependReactor("create", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -1830,7 +1832,7 @@ func TestCleanupGPUTestNamespace_DefinitiveCreateRejection(t *testing.T) {
 func TestCreateGPUTestNamespace_AmbiguousErrorStaysSettleable(t *testing.T) {
 	run := &gpuTestRun{
 		token:     "0123456789abcdef0123456789abcdef",
-		namespace: gpuTestNamespacePrefix + "ambiguous",
+		namespace: defaults.GPUTestNamespacePrefix + "ambiguous",
 	}
 	clientset := k8sfake.NewClientset()
 	clientset.PrependReactor("create", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {

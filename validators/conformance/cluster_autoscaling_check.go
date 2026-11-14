@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	appsv1 "k8s.io/api/apps/v1"
@@ -43,7 +44,6 @@ import (
 )
 
 const (
-	clusterAutoTestPrefix  = "cluster-auto-test-"
 	karpenterNodePoolLabel = "karpenter.sh/nodepool"
 	clusterAutoTestImage   = "docker.io/library/ubuntu:22.04"
 )
@@ -238,7 +238,7 @@ func CheckClusterAutoscaling(ctx *validators.Context) error {
 					"If the request failed, the check logs a warning naming the namespace. "+
 					"Find leftovers from earlier runs with: "+
 					"kubectl get namespaces -o name | grep %s",
-					report.Namespace, clusterAutoTestPrefix))
+					report.Namespace, defaults.ClusterAutoscalingTestNamespacePrefix))
 			return passAsObservation()
 		}
 		slog.Debug("behavioral validation failed for NodePool",
@@ -266,9 +266,9 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", randErr)
 	}
 	suffix := hex.EncodeToString(b)
-	nsName := clusterAutoTestPrefix + suffix
-	deployName := clusterAutoTestPrefix + suffix
-	hpaName := clusterAutoTestPrefix + suffix
+	nsName := defaults.ClusterAutoscalingTestNamespacePrefix + suffix
+	deployName := defaults.ClusterAutoscalingTestNamespacePrefix + suffix
+	hpaName := defaults.ClusterAutoscalingTestNamespacePrefix + suffix
 	report = &clusterAutoscalingReport{
 		NodePoolName:   nodePoolName,
 		Namespace:      nsName,
@@ -328,7 +328,7 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   nsName,
-			Labels: map[string]string{gpuTestRunLabel: run.token},
+			Labels: map[string]string{labels.GPUTestRun: run.token},
 		},
 	}
 	created, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
