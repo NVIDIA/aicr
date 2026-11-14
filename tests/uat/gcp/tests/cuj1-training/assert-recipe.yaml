@@ -45,6 +45,7 @@ componentRefs: ## alphabetically sorted
   - name: kube-prometheus-stack
   - name: kubeflow-trainer
   - name: nfd
+  - name: nktp
   - name: nodewright-customizations
   - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
@@ -52,19 +53,20 @@ componentRefs: ## alphabetically sorted
   - name: prometheus-adapter
   - name: prometheus-operator-crds
 deploymentOrder:
-  - cert-manager
   - gcp-driver-installer
-  - nfd
   - nodewright-operator
   - nodewright-customizations
   - prometheus-operator-crds
+  - cert-manager
   - kube-prometheus-stack
+  - k8s-ephemeral-storage-metrics
+  - nfd
   - gpu-operator
   - dra-node-labeler
   - gke-nccl-tcpxo
-  - k8s-ephemeral-storage-metrics
   - kai-scheduler
   - kubeflow-trainer
+  - nktp
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter

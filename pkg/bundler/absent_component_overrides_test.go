@@ -255,7 +255,8 @@ func TestRejectOverridesForAbsentComponents(t *testing.T) {
 			b := &DefaultBundler{Config: config.NewConfig(opts...)}
 			rr := &recipe.RecipeResult{ComponentRefs: tt.refs}
 
-			selection, filterErr := b.filterEnabledComponents(t.Context(), rr)
+			r := &bundleRun{DefaultBundler: b}
+			selection, filterErr := r.filterEnabledComponents(t.Context(), rr)
 			if filterErr != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", filterErr)
 			}
@@ -292,7 +293,8 @@ func TestRejectOverridesForAbsentComponents_RecipeDisabledReEnableUnchanged(t *t
 		{Name: "gpu-operator", Type: "Helm"},
 	}}
 
-	selection, err := b.filterEnabledComponents(t.Context(), rr)
+	r := &bundleRun{DefaultBundler: b}
+	selection, err := r.filterEnabledComponents(t.Context(), rr)
 	if err == nil {
 		t.Fatalf("filterEnabledComponents() emitted = %v, want the re-enable rejection", selection.emitted)
 	}

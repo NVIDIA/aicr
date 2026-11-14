@@ -16,6 +16,7 @@ package localformat
 
 import (
 	"embed"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -171,7 +172,11 @@ func writeLocalHelmFolder(
 
 		rendered, rerr := manifest.Render(manifests[p], renderInput)
 		if rerr != nil {
-			return Folder{}, errors.Wrap(errors.ErrCodeInternal,
+			code := errors.ErrCodeInternal
+			if se, ok := stderrors.AsType[*errors.StructuredError](rerr); ok {
+				code = se.Code
+			}
+			return Folder{}, errors.Wrap(code,
 				fmt.Sprintf("render manifest %s for %s", p, c.Name), rerr)
 		}
 		// Both branches run the same YAML round-trip; only the filter

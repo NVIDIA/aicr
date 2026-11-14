@@ -800,6 +800,8 @@ func (t *imageRefsTarget) removeOwnedTemp(name string, expected fs.FileInfo) err
 	return nil
 }
 
+// close releases the target's root handle. It is safe to call on a nil target
+// and more than once, and every call returns the first call's result.
 func (t *imageRefsTarget) close() error {
 	if t == nil {
 		return nil

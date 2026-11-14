@@ -13,10 +13,8 @@
 # limitations under the License.
 
 # Assert kind monitoring stack components required by H100 CI are healthy.
-# Grafana is intentionally not asserted here because conformance metrics use
-# Prometheus, DCGM exporter, and prometheus-adapter directly.
 
-# Prometheus Operator - manages Prometheus, Alertmanager, and ServiceMonitor CRs
+# Prometheus Operator - manages the Prometheus CR
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,17 +24,7 @@ status:
   (conditions[?type == 'Available']):
     - status: "True"
 ---
-# kube-state-metrics - Kubernetes object state metrics
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: kube-state-metrics
-  namespace: monitoring
-status:
-  (conditions[?type == 'Available']):
-    - status: "True"
----
-# Prometheus StatefulSet - time series database
+# Prometheus StatefulSet - serves PromQL to prometheus-adapter and Dynamo
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -44,25 +32,6 @@ metadata:
   namespace: monitoring
 status:
   (readyReplicas > `0`): true
----
-# Alertmanager StatefulSet - alert routing and silencing
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: alertmanager-kube-prometheus-alertmanager
-  namespace: monitoring
-status:
-  (readyReplicas > `0`): true
----
-# Prometheus Node Exporter DaemonSet - node-level hardware/OS metrics
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: prometheus-node-exporter
-  namespace: monitoring
-status:
-  (numberReady > `0`): true
-  (desiredNumberScheduled > `0`): true
 ---
 # k8s-ephemeral-storage-metrics - ephemeral storage usage metrics
 apiVersion: apps/v1

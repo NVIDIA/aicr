@@ -202,14 +202,45 @@ func podGroupWithConditions(name string, conditions []any) *unstructured.Unstruc
 const kaiRefusalEight = "PodSchedulingErrors: Resources were found for 6 pods while 8 are required for gang scheduling. " +
 	"Additional pods cannot be scheduled due to: no nodes with enough resources were found"
 
+// kaiOverLimitMessage is what KAI v0.18.3 under Run:ai 3.0.20 recorded for the
+// negative group in a Project with a 4-core CPU limit (live, 2026-11-11).
+const kaiOverLimitMessage = "aicr-gang quota has reached the allowable limit of CPU cores. " +
+	"Limit is 4 cores, currently 0 cores allocated and workload requested 491.028 cores"
+
 func TestEvaluateGangRefusal(t *testing.T) {
 	tests := []struct {
-		name       string
-		conditions []any
-		minMember  int
-		wantMsg    string
-		wantErr    string
+		name        string
+		conditions  []any
+		minMember   int
+		wantMsg     string
+		wantErr     string
+		wantErrCode errors.ErrorCode
 	}{
+		{
+			// The queue's limit is checked before node fit, so the group never
+			// reaches the gang refusal: a configuration error, not a scheduler one.
+			name: "queue limit refusal is a configuration error",
+			conditions: []any{map[string]any{
+				"type": "UnschedulableOnNodePool", "status": "True", "reason": "Unschedulable",
+				"message": "OverLimit: " + kaiOverLimitMessage + ".",
+				"reasons": []any{map[string]any{"reason": kaiOverLimitReason, "message": kaiOverLimitMessage}},
+			}},
+			minMember:   8,
+			wantErr:     "remove the CPU and memory limits",
+			wantErrCode: errors.ErrCodeInvalidRequest,
+		},
+		{
+			name: "a gang refusal beside a queue limit refusal is still credited",
+			conditions: []any{map[string]any{
+				"type": "UnschedulableOnNodePool", "status": "True",
+				"reasons": []any{
+					map[string]any{"reason": kaiOverLimitReason, "message": kaiOverLimitMessage},
+					map[string]any{"reason": "PodSchedulingErrors", "message": kaiRefusalEight},
+				},
+			}},
+			minMember: 8,
+			wantMsg:   kaiRefusalEight,
+		},
 		{
 			name: "deprecated message field carries the refusal",
 			conditions: []any{map[string]any{
@@ -285,7 +316,11 @@ func TestEvaluateGangRefusal(t *testing.T) {
 				if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
 				}
-				errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+				wantCode := tt.wantErrCode
+				if wantCode == "" {
+					wantCode = errors.ErrCodeInternal
+				}
+				errorstest.WantReportedCode(t, err, wantCode)
 				return
 			}
 			if err != nil {
@@ -588,7 +623,7 @@ func TestRunGangPositivePhase(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			run, err := newGangTestRun()
+			run, err := newGangTestRun(kaiGangTarget())
 			if err != nil {
 				t.Fatalf("newGangTestRun: %v", err)
 			}
@@ -658,6 +693,7 @@ func TestRunGangNegativePhase(t *testing.T) {
 		wantMembers int
 		refusal     bool // fake KAI writes the gang refusal
 		bindMembers bool // fake default scheduler binds members (gang disabled)
+		otherRun    bool // a Pending negative member of another run shares the namespace
 		wantErr     string
 		wantMsg     string
 	}{
@@ -703,15 +739,28 @@ func TestRunGangNegativePhase(t *testing.T) {
 			refusal:     false,
 			wantErr:     "not credited",
 		},
+		{
+			// A Run:ai Project namespace is shared, so another validation's
+			// negative members sit beside this run's with the same phase label.
+			name:        "another run's Pending member in the namespace: still credited",
+			nodes:       nodeObjs,
+			wantMembers: len(nodes) + 1,
+			refusal:     true,
+			otherRun:    true,
+			wantMsg:     "while 8 are required for gang scheduling",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			run, err := newGangTestRun()
+			run, err := newGangTestRun(kaiGangTarget())
 			if err != nil {
 				t.Fatalf("newGangTestRun: %v", err)
 			}
 			clientset := k8sfake.NewSimpleClientset(tt.nodes...)
+			if tt.otherRun {
+				seedOtherRunNegativeMember(t, clientset, run.namespace)
+			}
 			if tt.bindMembers {
 				bindNegativePodOnCreate(clientset, "gpu-0")
 			}
@@ -741,7 +790,7 @@ func TestRunGangNegativePhase(t *testing.T) {
 				t.Errorf("negative shape = %+v with %d pod names, want %d members", run.negShape, len(run.negPods), tt.wantMembers)
 			}
 			pods, err := clientset.CoreV1().Pods(run.namespace).List(context.Background(), metav1.ListOptions{
-				LabelSelector: gangPhaseSelector(gangPhaseNegative),
+				LabelSelector: run.phaseSelector(gangPhaseNegative),
 			})
 			if err != nil {
 				t.Fatalf("list negative pods: %v", err)
@@ -765,6 +814,23 @@ func TestRunGangNegativePhase(t *testing.T) {
 	}
 }
 
+// seedOtherRunNegativeMember creates a Pending negative member of a second
+// run in namespace, carrying the same phase label as the run under test.
+func seedOtherRunNegativeMember(t *testing.T, clientset *k8sfake.Clientset, namespace string) {
+	t.Helper()
+	other, err := newGangTestRun(kaiGangTarget())
+	if err != nil {
+		t.Fatalf("newGangTestRun (other): %v", err)
+	}
+	other.namespace = namespace
+	other.setNegativeShape(gangNegativeShape{Members: 1})
+	pod := buildGangNegativePod(other, 0, nil)
+	pod.Status.Phase = corev1.PodPending
+	if _, err := clientset.CoreV1().Pods(namespace).Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("seed other run's negative member: %v", err)
+	}
+}
+
 // TestGangPhaseBudgetUnderThreeMinutes pins the runtime budget the issue sets:
 // the positive completion bound plus the negative window must leave room for
 // KAI readiness waits, pod creation and cleanup inside a three-minute check.
@@ -779,7 +845,7 @@ func TestGangPhaseBudgetUnderThreeMinutes(t *testing.T) {
 // TestCleanupGangTestResourcesDeletesNegativeMembers extends the namespace
 // cleanup guard to the negative phase: its pods and PodGroup go with the run.
 func TestCleanupGangTestResourcesDeletesNegativeMembers(t *testing.T) {
-	run, err := newGangTestRun()
+	run, err := newGangTestRun(kaiGangTarget())
 	if err != nil {
 		t.Fatalf("newGangTestRun: %v", err)
 	}

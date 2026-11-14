@@ -21,6 +21,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
@@ -369,6 +370,14 @@ func (c *Client) adoptRecipe(ctx context.Context, rec *recipe.RecipeResult) (*Re
 	// canonical inline maps and slices must be acyclic because DeepCopy
 	// recursively copies those containers.
 	if err := rec.ValidateProfileContract(); err != nil {
+		return nil, err
+	}
+
+	if c.source.kind == sourceKindOCI && rec.Metadata.Artifacts != nil {
+		return nil, artifact.Invalid("artifact-source-unsupported", "OCI clients cannot consume artifact-bearing recipes")
+	}
+
+	if err := recipe.CheckArtifactInputs(rec.Metadata.Artifacts, dp); err != nil {
 		return nil, err
 	}
 

@@ -33,8 +33,8 @@ const (
 	// The images docs/user/container-images.md discloses for the mixin. The
 	// static BOM cannot see a mixin-gated subchart, so these assertions are
 	// what keep that note honest.
-	logCollectorImage       = "ghcr.io/nvidia/nvsentinel/log-collector:v1.28.0"
-	fileServerCleanupImage  = "ghcr.io/nvidia/nvsentinel/file-server-cleanup:v1.28.0"
+	logCollectorImage       = "ghcr.io/nvidia/nvsentinel/log-collector:v1.31.0"
+	fileServerCleanupImage  = "ghcr.io/nvidia/nvsentinel/file-server-cleanup:v1.31.0"
 	fileServerNginxImage    = "docker.io/bitnamilegacy/nginx:1.27.2-debian-12-r2"
 	fileServerInitImage     = "docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4"
 	fileServerExporterImage = "quay.io/martinhelmich/prometheus-nginxlog-exporter:v1.10.0"

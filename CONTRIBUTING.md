@@ -171,9 +171,12 @@ Trust is established through evidence, not assertions. Every released artifact c
 1. Push your branch and open a PR against `main`
 2. Fill out the PR template completely:
    - **Summary**: Brief description of changes
-   - **Fixes / Related**: The issue assigned to you (see [Start with an issue](#start-with-an-issue))
+   - **Motivation / Context**: Why the change is needed, with `Fixes:` / `Related:` naming the issue assigned to you (see [Start with an issue](#start-with-an-issue))
    - **Type of Change**: Bug fix, feature, breaking change, etc.
+   - **Component(s) Affected**: The areas the change touches
+   - **Implementation Notes**: Design choices reviewers should know about
    - **Testing**: What testing was performed
+   - **Risk Assessment**: Low / Medium / High, with rollout notes
    - **Checklist**: Verify all items
 3. Do not add a priority label (`P0`, `P1`, `P2`) to the PR. Priority is a field on the AICR Project board rather than a repository label, and the PR Label Guard workflow strips any `P<number>` label from a pull request. See [Issue Priority](#issue-priority).
 

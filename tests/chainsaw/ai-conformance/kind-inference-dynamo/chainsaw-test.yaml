@@ -70,6 +70,12 @@ spec:
         - assert:
             file: ../kind-common/assert-monitoring.yaml
 
+    - name: assert-nktp
+      description: Verify the NKTP telemetry pipeline and the resource metrics API.
+      try:
+        - assert:
+            file: ../kind-common/assert-nktp.yaml
+
     # ── agentgateway ───────────────────────────────────────────────────
     - name: assert-agentgateway
       description: Verify agentgateway controller is available.

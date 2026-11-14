@@ -124,7 +124,7 @@ func templateArgs(input ChartInput, valuesOnStdin bool) []string {
 		args = append(args, "--repo", repoFlag)
 	}
 	if input.Version != "" {
-		args = append(args, "--version", input.Version)
+		args = append(args, "--version", ChartVersion(input.Repository, input.Version))
 	}
 	if input.Namespace != "" {
 		args = append(args, "--namespace", input.Namespace)
@@ -216,4 +216,13 @@ func lastPathSegment(s string) string {
 		return s[i+1:]
 	}
 	return s
+}
+
+// ChartVersion decodes OCI tag build metadata for Helm's semantic-version inputs.
+// It preserves the leading v and build identity; pins and provenance retain the tag.
+func ChartVersion(repository, version string) string {
+	if strings.HasPrefix(repository, "oci://") {
+		return strings.ReplaceAll(version, "_", "+")
+	}
+	return version
 }

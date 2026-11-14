@@ -26,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	helmutil "github.com/NVIDIA/aicr/pkg/helm"
 )
 
 //go:embed templates/install-upstream-helm.sh.tmpl
@@ -133,7 +134,7 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 	// sequence '\'' — a closed quote, an escaped quote, then a re-opened
 	// one — which is the only POSIX-safe escape inside single quotes.
 	envContent := fmt.Sprintf("CHART=%s\nREPO=%s\nVERSION=%s\n",
-		shellSingleQuote(chart), shellSingleQuote(repo), shellSingleQuote(c.Version))
+		shellSingleQuote(chart), shellSingleQuote(repo), shellSingleQuote(helmutil.ChartVersion(c.Repository, c.Version)))
 	envPath, err := deployer.SafeJoin(folderDir, "upstream.env")
 	if err != nil {
 		return Folder{}, errors.Wrap(errors.ErrCodeInvalidRequest, "upstream.env path unsafe", err)

@@ -84,6 +84,7 @@ a component the bundler enabled at bundle time is not checked.
 - Effectively cluster-admin for the identity running `aicr validate`. Each run creates a ServiceAccount for its validator Jobs and binds it to the built-in `cluster-admin` ClusterRole through a per-run `aicr-validator-<run-id>` ClusterRoleBinding, and Kubernetes RBAC only lets you bind a role whose permissions you already hold. The run deletes the binding at cleanup; `--no-cleanup` leaves it active until you delete it yourself. AICR creates its own `aicr-validation` namespace on first run. To run without that grant, have an administrator provision the ServiceAccount instead; see [Running under a pre-provisioned ServiceAccount](#running-under-a-pre-provisioned-serviceaccount).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
 - **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` and `dra` require every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin — or, under `dra`, the NVIDIA DRA driver's ResourceSlices — is the sole whole-GPU advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate with no cap set, from the flag, `AICR_MAX_NODES_PER_ENTRY`, or `spec.snapshot.execution.maxNodesPerEntry`; a cap larger than the node count truncates nothing and validates normally). `gke-default` needs no provider projection flag. Its constraint reads node labels the standard snapshot already carries. `bundle-installer` and `dra` additionally re-evaluate `K8s.gke-gpu-pools.gpu-driver-installation`, corroborating that every GPU pool was actually created with `gpu-driver-version=disabled`. That reading requires a snapshot captured with `--gke-gpu-pools <gcloud dump>` (or passed to `aicr validate --gke-gpu-pools`), and without it is unavailable, so those values fail closed. `dra` also re-evaluates its own `K8s.server.version >= 1.35.0` floor. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
+- **Run:ai recipes** (`platform=runai`): the `gang-scheduling` conformance check runs its test pods in a Run:ai Project namespace, so export `AICR_RUNAI_PROJECT_NAMESPACE=runai-<project>` in the shell running `aicr validate`; the check fails, rather than skips, without it. The Project needs an explicit CPU and memory quota and no CPU or memory limit, and a private probe image needs its pull Secret already in that namespace. See [Run:ai cluster](component-catalog.md#runai-cluster).
 - **`NodeTopology.gpu-nodes.label` readiness constraints outside GKE** (including bare metal and `--data` services): GPU nodes are those the GPU Operator labels `nvidia.com/gpu.present=true`, so capture the snapshot after it is running. A snapshot with no such node fails readiness closed (exit 2), and GPU nodes it has not labeled are not checked.
 
 ## Training performance validation
@@ -1534,7 +1535,7 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
-> 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` normally reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. One narrow exception remains — the CLI waits the catalog timeout plus `ValidatorWaitBuffer` (2m30s) for the Job to become terminal — measured from the Job's observed start time (`status.startTime` when the apiserver has stamped it, otherwise `creationTimestamp`, which is never later and so only ever ends the wait earlier), so it shares an origin with the Job's clock — a window that is deliberately shorter than the Job's own `activeDeadlineSeconds` (catalog timeout plus `ValidatorJobDeadlineHeadroom`, 3m30s), so a validator whose pod is still running when the CLI's wait expires exhausts the wait before the deadline condition is ever stamped. Such a run falls back to the CLI-wait path and still reports `other`.
+> 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. The Job deadline is the catalog timeout plus `ValidatorJobDeadlineHeadroom` (3m: 2m for container startup, 30s for the check's deferred cleanup, 30s to flush its result), and the CLI waits for the Job to become terminal for that deadline plus the pod's 60s SIGTERM window and a 5s margin (catalog timeout + 4m05s), measured from the Job's observed start time (`status.startTime` when the apiserver has stamped it, otherwise `creationTimestamp`). The CLI therefore never gives up on a run while the pod is still finishing its cleanup. When the Job controller deletes the pod at the deadline, the CLI reports what the check itself reported: the exit code and termination message of the pod in its deletion grace window, or of the last terminated pod it observed while waiting, is appended to the deadline message (`check reported: exit code 3: terminated by SIGTERM …`). The verdict stays `failed`; if no terminated status was observed the generic deadline message stands.
 > 2. Exit 5 is narrower than it sounds. A timeout **inside** a check's own logic (DynamoGraphDeployment not ready, inference endpoint never healthy, AIPerf Job pod-wait deadline) surfaces as a failed phase, not as a structured `ErrCodeTimeout`, so the CLI exits **8**. So does a per-validator wait deadline: `runPhase` hands that error to the timeout handler and records the outcome as a check result rather than propagating it, which is the same path the wait-exhaustion exception in note 1 takes. The rule, rather than a list of sources: exit 5 applies whenever an `ErrCodeTimeout` reaches the top-level CLI. A timeout that is converted into a check result instead — whether raised inside a check or by a per-validator wait — surfaces as exit 8.
 
 **Interrupted runs.** The first Ctrl-C or SIGTERM cancels validation and, with
@@ -1552,12 +1553,12 @@ preparation, writes no CTRF output. Partial output is written only for an
 interruption. Any other error (for example a later phase's pre-flight failure,
 or a privileged RBAC revocation failure after every phase completed) writes no
 CTRF output, as before.
-Cleanup typically takes about 35s, and about 95s plus overhead in the worst
+Cleanup typically takes about 65s, and about 125s plus overhead in the worst
 case. One shared 30s window covers result capture, Job deletion and report
 persistence. The wait for the validator pod to terminate then covers the pod's
-full 30s SIGTERM grace from Job deletion (plus a 5s margin), so the validator's
+full 60s SIGTERM grace from Job deletion (plus a 5s margin), so the validator's
 RBAC stays in place while a cooperative check cleans up. The existing 30s
-per-run RBAC/data teardown window follows. The CLI records this 95s aggregate
+per-run RBAC/data teardown window follows. The CLI records this 125s aggregate
 deadline when cancellation is first observed, not when validation starts.
 Partial output uses only the time remaining before that deadline (and at most
 its existing 30s I/O cap), never a further cleanup window. If no time remains,
@@ -1586,11 +1587,13 @@ a cooperative check runs deferred cleanup, writes a SIGTERM interruption message
 and exits `3`, mapped to CTRF `other` rather than a completed failure verdict.
 This container exit is distinct from the CLI's exit `9` on operator cancellation.
 It remains blocking (normally CLI exit `8`), including when the check returns
-nil after cancellation. The pod's 30s grace is best effort: blocking checks,
-long cleanup, SIGKILL, OOM or a crash may prevent a termination message, and a
-missing pod with a terminal Job deadline condition still uses the Job-level
-`failed` classification described above. No external orphan-resource sweeper
-is provided.
+nil after cancellation. The pod's 60s grace (30s for cleanup, 30s to write the
+termination message) is best effort: blocking checks, long cleanup, SIGKILL, OOM
+or a crash may prevent a termination message, and a missing pod with a terminal
+Job deadline condition still uses the Job-level `failed` classification
+described above, carrying the check's own message when one was observed. No
+external orphan-resource sweeper is provided yet; namespaces a check leaves
+behind after SIGKILL or a crash carry the `aicr.run/gpu-test-run` label.
 
 Scripts that gate on validation outcome should treat **any non-zero code** as
 failure rather than branching on specific values, and should additionally
@@ -1711,14 +1714,15 @@ runtime handler, or a shim binary not found) and fail within seconds with
 instead of waiting out the pod timeout. A sandbox failure from network setup
 is transient and is not treated this way.
 
-### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus unreachable"
+### `ai-service-metrics` or `pod-autoscaling` cannot reach its metrics endpoint
 
 On EKS clusters that split worker and system pods across separate security
 groups (e.g. DGXC EKS with distinct customer/system ENI subnets), the
-conformance check `ai-service-metrics` can fail non-deterministically with:
+conformance check `ai-service-metrics`, which queries NKTP's `otel-lgtm`, can
+fail non-deterministically with:
 
 ```text
-[SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
+[SERVICE_UNAVAILABLE] metrics backend unreachable at http://lgtm.nktp.svc:9090 — verify network connectivity
 ```
 
 `pod-autoscaling`, which dials Prometheus for its PodMonitor load wait when the
@@ -1732,10 +1736,11 @@ Both checks' orchestrator Jobs carry the preferred `dependencyAffinity`
 described below.
 
 The validator orchestrator Job tolerates every taint and sets a *preferred*
-`dependencyAffinity` toward Prometheus, so the scheduler co-locates it with the
-Prometheus pod when possible. The preference is best-effort, so on fallback it
+`dependencyAffinity` toward the pod it dials (`otel-lgtm` for
+`ai-service-metrics`, Prometheus for `pod-autoscaling`), so the scheduler
+co-locates the two when possible. The preference is best-effort, so on fallback it
 can still land on any worker node — including one whose ENI is in a security
-group whose ingress to the Prometheus-hosting SG is missing or asymmetric. On
+group whose ingress to that pod's SG is missing or asymmetric. On
 such a fallback the outcome is **not stable across re-runs**: image-locality
 scoring tends to keep the pod on whatever node won the first scheduling
 decision, so a passing run on a fresh cluster does not prove the SG topology is
@@ -1743,13 +1748,14 @@ correct.
 
 This is a cluster-side prerequisite, not an AICR bug per se — see
 [EKS Dynamo Networking Prerequisites](../integrator/eks-dynamo-networking.md#required-security-group-rules)
-for the SG ingress rules required for Prometheus (`tcp/9090`). The preferred
+for the SG ingress rules required for `tcp/9090`, which both Prometheus and
+`otel-lgtm` serve. The preferred
 `dependencyAffinity` ([#933](https://github.com/NVIDIA/aicr/issues/933),
 resolved) makes a bad placement far less likely, but the `9090` SG rule remains
 the reliable guarantee since the affinity is best-effort.
 
 Workaround when SG changes are not available: re-run the check until the
-orchestrator lands on a node whose SG can reach Prometheus, then leave the
+orchestrator lands on a node whose SG can reach that pod, then leave the
 image cached there so image-locality keeps subsequent runs on the same node.
 This is unreliable and should not be used as the steady-state validation
 strategy.
@@ -1791,62 +1797,81 @@ the `--image-pull-secret` Secrets, copied into the per-run namespace as for
 the other probe pods (see the `driver-runtime-management` note above), so a
 mirror that needs credentials is served the same way as the validator image.
 
-### `ai-service-metrics` or `pod-autoscaling` fails with "Prometheus did not load the ServiceMonitor/PodMonitor"
+### `pod-autoscaling` fails with "Prometheus did not load the PodMonitor"
 
-Both checks create a monitor (a ServiceMonitor or a PodMonitor) and, before
-starting their collection budget, wait up to five minutes for the recipe's
-Prometheus to list it among its scrape pools (`GET /api/v1/scrape_pools`).
-That wait exists because prometheus-operator reconciles monitors on its own
-schedule: gaps of about three minutes between a monitor's creation and
-Prometheus loading it were observed on a healthy AKS cluster, longer than the
-collection budget itself. For `pod-autoscaling` the scrape-pool preflight and
-the wait happen only when the recipe declares `kube-prometheus-stack`; without
-it (the OpenShift overlay serves `prometheus-adapter-ocp` from the platform
-monitoring stack) there is no Prometheus to ask, the check records the wait as
-skipped, and its baseline is bounded by the metric timeout alone.
+When the recipe declares `kube-prometheus-stack`, the check creates its
+PodMonitor in the Prometheus namespace, because that Prometheus loads monitors
+only from the namespaces the bundle names and its own. Before starting its
+metric budget it waits up to five minutes for Prometheus to list the
+PodMonitor among its scrape pools (`GET /api/v1/scrape_pools`). That wait
+exists because prometheus-operator reconciles monitors on its own schedule:
+gaps of about three minutes between a monitor's creation and Prometheus
+loading it were observed on a healthy AKS cluster. Without
+`kube-prometheus-stack` (the OpenShift overlay serves `prometheus-adapter-ocp`
+from the platform monitoring stack) there is no Prometheus to ask: the
+PodMonitor stays in the test namespace, the check records the wait as skipped,
+and its baseline is bounded by the metric timeout alone.
 
 The baseline then ends in one of three ways, each with its own message.
 
 A failure naming the load, such as:
 
 ```text
-[NOT_FOUND] AI service metrics test failed in phase baseline: [NOT_FOUND] Prometheus did not load the ServiceMonitor ai-metrics-test-<id>/ai-metrics-stub within 5m0s: no scrape pool serviceMonitor/ai-metrics-test-<id>/ai-metrics-stub/* among the 12 configured ...
+[NOT_FOUND] HPA autoscaling test failed in phase baseline: [NOT_FOUND] Prometheus did not load the PodMonitor monitoring/hpa-workload-<id> within 5m0s: no scrape pool podMonitor/monitoring/hpa-workload-<id>/* among the 12 configured ...
 ```
 
 means Prometheus did not load the monitor within the wait. Two things have
 to happen for it to: prometheus-operator must write the monitor into the
 generated configuration, and Prometheus must reload that configuration. Check
 both. For the first, look at the operator's logs for the reconcile of that
-namespace, and confirm the Prometheus resource selects the monitor: the checks
-label it `release=kube-prometheus-stack`, and the recipe's Prometheus opens
-`serviceMonitorSelector`, `podMonitorSelector` and their namespace selectors.
-For the second, a rejected reload leaves Prometheus running on its previous
-configuration with the pool absent even though the operator did its part:
-check `prometheus_config_last_reload_successful` (0 after a failed reload),
-the `PrometheusBadConfig` alert and its runbook, and the Prometheus and
-config-reloader container logs for the reload error.
+namespace, and confirm the Prometheus resource's `podMonitorNamespaceSelector`
+names its own namespace. For the second, a rejected reload leaves Prometheus
+running on its previous configuration with the pool absent even though the
+operator did its part: check `prometheus_config_last_reload_successful` (0
+after a failed reload) and the Prometheus and config-reloader container logs
+for the reload error.
 
 A failure reading "could not determine whether Prometheus loaded the
-ServiceMonitor/PodMonitor ... the last completed scrape pool listing failed"
+PodMonitor ... the last completed scrape pool listing failed"
 (or "... no scrape pool listing completed") means the scrape pool API stopped
 answering after the preflight, so no verdict on the monitor was reached; the
 underlying listing error (unreachable, HTTP status, malformed response) is
 attached. A listing the wait's deadline interrupts does not change the
-verdict: "did not load" rests on the last listing that completed. Check the Prometheus pod and the network
-path from the validator pod to it, as for "Prometheus unreachable" above.
+verdict: "did not load" rests on the last listing that completed. Check the
+Prometheus pod and the network path from the validator pod to it, as in the
+section above.
 
-A failure naming the collection instead ("Prometheus loaded the ServiceMonitor
-but the workload metrics were not collected", or "Prometheus loaded the
-PodMonitor, but the custom metrics pipeline does not serve the workload
-metric") means the configuration was loaded and the scrape or the adapter
-query did not produce a sample: check the target under the active or
-dropped targets at `/api/v1/targets` (a target relabeling dropped is listed
-as dropped, not active) and, for `pod-autoscaling`, the prometheus-adapter
-rule.
+A failure naming the collection instead ("Prometheus loaded the PodMonitor,
+but the custom metrics pipeline does not serve the workload metric") means the
+configuration was loaded and the scrape or the adapter query did not produce a
+sample: check the target under the active or dropped targets at
+`/api/v1/targets` (a target relabeling dropped is listed as dropped, not
+active), that the Prometheus series filter keeps
+`ai_conformance_hpa_queue_depth`, and the prometheus-adapter rule.
+
+### `ai-service-metrics` fails with "did not report the stub's target as up"
+
+The check queries the backend NKTP exports to, not the recipe's Prometheus.
+It creates a ServiceMonitor in its test namespace and waits up to five minutes
+for that backend to hold the stub target's `up` series with value 1.
+
+- No `up` series: NKTP did not discover the ServiceMonitor, or did not export
+  the sample. NKTP needs no monitor label, so check the ServiceMonitor's
+  selector and port, the Target Allocators' logs, and the collectors' logs for
+  failed scrapes or exports.
+- `up` is 0: the target is discovered but its scrape fails. Check the network
+  path from NKTP's collectors to the stub pod.
+
+A failure reading "discovered the ServiceMonitor but the workload metrics were
+not collected" means `up` arrived but the stub's own series did not within the
+collection timeout: check the collectors' logs as above.
+
+The check is skipped, and the CNCF requirement reported as not tested, when
+the recipe has no `nktp` or NKTP runs without `otel-lgtm`.
 
 ### Benchmark Job stuck or timed out
 
-Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:` plus `ValidatorJobDeadlineHeadroom` (3m30s) on top. For `inference-perf`, the full pipeline (model-cache populate → workload ready → endpoint health → benchmark) can take up to ~50 min on cold-start clusters; the catalog budgets a 65 min timeout. If it still times out:
+Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:` plus `ValidatorJobDeadlineHeadroom` (3m) on top. For `inference-perf`, the full pipeline (model-cache populate → workload ready → endpoint health → benchmark) can take up to ~50 min on cold-start clusters; the catalog budgets a 65 min timeout. If it still times out:
 
 ```bash
 # validator orchestrator Job + AIPerf benchmark Job both live in aicr-validation.

@@ -311,7 +311,9 @@ rules; maintainer review of this entry is the trust gate.
 >
 > The first command rewrites `pointers.yaml` and fails on purpose, so the
 > next run embeds the new file. Commit `pointers.yaml` with the evidence
-> change.
+> change. Then run `make recipe-health-docs` and commit the regenerated
+> `docs/user/recipe-health.md`, so the recipe's Signer class column shows
+> the class of the new pointer.
 
 Only keyless signers count. Evidence signed with a KMS key
 (`--signing-key`) records `signer.issuer: key`, and the contract gate rejects

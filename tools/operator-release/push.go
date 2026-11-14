@@ -54,6 +54,13 @@ const deniedAttempts = 4
 // later retry waits one more of it.
 var deniedBackoff = 2 * time.Second
 
+// registryHTTPClient owns its connection pool so closing idle connections on
+// the process-wide default transport cannot interrupt a registry operation.
+var registryHTTPClient = &http.Client{
+	Transport: retry.NewTransport(http.DefaultTransport.(*http.Transport).Clone()),
+	Timeout:   pushTimeout,
+}
+
 // push publishes a candidate as built, never rebuilt: the operator and
 // in-cluster registry image indexes from their OCI layouts to the
 // repositories candidate.json names, tagged with the candidate version, then
@@ -150,7 +157,7 @@ func repository(ref string, plainHTTP bool) (*remote.Repository, error) {
 	}
 	repo.PlainHTTP = plainHTTP
 	repo.Client = &auth.Client{
-		Client: retry.DefaultClient,
+		Client: registryHTTPClient,
 		Cache:  auth.NewCache(),
 		Credential: auth.StaticCredential(repo.Reference.Registry, auth.Credential{
 			Username: os.Getenv("CANDIDATE_REGISTRY_USERNAME"), Password: os.Getenv("CANDIDATE_REGISTRY_PASSWORD"),

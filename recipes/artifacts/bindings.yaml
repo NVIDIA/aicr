@@ -1,0 +1,18 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: aicr.run/v1beta1
+kind: ArtifactBindings
+charts:
+  cert-manager-chart:
+    component: cert-manager
+  slurm-accounting-mariadb-chart:
+    component: slurm-accounting-mariadb
+images:
+  slurm-accounting-mariadb-image:
+    targets:
+      - component: slurm-accounting-mariadb
+        valuesFile: components/slurm-accounting-mariadb/values.yaml
+        write:
+          reference: /mariadb/image
+ignoredArtifacts: {}

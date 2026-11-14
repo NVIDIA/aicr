@@ -32,8 +32,10 @@ spec:
   componentRefs:
     - name: nvsentinel
       # Ordering only -- the controller resolves the PodGroup CRD at startup and
-      # exits without it. That kai-scheduler stays ENABLED is enforced by
-      # CheckNVSentinelPreflightGangSchedulerRequired, not by this edge.
+      # exits without it. That a provider of that CRD stays ENABLED
+      # (kai-scheduler, or runai-cluster on the Run:ai leaves, whose chart
+      # bundles KAI) is enforced by CheckNVSentinelPreflightGangSchedulerRequired,
+      # not by this edge.
       dependencyRefs:
         - kai-scheduler
       overrides:

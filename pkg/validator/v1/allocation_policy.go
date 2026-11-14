@@ -313,6 +313,9 @@ func ToValidationInputWithContext(ctx context.Context, r *recipe.RecipeResult) (
 	if validation == nil {
 		return nil, nil //nolint:nilnil // mirrors ToValidationInput's nil-in/nil-out contract
 	}
+	if err := r.ValidateArtifactLock(ctx, r.ComponentRefs, nil, nil); err != nil {
+		return nil, err
+	}
 	policy, err := ResolveGPUAllocationPolicy(ctx, r)
 	if err != nil {
 		return nil, err

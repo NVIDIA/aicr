@@ -291,7 +291,8 @@ func TestRunReportsCurrentAliasMappings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
-	const want = "BundleArtifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output\n" +
+	const want = "ArtifactOptions|github.com/NVIDIA/aicr/pkg/artifact|Options\n" +
+		"BundleArtifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output\n" +
 		"BundleAttester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester\n" +
 		"BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config\n" +
 		"BundleVerifyReport|github.com/NVIDIA/aicr/pkg/bundler/verifier|VerifyResult\n" +

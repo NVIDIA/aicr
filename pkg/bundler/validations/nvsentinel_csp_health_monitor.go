@@ -56,7 +56,7 @@ const (
 // cspMonitorIntervals are the timing values the chart writes into the
 // monitor's TOML unquoted, with the minimum the monitor accepts at startup
 // (health-monitors/csp-health-monitor/pkg/config/config.go, NVSentinel
-// v1.28.0). zeroIsDefault marks the ones the monitor replaces with its
+// v1.31.0). zeroIsDefault marks the ones the monitor replaces with its
 // default when 0. aws, gcp and lambda scope the minimum to that provider's
 // poller; the monitor decodes all three sections whatever cspName is, so each
 // must still be a whole number.
@@ -75,7 +75,7 @@ var cspMonitorIntervals = []struct {
 }
 
 // cspMonitorAWSHealthRegions are the regions the AWS Health API has an
-// endpoint in, in the commercial partition. NVSentinel v1.28.0 uses
+// endpoint in, in the commercial partition. NVSentinel v1.31.0 uses
 // aws.region both as the client's region and as the event filter, so a
 // cluster elsewhere can neither reach the API nor read its own region's
 // events.
@@ -111,7 +111,7 @@ var (
 //
 //   - cspName is not aws or gcp, or does not match the recipe's service (aws
 //     on eks, gcp on gke): on any other service there is no API it can read;
-//   - processingStrategy is not STORE_ONLY. At NVSentinel v1.28.0 a
+//   - processingStrategy is not STORE_ONLY. At NVSentinel v1.31.0 a
 //     maintenance event that fault-quarantine acts on can release a node
 //     another notice still holds: fault-quarantine keys the quarantine by
 //     agent, check, node and instance, among other fields, never by notice, so when two notices
@@ -202,7 +202,7 @@ func CheckNVSentinelCSPHealthMonitorCoherent(ctx context.Context, componentName 
 
 	if strategy, _, _ := resolvedStringValue(values, cspMonitorProcessingStrategyPath); strategy != cspMonitorStoreOnly {
 		raw, _ := component.GetValueByPath(values, cspMonitorProcessingStrategyPath)
-		fail("%s is %#v, but AICR supports only %s: at NVSentinel v1.28.0 a maintenance event fault-quarantine "+
+		fail("%s is %#v, but AICR supports only %s: at NVSentinel v1.31.0 a maintenance event fault-quarantine "+
 			"acts on can release a node another notice still holds (two notices for one instance, or a notice "+
 			"stored under %s ending after a switch), uncordoning it during active maintenance -- keep the %s%s "+
 			"mixin's %s", cspMonitorProcessingStrategyPath, raw, cspMonitorStoreOnly, cspMonitorStoreOnly,

@@ -108,6 +108,13 @@ spec:
         - nfd
         - cert-manager
 
+    # nktp: a self-managed cluster ships no resource metrics API.
+    - name: nktp
+      type: Helm
+      overrides:
+        metrics-server:
+          enabled: true
+
   # Deployment checks come from the gb300-any criteria-wildcard overlay.
   validation:
     performance:

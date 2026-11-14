@@ -270,6 +270,29 @@ func TestWrite_PreManifestRenderErrorPreservesCode(t *testing.T) {
 	}
 }
 
+func TestWrite_PostManifestRenderErrorKeepsCodeAndManifest(t *testing.T) {
+	_, err := localformat.Write(t.Context(), localformat.Options{
+		OutputDir: t.TempDir(),
+		Components: []localformat.Component{{
+			Name:      "foo",
+			Namespace: "slurm",
+			Values:    map[string]any{},
+		}},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"foo": {"components/foo/manifests/policy.yaml": []byte(`{{ fail "bad override" }}`)},
+		},
+	})
+	if err == nil {
+		t.Fatal("Write() error = nil, want post-manifest render error")
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	for _, want := range []string{"render manifest components/foo/manifests/policy.yaml for foo", "bad override"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Write() error = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+}
+
 func TestWrite_LocalHelmManifestOnly(t *testing.T) {
 	outDir := t.TempDir()
 

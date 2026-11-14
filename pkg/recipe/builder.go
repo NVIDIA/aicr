@@ -237,6 +237,10 @@ func (b *Builder) buildWithStore(ctx context.Context, c *Criteria, opts []BuildO
 		return nil, err
 	}
 
+	if err := result.ValidateArtifactLock(buildCtx, result.ComponentRefs, nil, nil); err != nil {
+		return nil, err
+	}
+
 	// Stamp owner so cross-Builder result mixing is rejected at the
 	// consumption point (see RecipeResult.AssertOwnedBy). The Builder
 	// pointer identity is the token — zero-cost and unforgeable from

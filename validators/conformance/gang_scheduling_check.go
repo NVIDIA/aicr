@@ -21,6 +21,8 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,10 +36,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -47,6 +51,11 @@ const (
 	gangNegativePodPrefix   = "gang-neg-worker-"
 	gangNegativeGroupPrefix = "gang-neg-group-"
 	gangMinMembers          = 2
+
+	// gangTerminationGracePeriod bounds how long a deleted member lingers. A
+	// negative member that bound runs sleep as PID 1, which ignores SIGTERM,
+	// so under the default 30s it would outlive the cleanup's pod wait.
+	gangTerminationGracePeriod int64 = 5
 
 	// gangNegativeMaxMembers caps the non-fitting PodGroup. The member CPU
 	// request is sized so that the group cannot fit whatever the count, so the
@@ -59,8 +68,9 @@ const (
 	gangWorkerCPURequest    = "100m"
 	gangWorkerMemoryRequest = "128Mi"
 
-	// gangPhaseLabel marks which phase a test pod belongs to; its values are
-	// gangPhasePositive and gangPhaseNegative.
+	// gangPhaseLabel marks which phase a test pod or PodGroup belongs to; its
+	// values are gangPhasePositive and gangPhaseNegative. gpuTestRunLabel,
+	// carrying the run's suffix, marks which run.
 	gangPhaseLabel    = "gang-scheduling.aicr.nvidia.com/phase"
 	gangPhasePositive = "positive"
 	gangPhaseNegative = "negative"
@@ -81,6 +91,23 @@ const (
 	// request, and the recipe componentRef name that declares the capability.
 	kaiSchedulerName = "kai-scheduler"
 
+	// kaiDefaultQueue is the Queue AICR's kai-scheduler values create.
+	kaiDefaultQueue = "default-queue"
+
+	// The Run:ai target (see gangTarget): the recipe componentRef, the
+	// namespace its bundled KAI runs in, the schedulerName it answers to, the
+	// Deployment the applicability gate probes, and the name prefix of the
+	// per-shard scheduler Deployments.
+	runaiClusterComponent      = "runai-cluster"
+	runaiNamespace             = "runai"
+	runaiSchedulerName         = "runai-scheduler"
+	runaiKAIOperatorDeployment = "kai-operator"
+	runaiSchedulerShardPrefix  = runaiSchedulerName + "-"
+
+	// runaiQueueLabel is the Project namespace label whose value is the
+	// Project's queue (the queueLabelKey of Run:ai's KAI).
+	runaiQueueLabel = "runai/queue"
+
 	// kaiGangRefusalFormat is the affirmative all-or-nothing refusal KAI writes
 	// to PodGroup status.schedulingConditions when fewer members fit than
 	// minMember (pkg/scheduler/actions/common/allocate.go,
@@ -89,6 +116,13 @@ const (
 	// when this phrase names the group's minMember, so an unbound pod from a
 	// stalled or absent scheduler, or a generic quota refusal, never passes.
 	kaiGangRefusalFormat = "while %d are required for gang scheduling"
+
+	// kaiOverLimitReason is the schedulingConditions reason KAI records when
+	// a PodGroup's request exceeds its queue's resource limit. KAI checks
+	// that limit before node fit, so under one the negative group, which is
+	// sized past the cluster's capacity, never reaches the gang refusal
+	// (observed live on Run:ai 3.0.20, KAI v0.18.3, 2026-11-11).
+	kaiOverLimitReason = "OverLimit"
 )
 
 // kaiSchedulerDeployments are the required KAI scheduler components.
@@ -102,8 +136,190 @@ var kaiSchedulerDeployments = []string{
 	"queue-controller",
 }
 
+// runaiSchedulerDeployments are the Deployments in runaiNamespace that prove
+// Run:ai's bundled KAI is running: the chart's runai-operator and
+// kai-operator, and the KAI operands kai-operator renders from the Config
+// that runai-operator writes. The scheduler shards are discovered by
+// runaiSchedulerShardPrefix.
+var runaiSchedulerDeployments = []string{
+	"runai-operator",
+	runaiKAIOperatorDeployment,
+	"admission",
+	"binder",
+	"pod-grouper",
+	"podgroup-controller",
+	"queue-controller",
+}
+
 var podGroupGVR = schema.GroupVersionResource{
 	Group: "scheduling.run.ai", Version: "v2alpha2", Resource: "podgroups",
+}
+
+// gangTarget is the gang scheduler the check exercises, resolved from the
+// recipe by resolveGangTarget: AICR's kai-scheduler unless the recipe
+// declares runai-cluster, whose bundled KAI answers to another name in
+// another namespace and takes its queues from Run:ai Projects.
+type gangTarget struct {
+	// component is the recipe componentRef that supplies the capability; the
+	// applicability gate keys on it.
+	component string
+	// label names the scheduler in artifacts and messages.
+	label         string
+	namespace     string
+	schedulerName string
+	// probeDeployment is the Deployment the applicability gate reads first.
+	probeDeployment string
+	// deployments must all become Available. shardPrefix, when set, also
+	// discovers the per-shard scheduler Deployments by name prefix and
+	// requires at least one.
+	deployments []string
+	shardPrefix string
+	// queue is the PodGroup queue; empty means it is read from the test
+	// namespace's runaiQueueLabel once the namespace is known to exist.
+	queue string
+	// testNamespace, when set, is an existing namespace the test pods run in
+	// and the check does not own; empty means a per-run namespace the check
+	// creates and deletes.
+	testNamespace string
+}
+
+func kaiGangTarget() gangTarget {
+	return gangTarget{
+		component:       kaiSchedulerName,
+		label:           "KAI scheduler",
+		namespace:       kaiSchedulerName,
+		schedulerName:   kaiSchedulerName,
+		probeDeployment: kaiSchedulerDeployments[0],
+		deployments:     kaiSchedulerDeployments,
+		queue:           kaiDefaultQueue,
+	}
+}
+
+func runaiGangTarget(projectNamespace string) gangTarget {
+	return gangTarget{
+		component:       runaiClusterComponent,
+		label:           "Run:ai scheduler",
+		namespace:       runaiNamespace,
+		schedulerName:   runaiSchedulerName,
+		probeDeployment: runaiKAIOperatorDeployment,
+		deployments:     runaiSchedulerDeployments,
+		shardPrefix:     runaiSchedulerShardPrefix,
+		testNamespace:   projectNamespace,
+	}
+}
+
+// resolveGangTarget picks the target from the recipe. A recipe that declares
+// runai-cluster needs the Run:ai Project namespace from projectNamespace
+// (defaults.EnvRunaiProjectNamespace): Run:ai resolves each PodGroup's queue
+// from the Project that owns its namespace and refuses hand-made Queues, so
+// without it the test pods have nowhere to run and the check fails rather
+// than skips. Every other recipe, including one that declares neither
+// scheduler, keeps the KAI target, where the applicability gate skips on a
+// clean NotFound.
+func resolveGangTarget(ctx *validators.Context, projectNamespace string) (gangTarget, error) {
+	if !validators.RecipeDeclares(ctx, runaiClusterComponent) {
+		return kaiGangTarget(), nil
+	}
+	projectNamespace = strings.TrimSpace(projectNamespace)
+	if projectNamespace == "" {
+		return gangTarget{}, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"recipe declares %s, so the gang test pods must run in a Run:ai Project namespace, but %s is not set; "+
+				"export %s=runai-<project> (a Project with explicit CPU and memory quota) in the shell running aicr validate",
+			runaiClusterComponent, defaults.EnvRunaiProjectNamespace, defaults.EnvRunaiProjectNamespace))
+	}
+	if errs := validation.IsDNS1123Label(projectNamespace); len(errs) > 0 {
+		return gangTarget{}, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s=%q is not a valid namespace name: %s",
+			defaults.EnvRunaiProjectNamespace, projectNamespace, strings.Join(errs, "; ")))
+	}
+	return runaiGangTarget(projectNamespace), nil
+}
+
+// resolveRunaiQueue returns the queue of the Run:ai Project that owns
+// namespace, read from its runaiQueueLabel. A namespace without the label is
+// not a Project namespace, so KAI would resolve no queue for the PodGroups
+// created there: that is a configuration error, not a scheduler failure, and
+// is reported as one.
+func resolveRunaiQueue(ctx context.Context, clientset kubernetes.Interface, namespace string) (string, error) {
+	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"Run:ai Project namespace %s (%s) not found; create the Project in the Run:ai control plane first",
+				namespace, defaults.EnvRunaiProjectNamespace), err)
+		}
+		return "", classifyK8sReadError(err, fmt.Sprintf("Run:ai Project namespace %s", namespace))
+	}
+	queue := ns.Labels[runaiQueueLabel]
+	if queue == "" {
+		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"namespace %s carries no %s label, so it is not a Run:ai Project namespace and the scheduler would resolve "+
+				"no queue for the test PodGroups; set %s to the Project's runai-<project> namespace",
+			namespace, runaiQueueLabel, defaults.EnvRunaiProjectNamespace))
+	}
+	return queue, nil
+}
+
+// verifyGangSchedulerDeployments waits (bounded by timeout) for every
+// Deployment that proves the target scheduler is running and records them,
+// discovering the per-shard scheduler Deployments first when the target asks
+// for it. Waiting rather than sampling matters: the single-replica admission
+// webhook can be transiently unavailable (rollout, restart, node pressure),
+// and a point-in-time 0/1 read would flake the whole conformance phase. A
+// genuinely-down Deployment still fails after the bound.
+func verifyGangSchedulerDeployments(ctx *validators.Context, target gangTarget, timeout time.Duration) error {
+	names := slices.Clone(target.deployments)
+	if target.shardPrefix != "" {
+		shards, err := listGangSchedulerShards(ctx, target)
+		if err != nil {
+			return err
+		}
+		names = append(names, shards...)
+	}
+	var deploymentsSummary strings.Builder
+	for _, name := range names {
+		deploy, err := waitForDeploymentAvailable(ctx, target.namespace, name, timeout)
+		if err != nil {
+			// Preserve the helper's code (NotFound for missing, Internal for
+			// not-available/API failure, Timeout for cancellation) instead of
+			// flattening every failure to NotFound.
+			return errors.PropagateOrWrap(err, errors.ErrCodeNotFound,
+				fmt.Sprintf("%s component %s check failed", target.label, name))
+		}
+		expected := int32(1)
+		if deploy.Spec.Replicas != nil {
+			expected = *deploy.Spec.Replicas
+		}
+		fmt.Fprintf(&deploymentsSummary, "%-25s available=%d/%d image=%s\n",
+			name, deploy.Status.AvailableReplicas, expected,
+			firstContainerImage(deploy.Spec.Template.Spec.Containers))
+	}
+	recordRawTextArtifact(ctx, target.label+" deployments",
+		"kubectl get deploy -n "+target.namespace, deploymentsSummary.String())
+	return nil
+}
+
+// listGangSchedulerShards names the per-shard scheduler Deployments in the
+// target namespace. None is a missing scheduler: KAI's operator renders one
+// per SchedulingShard, and a cluster with no shard schedules nothing.
+func listGangSchedulerShards(ctx *validators.Context, target gangTarget) ([]string, error) {
+	list, err := ctx.Clientset.AppsV1().Deployments(target.namespace).List(ctx.Ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, classifyK8sReadError(err, fmt.Sprintf("%s shard Deployments in %s", target.label, target.namespace))
+	}
+	var shards []string
+	for i := range list.Items {
+		if name := list.Items[i].Name; strings.HasPrefix(name, target.shardPrefix) {
+			shards = append(shards, name)
+		}
+	}
+	if len(shards) == 0 {
+		return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf(
+			"no %s* scheduler shard Deployment in namespace %s; KAI's operator renders one per SchedulingShard, "+
+				"so the %s is not running", target.shardPrefix, target.namespace, target.label))
+	}
+	slices.Sort(shards)
+	return shards, nil
 }
 
 // Gang scheduling scope: this check validates KAI PodGroup all-or-nothing
@@ -115,6 +331,15 @@ var podGroupGVR = schema.GroupVersionResource{
 type gangTestRun struct {
 	suffix    string
 	namespace string
+
+	// ownsNamespace is false when namespace is a Run:ai Project namespace
+	// the check runs in but must neither create nor delete.
+	ownsNamespace bool
+
+	// schedulerName and queue come from the resolved gangTarget: the
+	// schedulerName the member pods request and the queue the PodGroups join.
+	schedulerName string
+	queue         string
 
 	// Positive case: a fitting PodGroup of gangMinMembers members.
 	groupName string
@@ -129,7 +354,9 @@ type gangTestRun struct {
 	// imagePullSecrets and validatorNamespace are the --image-pull-secret
 	// names the orchestrator forwarded and where they live, copied into the
 	// per-run namespace at creation and attached to every member pod, as
-	// gpuTestRun does for the GPU probes.
+	// gpuTestRun does for the GPU probes. A namespace the run does not own
+	// gets the references only, never a copy: a registry credential must not
+	// land where a Run:ai Project's users can read it.
 	imagePullSecrets   []string
 	validatorNamespace string
 }
@@ -180,7 +407,7 @@ type gangPhaseOutcome struct {
 // have deleted a namespace another run owned. Every prefix plus the 32 hex
 // characters plus a member index stays within the 63-character DNS-1123
 // limit.
-func newGangTestRun() (*gangTestRun, error) {
+func newGangTestRun(target gangTarget) (*gangTestRun, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
@@ -189,10 +416,17 @@ func newGangTestRun() (*gangTestRun, error) {
 	run := &gangTestRun{
 		suffix:             suffix,
 		namespace:          gangTestNSPrefix + suffix,
+		ownsNamespace:      true,
+		schedulerName:      target.schedulerName,
+		queue:              target.queue,
 		groupName:          gangGroupPrefix + suffix,
 		negGroupName:       gangNegativeGroupPrefix + suffix,
 		imagePullSecrets:   validators.ImagePullSecretNames(),
 		validatorNamespace: validators.ValidatorNamespace(),
+	}
+	if target.testNamespace != "" {
+		run.namespace = target.testNamespace
+		run.ownsNamespace = false
 	}
 	for i := range gangMinMembers {
 		run.pods[i] = fmt.Sprintf("%s%s-%d", gangPodPrefix, suffix, i)
@@ -210,8 +444,9 @@ func (run *gangTestRun) setNegativeShape(shape gangNegativeShape) {
 }
 
 // CheckGangScheduling validates CNCF requirement #7: Gang Scheduling.
-// Verifies KAI scheduler deployments are running and required CRDs exist,
-// then exercises all-or-nothing scheduling in two phases, both CPU-only:
+// Verifies the gang scheduler's deployments are running and required CRDs
+// exist, then exercises all-or-nothing scheduling in two phases, both
+// CPU-only:
 //
 //   - Positive: a PodGroup with minMember=2 and two members requesting 100m
 //     CPU and 128Mi must have both members Succeeded, each bound to a node,
@@ -225,65 +460,57 @@ func (run *gangTestRun) setNegativeShape(shape gangNegativeShape) {
 // GPU access and DRA isolation are validated separately by the DRA and secure
 // accelerator access checks; keeping both phases CPU-only lets one-GPU CI
 // clusters run the full conformance phase.
+//
+// The scheduler under test is resolved from the recipe (resolveGangTarget):
+// AICR's kai-scheduler, or Run:ai's bundled KAI when the recipe declares
+// runai-cluster. On Run:ai both phases run in the Project namespace named by
+// defaults.EnvRunaiProjectNamespace, and the PodGroups join the Project's
+// queue; a Run:ai recipe without that input fails here.
 func CheckGangScheduling(ctx *validators.Context) (err error) {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
-	// 0. Applicability gate (#2122). KAI scheduler supplies gang scheduling;
-	// base recipes declare kai-scheduler. When the recipe declares it, a missing
-	// Deployment (or an RBAC/timeout/transport error reading it) is a real
-	// failure — not an inapplicable Skip. Only a clean NotFound on a recipe that
-	// does NOT declare kai-scheduler skips (the cluster uses another scheduler).
-	_, kaiCheckErr := ctx.Clientset.AppsV1().Deployments(kaiSchedulerName).Get(
-		ctx.Ctx, "kai-scheduler-default", metav1.GetOptions{})
-	if capErr := (validators.Capability{
-		Component: kaiSchedulerName,
-		Subject:   "KAI scheduler Deployment kai-scheduler/kai-scheduler-default",
-		AbsentMsg: "recipe declares kai-scheduler but its Deployment kai-scheduler/kai-scheduler-default is absent — apply the bundle or check RBAC",
-		InapplicableMsg: "KAI scheduler not found and kai-scheduler not declared in recipe — " +
-			"cluster may use a different scheduler",
-	}).Require(ctx, kaiCheckErr, kaiCheckErr == nil); capErr != nil {
-		return capErr
-	}
-
-	// 1. All KAI scheduler deployments available. Wait (bounded) for each to
-	// become Available rather than sampling instantaneously: the single-replica
-	// admission webhook can be transiently unavailable (rollout, restart, node
-	// pressure), and a point-in-time 0/1 read would flake the whole conformance
-	// phase. A genuinely-down deployment still fails after the bound.
-	var deploymentsSummary strings.Builder
-	for _, name := range kaiSchedulerDeployments {
-		deploy, waitErr := waitForDeploymentAvailable(ctx, kaiSchedulerName, name, defaults.K8sPodReadyTimeout)
-		if waitErr != nil {
-			// Preserve the helper's code (NotFound for missing, Internal for
-			// not-available/API failure, Timeout for cancellation) instead of
-			// flattening every failure to NotFound.
-			return errors.PropagateOrWrap(waitErr, errors.ErrCodeNotFound,
-				fmt.Sprintf("KAI scheduler component %s check failed", name))
-		}
-		expected := int32(1)
-		if deploy.Spec.Replicas != nil {
-			expected = *deploy.Spec.Replicas
-		}
-		fmt.Fprintf(&deploymentsSummary, "%-25s available=%d/%d image=%s\n",
-			name, deploy.Status.AvailableReplicas, expected,
-			firstContainerImage(deploy.Spec.Template.Spec.Containers))
-	}
-	recordRawTextArtifact(ctx, "KAI scheduler deployments",
-		"kubectl get deploy -n kai-scheduler", deploymentsSummary.String())
-
-	// KAI scheduler pods.
-	kaiPods, err := ctx.Clientset.CoreV1().Pods(kaiSchedulerName).List(ctx.Ctx, metav1.ListOptions{})
+	target, err := resolveGangTarget(ctx, os.Getenv(defaults.EnvRunaiProjectNamespace))
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to list KAI scheduler pods", err)
+		return err
+	}
+
+	// 0. Applicability gate (#2122). The target component supplies gang
+	// scheduling; base recipes declare kai-scheduler. When the recipe declares
+	// it, a missing Deployment (or an RBAC/timeout/transport error reading it)
+	// is a real failure — not an inapplicable Skip. Only a clean NotFound on a
+	// recipe that does NOT declare the component skips (the cluster uses
+	// another scheduler).
+	_, probeErr := ctx.Clientset.AppsV1().Deployments(target.namespace).Get(
+		ctx.Ctx, target.probeDeployment, metav1.GetOptions{})
+	if gateErr := (validators.Capability{
+		Component: target.component,
+		Subject:   fmt.Sprintf("%s Deployment %s/%s", target.label, target.namespace, target.probeDeployment),
+		AbsentMsg: fmt.Sprintf("recipe declares %s but its Deployment %s/%s is absent — apply the bundle or check RBAC",
+			target.component, target.namespace, target.probeDeployment),
+		InapplicableMsg: fmt.Sprintf("%s not found and %s not declared in recipe — cluster may use a different scheduler",
+			target.label, target.component),
+	}).Require(ctx, probeErr, probeErr == nil); gateErr != nil {
+		return gateErr
+	}
+
+	// 1. All scheduler deployments available.
+	if err = verifyGangSchedulerDeployments(ctx, target, defaults.K8sPodReadyTimeout); err != nil {
+		return err
+	}
+
+	// Scheduler pods.
+	schedulerPods, err := ctx.Clientset.CoreV1().Pods(target.namespace).List(ctx.Ctx, metav1.ListOptions{})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to list %s pods", target.label), err)
 	}
 	var podsSummary strings.Builder
-	for _, p := range kaiPods.Items {
+	for _, p := range schedulerPods.Items {
 		fmt.Fprintf(&podsSummary, "%-44s ready=%s phase=%s\n", p.Name, podReadyCount(p), p.Status.Phase)
 	}
-	recordRawTextArtifact(ctx, "KAI scheduler pods",
-		"kubectl get pods -n kai-scheduler", podsSummary.String())
+	recordRawTextArtifact(ctx, target.label+" pods",
+		"kubectl get pods -n "+target.namespace, podsSummary.String())
 
 	// 2. Required CRDs for gang scheduling.
 	dynClient, err := getDynamicClient(ctx)
@@ -309,8 +536,22 @@ func CheckGangScheduling(ctx *validators.Context) (err error) {
 		"kubectl get crd queues.scheduling.run.ai podgroups.scheduling.run.ai",
 		crdSummary.String())
 
-	// 3. Functional test, two phases in one per-run namespace.
-	run, err := newGangTestRun()
+	// On Run:ai the PodGroups join the queue of the Project that owns the
+	// test namespace, read from the namespace itself.
+	if target.queue == "" {
+		queue, queueErr := resolveRunaiQueue(ctx.Ctx, ctx.Clientset, target.testNamespace)
+		if queueErr != nil {
+			return queueErr
+		}
+		target.queue = queue
+		recordRawTextArtifact(ctx, "Run:ai Project namespace",
+			fmt.Sprintf("kubectl get namespace %s --show-labels", target.testNamespace),
+			fmt.Sprintf("Namespace: %s\nQueue (%s): %s\n", target.testNamespace, runaiQueueLabel, queue))
+	}
+
+	// 3. Functional test, two phases in one namespace: per-run on KAI, the
+	// Project namespace on Run:ai.
+	run, err := newGangTestRun(target)
 	if err != nil {
 		return err
 	}
@@ -326,22 +567,16 @@ func CheckGangScheduling(ctx *validators.Context) (err error) {
 	defer func() { //nolint:contextcheck // Fresh context: parent may be canceled during cleanup
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cleanupCancel()
-		nsErr := cleanupGangTestResources(cleanupCtx, ctx.Clientset, dynClient, run)
-		result := fmt.Sprintf("Deleted gang test pods, PodGroups, and the %s namespace.", run.namespace)
-		if nsErr != nil {
-			// Report the real outcome: a failed namespace delete leaves residue,
-			// so don't record a false success (tools/cleanup is the backstop).
-			result = fmt.Sprintf(
-				"Deleted gang test pods and PodGroups; namespace deletion FAILED (residue may remain, rerun tools/cleanup): %v",
-				nsErr)
-		}
-		recordRawTextArtifact(ctx, "Delete test namespace",
-			fmt.Sprintf("kubectl delete namespace %s --ignore-not-found", run.namespace), result)
-		err = failOnGangCleanup(err, nsErr)
+		cleanupErr := cleanupGangTestResources(cleanupCtx, ctx.Clientset, dynClient, run)
+		title, equivalent, result := gangCleanupArtifact(run, cleanupErr)
+		recordRawTextArtifact(ctx, title, equivalent, result)
+		err = failOnGangCleanup(err, cleanupErr)
 	}()
 
-	if err = createGangTestNamespace(ctx.Ctx, ctx.Clientset, run); err != nil {
-		return err
+	if run.ownsNamespace {
+		if err = createGangTestNamespace(ctx.Ctx, ctx.Clientset, run); err != nil {
+			return err
+		}
 	}
 
 	positive, err := runGangPositivePhase(ctx, dynClient, run)
@@ -403,19 +638,51 @@ func createGangTestNamespace(ctx context.Context, clientset kubernetes.Interface
 	})
 }
 
+// gangCleanupArtifact returns the title, the equivalent command and the
+// outcome text of the cleanup artifact. A failed cleanup is reported as such
+// rather than as a success: in the run's own namespace tools/cleanup is the
+// backstop, in a Run:ai Project namespace only the equivalent command is.
+// That command names the PodGroup resource in full because another PodGroup
+// CRD (scheduler-plugins, Volcano) makes the short name ambiguous.
+func gangCleanupArtifact(run *gangTestRun, cleanupErr error) (title, equivalent, result string) {
+	if !run.ownsNamespace {
+		title = "Delete test pods and PodGroups"
+		equivalent = fmt.Sprintf("kubectl delete pods,%s.%s -n %s -l %s",
+			podGroupGVR.Resource, podGroupGVR.Group, run.namespace, run.runSelector())
+		if cleanupErr != nil {
+			return title, equivalent, fmt.Sprintf(
+				"Cleanup of gang test pods and PodGroups in the Run:ai Project namespace %s FAILED (residue remains, remove it with the command above): %v",
+				run.namespace, cleanupErr)
+		}
+		return title, equivalent, fmt.Sprintf(
+			"Deleted gang test pods and PodGroups; the Run:ai Project namespace %s is not owned by the check and was left in place.",
+			run.namespace)
+	}
+	title = "Delete test namespace"
+	equivalent = fmt.Sprintf("kubectl delete namespace %s --ignore-not-found", run.namespace)
+	if cleanupErr != nil {
+		return title, equivalent, fmt.Sprintf(
+			"Deleted gang test pods and PodGroups; namespace deletion FAILED (residue may remain, rerun tools/cleanup): %v",
+			cleanupErr)
+	}
+	return title, equivalent, fmt.Sprintf("Deleted gang test pods, PodGroups, and the %s namespace.", run.namespace)
+}
+
 // failOnGangCleanup is the check's final verdict once cleanup ran: a run that
-// passed but could not delete its namespace fails, as every other per-run
-// namespace check does (cleanupGPUTestNamespace), so a PASS never stands over
-// a leaked namespace and its pods; a run that already failed keeps its own
-// error, and the cleanup failure stays in the artifact.
+// passed but could not delete its namespace, or its pods and PodGroups in a
+// namespace it does not own, fails, as every other per-run namespace check
+// does (cleanupGPUTestNamespace), so a PASS never stands over leaked test
+// resources; a run that already failed keeps its own error, and the cleanup
+// failure stays in the artifact.
 //
 // Errors:
-//   - ErrCodeInternal wrapping nsErr when err is nil and nsErr is not.
-func failOnGangCleanup(err, nsErr error) error {
-	if err != nil || nsErr == nil {
+//   - ErrCodeInternal wrapping cleanupErr when err is nil and cleanupErr is
+//     not.
+func failOnGangCleanup(err, cleanupErr error) error {
+	if err != nil || cleanupErr == nil {
 		return err
 	}
-	return errors.Wrap(errors.ErrCodeInternal, "gang scheduling test namespace cleanup failed after a passing run", nsErr)
+	return errors.Wrap(errors.ErrCodeInternal, "gang scheduling test cleanup failed after a passing run", cleanupErr)
 }
 
 // wrapGangPhase names the failed phase in the CTRF message while keeping the
@@ -485,7 +752,7 @@ func runGangNegativePhase(ctx *validators.Context, dynClient dynamic.Interface, 
 		return "", err
 	}
 
-	selector := gangPhaseSelector(gangPhaseNegative)
+	selector := run.phaseSelector(gangPhaseNegative)
 	observation, windowErr := holdGangNegativeWindow(ctx.Ctx, ctx.Clientset, run.namespace, selector, run.negPods, window)
 
 	// Record the binding state and PodGroup status whatever the window saw, so
@@ -562,6 +829,19 @@ func nodeIsReady(node *corev1.Node) bool {
 
 func gangPhaseSelector(phase string) string {
 	return gangPhaseLabel + "=" + phase
+}
+
+// phaseSelector selects this run's members of one phase. The run label is
+// what keeps a second validation of the same Run:ai Project, or the Pending
+// members an interrupted one left there, out of this run's view: the phase
+// label alone is shared by every run in the namespace.
+func (run *gangTestRun) phaseSelector(phase string) string {
+	return gangPhaseSelector(phase) + "," + run.runSelector()
+}
+
+// runSelector selects every pod and PodGroup this run created.
+func (run *gangTestRun) runSelector() string {
+	return gpuTestRunLabel + "=" + run.suffix
 }
 
 // gangBoundPodViolation reports why a pod breaks the all-or-nothing contract:
@@ -753,6 +1033,14 @@ func gangPartialSchedulingErr(podName, violation string) error {
 // all-or-nothing refusal for this group: a status.schedulingConditions entry
 // whose message, or one of whose reasons, says minMember members are required
 // for gang scheduling. Returns the matching message.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the scheduler refused the group on its
+//     queue's resource limit instead (kaiOverLimitReason): the queue's
+//     configuration keeps the phase from running, which is not a scheduler
+//     failure.
+//   - ErrCodeInternal when the conditions are malformed, absent, or carry
+//     neither refusal.
 func evaluateGangRefusal(pg *unstructured.Unstructured, minMember int) (string, error) {
 	want := fmt.Sprintf(kaiGangRefusalFormat, minMember)
 	conditions, found, err := unstructured.NestedSlice(pg.Object, "status", "schedulingConditions")
@@ -767,6 +1055,7 @@ func evaluateGangRefusal(pg *unstructured.Unstructured, minMember int) (string, 
 				pg.GetName()))
 	}
 	var seen []string
+	var overLimit string
 	for _, c := range conditions {
 		cond, ok := c.(map[string]any)
 		if !ok {
@@ -786,8 +1075,12 @@ func evaluateGangRefusal(pg *unstructured.Unstructured, minMember int) (string, 
 				if !ok {
 					continue
 				}
-				if msg, _, _ := unstructured.NestedString(rm, "message"); msg != "" {
+				msg, _, _ := unstructured.NestedString(rm, "message")
+				if msg != "" {
 					messages = append(messages, msg)
+				}
+				if reason, _, _ := unstructured.NestedString(rm, "reason"); reason == kaiOverLimitReason && overLimit == "" {
+					overLimit = msg
 				}
 			}
 		}
@@ -798,6 +1091,14 @@ func evaluateGangRefusal(pg *unstructured.Unstructured, minMember int) (string, 
 			seen = append(seen, msg)
 		}
 	}
+	if overLimit != "" {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("negative phase cannot run: the scheduler refused PodGroup %s on its queue's resource limit before "+
+				"gang scheduling applied (%s). The non-fitting group asks for more CPU than the cluster has, so a queue "+
+				"limit below that hides the gang refusal; remove the CPU and memory limits from the queue (on Run:ai, "+
+				"from the Project) and rerun",
+				pg.GetName(), overLimit))
+	}
 	return "", errors.New(errors.ErrCodeInternal,
 		fmt.Sprintf("negative phase not credited: PodGroup %s schedulingConditions carry no gang refusal %q (saw: %s)",
 			pg.GetName(), want, strings.Join(seen, " | ")))
@@ -805,7 +1106,7 @@ func evaluateGangRefusal(pg *unstructured.Unstructured, minMember int) (string, 
 
 func collectGangNegativeArtifacts(ctx *validators.Context, dynClient dynamic.Interface, run *gangTestRun, obs gangNegativeObservation, window time.Duration) {
 	pods, listErr := ctx.Clientset.CoreV1().Pods(run.namespace).List(ctx.Ctx, metav1.ListOptions{
-		LabelSelector: gangPhaseSelector(gangPhaseNegative),
+		LabelSelector: run.phaseSelector(gangPhaseNegative),
 	})
 	var b strings.Builder
 	fmt.Fprintf(&b, "Verification window: %s (watch events: %d)\n", window, obs.Events)
@@ -829,7 +1130,7 @@ func collectGangNegativeArtifacts(ctx *validators.Context, dynClient dynamic.Int
 		}
 	}
 	recordRawTextArtifact(ctx, "Negative phase: pod binding state",
-		fmt.Sprintf("kubectl get pods -n %s -l %s -o wide", run.namespace, gangPhaseSelector(gangPhaseNegative)),
+		fmt.Sprintf("kubectl get pods -n %s -l %s -o wide", run.namespace, run.phaseSelector(gangPhaseNegative)),
 		b.String())
 
 	pg, getErr := dynClient.Resource(podGroupGVR).Namespace(run.namespace).Get(ctx.Ctx, run.negGroupName, metav1.GetOptions{})
@@ -892,7 +1193,7 @@ func collectGangTestArtifacts(ctx *validators.Context, dynClient dynamic.Interfa
 			gangReport.LatestScheduled.Format(time.RFC3339))
 	}
 	recordRawTextArtifact(ctx, "Positive phase: pod status",
-		fmt.Sprintf("kubectl get pods -n %s -l %s -o wide", run.namespace, gangPhaseSelector(gangPhasePositive)),
+		fmt.Sprintf("kubectl get pods -n %s -l %s -o wide", run.namespace, run.phaseSelector(gangPhasePositive)),
 		gangResults.String())
 
 	// Worker logs.
@@ -1059,11 +1360,11 @@ func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) (*
 				fmt.Sprintf("gang test pod %s has no node assignment", run.pods[i]))
 		}
 
-		// Pod must use kai-scheduler.
-		if pod.Spec.SchedulerName != kaiSchedulerName {
+		// Pod must use the target scheduler.
+		if pod.Spec.SchedulerName != run.schedulerName {
 			return nil, errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("gang test pod %s schedulerName=%s (want kai-scheduler)",
-					run.pods[i], pod.Spec.SchedulerName))
+				fmt.Sprintf("gang test pod %s schedulerName=%s (want %s)",
+					run.pods[i], pod.Spec.SchedulerName, run.schedulerName))
 		}
 
 		// Pod must have PodGroup label.
@@ -1123,11 +1424,12 @@ func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) (*
 	}, nil
 }
 
-// cleanupGangTestResources tears down both phases' pods and PodGroups and the
-// namespace best-effort. It returns the namespace deletion error (nil on
-// success) so the caller can record the true outcome instead of a false
-// success; pod/PodGroup deletes stay best-effort as the namespace delete
-// subsumes them.
+// cleanupGangTestResources tears down both phases' pods and PodGroups and,
+// when the run owns it, the namespace. It returns what was left behind so the
+// caller can record the true outcome instead of a false success: the
+// namespace deletion error when the run owns the namespace, whose delete
+// subsumes the best-effort pod and PodGroup deletes, and otherwise the error
+// of confirmGangResourcesGone.
 func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *gangTestRun) error {
 	podNames := make([]string, 0, gangMinMembers+len(run.negPods))
 	podNames = append(podNames, run.pods[:]...)
@@ -1153,9 +1455,25 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 			}
 			return true, nil
 		})
+	// The wait above can spend all of ctx on a pod that is slow to go, and a
+	// delete issued on an expired context is never sent. In a namespace the
+	// run does not own nothing else removes the PodGroups, so they get their
+	// own deadline.
+	groupCtx, groupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+	defer groupCancel()
 	for _, group := range []string{run.groupName, run.negGroupName} {
+		//nolint:contextcheck // fresh deadline so a stuck pod wait cannot starve the PodGroup deletes
 		_ = k8s.IgnoreNotFound(dynClient.Resource(podGroupGVR).Namespace(run.namespace).Delete(
-			ctx, group, metav1.DeleteOptions{}))
+			groupCtx, group, metav1.DeleteOptions{}))
+	}
+	// A Run:ai Project namespace belongs to the Project, not to this run, so
+	// no namespace delete follows to subsume the deletes above. The fresh
+	// deadline keeps a stuck wait above from starving the confirmation.
+	if !run.ownsNamespace {
+		confirmCtx, confirmCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+		defer confirmCancel()
+		//nolint:contextcheck // fresh deadline, as for the namespace teardown below
+		return confirmGangResourcesGone(confirmCtx, clientset, dynClient, run, podNames)
 	}
 	// Delete the namespace so a cluster reset leaves no residue. Pods and the
 	// PodGroups are already gone, so this is a single bounded (background
@@ -1179,6 +1497,69 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 	// an error only when the namespace is still present and not Terminating.
 	//nolint:contextcheck // same fresh deadline as the Delete above, so a stuck wait earlier cannot starve the confirmation
 	return confirmGangNamespaceGone(nsCtx, clientset, run.namespace)
+}
+
+// confirmGangResourcesGone polls until none of the run's pods and PodGroups
+// remains in run.namespace or ctx ends. A resource whose deletion was
+// accepted but is still Terminating when the budget ends is not a leak, as
+// for the namespace in confirmGangNamespaceGone.
+//
+// Errors:
+//   - ErrCodeInternal when the budget ends with a pod or PodGroup present and
+//     not Terminating, or unreadable, or before any of them could be read.
+func confirmGangResourcesGone(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *gangTestRun, podNames []string) error {
+	var left, terminating []string
+	observed := false
+	pollErr := wait.PollUntilContextCancel(ctx, defaults.PodPollInterval, true, func(c context.Context) (bool, error) {
+		var curLeft, curTerminating []string
+		observe := func(kind, name string, obj metav1.Object, err error) {
+			switch {
+			case apierrors.IsNotFound(err):
+				// gone
+			case err != nil:
+				curLeft = append(curLeft, fmt.Sprintf("%s/%s (unreadable: %v)", kind, name, err))
+			case obj.GetDeletionTimestamp() != nil:
+				curTerminating = append(curTerminating, kind+"/"+name)
+			default:
+				curLeft = append(curLeft, kind+"/"+name)
+			}
+		}
+		for _, name := range podNames {
+			if c.Err() != nil {
+				return false, nil
+			}
+			pod, err := clientset.CoreV1().Pods(run.namespace).Get(c, name, metav1.GetOptions{})
+			observe("pod", name, pod, err)
+		}
+		for _, group := range []string{run.groupName, run.negGroupName} {
+			if c.Err() != nil {
+				return false, nil
+			}
+			pg, err := dynClient.Resource(podGroupGVR).Namespace(run.namespace).Get(c, group, metav1.GetOptions{})
+			observe("podgroup", group, pg, err)
+		}
+		// A sweep cut off by the poll deadline is not an observation; keep
+		// the last complete one for the verdict.
+		if c.Err() != nil {
+			return false, nil
+		}
+		left, terminating, observed = curLeft, curTerminating, true
+		return len(curLeft)+len(curTerminating) == 0, nil
+	})
+	if pollErr == nil {
+		return nil
+	}
+	if !observed {
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
+			"gang test pods and PodGroups in namespace %s could not be checked within the cleanup budget", run.namespace), pollErr)
+	}
+	if len(left) > 0 {
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+			"gang test resources left in namespace %s, which the check does not own: %s", run.namespace, strings.Join(left, ", ")))
+	}
+	slog.Warn("gang test resource deletion accepted but not confirmed within the cleanup budget",
+		"namespace", run.namespace, "resources", terminating)
+	return nil
 }
 
 // confirmGangNamespaceGone polls until the namespace is absent or ctx ends.
@@ -1221,26 +1602,32 @@ func confirmGangNamespaceGone(ctx context.Context, clientset kubernetes.Interfac
 
 // buildPodGroup returns the unstructured PodGroup for the positive case.
 func buildPodGroup(run *gangTestRun) *unstructured.Unstructured {
-	return newPodGroup(run.namespace, run.groupName, gangMinMembers)
+	return newPodGroup(run, run.groupName, gangPhasePositive, gangMinMembers)
 }
 
 // buildNegativePodGroup returns the unstructured PodGroup for the negative case.
 func buildNegativePodGroup(run *gangTestRun) *unstructured.Unstructured {
-	return newPodGroup(run.namespace, run.negGroupName, run.negShape.Members)
+	return newPodGroup(run, run.negGroupName, gangPhaseNegative, run.negShape.Members)
 }
 
-func newPodGroup(namespace, name string, minMember int) *unstructured.Unstructured {
+// newPodGroup labels the PodGroup like its members, so one selector finds
+// everything a run, or every run, left in a namespace it does not own.
+func newPodGroup(run *gangTestRun, name, phase string, minMember int) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]any{
 			keyAPIVersion: "scheduling.run.ai/v2alpha2",
 			keyKind:       "PodGroup",
 			keyMetadata: map[string]any{
 				keyName:      name,
-				keyNamespace: namespace,
+				keyNamespace: run.namespace,
+				"labels": map[string]any{
+					gangPhaseLabel:  phase,
+					gpuTestRunLabel: run.suffix,
+				},
 			},
 			keySpec: map[string]any{
 				"minMember": int64(minMember),
-				"queue":     "default-queue",
+				"queue":     run.queue,
 			},
 		},
 	}
@@ -1271,14 +1658,13 @@ func buildGangNegativePod(run *gangTestRun, index int, tolerations []corev1.Tole
 }
 
 func newGangMemberPod(run *gangTestRun, name, groupName, phase string, command []string, requests corev1.ResourceList, tolerations []corev1.Toleration) *corev1.Pod {
-	namespace := run.namespace
 	if tolerations == nil {
 		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
 	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: run.namespace,
 			Annotations: map[string]string{
 				podGroupNameAnnotation: groupName,
 			},
@@ -1286,13 +1672,15 @@ func newGangMemberPod(run *gangTestRun, name, groupName, phase string, command [
 				podGroupNameLabel: groupName,
 				podGroupIDLabel:   groupName,
 				gangPhaseLabel:    phase,
+				gpuTestRunLabel:   run.suffix,
 			},
 		},
 		Spec: corev1.PodSpec{
-			ImagePullSecrets: run.imagePullSecretRefs(),
-			SchedulerName:    kaiSchedulerName,
-			RestartPolicy:    corev1.RestartPolicyNever,
-			Tolerations:      tolerations,
+			ImagePullSecrets:              run.imagePullSecretRefs(),
+			SchedulerName:                 run.schedulerName,
+			RestartPolicy:                 corev1.RestartPolicyNever,
+			TerminationGracePeriodSeconds: ptr.To(gangTerminationGracePeriod),
+			Tolerations:                   tolerations,
 			Containers: []corev1.Container{
 				{
 					Name:    "worker",

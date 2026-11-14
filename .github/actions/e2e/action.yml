@@ -58,19 +58,19 @@ runs:
         echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
         echo "buildcache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
 
-    # Restore-only, for the reasons spelled out in go-lint: this job shares
-    # go-test's key, entries are immutable, and a save here could take that key
-    # with a GOCACHE that has none of the -race test objects go-test gates its
-    # own save on. The prefix fallback keeps this near-warm without writing.
+    # Restore-only, for the reasons spelled out in go-lint: qualification's
+    # shard a owns writes to the shared immutable key after its test step.
+    # A save here could claim the key without that shard's race-test objects.
+    # The prefix fallback permits reuse without another writer.
     #
     # Restore-only applies to THIS cache, not to the job: install-e2e-tools
     # below saves a tool-binary cache, which is why the action still takes a
     # privileged_ci input to forward.
     #
-    # E2E benefits less than lint does: `make test` banks -race objects, while
-    # this job's compiles (`ko build`, and the -trimpath/CGO_ENABLED=0 host
-    # builds) use different flags, so those ActionIDs miss. GOMODCACHE still
-    # lands in full, which is the part that dominates a cold run.
+    # Shard a banks only its compilation work, including -race objects. E2E's
+    # compiles (`ko build` and -trimpath/CGO_ENABLED=0 host builds) use different
+    # flags, so those ActionIDs miss. Downloaded modules are still reusable;
+    # dependencies not fetched by shard a must be downloaded here.
     - name: Restore Go modules and build output
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:

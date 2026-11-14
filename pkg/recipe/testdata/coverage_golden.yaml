@@ -8,6 +8,7 @@ criteria(service=, accelerator=, intent=, os=, platform=dynamo):
             - service=aks, accelerator=h100, intent=inference, os=ubuntu
             - service=eks, accelerator=gb200, intent=inference, os=ubuntu
             - service=eks, accelerator=gb300, intent=inference, os=ubuntu
+            - service=eks, accelerator=h100, intent=inference, os=amazonlinux
             - service=eks, accelerator=h100, intent=inference, os=ubuntu
             - service=eks, accelerator=rtx-pro-6000, intent=inference, os=ubuntu
             - service=gke, accelerator=b200, intent=inference, os=cos
@@ -15,6 +16,7 @@ criteria(service=, accelerator=, intent=, os=, platform=dynamo):
             - service=gke, accelerator=gb300, intent=inference, os=cos
             - service=gke, accelerator=h100, intent=inference, os=cos
             - service=mk8s, accelerator=b300, intent=inference, os=ubuntu
+            - service=nvke, accelerator=gb200, intent=inference, os=ubuntu
             - service=nvke, accelerator=gb300, intent=inference, os=ubuntu
             - service=nvke, accelerator=vr200, intent=inference, os=ubuntu
             - service=oke, accelerator=gb200, intent=inference, os=ubuntu
@@ -97,6 +99,20 @@ criteria(service=, accelerator=, intent=, os=amazonlinux, platform=):
             - service=eks, accelerator=gb300, intent=inference
             - service=eks, accelerator=h100, intent=inference
             - service=eks, accelerator=rtx-pro-6000, intent=inference
+criteria(service=, accelerator=, intent=, os=amazonlinux, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+    validCompletions:
+        os:
+            - service=eks, accelerator=gb200, intent=inference
+            - service=eks, accelerator=gb300, intent=inference
+            - service=eks, accelerator=h100, intent=inference
+            - service=eks, accelerator=rtx-pro-6000, intent=inference
+        platform:
+            - service=eks, accelerator=h100, intent=inference
+            - service=kind, accelerator=h100, intent=inference
 criteria(service=, accelerator=, intent=, os=cos, platform=):
     outcome: error
     uncovered:
@@ -208,6 +224,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=):
             - service=k0s, accelerator=h200, intent=training
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
+            - service=nvke, accelerator=gb200, intent=inference
             - service=nvke, accelerator=gb200, intent=training
             - service=nvke, accelerator=gb300, intent=inference
             - service=nvke, accelerator=gb300, intent=training
@@ -237,6 +254,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=dynamo):
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=mk8s, accelerator=b300, intent=inference
+            - service=nvke, accelerator=gb200, intent=inference
             - service=nvke, accelerator=gb200, intent=training
             - service=nvke, accelerator=gb300, intent=inference
             - service=nvke, accelerator=gb300, intent=training
@@ -256,6 +274,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=dynamo):
             - service=eks, accelerator=rtx-pro-6000, intent=inference
             - service=kind, accelerator=h100, intent=inference
             - service=mk8s, accelerator=b300, intent=inference
+            - service=nvke, accelerator=gb200, intent=inference
             - service=nvke, accelerator=gb300, intent=inference
             - service=nvke, accelerator=vr200, intent=inference
             - service=oke, accelerator=gb200, intent=inference
@@ -276,6 +295,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=kubeflow):
             - service=k0s, accelerator=h200, intent=training
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
+            - service=nvke, accelerator=gb200, intent=inference
             - service=nvke, accelerator=gb200, intent=training
             - service=nvke, accelerator=gb300, intent=inference
             - service=nvke, accelerator=gb300, intent=training
@@ -321,6 +341,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=kueue):
             - service=k0s, accelerator=h200, intent=training
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
+            - service=nvke, accelerator=gb200, intent=inference
             - service=nvke, accelerator=gb200, intent=training
             - service=nvke, accelerator=gb300, intent=inference
             - service=nvke, accelerator=gb300, intent=training
@@ -351,6 +372,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=nim):
             - service=k0s, accelerator=h200, intent=training
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
+            - service=nvke, accelerator=gb200, intent=inference
             - service=nvke, accelerator=gb200, intent=training
             - service=nvke, accelerator=gb300, intent=inference
             - service=nvke, accelerator=gb300, intent=training
@@ -382,6 +404,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=runai):
             - service=k0s, accelerator=h200, intent=training
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
+            - service=nvke, accelerator=gb200, intent=inference
             - service=nvke, accelerator=gb200, intent=training
             - service=nvke, accelerator=gb300, intent=inference
             - service=nvke, accelerator=gb300, intent=training
@@ -411,6 +434,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=slurm):
             - service=k0s, accelerator=h200, intent=training
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
+            - service=nvke, accelerator=gb200, intent=inference
             - service=nvke, accelerator=gb200, intent=training
             - service=nvke, accelerator=gb300, intent=inference
             - service=nvke, accelerator=gb300, intent=training
@@ -444,6 +468,7 @@ criteria(service=, accelerator=, intent=inference, os=, platform=):
             - service=rke2
             - service=gke, os=cos
             - service=oke, os=ol
+            - service=nvke, accelerator=gb200, os=ubuntu
             - service=nvke, accelerator=gb300, os=ubuntu
             - service=nvke, accelerator=vr200, os=ubuntu
             - service=oke, accelerator=gb200, os=ubuntu
@@ -464,6 +489,7 @@ criteria(service=, accelerator=, intent=inference, os=, platform=dynamo):
             - service=rke2
             - service=gke, os=cos
             - service=oke, os=ol
+            - service=nvke, accelerator=gb200, os=ubuntu
             - service=nvke, accelerator=gb300, os=ubuntu
             - service=nvke, accelerator=vr200, os=ubuntu
             - service=oke, accelerator=gb200, os=ubuntu
@@ -472,6 +498,7 @@ criteria(service=, accelerator=, intent=inference, os=, platform=dynamo):
             - service=aks, accelerator=h100, os=ubuntu
             - service=eks, accelerator=gb200, os=ubuntu
             - service=eks, accelerator=gb300, os=ubuntu
+            - service=eks, accelerator=h100, os=amazonlinux
             - service=eks, accelerator=h100, os=ubuntu
             - service=eks, accelerator=rtx-pro-6000, os=ubuntu
             - service=gke, accelerator=b200, os=cos
@@ -479,6 +506,7 @@ criteria(service=, accelerator=, intent=inference, os=, platform=dynamo):
             - service=gke, accelerator=gb300, os=cos
             - service=gke, accelerator=h100, os=cos
             - service=mk8s, accelerator=b300, os=ubuntu
+            - service=nvke, accelerator=gb200, os=ubuntu
             - service=nvke, accelerator=gb300, os=ubuntu
             - service=nvke, accelerator=vr200, os=ubuntu
             - service=oke, accelerator=gb200, os=ubuntu
@@ -500,6 +528,7 @@ criteria(service=, accelerator=, intent=inference, os=, platform=nim):
             - service=rke2
             - service=gke, os=cos
             - service=oke, os=ol
+            - service=nvke, accelerator=gb200, os=ubuntu
             - service=nvke, accelerator=gb300, os=ubuntu
             - service=nvke, accelerator=vr200, os=ubuntu
             - service=oke, accelerator=gb200, os=ubuntu
@@ -527,6 +556,30 @@ criteria(service=, accelerator=, intent=inference, os=amazonlinux, platform=):
             - service=eks, accelerator=gb300
             - service=eks, accelerator=h100
             - service=eks, accelerator=rtx-pro-6000
+criteria(service=, accelerator=, intent=inference, os=amazonlinux, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=kind
+            - service=lke
+            - service=mk8s
+            - service=ocp
+            - service=rke2
+        os:
+            - service=eks, accelerator=gb200
+            - service=eks, accelerator=gb300
+            - service=eks, accelerator=h100
+            - service=eks, accelerator=rtx-pro-6000
+        platform:
+            - service=eks, accelerator=h100
+            - service=kind, accelerator=h100
 criteria(service=, accelerator=, intent=inference, os=cos, platform=):
     outcome: error
     uncovered:
@@ -603,6 +656,7 @@ criteria(service=, accelerator=, intent=inference, os=ubuntu, platform=):
             - service=mk8s
             - service=ocp
             - service=rke2
+            - service=nvke, accelerator=gb200
             - service=nvke, accelerator=gb300
             - service=nvke, accelerator=vr200
             - service=oke, accelerator=gb200
@@ -610,6 +664,7 @@ criteria(service=, accelerator=, intent=inference, os=ubuntu, platform=):
             - service=aks
             - service=eks
             - service=lke, accelerator=rtx-pro-6000
+            - service=nvke, accelerator=gb200
             - service=nvke, accelerator=gb300
             - service=nvke, accelerator=vr200
             - service=oke, accelerator=gb200
@@ -631,6 +686,7 @@ criteria(service=, accelerator=, intent=inference, os=ubuntu, platform=dynamo):
             - service=mk8s
             - service=ocp
             - service=rke2
+            - service=nvke, accelerator=gb200
             - service=nvke, accelerator=gb300
             - service=nvke, accelerator=vr200
             - service=oke, accelerator=gb200
@@ -639,6 +695,7 @@ criteria(service=, accelerator=, intent=inference, os=ubuntu, platform=dynamo):
             - service=eks
             - service=lke, accelerator=rtx-pro-6000
             - service=mk8s, accelerator=b300
+            - service=nvke, accelerator=gb200
             - service=nvke, accelerator=gb300
             - service=nvke, accelerator=vr200
             - service=oke, accelerator=gb200
@@ -651,6 +708,7 @@ criteria(service=, accelerator=, intent=inference, os=ubuntu, platform=dynamo):
             - service=eks, accelerator=rtx-pro-6000
             - service=kind, accelerator=h100
             - service=mk8s, accelerator=b300
+            - service=nvke, accelerator=gb200
             - service=nvke, accelerator=gb300
             - service=nvke, accelerator=vr200
             - service=oke, accelerator=gb200
@@ -671,6 +729,7 @@ criteria(service=, accelerator=, intent=inference, os=ubuntu, platform=nim):
             - service=mk8s
             - service=ocp
             - service=rke2
+            - service=nvke, accelerator=gb200
             - service=nvke, accelerator=gb300
             - service=nvke, accelerator=vr200
             - service=oke, accelerator=gb200
@@ -678,6 +737,7 @@ criteria(service=, accelerator=, intent=inference, os=ubuntu, platform=nim):
             - service=aks
             - service=eks
             - service=lke, accelerator=rtx-pro-6000
+            - service=nvke, accelerator=gb200
             - service=nvke, accelerator=gb300
             - service=nvke, accelerator=vr200
             - service=oke, accelerator=gb200
@@ -1762,6 +1822,7 @@ criteria(service=, accelerator=gb200, intent=, os=, platform=dynamo):
         platform:
             - service=eks, intent=inference, os=ubuntu
             - service=gke, intent=inference, os=cos
+            - service=nvke, intent=inference, os=ubuntu
             - service=oke, intent=inference, os=ubuntu
 criteria(service=, accelerator=gb200, intent=, os=, platform=kubeflow):
     outcome: error
@@ -1840,6 +1901,7 @@ criteria(service=, accelerator=gb200, intent=, os=ubuntu, platform=):
         os:
             - service=aks
             - service=eks
+            - service=nvke, intent=inference
             - service=nvke, intent=training
             - service=oke, intent=inference
             - service=oke, intent=training
@@ -1852,11 +1914,13 @@ criteria(service=, accelerator=gb200, intent=, os=ubuntu, platform=dynamo):
         os:
             - service=aks
             - service=eks
+            - service=nvke, intent=inference
             - service=nvke, intent=training
             - service=oke, intent=inference
             - service=oke, intent=training
         platform:
             - service=eks, intent=inference
+            - service=nvke, intent=inference
             - service=oke, intent=inference
 criteria(service=, accelerator=gb200, intent=, os=ubuntu, platform=kubeflow):
     outcome: error
@@ -1867,6 +1931,7 @@ criteria(service=, accelerator=gb200, intent=, os=ubuntu, platform=kubeflow):
         os:
             - service=aks
             - service=eks
+            - service=nvke, intent=inference
             - service=nvke, intent=training
             - service=oke, intent=inference
             - service=oke, intent=training
@@ -1883,6 +1948,7 @@ criteria(service=, accelerator=gb200, intent=, os=ubuntu, platform=slurm):
         os:
             - service=aks
             - service=eks
+            - service=nvke, intent=inference
             - service=nvke, intent=training
             - service=oke, intent=inference
             - service=oke, intent=training
@@ -1903,6 +1969,7 @@ criteria(service=, accelerator=gb200, intent=inference, os=, platform=):
             - service=ocp
             - service=rke2
             - service=gke, os=cos
+            - service=nvke, os=ubuntu
             - service=oke, os=ol
             - service=oke, os=ubuntu
 criteria(service=, accelerator=gb200, intent=inference, os=, platform=dynamo):
@@ -1921,11 +1988,13 @@ criteria(service=, accelerator=gb200, intent=inference, os=, platform=dynamo):
             - service=ocp
             - service=rke2
             - service=gke, os=cos
+            - service=nvke, os=ubuntu
             - service=oke, os=ol
             - service=oke, os=ubuntu
         platform:
             - service=eks, os=ubuntu
             - service=gke, os=cos
+            - service=nvke, os=ubuntu
             - service=oke, os=ubuntu
 criteria(service=, accelerator=gb200, intent=inference, os=amazonlinux, platform=):
     outcome: error
@@ -2014,12 +2083,14 @@ criteria(service=, accelerator=gb200, intent=inference, os=ubuntu, platform=):
             - service=kind
             - service=lke
             - service=mk8s
+            - service=nvke
             - service=ocp
             - service=oke
             - service=rke2
         os:
             - service=aks
             - service=eks
+            - service=nvke
             - service=oke
 criteria(service=, accelerator=gb200, intent=inference, os=ubuntu, platform=dynamo):
     outcome: error
@@ -2035,15 +2106,18 @@ criteria(service=, accelerator=gb200, intent=inference, os=ubuntu, platform=dyna
             - service=kind
             - service=lke
             - service=mk8s
+            - service=nvke
             - service=ocp
             - service=oke
             - service=rke2
         os:
             - service=aks
             - service=eks
+            - service=nvke
             - service=oke
         platform:
             - service=eks
+            - service=nvke
             - service=oke
 criteria(service=, accelerator=gb200, intent=training, os=, platform=):
     outcome: error
@@ -2695,6 +2769,7 @@ criteria(service=, accelerator=h100, intent=, os=, platform=dynamo):
         platform:
             - service=kind, intent=inference
             - service=aks, intent=inference, os=ubuntu
+            - service=eks, intent=inference, os=amazonlinux
             - service=eks, intent=inference, os=ubuntu
             - service=gke, intent=inference, os=cos
 criteria(service=, accelerator=h100, intent=, os=, platform=kubeflow):
@@ -2750,6 +2825,17 @@ criteria(service=, accelerator=h100, intent=, os=amazonlinux, platform=):
     validCompletions:
         os:
             - service=eks, intent=inference
+criteria(service=, accelerator=h100, intent=, os=amazonlinux, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+    validCompletions:
+        os:
+            - service=eks, intent=inference
+        platform:
+            - service=eks, intent=inference
+            - service=kind, intent=inference
 criteria(service=, accelerator=h100, intent=, os=cos, platform=):
     outcome: error
     uncovered:
@@ -2944,6 +3030,7 @@ criteria(service=, accelerator=h100, intent=inference, os=, platform=dynamo):
         platform:
             - service=kind
             - service=aks, os=ubuntu
+            - service=eks, os=amazonlinux
             - service=eks, os=ubuntu
             - service=gke, os=cos
 criteria(service=, accelerator=h100, intent=inference, os=, platform=nim):
@@ -2983,6 +3070,27 @@ criteria(service=, accelerator=h100, intent=inference, os=amazonlinux, platform=
             - service=rke2
         os:
             - service=eks
+criteria(service=, accelerator=h100, intent=inference, os=amazonlinux, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=kind
+            - service=lke
+            - service=mk8s
+            - service=ocp
+            - service=rke2
+        os:
+            - service=eks
+        platform:
+            - service=eks
+            - service=kind
 criteria(service=, accelerator=h100, intent=inference, os=cos, platform=):
     outcome: error
     uncovered:
@@ -4618,6 +4726,7 @@ criteria(service=eks, accelerator=, intent=, os=, platform=dynamo):
         platform:
             - accelerator=gb200, intent=inference, os=ubuntu
             - accelerator=gb300, intent=inference, os=ubuntu
+            - accelerator=h100, intent=inference, os=amazonlinux
             - accelerator=h100, intent=inference, os=ubuntu
             - accelerator=rtx-pro-6000, intent=inference, os=ubuntu
 criteria(service=eks, accelerator=, intent=, os=, platform=kubeflow):
@@ -4673,6 +4782,19 @@ criteria(service=eks, accelerator=, intent=, os=amazonlinux, platform=):
             - accelerator=gb300, intent=inference
             - accelerator=h100, intent=inference
             - accelerator=rtx-pro-6000, intent=inference
+criteria(service=eks, accelerator=, intent=, os=amazonlinux, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+    validCompletions:
+        os:
+            - accelerator=gb200, intent=inference
+            - accelerator=gb300, intent=inference
+            - accelerator=h100, intent=inference
+            - accelerator=rtx-pro-6000, intent=inference
+        platform:
+            - accelerator=h100, intent=inference
 criteria(service=eks, accelerator=, intent=, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=, intent=, os=ubuntu, platform=dynamo):
@@ -4738,6 +4860,7 @@ criteria(service=eks, accelerator=, intent=inference, os=, platform=dynamo):
         platform:
             - accelerator=gb200, os=ubuntu
             - accelerator=gb300, os=ubuntu
+            - accelerator=h100, os=amazonlinux
             - accelerator=h100, os=ubuntu
             - accelerator=rtx-pro-6000, os=ubuntu
 criteria(service=eks, accelerator=, intent=inference, os=, platform=nim):
@@ -4758,6 +4881,19 @@ criteria(service=eks, accelerator=, intent=inference, os=amazonlinux, platform=)
             - accelerator=gb300
             - accelerator=h100
             - accelerator=rtx-pro-6000
+criteria(service=eks, accelerator=, intent=inference, os=amazonlinux, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+    validCompletions:
+        os:
+            - accelerator=gb200
+            - accelerator=gb300
+            - accelerator=h100
+            - accelerator=rtx-pro-6000
+        platform:
+            - accelerator=h100
 criteria(service=eks, accelerator=, intent=inference, os=ubuntu, platform=):
     outcome: success
 criteria(service=eks, accelerator=, intent=inference, os=ubuntu, platform=dynamo):
@@ -5071,6 +5207,7 @@ criteria(service=eks, accelerator=h100, intent=, os=, platform=dynamo):
         - platform
     validCompletions:
         platform:
+            - intent=inference, os=amazonlinux
             - intent=inference, os=ubuntu
 criteria(service=eks, accelerator=h100, intent=, os=, platform=kubeflow):
     outcome: error
@@ -5113,6 +5250,16 @@ criteria(service=eks, accelerator=h100, intent=, os=amazonlinux, platform=):
         - os
     validCompletions:
         os:
+            - intent=inference
+criteria(service=eks, accelerator=h100, intent=, os=amazonlinux, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+    validCompletions:
+        os:
+            - intent=inference
+        platform:
             - intent=inference
 criteria(service=eks, accelerator=h100, intent=, os=ubuntu, platform=):
     outcome: success
@@ -5166,6 +5313,7 @@ criteria(service=eks, accelerator=h100, intent=inference, os=, platform=dynamo):
         - platform
     validCompletions:
         platform:
+            - os=amazonlinux
             - os=ubuntu
 criteria(service=eks, accelerator=h100, intent=inference, os=, platform=nim):
     outcome: error
@@ -5175,6 +5323,8 @@ criteria(service=eks, accelerator=h100, intent=inference, os=, platform=nim):
         platform:
             - os=ubuntu
 criteria(service=eks, accelerator=h100, intent=inference, os=amazonlinux, platform=):
+    outcome: success
+criteria(service=eks, accelerator=h100, intent=inference, os=amazonlinux, platform=dynamo):
     outcome: success
 criteria(service=eks, accelerator=h100, intent=inference, os=ubuntu, platform=):
     outcome: success
@@ -6603,6 +6753,7 @@ criteria(service=nvke, accelerator=, intent=, os=, platform=dynamo):
         - platform
     validCompletions:
         platform:
+            - accelerator=gb200, intent=inference, os=ubuntu
             - accelerator=gb300, intent=inference, os=ubuntu
             - accelerator=vr200, intent=inference, os=ubuntu
 criteria(service=nvke, accelerator=, intent=, os=, platform=kubeflow):
@@ -6620,6 +6771,7 @@ criteria(service=nvke, accelerator=, intent=, os=ubuntu, platform=):
         - os
     validCompletions:
         os:
+            - accelerator=gb200, intent=inference
             - accelerator=gb200, intent=training
             - accelerator=gb300, intent=inference
             - accelerator=gb300, intent=training
@@ -6632,12 +6784,14 @@ criteria(service=nvke, accelerator=, intent=, os=ubuntu, platform=dynamo):
         - platform
     validCompletions:
         os:
+            - accelerator=gb200, intent=inference
             - accelerator=gb200, intent=training
             - accelerator=gb300, intent=inference
             - accelerator=gb300, intent=training
             - accelerator=vr200, intent=inference
             - accelerator=vr200, intent=training
         platform:
+            - accelerator=gb200, intent=inference
             - accelerator=gb300, intent=inference
             - accelerator=vr200, intent=inference
 criteria(service=nvke, accelerator=, intent=, os=ubuntu, platform=kubeflow):
@@ -6647,6 +6801,7 @@ criteria(service=nvke, accelerator=, intent=, os=ubuntu, platform=kubeflow):
         - platform
     validCompletions:
         os:
+            - accelerator=gb200, intent=inference
             - accelerator=gb200, intent=training
             - accelerator=gb300, intent=inference
             - accelerator=gb300, intent=training
@@ -6662,6 +6817,7 @@ criteria(service=nvke, accelerator=, intent=inference, os=, platform=):
         - intent
     validCompletions:
         intent:
+            - accelerator=gb200, os=ubuntu
             - accelerator=gb300, os=ubuntu
             - accelerator=vr200, os=ubuntu
 criteria(service=nvke, accelerator=, intent=inference, os=, platform=dynamo):
@@ -6671,9 +6827,11 @@ criteria(service=nvke, accelerator=, intent=inference, os=, platform=dynamo):
         - platform
     validCompletions:
         intent:
+            - accelerator=gb200, os=ubuntu
             - accelerator=gb300, os=ubuntu
             - accelerator=vr200, os=ubuntu
         platform:
+            - accelerator=gb200, os=ubuntu
             - accelerator=gb300, os=ubuntu
             - accelerator=vr200, os=ubuntu
 criteria(service=nvke, accelerator=, intent=inference, os=ubuntu, platform=):
@@ -6683,9 +6841,11 @@ criteria(service=nvke, accelerator=, intent=inference, os=ubuntu, platform=):
         - os
     validCompletions:
         intent:
+            - accelerator=gb200
             - accelerator=gb300
             - accelerator=vr200
         os:
+            - accelerator=gb200
             - accelerator=gb300
             - accelerator=vr200
 criteria(service=nvke, accelerator=, intent=inference, os=ubuntu, platform=dynamo):
@@ -6696,12 +6856,15 @@ criteria(service=nvke, accelerator=, intent=inference, os=ubuntu, platform=dynam
         - platform
     validCompletions:
         intent:
+            - accelerator=gb200
             - accelerator=gb300
             - accelerator=vr200
         os:
+            - accelerator=gb200
             - accelerator=gb300
             - accelerator=vr200
         platform:
+            - accelerator=gb200
             - accelerator=gb300
             - accelerator=vr200
 criteria(service=nvke, accelerator=, intent=training, os=, platform=):
@@ -6762,6 +6925,13 @@ criteria(service=nvke, accelerator=, intent=training, os=ubuntu, platform=kubefl
             - accelerator=vr200
 criteria(service=nvke, accelerator=gb200, intent=, os=, platform=):
     outcome: success
+criteria(service=nvke, accelerator=gb200, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+    validCompletions:
+        platform:
+            - intent=inference, os=ubuntu
 criteria(service=nvke, accelerator=gb200, intent=, os=, platform=kubeflow):
     outcome: error
     uncovered:
@@ -6775,7 +6945,19 @@ criteria(service=nvke, accelerator=gb200, intent=, os=ubuntu, platform=):
         - os
     validCompletions:
         os:
+            - intent=inference
             - intent=training
+criteria(service=nvke, accelerator=gb200, intent=, os=ubuntu, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+    validCompletions:
+        os:
+            - intent=inference
+            - intent=training
+        platform:
+            - intent=inference
 criteria(service=nvke, accelerator=gb200, intent=, os=ubuntu, platform=kubeflow):
     outcome: error
     uncovered:
@@ -6783,9 +6965,31 @@ criteria(service=nvke, accelerator=gb200, intent=, os=ubuntu, platform=kubeflow)
         - platform
     validCompletions:
         os:
+            - intent=inference
             - intent=training
         platform:
             - intent=training
+criteria(service=nvke, accelerator=gb200, intent=inference, os=, platform=):
+    outcome: error
+    uncovered:
+        - intent
+    validCompletions:
+        intent:
+            - os=ubuntu
+criteria(service=nvke, accelerator=gb200, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - platform
+    validCompletions:
+        intent:
+            - os=ubuntu
+        platform:
+            - os=ubuntu
+criteria(service=nvke, accelerator=gb200, intent=inference, os=ubuntu, platform=):
+    outcome: success
+criteria(service=nvke, accelerator=gb200, intent=inference, os=ubuntu, platform=dynamo):
+    outcome: success
 criteria(service=nvke, accelerator=gb200, intent=training, os=, platform=):
     outcome: error
     uncovered:

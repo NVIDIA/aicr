@@ -75,3 +75,10 @@ metadata:
   name: nvidia-network-operator
 status:
   phase: Active
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nktp
+status:
+  phase: Active

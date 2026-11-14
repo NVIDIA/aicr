@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/allocpolicy"
+	"github.com/NVIDIA/aicr/pkg/artifact"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -658,6 +659,9 @@ func (r *RecipeResult) ValidateProfileContract() error {
 	}
 	switch {
 	case header.IsSupportedAPIVersion(r.APIVersion):
+		if r.Metadata.Artifacts != nil {
+			return artifact.Invalid("artifact-invalid", "artifact-bearing recipes require strict aicr.run/v1beta2")
+		}
 		if r.Metadata.SelectedProfile != nil {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("recipe apiVersion %q cannot carry metadata.selectedProfile", r.APIVersion))
@@ -667,12 +671,20 @@ func (r *RecipeResult) ValidateProfileContract() error {
 		if err := r.validateProfileMetadataItems(); err != nil {
 			return err
 		}
+		if r.Metadata.Artifacts != nil {
+			if err := artifact.ValidateProvenance(r.Metadata.Artifacts); err != nil {
+				return err
+			}
+		}
 		if r.Metadata.SelectedProfile == nil {
+			if r.Metadata.Artifacts != nil {
+				return r.validateInlineDeepCopyCycles()
+			}
 			if _, accountingConfigured := r.AccountingMode(); accountingConfigured {
 				return r.validateInlineDeepCopyCycles()
 			}
 			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("recipe apiVersion %q requires metadata.selectedProfile or configuration.slurm.accounting",
+				fmt.Sprintf("recipe apiVersion %q requires metadata.selectedProfile, metadata.artifacts or configuration.slurm.accounting",
 					r.APIVersion))
 		}
 	default:
@@ -815,6 +827,9 @@ func (r *RecipeResult) prepareAndValidateWithSource(ctx context.Context, source 
 		}
 	}
 
+	if err := r.ValidateArtifactLock(ctx, r.ComponentRefs, nil, nil); err != nil {
+		return err
+	}
 	if r.Metadata.SelectedProfile == nil {
 		return nil
 	}
