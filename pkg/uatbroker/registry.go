@@ -233,7 +233,7 @@ func (r *Registry) Validate() error {
 // DaytimeAssignments returns the daytime human-access rotation (#1281, DC8):
 // one entry per reservation that opts in via a non-empty daytime-intent, in
 // registry (document) order. Reservations with an empty daytime-intent are
-// nightly-batch only and omitted.
+// omitted.
 func (r *Registry) DaytimeAssignments() []DaytimeAssignment {
 	out := make([]DaytimeAssignment, 0, len(r.Reservations))
 	for i := range r.Reservations {

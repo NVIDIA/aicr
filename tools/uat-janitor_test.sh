@@ -476,6 +476,14 @@ STUB
         REAP_AWS="$(grep -c '^aws ' "${AWS_TRACE}")"
     }
     staged() { yq -r "$1" "${AWS_STAGED}" 2>/dev/null; }
+    # committed <config> <expr>: the value as committed, so a config edit does
+    # not read as a staging regression. A missing value prints a sentinel that
+    # no staged value matches, so the check cannot pass on two empties.
+    committed() {
+        local v
+        v="$(yq -r "$2" "$1" 2>/dev/null)"
+        if [ -n "${v}" ] && [ "${v}" != null ]; then echo "${v}"; else echo "<no $2 in $1>"; fi
+    }
     nonzero() { [ "$1" -ne 0 ] && echo nonzero || echo zero; }
 
     PLACEHOLDER=gb300-instance-type-from-secret
@@ -495,15 +503,18 @@ STUB
     check "gb300 with the secret: one docker call"      "1" "${REAP_DOCKER}"
     check "gb300 with the secret: gpu-worker instanceType is the secret" "gb300-test.type" \
         "$(staged '.compute.eks.nodeGroups.workers[] | select(.name == "gpu-worker") | .instanceType')"
-    check "gb300 with the secret: system instanceType unchanged" "m7i.xlarge" \
+    check "gb300 with the secret: system instanceType unchanged" \
+        "$(committed "${GB300_CFG}" '.compute.eks.nodeGroups.system.instanceType')" \
         "$(staged '.compute.eks.nodeGroups.system.instanceType')"
     check "gb300 with the secret: no placeholder staged" "0" "$(grep -c "${PLACEHOLDER}" "${AWS_STAGED}" 2>/dev/null)"
     check "gb300 with the secret: staged id"            "aicr-uat-7" "$(staged '.deployment.id')"
     check "gb300 with the secret: staged destroy"       "true" "$(staged '.deployment.destroy')"
     # Guard (passes before and after by design): reap() does not touch the
     # backend/provider region split, so it reaches the actuator as committed.
-    check "guard: gb300 location staged unchanged"      "us-east-2" "$(staged '.deployment.location')"
-    check "guard: gb300 stateLocation staged unchanged" "us-east-1" "$(staged '.deployment.stateLocation')"
+    check "guard: gb300 location staged unchanged" \
+        "$(committed "${GB300_CFG}" '.deployment.location')" "$(staged '.deployment.location')"
+    check "guard: gb300 stateLocation staged unchanged" \
+        "$(committed "${GB300_CFG}" '.deployment.stateLocation')" "$(staged '.deployment.stateLocation')"
 
     # (b) without the secret, staging refuses before any LB helper, docker, or aws call.
     for secret in empty unset; do
@@ -531,9 +542,12 @@ STUB
     aws_reap "${CT_CFG}" false ""
     check "guard: ct without the secret: reap succeeds"   "0" "${REAP_RC}"
     check "guard: ct without the secret: one docker call" "1" "${REAP_DOCKER}"
-    check "guard: ct gpu-worker instanceType unchanged" "p5.48xlarge" \
+    check "guard: ct gpu-worker instanceType unchanged" \
+        "$(committed "${CT_CFG}" '.compute.eks.nodeGroups.workers[] | select(.name == "gpu-worker") | .instanceType')" \
         "$(staged '.compute.eks.nodeGroups.workers[] | select(.name == "gpu-worker") | .instanceType')"
-    check "guard: ct system instanceType unchanged" "m7i.xlarge" "$(staged '.compute.eks.nodeGroups.system.instanceType')"
+    check "guard: ct system instanceType unchanged" \
+        "$(committed "${CT_CFG}" '.compute.eks.nodeGroups.system.instanceType')" \
+        "$(staged '.compute.eks.nodeGroups.system.instanceType')"
 fi
 
 if [[ "${FAILED}" -eq 0 ]]; then
