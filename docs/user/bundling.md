@@ -546,7 +546,7 @@ namespace the bundle was published to; a bundle pushed with
 
 ```bash
 helm install aicr-bundle . \
-  --set repoURL=oci://<registry>/<namespace> \
+  --set repoURL=oci://ghcr.io/myorg \
   --set sizing.nodeCount=200
 ```
 
