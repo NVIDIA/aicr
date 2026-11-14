@@ -362,14 +362,40 @@ test-shell: ## Runs shell unit tests (tools/*_test.sh, tools/component-test/*_te
 # ---------------------------------------------------------------------------
 .PHONY: test
 test: test-tool-pins test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
+	@$(MAKE) test-go
+
+# Both local and sharded CI runs use the same enumeration and test flags.
+GO_TEST_COMMAND = GOFLAGS="-mod=readonly" go test -short -count=1 -race -timeout=$(TEST_TIMEOUT) -covermode=atomic
+
+.PHONY: test-packages
+test-packages:
+	@bash -e -o pipefail -c 'GOFLAGS="-mod=readonly" go list ./... | grep -v -e /tests/chainsaw/'
+
+.PHONY: test-go
+test-go:
 	@set -e; \
 	echo "Running tests with race detector..."; \
+	packages=$$($(MAKE) --no-print-directory test-packages); \
 	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
 	AICR_CRITERIA_STRICT=1 \
-	GOFLAGS="-mod=readonly" go test -short -count=1 -race -timeout=$(TEST_TIMEOUT) -covermode=atomic -coverprofile=coverage.full.out $$(go list ./... | grep -v -e /tests/chainsaw/) || exit 1; \
+	$(GO_TEST_COMMAND) -coverprofile=coverage.full.out $$packages || exit 1; \
 	grep -v '^github.com/NVIDIA/aicr/validators/' coverage.full.out > coverage.out; \
 	echo "Test coverage:"; \
 	go tool cover -func=coverage.out | tail -1
+
+.PHONY: test-shard
+test-shard:
+	@bash -e -o pipefail -c '\
+	case "$(SHARD)" in recipe|a|b) ;; *) echo "invalid SHARD" >&2; exit 1;; esac; \
+	mkdir -p "$(TEST_RESULTS)"; \
+	$(MAKE) --no-print-directory test-packages > "$(TEST_RESULTS)/all-packages.txt"; \
+	python3 tools/ci-tests/suite.py manifest "$(TEST_RESULTS)/all-packages.txt" "$(TEST_RESULTS)"; \
+	export KUBEBUILDER_ASSETS; \
+	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path); \
+	AICR_CRITERIA_STRICT=1 \
+	$(GO_TEST_COMMAND) -json -coverprofile="$(TEST_RESULTS)/$(SHARD)/coverage.full.out" \
+	$$(cat "$(TEST_RESULTS)/$(SHARD)/packages.txt") \
+	| python3 tools/ci-tests/suite.py stream "$(TEST_RESULTS)/$(SHARD)/timings.json"'
 
 # Listed before `test` so an unreadable threshold fails in seconds rather than
 # after the full race-enabled suite. Fails closed on both an empty value (yq
