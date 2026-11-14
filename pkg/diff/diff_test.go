@@ -1158,10 +1158,7 @@ func TestWriteTable_DriftDetected(t *testing.T) {
 }
 
 // TestWriteTable_ControlCharactersStayInCell pins that a value or path holding
-// a tab, newline, or carriage return renders escaped inside its own cell. The
-// sysctl collector stores /proc/sys files verbatim, and some, such as
-// fs/file-nr, are tab-separated; written raw, tabwriter reads the tabs as
-// column breaks and the newlines as new rows.
+// a table-breaking control character or ESC renders escaped inside its own cell.
 func TestWriteTable_ControlCharactersStayInCell(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -1185,6 +1182,18 @@ func TestWriteTable_ControlCharactersStayInCell(t *testing.T) {
 			change: Change{Kind: Removed, Severity: SeverityInfo, Path: "OS.sysctl.a\tb",
 				Baseline: strPtr("1")},
 			want: []string{"REMOVED", `"OS.sysctl.a\tb"`, "1", "-"},
+		},
+		{
+			name: "vertical tab and form feed",
+			change: Change{Kind: Modified, Severity: SeverityInfo, Path: "OS.kmod.params",
+				Baseline: strPtr("a\vb"), Target: strPtr("c\fd")},
+			want: []string{"MODIFIED", "OS.kmod.params", `"a\vb"`, `"c\fd"`},
+		},
+		{
+			name: "terminal escape sequence",
+			change: Change{Kind: Added, Severity: SeverityInfo, Path: "OS.kmod.params",
+				Target: strPtr("\x1b[31mred\x1b[0m")},
+			want: []string{"ADDED", "OS.kmod.params", "-", `"\x1b[31mred\x1b[0m"`},
 		},
 	}
 
