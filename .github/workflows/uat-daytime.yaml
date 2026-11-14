@@ -23,12 +23,16 @@ name: UAT Daytime Human-Access
 # even if nobody remembers to tear it down. If that teardown itself fails, the
 # pre-batch guard blocks the batch rather than racing the still-held cluster. The cloud→flavor split is data,
 # not code — it comes from the `daytime-intent` column of the reservation registry
-# (infra/uat/reservations.yaml), defaulting to AWS=training / GCP=inference.
+# (infra/uat/reservations.yaml), defaulting to AWS=training / GCP=inference. The
+# teardown covers every non-kind reservation, not just that rotation: daytime-up
+# can be dispatched through uat-run.yaml against any of them, and a teardown that
+# finds no held cluster is a no-op.
 #
 # This workflow is a THIN SCHEDULER. It owns no lifecycle mechanics: it enumerates
-# the daytime rotation from the broker and dispatches the shared uat-run.yaml
-# once per reservation with lifecycle=daytime-up (manual) or daytime-down (manual
-# or the evening cron). DC2 owns provision-and-hold, teardown, and the pre-batch
+# the reservations from the broker (the daytime rotation for up, every non-kind
+# row for down) and dispatches the shared uat-run.yaml once per reservation with
+# lifecycle=daytime-up (manual) or daytime-down (manual or the evening cron).
+# DC2 owns provision-and-hold, teardown, and the pre-batch
 # guard; uat-run.yaml owns the per-reservation lease. Because the daytime runs go
 # through that same dispatch surface, they contend on the SAME lease as the nightly
 # batch — CI and human use never overlap on one reservation.
@@ -75,10 +79,11 @@ env:
   EVENING_DOWN_CRON: '0 2 * * *'  # must equal the daytime-down cron in on.schedule
 
 jobs:
-  # Resolve the up/down action for this trigger and enumerate the daytime
-  # rotation (reservation + intent) from the registry into a JSON matrix. Keeps
-  # the scheduler data-driven: onboarding a daytime reservation is a
-  # `daytime-intent:` edit in infra/uat/reservations.yaml, no workflow change.
+  # Resolve the up/down action for this trigger and enumerate its reservations
+  # (reservation + intent) from the registry into a JSON matrix. Keeps the
+  # scheduler data-driven: onboarding a daytime reservation is a
+  # `daytime-intent:` edit in infra/uat/reservations.yaml, and a new row joins
+  # the evening teardown with no edit at all.
   enumerate:
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-24.04
@@ -135,14 +140,25 @@ jobs:
           go build -o ./bin/uat-broker ./tools/uat-broker
           # Compact to one line for GITHUB_OUTPUT; the matrix is a JSON array of
           # {reservation,intent} objects consumed as strategy.matrix.include.
-          matrix=$(./bin/uat-broker reservations --daytime | jq -c .)
+          # up stands up the rotation (rows with a daytime-intent). down covers
+          # every non-kind reservation, because daytime-up can be dispatched
+          # against any of them; both sets come from the same broker binary.
+          if [[ "${ACTION}" == "up" ]]; then
+            matrix=$(./bin/uat-broker reservations --daytime | jq -c .)
+          else
+            matrix=$(./bin/uat-broker reservations --daytime-down | jq -c .)
+          fi
           echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
-          echo "Daytime rotation: ${matrix}"
+          echo "Daytime ${ACTION} set: ${matrix}"
           if [[ "${matrix}" == "[]" ]]; then
-            echo "::notice::no reservations carry a daytime-intent; nothing to ${ACTION}."
+            if [[ "${ACTION}" == "up" ]]; then
+              echo "::notice::no reservations carry a daytime-intent; nothing to up."
+            else
+              echo "::notice::the registry has no non-kind reservation; nothing to down."
+            fi
           fi
 
-  # One matrix leg per daytime reservation (parallel — independent hardware).
+  # One matrix leg per enumerated reservation (parallel — independent hardware).
   # Each leg DISPATCHES uat-run.yaml once (workflow_dispatch is exempt from the
   # GITHUB_TOKEN recursion rule and always creates a run) and watches it to
   # completion so a failed morning handoff / evening teardown surfaces here. The
