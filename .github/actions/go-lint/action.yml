@@ -69,12 +69,10 @@ runs:
     # Restore-only, deliberately: there is no companion cache/save step, not
     # even a privileged-gated one.
     #
-    # This job shares go-test's key rather than owning a namespace, and cache
-    # entries are immutable, so whichever job saves first owns that key until
-    # go.sum moves. go-test gates its own save on `make test` having run,
-    # precisely so the banked GOCACHE contains the -race test objects; a lint
-    # run reaching the key first would bank a GOCACHE without them and every
-    # later go-test run would rebuild all of ./... under -race (#2663).
+    # This job shares go-test's key rather than owning a namespace. Entries are
+    # immutable; qualification lets only shard a save after test execution, so
+    # the entry includes that shard's race-test compilation work. A lint save
+    # could claim the key first without those objects (#2663).
     # Giving lint its own key prefix avoids that collision but adds another
     # multi-GB entry, and this repo's cache scope is already over its storage
     # ceiling and evicting (`gh api repos/NVIDIA/aicr/actions/cache/usage`), so
@@ -87,12 +85,11 @@ runs:
     # is safe in go-test: both directories are content-addressed, so Go
     # consults what still matches and refetches or rebuilds what does not.
     #
-    # The cost of the shared key is that three jobs now depend on one
-    # conditional writer. When go-test does not reach the end of `make test`
-    # -- a red `go mod tidy -diff`, a failed tool install, a timeout -- nothing
-    # banks the new go.sum, and lint keeps falling back to a progressively
-    # older entry against a 10-minute budget. It self-heals on the next
-    # completed test run, so this degrades rather than breaks.
+    # These consumers depend on one conditional writer. If shard a never
+    # completes its test step (for example, setup fails or the job times out),
+    # lint keeps falling back to an older entry against a 10-minute budget.
+    # A later completed shard a run can save the new key. Module tidiness runs
+    # independently in compatibility; a tidy failure does not prevent that save.
     - name: Restore Go modules and build output
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
