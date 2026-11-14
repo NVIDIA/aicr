@@ -101,13 +101,13 @@ jobs:
     # ~40 teardown = ~288 base.
     #
     # The Bringup Infra step retries once (#2066) and carries no step-level
-    # timeout, so a retried run costs a second provisioning attempt. The pinned
-    # v0.5.17 GKE actuator widens the Terraform node-pool create/update timeout
-    # to 60m (up from the old 30m), so each of the two attempts can now burn up
-    # to ~60m before Terraform gives up. The retry exists because a slow GPU pool
-    # occasionally still trips even the wider window (or hits a transient state)
-    # and `terraform apply` is idempotent: a second attempt refreshes state,
-    # waits out the still-completing pool, and converges.
+    # timeout, so a retried run costs a second provisioning attempt. The GKE
+    # actuator (since v0.5.17) widens the Terraform node-pool create/update
+    # timeout to 60m (up from the old 30m), so each of the two attempts can now
+    # burn up to ~60m before Terraform gives up. The retry exists because a slow
+    # GPU pool occasionally still trips even the wider window (or hits a
+    # transient state) and `terraform apply` is idempotent: a second attempt
+    # refreshes state, waits out the still-completing pool, and converges.
     #
     # Worst case is a second apply running near the full 60m: ~288 base already
     # counts one ~60m provisioning attempt inside its ~30m "setup + provisioning"
@@ -166,16 +166,18 @@ jobs:
       # DC2 selects the AICRConfig by intent; both intents drive the same
       # cluster-config (GPU pool from the reservation, system/CPU pools dynamic).
       TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
-      # v0.5.17. Keep the release tag for update visibility and the digest for
+      # v0.5.20. Keep the release tag for update visibility and the digest for
       # execution identity. Review the upstream release and verify its signature
       # before rotating both values; never use a tag-only actuator reference.
+      # Rotate JANITOR_ACTUATOR_IMAGE in uat-janitor.yaml's gcp job with it.
       #
-      # v0.5.19 is available and provenance-verified, but is NOT taken here:
-      # v0.5.17..v0.5.19 reworks provider/gke/terraform/compute.tf
-      # (a3-megagpu-8g gVNIC guard, host maintenance interval) and moves the
-      # google provider pin, which is a real provisioning change and wants a
-      # GCP lane run of its own rather than riding along with an EKS bump.
-      GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.17@sha256:8bfffd412d98276ee1000a6c083514e6b28928416cc37602ec637ed3a2167c99"
+      # v0.5.20's SLSA v1 provenance (source commit 75139a4, GitHub-hosted
+      # runner) was verified with:
+      #   gh attestation verify oci://ghcr.io/mchmarny/cluster/gke@<digest> \
+      #     --repo mchmarny/cluster --source-ref refs/tags/v0.5.20-gke \
+      #     --signer-workflow mchmarny/cluster/.github/workflows/on-tag.yaml \
+      #     --deny-self-hosted-runners
+      GKE_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.20@sha256:e0956f0b3c44517b6a269ca5775c617d0f118554b42c6766284de86aace4734b"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Pin validator-image resolution for MAIN cells to this run's freshly
@@ -545,7 +547,7 @@ jobs:
         run: |
           set -euo pipefail
           # Retry the actuator apply once on a transient provisioning failure.
-          # The pinned v0.5.17 GKE actuator sets a 60m Terraform node-pool
+          # The GKE actuator (since v0.5.17) sets a 60m Terraform node-pool
           # create/update timeout (terraform/compute.tf), wide enough for a slow
           # GPU pool that used to exceed the prior 30m and get failed even though
           # GKE finished and reported the pool RUNNING moments later (observed on
@@ -567,10 +569,12 @@ jobs:
               -e KEY_CONTENT="$(base64 < ${{ steps.auth.outputs.credentials_file_path }})" \
               ${{ env.GKE_ACTUATOR_IMAGE }} apply; then
               # Actuator exit 0 is necessary but NOT sufficient. With google
-              # provider v7.35 a node pool left in ERROR state produces a
-              # no-change plan (exit 0) on a subsequent apply, and the Connect
-              # step's `kubectl get nodes` proves only API reachability, not pool
-              # health — together those would mark a broken cluster "brought up",
+              # provider v7.35 (actuator v0.5.17; not re-checked on the 8.x
+              # provider the pinned actuator uses) a node pool left in ERROR
+              # state produced a no-change plan (exit 0) on a subsequent apply,
+              # and the Connect step's `kubectl get nodes` proves only API
+              # reachability, not pool health — together those would mark a
+              # broken cluster "brought up",
               # holding it on daytime-up/skip_delete and suppressing #2067's
               # failure() teardown (which never fires on an exit-0 run). Gate
               # brought_up on every configured node pool reporting RUNNING.
