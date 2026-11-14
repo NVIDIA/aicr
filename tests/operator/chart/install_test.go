@@ -916,8 +916,11 @@ func tenants(t *testing.T) {
 	}
 	const tenant = "alice"
 	groups := []string{"tenants"}
-	if !allowed(ctx, t, tenant, groups, authorizationv1.ResourceAttributes{Verb: "create", Group: "apps", Resource: "deployments", Namespace: "team-a"}) {
-		t.Fatal("the tenant cannot manage its own namespace; the check proves nothing")
+	// RoleBinding writes can complete before the RBAC authorizer observes them.
+	if err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		return allowed(ctx, t, tenant, groups, authorizationv1.ResourceAttributes{Verb: "create", Group: "apps", Resource: "deployments", Namespace: "team-a"}), nil
+	}); err != nil {
+		t.Fatalf("the tenant cannot manage its own namespace; the check proves nothing: %v", err)
 	}
 	operatorGroup := v1alpha1.GroupVersion.Group
 	surfaces := make([]authorizationv1.ResourceAttributes, 0, 64)
