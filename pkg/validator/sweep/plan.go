@@ -203,12 +203,14 @@ func namespaceHasLivePods(ctx context.Context, kube kubernetes.Interface, namesp
 
 // runScopedGate applies the guards shared by every run-scoped object:
 // already terminating, a readable run ID (without it the liveness guard
-// cannot run, so the object is kept), the age floor, and the no-live-Job
-// rule — a Job carrying the run's aicr.run/run-id label in ANY namespace
-// keeps the object, because a run in another namespace still owns its
-// cluster-scoped agent RBAC. The object's Status and Reason are set on
-// return; StatusWouldDelete means every guard passed.
-func runScopedGate(obj *Object, meta metav1.Object, o Options, live map[string]bool) {
+// cannot run, so the object is kept), a name that is exactly what the
+// producer writes for that run ID (labels prove nothing — a user can stamp
+// them on anything), the age floor, and the no-live-Job rule — a Job
+// carrying the run's aicr.run/run-id label in ANY namespace keeps the
+// object, because a run in another namespace still owns its cluster-scoped
+// agent RBAC. The object's Status and Reason are set on return;
+// StatusWouldDelete means every guard passed.
+func runScopedGate(obj *Object, meta metav1.Object, o Options, live map[string]bool, ownsName func(name, runID string) bool) {
 	if meta.GetDeletionTimestamp() != nil {
 		obj.Status = StatusTerminating
 		obj.Reason = reasonTerminating
@@ -221,6 +223,11 @@ func runScopedGate(obj *Object, meta metav1.Object, o Options, live map[string]b
 		return
 	}
 	obj.RunID = runID
+	if !ownsName(meta.GetName(), runID) {
+		obj.Status = StatusSkipped
+		obj.Reason = fmt.Sprintf("name %q is not the name the validator writes for run %s", meta.GetName(), runID)
+		return
+	}
 	if ageGate(obj, meta.GetCreationTimestamp(), o.OlderThan) {
 		return
 	}
@@ -329,7 +336,8 @@ func isValidatorBinding(crb *rbacv1.ClusterRoleBinding, namespace, runID string)
 }
 
 // planDataConfigMaps selects the per-run data and CTRF ConfigMaps in the
-// validation namespace.
+// validation namespace. The label selector is only half the selection: the
+// name must be exactly one the validator writes for the label's run ID.
 func planDataConfigMaps(ctx context.Context, kube kubernetes.Interface, o Options, live map[string]bool) ([]Object, error) {
 	callCtx, cancel := apiCallCtx(ctx)
 	defer cancel()
@@ -341,7 +349,7 @@ func planDataConfigMaps(ctx context.Context, kube kubernetes.Interface, o Option
 	for i := range cms.Items {
 		cm := &cms.Items[i]
 		obj := Object{Kind: kindConfigMap, Namespace: cm.Namespace, Name: cm.Name, UID: cm.UID, Age: ageOf(cm.CreationTimestamp)}
-		runScopedGate(&obj, cm, o, live)
+		runScopedGate(&obj, cm, o, live, dataConfigMapOwnsName)
 		out = append(out, obj)
 	}
 	return out, nil
@@ -411,10 +419,17 @@ func planAgentObjects(ctx context.Context, kube kubernetes.Interface, o Options,
 	return out, nil
 }
 
-// agentObject runs the run-scoped gate over one snapshot-agent object.
+// agentObject runs the run-scoped gate over one snapshot-agent object, with
+// the name shape its scope is written in: the namespaced kinds join a
+// caller-configurable prefix to the run ID, the cluster-scoped pair is named
+// exactly defaults.AgentClusterRoleName + "-" + runID.
 func agentObject(kind, namespace string, meta metav1.Object, o Options, live map[string]bool) Object {
 	obj := Object{Kind: kind, Namespace: namespace, Name: meta.GetName(), UID: meta.GetUID(), Age: ageOf(meta.GetCreationTimestamp())}
-	runScopedGate(&obj, meta, o, live)
+	ownsName := agentNamespacedOwnsName
+	if kind == kindClusterRole || kind == kindClusterRoleBinding {
+		ownsName = agentClusterOwnsName
+	}
+	runScopedGate(&obj, meta, o, live, ownsName)
 	return obj
 }
 

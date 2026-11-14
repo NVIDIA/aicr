@@ -43,8 +43,10 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	"github.com/NVIDIA/aicr/pkg/validator/job"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 const (
@@ -137,15 +139,22 @@ func agentLabels(runID string) map[string]string {
 	}
 }
 
-func agentSA(name, runID string, age time.Duration) *corev1.ServiceAccount {
+func agentSA(name, runID string) *corev1.ServiceAccount {
 	return &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
 		Name: name, Namespace: testNamespace, UID: types.UID("uid-" + name),
-		CreationTimestamp: created(age), Labels: agentLabels(runID),
+		CreationTimestamp: created(old), Labels: agentLabels(runID),
 	}}
 }
 
 func agentRoleBinding(name, runID string, age time.Duration) *rbacv1.RoleBinding {
 	return &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{
+		Name: name, Namespace: testNamespace, UID: types.UID("uid-" + name),
+		CreationTimestamp: created(age), Labels: agentLabels(runID),
+	}}
+}
+
+func agentRole(name, runID string, age time.Duration) *rbacv1.Role {
+	return &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{
 		Name: name, Namespace: testNamespace, UID: types.UID("uid-" + name),
 		CreationTimestamp: created(age), Labels: agentLabels(runID),
 	}}
@@ -158,7 +167,8 @@ func agentClusterRole(name, runID string) *rbacv1.ClusterRole {
 	}}
 }
 
-func agentClusterRoleBinding(name, runID string) *rbacv1.ClusterRoleBinding {
+func agentClusterRoleBinding(runID string) *rbacv1.ClusterRoleBinding {
+	name := defaults.AgentClusterRoleName + "-" + runID
 	return &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{
 		Name: name, UID: types.UID("uid-" + name),
 		CreationTimestamp: created(old), Labels: agentLabels(runID),
@@ -260,13 +270,13 @@ func wantStatus(t *testing.T, r *Report, kind, name string, status Status, reaso
 	}
 }
 
-// useSettle overrides the settle-observation knobs with test-scale values,
+// useSettle overrides the settle-observation window with a test-scale value,
 // restored at cleanup.
-func useSettle(t *testing.T, window, pause time.Duration) {
+func useSettle(t *testing.T, window time.Duration) {
 	t.Helper()
-	oldWindow, oldPause := settleWindow, settleRewatchPause
-	settleWindow, settleRewatchPause = window, pause
-	t.Cleanup(func() { settleWindow, settleRewatchPause = oldWindow, oldPause })
+	oldWindow := settleWindow
+	settleWindow = window
+	t.Cleanup(func() { settleWindow = oldWindow })
 }
 
 // noSettle removes the settle wait for tests that do not exercise it: a
@@ -274,7 +284,7 @@ func useSettle(t *testing.T, window, pause time.Duration) {
 // straight to the delete loop.
 func noSettle(t *testing.T) {
 	t.Helper()
-	useSettle(t, 0, time.Second)
+	useSettle(t, 0)
 }
 
 // deleteActions records the fake's delete calls in order.
@@ -567,13 +577,14 @@ func TestPlanConfigMapsAndAgentObjectsGroupByRun(t *testing.T) {
 		dataConfigMap("aicr-snapshot-"+deadRun, deadRun),
 		dataConfigMap("aicr-validation-"+deadRun, deadRun),
 		dataConfigMap("aicr-ctrf-"+deadRun+"-deployment", deadRun),
-		agentSA("aicr-validate-"+deadRun, deadRun, old),
+		agentSA("aicr-validate-"+deadRun, deadRun),
 		agentRoleBinding("aicr-validate-"+deadRun, deadRun, old),
 		agentClusterRole("aicr-node-reader-"+deadRun, deadRun),
 		// Live run: everything kept.
 		dataConfigMap("aicr-snapshot-"+liveRun, liveRun),
-		agentSA("aicr-validate-"+liveRun, liveRun, old),
+		agentSA("aicr-validate-"+liveRun, liveRun),
 		agentClusterRole("aicr-node-reader-"+liveRun, liveRun),
+		agentClusterRoleBinding(liveRun),
 		// No run-id label: kept, the liveness guard cannot run.
 		func() *corev1.ConfigMap {
 			cm := dataConfigMap("aicr-snapshot-unlabeled", "")
@@ -598,7 +609,93 @@ func TestPlanConfigMapsAndAgentObjectsGroupByRun(t *testing.T) {
 	wantStatus(t, report, kindConfigMap, "aicr-snapshot-"+liveRun, StatusSkipped, "still has a validator Job")
 	wantStatus(t, report, kindServiceAccount, "aicr-validate-"+liveRun, StatusSkipped, "still has a validator Job")
 	wantStatus(t, report, kindClusterRole, "aicr-node-reader-"+liveRun, StatusSkipped, "still has a validator Job")
+	wantStatus(t, report, kindClusterRoleBinding, "aicr-node-reader-"+liveRun, StatusSkipped, "still has a validator Job")
 	wantStatus(t, report, kindConfigMap, "aicr-snapshot-unlabeled", StatusSkipped, "missing the "+labels.RunID+" label")
+}
+
+// TestPlanRunScopedNameShapes pins the name half of the run-scoped
+// selectors: a label match is only half the selection — the name must be
+// exactly one the producer writes for the label's run ID, or the object is
+// kept (fail closed).
+func TestPlanRunScopedNameShapes(t *testing.T) {
+	wrongName := "is not the name the validator writes"
+	tests := []struct {
+		name           string
+		object         runtime.Object
+		kind           string
+		objName        string
+		wantStatus     Status
+		reasonFragment string
+	}{
+		// Data and CTRF ConfigMaps: exactly the five names a run writes.
+		{"snapshot ConfigMap",
+			dataConfigMap(defaults.SnapshotConfigMapPrefix+deadRun, deadRun),
+			kindConfigMap, defaults.SnapshotConfigMapPrefix + deadRun, StatusWouldDelete, ""},
+		{"validation ConfigMap",
+			dataConfigMap(defaults.ValidationConfigMapPrefix+deadRun, deadRun),
+			kindConfigMap, defaults.ValidationConfigMapPrefix + deadRun, StatusWouldDelete, ""},
+		{"ctrf deployment ConfigMap",
+			dataConfigMap(ctrf.ConfigMapName(deadRun, string(v1.PhaseDeployment)), deadRun),
+			kindConfigMap, ctrf.ConfigMapName(deadRun, string(v1.PhaseDeployment)), StatusWouldDelete, ""},
+		{"ctrf conformance ConfigMap",
+			dataConfigMap(ctrf.ConfigMapName(deadRun, string(v1.PhaseConformance)), deadRun),
+			kindConfigMap, ctrf.ConfigMapName(deadRun, string(v1.PhaseConformance)), StatusWouldDelete, ""},
+		{"ctrf performance ConfigMap",
+			dataConfigMap(ctrf.ConfigMapName(deadRun, string(v1.PhasePerformance)), deadRun),
+			kindConfigMap, ctrf.ConfigMapName(deadRun, string(v1.PhasePerformance)), StatusWouldDelete, ""},
+		{"labeled user ConfigMap kept",
+			dataConfigMap("production-settings", deadRun),
+			kindConfigMap, "production-settings", StatusSkipped, wrongName},
+		{"snapshot name of another run kept",
+			dataConfigMap(defaults.SnapshotConfigMapPrefix+deadRun2, deadRun),
+			kindConfigMap, defaults.SnapshotConfigMapPrefix + deadRun2, StatusSkipped, wrongName},
+		{"ctrf name with a phase no run writes kept",
+			dataConfigMap("aicr-ctrf-"+deadRun+"-all", deadRun),
+			kindConfigMap, "aicr-ctrf-" + deadRun + "-all", StatusSkipped, wrongName},
+		{"snapshot name with an extra suffix kept",
+			dataConfigMap(defaults.SnapshotConfigMapPrefix+deadRun+"-extra", deadRun),
+			kindConfigMap, defaults.SnapshotConfigMapPrefix + deadRun + "-extra", StatusSkipped, wrongName},
+
+		// Snapshot-agent namespaced objects: the bare run ID or any name
+		// ending in "-"+runID (the producer's prefix is caller-configurable).
+		{"agent ServiceAccount with the producer name",
+			agentSA("aicr-validate-"+deadRun, deadRun),
+			kindServiceAccount, "aicr-validate-" + deadRun, StatusWouldDelete, ""},
+		{"agent ServiceAccount named the bare run ID",
+			agentSA(deadRun, deadRun),
+			kindServiceAccount, deadRun, StatusWouldDelete, ""},
+		{"agent RoleBinding named for another run kept",
+			agentRoleBinding("aicr-validate-"+deadRun2, deadRun, old),
+			kindRoleBinding, "aicr-validate-" + deadRun2, StatusSkipped, wrongName},
+		{"agent Role with the run ID glued on without a dash kept",
+			agentRole("aicr-validate"+deadRun, deadRun, old),
+			kindRole, "aicr-validate" + deadRun, StatusSkipped, wrongName},
+
+		// Snapshot-agent cluster-scoped pair: exactly
+		// defaults.AgentClusterRoleName + "-" + runID, nothing else.
+		{"agent ClusterRole with the producer name",
+			agentClusterRole(defaults.AgentClusterRoleName+"-"+deadRun, deadRun),
+			kindClusterRole, defaults.AgentClusterRoleName + "-" + deadRun, StatusWouldDelete, ""},
+		{"agent ClusterRoleBinding with the producer name",
+			agentClusterRoleBinding(deadRun),
+			kindClusterRoleBinding, defaults.AgentClusterRoleName + "-" + deadRun, StatusWouldDelete, ""},
+		{"agent ClusterRole named for another run kept",
+			agentClusterRole(defaults.AgentClusterRoleName+"-"+deadRun2, deadRun),
+			kindClusterRole, defaults.AgentClusterRoleName + "-" + deadRun2, StatusSkipped, wrongName},
+		{"agent ClusterRoleBinding with a suffix-shaped foreign name kept",
+			func() *rbacv1.ClusterRoleBinding {
+				crb := agentClusterRoleBinding(deadRun)
+				crb.Name = "custom-node-reader-" + deadRun
+				return crb
+			}(),
+			kindClusterRoleBinding, "custom-node-reader-" + deadRun, StatusSkipped, wrongName},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			report, _ := planWith(t, testOptions(), []runtime.Object{tt.object})
+			wantStatus(t, report, tt.kind, tt.objName, tt.wantStatus, tt.reasonFragment)
+		})
+	}
 }
 
 func TestPlanExcludesOperatorOwnedAgentRBAC(t *testing.T) {
@@ -1085,7 +1182,7 @@ func watchJobs(t *testing.T, cs *k8sfake.Clientset, size int) *watch.FakeWatcher
 // appears while the sweep is observing the settle window keeps every one of
 // its run-scoped objects, while a run that stays quiet is swept.
 func TestExecuteSettleWindowKeepsARunThatReappears(t *testing.T) {
-	useSettle(t, 200*time.Millisecond, 5*time.Millisecond)
+	useSettle(t, 200*time.Millisecond)
 	objects := []runtime.Object{
 		validatorSA(deadRun, old),
 		validatorCRB(deadRun),
@@ -1131,7 +1228,7 @@ func TestExecuteSettleWindowKeepsARunThatReappears(t *testing.T) {
 // window — the gap a poll can miss entirely — is still observed through the
 // watch, so its run keeps its objects.
 func TestExecuteSettleWindowSeesABriefJob(t *testing.T) {
-	useSettle(t, 200*time.Millisecond, 5*time.Millisecond)
+	useSettle(t, 200*time.Millisecond)
 	report, cs := planWith(t, testOptions(), []runtime.Object{
 		validatorSA(deadRun, old),
 		validatorCRB(deadRun),
@@ -1160,7 +1257,7 @@ func TestExecuteSettleWindowSeesABriefJob(t *testing.T) {
 // not in the watch (which resumes after the list), so the observation's
 // initial list is the only thing that sees it.
 func TestExecuteSettleListKeepsARunThatAppearedAfterTheReplan(t *testing.T) {
-	useSettle(t, 200*time.Millisecond, 5*time.Millisecond)
+	useSettle(t, 200*time.Millisecond)
 	report, cs := planWith(t, testOptions(), []runtime.Object{
 		validatorSA(deadRun, old),
 		validatorCRB(deadRun),
@@ -1194,7 +1291,7 @@ func TestExecuteSettleListKeepsARunThatAppearedAfterTheReplan(t *testing.T) {
 // start at the list's resourceVersion, or a Job created and deleted between
 // the list and the watch is never reported.
 func TestExecuteSettleWatchResumesFromTheListResourceVersion(t *testing.T) {
-	useSettle(t, 50*time.Millisecond, 5*time.Millisecond)
+	useSettle(t, 50*time.Millisecond)
 	report, cs := planWith(t, testOptions(), []runtime.Object{validatorSA(deadRun, old)})
 
 	const listVersion = "4242"
@@ -1216,34 +1313,56 @@ func TestExecuteSettleWatchResumesFromTheListResourceVersion(t *testing.T) {
 	}
 }
 
-// TestExecuteSettleWindowRewatchesAfterClose: a watch channel that closes
-// mid-window is re-established from a fresh list, and an event the second
-// watch delivers is still honored.
-func TestExecuteSettleWindowRewatchesAfterClose(t *testing.T) {
-	useSettle(t, 500*time.Millisecond, 5*time.Millisecond)
+// TestExecuteSettleWatchClosedEarlyFailsClosed: a watch channel that closes
+// before the window fires means liveness was not observed for the whole
+// window, so the apply aborts with ErrCodeUnavailable and deletes nothing.
+func TestExecuteSettleWatchClosedEarlyFailsClosed(t *testing.T) {
+	useSettle(t, 500*time.Millisecond)
 	report, cs := planWith(t, testOptions(), []runtime.Object{validatorSA(deadRun, old)})
 
-	first := watch.NewFake()
-	first.Stop() // the first watch's channel is closed from the start
-	second := watch.NewFakeWithChanSize(1, false)
-	second.Add(validatorJob(testNamespace, deadRun))
-	watches := 0
+	closed := watch.NewFake()
+	closed.Stop() // the watch's channel is closed from the start
 	cs.PrependWatchReactor("jobs", func(k8stesting.Action) (bool, watch.Interface, error) {
-		watches++
-		if watches == 1 {
-			return true, first, nil
-		}
-		return true, second, nil
+		return true, closed, nil
 	})
 	dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), testPodGroupListKinds)
 
-	if err := Execute(context.Background(), cs, dyn, report); err != nil {
-		t.Fatalf("Execute() error = %v", err)
+	err := Execute(context.Background(), cs, dyn, report)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
+	if deletes := deleteActions(cs); len(deletes) != 0 {
+		t.Errorf("Execute deleted %d objects with the settle watch unproven: %v", len(deletes), deletes)
 	}
-	wantStatus(t, report, kindServiceAccount, job.ServiceAccountName(deadRun), StatusSkipped,
-		"started a validator Job while the sweep waited")
-	if watches != 2 {
-		t.Errorf("watch establishments = %d, want 2 (the closed watch re-listed and re-watched)", watches)
+}
+
+// TestExecuteSettleWatchErrorEventFailsClosed: a watch.Error event — whatever
+// its Status — ends the observation before the window did, so the apply
+// fails closed and deletes nothing. An Expired (410) Status gets no special
+// recovery: any early end aborts.
+func TestExecuteSettleWatchErrorEventFailsClosed(t *testing.T) {
+	tests := []struct {
+		name   string
+		status *metav1.Status
+	}{
+		{"internal error Status", &apierrors.NewInternalError(fmt.Errorf("boom")).ErrStatus},
+		{"expired (Gone) Status", &apierrors.NewResourceExpired("resource version too old").ErrStatus},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useSettle(t, 500*time.Millisecond)
+			report, cs := planWith(t, testOptions(), []runtime.Object{validatorSA(deadRun, old)})
+
+			fw := watchJobs(t, cs, 1)
+			fw.Error(tt.status)
+			dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), testPodGroupListKinds)
+
+			err := Execute(context.Background(), cs, dyn, report)
+			if err == nil {
+				t.Fatal("Execute() = nil, want the watch error to abort the apply")
+			}
+			if deletes := deleteActions(cs); len(deletes) != 0 {
+				t.Errorf("Execute deleted %d objects with the settle watch unproven: %v", len(deletes), deletes)
+			}
+		})
 	}
 }
 
@@ -1251,7 +1370,7 @@ func TestExecuteSettleWindowRewatchesAfterClose(t *testing.T) {
 // established means quiet was not proven — Execute returns the classified
 // error and deletes nothing.
 func TestExecuteSettleWindowWatchFailureFailsClosed(t *testing.T) {
-	useSettle(t, 200*time.Millisecond, 5*time.Millisecond)
+	useSettle(t, 200*time.Millisecond)
 	report, cs := planWith(t, testOptions(), []runtime.Object{validatorSA(deadRun, old)})
 	cs.PrependWatchReactor("jobs", func(k8stesting.Action) (bool, watch.Interface, error) {
 		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "jobs"}, "", fmt.Errorf("denied"))
@@ -1271,7 +1390,7 @@ func TestExecuteSettleWindowWatchFailureFailsClosed(t *testing.T) {
 // window bounds the call: it fails with a timeout instead of hanging until
 // the operator interrupts.
 func TestWatchOnceBoundsAWatchTheServerNeverAnswers(t *testing.T) {
-	useSettle(t, 100*time.Millisecond, 5*time.Millisecond)
+	useSettle(t, 100*time.Millisecond)
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	}))
@@ -1285,10 +1404,7 @@ func TestWatchOnceBoundsAWatchTheServerNeverAnswers(t *testing.T) {
 	pending := map[string][]*Object{deadRun: {{Kind: kindServiceAccount}}}
 
 	start := time.Now()
-	done, err := watchOnce(context.Background(), kube, "1", window, pending)
-	if !done {
-		t.Error("watchOnce() done = false, want true: an unestablished watch must not be retried")
-	}
+	err = watchOnce(context.Background(), kube, "1", window, pending)
 	errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Errorf("watchOnce() took %v, want it bounded by the %v settle window", elapsed, settleWindow)
@@ -1309,7 +1425,7 @@ func TestExecuteSettleTrustsTheFreshRunID(t *testing.T) {
 		{"run ID altered to another run", deadRun2},
 	} {
 		t.Run(tamper.name, func(t *testing.T) {
-			useSettle(t, 200*time.Millisecond, 5*time.Millisecond)
+			useSettle(t, 200*time.Millisecond)
 			report, cs := planWith(t, testOptions(), []runtime.Object{
 				validatorSA(deadRun, old),
 				validatorCRB(deadRun),
@@ -1344,7 +1460,7 @@ func TestExecuteSettleTrustsTheFreshRunID(t *testing.T) {
 // TestExecuteSettleWindowQuietDeletes: nothing reappears before the window
 // elapses, so the run-scoped candidates are deleted.
 func TestExecuteSettleWindowQuietDeletes(t *testing.T) {
-	useSettle(t, 30*time.Millisecond, 5*time.Millisecond)
+	useSettle(t, 30*time.Millisecond)
 	report, cs := planWith(t, testOptions(), []runtime.Object{
 		validatorSA(deadRun, old),
 		validatorCRB(deadRun),
@@ -1358,11 +1474,78 @@ func TestExecuteSettleWindowQuietDeletes(t *testing.T) {
 	wantStatus(t, report, kindClusterRoleBinding, job.ClusterRoleBindingName(deadRun), StatusDeleted, "")
 }
 
+// TestExecuteReplansAgainAfterTheSettleWindow: the settle wait sits between
+// the re-plan's reads and the deletes, so Execute re-plans once more after
+// it — a guard that trips during the window keeps its object.
+func TestExecuteReplansAgainAfterTheSettleWindow(t *testing.T) {
+	t.Run("namespace gains a live pod during the settle window", func(t *testing.T) {
+		useSettle(t, 100*time.Millisecond)
+		ns := testNamespaceObj(defaults.GPUTestNamespacePrefix+hexToken32a, hexToken32a, old)
+		report, cs := planWith(t, testOptions(), []runtime.Object{ns, validatorSA(deadRun, old)})
+		wantStatus(t, report, kindNamespace, ns.Name, StatusWouldDelete, "")
+
+		// The watch's establishment is the settle window's start: the pod
+		// lands after the first re-plan listed the namespace's pods.
+		cs.PrependWatchReactor("jobs", func(k8stesting.Action) (bool, watch.Interface, error) {
+			if err := cs.Tracker().Add(livePod(ns.Name, "late-pod")); err != nil {
+				t.Errorf("add late pod: %v", err)
+			}
+			return true, watch.NewFake(), nil
+		})
+		dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), testPodGroupListKinds)
+
+		if err := Execute(context.Background(), cs, dyn, report); err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		wantStatus(t, report, kindNamespace, ns.Name, StatusSkipped, "still has live pods")
+		if _, err := cs.CoreV1().Namespaces().Get(context.Background(), ns.Name, metav1.GetOptions{}); err != nil {
+			t.Errorf("namespace that gained a live pod during the settle window was deleted: %v", err)
+		}
+		// The quiet run-scoped candidate in the same plan is still deleted.
+		wantStatus(t, report, kindServiceAccount, job.ServiceAccountName(deadRun), StatusDeleted, "")
+	})
+
+	t.Run("run gains a Job after the window closes", func(t *testing.T) {
+		useSettle(t, 100*time.Millisecond)
+		report, cs := planWith(t, testOptions(), []runtime.Object{
+			validatorSA(deadRun, old),
+			validatorCRB(deadRun),
+		})
+
+		// The Job exists only for lists after the settle watch was
+		// established: the first re-plan and the settle list see none, the
+		// post-settle re-plan sees it.
+		watchEstablished := false
+		cs.PrependWatchReactor("jobs", func(k8stesting.Action) (bool, watch.Interface, error) {
+			watchEstablished = true
+			return true, watch.NewFake(), nil
+		})
+		cs.PrependReactor("list", "jobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+			if !watchEstablished {
+				return true, &batchv1.JobList{}, nil
+			}
+			return true, &batchv1.JobList{Items: []batchv1.Job{*validatorJob(testNamespace, deadRun)}}, nil
+		})
+		dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), testPodGroupListKinds)
+
+		if err := Execute(context.Background(), cs, dyn, report); err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		wantStatus(t, report, kindServiceAccount, job.ServiceAccountName(deadRun), StatusSkipped,
+			"still has a validator Job")
+		wantStatus(t, report, kindClusterRoleBinding, job.ClusterRoleBindingName(deadRun), StatusSkipped,
+			"still has a validator Job")
+		if deletes := deleteActions(cs); len(deletes) != 0 {
+			t.Errorf("a run whose Job appeared after the settle window was swept: %v", deletes)
+		}
+	})
+}
+
 // TestExecuteSettleWindowCanceled: canceling mid-window aborts before any
 // delete, with the canceled classification.
 func TestExecuteSettleWindowCanceled(t *testing.T) {
 	// A window long enough that only cancellation can end it.
-	useSettle(t, time.Hour, 5*time.Millisecond)
+	useSettle(t, time.Hour)
 	report, cs := planWith(t, testOptions(), []runtime.Object{validatorSA(deadRun, old)})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1384,11 +1567,12 @@ func TestExecuteSettleWindowCanceled(t *testing.T) {
 
 // TestExecuteWithoutRunScopedCandidatesDoesNotObserve: namespaces and Run:ai
 // residue are guarded by live pods and age, not by the Job signal, so their
-// apply runs no settle observation at all — the only Jobs list is the
+// apply runs no settle observation at all — and with nothing waited on, no
+// post-settle re-plan either: the only Jobs and namespaces lists are the
 // re-plan's own.
 func TestExecuteWithoutRunScopedCandidatesDoesNotObserve(t *testing.T) {
 	// A window that would stall the test if the observation ran.
-	useSettle(t, time.Hour, time.Hour)
+	useSettle(t, time.Hour)
 	report, cs := planWith(t, testOptions(), []runtime.Object{
 		testNamespaceObj(defaults.GPUTestNamespacePrefix+hexToken32a, hexToken32a, old),
 		gangPod("runai-team-a", "gang-neg-worker-"+hexToken32a+"-0", hexToken32a, old),
@@ -1397,9 +1581,13 @@ func TestExecuteWithoutRunScopedCandidatesDoesNotObserve(t *testing.T) {
 		t.Fatalf("candidates = %d, want 3", got)
 	}
 
-	listCalls := 0
+	jobsListed, namespacesListed := 0, 0
 	cs.PrependReactor("list", "jobs", func(k8stesting.Action) (bool, runtime.Object, error) {
-		listCalls++
+		jobsListed++
+		return false, nil, nil
+	})
+	cs.PrependReactor("list", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		namespacesListed++
 		return false, nil, nil
 	})
 	cs.PrependWatchReactor("jobs", func(k8stesting.Action) (bool, watch.Interface, error) {
@@ -1412,8 +1600,9 @@ func TestExecuteWithoutRunScopedCandidatesDoesNotObserve(t *testing.T) {
 	if err := Execute(context.Background(), cs, dyn, report); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if listCalls != 1 {
-		t.Errorf("jobs list calls = %d, want exactly 1 (the re-plan's); the settle observation must not run without run-scoped candidates", listCalls)
+	if jobsListed != 1 || namespacesListed != 1 {
+		t.Errorf("list calls: jobs %d, namespaces %d, want exactly 1 each (one re-plan, no settle observation, no post-settle re-plan)",
+			jobsListed, namespacesListed)
 	}
 	wantStatus(t, report, kindNamespace, defaults.GPUTestNamespacePrefix+hexToken32a, StatusDeleting, "")
 	wantStatus(t, report, kindPod, "gang-neg-worker-"+hexToken32a+"-0", StatusDeleted, "")
@@ -1550,7 +1739,7 @@ func TestExecuteNilPlanRejected(t *testing.T) {
 func TestPlanAgentClusterRBACGuardedByJobInAnyNamespace(t *testing.T) {
 	objects := []runtime.Object{
 		agentClusterRole("aicr-node-reader-"+deadRun, deadRun),
-		agentClusterRoleBinding("aicr-node-reader-"+deadRun, deadRun),
+		agentClusterRoleBinding(deadRun),
 		validatorJob("other-validation", deadRun),
 	}
 	report, _ := planWith(t, testOptions(), objects)
@@ -1564,7 +1753,7 @@ func TestPlanAgentClusterRBACGuardedByJobInAnyNamespace(t *testing.T) {
 func TestPlanAgentClusterRBACSelectedWhenNoJobAnywhere(t *testing.T) {
 	objects := []runtime.Object{
 		agentClusterRole("aicr-node-reader-"+deadRun, deadRun),
-		agentClusterRoleBinding("aicr-node-reader-"+deadRun, deadRun),
+		agentClusterRoleBinding(deadRun),
 		validatorJob(testNamespace, liveRun),
 	}
 	report, _ := planWith(t, testOptions(), objects)

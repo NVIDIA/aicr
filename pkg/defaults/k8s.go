@@ -81,6 +81,18 @@ const (
 	EnvRunaiProjectNamespace = "AICR_RUNAI_PROJECT_NAMESPACE"
 )
 
+// The data ConfigMap prefixes below are the names a validation run writes
+// for its run ID (prefix + run ID): the snapshot input and the validation
+// recipe its validator Jobs mount, created and cleaned up by pkg/validator's
+// EnsureDataConfigMaps and cleanupDataConfigMaps. `aicr sweep` selects these
+// ConfigMaps by label AND exact name, so a rename must move the producer and
+// the sweeper together. The per-phase CTRF report ConfigMaps are named
+// separately, by pkg/validator/ctrf's ConfigMapName.
+const (
+	SnapshotConfigMapPrefix   = "aicr-snapshot-"
+	ValidationConfigMapPrefix = "aicr-validation-"
+)
+
 // K8sAccessReviewConcurrency bounds how many Self/SubjectAccessReview
 // requests a pre-flight permission gate keeps in flight at once.
 //

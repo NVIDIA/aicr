@@ -1044,12 +1044,17 @@ result, err := client.ApplyValidationSweep(ctx, plan)
   floor, then deletes only the intersection — candidates a fresh plan still
   marks would-delete — with UID-pinned deletes, so an object recreated
   between plan and apply is left alone and a re-run is idempotent. Before
-  deleting run-scoped objects it also watches the
+  deleting run-scoped objects it also lists the run-labeled Jobs and
+  watches from the list's ResourceVersion for the
   `defaults.ValidationSweepSettleWindow` (~2m30s — a conservative margin
   over the usual between-checks gap, not a proven bound) for a validator
   Job to appear, because a live run with cleanup on shows no Job between
-  its checks. A partial failure still returns the report, with the failed
-  objects marked `SweepFailed`, alongside an `ErrCodeInternal` naming them.
+  its checks; the wait sits between the re-plan's reads and the deletes, so
+  a second re-plan re-applies every guard after it. The observation fails
+  closed: a watch the apiserver ends before the window elapses aborts the
+  apply with `ErrCodeUnavailable` and nothing is deleted. A partial failure
+  still returns the report, with the failed objects marked `SweepFailed`,
+  alongside an `ErrCodeInternal` naming them.
 - `SweepOptions.OlderThan` defaults to `defaults.ValidationSweepMinAge` (2h)
   when zero; negative is rejected. The floor outlasts the facade's whole-run
   cap and the largest single-check envelope (which bounds a test

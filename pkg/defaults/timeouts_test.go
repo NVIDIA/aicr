@@ -88,7 +88,6 @@ func TestTimeoutConstants(t *testing.T) {
 		{"ValidatorMinCompletionWait", ValidatorMinCompletionWait, 10 * time.Second, 60 * time.Second},
 		{"ValidationSweepMinAge", ValidationSweepMinAge, 90 * time.Minute, 4 * time.Hour},
 		{"ValidationSweepSettleWindow", ValidationSweepSettleWindow, 2 * time.Minute, 5 * time.Minute},
-		{"ValidationSweepSettleRewatchPause", ValidationSweepSettleRewatchPause, time.Second, 30 * time.Second},
 
 		// ConfigMap read/write budgets — held as distinct constants so the
 		// read path (serializer resolving cm:// URIs) and the write path
@@ -364,7 +363,7 @@ func TestValidationSweepMinAgeInvariant(t *testing.T) {
 
 // TestValidationSweepSettleWindowInvariant pins the floor of the `aicr
 // sweep` settle observation — at least one pod-termination wait plus one
-// bounded API call — and the sanity of the rewatch pause. The real
+// bounded API call. The real
 // between-checks gap adds unbudgeted work (the phase-boundary result write,
 // the dependency-affinity scan, the Job apply), so the window is a
 // conservative margin and this test pins a floor, not a derivation.
@@ -372,10 +371,6 @@ func TestValidationSweepSettleWindowInvariant(t *testing.T) {
 	if min := K8sPodTerminationWaitTimeout + K8sCleanupTimeout; ValidationSweepSettleWindow < min {
 		t.Errorf("ValidationSweepSettleWindow (%v) must be at least one pod-termination wait plus a bounded API call (%v)",
 			ValidationSweepSettleWindow, min)
-	}
-	if ValidationSweepSettleRewatchPause >= ValidationSweepSettleWindow {
-		t.Errorf("ValidationSweepSettleRewatchPause (%v) must be shorter than ValidationSweepSettleWindow (%v), or a closed watch would never be re-established within the window",
-			ValidationSweepSettleRewatchPause, ValidationSweepSettleWindow)
 	}
 }
 

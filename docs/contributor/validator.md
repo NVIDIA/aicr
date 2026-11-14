@@ -1322,7 +1322,14 @@ namespaces (name must reconstruct from the label value's hex token), the
 gang-scheduling pods and PodGroups in Run:ai Project namespaces (objects only;
 the Project namespace is never touched), and the validation namespace's
 run-scoped RBAC and ConfigMaps, including the per-run cluster-admin
-ClusterRoleBinding. A candidate must be older than the age floor
+ClusterRoleBinding. For the run-scoped families the shape half is the exact
+name the producer writes for the label's run ID: the data ConfigMaps
+(`defaults.SnapshotConfigMapPrefix` / `defaults.ValidationConfigMapPrefix` +
+run ID) and the three per-phase CTRF reports (`ctrf.ConfigMapName`), the
+snapshot agent's namespaced objects (the bare run ID or a name ending in
+`-<run-id>` — its prefix is caller-configurable), and its ClusterRole and
+ClusterRoleBinding (exactly `defaults.AgentClusterRoleName` + `-` + run ID).
+A candidate must be older than the age floor
 (`defaults.ValidationSweepMinAge`, 2h — above `ValidationOperationTimeout` and
 every catalog wait envelope, pinned in `pkg/defaults/timeouts_test.go` and
 `pkg/validator/catalog/catalog_test.go`) and pass a liveness guard: no
@@ -1338,21 +1345,28 @@ appears only after the remaining pod-termination wait plus, between phases,
 the result ConfigMap write, the dependency-affinity scan and the Job apply,
 so a live run can show no Job at all. `Execute` therefore re-plans
 against current cluster state before deleting and, while run-scoped
-candidates remain, watches the settle window
+candidates remain, lists the run-labeled Jobs and watches from the list's
+ResourceVersion for the settle window
 (`defaults.ValidationSweepSettleWindow`, ~2m30s — a conservative margin over
 the usual between-checks gap; that gap has no proven bound, since not all of
 the work in it is budgeted) for a Job to appear; a run that reappears keeps
 all of its objects, and a run suspended
 while idle between checks for longer than the window cannot be told from a
-dead one. Deletes are pinned with
+dead one. The observation fails closed: an apiserver watch outlasts the
+window by far, so a watch that ends early (a closed channel or an error
+event) aborts the apply with `ErrCodeUnavailable` and nothing is deleted.
+And because the wait sits between the re-plan's reads and the deletes,
+`Execute` re-plans once more after it, re-applying every guard against
+current state. Deletes are pinned with
 `Preconditions{UID}`; a NotFound means the object was already gone, and a
 Conflict — the delete was refused, which does not by itself prove the object
 was replaced — leaves it alone with a skipped status, so a re-run is safe.
 Terminating namespaces are reported with their
 remaining finalizers and never force-stripped. The facade entry points are
 `Client.PlanValidationSweep` (read-only) and `Client.ApplyValidationSweep`
-(re-plans with the plan's namespace and floor, runs the settle observation,
-then deletes only the intersection — so a stale or tampered report cannot
+(re-plans with the plan's namespace and floor before AND after the settle
+observation, then deletes only the intersection — so a stale or tampered
+report cannot
 widen the deletion set; a report `PlanValidationSweep` did not produce is
 rejected outright).
 

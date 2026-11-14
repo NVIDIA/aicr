@@ -982,10 +982,11 @@ func (v *Validator) phaseSkipped(cat *catalog.ValidatorCatalog, phase Phase, rea
 }
 
 // EnsureDataConfigMaps creates or updates snapshot and validation ConfigMaps.
-// Creates ConfigMaps named aicr-snapshot-{runID} and aicr-validation-{runID} with
-// create-or-update semantics. External controllers should call this after generating
-// a runID and before rendering validator Jobs. The Jobs mount these ConfigMaps at
-// /data/snapshot and /data/validation.
+// Creates ConfigMaps named aicr-snapshot-{runID} and aicr-validation-{runID}
+// (defaults.SnapshotConfigMapPrefix / defaults.ValidationConfigMapPrefix + the
+// run ID) with create-or-update semantics. External controllers should call
+// this after generating a runID and before rendering validator Jobs. The Jobs
+// mount these ConfigMaps at /data/snapshot and /data/validation.
 func EnsureDataConfigMaps(
 	ctx context.Context,
 	clientset kubernetes.Interface,
@@ -1005,8 +1006,8 @@ func EnsureDataConfigMaps(
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize validation", err)
 	}
 
-	snapshotCMName := fmt.Sprintf("aicr-snapshot-%s", runID)
-	validationCMName := fmt.Sprintf("aicr-validation-%s", runID)
+	snapshotCMName := defaults.SnapshotConfigMapPrefix + runID
+	validationCMName := defaults.ValidationConfigMapPrefix + runID
 
 	for _, cm := range []struct {
 		name string
@@ -1084,8 +1085,8 @@ func (v *Validator) ensureDataConfigMaps(
 func (v *Validator) cleanupDataConfigMaps(ctx context.Context, clientset kubernetes.Interface) error {
 	var errs []error
 	for _, name := range []string{
-		fmt.Sprintf("aicr-snapshot-%s", v.RunID),
-		fmt.Sprintf("aicr-validation-%s", v.RunID),
+		defaults.SnapshotConfigMapPrefix + v.RunID,
+		defaults.ValidationConfigMapPrefix + v.RunID,
 	} {
 		err := clientset.CoreV1().ConfigMaps(v.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {

@@ -23,8 +23,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	"github.com/NVIDIA/aicr/pkg/validator/job"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
 // Kinds the sweeper selects. The values are the metav1 Kind strings so a
@@ -80,7 +82,9 @@ const (
 		"," + labels.ManagedBy + "=" + labels.ValueAICR
 
 	// dataConfigMapSelector selects the per-run data and CTRF ConfigMaps.
-	// The run ID comes from the labels.RunID label, required below.
+	// The run ID comes from the labels.RunID label, required below, and the
+	// name must be exactly one the validator writes for it
+	// (dataConfigMapOwnsName).
 	dataConfigMapSelector = labels.Name + "=" + labels.ValueAICR +
 		"," + labels.Component + "=" + labels.ValueValidation +
 		"," + labels.ManagedBy + "=" + labels.ValueAICR
@@ -90,6 +94,8 @@ const (
 	// --add-roles-to-service-account` carries component=agent-rbac
 	// (labels.ValueAgentRBAC), so this selector never matches it — the
 	// exclusion the tools/cleanup predicates make explicit is inherent here.
+	// The name must still be one the agent writes for the label's run ID
+	// (agentNamespacedOwnsName / agentClusterOwnsName).
 	agentObjectSelector = labels.Name + "=" + labels.ValueAICR +
 		"," + labels.Component + "=" + labels.ValueSnapshotAgent +
 		"," + labels.ManagedBy + "=" + labels.ValueAICR
@@ -134,6 +140,43 @@ func validatorRunName(name string) (runID string, ok bool) {
 		return "", false
 	}
 	return runID, true
+}
+
+// dataConfigMapOwnsName reports whether name is exactly one of the ConfigMap
+// names a validation run writes for runID: the snapshot and validation data
+// ConfigMaps and the per-phase CTRF reports. The PhaseAll wildcard never
+// reaches the CTRF writer — the CLI parser collapses it to a nil selection
+// before any report is written — so only the three concrete phases appear.
+func dataConfigMapOwnsName(name, runID string) bool {
+	if name == defaults.SnapshotConfigMapPrefix+runID || name == defaults.ValidationConfigMapPrefix+runID {
+		return true
+	}
+	for _, phase := range []v1.Phase{v1.PhaseDeployment, v1.PhaseConformance, v1.PhasePerformance} {
+		if name == ctrf.ConfigMapName(runID, string(phase)) {
+			return true
+		}
+	}
+	return false
+}
+
+// agentNamespacedOwnsName reports whether name is what the snapshot agent
+// writes for runID at namespace scope (ServiceAccount, Role, RoleBinding).
+// The producer (pkg/k8s/agent nameWithRunID) joins a caller-configurable
+// prefix and the run ID, possibly truncating the prefix to fit the name
+// ceiling, and an empty prefix yields the bare run ID — so the shape is the
+// run ID itself or any name ending in "-"+runID.
+func agentNamespacedOwnsName(name, runID string) bool {
+	return name == runID || strings.HasSuffix(name, "-"+runID)
+}
+
+// agentClusterOwnsName reports whether name is exactly the snapshot agent's
+// ClusterRole/ClusterRoleBinding name for runID: defaults.AgentClusterRoleName
+// + "-" + runID (pkg/k8s/agent clusterRoleName). No truncation applies to a
+// runid.Generate ID (16+1+32 = 49 chars, under the 63-char ceiling), and a
+// caller-supplied run ID long enough to truncate the prefix fails this check
+// and is skipped fail-closed, as is any other name.
+func agentClusterOwnsName(name, runID string) bool {
+	return name == defaults.AgentClusterRoleName+"-"+runID
 }
 
 // deletionRank orders deletion: the ClusterRoleBinding first, mirroring

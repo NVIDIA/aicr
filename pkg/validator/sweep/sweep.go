@@ -186,20 +186,26 @@ func Plan(ctx context.Context, kube kubernetes.Interface, dyn dynamic.Interface,
 
 // Execute deletes the plan's candidates, but only those a fresh Plan still
 // marks would-delete: the caller's report is a claim, never proof. Execute
-// first re-plans against the cluster's current state with the plan's
-// namespace and age floor, and any candidate the re-plan no longer selects
-// (a namespace gained a live pod, a run gained a Job, an object was
-// replaced, or the report was hand-built or tampered with) is marked
-// StatusSkipped instead of deleted. Objects the caller's plan did not mark
-// StatusWouldDelete are never deleted.
+// re-plans against the cluster's current state with the plan's namespace and
+// age floor, and any candidate the re-plan no longer selects (a namespace
+// gained a live pod, a run gained a Job, an object was replaced, or the
+// report was hand-built or tampered with) is marked StatusSkipped instead of
+// deleted. Objects the caller's plan did not mark StatusWouldDelete are
+// never deleted.
 //
 // Job liveness is a point-in-time signal — with cleanup on, a live run shows
 // no Job at all while it waits between checks — so when run-scoped
-// candidates remain, Execute then watches for a Job to appear for
-// defaults.ValidationSweepSettleWindow before deleting any of them; the
-// window is a conservative margin over the usual between-checks gap, not a
-// proven bound, and a run whose Job appears during it keeps all of its
-// objects.
+// candidates remain, Execute then lists the run-labeled Jobs and watches
+// from the list's ResourceVersion for defaults.ValidationSweepSettleWindow
+// before deleting any of them; the window is a conservative margin over the
+// usual between-checks gap, not a proven bound, and a run whose Job appears
+// during it keeps all of its objects. The observation fails closed: a watch
+// the apiserver ends before the window fires (an anomaly — apiserver watch
+// timeouts are far longer) aborts the apply with ErrCodeUnavailable and
+// nothing is deleted. Because the wait widens the gap between the re-plan's
+// reads and the deletes to the whole window, a second re-plan runs after it
+// and re-applies every guard against current state; an object it no longer
+// selects is skipped with the fresh guard's reason.
 //
 // Every delete carries metav1.Preconditions{UID} so an object recreated
 // since planning is left alone, and background propagation so dependent
@@ -214,10 +220,11 @@ func Plan(ctx context.Context, kube kubernetes.Interface, dyn dynamic.Interface,
 // StatusDeleted, StatusDeleting (namespaces, whose termination is never
 // awaited), StatusSkipped (a guard now keeps it), or StatusFailed.
 //
-// Errors: the re-plan's errors propagate (including ErrCodeInvalidRequest
+// Errors: the re-plans' errors propagate (including ErrCodeInvalidRequest
 // for a non-positive age floor and ErrCodeUnauthorized for a forbidden
-// list), as does a failed liveness read or watch during the settle window —
-// both abort before anything is deleted. Partial delete failures are joined
+// list), as do a failed liveness read or watch during the settle window and
+// the ErrCodeUnavailable of a settle watch the apiserver ended early — all
+// abort before anything is deleted. Partial delete failures are joined
 // and wrapped in ErrCodeInternal naming the failed objects; a delete that is
 // Forbidden is additionally reported per object with ErrCodeUnauthorized.
 func Execute(ctx context.Context, kube kubernetes.Interface, dyn dynamic.Interface, plan *Report) error {
@@ -228,46 +235,23 @@ func Execute(ctx context.Context, kube kubernetes.Interface, dyn dynamic.Interfa
 		return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "sweep interrupted before it started")
 	}
 
-	// Re-plan and intersect. The fresh plan runs every guard against current
-	// cluster state; only objects it still selects (same identity AND same
-	// UID) may be deleted.
-	fresh, err := Plan(ctx, kube, dyn, Options{Namespace: plan.Namespace, OlderThan: plan.OlderThan})
-	if err != nil {
+	if err := intersectFreshPlan(ctx, kube, dyn, plan); err != nil {
 		return err
-	}
-	freshByKey := make(map[objectKey]Object, len(fresh.Objects))
-	for _, o := range fresh.Objects {
-		freshByKey[keyOf(o)] = o
-	}
-	for i := range plan.Objects {
-		obj := &plan.Objects[i]
-		if obj.Status != StatusWouldDelete {
-			continue
-		}
-		freshObj, known := freshByKey[keyOf(*obj)]
-		switch {
-		case known && freshObj.Status == StatusWouldDelete:
-			// The caller's report is a claim, never proof: the fields the
-			// settle observation trusts come from the fresh plan, so a
-			// report with a cleared or altered RunID cannot hide a live
-			// run from it.
-			obj.RunID = freshObj.RunID
-			obj.Age = freshObj.Age
-		case known && freshObj.Reason != "":
-			// The fresh plan still names the object and says which guard
-			// now keeps it.
-			obj.Status = StatusSkipped
-			obj.Reason = freshObj.Reason
-		default:
-			obj.Status = StatusSkipped
-			obj.Reason = reasonNoLongerCandidate
-		}
 	}
 
 	// Give a live run the settle window to reveal itself before any
-	// run-scoped object is deleted.
-	if err := settleQuiet(ctx, kube, plan); err != nil {
+	// run-scoped object is deleted. When the observation ran, the window sat
+	// between the re-plan's reads and the deletes, so re-plan once more: a
+	// namespace that gained a live pod, or a run that gained a Job just after
+	// the window, is caught before anything is removed.
+	waited, err := settleQuiet(ctx, kube, plan)
+	if err != nil {
 		return err
+	}
+	if waited {
+		if err := intersectFreshPlan(ctx, kube, dyn, plan); err != nil {
+			return err
+		}
 	}
 
 	var errs []error
@@ -346,31 +330,76 @@ func keyOf(o Object) objectKey {
 // fresh plan Execute runs no longer selects it.
 const reasonNoLongerCandidate = "no longer a sweep candidate (re-planned at apply)"
 
-// settleWindow and settleRewatchPause govern the settle observation; they
-// are package-level variables so tests can compress the wait, the same seam
+// intersectFreshPlan re-plans against the cluster's current state and
+// intersects: the fresh plan runs every guard anew, so only candidates it
+// still selects (same identity AND same UID) keep StatusWouldDelete. A
+// survivor's RunID and Age come from the fresh plan — the caller's report is
+// a claim, never proof, so a report with a cleared or altered RunID cannot
+// hide a live run from the settle observation. Anything else is kept: with
+// the fresh guard's reason when the fresh plan still names the object, or as
+// no longer a candidate. A failed re-plan aborts before any delete.
+func intersectFreshPlan(ctx context.Context, kube kubernetes.Interface, dyn dynamic.Interface, plan *Report) error {
+	fresh, err := Plan(ctx, kube, dyn, Options{Namespace: plan.Namespace, OlderThan: plan.OlderThan})
+	if err != nil {
+		return err
+	}
+	freshByKey := make(map[objectKey]Object, len(fresh.Objects))
+	for _, o := range fresh.Objects {
+		freshByKey[keyOf(o)] = o
+	}
+	for i := range plan.Objects {
+		obj := &plan.Objects[i]
+		if obj.Status != StatusWouldDelete {
+			continue
+		}
+		freshObj, known := freshByKey[keyOf(*obj)]
+		switch {
+		case known && freshObj.Status == StatusWouldDelete:
+			obj.RunID = freshObj.RunID
+			obj.Age = freshObj.Age
+		case known && freshObj.Reason != "":
+			// The fresh plan still names the object and says which guard
+			// now keeps it.
+			obj.Status = StatusSkipped
+			obj.Reason = freshObj.Reason
+		default:
+			obj.Status = StatusSkipped
+			obj.Reason = reasonNoLongerCandidate
+		}
+	}
+	return nil
+}
+
+// settleWindow governs the settle observation; it is a package-level
+// variable so tests can compress the wait, the same seam
 // validators/conformance uses for cleanupTimeout.
-var (
-	settleWindow       = defaults.ValidationSweepSettleWindow
-	settleRewatchPause = defaults.ValidationSweepSettleRewatchPause
-)
+var settleWindow = defaults.ValidationSweepSettleWindow
 
 // settleQuiet holds the deletion of run-scoped objects while a live run
 // could be between its validator Jobs and therefore invisible to the Job
 // liveness guard: with cleanup on, the validator deletes each Job right
 // after its check, so a quiet cluster proves nothing at one instant. While
-// any run-scoped candidate remains, the run-labeled Jobs are listed and then
-// watched from the list's ResourceVersion until the window elapses, so a Job
-// that appears only briefly — created and deleted inside the gap by a fast
-// check — is still observed; a run whose Job appears keeps every one of its
-// candidates. A closed watch channel is re-listed and re-established after
-// settleRewatchPause, and a failed list or watch fails closed: quiet was not
-// proven. The window is a conservative margin over the usual between-checks
-// gap, not a proven bound — a run stalled between checks for longer cannot
-// be told from a dead one.
+// any run-scoped candidate remains, the run-labeled Jobs are listed once and
+// then watched from the list's ResourceVersion until the window elapses, so
+// a Job that appears only briefly — created and deleted inside the gap by a
+// fast check — is still observed; a run whose Job appears keeps every one of
+// its candidates. The window is a conservative margin over the usual
+// between-checks gap, not a proven bound — a run stalled between checks for
+// longer cannot be told from a dead one.
+//
+// The observation fails closed. An apiserver watch outlasts this window by
+// far (the routine --min-request-timeout expiry is 30+ minutes), so a watch
+// that ends first — a closed channel, an error event — is an anomaly after
+// which quiet was not observed for the whole window: settleQuiet returns an
+// error and nothing is deleted. The same holds for a failed list or watch.
+//
+// waited reports whether the observation ran at all: with no run-scoped
+// candidates there is nothing to wait for, and Execute skips the post-settle
+// re-plan.
 //
 // Namespace and Run:ai residue candidates do not gate on this signal —
 // their guards are live pods and name shape.
-func settleQuiet(ctx context.Context, kube kubernetes.Interface, plan *Report) error {
+func settleQuiet(ctx context.Context, kube kubernetes.Interface, plan *Report) (waited bool, err error) {
 	pending := make(map[string][]*Object) // run ID -> its waiting candidates
 	for i := range plan.Objects {
 		obj := &plan.Objects[i]
@@ -379,7 +408,7 @@ func settleQuiet(ctx context.Context, kube kubernetes.Interface, plan *Report) e
 		}
 	}
 	if len(pending) == 0 {
-		return nil
+		return false, nil
 	}
 
 	slog.Info("sweep observing the settle window before deleting run-scoped objects: "+
@@ -388,41 +417,24 @@ func settleQuiet(ctx context.Context, kube kubernetes.Interface, plan *Report) e
 	window := time.NewTimer(settleWindow)
 	defer window.Stop()
 
-	for {
-		jobs, err := listRunJobs(ctx, kube)
-		if err != nil {
-			return err
-		}
-		for i := range jobs.Items {
-			keepRun(pending, jobs.Items[i].Labels[labels.RunID])
-		}
-		if len(pending) == 0 {
-			return nil
-		}
-
-		done, err := watchOnce(ctx, kube, jobs.ResourceVersion, window, pending)
-		if done {
-			return err
-		}
-
-		// The channel ended before the window did: re-list and re-watch,
-		// paced so a stream that keeps closing cannot spin.
-		select {
-		case <-ctx.Done():
-			return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout,
-				"sweep interrupted while waiting for validation runs to go quiet")
-		case <-window.C:
-			return nil
-		case <-time.After(settleRewatchPause):
-		}
+	jobs, err := listRunJobs(ctx, kube)
+	if err != nil {
+		return true, err
 	}
+	for i := range jobs.Items {
+		keepRun(pending, jobs.Items[i].Labels[labels.RunID])
+	}
+	if len(pending) == 0 {
+		return true, nil
+	}
+	return true, watchOnce(ctx, kube, jobs.ResourceVersion, window, pending)
 }
 
-// watchOnce opens one Job watch from resourceVersion and consumes it with
-// watchRunJobs. The watch context is bounded by the window so a hung
-// apiserver cannot hold the sweep past it; the timeout classifies as
-// ErrCodeTimeout and nothing is deleted.
-func watchOnce(ctx context.Context, kube kubernetes.Interface, resourceVersion string, window *time.Timer, pending map[string][]*Object) (done bool, err error) {
+// watchOnce opens the settle observation's one Job watch from
+// resourceVersion and consumes it with watchRunJobs. The watch context is
+// bounded by the window so a hung apiserver cannot hold the sweep past it;
+// the timeout classifies as ErrCodeTimeout and nothing is deleted.
+func watchOnce(ctx context.Context, kube kubernetes.Interface, resourceVersion string, window *time.Timer, pending map[string][]*Object) error {
 	watchCtx, cancel := context.WithTimeout(ctx, settleWindow)
 	defer cancel()
 	watcher, err := kube.BatchV1().Jobs(metav1.NamespaceAll).Watch(watchCtx, metav1.ListOptions{
@@ -430,34 +442,40 @@ func watchOnce(ctx context.Context, kube kubernetes.Interface, resourceVersion s
 		ResourceVersion: resourceVersion,
 	})
 	if err != nil {
-		return true, classifyWatchError(ctx, "jobs", err)
+		return classifyWatchError(ctx, "jobs", err)
 	}
 	defer watcher.Stop()
 	return watchRunJobs(ctx, watcher, window, pending)
 }
 
 // watchRunJobs consumes Job events until the window elapses or every pending
-// run is accounted for (done is true), or the channel ends — including an
-// error event, whose recovery is the caller's re-list. Any event whose Job
-// carries a pending run's aicr.run/run-id label keeps that run; a DELETED
-// event still proves the run was alive inside the window.
-func watchRunJobs(ctx context.Context, watcher watch.Interface, window *time.Timer, pending map[string][]*Object) (done bool, err error) {
+// run is accounted for. Any event whose Job carries a pending run's
+// aicr.run/run-id label keeps that run; a DELETED event still proves the run
+// was alive inside the window. The result channel ending before the window
+// fires — a closed channel or an error event — means liveness was not
+// observed for the whole window, so it fails closed.
+func watchRunJobs(ctx context.Context, watcher watch.Interface, window *time.Timer, pending map[string][]*Object) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return true, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout,
+			return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout,
 				"sweep interrupted while waiting for validation runs to go quiet")
 		case <-window.C:
-			return true, nil
+			return nil
 		case event, ok := <-watcher.ResultChan():
-			if !ok || event.Type == watch.Error {
-				return false, nil
+			if !ok {
+				return errors.New(errors.ErrCodeUnavailable,
+					"the apiserver ended the job watch before the settle window did, "+
+						"so liveness was not observed for the whole window; nothing was deleted — re-run")
+			}
+			if event.Type == watch.Error {
+				return classifyWatchError(ctx, "jobs", apierrors.FromObject(event.Object))
 			}
 			if j, isJob := event.Object.(*batchv1.Job); isJob {
 				keepRun(pending, j.Labels[labels.RunID])
 			}
 			if len(pending) == 0 {
-				return true, nil
+				return nil
 			}
 		}
 	}

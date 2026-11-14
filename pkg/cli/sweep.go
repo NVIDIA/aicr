@@ -56,11 +56,14 @@ What is swept:
     namespace carrying the runai/queue label is never a candidate;
   - run-scoped objects in --namespace: the aicr-validator-<run-id>
     ServiceAccount and its cluster-admin ClusterRoleBinding (name, roleRef
-    and single subject must all match what a run writes), the
-    aicr-snapshot-* / aicr-validation-* / aicr-ctrf-* ConfigMaps, and
+    and single subject must all match what a run writes), the ConfigMaps a
+    run writes for its run ID (exactly aicr-snapshot-<run-id>,
+    aicr-validation-<run-id> or aicr-ctrf-<run-id>-<phase>), and
     snapshot-agent RBAC carrying component=snapshot-agent with an
-    aicr.run/run-id label. component=agent-rbac is operator-owned and
-    never matched.
+    aicr.run/run-id label whose value the name must carry: the namespaced
+    names end in -<run-id>, and the ClusterRole and ClusterRoleBinding are
+    exactly aicr-node-reader-<run-id>. component=agent-rbac is
+    operator-owned and never matched.
 
 A candidate must ALSO be older than --older-than (default 2h, above the
 facade's whole-run cap and the largest single-check envelope, which is what
@@ -73,12 +76,16 @@ objects guarded until the Job TTL controller reaps them (about an hour
 after they finish): its objects become eligible once the Jobs have expired
 AND they are older than the floor, and the sweep never deletes the Jobs
 themselves. The floor does not bound a whole uncapped validate run, and a
-live run with cleanup on shows no Job between its checks, so an apply first
-re-plans against the cluster's current state and then watches for up to
-about 2m30s — a conservative margin over the usual between-checks gap, not
-a proven bound — for a Job to appear before deleting anything run-scoped;
+live run with cleanup on shows no Job between its checks, so an apply
+re-plans against the cluster's current state, then — while run-scoped
+candidates remain — lists the run-labeled Jobs and watches from the list's
+resourceVersion for up to about 2m30s (a conservative margin over the usual
+between-checks gap, not a proven bound) for a Job to appear, and re-plans
+once more against current state before deleting anything run-scoped;
 a run that stays suspended while idle between checks for longer than that
-cannot be told from a dead one. Objects already
+cannot be told from a dead one. An apiserver watch outlasts this window by
+far, so a watch that ends before it elapses is an anomaly: the apply aborts
+(exit 6) with nothing deleted — re-run. Objects already
 terminating are reported with their remaining finalizers and conditions, and
 their finalizers are never stripped. With --format json|yaml the report
 document owns stdout, so the plan table and the prompt go to stderr.
@@ -113,11 +120,12 @@ included; 1 for flag-parse errors (an unreadable --older-than value or an
 unknown flag); 2 for validation errors the command itself raises (a
 non-positive --older-than, a duplicated flag, an unknown --format, an
 unsupported output destination, or a confirmation that could not be asked);
-4 when a list or watch is forbidden; 5 when the operation timed out; 8 when a delete
-failed or a list failed for a reason other than permissions (a forbidden
-DELETE lands here too: the partial-failure error wraps its Unauthorized
-cause, so the reported code is Internal); 9 when the prompt was declined or
-the command was interrupted.
+4 when a list or watch is forbidden; 5 when the operation timed out; 6 when
+the apiserver ended the settle watch early — nothing is deleted; re-run; 8
+when a delete failed or a list failed for a reason other than permissions (a
+forbidden DELETE lands here too: the partial-failure error wraps its
+Unauthorized cause, so the reported code is Internal); 9 when the prompt was
+declined or the command was interrupted.
 
 Examples:
   # See what a sweep would delete, deleting nothing
@@ -218,12 +226,13 @@ func runSweepCmd(ctx context.Context, cmd *cli.Command) error {
 
 	w := cmd.Root().Writer
 	candidates := plan.Candidates()
-	needPrompt := !dryRun && !assumeYes && len(candidates) > 0
+	willApply := !dryRun && len(candidates) > 0
+	needPrompt := willApply && !assumeYes
 
 	// The confirmation display — context, server and the exact list — always
-	// precedes a prompt, and is the whole output in table mode. With
-	// --format json|yaml the document owns stdout, so the display and the
-	// prompt go to the error writer instead.
+	// precedes an apply (prompted or --yes), and is the whole output in
+	// table mode. With --format json|yaml the document owns stdout, so the
+	// display and the prompt go to the error writer instead.
 	display := w
 	if outFormat != serializer.FormatTable {
 		display = cmd.Root().ErrWriter
@@ -231,7 +240,7 @@ func runSweepCmd(ctx context.Context, cmd *cli.Command) error {
 			display = os.Stderr
 		}
 	}
-	if outFormat == serializer.FormatTable || needPrompt {
+	if outFormat == serializer.FormatTable || willApply {
 		if err := printSweepPlan(display, plan); err != nil {
 			return err
 		}
@@ -269,8 +278,8 @@ func runSweepCmd(ctx context.Context, cmd *cli.Command) error {
 
 // printSweepPlan writes the target header and the plan table to w. In table
 // mode this is the primary output on the root writer; with --format json|yaml
-// it is only the confirmation display before a prompt, written to the error
-// writer so the document owns stdout.
+// it is the pre-apply display, written to the error writer so the document
+// owns stdout.
 func printSweepPlan(w io.Writer, plan *aicr.SweepReport) error {
 	buf := &bytes.Buffer{}
 	renderSweepPlan(buf, plan)
