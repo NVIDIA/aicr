@@ -28,6 +28,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	validatorlabels "github.com/NVIDIA/aicr/pkg/validator/labels"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
@@ -1324,7 +1325,7 @@ func buildHPAPodMonitor(monitorNamespace, name, namespace, runToken string) *uns
 	pm.SetKind("PodMonitor")
 	pm.SetName(name)
 	pm.SetNamespace(monitorNamespace)
-	pm.SetLabels(map[string]string{prometheusReleaseLabel: prometheusComponentName, gpuTestRunLabel: runToken})
+	pm.SetLabels(map[string]string{prometheusReleaseLabel: prometheusComponentName, validatorlabels.GPUTestRun: runToken})
 	return pm
 }
 
@@ -1334,7 +1335,7 @@ func buildHPAPodMonitor(monitorNamespace, name, namespace, runToken string) *uns
 // namespace does not reach a PodMonitor outside it. Best effort: a failure
 // here must not fail the run that found the leftovers.
 func pruneStaleHPAPodMonitors(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, monitorNamespace string) {
-	list, err := dynClient.Resource(podMonitorGVR).Namespace(monitorNamespace).List(ctx, metav1.ListOptions{LabelSelector: gpuTestRunLabel})
+	list, err := dynClient.Resource(podMonitorGVR).Namespace(monitorNamespace).List(ctx, metav1.ListOptions{LabelSelector: validatorlabels.GPUTestRun})
 	if err != nil {
 		slog.Warn("failed to list PodMonitors left by earlier runs", "namespace", monitorNamespace, "error", err)
 		return

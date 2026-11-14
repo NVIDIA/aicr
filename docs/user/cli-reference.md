@@ -1674,6 +1674,59 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 
 ---
 
+### aicr sweep
+
+Delete stale per-run validation resources a crashed or `--no-cleanup` [`aicr validate`](#aicr-validate) run left behind. A run cleans up after itself on the success and SIGTERM paths; this command exists for the paths that cannot run deferred cleanup (SIGKILL, OOM, node loss) and for `--no-cleanup` runs — whose objects become eligible once their retained validator Jobs have expired (the Job TTL controller reaps them one hour after they finish; until then they keep the run guarded) and the objects are older than `--older-than`. The sweep never deletes the retained Jobs themselves.
+
+The kube context, the API server and the exact candidate list are printed before anything is deleted. On a terminal the command then asks for `y/N`; an empty or negative answer cancels with exit `9` and deletes nothing. A non-terminal stdin without `--yes` or `--dry-run` fails with exit `2` rather than deleting — there is no environment-variable bypass.
+
+**Synopsis:**
+```text
+aicr sweep [--namespace <ns>] [--older-than <duration>] [--dry-run | --yes] [flags]
+```
+
+**Flags:**
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--namespace` | `-n` | string | `aicr-validation` | Namespace holding the run-scoped validation resources (RBAC, ConfigMaps). Env: `AICR_NAMESPACE`. |
+| `--older-than` | | duration | `2h` | Only delete objects older than this. Must be positive. The default sits above the facade's whole-run cap and the largest single-check envelope (which is what bounds a test namespace's life), so anything younger may still be cleaned up by its own run. It does not bound a whole uncapped `aicr validate` — run-scoped objects rely on the Job liveness guard plus the settle wait described below. |
+| `--dry-run` | | bool | off | List what would be deleted without deleting anything. Never prompts. |
+| `--yes` | | bool | off | Skip the confirmation prompt and delete the listed candidates. Required in CI: a non-terminal stdin without `--yes` or `--dry-run` fails instead of deleting. |
+| `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`, JSON/YAML only), or stdout. |
+| `--format` | `-t` | string | **table** | Output format: `json`, `yaml`, or `table`. |
+| `--kubeconfig` | `-k` | string | | Kubeconfig path. Overrides `KUBECONFIG` and `~/.kube/config`. |
+
+**What is swept** (each family selected by label AND shape, never by a bare label, and every delete pinned to the UID seen at planning time):
+
+- Per-run conformance test namespaces carrying the `aicr.run/gpu-test-run` label whose value reconstructs the name: `aicr-gpu-test-*` and `gang-scheduling-test-*` (32-hex run token) and `cluster-auto-test-*` (8-hex token). A labeled namespace whose name does not reconstruct is reported as `skipped` and never deleted.
+- Gang-scheduling pods and `podgroups.scheduling.run.ai` left in a Run:ai Project namespace (labels `aicr.run/gpu-test-run` and `gang-scheduling.aicr.nvidia.com/phase`). Only the objects are deleted — the Project namespace itself is never touched, and a namespace carrying the `runai/queue` label is never a candidate.
+- Run-scoped objects in `--namespace`: the `aicr-validator-<run-id>` ServiceAccount and its cluster-admin ClusterRoleBinding (name, `roleRef` and single subject must all match what a run writes), the `aicr-snapshot-*` / `aicr-validation-*` / `aicr-ctrf-*` ConfigMaps, and snapshot-agent RBAC carrying `component=snapshot-agent` with an `aicr.run/run-id` label. `component=agent-rbac` objects are operator-owned and never matched.
+
+A candidate must also be older than `--older-than` and pass a liveness guard: a namespace is kept while any non-terminal pod runs in it, and run-scoped objects are kept while a validator Job carrying their run ID exists in any namespace (a run started with `-n another-ns` owns cluster-scoped agent RBAC that this sweep would otherwise orphan). A validator Job is a point-in-time signal — with cleanup on, a run deletes each Job right after its check — so an apply first re-plans against the cluster's current state and then watches for up to about 2m30s — a conservative margin over the usual between-checks gap, not a proven bound — for a Job to appear before deleting anything run-scoped; a run that stays suspended while idle between its checks for longer than that cannot be told from a dead one. Objects already terminating are reported with their remaining finalizers and status conditions; finalizers are never stripped. A delete answered NotFound means the object was already gone; a delete refused with a conflict (the object may have been replaced or modified) is left alone — re-run to retry. Either way a sweep is safe to re-run. With `--format json|yaml` the report document owns stdout, so the plan table and the confirmation prompt are written to stderr.
+
+**What is not swept:** the `aicr-validation` namespace itself; the snapshot agent's staging ConfigMap (`aicr-agent-snapshot-<run-id>` — it carries no `run-id` label, so it cannot be tied to a dead run); NCCL and inference-perf benchmark namespaces; the AIPerf Job; the nvidia-smi verify pod; robust-controller webhook probes; a Trainer self-install; CRE Certification objects; the `pod-autoscaling` PodMonitor left in the recipe's Prometheus namespace. That PodMonitor carries the ownership label but lives in a shared namespace this command never enters, and the next `pod-autoscaling` run prunes it. None of the others carry the labels this command trusts.
+
+**RBAC:** the caller needs `list` and `delete` on `namespaces`, `clusterrolebindings` and `clusterroles`, cluster-wide `list` and `delete` on `pods` and `podgroups.scheduling.run.ai`, cluster-wide `list` and `watch` on `jobs` (the liveness guard and the settle observation), and `list` and `delete` on `serviceaccounts`, `configmaps`, `roles` and `rolebindings` in `--namespace`. A forbidden list or watch fails the run before anything is deleted.
+
+**Exit codes:** `0` when nothing failed — dry-run, skipped and terminating objects included; `1` for flag-parse errors (an unreadable `--older-than` value, an unknown flag); `2` for validation errors the command itself raises (a non-positive `--older-than`, a duplicated flag, an unknown `--format`, an unsupported output destination, or a confirmation that could not be asked); `4` when a list or watch is forbidden; `5` when the operation timed out; `8` when a delete failed or a list failed for a reason other than permissions (the report names the failed objects; a forbidden DELETE lands here too — the partial-failure error wraps its Unauthorized cause, so the reported code is Internal); `9` when the prompt was declined or the command was interrupted.
+
+**Examples:**
+```bash
+# See what a sweep would delete, deleting nothing
+aicr sweep --dry-run
+
+# Sweep the default validation namespace interactively
+aicr sweep
+
+# CI: no prompt, JSON for the pipeline
+aicr sweep --yes --format json
+
+# A custom validation namespace and a tighter age floor
+aicr sweep --namespace my-validation --older-than 4h
+```
+
+---
+
 ### aicr diff
 
 Compare two snapshots field-by-field to surface configuration drift between cluster states. Reports added, removed, and modified readings across every measurement type (K8s, GPU, OS, SystemD, NodeTopology, NetworkTopology).

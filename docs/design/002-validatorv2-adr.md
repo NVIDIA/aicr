@@ -226,9 +226,10 @@ SIGTERM from deadline enforcement, eviction or drain cancels the in-pod check
 context. Checks must honor cancellation and use fresh, bounded cleanup contexts.
 The grace period is not a guarantee that teardown finishes: existing CRE teardown
 and NCCL namespace/Trainer cleanup can exceed the 30s cleanup grace. SIGKILL, OOM and
-crashes cannot run deferred cleanup. An external orphan-resource sweeper for the
-`aicr.run/gpu-test-run` label is not implemented; it is tracked separately from the
-envelope described here (issue #1632).
+crashes cannot run deferred cleanup. Orphaned per-run resources — the
+`aicr.run/gpu-test-run`-labeled test namespaces and Run:ai residue, plus
+run-scoped RBAC and ConfigMaps — are reclaimed out of band by `aicr sweep`,
+the label-based sweeper shipped for this issue.
 
 Operator SIGINT/SIGTERM preserves completed and partial current-phase CTRF results,
 records unstarted checks in that phase as skipped, and returns `ErrCodeCanceled`

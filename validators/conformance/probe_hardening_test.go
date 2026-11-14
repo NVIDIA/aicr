@@ -22,8 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
@@ -53,7 +55,7 @@ const (
 func pullSecretRun(names ...string) *gpuTestRun {
 	return &gpuTestRun{
 		token:              "0123456789abcdef0123456789abcdef",
-		namespace:          gpuTestNamespacePrefix + "pullsecret",
+		namespace:          defaults.GPUTestNamespacePrefix + "pullsecret",
 		podName:            gpuTestPodPrefix + "pullsecret",
 		noAllocPodName:     noAllocProbePrefix + "pullsecret",
 		imexPodName:        imexTestPodPrefix + "pullsecret",
@@ -121,7 +123,7 @@ func TestCreateGPUTestNamespace_CopiesImagePullSecrets(t *testing.T) {
 			name: "refreshes a copy left by an ambiguous earlier create",
 			run:  pullSecretRun(testPullSecretName),
 			objects: []runtime.Object{sourcePullSecret(), &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: testPullSecretName, Namespace: gpuTestNamespacePrefix + "pullsecret"},
+				ObjectMeta: metav1.ObjectMeta{Name: testPullSecretName, Namespace: defaults.GPUTestNamespacePrefix + "pullsecret"},
 				Type:       corev1.SecretTypeDockerConfigJson,
 				Data:       map[string][]byte{corev1.DockerConfigJsonKey: []byte("stale")},
 			}},
@@ -190,8 +192,8 @@ func TestCreateGPUTestNamespace_CopiesImagePullSecrets(t *testing.T) {
 				t.Errorf("copied Secret type/data = %s/%q, want the source's %s/%q",
 					got.Type, got.Data[corev1.DockerConfigJsonKey], source.Type, source.Data[corev1.DockerConfigJsonKey])
 			}
-			if got.Labels[gpuTestRunLabel] != tt.run.token {
-				t.Errorf("copied Secret label %s = %q, want the run token", gpuTestRunLabel, got.Labels[gpuTestRunLabel])
+			if got.Labels[labels.GPUTestRun] != tt.run.token {
+				t.Errorf("copied Secret label %s = %q, want the run token", labels.GPUTestRun, got.Labels[labels.GPUTestRun])
 			}
 		})
 	}
@@ -338,7 +340,7 @@ func TestValidateClusterAutoscaling_ImagePullSecrets(t *testing.T) {
 		if err != nil {
 			t.Fatalf("copied Secret missing from %s: %v", deploy.Namespace, err)
 		}
-		if copied.Labels[gpuTestRunLabel] == "" {
+		if copied.Labels[labels.GPUTestRun] == "" {
 			t.Error("copied Secret lacks the run ownership label")
 		}
 		if want := []corev1.LocalObjectReference{{Name: testPullSecretName}}; !slices.Equal(deploy.Spec.Template.Spec.ImagePullSecrets, want) {

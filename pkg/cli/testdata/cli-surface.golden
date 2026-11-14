@@ -24,6 +24,7 @@ command aicr recipe validate  aliases= hidden=false
 command aicr recipe verify-catalog  aliases= hidden=false
 command aicr skill  aliases= hidden=false
 command aicr snapshot  aliases= hidden=false
+command aicr sweep  aliases= hidden=false
 command aicr trust  aliases= hidden=false
 command aicr trust update  aliases= hidden=false
 command aicr upgrade-check  aliases= hidden=false
@@ -244,6 +245,13 @@ flag    aicr snapshot  --service-account-name  type=string default="aicr" requir
 flag    aicr snapshot  --template  type=string default= required=false hidden=false env=
 flag    aicr snapshot  --timeout  type=duration default=5m0s required=false hidden=false env=
 flag    aicr snapshot  --toleration  type=string default= required=false hidden=false env=
+flag    aicr sweep  --dry-run  type=bool default=false required=false hidden=false env=
+flag    aicr sweep  --format,-t  type=string default="table" required=false hidden=false env=
+flag    aicr sweep  --kubeconfig,-k  type=string default= required=false hidden=false env=
+flag    aicr sweep  --namespace,-n  type=string default="aicr-validation" required=false hidden=false env=AICR_NAMESPACE
+flag    aicr sweep  --older-than  type=duration default=2h0m0s required=false hidden=false env=
+flag    aicr sweep  --output,-o  type=string default= required=false hidden=false env=
+flag    aicr sweep  --yes  type=bool default=false required=false hidden=false env=
 flag    aicr trust update  --emit-signing-config  type=string default= required=false hidden=false env=
 flag    aicr upgrade-check  --deployer,-d  type=string default= required=false hidden=false env=
 flag    aicr upgrade-check  --fail-on-error  type=bool default=true required=false hidden=false env=

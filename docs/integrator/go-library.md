@@ -1014,6 +1014,58 @@ data, not errors: `WriteUpgradeReportTable` renders the table the CLI prints,
 and `FailsRun` makes the CLI's `--fail-on-error` decision. A record that cannot
 be read or is malformed fails the call rather than reporting `unknown`.
 
+### Sweeping stale validation resources
+
+`PlanValidationSweep` and `ApplyValidationSweep` are the SDK form of
+[`aicr sweep`](../user/cli-reference.md#aicr-sweep): they find and delete the
+per-run resources an interrupted or `--no-cleanup` validation run leaves
+behind. The split exists so the caller confirms the exact list that is
+deleted:
+
+```go
+plan, err := client.PlanValidationSweep(ctx, aicr.SweepOptions{
+	Kubeconfig: "", // empty follows the standard chain: flag, KUBECONFIG, ~/.kube/config, in-cluster
+	Namespace:  "aicr-validation",
+	OlderThan: 2 * time.Hour,
+})
+if err != nil {
+	log.Fatalf("sweep plan: %v", err)
+}
+for _, o := range plan.Objects {
+	fmt.Printf("%s %s/%s: %s (%s)\n", o.Kind, o.Namespace, o.Name, o.Status, o.Reason)
+}
+// plan.Candidates() is the exact set the apply step attempts. Confirm with
+// the operator first — ClusterContext and Server name the cluster — then:
+result, err := client.ApplyValidationSweep(ctx, plan)
+```
+
+- `PlanValidationSweep` is read-only. `ApplyValidationSweep` re-plans
+  against the cluster's current state with the plan's namespace and age
+  floor, then deletes only the intersection — candidates a fresh plan still
+  marks would-delete — with UID-pinned deletes, so an object recreated
+  between plan and apply is left alone and a re-run is idempotent. Before
+  deleting run-scoped objects it also watches the
+  `defaults.ValidationSweepSettleWindow` (~2m30s — a conservative margin
+  over the usual between-checks gap, not a proven bound) for a validator
+  Job to appear, because a live run with cleanup on shows no Job between
+  its checks. A partial failure still returns the report, with the failed
+  objects marked `SweepFailed`, alongside an `ErrCodeInternal` naming them.
+- `SweepOptions.OlderThan` defaults to `defaults.ValidationSweepMinAge` (2h)
+  when zero; negative is rejected. The floor outlasts the facade's whole-run
+  cap and the largest single-check envelope (which bounds a test
+  namespace's life), not a whole uncapped CLI run; the liveness guards (no
+  non-terminal pods in a test namespace, no validator Job carrying the
+  run's `aicr.run/run-id` label in any namespace) plus the settle
+  observation cover run-scoped objects.
+- `SweepReport` and `SweepObject` are facade-owned (not aliases of
+  `pkg/validator/sweep`), with the JSON/YAML shape the CLI's `--format`
+  output publishes.
+- `ApplyValidationSweep` accepts only a report `PlanValidationSweep`
+  produced: the marker and the sweep target are unexported fields, so a
+  hand-built `SweepReport` — or a plan that round-tripped through JSON,
+  which drops unexported fields — is rejected with `ErrCodeInvalidRequest`.
+  Re-plan instead of reusing a serialized report.
+
 ### Criteria relaxation on the snapshot path
 
 A snapshot resolve is strict by default — every criteria dimension you state

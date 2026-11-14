@@ -26,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 
@@ -194,20 +195,20 @@ func TestResolveRunaiQueue(t *testing.T) {
 	}{
 		{
 			name:      "Project namespace yields its queue",
-			objs:      []runtime.Object{namespace(map[string]string{runaiQueueLabel: testRunaiQueue, "project": testRunaiQueue})},
+			objs:      []runtime.Object{namespace(map[string]string{labels.RunAIQueue: testRunaiQueue, "project": testRunaiQueue})},
 			wantQueue: testRunaiQueue,
 		},
 		{
 			name:        "namespace without the queue label is not a Project namespace",
 			objs:        []runtime.Object{namespace(map[string]string{"team": "x"})},
 			wantErrCode: errors.ErrCodeInvalidRequest,
-			wantErrHas:  runaiQueueLabel,
+			wantErrHas:  labels.RunAIQueue,
 		},
 		{
 			name:        "empty queue label is not a Project namespace",
-			objs:        []runtime.Object{namespace(map[string]string{runaiQueueLabel: ""})},
+			objs:        []runtime.Object{namespace(map[string]string{labels.RunAIQueue: ""})},
 			wantErrCode: errors.ErrCodeInvalidRequest,
-			wantErrHas:  runaiQueueLabel,
+			wantErrHas:  labels.RunAIQueue,
 		},
 		{
 			name:        "missing namespace names the input",
@@ -218,7 +219,7 @@ func TestResolveRunaiQueue(t *testing.T) {
 			// An RBAC denial is not a configuration error on the operator's
 			// side and must not be reported as one.
 			name:       "forbidden read is not a configuration error",
-			objs:       []runtime.Object{namespace(map[string]string{runaiQueueLabel: testRunaiQueue})},
+			objs:       []runtime.Object{namespace(map[string]string{labels.RunAIQueue: testRunaiQueue})},
 			forbidden:  true,
 			wantErrHas: "Project namespace",
 		},
@@ -310,8 +311,8 @@ func TestNewGangTestRunTarget(t *testing.T) {
 				if pod.Namespace != run.namespace {
 					t.Errorf("pod %d namespace = %q, want %q", i, pod.Namespace, run.namespace)
 				}
-				if got := pod.Labels[gpuTestRunLabel]; got != run.suffix {
-					t.Errorf("pod %d label %s = %q, want the run suffix %q", i, gpuTestRunLabel, got, run.suffix)
+				if got := pod.Labels[labels.GPUTestRun]; got != run.suffix {
+					t.Errorf("pod %d label %s = %q, want the run suffix %q", i, labels.GPUTestRun, got, run.suffix)
 				}
 				if got := pod.Spec.TerminationGracePeriodSeconds; got == nil || *got != gangTerminationGracePeriod {
 					t.Errorf("pod %d terminationGracePeriodSeconds = %s, want %d", i, formatGracePeriod(got), gangTerminationGracePeriod)
@@ -326,11 +327,11 @@ func TestNewGangTestRunTarget(t *testing.T) {
 				if pg.GetNamespace() != run.namespace {
 					t.Errorf("PodGroup %s namespace = %q, want %q", pg.GetName(), pg.GetNamespace(), run.namespace)
 				}
-				if got := pg.GetLabels()[gangPhaseLabel]; got != wantPhase[i] {
-					t.Errorf("PodGroup %s label %s = %q, want %q", pg.GetName(), gangPhaseLabel, got, wantPhase[i])
+				if got := pg.GetLabels()[labels.GangSchedulingPhase]; got != wantPhase[i] {
+					t.Errorf("PodGroup %s label %s = %q, want %q", pg.GetName(), labels.GangSchedulingPhase, got, wantPhase[i])
 				}
-				if got := pg.GetLabels()[gpuTestRunLabel]; got != run.suffix {
-					t.Errorf("PodGroup %s label %s = %q, want the run suffix %q", pg.GetName(), gpuTestRunLabel, got, run.suffix)
+				if got := pg.GetLabels()[labels.GPUTestRun]; got != run.suffix {
+					t.Errorf("PodGroup %s label %s = %q, want the run suffix %q", pg.GetName(), labels.GPUTestRun, got, run.suffix)
 				}
 			}
 		})
@@ -356,7 +357,7 @@ func TestCleanupGangTestResourcesLeavesRunaiProjectNamespace(t *testing.T) {
 
 	objs := make([]runtime.Object, 0, 1+gangMinMembers+len(run.negPods))
 	objs = append(objs, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name: run.namespace, Labels: map[string]string{runaiQueueLabel: testRunaiQueue},
+		Name: run.namespace, Labels: map[string]string{labels.RunAIQueue: testRunaiQueue},
 	}})
 	for i := range gangMinMembers {
 		objs = append(objs, buildGangTestPod(run, i, nil))
@@ -509,7 +510,7 @@ func TestGangCleanupArtifact(t *testing.T) {
 	runaiRun := runaiCleanupRun(t)
 	cleanupErr := errors.New(errors.ErrCodeInternal, "boom")
 	projectEquivalent := "kubectl delete pods,podgroups.scheduling.run.ai -n " + testRunaiProjectNamespace +
-		" -l " + gpuTestRunLabel + "=" + runaiRun.suffix
+		" -l " + labels.GPUTestRun + "=" + runaiRun.suffix
 	const (
 		ownedTitle   = "Delete test namespace"
 		projectTitle = "Delete test pods and PodGroups"
@@ -736,7 +737,7 @@ func TestCheckGangSchedulingRunaiProject(t *testing.T) {
 	}{
 		{
 			name:          "Project namespace: queue from its label, nothing created around it",
-			project:       labelled(map[string]string{runaiQueueLabel: testRunaiQueue}),
+			project:       labelled(map[string]string{labels.RunAIQueue: testRunaiQueue}),
 			wantErrCode:   errors.ErrCodeInternal,
 			wantErrHas:    "positive phase failed",
 			wantPodGroups: 1,
@@ -750,7 +751,7 @@ func TestCheckGangSchedulingRunaiProject(t *testing.T) {
 			name:        "namespace without the queue label",
 			project:     labelled(nil),
 			wantErrCode: errors.ErrCodeInvalidRequest,
-			wantErrHas:  runaiQueueLabel,
+			wantErrHas:  labels.RunAIQueue,
 		},
 	}
 	for _, tt := range tests {
@@ -786,7 +787,7 @@ func TestCheckGangSchedulingRunaiProject(t *testing.T) {
 					t.Errorf("PodGroup %s created in %q, want the Project namespace", pg.GetName(), pg.GetNamespace())
 				}
 				if queue, _, _ := unstructured.NestedString(pg.Object, keySpec, "queue"); queue != testRunaiQueue {
-					t.Errorf("PodGroup %s queue = %q, want %q from the namespace's %s label", pg.GetName(), queue, testRunaiQueue, runaiQueueLabel)
+					t.Errorf("PodGroup %s queue = %q, want %q from the namespace's %s label", pg.GetName(), queue, testRunaiQueue, labels.RunAIQueue)
 				}
 			}
 			for _, action := range clientset.Actions() {

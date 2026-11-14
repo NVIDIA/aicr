@@ -39,6 +39,8 @@
 //     return facade-owned field-level changes for drift detection.
 //   - ValidateState — evaluate a resolved recipe against a snapshot,
 //     running deployment / conformance / performance phases.
+//   - PlanValidationSweep / ApplyValidationSweep — list, then delete, the
+//     per-run resources an interrupted validation leaves behind.
 //   - LoadConfig — read and validate the AICRConfig a team commits, from a
 //     file or an HTTP(S) URL. WrapConfig lifts one already parsed elsewhere;
 //     it does no parsing itself. Either way the resulting Config DERIVES
@@ -176,8 +178,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe/ocisource"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
+	"github.com/NVIDIA/aicr/pkg/validator/sweep"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"golang.org/x/sync/errgroup"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
 )
 
@@ -276,6 +281,13 @@ type clientDependencies struct {
 	// actually crossed, is otherwise observable only from a live apiserver.
 	readInventory func(context.Context, inventory.Options) (inventory.Result, error)
 	scanAtRisk    func(context.Context, inventory.AtRiskOptions) (inventory.AtRiskResult, error)
+
+	// sweepPlan and sweepApply are the validation-residue sweep's entry
+	// points. They are seams for the reason readInventory is: what the facade
+	// decides — the option defaults and the report mapping — is otherwise
+	// observable only from a live apiserver.
+	sweepPlan  func(context.Context, kubernetes.Interface, dynamic.Interface, sweep.Options) (*sweep.Report, error)
+	sweepApply func(context.Context, kubernetes.Interface, dynamic.Interface, *sweep.Report) error
 }
 
 func defaultClientDependencies() clientDependencies {
@@ -291,6 +303,8 @@ func defaultClientDependencies() clientDependencies {
 		deployAndCollect: snapshotter.DeployAndCollect,
 		readInventory:    inventory.Read,
 		scanAtRisk:       inventory.ScanAtRisk,
+		sweepPlan:        sweep.Plan,
+		sweepApply:       sweep.Execute,
 	}
 }
 

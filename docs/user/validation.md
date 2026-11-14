@@ -1490,7 +1490,15 @@ aicr validate \
   validator ServiceAccount is reported before the agent is deployed.
 - `--no-cleanup` keeps the validator Jobs and ConfigMaps. The validator Jobs
   created no binding to leave behind; a live-capture agent's run-scoped RBAC
-  is kept as well.
+  is kept as well. Everything such a run keeps carries the labels
+  [`aicr sweep`](cli-reference.md#aicr-sweep) selects on — except the agent's
+  staging ConfigMap (`aicr-agent-snapshot-<run-id>`), which carries no
+  run-id label and is therefore never swept. The retained validator Jobs keep
+  the run's run-scoped objects guarded while they exist: the sweep's liveness
+  guard keeps every object of a run whose Job it can see. So those objects
+  become eligible once the TTL controller has removed the finished Jobs (one
+  hour after they finish) AND they are older than the sweep's `--older-than`
+  floor. `aicr sweep` never deletes the Jobs themselves.
 - Before deploying a validator that is placed next to another component's
   pods, the run lists pods in that component's namespace (for example
   `monitoring`) to warn when the placement selector matches nothing. Without
@@ -1591,9 +1599,11 @@ nil after cancellation. The pod's 60s grace (30s for cleanup, 30s to write the
 termination message) is best effort: blocking checks, long cleanup, SIGKILL, OOM
 or a crash may prevent a termination message, and a missing pod with a terminal
 Job deadline condition still uses the Job-level `failed` classification
-described above, carrying the check's own message when one was observed. No
-external orphan-resource sweeper is provided yet; namespaces a check leaves
-behind after SIGKILL or a crash carry the `aicr.run/gpu-test-run` label.
+described above, carrying the check's own message when one was observed.
+Namespaces, pods and PodGroups a check leaves behind after SIGKILL or a crash
+carry the `aicr.run/gpu-test-run` label, and the run-scoped RBAC and ConfigMaps
+carry `aicr.run/run-id`; [`aicr sweep`](cli-reference.md#aicr-sweep) deletes
+those orphans once they outlive its two-hour age floor.
 
 Scripts that gate on validation outcome should treat **any non-zero code** as
 failure rather than branching on specific values, and should additionally

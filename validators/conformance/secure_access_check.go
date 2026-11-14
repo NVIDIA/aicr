@@ -26,6 +26,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
@@ -41,23 +42,6 @@ import (
 )
 
 const (
-	// gpuTestNamespacePrefix names the PER-RUN test namespace. A fresh
-	// namespace per run makes cleanup a single bounded operation — delete the
-	// namespace and wait — and closes the ambiguous-create leak window: once
-	// the namespace is Terminating, the NamespaceLifecycle admission plugin
-	// rejects subsequent Creates in it, and the namespace deletion controller
-	// durably garbage-collects any content that still lands (e.g. an
-	// already-admitted in-flight Create committing late) before finalizing.
-	gpuTestNamespacePrefix = "aicr-gpu-test-"
-	// gpuTestRunLabel is the ownership label stamped on the per-run test
-	// namespace; its value is the run's 128-bit random token. Cleanup uses it
-	// to verify that a namespace found at the expected name really belongs to
-	// this run before deleting anything, and an external label-based sweeper
-	// can use it to find leaked test namespaces — the residual paths no
-	// in-process budget can cover (SIGKILL, or scheduling/image-pull skew
-	// beyond the margin the work budgets reserve; see gpuCheckWorkBudget in
-	// consts.go).
-	gpuTestRunLabel = "aicr.run/gpu-test-run"
 	// gpuTestPodPrefix names the GPU allocation test pod. Mechanism-neutral:
 	// the same pod shape is used in DRA mode (ResourceClaim) and device
 	// plugin mode (nvidia.com/gpu limits).
@@ -171,7 +155,7 @@ const (
 // device plugin mode). The name suffix is a 128-bit random token (32 hex
 // chars) so a same-name collision with a namespace this run did not create is
 // practically impossible; the token doubles as the value of the
-// gpuTestRunLabel ownership label on the namespace.
+// labels.GPUTestRun ownership label on the namespace.
 //
 // nsObserved/nsUID/nsForeign/nsNeverCreated carry namespace-ownership state
 // from createGPUTestNamespace to the deferred cleanupGPUTestNamespace:
@@ -279,7 +263,7 @@ func newGPUTestRun() (*gpuTestRun, error) {
 	token := hex.EncodeToString(b)
 	return &gpuTestRun{
 		token:          token,
-		namespace:      gpuTestNamespacePrefix + token,
+		namespace:      defaults.GPUTestNamespacePrefix + token,
 		podName:        gpuTestPodPrefix + token,
 		claimName:      gpuClaimPrefix + token,
 		noAllocPodName: noAllocProbePrefix + token,
@@ -300,7 +284,7 @@ func newGPUTestRun() (*gpuTestRun, error) {
 }
 
 // createGPUTestNamespace creates the per-run test namespace stamped with the
-// run's ownership label (gpuTestRunLabel=token) and records the created UID
+// run's ownership label (labels.GPUTestRun=token) and records the created UID
 // so cleanup can delete with a metav1.Preconditions{UID} guard.
 //
 // On AlreadyExists it verifies ownership before adopting: with a 128-bit
@@ -321,9 +305,9 @@ func createGPUTestNamespace(ctx context.Context, clientset kubernetes.Interface,
 
 // ensureGPUTestNamespace is the namespace half of createGPUTestNamespace.
 func ensureGPUTestNamespace(ctx context.Context, clientset kubernetes.Interface, run *gpuTestRun) error {
-	nsLabels := map[string]string{gpuTestRunLabel: run.token}
+	nsLabels := map[string]string{labels.GPUTestRun: run.token}
 	for k, v := range run.namespaceLabels {
-		if k != gpuTestRunLabel {
+		if k != labels.GPUTestRun {
 			nsLabels[k] = v
 		}
 	}
@@ -360,11 +344,11 @@ func ensureGPUTestNamespace(ctx context.Context, clientset kubernetes.Interface,
 		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
 			"test namespace %s already exists and its ownership could not be verified", run.namespace), getErr)
 	}
-	if existing.Labels[gpuTestRunLabel] != run.token {
+	if existing.Labels[labels.GPUTestRun] != run.token {
 		run.nsForeign = true
 		return errors.New(errors.ErrCodeConflict, fmt.Sprintf(
 			"test namespace %s already exists without this run's %s ownership label — refusing to reuse or delete a foreign namespace",
-			run.namespace, gpuTestRunLabel))
+			run.namespace, labels.GPUTestRun))
 	}
 	run.nsObserved = true
 	run.nsUID = existing.UID
@@ -428,7 +412,7 @@ func copyImagePullSecret(ctx context.Context, clientset kubernetes.Interface, ru
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: run.namespace,
-			Labels:    map[string]string{gpuTestRunLabel: run.token},
+			Labels:    map[string]string{labels.GPUTestRun: run.token},
 		},
 		Type: source.Type,
 		Data: source.Data,
@@ -1813,7 +1797,7 @@ var cleanupTimeout = defaults.K8sCleanupTimeout
 //     error returned, object possibly committed), a first NotFound is NOT
 //     confirmed absence — cleanup keeps re-Getting within the budget, adopts
 //     the namespace if it surfaces with our ownership token, and otherwise
-//     reports that it may surface later carrying gpuTestRunLabel for
+//     reports that it may surface later carrying labels.GPUTestRun for
 //     external sweeping.
 //
 // Deleting the namespace reconciles every test resource inside it (GPU test
@@ -1844,7 +1828,7 @@ func cleanupGPUTestNamespace(clientset kubernetes.Interface, run *gpuTestRun) (s
 	if run.nsForeign {
 		return fmt.Sprintf(
 			"namespace %s is owned by another party (missing %s=%s ownership label) — deliberately left untouched, nothing was created in it",
-			run.namespace, gpuTestRunLabel, run.token), nil
+			run.namespace, labels.GPUTestRun, run.token), nil
 	}
 	if run.nsNeverCreated {
 		return fmt.Sprintf(
@@ -1872,10 +1856,10 @@ func cleanupGPUTestNamespace(clientset kubernetes.Interface, run *gpuTestRun) (s
 			existing, getErr := clientset.CoreV1().Namespaces().Get(ctx, run.namespace, metav1.GetOptions{})
 			switch {
 			case getErr == nil:
-				if existing.Labels[gpuTestRunLabel] != run.token {
+				if existing.Labels[labels.GPUTestRun] != run.token {
 					return fmt.Sprintf(
 						"namespace %s exists but is owned by another party (missing %s=%s ownership label) — deliberately left untouched, nothing was created in it",
-						run.namespace, gpuTestRunLabel, run.token), nil
+						run.namespace, labels.GPUTestRun, run.token), nil
 				}
 				run.nsObserved = true
 				run.nsUID = existing.UID
@@ -1958,7 +1942,7 @@ func cleanupDeadlineStatus(run *gpuTestRun, deleteAccepted, observedTerminating 
 	case !run.nsObserved:
 		msg := fmt.Sprintf(
 			"WARNING: namespace %s was never observed within the %s cleanup budget after an ambiguous create — it may still surface later; if it does, it carries the ownership label %s=%s for external sweeping",
-			run.namespace, cleanupTimeout, gpuTestRunLabel, run.token)
+			run.namespace, cleanupTimeout, labels.GPUTestRun, run.token)
 		if lastErr != nil {
 			msg += fmt.Sprintf(" (last error: %v)", lastErr)
 		}

@@ -25,6 +25,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	"github.com/NVIDIA/aicr/validators"
 
 	corev1 "k8s.io/api/core/v1"
@@ -364,7 +365,7 @@ func negativeMemberPod(ns, name, nodeName string, phase corev1.PodPhase) *corev1
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name, Namespace: ns,
-			Labels: map[string]string{gangPhaseLabel: gangPhaseNegative},
+			Labels: map[string]string{labels.GangSchedulingPhase: gangPhaseNegative},
 		},
 		Spec:   corev1.PodSpec{NodeName: nodeName},
 		Status: corev1.PodStatus{Phase: phase},
@@ -549,7 +550,7 @@ func completePositivePodOnCreate(clientset *k8sfake.Clientset, nodeName string, 
 			return false, nil, nil
 		}
 		pod, ok := create.GetObject().(*corev1.Pod)
-		if !ok || pod.Labels[gangPhaseLabel] != gangPhasePositive {
+		if !ok || pod.Labels[labels.GangSchedulingPhase] != gangPhasePositive {
 			return false, nil, nil
 		}
 		pod.Spec.NodeName = nodeName
@@ -571,7 +572,7 @@ func bindNegativePodOnCreate(clientset *k8sfake.Clientset, nodeName string) {
 			return false, nil, nil
 		}
 		pod, ok := create.GetObject().(*corev1.Pod)
-		if !ok || pod.Labels[gangPhaseLabel] != gangPhaseNegative {
+		if !ok || pod.Labels[labels.GangSchedulingPhase] != gangPhaseNegative {
 			return false, nil, nil
 		}
 		pod.Spec.NodeName = nodeName

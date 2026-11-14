@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -134,7 +135,7 @@ func requireNoSandboxNamespaceLeak(t *testing.T, clientset *k8sfake.Clientset) {
 		t.Fatalf("failed to list namespaces: %v", err)
 	}
 	for _, ns := range namespaces.Items {
-		if strings.HasPrefix(ns.Name, gpuTestNamespacePrefix) {
+		if strings.HasPrefix(ns.Name, defaults.GPUTestNamespacePrefix) {
 			t.Errorf("per-run test namespace %s leaked", ns.Name)
 		}
 	}
