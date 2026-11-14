@@ -32,8 +32,8 @@ Several controllers in AICR's stack hold cluster-wide informer caches, so
 their working set grows with cluster size: gpu-operator, network-operator,
 maintenance-operator and the nodewright manager among them.
 
-Today's defaults are sized for the largest clusters: 8Gi to 12Gi limits,
-which hold at 2500 GPU nodes. Smaller values OOM-killed these controllers
+Where a values file sets 8Gi to 12Gi limits, those defaults are sized for
+the largest clusters and hold at 2500 GPU nodes. Smaller values OOM-killed these controllers
 on two GB300 clusters at about
 1600 and 2500 GPU nodes
 ([#3148](https://github.com/NVIDIA/aicr/issues/3148)). For every other
@@ -246,9 +246,9 @@ supports.
 
 The values files AICR ships are the top tier, and sizing never edits
 them. A bundle generated without `--nodes`, or with a count above a
-component's highest tier, and an `argocd-helm` bundle installed with
-`sizing.nodeCount` 0 or above that tier, get exactly the values files'
-values.
+component's highest tier, gets exactly the values files' values. So do
+the components an `argocd-helm` bundle sizes at install time (see Deploy
+time) when it is installed with `sizing.nodeCount` 0 or above that tier.
 
 ### The node count
 
@@ -295,7 +295,8 @@ resources:
   - path: controller.resources
     tiers:
       - maxNodes: 250
-        # No requests: the requirement (2163Mi) is above today's 2000Mi.
+        # No requests: the requirement (1859Mi) rounds up to 2Gi, above
+        # today's 2000Mi.
         limits: {memory: 3Gi}
         measurements:
           - sets: []
@@ -360,6 +361,9 @@ resources:
   - `gpuNodes`, `nodes` and `pods`: the measured cluster at read time.
     `nodes` is required on a windowed reading that sets a limit, because
     the limit covers clusters only up to that total (see The node count).
+    An instantaneous reading that sets a limit without `nodes` covers
+    clusters only up to its `gpuNodes` in total, the least its cluster can
+    have had.
     `pods` is optional: the controllers that track pods do so through
     caches being scoped upstream
     ([Mellanox/network-operator#3173](https://github.com/Mellanox/network-operator/issues/3173),
@@ -403,7 +407,8 @@ replace it.
   candidates. The limit is still the highest peak among all of them, so
   a higher untruncated peak inside the tier is never discarded. If no
   reading above the bound exceeds the killing limit, the tier leaves the
-  limit out and today's value applies, until such a reading exists. A
+  limit out, as does every tier above it (see Ordering), and today's
+  value applies until such a reading exists. A
   tier's limit is therefore always above every `truncatedAt` recorded in
   it.
 - **Instantaneous readings:** the reading stands in for p90, and reading ×
@@ -416,10 +421,13 @@ replace it.
 - **Ordering:** derive tiers from the lowest up. A tier's request and
   limit are each at least the tier below's, so a requirement measured in
   a lower tier carries upward and is never clamped down to fit. A tier
-  may equal the tier above.
+  may equal the tier above. A request or limit that a tier leaves out is
+  left out of every tier above it, whatever the reason: the lower tier
+  then runs at today's value, and a higher tier never gets less than a
+  lower one.
 - **Today's values are the ceiling:** a request or limit whose
-  requirement is at or above today's value is left out of the tier, and
-  of every tier above it, so today's value applies. Where values files
+  requirement, after rounding, is at or above today's value is left out
+  of the tier, and of every tier above it, so today's value applies. Where values files
   set different values for a path, today's value is the highest of them;
   a file that sets less is covered when sizing runs, which takes the
   smaller of the resolved value and the tier's. For a limit, two cases
@@ -447,12 +455,15 @@ replace it.
 - a quantity that does not parse;
 - a limit below its request;
 - a tier value above the same field in the next higher tier;
+- a request or limit set in a tier above one that leaves it out;
 - a limit at or below a `truncatedAt` recorded in the same tier;
 - a tier that sets `requests` or `limits` with no measurement whose `sets`
   names it;
 - a measurement missing `kind`, `gpuNodes`, `max` or `date`, a windowed
   one missing `window`, or a windowed one that sets a limit missing
   `nodes`.
+
+Any one failure rejects the whole file.
 
 The loader cannot reject a well-formed path that no values file sets,
 because an entry is skipped by design where a file does not set it. A
@@ -497,12 +508,15 @@ Sizing never writes:
   after sizing and replace its result.
 
 After every override is applied, the bundler fails closed with
-`ErrCodeInvalidRequest` if a sized path's request is above its limit. On
-`argocd-helm` it checks every emitted row merged over the component's
-static values, which already carry the generation-time overrides, so a
-`--set` request that a row's limit would undercut fails the bundle rather
-than the sync. Only an install-time root-chart value can still produce
-one, because the template never compares quantities; the API server then
+`ErrCodeInvalidRequest` if a sized path's request is above its limit: a
+count and a `--set` request that contradict each other fail the bundle
+rather than the sync. On `argocd-helm` that check covers the row the
+bundle's own `--nodes` selects, merged over the component's static
+values, which already carry the generation-time overrides. Every other
+row leaves out a limit that is below the static request, so a bundle
+generated with no count builds as it does today whatever its `--set`
+values. Only an install-time root-chart value can still produce a request
+above its limit, because the template never compares quantities; the API server then
 rejects the pod spec and Argo CD reports the sync error. The documentation
 states this limitation.
 
@@ -538,7 +552,10 @@ chart, which the operator sets at install. Sizing is decided per path:
   compares quantities.
 - **Paths read by bundle-rendered manifests** are never sized, as at
   generation time.
-- **Local-chart components** are sized at generation time.
+- **Local-chart components** are sized at generation time. Under
+  `--vendor-charts` every Helm component is one: its child Application
+  renders only root values and no row reaches it, so `--nodes` sizes the
+  whole bundle and `sizing.nodeCount` changes nothing in it.
 
 Rendering:
 
@@ -555,9 +572,10 @@ Rendering:
   to `int64` before comparing. A count arrives as `int64` from `--set` and
   as `float64` from a values file, and Helm's comparison functions fail on
   mixed types; tests cover both sources.
-- The template stamps `aicr.nvidia.com/sizing-node-count` on each sized
-  child Application, and `aicr.nvidia.com/sizing-tier` (the row's
-  `maxNodes`) only on one whose values a row changed.
+- The template stamps `aicr.run/sizing-node-count` on each sized
+  child Application, and `aicr.run/sizing-tier` (the row's
+  `maxNodes`) only on one whose values a row changed. Both keys are built
+  from `header.Domain` ([ADR-013](013-aicr-run-domain-migration.md)).
 - A `--dynamic` export of a sized path is rejected at bundle time. Its
   pre-filled root value would otherwise always mask the selected row.
 
@@ -577,14 +595,17 @@ by following this section.
   without `sizing.nodeCount` keeps today's values. An `argocd-helm` bundle
   generated with `--nodes` carries that count as the default for
   `sizing.nodeCount`: set it at install, or generate without `--nodes`,
-  when the target cluster's size differs.
+  when the target cluster's size differs. Components sized at generation
+  time, which includes every Helm component of a `--vendor-charts`
+  bundle, follow `--nodes` only.
 - **Changing it.** Moving the count across a tier boundary re-renders the
   sized controllers and restarts them. Within a tier the sized values do
   not change; on `argocd-helm` the `sizing-node-count` annotation does.
 - **Checking it.** The applied values are in each component's
   `values.yaml`; on `argocd-helm` the child Applications' sizing
   annotations show the count and the row.
-- **Large CPU pools.** Each measurement records the cluster's total nodes.
+- **Large CPU pools.** The readings behind a limit record the cluster's
+  total nodes, or stand for their GPU node count where they do not.
   A cluster with more total nodes than the readings behind its tier
   should state a higher count or override.
 
@@ -611,9 +632,9 @@ by following this section.
   that grows within its tier stays covered.
 - **GPU nodes is an imperfect proxy.** CPU nodes, pods and Jobs retained
   from churn (nodewright) and drift at a constant count
-  (maintenance-operator) are not counted. Each measurement records
-  total nodes and pods, so an operator with a far denser cluster knows to
-  override.
+  (maintenance-operator) are not counted. A measurement records total
+  nodes, and pods where known, so an operator with a far denser cluster
+  knows to override.
 - **A tier is only as good as its readings.** Where no reading lies near
   a bound, the nearest one above sizes the tier, which over-sizes it; where
   none lies above, the tier keeps today's values.
@@ -656,7 +677,7 @@ by following this section.
 - **Reporting the measured NodeWright numbers upstream** (see Option E).
 - **Install-time sizing for the other deployers.** For `helm` and
   `helmfile`, `install.sh` could read an `AICR_NODE_COUNT` environment
-  variable and layer per-tier values files. `flux`, `fleet` and `terraform`
-  are not yet designed.
+  variable and layer per-tier values files. `argocd`, `flux`, `fleet` and
+  `terraform` are not yet designed.
 - **Passing a count from the AICR Operator**
   ([ADR-027](027-aicr-operator.md)) to the bundle step it runs.
