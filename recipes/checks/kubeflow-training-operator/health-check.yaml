@@ -32,7 +32,9 @@
 #    TFJob, XGBoostJob), which TestKubeflowTrainingOperatorWebhookCount
 #    keeps equal to the vendored manifest. Each must also carry the injected
 #    CA: until it does, the apiserver cannot verify the operator's serving
-#    certificate and rejects the jobs that webhook covers.
+#    certificate and rejects the jobs that webhook covers. The CA count
+#    repeats the Service predicate, so a webhook that is not ours cannot
+#    stand in for one of ours that lacks its CA.
 #
 # Names verified against training-operator v1.9.4's standalone overlay;
 # re-verify on every re-vendor.
@@ -149,4 +151,4 @@ spec:
               metadata:
                 name: validator.training-operator.kubeflow.org
               (webhooks[?clientConfig.service.name == 'training-operator' && clientConfig.service.namespace == 'kubeflow'] | length(@) == `5`): true
-              (webhooks[?length(clientConfig.caBundle || '') > `0`] | length(@) == `5`): true
+              (webhooks[?clientConfig.service.name == 'training-operator' && clientConfig.service.namespace == 'kubeflow' && length(clientConfig.caBundle || '') > `0`] | length(@) == `5`): true
