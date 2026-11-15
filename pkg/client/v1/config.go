@@ -448,6 +448,7 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 		Nodes:                resolved.Nodes,
 		StorageClass:         resolved.StorageClass,
 		SharedStorageClass:   resolved.SharedStorageClass,
+		RuntimeMetrics:       resolved.RuntimeMetrics,
 		Attest:               resolved.Attest,
 		CertIDRegexp:         resolved.CertIDRegexp,
 		VendorCharts:         resolved.VendorCharts,

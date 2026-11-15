@@ -16,6 +16,7 @@ package config_test
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -327,6 +328,10 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 			StorageClass:               "fast-ssd",
 			SharedStorageClass:         "shared-rwx",
 		},
+		RuntimeMetrics: &config.RuntimeMetricsSpec{
+			Series:     []string{"queue_depth"},
+			Namespaces: []string{"inference"},
+		},
 		// Keyless: signingKey is mutually exclusive with fulcioURL, so the two
 		// cannot appear in one populated-everything spec. SigningKey has its own
 		// projection case in TestBundleResolve_SigningKey.
@@ -393,6 +398,11 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 	}
 	if got.SharedStorageClass != "shared-rwx" {
 		t.Errorf("SharedStorageClass: got %q", got.SharedStorageClass)
+	}
+	if !slices.Equal(got.RuntimeMetrics.Series, []string{"queue_depth"}) ||
+		!slices.Equal(got.RuntimeMetrics.Namespaces, []string{"inference"}) {
+
+		t.Errorf("RuntimeMetrics: got %+v", got.RuntimeMetrics)
 	}
 	if !got.Attest || got.CertIDRegexp != ".+" || !got.OIDCDeviceFlow {
 		t.Errorf("Attestation fields: got attest=%v cert=%q oidc=%v",
@@ -667,6 +677,20 @@ func TestBundleResolve_InvalidValues(t *testing.T) {
 				Scheduling: &config.SchedulingSpec{Nodes: -3},
 			},
 			wantSub: "spec.bundle.scheduling.nodes",
+		},
+		{
+			name: "runtime metrics series that is not RE2",
+			spec: &config.BundleSpec{
+				RuntimeMetrics: &config.RuntimeMetricsSpec{Series: []string{"queue_(depth"}},
+			},
+			wantSub: "spec.bundle.runtimeMetrics",
+		},
+		{
+			name: "runtime metrics namespace that is not a name",
+			spec: &config.BundleSpec{
+				RuntimeMetrics: &config.RuntimeMetricsSpec{Namespaces: []string{"Team_A"}},
+			},
+			wantSub: "spec.bundle.runtimeMetrics",
 		},
 	}
 	for _, tt := range tests {

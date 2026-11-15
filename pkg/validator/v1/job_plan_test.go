@@ -1595,6 +1595,124 @@ func TestBuildJobPlan_ForwardsRunaiProjectNamespaceEnv(t *testing.T) {
 	})
 }
 
+// TestBuildJobPlan_ForwardsServiceMetricsQueryURLEnv verifies the owner's
+// Prometheus query URL reaches only the ai-service-metrics Job, from the CLI
+// process environment and never from a catalog-pinned value, which could
+// otherwise point every run's evidence at one backend.
+func TestBuildJobPlan_ForwardsServiceMetricsQueryURLEnv(t *testing.T) {
+	values := func(entry ValidatorEntry) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == defaults.EnvServiceMetricsQueryURL {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+	const queryURL = "https://mimir.example.com/prometheus"
+	entry := ValidatorEntry{Name: AIServiceMetricsCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+	catalogEntry := entry
+	catalogEntry.Env = []EnvVar{{Name: defaults.EnvServiceMetricsQueryURL, Value: "http://from-catalog:9090"}}
+
+	tests := []struct {
+		name  string
+		env   string
+		entry ValidatorEntry
+		want  []string
+	}{
+		{name: "forwarded", env: queryURL, entry: entry, want: []string{queryURL}},
+		{name: "surrounding whitespace trimmed", env: "  " + queryURL + "\n", entry: entry, want: []string{queryURL}},
+		{name: "unset omitted", env: "", entry: entry, want: nil},
+		{
+			name:  "not forwarded to other validators",
+			env:   queryURL,
+			entry: ValidatorEntry{Name: "pod-autoscaling", Phase: "conformance", Image: "img:v1", Timeout: time.Minute},
+			want:  nil,
+		},
+		{name: "catalog value cannot name the backend", env: "", entry: catalogEntry, want: nil},
+		{name: "catalog value cannot override the forwarded URL", env: queryURL, entry: catalogEntry, want: []string{queryURL}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(defaults.EnvServiceMetricsQueryURL, tt.env)
+			if got := values(tt.entry); !slices.Equal(got, tt.want) {
+				t.Errorf("%s env = %v, want %v", defaults.EnvServiceMetricsQueryURL, got, tt.want)
+			}
+		})
+	}
+	t.Run("env-name literal locked", func(t *testing.T) {
+		if defaults.EnvServiceMetricsQueryURL != "AICR_SERVICE_METRICS_QUERY_URL" {
+			t.Errorf("EnvServiceMetricsQueryURL = %q, want AICR_SERVICE_METRICS_QUERY_URL (documented in docs/contributor/validator.md)",
+				defaults.EnvServiceMetricsQueryURL)
+		}
+	})
+}
+
+func TestParseServiceMetricsQueryURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		raw     string
+		want    string
+		wantErr string
+	}{
+		{raw: "http://thanos-query.observability.svc:9090", want: "http://thanos-query.observability.svc:9090"},
+		{raw: "https://mimir.example.com/prometheus/", want: "https://mimir.example.com/prometheus"},
+		{raw: "https://user:secret@mimir.example.com", wantErr: "must not carry credentials"},
+		{raw: "mimir.example.com:9090", wantErr: "scheme must be http or https"},
+		{raw: "ftp://mimir.example.com", wantErr: "scheme must be http or https"},
+		{raw: "http://", wantErr: "has no host"},
+		{raw: "http://mimir.example.com/api/v1/query?query=up", wantErr: "must be a base URL"},
+		{raw: "http://user:sec ret@mimir.example.com", wantErr: "does not parse as a URL"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			t.Parallel()
+			got, err := ParseServiceMetricsQueryURL(tt.raw)
+			if tt.wantErr == "" {
+				if err != nil || got != tt.want {
+					t.Fatalf("ParseServiceMetricsQueryURL(%q) = %q, %v; want %q", tt.raw, got, err, tt.want)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ParseServiceMetricsQueryURL(%q) error = %v, want one containing %q", tt.raw, err, tt.wantErr)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "sec ret") {
+				t.Errorf("error %q repeats the URL's credentials", err)
+			}
+		})
+	}
+}
+
+// TestBuildJobPlan_RejectsUnusableServiceMetricsQueryURL pins that a query URL
+// carrying credentials fails the plan, so it never reaches a Job spec, and
+// that the error does not repeat it. Other checks ignore the variable.
+func TestBuildJobPlan_RejectsUnusableServiceMetricsQueryURL(t *testing.T) {
+	t.Setenv(defaults.EnvServiceMetricsQueryURL, "https://user:secret@mimir.example.com")
+	build := func(name string) (JobPlan, error) {
+		entry := ValidatorEntry{Name: name, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+		return BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+	}
+
+	plan, err := build(AIServiceMetricsCheckName)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if strings.Contains(err.Error(), "secret") {
+		t.Errorf("error %q repeats the URL's credentials", err)
+	}
+	if len(plan.Env) != 0 {
+		t.Errorf("plan.Env = %v, want no environment on a rejected plan", plan.Env)
+	}
+
+	if _, err := build("pod-autoscaling"); err != nil {
+		t.Errorf("BuildJobPlan for another check = %v, want nil", err)
+	}
+}
+
 // TestBuildJobPlan_ForwardsDriverRuntimeImageEnv verifies the vanilla probe
 // image override reaches only the driver-runtime-management Job, from the CLI
 // process environment and never from a catalog-pinned value.
