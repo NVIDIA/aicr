@@ -1622,7 +1622,7 @@ components:
             - h100
 
   # Kubeflow Training Operator v1: the kubeflow.org/v1 PyTorchJob, TFJob,
-  # XGBoostJob, PaddleJob, JAXJob and MPIJob v1 controller, which Run:ai 3.0
+  # XGBoostJob, PaddleJob and JAXJob controller, which Run:ai 3.0
   # submits distributed training through and whose Deployment its operator
   # looks up by name (training-operator in kubeflow). Not Kubeflow Trainer v2
   # (kubeflow-trainer, trainer.kubeflow.org): the two install different CRD
@@ -1650,7 +1650,6 @@ components:
       defaultNamespace: kubeflow
     manifestFiles:
       - components/kubeflow-training-operator/manifests/kubeflow.org_jaxjobs.yaml
-      - components/kubeflow-training-operator/manifests/kubeflow.org_mpijobs.yaml
       - components/kubeflow-training-operator/manifests/kubeflow.org_paddlejobs.yaml
       - components/kubeflow-training-operator/manifests/kubeflow.org_pytorchjobs.yaml
       - components/kubeflow-training-operator/manifests/kubeflow.org_tfjobs.yaml

@@ -44,11 +44,11 @@ const (
 var kubeflowTrainingOperatorImagePattern = regexp.MustCompile(
 	`image: (ghcr\.io/kubeflow/training-v1/training-operator):(v1-[0-9a-f]{7})@(sha256:[0-9a-f]{64})`)
 
-// kubeflowTrainingOperatorCRDs are the kubeflow.org/v1 kinds training-operator
-// v1.9.4's standalone overlay installs, one vendored file each.
+// kubeflowTrainingOperatorCRDs are the kubeflow.org/v1 kinds the component
+// installs, one vendored file each: training-operator v1.9.4's standalone
+// overlay less mpijobs.kubeflow.org, which Run:ai 3.0 leaves to MPI Operator v2.
 var kubeflowTrainingOperatorCRDs = []string{
 	"jaxjobs.kubeflow.org",
-	"mpijobs.kubeflow.org",
 	"paddlejobs.kubeflow.org",
 	"pytorchjobs.kubeflow.org",
 	"tfjobs.kubeflow.org",
@@ -100,8 +100,9 @@ func TestRunaiLeavesCarryKubeflowTrainingOperator(t *testing.T) {
 			kubeflowTrainingOperatorComponent, cfg.Helm)
 	}
 	if len(cfg.ManifestFiles) != len(kubeflowTrainingOperatorCRDs)+1 {
-		t.Errorf("%s declares %d manifestFiles, want %d (six CRDs and the operator)",
-			kubeflowTrainingOperatorComponent, len(cfg.ManifestFiles), len(kubeflowTrainingOperatorCRDs)+1)
+		t.Errorf("%s declares %d manifestFiles, want %d (%d CRDs and the operator)",
+			kubeflowTrainingOperatorComponent, len(cfg.ManifestFiles), len(kubeflowTrainingOperatorCRDs)+1,
+			len(kubeflowTrainingOperatorCRDs))
 	}
 
 	for leaf, criteria := range runaiLeafCriteria() {
@@ -280,8 +281,8 @@ func TestKubeflowTrainingOperatorVendoredCRDs(t *testing.T) {
 // TestKubeflowTrainingOperatorWebhookCount keeps the health check's webhook
 // count equal to the vendored ValidatingWebhookConfiguration. Upstream v1.9.4
 // validates five kinds (JAXJob, PaddleJob, PyTorchJob, TFJob, XGBoostJob; MPIJob
-// v1 has no webhook), one fewer than the CRDs, which is how the first draft
-// asserted six and would have failed every install.
+// v1 has no webhook), one fewer than the CRDs its overlay installs, which is
+// how the first draft asserted six and would have failed every install.
 func TestKubeflowTrainingOperatorWebhookCount(t *testing.T) {
 	t.Parallel()
 
@@ -304,5 +305,38 @@ func TestKubeflowTrainingOperatorWebhookCount(t *testing.T) {
 	}
 	if m[1] != fmt.Sprint(len(webhooks)) {
 		t.Errorf("health check asserts %s webhooks, but the vendored manifest declares %d", m[1], len(webhooks))
+	}
+}
+
+// TestKubeflowTrainingOperatorEnabledSchemes keeps the operator's
+// --enable-scheme args equal to the vendored CRDs. A scheme enabled without its
+// CRD stops the operator at startup, and a vendored CRD without its scheme
+// installs a kind nothing reconciles. mpijob must stay off: Run:ai 3.0 runs MPI
+// through MPI Operator v2, whose CRD shares the v1 name. The Run:ai operator
+// reads these args from containers[0].args in --enable-scheme=<kind> form,
+// matching exact lowercase kinds.
+func TestKubeflowTrainingOperatorEnabledSchemes(t *testing.T) {
+	t.Parallel()
+
+	manifest, err := os.ReadFile(filepath.Join(kubeflowTrainingOperatorDir, "training-operator.yaml"))
+	if err != nil {
+		t.Fatalf("reading manifest: %v", err)
+	}
+	matches := regexp.MustCompile(`(?m)^\s+- --enable-scheme=(\S+)$`).FindAllStringSubmatch(string(manifest), -1)
+	got := make([]string, 0, len(matches))
+	for _, m := range matches {
+		got = append(got, m[1])
+	}
+	want := make([]string, 0, len(kubeflowTrainingOperatorCRDs))
+	for _, crd := range kubeflowTrainingOperatorCRDs {
+		want = append(want, strings.TrimSuffix(crd, "s.kubeflow.org"))
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("vendored manifest enables schemes %v, want one per vendored CRD %v", got, want)
+	}
+	if slices.Contains(got, "mpijob") {
+		t.Error("vendored manifest enables mpijob; Run:ai 3.0 runs MPI through MPI Operator v2")
 	}
 }

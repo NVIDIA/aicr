@@ -13,16 +13,17 @@
 # limitations under the License.
 
 # Kubeflow Training Operator v1 (the kubeflow.org/v1 PyTorchJob, TFJob,
-# XGBoostJob, PaddleJob, JAXJob and MPIJob v1 controller), as a vendored
-# manifest-only component: upstream ships v1 only as Kustomize, with no chart.
+# XGBoostJob, PaddleJob and JAXJob controller), as a vendored manifest-only
+# component: upstream ships v1 only as Kustomize, with no chart.
 # Rendered from github.com/kubeflow/training-operator tag v1.9.4 (commit
 # 4445c12aa62e4345b0c2c6ac9b215a70eca46ed7) with
 #
 #   kubectl kustomize manifests/overlays/standalone
 #
-# The six CRDs that render alongside are the kubeflow.org_*.yaml files in this
-# directory, with their description fields removed (see their headers for why).
-# Differences from the render in this file:
+# Five of the six CRDs that render alongside are the kubeflow.org_*.yaml files
+# in this directory, with their description fields removed (see their headers
+# for why). mpijobs.kubeflow.org is not vendored; see the --enable-scheme
+# bullet below. Differences from the render in this file:
 #
 #   - the Namespace object is dropped: every deployer creates the release
 #     namespace itself, and a second owner of the kubeflow namespace would
@@ -33,10 +34,18 @@
 #     TrainingOperatorDeploymentName in runai-cluster 3.0.20's go-operator
 #     consts), so neither the name nor the namespace may change.
 #   - the image carries its digest, and the pod takes the system node
-#     placement from values. Nothing else about the pod spec is changed; in
-#     particular no --enable-scheme argument is added, because the Run:ai
-#     operator reads that list to decide which frameworks are usable and an
-#     absent list means all of them.
+#     placement from values.
+#   - the container passes --enable-scheme for every scheme except mpijob,
+#     the way Run:ai 3.0's prerequisites page configures the operator: Run:ai
+#     runs MPI through MPI Operator v2 (kubeflow.org/v2beta1), whose CRD has
+#     the same name as v1's mpijobs.kubeflow.org, so the v1 scheme and its CRD
+#     are left out rather than shipped and later removed (a removed CRD
+#     deletes every object of its kind). paddlejob stays enabled so PaddleJob
+#     keeps working. The Run:ai operator reads these args (=-form, exact
+#     lowercase kinds) to decide which frameworks it reports usable.
+#   - the container requests CPU and memory, so the pod is not BestEffort:
+#     while it is down its failurePolicy Fail webhooks reject every
+#     kubeflow.org job create and spec update.
 #
 # This is the v1 API, not Kubeflow Trainer v2 (AICR's kubeflow-trainer):
 # Run:ai 3.0 submits distributed training as kubeflow.org/v1 jobs and does not
@@ -435,7 +444,13 @@ spec:
         {{- toYaml $vals.systemTolerations | nindent 8 }}
       {{- end }}
       containers:
-        - command:
+        - args:
+            - --enable-scheme=tfjob
+            - --enable-scheme=pytorchjob
+            - --enable-scheme=xgboostjob
+            - --enable-scheme=paddlejob
+            - --enable-scheme=jaxjob
+          command:
             - /manager
           env:
             - name: MY_POD_NAMESPACE
@@ -474,6 +489,10 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 15
             timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
           securityContext:
             allowPrivilegeEscalation: false
           volumeMounts:

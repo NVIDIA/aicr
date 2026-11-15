@@ -15,9 +15,10 @@
 # Kubeflow Training Operator v1 (kubeflow.org/v1) health check.
 #
 # Positive asserts throughout, so nothing passes on an empty cluster:
-# 1. The six kubeflow.org CRDs the vendored manifests install are
+# 1. The five kubeflow.org CRDs the vendored manifests install are
 #    Established. The Run:ai operator reports a framework usable only when
-#    its kind is served, so each is load-bearing, MPIJob v1 included.
+#    its kind is served, so each is load-bearing. MPIJob v1 is not installed:
+#    Run:ai 3.0 runs MPI through MPI Operator v2.
 # 2. The Deployment the Run:ai operator looks up by name,
 #    kubeflow/training-operator, has rolled out: an available replica, and
 #    no stale rollout (the slinky-drainer check's guards).
@@ -27,8 +28,8 @@
 #    failurePolicy Fail, an operator that never got this far rejects every
 #    kubeflow.org job, so a populated Secret is what proves the admission
 #    path works, and the configuration must still be there to be served:
-#    five webhooks (JAXJob, PaddleJob, PyTorchJob, TFJob, XGBoostJob; MPIJob
-#    v1 has none upstream), which TestKubeflowTrainingOperatorWebhookCount
+#    five webhooks, one per installed kind (JAXJob, PaddleJob, PyTorchJob,
+#    TFJob, XGBoostJob), which TestKubeflowTrainingOperatorWebhookCount
 #    keeps equal to the vendored manifest.
 #
 # Names verified against training-operator v1.9.4's standalone overlay;
@@ -81,14 +82,6 @@ spec:
               kind: CustomResourceDefinition
               metadata:
                 name: jaxjobs.kubeflow.org
-              status:
-                (conditions[?type == 'Established' && status == 'True'] | length(@) > `0`): true
-        - assert:
-            resource:
-              apiVersion: apiextensions.k8s.io/v1
-              kind: CustomResourceDefinition
-              metadata:
-                name: mpijobs.kubeflow.org
               status:
                 (conditions[?type == 'Established' && status == 'True'] | length(@) > `0`): true
     - name: validate-operator-rollout
