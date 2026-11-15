@@ -147,7 +147,7 @@ jobs:
     env:
       AWS_REGION: "us-east-1"
       JANITOR_CONFIG: "tests/uat/aws/cluster-config.yaml"
-      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.3@sha256:ff1a04bedf1aa4b30e316404a69a60068b269c6bba3a9d09231f68a69b7898b6"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.4@sha256:13aa5793aea0e74c73986d52e0c5bd7b46fbeb39d4a630f45eef95142ca64552"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -185,7 +185,7 @@ jobs:
     env:
       AWS_REGION: "us-east-1"
       JANITOR_CONFIG: "tests/uat/aws/cluster-config-gb200.yaml"
-      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.3@sha256:ff1a04bedf1aa4b30e316404a69a60068b269c6bba3a9d09231f68a69b7898b6"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.4@sha256:13aa5793aea0e74c73986d52e0c5bd7b46fbeb39d4a630f45eef95142ca64552"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
