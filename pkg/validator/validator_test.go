@@ -1597,3 +1597,60 @@ func TestPreflightServiceAccount(t *testing.T) {
 		})
 	}
 }
+
+// TestValidatePhases_RejectsUnusableServiceMetricsQueryURLBeforeClusterWork
+// pins that a query URL carrying credentials fails the run before the cluster
+// client is built, so no Job of any phase is applied, the earlier deployment
+// phase's included. A run that would not deploy ai-service-metrics, because it
+// is skipped or its phase is not requested, is not judged.
+func TestValidatePhases_RejectsUnusableServiceMetricsQueryURLBeforeClusterWork(t *testing.T) {
+	const envName = "AICR_SERVICE_METRICS_QUERY_URL"
+	checks := map[Phase][]string{
+		PhaseDeployment:  {"operator-health"},
+		PhaseConformance: {v1.AIServiceMetricsCheckName, "dra-support"},
+	}
+	errReachedCluster := stderrors.New("reached the cluster")
+
+	tests := []struct {
+		name       string
+		url        string
+		phases     []Phase
+		skip       []string
+		wantReject bool
+	}{
+		{name: "credentialed URL fails before the first phase", url: "https://user:secret@mimir.example.com",
+			phases: []Phase{PhaseDeployment, PhaseConformance}, wantReject: true},
+		{name: "usable URL passes", url: "https://mimir.example.com/prometheus",
+			phases: []Phase{PhaseDeployment, PhaseConformance}},
+		{name: "skipped check is not judged", url: "https://user:secret@mimir.example.com",
+			phases: []Phase{PhaseDeployment, PhaseConformance}, skip: []string{v1.AIServiceMetricsCheckName}},
+		{name: "phase not requested is not judged", url: "https://user:secret@mimir.example.com",
+			phases: []Phase{PhaseDeployment}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envName, tt.url)
+			v := New(WithVersion("1.0.0"), WithKubeconfig("/path/to/kubeconfig"), WithSkipChecks(tt.skip...))
+			reachedCluster := false
+			v.kubeClientFactory = func(string) (kubernetes.Interface, error) {
+				reachedCluster = true
+				return nil, errReachedCluster
+			}
+
+			_, err := v.ValidatePhases(t.Context(), tt.phases, validationWithChecks(checks), nil)
+			if !tt.wantReject {
+				if !stderrors.Is(err, errReachedCluster) {
+					t.Fatalf("ValidatePhases() error = %v, want the run to get as far as the cluster", err)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if !strings.Contains(err.Error(), envName) || strings.Contains(err.Error(), "secret") {
+				t.Errorf("error %q must name %s and not repeat the URL", err, envName)
+			}
+			if reachedCluster {
+				t.Error("ValidatePhases() built the cluster client before rejecting the URL")
+			}
+		})
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -207,6 +208,11 @@ spec:
       nodes: 4
       storageClass: gp3
       sharedStorageClass: efs-sc
+    runtimeMetrics:
+      series:
+        - queue_depth
+      namespaces:
+        - inference
     attestation:
       enabled: false
     registry:
@@ -285,8 +291,55 @@ func TestBundleCmd_ConfigFlag_PopulatesAllSections(t *testing.T) {
 	if opts.sharedStorageClass != "efs-sc" {
 		t.Errorf("sharedStorageClass = %q, want efs-sc", opts.sharedStorageClass)
 	}
+	if got := opts.runtimeMetrics; !slices.Equal(got.Series, []string{"queue_depth"}) ||
+		!slices.Equal(got.Namespaces, []string{"inference"}) {
+
+		t.Errorf("runtimeMetrics = %+v, want series [queue_depth] and namespaces [inference]", got)
+	}
 	if opts.attest {
 		t.Errorf("attest = true, want false")
+	}
+}
+
+// TestBundleCmd_RuntimeMetricsFlags pins that each flag replaces its own list
+// from the config file and leaves the other.
+func TestBundleCmd_RuntimeMetricsFlags(t *testing.T) {
+	recipePath := writeYAML(t, "recipe.yaml", "kind: Recipe\n")
+	cfgPath := writeYAML(t, "config.yaml",
+		strings.ReplaceAll(testBundleConfig, "%q", recipePath))
+
+	tests := []struct {
+		name           string
+		args           []string
+		wantSeries     []string
+		wantNamespaces []string
+	}{
+		{
+			name:           "flags alone, repeated",
+			args:           []string{"-r", recipePath, "--runtime-metrics-series", "a_total", "--runtime-metrics-series", "b_(sum|count)", "--runtime-metrics-namespace", "team-a"},
+			wantSeries:     []string{"a_total", "b_(sum|count)"},
+			wantNamespaces: []string{"team-a"},
+		},
+		{
+			name:           "series flag replaces the config list only",
+			args:           []string{"--config", cfgPath, "--runtime-metrics-series", "a_total"},
+			wantSeries:     []string{"a_total"},
+			wantNamespaces: []string{"inference"},
+		},
+		{
+			name:           "namespace flag replaces the config list only",
+			args:           []string{"--config", cfgPath, "--runtime-metrics-namespace", "team-a"},
+			wantSeries:     []string{"queue_depth"},
+			wantNamespaces: []string{"team-a"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := runBundleParse(t, append(tt.args, "-o", t.TempDir())).runtimeMetrics
+			if !slices.Equal(got.Series, tt.wantSeries) || !slices.Equal(got.Namespaces, tt.wantNamespaces) {
+				t.Errorf("runtimeMetrics = %+v, want series %v and namespaces %v", got, tt.wantSeries, tt.wantNamespaces)
+			}
+		})
 	}
 }
 

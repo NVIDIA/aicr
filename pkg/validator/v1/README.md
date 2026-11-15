@@ -335,7 +335,9 @@ Builds one `JobPlan` per `(phase, validator entry)` pair that matches
 
 Builds a plan from a single catalog entry. Returns
 `ErrCodeInvalidRequest` when a `required` `dependencyAffinity.componentRef`
-is not present in `componentRefs`.
+is not present in `componentRefs`, or when the entry is `ai-service-metrics`
+and `AICR_SERVICE_METRICS_QUERY_URL` is not a usable base URL (for example,
+it carries credentials).
 
 Parameter notes shared by both functions:
 
