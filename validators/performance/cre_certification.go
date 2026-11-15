@@ -96,10 +96,17 @@ func uniqueCREResourceName(prefix string) (string, error) {
 // per combination: training/nemotron5-56b requires 32 GPUs and fails on a SKU
 // where nemotron5-8b passes, and a node count proven on one accelerator says
 // nothing about another.
+//
+// Image, when set, is the digest-pinned workload image submitted as the
+// category's options.image. The catalog names its images by tag, and CRE
+// applies options.image after its platform overrides, so a pin must be the
+// image those overrides select on the combination, or the run changes what it
+// measures.
 type creCatalogEntry struct {
 	Domain   string
 	Variant  string
 	MaxNodes int
+	Image    string
 }
 
 // buildCRECertification renders the Certification for one catalog entry,
@@ -134,13 +141,15 @@ func buildCRECertification(
 				"variant":                entry.Variant,
 			})
 	}
+	category := map[string]any{
+		"domain":  entry.Domain,
+		"variant": entry.Variant,
+	}
+	if entry.Image != "" {
+		category["options"] = map[string]any{"image": entry.Image}
+	}
 	spec := map[string]any{
-		"categories": []any{
-			map[string]any{
-				"domain":  entry.Domain,
-				"variant": entry.Variant,
-			},
-		},
+		"categories":    []any{category},
 		"gpusPerNode":   int64(gpuConfig.GPUCountPerNode),
 		"nodesPerJob":   int64(len(nodes)),
 		"timeoutPerJob": defaults.CRECertificationTimeout.String(),

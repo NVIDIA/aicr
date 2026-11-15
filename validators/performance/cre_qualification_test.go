@@ -16,6 +16,8 @@ package main
 
 import (
 	stderrors "errors"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 )
 
 // creEKSH100 is the only combination qualified today; see creQualifiedEntries.
@@ -91,6 +94,67 @@ func TestCREQualifiedEntries(t *testing.T) {
 			// GPU pool, so a qualified entry without a cap is a leak.
 			if entry.MaxNodes < 2 {
 				t.Errorf("MaxNodes = %d, want at least the 2 nodes a multi-node run needs", entry.MaxNodes)
+			}
+		})
+	}
+}
+
+// nvcreWorkloadClosurePath is the committed NVCRE workload closure, derived for
+// platform aws and gpuArchitecture h100, the selectors eks x h100 resolves to.
+const nvcreWorkloadClosurePath = "../../recipes/components/nvcre/workload-images.yaml"
+
+// A qualified entry pins its workload image to the digest the closure records
+// for the pinned CRE version. A chart bump re-derives the closure, so a pin left
+// behind fails here instead of running bytes the closure no longer describes.
+func TestCREQualifiedImagesMatchWorkloadClosure(t *testing.T) {
+	data, err := os.ReadFile(nvcreWorkloadClosurePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", nvcreWorkloadClosurePath, err)
+	}
+	var closure struct {
+		Platform        string `json:"platform"`
+		GPUArchitecture string `json:"gpuArchitecture"`
+		Images          []struct {
+			Image  string `json:"image"`
+			Digest string `json:"digest"`
+		} `json:"images"`
+	}
+	if err := yaml.Unmarshal(data, &closure); err != nil {
+		t.Fatalf("parse %s: %v", nvcreWorkloadClosurePath, err)
+	}
+	if closure.Platform != "aws" || closure.GPUArchitecture != "h100" {
+		t.Fatalf("closure resolves platform %q, gpuArchitecture %q; the eks x h100 pins need aws, h100",
+			closure.Platform, closure.GPUArchitecture)
+	}
+	recorded := make(map[string]string, len(closure.Images))
+	for _, img := range closure.Images {
+		recorded[img.Image] = img.Digest
+	}
+
+	pinPattern := regexp.MustCompile(`^([^@\s]+:[^@\s]+)@(sha256:[0-9a-f]{64})$`)
+	for checkName, combinations := range creQualifiedEntries {
+		for combination := range combinations {
+			if combination != creEKSH100 {
+				t.Errorf("%s is qualified on %s x %s, which no committed closure covers; "+
+					"derive one for its platform and pin its image from it",
+					checkName, combination.Service, combination.Accelerator)
+			}
+		}
+		entry, ok := combinations[creEKSH100]
+		if !ok {
+			continue
+		}
+		t.Run(checkName, func(t *testing.T) {
+			match := pinPattern.FindStringSubmatch(entry.Image)
+			if match == nil {
+				t.Fatalf("Image = %q, want <repository>:<tag>@sha256:<64 hex>", entry.Image)
+			}
+			digest, found := recorded[match[1]]
+			if !found {
+				t.Fatalf("%s is not in %s; re-derive the pin from the closure", match[1], nvcreWorkloadClosurePath)
+			}
+			if digest != match[2] {
+				t.Errorf("%s pins %s, the closure records %s", match[1], match[2], digest)
 			}
 		})
 	}

@@ -596,6 +596,19 @@ two nodes, and for `cre-training-goodput` on `eks` x `h100`,
 `training/nemotron5-8b` on two nodes. A combination that no entry records as
 qualified skips with an unsupported-target reason.
 
+The record also pins each entry's workload image by digest, and the check
+submits it as the category's `options.image`, so the run pulls the bytes the
+closure records rather than whatever the catalog's tag points to. The pins
+are the images the catalog selects on `eks` x `h100`, at the digests
+`recipes/components/nvcre/workload-images.yaml` records for the CRE version
+the registry pins, and the checks submit them whatever CRE version the cluster
+runs: the EFA `nccl-tests` image for `nccl-cre-all-reduce-bw`, and
+`nvcr.io/nvidia/pytorch:25.08-py3` for `cre-training-goodput`. With the pin,
+the NCCL launcher's SSH-permissions init container also runs `nccl-tests`
+rather than `nvcr.io/nvidia/pytorch:26.01-py3`, so the NCCL check no longer
+pulls that image. A mirror for a disconnected cluster has to serve these two
+images at the recorded digests.
+
 #### Relation to the TrainJob check
 
 On `eks` x `h100`, `nccl-cre-all-reduce-bw`

@@ -121,8 +121,9 @@ type closure struct {
 }
 
 // closureImage pairs a catalog image tag with the digest it resolved to at
-// derivation time. Workloads pull by tag, so Digest names the bytes to mirror,
-// not what a pod runs after upstream repoints the tag.
+// derivation time. A Certification without options.image pulls by tag, so
+// Digest names the bytes to mirror, not what such a pod runs after upstream
+// repoints the tag; AICR's CRE checks pin these digests.
 type closureImage struct {
 	Image  string `yaml:"image"`
 	Digest string `yaml:"digest"`
@@ -530,10 +531,13 @@ const generatedHeader = `# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. 
 # manager image.
 #
 # Each digest is what its tag resolved to when this file was derived. The
-# workloads pull by tag, not by digest, so the digest tells a mirror which bytes
-# to copy but does not guarantee what runs. If upstream repoints a tag, pods
-# pull bytes this file does not describe. A mirror has to serve each tag, and
-# serving it at the recorded digest keeps the cluster on the derived bytes.
+# catalog names its workloads by tag, so a Certification that sets no
+# options.image pulls by tag, not by digest: the digest tells a mirror which
+# bytes to copy but does not guarantee what runs, and if upstream repoints a
+# tag, pods pull bytes this file does not describe. AICR's
+# nccl-cre-all-reduce-bw and cre-training-goodput checks pin their workload
+# image to the digest recorded here. A mirror has to serve each tag at the
+# recorded digest, which those two checks require.
 #
 # sourceCommit is the upstream commit sourceVersion pointed to at derivation.
 # Tags are mutable, so the commit is the input that reproduces this file.
