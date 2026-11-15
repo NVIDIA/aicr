@@ -59,15 +59,16 @@
 //
 // # Retry Contract
 //
-// SignStatementWith wraps the underlying sign.Bundle call with bounded
-// exponential-backoff retry to absorb transient Fulcio/Rekor failures
-// (e.g., Sigstore Rekor public-good infrastructure slowness — see #1249
-// for the failure pattern observed in #1244 and #1245). Each attempt is
-// bounded by defaults.SigstoreAttemptTimeout; the outer signing flow is
-// bounded by defaults.SigstoreSignTimeout (an upper-bound ceiling that
-// covers up to defaults.SigstoreRetryBudget attempts plus
+// SignStatementWith wraps each Sigstore request with bounded
+// exponential-backoff retry to absorb transient Fulcio/Rekor failures,
+// such as slow responses from the public-good Rekor. Keyless signing
+// retries the Fulcio certificate request and then the sign.Bundle call,
+// each as its own step. Each attempt is bounded by
+// defaults.SigstoreAttemptTimeout. The outer signing flow is bounded by
+// defaults.SigstoreSignTimeout, an upper-bound ceiling that covers both
+// steps, each with up to defaults.SigstoreRetryBudget attempts plus
 // SigstoreRetryInitialBackoff × SigstoreRetryBackoffFactor^(N-1)
-// backoffs between them). Retry semantics:
+// backoffs between them. Retry semantics:
 //
 //   - Outer ctx DeadlineExceeded   → ErrCodeTimeout, no further retries
 //     (the whole signing budget is gone).

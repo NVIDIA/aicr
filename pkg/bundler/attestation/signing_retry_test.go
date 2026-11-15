@@ -17,6 +17,7 @@ package attestation
 import (
 	"context"
 	stderrors "errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,6 +29,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
 )
 
+const testRetryStep = "test step"
+
 // TestSignWithRetry_SuccessOnFirstAttempt verifies the happy path:
 // attempt returns nil error → no retry, no backoff, immediate return.
 func TestSignWithRetry_SuccessOnFirstAttempt(t *testing.T) {
@@ -35,7 +38,7 @@ func TestSignWithRetry_SuccessOnFirstAttempt(t *testing.T) {
 
 	var calls atomic.Int32
 	want := &protobundle.Bundle{}
-	got, err := signWithRetry(context.Background(), func(_ context.Context) (*protobundle.Bundle, error) {
+	got, err := signWithRetry(context.Background(), testRetryStep, func(_ context.Context) (*protobundle.Bundle, error) {
 		calls.Add(1)
 		return want, nil
 	})
@@ -59,7 +62,7 @@ func TestSignWithRetry_SuccessAfterTransient(t *testing.T) {
 	var calls atomic.Int32
 	want := &protobundle.Bundle{}
 	start := time.Now()
-	got, err := signWithRetry(context.Background(), func(_ context.Context) (*protobundle.Bundle, error) {
+	got, err := signWithRetry(context.Background(), testRetryStep, func(_ context.Context) (*protobundle.Bundle, error) {
 		n := calls.Add(1)
 		if n == 1 {
 			return nil, stderrors.New("simulated Rekor 503")
@@ -95,7 +98,7 @@ func TestSignWithRetry_BudgetExhaustion(t *testing.T) {
 
 	var calls atomic.Int32
 	sentinel := stderrors.New("simulated Rekor 503")
-	_, err := signWithRetry(context.Background(), func(_ context.Context) (*protobundle.Bundle, error) {
+	_, err := signWithRetry(context.Background(), testRetryStep, func(_ context.Context) (*protobundle.Bundle, error) {
 		calls.Add(1)
 		return nil, sentinel
 	})
@@ -115,6 +118,9 @@ func TestSignWithRetry_BudgetExhaustion(t *testing.T) {
 	if !stderrors.Is(err, sentinel) {
 		t.Errorf("expected wrapped sentinel error in chain, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), testRetryStep) {
+		t.Errorf("error %q does not name the step %q", err, testRetryStep)
+	}
 }
 
 // TestSignWithRetry_OuterDeadlineExceeded verifies that the outer ctx
@@ -129,7 +135,7 @@ func TestSignWithRetry_OuterDeadlineExceeded(t *testing.T) {
 	defer cancel()
 
 	var calls atomic.Int32
-	_, err := signWithRetry(ctx, func(_ context.Context) (*protobundle.Bundle, error) {
+	_, err := signWithRetry(ctx, testRetryStep, func(_ context.Context) (*protobundle.Bundle, error) {
 		calls.Add(1)
 		return nil, stderrors.New("simulated Rekor 503")
 	})
@@ -166,7 +172,7 @@ func TestSignWithRetry_OuterCanceled(t *testing.T) {
 		cancel()
 	}()
 
-	_, err := signWithRetry(ctx, func(_ context.Context) (*protobundle.Bundle, error) {
+	_, err := signWithRetry(ctx, testRetryStep, func(_ context.Context) (*protobundle.Bundle, error) {
 		calls.Add(1)
 		return nil, stderrors.New("simulated Rekor 503")
 	})
