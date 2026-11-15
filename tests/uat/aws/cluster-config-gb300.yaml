@@ -42,7 +42,7 @@
 # to differ here, which the actuator could not express until
 # mchmarny/cluster#51 added deployment.stateLocation; deriving the backend
 # region from .deployment.location answered init with an S3 301 (#3162). Both
-# halves are now in place: EKS_IMAGE is pinned to v0.5.3, which carries that
+# halves are now in place: EKS_IMAGE is pinned to v0.5.4, which carries that
 # change, and stateLocation is set below.
 
 apiVersion: github.com/mchmarny/cluster/v1alpha1
