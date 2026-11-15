@@ -3996,7 +3996,7 @@ h100-eks-ubuntu-training-runai:
   002-kubeflow-training-operator/templates/kubeflow.org_pytorchjobs.yaml: c99537b88b4a82891624130a5c92026dd4706c92ed88325b16d657b25f21e07d
   002-kubeflow-training-operator/templates/kubeflow.org_tfjobs.yaml: dc642613ac1cf0bec25e141e0c01ede52cf4289073291200085fc79b5fe1a9cf
   002-kubeflow-training-operator/templates/kubeflow.org_xgboostjobs.yaml: d5ed0f4cbd8559e81ec373b577551388432c6080356eea0b332bd5ec4418e285
-  002-kubeflow-training-operator/templates/training-operator.yaml: 27ef996208e0610598304a30f394130ab9d1a964146d6beed9428384c886d015
+  002-kubeflow-training-operator/templates/training-operator.yaml: 735df6e21a14ba7df379a293f0a1a3bc6854a05f2c39df28c9a223eaf9e098a6
   002-kubeflow-training-operator/values.yaml: 0ae80f4f6bda5a3f8bd56daf4e3353b3c9d414723bb04fb2e7b7e10e59068574
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -4060,7 +4060,7 @@ h100-eks-ubuntu-training-runai:
   README.md: 76cbe3e460b36184c843a8f301f8150632fddc0412e9d64193b8f05d779eb820
   UPGRADING.md: 1c454b8fd7f9c45f515bee752f5bfe7306c10b8af1d27bbdeb314715e17da2c1
   bundle-info.yaml: cf5f997e3f8fc6e031d256071aa34b95979ed1c54187d26dd79593d83256ad71
-  checksums.txt: c3ef458b25f63fa5057b597cb19f59de3b57078a66c1e52b5a40c1a2022723b1
+  checksums.txt: 5d35281b981cfde137287adcdf22da5d05129d9cbf011f95866bf6f9a0141788
   deploy.sh: ee8e2226b690e9e737583bfd804212fca9681676e1da3a009cac26bbdee1a79e
   recipe.yaml: 0cf790cbed0c4196547f96460d7e1efa0ebe57283c712d65100cf52814f332df
 h100-eks-ubuntu-training-slurm:
@@ -4748,7 +4748,7 @@ h100-gke-cos-training-runai:
   002-kubeflow-training-operator/templates/kubeflow.org_pytorchjobs.yaml: c99537b88b4a82891624130a5c92026dd4706c92ed88325b16d657b25f21e07d
   002-kubeflow-training-operator/templates/kubeflow.org_tfjobs.yaml: dc642613ac1cf0bec25e141e0c01ede52cf4289073291200085fc79b5fe1a9cf
   002-kubeflow-training-operator/templates/kubeflow.org_xgboostjobs.yaml: d5ed0f4cbd8559e81ec373b577551388432c6080356eea0b332bd5ec4418e285
-  002-kubeflow-training-operator/templates/training-operator.yaml: 27ef996208e0610598304a30f394130ab9d1a964146d6beed9428384c886d015
+  002-kubeflow-training-operator/templates/training-operator.yaml: 735df6e21a14ba7df379a293f0a1a3bc6854a05f2c39df28c9a223eaf9e098a6
   002-kubeflow-training-operator/values.yaml: 0ae80f4f6bda5a3f8bd56daf4e3353b3c9d414723bb04fb2e7b7e10e59068574
   003-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   003-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -4819,7 +4819,7 @@ h100-gke-cos-training-runai:
   README.md: 8111968871b63040219afa443c1243121c689b8ae2bc7f53f30fefd90fdc7d57
   UPGRADING.md: 86642c8ead7cf5e5fbfc979c9ff7049b99d90deee92d60793de5b880a4f9dbdd
   bundle-info.yaml: 50506b5a59687716e7ff5f169224a13ec39c72818d1f4cc693d82b56d9da67b2
-  checksums.txt: 3e681a836d67242863048ad9f9ec4389a0974a860ed4e04d10f31bfe255cfa1c
+  checksums.txt: 1e713e8fa22596212e4e532954126508853a07603edb95f37895ba0ec0c008ab
   deploy.sh: 89825532b6955d852db8700172db2275185a5784208c4e5e86cc87a14d09a24d
   recipe.yaml: c3b5825a0100bd044ed6fbcb207ac34330da94a8562867791348f92e094ab544
 h100-gke-cos-training-slurm:

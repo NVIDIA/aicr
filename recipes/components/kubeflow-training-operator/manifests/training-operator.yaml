@@ -379,8 +379,9 @@ subjects:
     namespace: {{ .Release.Namespace }}
 ---
 # Shipped empty, as upstream's secretGenerator ships it; the operator fills it
-# at startup. Every deployer applies with a three-way merge, so the filled data
-# survives a re-apply of this empty spec.
+# at startup. Keep `data` empty: the filled keys survive a re-apply only
+# because this spec lists none. A key added here would be applied over the
+# operator's value.
 apiVersion: v1
 kind: Secret
 metadata:

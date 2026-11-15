@@ -2987,12 +2987,16 @@ injected into all five webhooks.
 **Uninstalling the Training Operator.** The five CRDs carry
 `helm.sh/resource-policy: keep` and
 `argocd.argoproj.io/sync-options: Delete=false,Prune=false`. Uninstalling the
-`kubeflow-training-operator` release, pruning its Argo CD Application, or
-re-bundling without the component therefore removes the operator and leaves
-the CRDs, and with them every `kubeflow.org/v1` job in the cluster. Nothing
-reconciles those jobs until an operator runs again; a reinstall takes the kept
-CRDs back into the release. To remove the API for good, delete the CRDs
-yourself after the uninstall, which deletes every job of those kinds:
+`kubeflow-training-operator` release or pruning its Argo CD Application
+therefore removes the operator and leaves the CRDs, and with them every
+`kubeflow.org/v1` job in the cluster. Nothing reconciles those jobs until an
+operator runs again; a reinstall takes the kept CRDs back into the release.
+Dropping the component from the recipe and redeploying removes nothing: AICR
+does not uninstall a component that leaves the bundle, so the operator and its
+five webhooks keep running until
+`helm uninstall kubeflow-training-operator -n kubeflow`. To remove the API for
+good, delete the CRDs yourself after the uninstall, which deletes every job of
+those kinds:
 `kubectl delete crd jaxjobs.kubeflow.org paddlejobs.kubeflow.org pytorchjobs.kubeflow.org tfjobs.kubeflow.org xgboostjobs.kubeflow.org`.
 
 **A cluster that already runs Training Operator v1.** An operator installed
