@@ -1254,9 +1254,11 @@ components:
       required: false
       description: >
         Repeatable namespace whose ServiceMonitors and PodMonitors the runtime
-        Prometheus server loads, in addition to the namespaces of the recipe's
-        components and the server's own. Rejected when the recipe enables no
-        runtime Prometheus server, or `bundlers` leaves it out.
+        Prometheus server loads, in addition to its own namespace and the
+        namespaces the recipe's own consumers read. A monitor in any other
+        namespace, another component's included, is not loaded unless that
+        namespace is listed. Rejected when the recipe enables no runtime
+        Prometheus server, or `bundlers` leaves it out.
       schema:
         type: array
         items:
