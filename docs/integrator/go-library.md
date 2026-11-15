@@ -1307,7 +1307,7 @@ derive step rather than the load step.
 | Method | Reads |
 |---|---|
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
-| `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
+| `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.runtimeMetrics` + `spec.bundle.attestation` |
 | `BundleInputOptions()` | `spec.bundle.input` + `.output` + `.registry` |
 | `ValidateSettings()` | `spec.validate.agent` + `.execution` |
 | `ValidateInputOptions()` | `spec.validate.input` + `.execution.failOnError` |
@@ -1347,9 +1347,9 @@ guarantee.
 
 ### What `BundleOptions()` does and does not carry
 
-`BundleOptions()` returns 19 bundler settings (those `spec.bundle.deployment`
-and `spec.bundle.scheduling` configure, plus the two attestation flags the
-bundler itself reads) as plain fields — not a built `Config` — so you read and
+`BundleOptions()` returns 20 bundler settings (those `spec.bundle.deployment`,
+`spec.bundle.scheduling` and `spec.bundle.runtimeMetrics` configure, plus the
+two attestation flags the bundler itself reads) as plain fields — not a built `Config` — so you read and
 override individual settings directly, the same as `ValidateSettings()`. It
 also returns `OIDCResolve` (the four signing settings that reach the attester
 rather than the bundler):
@@ -1365,7 +1365,7 @@ opts.Nodes = 32 // caller wins, visibly
 `Config` is still on the struct, as an escape hatch: when you already have a
 fully built `*BundleConfig` from something the flat fields cannot express (a
 CLI-flag-only setting such as `Version` or `Serial`, or a config object you
-mutate in place), set it and it wins outright over the 19 bundler-config flat
+mutate in place), set it and it wins outright over the 20 bundler-config flat
 fields (`Deployer` through `ArgoCD`) and over `Split`, which follows them
 and is caller-set only: no config file setting derives it. `BundleOptions()`
 leaves `Config` and `Split` unset. `Config` does NOT override `Attester`, `OIDCResolve`,

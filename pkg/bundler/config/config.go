@@ -402,6 +402,10 @@ type Config struct {
 	// shared filesystem PVCs at bundle time.
 	sharedStorageClass string
 
+	// runtimeMetrics adds series and monitor namespaces to the runtime
+	// Prometheus server's scrape scope.
+	runtimeMetrics RuntimeMetrics
+
 	// draEvictionNodeLabel is the shared label used to place the DRA kubelet
 	// plugin and tell GPU Operator's Driver Manager which pods to evict during
 	// driver upgrades. It is injected only when both components are enabled.
@@ -644,6 +648,12 @@ func (c *Config) WorkloadSelector() map[string]string {
 	result := make(map[string]string, len(c.workloadSelector))
 	maps.Copy(result, c.workloadSelector)
 	return result
+}
+
+// RuntimeMetrics returns a copy of the bundle's additions to the runtime
+// Prometheus server's scrape scope.
+func (c *Config) RuntimeMetrics() RuntimeMetrics {
+	return c.runtimeMetrics.Clone()
 }
 
 // Attest returns whether bundle attestation is enabled.
@@ -993,6 +1003,15 @@ func WithWorkloadSelector(selector map[string]string) Option {
 		}
 		c.workloadSelector = make(map[string]string, len(selector))
 		maps.Copy(c.workloadSelector, selector)
+	}
+}
+
+// WithRuntimeMetrics adds series and monitor namespaces to the runtime
+// Prometheus server's scrape scope. The bundler validates them, and rejects
+// them on a recipe that enables no such server.
+func WithRuntimeMetrics(metrics RuntimeMetrics) Option {
+	return func(c *Config) {
+		c.runtimeMetrics = metrics.Clone()
 	}
 }
 

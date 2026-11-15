@@ -68,6 +68,8 @@ flag    aicr bundle  --readiness-hooks  type=bool default=false required=false h
 flag    aicr bundle  --recipe,-r  type=string default= required=false hidden=false env=
 flag    aicr bundle  --rekor-url  type=string default= required=false hidden=false env=AICR_REKOR_URL
 flag    aicr bundle  --repo  type=string default= required=false hidden=false env=
+flag    aicr bundle  --runtime-metrics-namespace  type=string default= required=false hidden=false env=
+flag    aicr bundle  --runtime-metrics-series  type=string default= required=false hidden=false env=
 flag    aicr bundle  --serial  type=bool default=false required=false hidden=false env=
 flag    aicr bundle  --set  type=string default= required=false hidden=false env=
 flag    aicr bundle  --set-file  type=string default= required=false hidden=false env=
