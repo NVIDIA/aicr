@@ -190,8 +190,10 @@ jobs:
       # (mchmarny/cluster#63), so a transient InsufficientInstanceCapacity no
       # longer ends the capacity wait: Terraform waits up to the capacity
       # timeout and returns once healthy capacity reaches the target (#3832).
-      # The rest of the v0.5.3..v0.5.4 delta reaching EKS is an awscli bump
-      # (upstream #64); the shared-code changes add the OKE provider only.
+      # The rest of the v0.5.3..v0.5.4 delta reaching EKS: awscli 2.34.63 ->
+      # 2.40.3 (upstream #64), and newer bundled Terraform providers under
+      # unchanged constraints (aws 6.68.0 -> 6.73.0, http 3.6.2 -> 3.6.3, tls
+      # 4.4.1 -> 4.4.2). The shared-code changes add the OKE provider only.
       #
       # Carried forward from v0.5.2/v0.5.3: deployment.stateLocation
       # (mchmarny/cluster#51), which decouples the S3 backend region from the
