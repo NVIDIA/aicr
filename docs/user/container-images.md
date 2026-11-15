@@ -62,7 +62,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.4 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.4 | 1 |
 | kai-scheduler | helm | kai-scheduler | v0.18.8 | 12 |
-| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.5.0 | 2 |
+| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 88.6.5 | 2 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.1 | 4 |
 | kueue | helm | kueue | 0.19.13 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.2 | 1 |
@@ -84,7 +84,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nvsentinel-mongodb | helm | psmdb-db | 1.23.3 | 5 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
-| prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
+| prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 31.0.1 | 0 |
 | psmdb-operator | helm | psmdb-operator | 1.23.2 | 1 |
 | rdma-modules | manifest | — | — | 1 |
 | runai-cluster | helm | runai-cluster | 3.0.24 | 10 |
@@ -245,8 +245,8 @@ _No images extracted._
 
 ### kube-prometheus-stack
 
-- `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
-- `quay.io/prometheus/prometheus:v3.11.3`
+- `quay.io/prometheus-operator/prometheus-operator:v0.93.1`
+- `quay.io/prometheus/prometheus:v3.14.0-distroless`
 
 ### kubeflow-trainer
 

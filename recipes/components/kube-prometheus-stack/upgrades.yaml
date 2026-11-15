@@ -102,3 +102,45 @@ transitions:
     references:
       - https://github.com/NVIDIA/aicr/blob/main/docs/design/026-nktp-telemetry-collection.md
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#kube-prometheus-stack-8450-keeps-only-the-runtime-prometheus
+  # The stack half of the prometheus-operator v0.93.1 upgrade. The CRDs the
+  # operator needs ship in the sibling prometheus-operator-crds release, so
+  # upstream's "apply the new CRDs before upgrading" step is that release's
+  # upgrade, which every bundle orders first through dependencyRefs.
+  - from: ">=84.5.0 <88.6.5"
+    to: "=88.6.5"
+    verdict: safe
+    verifiedBy: >-
+      Upstream UPGRADE.md for 84.x through 88.x: 85.x switches the prometheus
+      image to its distroless variant by default, and 86.x, 87.x and 88.x each
+      upgrade prometheus-operator (v0.91.0, v0.92.0, v0.93.0) and ask only for
+      the matching CRDs to be applied first, which prometheus-operator-crds
+      31.0.1 does. prometheus-operator v0.91.0 to v0.93.1 release notes: CRD
+      changes are added optional fields plus tighter validation on
+      ScrapeConfig and AlertmanagerConfig receivers, neither of which AICR
+      ships; the v0.93.0 default of one shard matches a stack with shards
+      unset. Rendering 84.5.0 and 88.6.5 with the values of the Kind, EKS,
+      GKE, AKS and Run:ai bundles gives the same eleven objects, differing
+      only in the operator, config-reloader and Prometheus images, and no
+      value path AICR sets is renamed or removed. In-place Helm upgrade on a
+      single-node Kind v1.37.0 cluster, 2026-11-15, with the Kind bundle's
+      values: prometheus-operator-crds 28.0.1 to 31.0.1, then
+      kube-prometheus-stack 84.5.0 to 88.6.5. The operator rolled to v0.93.1
+      and Prometheus to v3.14.0-distroless, ready 51 seconds after the
+      upgrade began; the Prometheus CR reported Available; a ServiceMonitor
+      target exposing a series on AICR's keep-list was scraped before the
+      upgrade, on the new CRDs under the old operator, and after it; the
+      shipped health check passed at each point; and the operator logged no
+      warning or error.
+    summary: >-
+      Prometheus moves to v3.14.0 on a distroless image and the operator to
+      v0.93.1. The Prometheus StatefulSet rolls once, so its emptyDir history
+      restarts. Upgrade the prometheus-operator-crds release first, as the
+      bundle's dependency order already does. A private registry that mirrors
+      the stack's images needs the -distroless Prometheus tag, and that image
+      has no shell for kubectl exec.
+    references:
+      - https://github.com/prometheus-community/helm-charts/blob/main/charts/kube-prometheus-stack/UPGRADE.md
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.91.0
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.92.0
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.93.0
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.93.1
