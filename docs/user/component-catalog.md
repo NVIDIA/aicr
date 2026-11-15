@@ -2981,7 +2981,48 @@ is not installed, because Run:ai runs MPI through MPI Operator v2
 (`kubeflow.org/v2beta1`), whose CRD has the same name. AICR does not install
 MPI Operator v2; follow that page to add it. The component's health check
 asserts the five `kubeflow.org` CRDs are Established, the Deployment has
-rolled out, and the webhook serving certificate was written.
+rolled out, the webhook serving certificate was written, and the CA is
+injected into all five webhooks.
+
+**Uninstalling the Training Operator.** The five CRDs carry
+`helm.sh/resource-policy: keep` and
+`argocd.argoproj.io/sync-options: Delete=false,Prune=false`. Uninstalling the
+`kubeflow-training-operator` release, pruning its Argo CD Application, or
+re-bundling without the component therefore removes the operator and leaves
+the CRDs, and with them every `kubeflow.org/v1` job in the cluster. Nothing
+reconciles those jobs until an operator runs again; a reinstall takes the kept
+CRDs back into the release. To remove the API for good, delete the CRDs
+yourself after the uninstall, which deletes every job of those kinds:
+`kubectl delete crd jaxjobs.kubeflow.org paddlejobs.kubeflow.org pytorchjobs.kubeflow.org tfjobs.kubeflow.org xgboostjobs.kubeflow.org`.
+
+**A cluster that already runs Training Operator v1.** An operator installed
+the way Run:ai's prerequisites page describes, from the upstream manifests with
+`kubectl`, uses the same namespace and the same object names. Helm refuses to
+install over objects it does not own, so a Helm-based deployer stops with
+`invalid ownership metadata`. Do not clear the way by deleting the upstream
+manifests (`kubectl delete -k`): that deletes the CRDs and every training job
+with them. Hand the existing objects to the release instead, then deploy the
+bundle. Existing jobs are kept, and the operator restarts once with AICR's
+settings:
+
+```bash
+adopt() {
+  kubectl label --overwrite "$@" app.kubernetes.io/managed-by=Helm
+  kubectl annotate --overwrite "$@" \
+    meta.helm.sh/release-name=kubeflow-training-operator \
+    meta.helm.sh/release-namespace=kubeflow
+}
+adopt crd jaxjobs.kubeflow.org paddlejobs.kubeflow.org pytorchjobs.kubeflow.org \
+  tfjobs.kubeflow.org xgboostjobs.kubeflow.org
+adopt clusterrole,clusterrolebinding training-operator
+adopt validatingwebhookconfiguration validator.training-operator.kubeflow.org
+adopt -n kubeflow serviceaccount,service,deployment training-operator
+adopt -n kubeflow secret training-operator-webhook-cert
+```
+
+The existing `mpijobs.kubeflow.org` CRD is not part of the release and stays
+as it is. With the v1 MPI scheme off nothing reconciles it, and Run:ai's page
+has you delete it before installing MPI Operator v2.
 
 **Prerequisites the health check expects.** The check asserts the
 `RunaiConfig` the install creates from the control plane's configuration

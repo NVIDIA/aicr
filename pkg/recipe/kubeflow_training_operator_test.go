@@ -252,14 +252,23 @@ func TestKubeflowTrainingOperatorVendoredCRDs(t *testing.T) {
 			var doc struct {
 				Kind     string `yaml:"kind"`
 				Metadata struct {
-					Name string `yaml:"name"`
+					Name        string            `yaml:"name"`
+					Annotations map[string]string `yaml:"annotations"`
 				} `yaml:"metadata"`
 			}
 			if err := dec.Decode(&doc); err != nil {
 				break
 			}
-			if doc.Kind == "CustomResourceDefinition" {
-				names = append(names, doc.Metadata.Name)
+			if doc.Kind != "CustomResourceDefinition" {
+				continue
+			}
+			names = append(names, doc.Metadata.Name)
+			// Upstream ships neither guard, so a re-vendor drops them, and
+			// uninstalling the release would then delete every job of the kind.
+			for key, want := range crdRetentionGuards {
+				if got := doc.Metadata.Annotations[key]; got != want {
+					t.Errorf("%s: CRD %s has %s=%q, want %q", file, doc.Metadata.Name, key, got, want)
+				}
 			}
 		}
 		if !slices.Equal(names, []string{crd}) {
@@ -299,12 +308,16 @@ func TestKubeflowTrainingOperatorWebhookCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading health check: %v", err)
 	}
-	m := regexp.MustCompile("webhooks\\[\\?[^\\]]*\\] \\| length\\(@\\) == `([0-9]+)`").FindStringSubmatch(string(check))
-	if m == nil {
-		t.Fatal("health check has no webhook count assertion")
+	// Two assertions count webhooks: the ones pointing at the Service, and the
+	// ones carrying an injected CA.
+	counts := regexp.MustCompile("webhooks\\[\\?[^\\]]*\\] \\| length\\(@\\) == `([0-9]+)`").FindAllStringSubmatch(string(check), -1)
+	if len(counts) != 2 {
+		t.Fatalf("health check has %d webhook count assertions, want 2 (service reference and caBundle)", len(counts))
 	}
-	if m[1] != fmt.Sprint(len(webhooks)) {
-		t.Errorf("health check asserts %s webhooks, but the vendored manifest declares %d", m[1], len(webhooks))
+	for _, m := range counts {
+		if m[1] != fmt.Sprint(len(webhooks)) {
+			t.Errorf("health check asserts %s webhooks in %q, but the vendored manifest declares %d", m[1], m[0], len(webhooks))
+		}
 	}
 }
 

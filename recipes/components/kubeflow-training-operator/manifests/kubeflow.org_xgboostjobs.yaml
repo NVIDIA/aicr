@@ -18,6 +18,15 @@
 #
 #   yq 'del(.. | select(has("description")).description)' kubeflow.org_xgboostjobs.yaml
 #
+# and with two annotations added that upstream does not ship,
+# helm.sh/resource-policy: keep and
+# argocd.argoproj.io/sync-options: Delete=false,Prune=false. Without them,
+# uninstalling or pruning the release or Application that owns the CRD deletes
+# it, and with it every job of its kind in the cluster. Helm reads keep from
+# the release's stored manifest, so it has to ship in the bundle. Neither
+# stops an explicit kubectl delete. Keep both when re-vendoring
+# (TestKubeflowTrainingOperatorVendoredCRDs checks them).
+#
 # Nothing else is changed. The descriptions are 60% of these CRDs: with them,
 # the Helm release record (chart templates and rendered manifest, gzipped and
 # base64-encoded in one Secret) is 1.4 MB and the apiserver rejects it at
@@ -34,6 +43,8 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+    helm.sh/resource-policy: "keep"
+    argocd.argoproj.io/sync-options: "Delete=false,Prune=false"
     controller-gen.kubebuilder.io/version: v0.16.5
   name: xgboostjobs.kubeflow.org
 spec:

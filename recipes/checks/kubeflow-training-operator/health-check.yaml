@@ -30,7 +30,9 @@
 #    path works, and the configuration must still be there to be served:
 #    five webhooks, one per installed kind (JAXJob, PaddleJob, PyTorchJob,
 #    TFJob, XGBoostJob), which TestKubeflowTrainingOperatorWebhookCount
-#    keeps equal to the vendored manifest.
+#    keeps equal to the vendored manifest. Each must also carry the injected
+#    CA: until it does, the apiserver cannot verify the operator's serving
+#    certificate and rejects the jobs that webhook covers.
 #
 # Names verified against training-operator v1.9.4's standalone overlay;
 # re-verify on every re-vendor.
@@ -147,3 +149,4 @@ spec:
               metadata:
                 name: validator.training-operator.kubeflow.org
               (webhooks[?clientConfig.service.name == 'training-operator' && clientConfig.service.namespace == 'kubeflow'] | length(@) == `5`): true
+              (webhooks[?length(clientConfig.caBundle || '') > `0`] | length(@) == `5`): true
