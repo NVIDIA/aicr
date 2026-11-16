@@ -29,6 +29,7 @@ import (
 	"aicr.run/pkg/component"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/sizing"
 )
 
 // sizedField is one memory request or limit that sizing lowered.
@@ -52,10 +53,10 @@ func sizingFileFor(provider recipe.DataProvider, componentName string) (string, 
 	return comp.Sizing.File, nil
 }
 
-// sizingPlan is how one component is sized in this bundle. A nil sz means
+// sizingPlan is how one component is sized in this bundle. A nil file means
 // it is not sized.
 type sizingPlan struct {
-	sz         *recipe.ComponentSizing
+	file       *sizing.File
 	atInstall  bool
 	recipeSets func(string) bool
 }
@@ -71,15 +72,15 @@ func (b *DefaultBundler) planSizing(ctx context.Context, rr *recipe.RecipeResult
 	if n <= 0 && !atInstall {
 		return sizingPlan{}, nil
 	}
-	file, err := sizingFileFor(rr.DataProvider(), ref.Name)
-	if err != nil || file == "" {
+	path, err := sizingFileFor(rr.DataProvider(), ref.Name)
+	if err != nil || path == "" {
 		return sizingPlan{}, err
 	}
-	sz, err := recipe.LoadComponentSizing(ctx, rr.DataProvider(), ref.Name, file)
+	sz, err := sizing.Load(ctx, rr.DataProvider(), ref.Name, path)
 	if err != nil {
 		return sizingPlan{}, err
 	}
-	p := sizingPlan{sz: sz, atInstall: atInstall, recipeSets: recipeSetsPath(rr, ref)}
+	p := sizingPlan{file: sz, atInstall: atInstall, recipeSets: recipeSetsPath(rr, ref)}
 	if !atInstall {
 		if err := sizeComponent(ref, values, p.recipeSets, sz, n); err != nil {
 			return sizingPlan{}, err
@@ -90,15 +91,15 @@ func (b *DefaultBundler) planSizing(ctx context.Context, rr *recipe.RecipeResult
 
 // finishSizing runs once every override is applied and fails when a sized
 // request ends above its limit at the bundle's node count. Rows of a
-// component sized at install follow installSizingRows.
+// component sized at install follow buildRows.
 func (b *DefaultBundler) finishSizing(p sizingPlan, ref *recipe.ComponentRef, values map[string]any,
 	provider recipe.DataProvider) error {
 
-	if p.sz == nil {
+	if p.file == nil {
 		return nil
 	}
 	if !p.atInstall {
-		if err := checkSizedRequestsWithinLimits(values, p.sz, b.Config.EstimatedNodeCount()); err != nil {
+		if err := checkRequestsWithinLimits(values, p.file, b.Config.EstimatedNodeCount()); err != nil {
 			return errors.WrapWithContext(errors.ErrCodeInvalidRequest, "sized memory request exceeds its limit", err,
 				map[string]any{errCtxKeyComponent: ref.Name})
 		}
@@ -121,7 +122,7 @@ func (b *DefaultBundler) installRows(p sizingPlan, ref *recipe.ComponentRef, val
 		return p.recipeSets(path) || overrideReaches(sets, path) || overrideReaches(typed, path) ||
 			overrideReaches(dynamic, path)
 	}
-	return installSizingRows(ref, values, skip, p.sz, b.Config.EstimatedNodeCount())
+	return buildRows(ref, values, skip, p.file, b.Config.EstimatedNodeCount())
 }
 
 // installSizing returns the rows of every component in componentValues that
@@ -140,7 +141,7 @@ func (b *DefaultBundler) installSizing(ctx context.Context, rr *recipe.RecipeRes
 		if err != nil {
 			return nil, err
 		}
-		if p.sz == nil {
+		if p.file == nil {
 			continue
 		}
 		rows, err := b.installRows(p, ref, values, rr.DataProvider())
@@ -164,7 +165,7 @@ func (b *DefaultBundler) sizedAtInstall(ref *recipe.ComponentRef) bool {
 
 // sizeComponent sizes ref's resolved values at the bundle's node count.
 func sizeComponent(ref *recipe.ComponentRef, values map[string]any, skip func(string) bool,
-	sz *recipe.ComponentSizing, n int) error {
+	sz *sizing.File, n int) error {
 
 	applied, err := applySizing(values, skip, sz, n)
 	if err != nil {
@@ -187,15 +188,15 @@ func recipeSetsPath(rr *recipe.RecipeResult, ref *recipe.ComponentRef) func(stri
 	}
 }
 
-// installSizingRows builds one row per tier bound for an argocd-helm
+// buildRows builds one row per tier bound for an argocd-helm
 // component sized at install: each row holds the fields that tier lowers
 // from the final values, skipping every path skip reaches. The row that
 // count n selects must keep each request within its limit; any other row
 // leaves out a limit that would undercut a request, so a bundle with no
 // count builds whatever its overrides. Rows above the highest one that
 // lowers something are dropped.
-func installSizingRows(ref *recipe.ComponentRef, values map[string]any, skip func(string) bool,
-	sz *recipe.ComponentSizing, n int) ([]argocdhelm.SizingRow, error) {
+func buildRows(ref *recipe.ComponentRef, values map[string]any, skip func(string) bool,
+	sz *sizing.File, n int) ([]argocdhelm.SizingRow, error) {
 
 	var bounds []int
 	for i := range sz.Resources {
@@ -221,7 +222,7 @@ func installSizingRows(ref *recipe.ComponentRef, values map[string]any, skip fun
 				map[string]any{errCtxKeyComponent: ref.Name})
 		}
 		if bound == selected {
-			if err := checkSizedRequestsWithinLimits(merged, sz, bound); err != nil {
+			if err := checkRequestsWithinLimits(merged, sz, bound); err != nil {
 				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("sized memory request exceeds its limit at sizing.nodeCount %d", bound), err,
 					map[string]any{errCtxKeyComponent: ref.Name})
@@ -244,13 +245,13 @@ func installSizingRows(ref *recipe.ComponentRef, values map[string]any, skip fun
 // dropUndercutLimits removes from applied each lowered limit that is below
 // the memory request beside it in merged.
 func dropUndercutLimits(applied []sizedField, merged map[string]any) []sizedField {
-	const limitSuffix = "." + recipe.SizingFieldLimits + ".memory"
+	const limitSuffix = "." + sizing.Limits + ".memory"
 	return slices.DeleteFunc(applied, func(a sizedField) bool {
 		base, isLimit := strings.CutSuffix(a.Path, limitSuffix)
 		if !isLimit {
 			return false
 		}
-		reqV, ok := component.GetValueByPath(merged, base+"."+recipe.SizingFieldRequests+".memory")
+		reqV, ok := component.GetValueByPath(merged, base+"."+sizing.Requests+".memory")
 		if !ok {
 			return false
 		}
@@ -263,7 +264,7 @@ func dropUndercutLimits(applied []sizedField, merged map[string]any) []sizedFiel
 // applySizing lowers each memory request and limit the sizing document names
 // to the tier covering n, writing min(resolved, tier). A field the values do
 // not set is skipped, as is one skip reports.
-func applySizing(values map[string]any, skip func(string) bool, sz *recipe.ComponentSizing, n int) ([]sizedField, error) {
+func applySizing(values map[string]any, skip func(string) bool, sz *sizing.File, n int) ([]sizedField, error) {
 	if sz == nil {
 		return nil, nil
 	}
@@ -276,8 +277,8 @@ func applySizing(values map[string]any, skip func(string) bool, sz *recipe.Compo
 		}
 		for _, f := range []struct {
 			name string
-			q    *recipe.SizingQuantities
-		}{{recipe.SizingFieldRequests, tier.Requests}, {recipe.SizingFieldLimits, tier.Limits}} {
+			q    *sizing.Memory
+		}{{sizing.Requests, tier.Requests}, {sizing.Limits, tier.Limits}} {
 			if f.q == nil {
 				continue
 			}
@@ -309,9 +310,9 @@ func applySizing(values map[string]any, skip func(string) bool, sz *recipe.Compo
 	return applied, nil
 }
 
-// checkSizedRequestsWithinLimits fails when a resource with a tier at n ends
+// checkRequestsWithinLimits fails when a resource with a tier at n ends
 // with its memory request above its limit after every override.
-func checkSizedRequestsWithinLimits(values map[string]any, sz *recipe.ComponentSizing, n int) error {
+func checkRequestsWithinLimits(values map[string]any, sz *sizing.File, n int) error {
 	if sz == nil {
 		return nil
 	}
@@ -320,8 +321,8 @@ func checkSizedRequestsWithinLimits(values map[string]any, sz *recipe.ComponentS
 		if _, ok := r.TierFor(n); !ok {
 			continue
 		}
-		reqV, hasReq := component.GetValueByPath(values, r.Path+"."+recipe.SizingFieldRequests+".memory")
-		limV, hasLim := component.GetValueByPath(values, r.Path+"."+recipe.SizingFieldLimits+".memory")
+		reqV, hasReq := component.GetValueByPath(values, r.Path+"."+sizing.Requests+".memory")
+		limV, hasLim := component.GetValueByPath(values, r.Path+"."+sizing.Limits+".memory")
 		if !hasReq || !hasLim {
 			continue
 		}

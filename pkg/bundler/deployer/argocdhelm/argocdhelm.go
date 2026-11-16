@@ -206,10 +206,10 @@ const rootValuesDeployerKey = "deployer"
 const rootValuesSizingKey = "sizing"
 
 const (
-	sizingFileSuffix             = "-sizing"
-	annotationSizingNodeCount    = header.Domain + "/sizing-node-count"
-	annotationSizingTier         = header.Domain + "/sizing-tier"
-	sizingTierAnnotationSentinel = "__aicr_sizing_tier__"
+	sizingFileSuffix          = "-sizing"
+	annotationSizingNodeCount = header.Domain + "/sizing-node-count"
+	annotationSizingTier      = header.Domain + "/sizing-tier"
+	tierSentinel              = "__aicr_sizing_tier__"
 )
 
 // SizingRow is one tier of a component's install-time sizing: the values

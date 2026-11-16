@@ -26,6 +26,7 @@ import (
 	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/recipe"
 	"aicr.run/pkg/recipe/providertest"
+	"aicr.run/pkg/recipe/sizing"
 )
 
 // Fixture tiers only; real tiers are validated empirically, not in unit tests.
@@ -84,10 +85,10 @@ components:
 	return layered
 }
 
-func sizingFixtureDocument(t *testing.T) *recipe.ComponentSizing {
+func sizingFixtureDocument(t *testing.T) *sizing.File {
 	t.Helper()
 	dp := providertest.NewMap(map[string][]byte{sizingFixtureFile: []byte(sizingFixtureDoc)})
-	sz, err := recipe.LoadComponentSizing(context.Background(), dp, sizingFixtureComponent, sizingFixtureFile)
+	sz, err := sizing.Load(context.Background(), dp, sizingFixtureComponent, sizingFixtureFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +165,7 @@ func TestApplySizing(t *testing.T) {
 	}
 }
 
-func TestCheckSizedRequestsWithinLimits(t *testing.T) {
+func TestCheckRequestsWithinLimits(t *testing.T) {
 	sz := sizingFixtureDocument(t)
 	tests := []struct {
 		name    string
@@ -180,7 +181,7 @@ func TestCheckSizedRequestsWithinLimits(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := checkSizedRequestsWithinLimits(tt.values, sz, tt.n)
+			err := checkRequestsWithinLimits(tt.values, sz, tt.n)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
