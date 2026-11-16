@@ -39,10 +39,10 @@ aicr bundle --recipe recipe.yaml --deployer argocd \
 `--output` defaults to the current directory. The bundle renders in a private
 `.aicr-stage-*` directory, inside the output directory when it exists and
 beside it when it does not, and reaches the output directory only once it is
-complete. A run that fails while rendering, or is interrupted with Ctrl-C or
-`SIGTERM` before the bundle starts moving into place, leaves the output
-directory as it found it. An interrupt that arrives after that does not stop
-the move.
+complete. A run that fails while rendering, or that a first Ctrl-C or
+`SIGTERM` interrupts before the bundle starts moving into place, leaves the
+output directory as it found it. A first interrupt that arrives after that
+does not stop the move.
 
 Bundling into a directory that holds an earlier bundle replaces it. Every
 top-level folder named like a component folder, three digits and a hyphen such
@@ -67,14 +67,15 @@ omits the GPU Operator or the NVIDIA DRA driver also fails, before anything is
 written, when the directory holds that component's output from an earlier
 bundle. Bundle it into a new directory.
 
-A run that is killed outright, for example by `SIGKILL` or the out-of-memory
-killer, cannot clean up after itself. A run that fails while moving the
-finished bundle into an existing output directory keeps what it has not moved
-yet, and its error names the directory holding it. Either can leave
-a `.aicr-stage-*` directory behind, and the output directory partly replaced.
-Delete the `.aicr-stage-*` directory and bundle again. If that run reports an
-unexpected file, the partial replacement removed the `checksums.txt` that
-listed it, so bundle into a new directory instead.
+A run that is killed outright, for example by `SIGKILL`, the out-of-memory
+killer, or a second Ctrl-C or `SIGTERM`, cannot clean up after itself. A run
+that fails while moving the finished bundle into an existing output directory
+keeps what it has not moved yet, and its error names the directory holding
+it. Either can leave a `.aicr-stage-*` directory behind, and the output
+directory partly replaced. Delete the `.aicr-stage-*` directory and bundle
+again. If that run reports an unexpected file, the partial replacement
+removed the `checksums.txt` that listed it, so bundle into a new directory
+instead.
 
 A `--split` set needs a path that does not exist yet. See
 [Split a bundle by class](#split-a-bundle-by-class).
