@@ -27,11 +27,11 @@ import (
 
 	"k8s.io/apimachinery/pkg/labels"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
-	"github.com/NVIDIA/aicr/pkg/component"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/drainscope"
+	"aicr.run/pkg/component"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 const faultQuarantinePartialDrainPath = "fault-quarantine.validation.partialDrainEnabled"

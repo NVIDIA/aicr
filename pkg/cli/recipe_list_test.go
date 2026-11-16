@@ -24,7 +24,7 @@ import (
 	"github.com/urfave/cli/v3"
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/health"
+	"aicr.run/pkg/health"
 )
 
 // runRecipeList drives `recipe list` end-to-end through urfave/cli with a

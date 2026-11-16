@@ -19,8 +19,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/measurement"
 )
 
 // LabelReading is one aggregated label reading.

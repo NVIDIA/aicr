@@ -23,7 +23,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 // withPatch returns testdata/profile-patch/<fixture> with the YAML merge patch

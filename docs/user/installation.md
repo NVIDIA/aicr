@@ -75,7 +75,7 @@ sudo chmod +x /usr/local/bin/aicr
   [`.go-version`](https://github.com/NVIDIA/aicr/blob/main/.go-version))
 
 ```shell
-go install github.com/NVIDIA/aicr/cmd/aicr@latest
+go install aicr.run/cmd/aicr@latest
 ```
 
 ## Verify Installation

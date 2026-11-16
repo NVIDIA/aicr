@@ -17,7 +17,7 @@ package result
 import (
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/types"
+	"aicr.run/pkg/bundler/types"
 )
 
 // Result contains the result of a single bundler execution.

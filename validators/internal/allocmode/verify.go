@@ -17,8 +17,8 @@ package allocmode
 import (
 	"fmt"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/errors"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 // Verify is the VERIFY step of the #1327 contract ("configuration selects

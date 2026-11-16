@@ -17,8 +17,8 @@ package attestation
 import (
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/header"
 )
 
 // Public stability constants. These match the V1 schema documented in

@@ -19,8 +19,8 @@ import (
 
 	"github.com/sigstore/sigstore-go/pkg/sign"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // keylessIdentity signs with a fresh ephemeral keypair and obtains a Fulcio

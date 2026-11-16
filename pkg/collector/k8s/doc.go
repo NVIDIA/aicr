@@ -99,7 +99,7 @@
 //
 // The collector uses the centralized Kubernetes client from pkg/k8s/client:
 //
-//	import "github.com/NVIDIA/aicr/pkg/k8s/client"
+//	import "aicr.run/pkg/k8s/client"
 //
 //	// Automatically uses in-cluster config when running as pod, or kubeconfig
 //	clientset, config, err := client.GetKubeClient()

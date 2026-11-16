@@ -18,7 +18,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 // TestStockCatalogResolvesDevicePluginPolicy is the production-default flip

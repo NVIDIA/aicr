@@ -41,8 +41,8 @@ import (
 	"log"
 	"os"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicr "aicr.run/pkg/client/v1"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 // Example is the quick start: build a Client over the embedded recipe data and

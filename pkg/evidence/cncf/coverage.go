@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // CoverageGap is an applicable MUST requirement none of whose proof paths

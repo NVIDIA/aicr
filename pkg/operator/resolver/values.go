@@ -22,7 +22,7 @@ import (
 
 	"go.yaml.in/yaml/v4"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // Values files of a rendered release, in the order AICR's install script

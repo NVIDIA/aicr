@@ -22,8 +22,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
 	"github.com/google/uuid"
 )
 

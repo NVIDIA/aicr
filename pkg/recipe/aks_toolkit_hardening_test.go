@@ -20,7 +20,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/manifest"
+	"aicr.run/pkg/manifest"
 )
 
 const aksToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml"

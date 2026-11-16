@@ -37,8 +37,8 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/k8s/k8stest"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/k8s/k8stest"
 )
 
 const (

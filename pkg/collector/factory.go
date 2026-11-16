@@ -15,14 +15,14 @@
 package collector
 
 import (
-	"github.com/NVIDIA/aicr/pkg/collector/gpu"
-	"github.com/NVIDIA/aicr/pkg/collector/k8s"
-	"github.com/NVIDIA/aicr/pkg/collector/network"
-	"github.com/NVIDIA/aicr/pkg/collector/os"
-	"github.com/NVIDIA/aicr/pkg/collector/systemd"
-	"github.com/NVIDIA/aicr/pkg/collector/talos"
-	"github.com/NVIDIA/aicr/pkg/collector/topology"
-	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
+	"aicr.run/pkg/collector/gpu"
+	"aicr.run/pkg/collector/k8s"
+	"aicr.run/pkg/collector/network"
+	"aicr.run/pkg/collector/os"
+	"aicr.run/pkg/collector/systemd"
+	"aicr.run/pkg/collector/talos"
+	"aicr.run/pkg/collector/topology"
+	"aicr.run/pkg/recipe/oskind"
 )
 
 // Factory defines the interface for creating collector instances.

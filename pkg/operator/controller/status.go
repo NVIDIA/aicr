@@ -30,8 +30,8 @@ import (
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // maxMessage bounds every message the operator writes: the CRD bounds on

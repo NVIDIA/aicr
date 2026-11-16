@@ -44,9 +44,9 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
 )
 
 // ProvenanceFileName is the on-disk filename at the bundle root. Exported

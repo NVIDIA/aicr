@@ -33,9 +33,9 @@ import (
 
 	"github.com/opencontainers/go-digest"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func writeSourceFixture(t *testing.T, root string) map[string]string {

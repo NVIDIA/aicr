@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 func TestRenderEmptyReport(t *testing.T) {

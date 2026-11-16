@@ -26,11 +26,11 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/logging"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/logging"
+	"aicr.run/pkg/serializer"
 )
 
 const (

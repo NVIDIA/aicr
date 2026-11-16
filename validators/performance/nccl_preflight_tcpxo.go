@@ -26,11 +26,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/ptr"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	k8spod "github.com/NVIDIA/aicr/pkg/k8s/pod"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/defaults"
+	aicrErrors "aicr.run/pkg/errors"
+	k8spod "aicr.run/pkg/k8s/pod"
+	"aicr.run/pkg/recipe"
+	"aicr.run/validators"
 )
 
 const (

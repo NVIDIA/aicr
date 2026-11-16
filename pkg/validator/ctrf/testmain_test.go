@@ -25,7 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/NVIDIA/aicr/pkg/k8s/k8stest"
+	"aicr.run/pkg/k8s/k8stest"
 )
 
 // testClientset is a real Kubernetes clientset backed by envtest.

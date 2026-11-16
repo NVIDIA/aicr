@@ -1,6 +1,6 @@
 # Measurement Schema
 
-The `Measurement` type in `github.com/NVIDIA/aicr/pkg/measurement` is the
+The `Measurement` type in `aicr.run/pkg/measurement` is the
 on-wire shape used throughout aicr's Snapshot -> Recipe -> Validate -> Bundle
 pipeline. Snapshots serialize a `[]*Measurement` to YAML/JSON; recipes and
 validators consume the same shape. This page is the schema contract — any

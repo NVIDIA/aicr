@@ -17,8 +17,8 @@ package validators
 import (
 	"fmt"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/validators/internal/allocmode"
+	"aicr.run/pkg/errors"
+	"aicr.run/validators/internal/allocmode"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 )

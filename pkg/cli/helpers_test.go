@@ -21,7 +21,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/serializer"
 )
 
 func TestParseOutputFormat(t *testing.T) {

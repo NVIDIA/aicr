@@ -25,9 +25,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/NVIDIA/aicr/pkg/chainsaw"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/chainsaw"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // stubFetcher satisfies chainsaw.ResourceFetcher for wiring tests that never

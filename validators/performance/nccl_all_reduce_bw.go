@@ -18,10 +18,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	v1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
 )
 
 // checkNCCLAllReduceBW is the legacy CheckFunc that runs the provider-default

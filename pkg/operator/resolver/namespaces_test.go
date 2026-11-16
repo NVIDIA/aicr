@@ -18,8 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/plan"
 )
 
 func TestCheckNamespaces(t *testing.T) {

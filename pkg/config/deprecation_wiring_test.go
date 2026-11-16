@@ -21,8 +21,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/config"
+	"aicr.run/pkg/header"
 )
 
 // These were the Release N+1 wiring tests, asserting that an alpha AICRConfig

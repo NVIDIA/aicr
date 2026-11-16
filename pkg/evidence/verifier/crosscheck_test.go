@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"aicr.run/pkg/evidence/attestation"
 )
 
 // unreachablePullTimeout bounds the materialize calls that dial an

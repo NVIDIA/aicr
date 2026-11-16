@@ -21,9 +21,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 var (

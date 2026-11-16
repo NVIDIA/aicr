@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"io/fs"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/recipes"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
+	"aicr.run/recipes"
 	"gopkg.in/yaml.v3"
 )
 

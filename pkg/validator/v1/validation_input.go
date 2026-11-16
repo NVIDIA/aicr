@@ -14,7 +14,7 @@
 
 package v1
 
-import "github.com/NVIDIA/aicr/pkg/recipe"
+import "aicr.run/pkg/recipe"
 
 const (
 	// KindValidationInput is the Kubernetes kind for ValidationInput resources.

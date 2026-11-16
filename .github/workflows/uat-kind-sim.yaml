@@ -268,7 +268,7 @@ jobs:
           set -euo pipefail
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           go build \
-            -ldflags "-X github.com/NVIDIA/aicr/pkg/cli.version=main -X github.com/NVIDIA/aicr/pkg/cli.commit=${COMMIT_SHA} -X github.com/NVIDIA/aicr/pkg/cli.date=${BUILD_DATE}" \
+            -ldflags "-X aicr.run/pkg/cli.version=main -X aicr.run/pkg/cli.commit=${COMMIT_SHA} -X aicr.run/pkg/cli.date=${BUILD_DATE}" \
             -o ./aicr ./cmd/aicr
           VER_OUT="$(./aicr --version)"
           echo "${VER_OUT}"

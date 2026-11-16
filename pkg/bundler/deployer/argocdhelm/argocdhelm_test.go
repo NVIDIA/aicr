@@ -36,19 +36,19 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/allocpolicy"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd/argocdtest"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat/localformattest"
-	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/allocpolicy"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/bundler/deployer/argocd/argocdtest"
+	"aicr.run/pkg/bundler/deployer/localformat/localformattest"
+	"aicr.run/pkg/bundler/gatemanifest"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/defaults"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 // update regenerates goldens under testdata/ when set via `go test -update`.

@@ -22,8 +22,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	"aicr.run/pkg/bundler/checksum"
+	aicr "aicr.run/pkg/client/v1"
 )
 
 // newVerifyClient returns an embedded-source Client for verification tests.

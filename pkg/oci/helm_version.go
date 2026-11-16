@@ -21,7 +21,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/distribution/reference"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 const maximumDistributionTagBytes = 128

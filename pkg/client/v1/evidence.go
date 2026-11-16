@@ -20,15 +20,15 @@ import (
 	"log/slog"
 	"path/filepath"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	evattest "github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
-	"github.com/NVIDIA/aicr/pkg/oci"
-	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	evattest "aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/evidence/cncf"
+	"aicr.run/pkg/oci"
+	"aicr.run/pkg/validator"
+	"aicr.run/pkg/validator/catalog"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // OIDCResolveOptions selects how a pushed evidence bundle is signed: with the

@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"aicr.run/pkg/evidence/attestation"
 )
 
 func TestRenderMarkdown_ShowsRedactionPolicy(t *testing.T) {

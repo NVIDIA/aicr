@@ -30,7 +30,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/registry"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // pushManifest stores a Helm-shaped chart manifest under repo:v1.0.0 in an

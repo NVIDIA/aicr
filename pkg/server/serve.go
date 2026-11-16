@@ -22,9 +22,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/logging"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/logging"
 )
 
 const (
@@ -34,7 +34,7 @@ const (
 
 var (
 	// overridden during build with ldflags to reflect actual version info
-	// e.g., -X "github.com/NVIDIA/aicr/pkg/server.version=1.0.0"
+	// e.g., -X "aicr.run/pkg/server.version=1.0.0"
 	version = versionDefault
 	commit  = "unknown"
 	date    = "unknown"

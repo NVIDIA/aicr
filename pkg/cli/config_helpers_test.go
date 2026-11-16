@@ -21,9 +21,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // runWith builds a Command with the given Flags and runs it with args, calling

@@ -18,8 +18,8 @@ import (
 	"context"
 	"sort"
 
-	"github.com/NVIDIA/aicr/pkg/inventory"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	"aicr.run/pkg/inventory"
+	"aicr.run/pkg/upgrade"
 )
 
 // UpgradeComponents projects the registry entries that reference an ADR-021

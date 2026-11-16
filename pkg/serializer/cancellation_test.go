@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // wantCanceledAndNotTransient asserts the abort contract every read path in

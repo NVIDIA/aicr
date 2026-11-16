@@ -23,9 +23,9 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/collector"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/collector"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/measurement"
 )
 
 func TestNewSnapshot(t *testing.T) {

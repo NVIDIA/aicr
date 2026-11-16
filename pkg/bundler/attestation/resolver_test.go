@@ -22,9 +22,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // TestSelectOIDCSource pins the source-precedence classifier that both

@@ -18,7 +18,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 func TestTelemetryDataProvider(t *testing.T) {

@@ -20,8 +20,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/artifact"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/errors"
 )
 
 // CheckSelection enforces coverage only for selected, enabled Helm components.

@@ -57,8 +57,8 @@ import (
 	tufmd "github.com/theupdateframework/go-tuf/v2/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // classifyTUFError maps a go-tuf error to the appropriate pkg/errors code.

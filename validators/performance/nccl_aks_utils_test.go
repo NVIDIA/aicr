@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/validators/helper"
+	"aicr.run/validators/helper"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )

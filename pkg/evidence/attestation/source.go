@@ -18,7 +18,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // SourceSlugLength is the number of hex characters in a source slug. 32

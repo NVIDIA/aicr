@@ -22,15 +22,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
-	"github.com/NVIDIA/aicr/pkg/mirror"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/ocisource"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
-	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/mirror"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/ocisource"
+	"aicr.run/pkg/recipe/providertest"
+	validatorv1 "aicr.run/pkg/validator/v1"
 )
 
 func artifactExecutionFixture(t *testing.T) (*Client, *recipe.RecipeResult, string) {

@@ -47,8 +47,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/verifier"
 )
 
 // serverSigningIntegrationTimeout bounds the whole flow: real KMS round-trips

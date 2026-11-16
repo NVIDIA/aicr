@@ -15,9 +15,9 @@
 package config
 
 import (
-	"github.com/NVIDIA/aicr/pkg/artifact"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/recipe"
 )
 
 // Kind is the kind value for AICRConfig documents.

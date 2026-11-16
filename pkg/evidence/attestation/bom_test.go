@@ -22,12 +22,12 @@ import (
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 
-	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	k8scollector "aicr.run/pkg/collector/k8s"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator/catalog"
 )
 
 func TestCatalogVersion(t *testing.T) {

@@ -42,9 +42,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	helmutil "github.com/NVIDIA/aicr/pkg/helm"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/errors"
+	helmutil "aicr.run/pkg/helm"
 )
 
 // writeVendoredHelmFolder pulls the upstream chart bytes via puller and

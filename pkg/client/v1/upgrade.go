@@ -24,16 +24,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/artifact"
-	"github.com/NVIDIA/aicr/pkg/bundler"
-	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/inventory"
-	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/bundler"
+	"aicr.run/pkg/bundler/bundleinfo"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/inventory"
+	k8sclient "aicr.run/pkg/k8s/client"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/upgrade"
 )
 
 // FromCluster is the UpgradeCheckRequest.From value that reads the `from`

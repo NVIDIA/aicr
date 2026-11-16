@@ -14,7 +14,7 @@
 
 package chainsaw
 
-import "github.com/NVIDIA/aicr/pkg/chainsaw/validation"
+import "aicr.run/pkg/chainsaw/validation"
 
 // ValidateTestReadOnly rejects Chainsaw Test operations outside the read-only
 // allowlist. See [validation.ValidateTestReadOnly] for the validation rules.

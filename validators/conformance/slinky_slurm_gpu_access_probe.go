@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // slinkySlurmGPUProbeShell runs as a Slurm job step on a slurmd pod and prints

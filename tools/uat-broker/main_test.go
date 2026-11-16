@@ -25,8 +25,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/uatbroker"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/uatbroker"
 )
 
 const testRegistry = `

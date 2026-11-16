@@ -17,7 +17,7 @@ package config
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 func TestRecipeSpecResolveAccountingMode(t *testing.T) {

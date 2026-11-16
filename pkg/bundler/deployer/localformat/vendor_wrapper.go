@@ -37,9 +37,9 @@ import (
 	"embed"
 	"text/template"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
 )
 
 //go:embed templates/wrapper-chart.yaml.tmpl

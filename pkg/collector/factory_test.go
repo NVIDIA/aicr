@@ -18,10 +18,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/collector/gpu"
-	"github.com/NVIDIA/aicr/pkg/collector/systemd"
-	"github.com/NVIDIA/aicr/pkg/collector/talos"
-	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
+	"aicr.run/pkg/collector/gpu"
+	"aicr.run/pkg/collector/systemd"
+	"aicr.run/pkg/collector/talos"
+	"aicr.run/pkg/recipe/oskind"
 )
 
 func TestDefaultCollectorFactory_CreateSystemDCollector(t *testing.T) {

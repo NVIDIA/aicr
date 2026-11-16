@@ -24,11 +24,11 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	"github.com/NVIDIA/aicr/pkg/bundler/types"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/result"
+	"aicr.run/pkg/bundler/types"
+	"aicr.run/pkg/errors"
 )
 
 // BaseBundler provides common functionality for bundler implementations.

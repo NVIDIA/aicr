@@ -54,8 +54,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 )
 
 const (

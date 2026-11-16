@@ -26,14 +26,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"aicr.run/pkg/evidence/attestation"
 
 	"golang.org/x/mod/semver"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator"
+	"aicr.run/pkg/validator/catalog"
 )
 
 // errSkipRun is a loadRun sentinel: the run is malformed in a way that warrants
