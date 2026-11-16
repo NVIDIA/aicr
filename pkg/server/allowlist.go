@@ -15,8 +15,8 @@
 package server
 
 import (
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/recipe"
 )
 
 // validateAgainstAllowLists runs the upstream pkg/recipe.AllowLists check

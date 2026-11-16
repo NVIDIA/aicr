@@ -52,7 +52,7 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **kueue** | `ops` | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. The `platform=kueue` leaves (`h100-kind-training-kueue`, `h100-gke-cos-training-kueue`, `h100-eks-ubuntu-training-kueue`) do exactly that to enable topology-aware scheduling; see [Topology-aware scheduling](#topology-aware-scheduling-with-kueue-and-topograph). Upgrading from a 0.18.x bundle needs two checks first: see [Upgrade Notes](#kueue-018x-to-019x) below. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | `ops` | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
 | **runai-cluster** | `ops` | NVIDIA Run:ai cluster side (3.0, open source): the Run:ai operator, KAI Scheduler 0.18 with KAI Resource Management, Karta, and the agent and controllers that register the cluster with a Run:ai control plane you already run. Selected by `--platform runai`; its leaves turn off AICR's `kai-scheduler` because the chart bundles its own. The control plane URL, cluster UID and cluster FQDN (`cluster.url`) are `--set` at bundle time; the bootstrap token is declared with `--dynamic` and written in at install time. Preview. See [Run:ai cluster](#runai-cluster). | [Run:ai](https://github.com/dsx-ai-factory/run-ai) |
-| **nvcre** | `ops` | NVIDIA Cluster Readiness Engine, a GPU cluster burn-in certification controller. Runs training and NCCL workloads, measures goodput and bandwidth. **Not installed by default.** Enabling it takes both a `valuesFile` and a Trainer source. See [Enabling NVCRE](#enabling-nvcre) for a fragment that resolves. With that values file referenced, `metrics.serviceMonitor.enabled` is **false** so install does not require prometheus-operator CRDs. Turn it on with `--set cre:metrics.serviceMonitor.enabled=true` only after those CRDs exist, and add `prometheus-operator-crds` to `dependencyRefs`. The chart has no manager `nodeSelector`. For hard placement, set `manager.affinity` in `recipes/components/nvcre/values.yaml` or a complete JSON object, for example `--set-json cre:manager.affinity='{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"nvidia.com/gpu.present","operator":"Exists"}]}]}}}'` (scalar `--set cre:manager.affinity=...` renders an invalid string). CLI aliases: `cre`, `cluster-readiness-engine`. Shipped EKS H100 training still uses the TrainJob NCCL check. Opt-in AICR validators drive CRE with `Certification` (create, wait, delete), not `WorkloadRun`. **Disconnected installs.** The certification workloads pull images the chart does not render, because the workload catalog is compiled into the manager binary. Mirror the set in `recipes/components/nvcre/workload-images.yaml`, regenerated with `make nvcre-closure`. Each image is listed by tag with the digest that tag resolved to when the file was generated, and `sourceCommit` records the upstream commit it was derived from. The workloads pull by tag, so the mirror has to serve each tag, and serving it at the recorded digest keeps the cluster on the bytes the file describes. That committed set is scoped, not universal. It resolves the catalog for `platform: aws`, `gpuArchitecture: h100`, and the two certification entries `communication/nccl-all-reduce` and `training/nemotron5-8b`. The NCCL image it names is an EFA build, so another platform or accelerator pulls a different set and mirroring this one leaves those images unmirrored. Derive the set you need instead of reusing this one, writing it somewhere other than the committed path, for example `go run ./tools/nvcre-closure -platform gcp -arch h100 -entries communication/nccl-all-reduce -out /tmp/nvcre-gcp.yaml`. The training path additionally needs Megatron-LM at pod start, and the clone recorded in the closure is its last resort. The init container uses an already-populated workspace if one is mounted, else copies from `/opt/megatron-lm` in the image, and only clones when neither is there. So it can run disconnected, but only once you have provided the source by one of those two routes. The NCCL path needs nothing beyond the mirrored images. | [Cluster Readiness Engine](https://github.com/NVIDIA/cluster-readiness-engine) |
+| **nvcre** | `ops` | NVIDIA Cluster Readiness Engine, a GPU cluster burn-in certification controller. Runs training and NCCL workloads, measures goodput and bandwidth. **Not installed by default.** Enabling it takes both a `valuesFile` and a Trainer source. See [Enabling NVCRE](#enabling-nvcre) for a fragment that resolves. With that values file referenced, `metrics.serviceMonitor.enabled` is **false** so install does not require prometheus-operator CRDs. Turn it on with `--set cre:metrics.serviceMonitor.enabled=true` only after those CRDs exist, and add `prometheus-operator-crds` to `dependencyRefs`. The chart has no manager `nodeSelector`. For hard placement, set `manager.affinity` in `recipes/components/nvcre/values.yaml` or a complete JSON object, for example `--set-json cre:manager.affinity='{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"nvidia.com/gpu.present","operator":"Exists"}]}]}}}'` (scalar `--set cre:manager.affinity=...` renders an invalid string). CLI aliases: `cre`, `cluster-readiness-engine`. Shipped EKS H100 training still uses the TrainJob NCCL check. Opt-in AICR validators drive CRE with `Certification` (create, wait, delete), not `WorkloadRun`. **Disconnected installs.** The certification workloads pull images the chart does not render, because the workload catalog is compiled into the manager binary. Mirror the set in `recipes/components/nvcre/workload-images.yaml`, regenerated with `make nvcre-closure`. Each image is listed by tag with the digest that tag resolved to when the file was generated, and `sourceCommit` records the upstream commit it was derived from. A `Certification` you submit yourself pulls by tag, so the mirror has to serve each tag, and serving it at the recorded digest keeps the cluster on the bytes the file describes. AICR's `nccl-cre-all-reduce-bw` and `cre-training-goodput` checks pull their workload image by the recorded digest instead, so for them the mirror must serve that digest. That committed set is scoped, not universal. It resolves the catalog for `platform: aws`, `gpuArchitecture: h100`, and the two certification entries `communication/nccl-all-reduce` and `training/nemotron5-8b`. The NCCL image it names is an EFA build, so another platform or accelerator pulls a different set and mirroring this one leaves those images unmirrored. Derive the set you need instead of reusing this one, writing it somewhere other than the committed path, for example `go run ./tools/nvcre-closure -platform gcp -arch h100 -entries communication/nccl-all-reduce -out /tmp/nvcre-gcp.yaml`. The training path additionally needs Megatron-LM at pod start, and the clone recorded in the closure is its last resort. The init container uses an already-populated workspace if one is mounted, else copies from `/opt/megatron-lm` in the image, and only clones when neither is there. So it can run disconnected, but only once you have provided the source by one of those two routes. The NCCL path needs nothing beyond the mirrored images. | [Cluster Readiness Engine](https://github.com/NVIDIA/cluster-readiness-engine) |
 | **mariadb-operator-crds** | `ops` | Official MariaDB Operator CRDs. Declared in every Slurm recipe but installed only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
 | **mariadb-operator** | `ops` | Official MariaDB Operator controller, webhook, and certificate controller. AICR installs it only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
 | **slurm-accounting-mariadb** | `ops` | Installation-managed MariaDB instance whose initial database, all-privileges accounting user, and generated Secret reference are configured atomically on the MariaDB resource. Declared in every Slurm recipe and rendered only for `accounting.mode: aicr-provided`. | [MariaDB Cluster chart](https://artifacthub.io/packages/helm/mariadb-operator/mariadb-cluster) |
@@ -2775,6 +2775,66 @@ Other deployers remove `nktp` through their own resource. Follow step 2 of the
 Bundle, and HelmOp name, and `nktp` in place of the `k8s-aibom-system`
 namespace. Skip its step 3. Those AIBOM and CRD deletions belong to
 `k8s-aibom`, and NKTP keeps its CRDs on uninstall.
+
+## Autoscaling on a workload metric
+
+The runtime Prometheus server keeps only the series AICR's components declare.
+An HPA on a workload's own metric, such as an inference server's queue depth,
+needs three things:
+
+1. **The series is kept.** Name it when you build the bundle, with
+   `--runtime-metrics-series` or `spec.bundle.runtimeMetrics.series`. Each
+   value is an RE2 pattern matched against the whole metric name as scraped,
+   so a histogram is named by its `_bucket`, `_sum`, or `_count` series.
+2. **A monitor is loaded.** The server loads ServiceMonitors and PodMonitors
+   only from its own namespace, `monitoring`, and from the namespaces AICR's
+   own consumers read, such as `gpu-operator`. A monitor in any other
+   namespace, another component's included, is not loaded. Create the monitor
+   in `monitoring` with a `namespaceSelector`
+   naming the workload's namespace, or add the workload's namespace with
+   `--runtime-metrics-namespace` (`spec.bundle.runtimeMetrics.namespaces`) and
+   create the monitor beside the workload. The monitor must not set
+   `spec.scrapeClass`.
+3. **The adapter serves it.** Add a rule for the series to
+   `prometheus-adapter`'s `rules.custom`. An override replaces the whole list,
+   so restate the stock rules with yours.
+
+```shell
+# 1. Write the recipe's current rules to a file.
+aicr query -r recipe.yaml \
+  --selector components.prometheus-adapter.values.rules.custom > adapter-rules.yaml
+
+# 2. Append a rule for your series. This one serves it per pod under its own name.
+cat >> adapter-rules.yaml <<'EOF'
+- seriesQuery: 'inference_queue_depth{namespace!="",pod!=""}'
+  metricsQuery: 'max(last_over_time(<<.Series>>{<<.LabelMatchers>>}[1m])) by (<<.GroupBy>>)'
+  name:
+    matches: "^inference_queue_depth$"
+    as: "inference_queue_depth"
+  resources:
+    overrides:
+      namespace: {resource: "namespace"}
+      pod: {resource: "pod"}
+EOF
+
+# 3. Build the bundle with the series, the namespace, and the rule list.
+aicr bundle -r recipe.yaml \
+  --runtime-metrics-series inference_queue_depth \
+  --runtime-metrics-namespace inference \
+  --set-file prometheusadapter:rules.custom=adapter-rules.yaml \
+  -o ./bundle
+```
+
+Another workload that exposes a series the bundle already keeps, and the
+adapter already has a rule for, needs no new bundle, only a monitor in a
+loaded namespace. A new series, or a new rule, needs a new bundle. The bundle
+fails if either flag is set on a recipe with no runtime Prometheus server,
+such as `ocp`, or when the `bundlers` filter of `/v1/bundle` leaves that
+server out.
+
+The filter matches metric names only. Whoever can create a monitor in a loaded
+namespace can supply any kept series, the GPU series included, so treat that
+permission as access to every HPA's input.
 
 ## Run:ai cluster
 

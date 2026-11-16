@@ -49,12 +49,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	"github.com/NVIDIA/aicr/pkg/version"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator/ctrf"
+	"aicr.run/pkg/version"
 )
 
 const (

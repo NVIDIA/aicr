@@ -26,7 +26,7 @@ import (
 	"sort"
 	"strings"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // Statement and predicate identifiers.

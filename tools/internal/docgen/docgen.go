@@ -21,7 +21,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // WriteRendered opens path with the given flags and invokes render against it,

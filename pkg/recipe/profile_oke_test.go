@@ -17,7 +17,7 @@ package recipe
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/allocpolicy"
+	"aicr.run/pkg/allocpolicy"
 )
 
 func okeCriteria() *Criteria {

@@ -21,8 +21,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
 )
 
 const (

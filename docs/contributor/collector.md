@@ -292,7 +292,7 @@ Use `pkg/errors` with codes — never `fmt.Errorf`:
 ```go
 import (
     stderrors "errors"
-    "github.com/NVIDIA/aicr/pkg/errors"
+    "aicr.run/pkg/errors"
 )
 
 if err := api.Get(...); err != nil {

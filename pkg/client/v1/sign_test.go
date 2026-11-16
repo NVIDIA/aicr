@@ -18,7 +18,7 @@ import (
 	"context"
 	"testing"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicr "aicr.run/pkg/client/v1"
 )
 
 // TestPublishEvidence_Guards covers every rejection that happens before any

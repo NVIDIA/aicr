@@ -17,10 +17,10 @@ package cli
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/evidence/verifier"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/evidence/verifier"
 )
 
 // TestVerdictError_ProcessExitMatrix pins the whole verdict-to-process-exit

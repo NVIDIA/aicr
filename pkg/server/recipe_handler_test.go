@@ -21,8 +21,8 @@ import (
 	"strings"
 	"testing"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/recipe"
 )
 
 // newTestHandler builds a recipeHandler backed by an embedded-source client.

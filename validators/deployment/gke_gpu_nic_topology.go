@@ -23,10 +23,10 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/internal/gkenet"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/validators"
+	"aicr.run/validators/internal/gkenet"
 )
 
 // gkeAcceleratorLabel selects a3-megagpu-8g GPU nodes on GKE — the nodes that

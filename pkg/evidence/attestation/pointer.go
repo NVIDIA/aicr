@@ -23,10 +23,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/internal/boundedio"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/internal/boundedio"
+	"aicr.run/pkg/serializer"
 )
 
 // sha256HexLen is the number of hex characters in a SHA-256 digest body

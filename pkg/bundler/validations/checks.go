@@ -27,12 +27,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/allocpolicy"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
-	"github.com/NVIDIA/aicr/pkg/component"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/allocpolicy"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/drainscope"
+	"aicr.run/pkg/component"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // overrideValueFalse and overrideValueTrue are the string forms of boolean

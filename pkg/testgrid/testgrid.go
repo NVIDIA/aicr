@@ -25,9 +25,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/corroborate"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/corroborate"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // Origin is the AICR evidence dashboard's public origin. It is the single

@@ -23,7 +23,7 @@
 //
 // The client is initialized once on first use and cached for subsequent calls:
 //
-//	import "github.com/NVIDIA/aicr/pkg/k8s/client"
+//	import "aicr.run/pkg/k8s/client"
 //
 //	clientset, config, err := client.GetKubeClient()
 //	if err != nil {
@@ -150,7 +150,7 @@
 // This package was refactored from pkg/collector/k8s to provide centralized
 // Kubernetes client access for all components. All imports should now use:
 //
-//	import "github.com/NVIDIA/aicr/pkg/k8s/client"
+//	import "aicr.run/pkg/k8s/client"
 //
 // See also:
 //   - pkg/collector/k8s - K8s collector using this client

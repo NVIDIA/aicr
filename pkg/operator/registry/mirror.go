@@ -28,8 +28,8 @@ import (
 
 	"go.yaml.in/yaml/v4"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // UpstreamChart names a pinned chart in an upstream Helm repository.

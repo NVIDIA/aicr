@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/recipes"
+	"aicr.run/recipes"
 	"gopkg.in/yaml.v3"
 )
 

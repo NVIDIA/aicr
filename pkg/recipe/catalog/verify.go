@@ -19,9 +19,9 @@ import (
 	"encoding/hex"
 	"os"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/verifier"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // VerifyOptions configures a Verify call.

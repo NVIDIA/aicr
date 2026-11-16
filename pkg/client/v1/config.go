@@ -20,12 +20,12 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NVIDIA/aicr/pkg/artifact"
-	appconfig "github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/oci"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/artifact"
+	appconfig "aicr.run/pkg/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/oci"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
 )
 
 // Config is a parsed AICRConfig document — the version-controlled file a team
@@ -448,6 +448,7 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 		Nodes:                resolved.Nodes,
 		StorageClass:         resolved.StorageClass,
 		SharedStorageClass:   resolved.SharedStorageClass,
+		RuntimeMetrics:       resolved.RuntimeMetrics,
 		Attest:               resolved.Attest,
 		CertIDRegexp:         resolved.CertIDRegexp,
 		VendorCharts:         resolved.VendorCharts,

@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // refusalTimeout bounds each run of the candidate's binary.

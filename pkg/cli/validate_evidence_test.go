@@ -20,10 +20,10 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // runEvidenceCmd builds a minimal cli.Command that exposes the

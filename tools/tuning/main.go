@@ -30,9 +30,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/tuning"
-	"github.com/NVIDIA/aicr/tools/internal/docgen"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/tuning"
+	"aicr.run/tools/internal/docgen"
 )
 
 // matrixFile is the basename written under -out-dir; the Makefile splice reads it.

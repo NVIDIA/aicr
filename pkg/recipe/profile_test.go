@@ -25,11 +25,11 @@ import (
 	"testing"
 	"time"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
 

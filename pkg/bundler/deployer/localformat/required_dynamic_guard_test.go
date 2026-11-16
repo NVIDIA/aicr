@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/bundler/deployer/localformat"
 )
 
 // requiredDynamicComponent is an upstream Helm component with one dynamic

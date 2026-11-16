@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"strings"
 
-	pkgerrors "github.com/NVIDIA/aicr/pkg/errors"
+	pkgerrors "aicr.run/pkg/errors"
 )
 
 // gkeSuffixPrefix is the bare prefix that identifies GKE-specific build number

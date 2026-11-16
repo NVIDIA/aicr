@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"slices"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 // The catalog describes which constraint measurement paths are ADDRESSABLE —

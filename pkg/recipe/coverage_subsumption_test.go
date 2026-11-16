@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 // retiredOSGuard is the deleted requireOSIfNeeded, preserved verbatim as a

@@ -26,7 +26,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"aicr.run/pkg/bundler/config"
 )
 
 // === Regression: --criteria removal ===

@@ -30,16 +30,16 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/NVIDIA/aicr/pkg/constraints"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	"github.com/NVIDIA/aicr/pkg/validator/job"
-	"github.com/NVIDIA/aicr/pkg/validator/labels"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/constraints"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	k8sclient "aicr.run/pkg/k8s/client"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator/catalog"
+	"aicr.run/pkg/validator/ctrf"
+	"aicr.run/pkg/validator/job"
+	"aicr.run/pkg/validator/labels"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 // validatorFieldManager identifies AICR's server-side-apply writes against the
@@ -384,6 +384,9 @@ func (v *Validator) ValidatePhases(
 	if err = v.preflightSkipChecks(cat, phases, validationInput); err != nil {
 		return nil, err
 	}
+	if err = v.preflightForwardedEnv(cat, phases, validationInput); err != nil {
+		return nil, err
+	}
 
 	// --no-cluster: report all as skipped, no K8s calls
 	if v.NoCluster {
@@ -507,6 +510,9 @@ func (v *Validator) ValidatePhase(
 	if err = v.preflightSkipChecks(cat, []Phase{phase}, validationInput); err != nil {
 		return nil, err
 	}
+	if err = v.preflightForwardedEnv(cat, []Phase{phase}, validationInput); err != nil {
+		return nil, err
+	}
 
 	if v.NoCluster {
 		return v.phaseSkipped(cat, phase, "skipped - no-cluster mode"), nil
@@ -575,6 +581,29 @@ func (v *Validator) preflightDeclaredChecks(
 	return errors.New(errors.ErrCodeInvalidRequest,
 		"validation declares checks that do not match the validator catalog:\n  - "+
 			strings.Join(problems, "\n  - "))
+}
+
+// preflightForwardedEnv fails closed, before the cluster is prepared or any
+// Job is deployed, when the process environment holds a value that must not
+// reach the Job of a check this run would deploy. A check that is not
+// declared, or is named in skipChecks, deploys no Job and is not judged.
+func (v *Validator) preflightForwardedEnv(
+	cat *catalog.ValidatorCatalog,
+	phases []Phase,
+	validationInput *v1.ValidationInput,
+) error {
+
+	for _, phase := range phases {
+		for _, entry := range v1.FilterEntriesByValidation(cat.ForPhase(phase), phase, validationInput) {
+			if v.skipsCheck(entry.Name) {
+				continue
+			}
+			if err := v1.ValidateForwardedEnv(entry); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // runPhase executes all validators for a single phase sequentially.

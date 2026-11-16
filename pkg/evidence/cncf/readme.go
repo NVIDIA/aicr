@@ -19,9 +19,9 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/cncf/upstreamvalidator"
-	"github.com/NVIDIA/aicr/pkg/evidence/redact"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/cncf/upstreamvalidator"
+	"aicr.run/pkg/evidence/redact"
 )
 
 // Platform is what the submission README records about the cluster and the

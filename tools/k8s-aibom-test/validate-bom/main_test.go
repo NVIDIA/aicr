@@ -22,9 +22,9 @@ import (
 	"strings"
 	"testing"
 
-	projecterrors "github.com/NVIDIA/aicr/pkg/errors"
+	projecterrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // validBOM is the minimum shape run() must accept: CycloneDX 1.6, with

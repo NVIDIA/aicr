@@ -17,7 +17,7 @@ package project
 import (
 	"encoding/json"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // MetaSchemaVersion is the schema constant the GP4 corroborate consumer

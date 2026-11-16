@@ -19,9 +19,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/validator/ctrf"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 // RequirementStatus is the aggregate verdict of one checklist requirement,

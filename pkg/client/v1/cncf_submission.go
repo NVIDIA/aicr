@@ -20,12 +20,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/cncf"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // CNCFVendor is the product metadata a CNCF AI Conformance submission's

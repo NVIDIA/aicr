@@ -22,8 +22,8 @@ import (
 	"strconv"
 	"strings"
 
+	"aicr.run/pkg/errors"
 	"github.com/Masterminds/semver/v3"
-	"github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 

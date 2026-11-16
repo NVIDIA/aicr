@@ -28,7 +28,7 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/content"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
+	"aicr.run/pkg/operator/defaults"
 )
 
 // BundleArtifactType is the artifactType of an AICR bundle at v1.0.0: one

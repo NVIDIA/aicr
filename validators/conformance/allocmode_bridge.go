@@ -15,7 +15,7 @@
 package main
 
 import (
-	"github.com/NVIDIA/aicr/validators/internal/allocmode"
+	"aicr.run/validators/internal/allocmode"
 )
 
 // The GPU allocation-mode probe lives in validators/internal/allocmode so the

@@ -18,8 +18,8 @@ import (
 	"reflect"
 	"testing"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appconfig "github.com/NVIDIA/aicr/pkg/config"
+	aicr "aicr.run/pkg/client/v1"
+	appconfig "aicr.run/pkg/config"
 )
 
 // assertProjected fails when a field of the resolved type does not have a

@@ -24,9 +24,9 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func writeFile(t *testing.T, dir, name string, body []byte) string {

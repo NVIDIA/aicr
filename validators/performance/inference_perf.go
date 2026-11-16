@@ -19,8 +19,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/errors"
+	"aicr.run/validators"
 )
 
 // checkInferencePerf wraps the inference performance pipeline as a CheckFunc.

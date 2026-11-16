@@ -20,9 +20,9 @@ import (
 	"strings"
 	"testing"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appconfig "github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	aicr "aicr.run/pkg/client/v1"
+	appconfig "aicr.run/pkg/config"
+	"aicr.run/pkg/recipe/providertest"
 	"github.com/urfave/cli/v3"
 )
 

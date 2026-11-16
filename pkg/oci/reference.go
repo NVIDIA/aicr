@@ -24,8 +24,8 @@ import (
 
 	"github.com/distribution/reference"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	apperrors "aicr.run/pkg/errors"
 )
 
 // URIScheme is the URI scheme for OCI registry references

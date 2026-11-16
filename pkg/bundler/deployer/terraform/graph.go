@@ -19,9 +19,9 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // nonIdentifier matches every rune that cannot appear in a Terraform

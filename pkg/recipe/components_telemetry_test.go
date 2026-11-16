@@ -19,8 +19,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func telemetryTestServer() PromQLServerConfig {
@@ -135,6 +135,38 @@ func TestValidatePromQLSeriesPattern(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("ValidatePromQLSeriesPattern(%q) = %v, want an error containing %q", tt.pattern, err, tt.wantErr)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		})
+	}
+}
+
+func TestValidateRuntimeMetrics(t *testing.T) {
+	tests := []struct {
+		name       string
+		series     []string
+		namespaces []string
+		wantErr    string
+	}{
+		{name: "empty"},
+		{name: "valid", series: []string{"queue_depth", "http_requests_(total|created)"}, namespaces: []string{"inference"}},
+		{name: "blank series", series: []string{"queue_depth", ""}, wantErr: "invalid runtimeMetrics.series entry"},
+		{name: "series that is not RE2", series: []string{"queue_(depth"}, wantErr: "is not valid RE2"},
+		{name: "blank namespace", namespaces: []string{""}, wantErr: `invalid runtimeMetrics.namespaces entry ""`},
+		{name: "namespace that is not a name", namespaces: []string{"inference", "Team_A"},
+			wantErr: `invalid runtimeMetrics.namespaces entry "Team_A"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRuntimeMetrics(tt.series, tt.namespaces)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateRuntimeMetrics() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ValidateRuntimeMetrics() = %v, want an error containing %q", err, tt.wantErr)
 			}
 			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 		})

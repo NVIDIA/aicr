@@ -26,12 +26,12 @@ import (
 	"testing/synctest"
 	"time"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 func TestFinishValidationPreservesPartialReport(t *testing.T) {

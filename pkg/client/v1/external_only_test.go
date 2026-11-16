@@ -18,10 +18,10 @@ import (
 	"strings"
 	"testing"
 
-	bundleconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
-	appconfig "github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	bundleconfig "aicr.run/pkg/bundler/config"
+	appconfig "aicr.run/pkg/config"
+	"aicr.run/pkg/recipe/providertest"
+	"aicr.run/pkg/validator/catalog"
 )
 
 func TestExternalOnlyClient(t *testing.T) {

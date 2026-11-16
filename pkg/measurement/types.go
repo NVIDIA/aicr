@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"maps"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 

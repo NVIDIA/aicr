@@ -22,10 +22,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/verifier"
+	"aicr.run/pkg/defaults"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 // TestLoadBinaryAttestation exercises the startup fail-fast loader with an

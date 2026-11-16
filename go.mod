@@ -1,4 +1,4 @@
-module github.com/NVIDIA/aicr
+module aicr.run
 
 go 1.27.0
 

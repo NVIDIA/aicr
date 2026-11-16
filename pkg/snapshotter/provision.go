@@ -22,10 +22,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s/agent"
-	"github.com/NVIDIA/aicr/pkg/runid"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/k8s/agent"
+	"aicr.run/pkg/runid"
 )
 
 // AgentRolesConfig selects the ServiceAccount that WriteAgentRoleManifests

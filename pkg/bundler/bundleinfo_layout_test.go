@@ -22,7 +22,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
+	"aicr.run/pkg/bundler/bundleinfo"
 )
 
 // TestBundleInfoDescribesTheBundle asserts the index and the tree agree, in

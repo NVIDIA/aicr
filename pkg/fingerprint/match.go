@@ -17,7 +17,7 @@ package fingerprint
 import (
 	"strconv"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 // Match compares the fingerprint against a recipe's criteria using the

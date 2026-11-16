@@ -17,7 +17,7 @@ package fingerprint
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 func h100Fingerprint() *Fingerprint {

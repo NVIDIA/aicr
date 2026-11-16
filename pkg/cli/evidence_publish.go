@@ -20,8 +20,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/errors"
 )
 
 // evidencePublishCmd implements `aicr evidence publish <bundle-dir> --push <ref>`.

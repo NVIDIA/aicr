@@ -25,8 +25,8 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/defaults"
 )
 
 // chartMetadata mirrors the subset of Helm's chart.Metadata the generated
