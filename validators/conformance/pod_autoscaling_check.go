@@ -75,10 +75,6 @@ const (
 	hpaMaxReplicas int32 = 2
 )
 
-// hpaTestPrefix names the per-run test namespace; leftovers from interrupted
-// runs are found by this prefix.
-const hpaTestPrefix = "hpa-test-"
-
 // prometheusReleaseLabel is the label kube-prometheus-stack's Prometheus
 // selects PodMonitors and ServiceMonitors by when selectors are not opened
 // up; the recipe opens them, and the label is set anyway so a restricted
@@ -351,7 +347,7 @@ func newHPAScenario(ctx *validators.Context, dynClient dynamic.Interface, metric
 	if err != nil {
 		return nil, err
 	}
-	run.namespace = hpaTestPrefix + run.token
+	run.namespace = defaults.PodAutoscalingTestNamespacePrefix + run.token
 	s := &hpaScenario{
 		clientset:             ctx.Clientset,
 		dynClient:             dynClient,
@@ -1343,7 +1339,7 @@ func pruneStaleHPAPodMonitors(ctx context.Context, clientset kubernetes.Interfac
 	for i := range list.Items {
 		pm := &list.Items[i]
 		targets, _, _ := unstructured.NestedStringSlice(pm.Object, keySpec, "namespaceSelector", "matchNames")
-		if !strings.HasPrefix(pm.GetName(), hpaWorkloadName+"-") || len(targets) != 1 || !strings.HasPrefix(targets[0], hpaTestPrefix) {
+		if !strings.HasPrefix(pm.GetName(), hpaWorkloadName+"-") || len(targets) != 1 || !strings.HasPrefix(targets[0], defaults.PodAutoscalingTestNamespacePrefix) {
 			continue
 		}
 		// Only a definitive NotFound proves the run is over; any other

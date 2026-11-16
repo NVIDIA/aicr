@@ -47,8 +47,9 @@ AND shape, never by label alone, and every delete is pinned to the UID seen at
 planning time, so an object recreated in between is left alone.
 
 What is swept:
-  - per-run conformance test namespaces: aicr-gpu-test-* and
-    gang-scheduling-test-* (32-hex run token), cluster-auto-test-* (8-hex
+  - per-run conformance test namespaces: aicr-gpu-test-*,
+    gang-scheduling-test-*, hpa-test-*, ai-metrics-test-* and
+    gateway-traffic-* (32-hex run token), cluster-auto-test-* (8-hex
     token), each carrying the aicr.run/gpu-test-run label whose value must
     reconstruct the namespace name;
   - gang-scheduling pods and podgroups.scheduling.run.ai left in a Run:ai
@@ -67,11 +68,16 @@ What is swept:
 
 A candidate must ALSO be older than --older-than (default 2h, above the
 facade's whole-run cap and the largest single-check envelope, which is what
-bounds a test namespace's life) and pass a liveness guard: a namespace is
-kept while any non-terminal pod runs in it, and run-scoped objects are kept
-while a validator Job carrying their run ID exists in ANY namespace (a run
-started with -n another-ns owns cluster-scoped agent RBAC that this sweep
-would otherwise orphan). A --no-cleanup run's retained Jobs keep its
+bounds a test namespace's life) and pass a liveness guard. Below the
+default floor a namespace is kept while any non-terminal pod runs in it;
+at or above the floor that guard no longer applies, because an aged
+namespace cannot belong to a live check — the floor is pinned above every
+check's wait envelope — and the workloads a killed run leaks never go
+terminal (a RestartPolicyAlways Deployment's pods keep Running, gang
+members the scheduler holds Pending), so the namespace is deleted with its pods.
+Run-scoped objects are kept while a validator Job carrying their run ID
+exists in ANY namespace (a run started with -n another-ns owns
+cluster-scoped agent RBAC that this sweep would otherwise orphan). A --no-cleanup run's retained Jobs keep its
 objects guarded until the Job TTL controller reaps them (about an hour
 after they finish): its objects become eligible once the Jobs have expired
 AND they are older than the floor, and the sweep never deletes the Jobs

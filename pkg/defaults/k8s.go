@@ -76,6 +76,18 @@ const (
 	// per-run namespaces its token is 4 random bytes (8 hex chars), not 16.
 	ClusterAutoscalingTestNamespacePrefix = "cluster-auto-test-"
 
+	// PodAutoscalingTestNamespacePrefix prefixes the per-run namespace the
+	// pod-autoscaling conformance check creates.
+	PodAutoscalingTestNamespacePrefix = "hpa-test-"
+
+	// AIServiceMetricsTestNamespacePrefix prefixes the per-run namespace the
+	// ai-service-metrics conformance check creates.
+	AIServiceMetricsTestNamespacePrefix = "ai-metrics-test-"
+
+	// InferenceGatewayTestNamespacePrefix prefixes the per-run namespace the
+	// inference-gateway traffic conformance check creates.
+	InferenceGatewayTestNamespacePrefix = "gateway-traffic-"
+
 	// EnvRunaiProjectNamespace names the Run:ai Project namespace the
 	// gang-scheduling conformance check runs its test pods in.
 	EnvRunaiProjectNamespace = "AICR_RUNAI_PROJECT_NAMESPACE"

@@ -138,6 +138,17 @@ func planCheckNamespaces(ctx context.Context, kube kubernetes.Interface, o Optio
 			if ageGate(&obj, ns.CreationTimestamp, o.OlderThan) {
 				break
 			}
+			if o.OlderThan >= defaults.ValidationSweepMinAge {
+				// The floor outlasts every per-check wait envelope (pinned in
+				// pkg/validator/catalog), so a namespace this old cannot
+				// belong to a live check — and the leaked workloads that
+				// outlive their check (a RestartPolicyAlways Deployment,
+				// gang members the scheduler keeps Pending) never go
+				// terminal, so the pod guard below would keep them forever.
+				obj.Status = StatusWouldDelete
+				obj.Reason = "older than the default floor: its non-terminal pods are leaked workload, deleted with it"
+				break
+			}
 			live, err := namespaceHasLivePods(ctx, kube, ns.Name)
 			if err != nil {
 				return nil, nil, err
@@ -181,7 +192,10 @@ func conditionSummary(ns *corev1.Namespace) []string {
 
 // namespaceHasLivePods reports whether any pod in the namespace is neither
 // terminal nor already being deleted — the guard mirrors the NCCL stale
-// namespace prune's occupancy check.
+// namespace prune's occupancy check. It runs only when the age floor is
+// below defaults.ValidationSweepMinAge: at or above the floor an accepted
+// namespace cannot belong to a live check, so its pods are deleted with it
+// rather than consulted.
 func namespaceHasLivePods(ctx context.Context, kube kubernetes.Interface, namespace string) (bool, error) {
 	callCtx, cancel := apiCallCtx(ctx)
 	defer cancel()

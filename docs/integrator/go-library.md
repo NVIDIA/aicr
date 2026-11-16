@@ -1061,8 +1061,11 @@ result, err := client.ApplyValidationSweep(ctx, plan)
 - `SweepOptions.OlderThan` defaults to `defaults.ValidationSweepMinAge` (2h)
   when zero; negative is rejected. The floor outlasts the facade's whole-run
   cap and the largest single-check envelope (which bounds a test
-  namespace's life), not a whole uncapped CLI run; the liveness guards (no
-  non-terminal pods in a test namespace, no validator Job carrying the
+  namespace's life), not a whole uncapped CLI run; the liveness guards
+  (below the default floor, no non-terminal pods in a test namespace — at
+  or above the floor an aged namespace cannot belong to a live check and
+  leaked workloads never go terminal, so it is deleted with its pods; no
+  validator Job carrying the
   run's `aicr.run/run-id` label in any namespace) plus the settle
   observation cover run-scoped objects.
 - `SweepReport` and `SweepObject` are facade-owned (not aliases of

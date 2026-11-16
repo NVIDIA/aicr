@@ -43,11 +43,17 @@
 //   - An object must be older than Options.OlderThan (default
 //     defaults.ValidationSweepMinAge, which outlasts any single check's
 //     wait envelope — the bound on a test namespace's life) AND fail a
-//     liveness guard: a test namespace is kept while any non-terminal pod
-//     runs in it, and run-scoped RBAC/ConfigMaps are kept while a
-//     validator Job carrying their run's aicr.run/run-id label exists in
-//     any namespace (a run in another namespace still owns cluster-scoped
-//     agent RBAC). The floor does not bound a whole uncapped `aicr
+//     liveness guard: below the default floor a test namespace is kept
+//     while any non-terminal pod runs in it, and run-scoped
+//     RBAC/ConfigMaps are kept while a validator Job carrying their run's
+//     aicr.run/run-id label exists in any namespace (a run in another
+//     namespace still owns cluster-scoped agent RBAC). At or above the
+//     floor the pod guard no longer applies: an aged namespace cannot
+//     belong to a live check — the floor is pinned above every check's
+//     wait envelope — and the workloads a killed run leaks never go
+//     terminal (a RestartPolicyAlways Deployment's pods keep Running,
+//     gang members the scheduler holds Pending), so the namespace is deleted
+//     with its pods. The floor does not bound a whole uncapped `aicr
 //     validate`, and a live run with cleanup on shows no Job between its
 //     checks, so Execute additionally re-plans against current cluster
 //     state, then lists the run-labeled Jobs and watches from the list's

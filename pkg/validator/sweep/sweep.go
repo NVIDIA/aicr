@@ -242,8 +242,9 @@ func Execute(ctx context.Context, kube kubernetes.Interface, dyn dynamic.Interfa
 	// Give a live run the settle window to reveal itself before any
 	// run-scoped object is deleted. When the observation ran, the window sat
 	// between the re-plan's reads and the deletes, so re-plan once more: a
-	// namespace that gained a live pod, or a run that gained a Job just after
-	// the window, is caught before anything is removed.
+	// namespace that gained a live pod (below the default floor, where the
+	// pod guard applies), or a run that gained a Job just after the window,
+	// is caught before anything is removed.
 	waited, err := settleQuiet(ctx, kube, plan)
 	if err != nil {
 		return err
@@ -398,7 +399,8 @@ var settleWindow = defaults.ValidationSweepSettleWindow
 // re-plan.
 //
 // Namespace and Run:ai residue candidates do not gate on this signal —
-// their guards are live pods and name shape.
+// the namespace guard is live pods below the default floor, the residue
+// guard is name shape.
 func settleQuiet(ctx context.Context, kube kubernetes.Interface, plan *Report) (waited bool, err error) {
 	pending := make(map[string][]*Object) // run ID -> its waiting candidates
 	for i := range plan.Objects {
@@ -445,7 +447,7 @@ func watchOnce(ctx context.Context, kube kubernetes.Interface, resourceVersion s
 		return classifyWatchError(ctx, "jobs", err)
 	}
 	defer watcher.Stop()
-	return watchRunJobs(ctx, watcher, window, pending)
+	return watchRunJobs(ctx, watcher, window.C, pending)
 }
 
 // watchRunJobs consumes Job events until the window elapses or every pending
@@ -453,32 +455,60 @@ func watchOnce(ctx context.Context, kube kubernetes.Interface, resourceVersion s
 // aicr.run/run-id label keeps that run; a DELETED event still proves the run
 // was alive inside the window. The result channel ending before the window
 // fires — a closed channel or an error event — means liveness was not
-// observed for the whole window, so it fails closed.
-func watchRunJobs(ctx context.Context, watcher watch.Interface, window *time.Timer, pending map[string][]*Object) error {
+// observed for the whole window, so it fails closed. An event already
+// buffered when the window fires still counts (drainJobEvents).
+func watchRunJobs(ctx context.Context, watcher watch.Interface, window <-chan time.Time, pending map[string][]*Object) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout,
 				"sweep interrupted while waiting for validation runs to go quiet")
-		case <-window.C:
-			return nil
+		case <-window:
+			return drainJobEvents(ctx, watcher, pending)
 		case event, ok := <-watcher.ResultChan():
-			if !ok {
-				return errors.New(errors.ErrCodeUnavailable,
-					"the apiserver ended the job watch before the settle window did, "+
-						"so liveness was not observed for the whole window; nothing was deleted — re-run")
-			}
-			if event.Type == watch.Error {
-				return classifyWatchError(ctx, "jobs", apierrors.FromObject(event.Object))
-			}
-			if j, isJob := event.Object.(*batchv1.Job); isJob {
-				keepRun(pending, j.Labels[labels.RunID])
-			}
-			if len(pending) == 0 {
-				return nil
+			done, err := handleJobEvent(ctx, event, ok, pending)
+			if err != nil || done {
+				return err
 			}
 		}
 	}
+}
+
+// drainJobEvents processes the Job events already buffered when the window
+// fires, then reports quiet: select picks at random between a fired window
+// and a ready event, so without the drain an event that arrived inside the
+// window could be discarded.
+func drainJobEvents(ctx context.Context, watcher watch.Interface, pending map[string][]*Object) error {
+	for {
+		select {
+		case event, ok := <-watcher.ResultChan():
+			done, err := handleJobEvent(ctx, event, ok, pending)
+			if err != nil || done {
+				return err
+			}
+		default:
+			return nil
+		}
+	}
+}
+
+// handleJobEvent processes one settle-window Job event, reporting done when
+// every pending run is accounted for. A closed channel or an error event
+// fails closed exactly as the main loop does: liveness was not observed for
+// the whole window.
+func handleJobEvent(ctx context.Context, event watch.Event, ok bool, pending map[string][]*Object) (done bool, err error) {
+	if !ok {
+		return false, errors.New(errors.ErrCodeUnavailable,
+			"the apiserver ended the job watch before the settle window did, "+
+				"so liveness was not observed for the whole window; nothing was deleted — re-run")
+	}
+	if event.Type == watch.Error {
+		return false, classifyWatchError(ctx, "jobs", apierrors.FromObject(event.Object))
+	}
+	if j, isJob := event.Object.(*batchv1.Job); isJob {
+		keepRun(pending, j.Labels[labels.RunID])
+	}
+	return len(pending) == 0, nil
 }
 
 // keepRun keeps every waiting candidate of runID: a validator Job carrying
@@ -501,7 +531,8 @@ func keepRun(pending map[string][]*Object, runID string) {
 
 // isRunScoped reports whether a kind's liveness guard is the validator-Job
 // signal: the families a whole uncapped `aicr validate` can outlive the age
-// floor with, unlike namespaces and residue (guarded by live pods and age).
+// floor with, unlike namespaces and residue (guarded by age, plus live pods
+// for a namespace below the default floor).
 func isRunScoped(kind string) bool {
 	switch kind {
 	case kindServiceAccount, kindClusterRoleBinding, kindClusterRole,

@@ -1348,10 +1348,15 @@ ClusterRoleBinding (exactly `defaults.AgentClusterRoleName` + `-` + run ID).
 A candidate must be older than the age floor
 (`defaults.ValidationSweepMinAge`, 2h — above `ValidationOperationTimeout` and
 every catalog wait envelope, pinned in `pkg/defaults/timeouts_test.go` and
-`pkg/validator/catalog/catalog_test.go`) and pass a liveness guard: no
-non-terminal pods in a test namespace, and no validator Job carrying the run's
+`pkg/validator/catalog/catalog_test.go`) and pass a liveness guard: below the
+default floor, no non-terminal pods in a test namespace, and no validator Job
+carrying the run's
 `aicr.run/run-id` label in any namespace for run-scoped objects (a run started
-with `-n another-ns` still owns cluster-scoped agent RBAC). The floor bounds a
+with `-n another-ns` still owns cluster-scoped agent RBAC). The namespace pod
+guard applies only below the floor: at or above it an aged namespace cannot
+belong to a live check, and the workloads a killed run leaks never go
+terminal (a RestartPolicyAlways Deployment's pods keep Running, gang members
+the scheduler holds Pending), so the namespace is deleted with its pods. The floor bounds a
 test namespace's life, not a whole `aicr validate` — the CLI uncaps the
 facade timeout, so an all-phase run can outlive 2h. And Job existence is a
 point-in-time signal: with cleanup on, the validator deletes each Job right

@@ -925,7 +925,7 @@ func TestHPAScenarioPhases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := k8sfake.NewClientset()
-			cp := newFakeHPAControlPlane(c, hpaTestPrefix+"unit")
+			cp := newFakeHPAControlPlane(c, defaults.PodAutoscalingTestNamespacePrefix+"unit")
 			tt.configure(cp)
 			s := newTestHPAScenario(t, cp, c)
 			cp.start()
@@ -975,7 +975,7 @@ func TestHPAScenarioPhases(t *testing.T) {
 // while livePods still counts it.
 func TestReadyLivePodsExcludesPending(t *testing.T) {
 	t.Parallel()
-	const ns = hpaTestPrefix + "ready-unit"
+	const ns = defaults.PodAutoscalingTestNamespacePrefix + "ready-unit"
 	ready := readyHPAPod(hpaWorkloadName + "-0")
 	ready.Namespace = ns
 	pending := readyHPAPod(hpaWorkloadName + "-1")
@@ -1033,7 +1033,7 @@ func TestHPAScenarioAttachPrometheus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := k8sfake.NewClientset(tt.objects...)
-			cp := newFakeHPAControlPlane(c, hpaTestPrefix+"attach")
+			cp := newFakeHPAControlPlane(c, defaults.PodAutoscalingTestNamespacePrefix+"attach")
 			cp.noPrometheus = true
 			s := newTestHPAScenario(t, cp, c)
 			var gotURL string
@@ -1081,7 +1081,7 @@ func TestHPAScenarioAttachPrometheus(t *testing.T) {
 func TestHPAScenarioDeployCreatesScrapeConfig(t *testing.T) {
 	t.Parallel()
 	c := k8sfake.NewClientset()
-	cp := newFakeHPAControlPlane(c, hpaTestPrefix+"scrape")
+	cp := newFakeHPAControlPlane(c, defaults.PodAutoscalingTestNamespacePrefix+"scrape")
 	s := newTestHPAScenario(t, cp, c)
 	if err := s.deploy(&validators.Context{Ctx: context.Background(), Clientset: c}); err != nil {
 		t.Fatalf("deploy: %v", err)
@@ -1307,7 +1307,7 @@ func TestHPAScenarioRunWithCleanup_NamespaceCreateFailure(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newGPUTestRun: %v", err)
 			}
-			run.namespace = hpaTestPrefix + run.token
+			run.namespace = defaults.PodAutoscalingTestNamespacePrefix + run.token
 			s := &hpaScenario{
 				clientset: c,
 				dynClient: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
@@ -1333,7 +1333,7 @@ func TestHPAScenarioRunWithCleanup_NamespaceCreateFailure(t *testing.T) {
 // without the run label or the check's name is not this check's.
 func TestPruneStaleHPAPodMonitors(t *testing.T) {
 	t.Parallel()
-	const liveNS, goneNS = hpaTestPrefix + "live", hpaTestPrefix + "gone"
+	const liveNS, goneNS = defaults.PodAutoscalingTestNamespacePrefix + "live", defaults.PodAutoscalingTestNamespacePrefix + "gone"
 	monitor := func(name, target string, labeled bool) *unstructured.Unstructured {
 		pm := buildHPAPodMonitor(testPrometheusNamespace, name, target, "token-"+name)
 		if !labeled {

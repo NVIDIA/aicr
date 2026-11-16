@@ -102,7 +102,7 @@ const (
 )
 
 // token32 and token8 are the hex shapes the checks' random namespace tokens
-// take: 16 bytes for the GPU and gang-scheduling runs, 4 for
+// take: 16 bytes for every run out of newGPUTestRun/newGangTestRun, 4 for
 // cluster-autoscaling.
 var (
 	token32 = regexp.MustCompile(`^[0-9a-f]{32}$`)
@@ -122,6 +122,9 @@ func acceptTestNamespace(name, token string) bool {
 		{defaults.GPUTestNamespacePrefix, token32},
 		{defaults.GangSchedulingTestNamespacePrefix, token32},
 		{defaults.ClusterAutoscalingTestNamespacePrefix, token8},
+		{defaults.PodAutoscalingTestNamespacePrefix, token32},
+		{defaults.AIServiceMetricsTestNamespacePrefix, token32},
+		{defaults.InferenceGatewayTestNamespacePrefix, token32},
 	} {
 		if strings.HasPrefix(name, p.prefix) {
 			return name == p.prefix+token && p.shape.MatchString(token)

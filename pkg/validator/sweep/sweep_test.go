@@ -51,7 +51,11 @@ import (
 
 const (
 	testNamespace = defaults.ValidationNamespace
-	testOlderThan = 2 * time.Hour
+
+	// testOlderThan sits BELOW the default floor
+	// (defaults.ValidationSweepMinAge, 2h): the namespace live-pod guard
+	// applies only there, so the tests that exercise it must plan below it.
+	testOlderThan = time.Hour
 
 	old   = 3 * time.Hour    // past the floor: eligible
 	young = 30 * time.Minute // below the floor: kept
@@ -75,6 +79,13 @@ func created(age time.Duration) metav1.Time {
 
 func testOptions() Options {
 	return Options{Namespace: testNamespace, OlderThan: testOlderThan}
+}
+
+// floorOptions plans at the default floor, where an aged test namespace is a
+// candidate even with live pods: the floor outlasts every check's envelope,
+// so the pods are leaked workload, not a sign of life.
+func floorOptions() Options {
+	return Options{Namespace: testNamespace, OlderThan: defaults.ValidationSweepMinAge}
 }
 
 // --- object builders -------------------------------------------------------
@@ -139,23 +150,26 @@ func agentLabels(runID string) map[string]string {
 	}
 }
 
+// The agent builders share a name across kinds, as pkg/k8s/agent writes
+// them, but carry per-kind UIDs — a real cluster never reuses one.
+
 func agentSA(name, runID string) *corev1.ServiceAccount {
 	return &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
-		Name: name, Namespace: testNamespace, UID: types.UID("uid-" + name),
+		Name: name, Namespace: testNamespace, UID: types.UID("uid-sa-" + name),
 		CreationTimestamp: created(old), Labels: agentLabels(runID),
 	}}
 }
 
 func agentRoleBinding(name, runID string, age time.Duration) *rbacv1.RoleBinding {
 	return &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{
-		Name: name, Namespace: testNamespace, UID: types.UID("uid-" + name),
+		Name: name, Namespace: testNamespace, UID: types.UID("uid-rb-" + name),
 		CreationTimestamp: created(age), Labels: agentLabels(runID),
 	}}
 }
 
 func agentRole(name, runID string, age time.Duration) *rbacv1.Role {
 	return &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{
-		Name: name, Namespace: testNamespace, UID: types.UID("uid-" + name),
+		Name: name, Namespace: testNamespace, UID: types.UID("uid-role-" + name),
 		CreationTimestamp: created(age), Labels: agentLabels(runID),
 	}}
 }
@@ -330,6 +344,39 @@ func TestPlanCheckNamespaces(t *testing.T) {
 			wantStatus: StatusWouldDelete,
 		},
 		{
+			name:       "old pod-autoscaling namespace selected",
+			namespace:  testNamespaceObj(defaults.PodAutoscalingTestNamespacePrefix+hexToken32a, hexToken32a, old),
+			wantStatus: StatusWouldDelete,
+		},
+		{
+			name:       "old ai-service-metrics namespace selected",
+			namespace:  testNamespaceObj(defaults.AIServiceMetricsTestNamespacePrefix+hexToken32b, hexToken32b, old),
+			wantStatus: StatusWouldDelete,
+		},
+		{
+			name:       "old inference-gateway namespace selected",
+			namespace:  testNamespaceObj(defaults.InferenceGatewayTestNamespacePrefix+hexToken32a, hexToken32a, old),
+			wantStatus: StatusWouldDelete,
+		},
+		{
+			name:           "pod-autoscaling token differs from the name kept",
+			namespace:      testNamespaceObj(defaults.PodAutoscalingTestNamespacePrefix+hexToken32a, hexToken32b, old),
+			wantStatus:     StatusSkipped,
+			reasonFragment: reasonForeignNamespace,
+		},
+		{
+			name:           "ai-service-metrics with an 8-hex token kept",
+			namespace:      testNamespaceObj(defaults.AIServiceMetricsTestNamespacePrefix+hexToken8, hexToken8, old),
+			wantStatus:     StatusSkipped,
+			reasonFragment: reasonForeignNamespace,
+		},
+		{
+			name:           "inference-gateway label value does not match the name kept",
+			namespace:      testNamespaceObj(defaults.InferenceGatewayTestNamespacePrefix+hexToken32b, hexToken32a, old),
+			wantStatus:     StatusSkipped,
+			reasonFragment: reasonForeignNamespace,
+		},
+		{
 			name:           "cluster-autoscaling token with 32-hex shape kept",
 			namespace:      testNamespaceObj(defaults.ClusterAutoscalingTestNamespacePrefix+hexToken32a, hexToken32a, old),
 			wantStatus:     StatusSkipped,
@@ -405,6 +452,91 @@ func TestPlanCheckNamespaces(t *testing.T) {
 				typed = append(typed, p)
 			}
 			report, _ := planWith(t, testOptions(), typed)
+			wantStatus(t, report, kindNamespace, tt.namespace.Name, tt.wantStatus, tt.reasonFragment)
+		})
+	}
+}
+
+// TestPlanCheckNamespacesPodGuardFloor pins where the live-pod guard
+// applies: only below the default floor. At the floor an aged namespace
+// cannot belong to a live check (the floor outlasts every check's wait
+// envelope), and the workloads a killed run leaks never go terminal — a
+// RestartPolicyAlways Deployment's pods keep Running and gang members
+// the scheduler holds Pending — so the namespace is deleted with them. Below the
+// floor the same namespaces are kept while any pod is non-terminal.
+func TestPlanCheckNamespacesPodGuardFloor(t *testing.T) {
+	// A Running pod a ReplicaSet owns: the cluster-autoscaling leak.
+	replicaSetPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "workload-7d9f8b6c5-x1",
+			Namespace:         defaults.ClusterAutoscalingTestNamespacePrefix + hexToken8,
+			CreationTimestamp: created(old),
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: "workload-7d9f8b6c5",
+			}},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	// Pending pods the scheduler cannot place: the gang-scheduling leak.
+	pendingPod := func(name string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              name,
+				Namespace:         defaults.GangSchedulingTestNamespacePrefix + hexToken32b,
+				CreationTimestamp: created(old),
+			},
+			Status: corev1.PodStatus{Phase: corev1.PodPending},
+		}
+	}
+
+	tests := []struct {
+		name           string
+		options        Options
+		namespace      *corev1.Namespace
+		pods           []*corev1.Pod
+		wantStatus     Status
+		reasonFragment string
+	}{
+		{
+			name:           "at the floor, cluster-autoscaling namespace with a Running ReplicaSet-owned pod is swept",
+			options:        floorOptions(),
+			namespace:      testNamespaceObj(defaults.ClusterAutoscalingTestNamespacePrefix+hexToken8, hexToken8, old),
+			pods:           []*corev1.Pod{replicaSetPod},
+			wantStatus:     StatusWouldDelete,
+			reasonFragment: "older than the default floor",
+		},
+		{
+			name:           "at the floor, gang-scheduling namespace with Pending pods is swept",
+			options:        floorOptions(),
+			namespace:      testNamespaceObj(defaults.GangSchedulingTestNamespacePrefix+hexToken32b, hexToken32b, old),
+			pods:           []*corev1.Pod{pendingPod("gang-neg-worker-" + hexToken32b + "-0"), pendingPod("gang-neg-worker-" + hexToken32b + "-1")},
+			wantStatus:     StatusWouldDelete,
+			reasonFragment: "older than the default floor",
+		},
+		{
+			name:           "below the floor, cluster-autoscaling namespace with a Running pod is kept",
+			options:        Options{Namespace: testNamespace, OlderThan: 30 * time.Minute},
+			namespace:      testNamespaceObj(defaults.ClusterAutoscalingTestNamespacePrefix+hexToken8, hexToken8, old),
+			pods:           []*corev1.Pod{replicaSetPod},
+			wantStatus:     StatusSkipped,
+			reasonFragment: "still has live pods",
+		},
+		{
+			name:           "below the floor, gang-scheduling namespace with Pending pods is kept",
+			options:        Options{Namespace: testNamespace, OlderThan: 30 * time.Minute},
+			namespace:      testNamespaceObj(defaults.GangSchedulingTestNamespacePrefix+hexToken32b, hexToken32b, old),
+			pods:           []*corev1.Pod{pendingPod("gang-neg-worker-" + hexToken32b + "-0")},
+			wantStatus:     StatusSkipped,
+			reasonFragment: "still has live pods",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			typed := []runtime.Object{tt.namespace}
+			for _, p := range tt.pods {
+				typed = append(typed, p)
+			}
+			report, _ := planWith(t, tt.options, typed)
 			wantStatus(t, report, kindNamespace, tt.namespace.Name, tt.wantStatus, tt.reasonFragment)
 		})
 	}
@@ -894,6 +1026,12 @@ func newExecuteFixture(t *testing.T) *executeFixture {
 		validatorSA(deadRun, old),
 		validatorCRB(deadRun),
 		dataConfigMap("aicr-snapshot-"+deadRun, deadRun),
+		// The snapshot agent's namespaced RBAC shares one name across
+		// kinds, as pkg/k8s/agent writes it — so delete assertions keyed
+		// without the kind cannot tell them apart.
+		agentSA("aicr-validate-"+deadRun, deadRun),
+		agentRole("aicr-validate-"+deadRun, deadRun, old),
+		agentRoleBinding("aicr-validate-"+deadRun, deadRun, old),
 		agentClusterRole("aicr-node-reader-"+deadRun, deadRun),
 		gangPod("runai-team-a", "gang-neg-worker-"+hexToken32a+"-0", hexToken32a, old),
 	}
@@ -907,26 +1045,47 @@ func TestExecuteDeletesWithUIDPreconditionsInOrder(t *testing.T) {
 	f := newExecuteFixture(t)
 
 	// The fakes ignore delete preconditions, so capture them: every delete
-	// must pin exactly the UID the plan observed for that object.
+	// must pin exactly the UID the plan observed for that object. The key
+	// carries the kind — the fixture's agent ServiceAccount, Role and
+	// RoleBinding share one name, so namespace+name alone cannot tell one
+	// kind's delete from another's.
+	kindByResource := map[string]string{
+		"clusterrolebindings": kindClusterRoleBinding,
+		"clusterroles":        kindClusterRole,
+		"serviceaccounts":     kindServiceAccount,
+		"roles":               kindRole,
+		"rolebindings":        kindRoleBinding,
+		"configmaps":          kindConfigMap,
+		"namespaces":          kindNamespace,
+		"pods":                kindPod,
+		"podgroups":           kindPodGroup,
+	}
 	wantUID := make(map[string]types.UID)
 	for _, o := range f.report.Objects {
 		if o.Status == StatusWouldDelete {
-			wantUID[o.Namespace+"/"+o.Name] = o.UID
+			wantUID[o.Kind+"/"+o.Namespace+"/"+o.Name] = o.UID
 		}
 	}
+	deleted := make(map[string]int)
 	checkPreconditions := func(d k8stesting.DeleteAction) {
 		t.Helper()
-		key := d.GetNamespace() + "/" + d.GetName()
+		kind, known := kindByResource[d.GetResource().Resource]
+		if !known {
+			t.Errorf("delete of unmapped resource %q", d.GetResource().Resource)
+			return
+		}
+		key := kind + "/" + d.GetNamespace() + "/" + d.GetName()
 		want, planned := wantUID[key]
 		pre := d.GetDeleteOptions().Preconditions
 		switch {
 		case !planned:
-			t.Errorf("unexpected delete of %s %s", d.GetResource().Resource, key)
+			t.Errorf("unexpected delete of %s", key)
 		case pre == nil || pre.UID == nil:
 			t.Errorf("delete %s carried no UID precondition", key)
 		case *pre.UID != want:
 			t.Errorf("delete %s pinned UID %q, want the planned %q", key, *pre.UID, want)
 		}
+		deleted[key]++
 		if pp := d.GetDeleteOptions().PropagationPolicy; pp == nil || *pp != metav1.DeletePropagationBackground {
 			t.Errorf("delete %s propagation = %v, want background", key, pp)
 		}
@@ -953,11 +1112,15 @@ func TestExecuteDeletesWithUIDPreconditionsInOrder(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	// CRB before SA before ConfigMap before namespace before residue objects.
+	// CRB before cluster RBAC before ServiceAccounts before namespaced RBAC
+	// before ConfigMap before namespace before residue objects.
 	wantOrder := []string{
 		"clusterrolebindings//" + job.ClusterRoleBindingName(deadRun),
 		"clusterroles//aicr-node-reader-" + deadRun,
+		"serviceaccounts/" + testNamespace + "/aicr-validate-" + deadRun,
 		"serviceaccounts/" + testNamespace + "/" + job.ServiceAccountName(deadRun),
+		"roles/" + testNamespace + "/aicr-validate-" + deadRun,
+		"rolebindings/" + testNamespace + "/aicr-validate-" + deadRun,
 		"configmaps/" + testNamespace + "/aicr-snapshot-" + deadRun,
 		"namespaces//" + defaults.GPUTestNamespacePrefix + hexToken32a,
 		"pods/runai-team-a/gang-neg-worker-" + hexToken32a + "-0",
@@ -968,6 +1131,14 @@ func TestExecuteDeletesWithUIDPreconditionsInOrder(t *testing.T) {
 	for i, want := range wantOrder {
 		if pinned[i] != want {
 			t.Errorf("delete %d = %s, want %s (full order %v)", i, pinned[i], want, pinned)
+		}
+	}
+
+	// Every planned candidate was deleted exactly once — a missing or
+	// doubled delete fails here even when the order above matches.
+	for key := range wantUID {
+		if deleted[key] != 1 {
+			t.Errorf("planned %s deleted %d times, want exactly once", key, deleted[key])
 		}
 	}
 
@@ -1356,13 +1527,98 @@ func TestExecuteSettleWatchErrorEventFailsClosed(t *testing.T) {
 			dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), testPodGroupListKinds)
 
 			err := Execute(context.Background(), cs, dyn, report)
-			if err == nil {
-				t.Fatal("Execute() = nil, want the watch error to abort the apply")
-			}
+			// Both Statuses fall through classifyWatchError to its default:
+			// neither is Forbidden nor a context death, so both are Internal.
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
 			if deletes := deleteActions(cs); len(deletes) != 0 {
 				t.Errorf("Execute deleted %d objects with the settle watch unproven: %v", len(deletes), deletes)
 			}
 		})
+	}
+}
+
+// TestDrainJobEventsAfterTheWindow: the events already buffered when the
+// settle window fires are processed exactly as inside the window. It calls
+// the drain directly, because watchRunJobs reaches it only when select
+// happens to pick the fired window over a ready event.
+func TestDrainJobEventsAfterTheWindow(t *testing.T) {
+	newPending := func() (*Object, map[string][]*Object) {
+		obj := &Object{Kind: kindServiceAccount, Name: job.ServiceAccountName(deadRun), Status: StatusWouldDelete, RunID: deadRun}
+		return obj, map[string][]*Object{deadRun: {obj}}
+	}
+
+	t.Run("a buffered Job keeps its run", func(t *testing.T) {
+		fw := watch.NewFakeWithChanSize(1, false)
+		fw.Add(validatorJob(testNamespace, deadRun))
+		obj, pending := newPending()
+
+		if err := drainJobEvents(context.Background(), fw, pending); err != nil {
+			t.Fatalf("drainJobEvents() error = %v", err)
+		}
+		if obj.Status != StatusSkipped || !strings.Contains(obj.Reason, "started a validator Job") {
+			t.Errorf("object = %q (%q), want kept: its run's Job was buffered when the window fired", obj.Status, obj.Reason)
+		}
+	})
+
+	t.Run("every buffered Job is processed, not just the first", func(t *testing.T) {
+		fw := watch.NewFakeWithChanSize(2, false)
+		fw.Add(validatorJob(testNamespace, deadRun))
+		fw.Add(validatorJob(testNamespace, deadRun2))
+		first, pending := newPending()
+		second := &Object{Kind: kindServiceAccount, Name: job.ServiceAccountName(deadRun2), Status: StatusWouldDelete, RunID: deadRun2}
+		pending[deadRun2] = []*Object{second}
+
+		if err := drainJobEvents(context.Background(), fw, pending); err != nil {
+			t.Fatalf("drainJobEvents() error = %v", err)
+		}
+		for _, obj := range []*Object{first, second} {
+			if obj.Status != StatusSkipped {
+				t.Errorf("%s status = %q, want kept: its run's Job was buffered when the window fired", obj.Name, obj.Status)
+			}
+		}
+	})
+
+	t.Run("an empty buffer is quiet", func(t *testing.T) {
+		obj, pending := newPending()
+		if err := drainJobEvents(context.Background(), watch.NewFakeWithChanSize(1, false), pending); err != nil {
+			t.Fatalf("drainJobEvents() error = %v", err)
+		}
+		if obj.Status != StatusWouldDelete {
+			t.Errorf("object status = %q, want still %q with nothing buffered", obj.Status, StatusWouldDelete)
+		}
+	})
+
+	t.Run("a buffered close fails closed", func(t *testing.T) {
+		fw := watch.NewFake()
+		fw.Stop()
+		_, pending := newPending()
+		errorstest.WantReportedCode(t, drainJobEvents(context.Background(), fw, pending), errors.ErrCodeUnavailable)
+	})
+
+	t.Run("a buffered watch.Error fails closed", func(t *testing.T) {
+		fw := watch.NewFakeWithChanSize(1, false)
+		fw.Error(&apierrors.NewInternalError(fmt.Errorf("boom")).ErrStatus)
+		_, pending := newPending()
+		errorstest.WantReportedCode(t, drainJobEvents(context.Background(), fw, pending), errors.ErrCodeInternal)
+	})
+}
+
+// TestWatchRunJobsUsesTheDrainWhenTheWindowFires: with the window already
+// fired and a Job buffered, whichever case select picks, the run is kept.
+func TestWatchRunJobsUsesTheDrainWhenTheWindowFires(t *testing.T) {
+	fired := make(chan time.Time)
+	close(fired)
+	for i := 0; i < 20; i++ {
+		fw := watch.NewFakeWithChanSize(1, false)
+		fw.Add(validatorJob(testNamespace, deadRun))
+		obj := &Object{Kind: kindServiceAccount, Name: job.ServiceAccountName(deadRun), Status: StatusWouldDelete, RunID: deadRun}
+
+		if err := watchRunJobs(context.Background(), fw, fired, map[string][]*Object{deadRun: {obj}}); err != nil {
+			t.Fatalf("watchRunJobs() error = %v", err)
+		}
+		if obj.Status != StatusSkipped {
+			t.Fatalf("iteration %d: object status = %q, want kept: its Job was buffered when the window fired", i, obj.Status)
+		}
 	}
 }
 
@@ -1476,7 +1732,10 @@ func TestExecuteSettleWindowQuietDeletes(t *testing.T) {
 
 // TestExecuteReplansAgainAfterTheSettleWindow: the settle wait sits between
 // the re-plan's reads and the deletes, so Execute re-plans once more after
-// it — a guard that trips during the window keeps its object.
+// it — a guard that trips during the window keeps its object. The first
+// namespace subtest plans below the default floor (testOlderThan), where
+// the live-pod guard applies; the second plans at the floor, where it does
+// not.
 func TestExecuteReplansAgainAfterTheSettleWindow(t *testing.T) {
 	t.Run("namespace gains a live pod during the settle window", func(t *testing.T) {
 		useSettle(t, 100*time.Millisecond)
@@ -1502,6 +1761,33 @@ func TestExecuteReplansAgainAfterTheSettleWindow(t *testing.T) {
 			t.Errorf("namespace that gained a live pod during the settle window was deleted: %v", err)
 		}
 		// The quiet run-scoped candidate in the same plan is still deleted.
+		wantStatus(t, report, kindServiceAccount, job.ServiceAccountName(deadRun), StatusDeleted, "")
+	})
+
+	t.Run("at the floor, a pod appearing during the window does not save the namespace", func(t *testing.T) {
+		useSettle(t, 100*time.Millisecond)
+		ns := testNamespaceObj(defaults.GPUTestNamespacePrefix+hexToken32a, hexToken32a, old)
+		report, cs := planWith(t, floorOptions(), []runtime.Object{ns, validatorSA(deadRun, old)})
+		wantStatus(t, report, kindNamespace, ns.Name, StatusWouldDelete, "")
+
+		// The pod lands after the first re-plan, while the settle
+		// observation runs: at the floor the pod guard is off, so the
+		// post-settle re-plan still selects the namespace.
+		cs.PrependWatchReactor("jobs", func(k8stesting.Action) (bool, watch.Interface, error) {
+			if err := cs.Tracker().Add(livePod(ns.Name, "late-pod")); err != nil {
+				t.Errorf("add late pod: %v", err)
+			}
+			return true, watch.NewFake(), nil
+		})
+		dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), testPodGroupListKinds)
+
+		if err := Execute(context.Background(), cs, dyn, report); err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		wantStatus(t, report, kindNamespace, ns.Name, StatusDeleting, "")
+		if _, err := cs.CoreV1().Namespaces().Get(context.Background(), ns.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Errorf("namespace at the floor survived a pod that appeared during the settle window: err=%v", err)
+		}
 		wantStatus(t, report, kindServiceAccount, job.ServiceAccountName(deadRun), StatusDeleted, "")
 	})
 
@@ -1799,6 +2085,12 @@ func TestAcceptTestNamespace(t *testing.T) {
 		{"GPU namespace", defaults.GPUTestNamespacePrefix + hexToken32a, hexToken32a, true},
 		{"gang namespace", defaults.GangSchedulingTestNamespacePrefix + hexToken32a, hexToken32a, true},
 		{"cluster-autoscaling namespace", defaults.ClusterAutoscalingTestNamespacePrefix + hexToken8, hexToken8, true},
+		{"pod-autoscaling namespace", defaults.PodAutoscalingTestNamespacePrefix + hexToken32a, hexToken32a, true},
+		{"ai-service-metrics namespace", defaults.AIServiceMetricsTestNamespacePrefix + hexToken32b, hexToken32b, true},
+		{"inference-gateway namespace", defaults.InferenceGatewayTestNamespacePrefix + hexToken32a, hexToken32a, true},
+		{"pod-autoscaling with 8 hex", defaults.PodAutoscalingTestNamespacePrefix + hexToken8, hexToken8, false},
+		{"ai-service-metrics token differs from name", defaults.AIServiceMetricsTestNamespacePrefix + hexToken32a, hexToken32b, false},
+		{"inference-gateway with 8 hex", defaults.InferenceGatewayTestNamespacePrefix + hexToken8, hexToken8, false},
 		{"token differs from name", defaults.GPUTestNamespacePrefix + hexToken32a, hexToken32b, false},
 		{"wrong hex length for prefix", defaults.GPUTestNamespacePrefix + hexToken8, hexToken8, false},
 		{"cluster-autoscaling with 32 hex", defaults.ClusterAutoscalingTestNamespacePrefix + hexToken32a, hexToken32a, false},
