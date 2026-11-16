@@ -20,10 +20,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/collector/topology"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
+	"aicr.run/pkg/collector/topology"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/oskind"
 )
 
 // Subtype names referenced from collector outputs, kept as local constants

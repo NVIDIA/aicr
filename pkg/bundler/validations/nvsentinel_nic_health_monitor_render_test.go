@@ -20,9 +20,9 @@ import (
 	"strings"
 	"testing"
 
-	aicrhelm "github.com/NVIDIA/aicr/pkg/helm"
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	aicrhelm "aicr.run/pkg/helm"
+	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/recipe"
 )
 
 // The two images the nvsentinel-nic-health-monitor mixin adds, as disclosed

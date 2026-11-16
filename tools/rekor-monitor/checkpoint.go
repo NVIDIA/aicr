@@ -27,7 +27,7 @@ import (
 	rmfile "github.com/sigstore/rekor-monitor/pkg/util/file"
 	tlog "github.com/transparency-dev/formats/log"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // maxCheckpointBytes bounds a checkpoint restored from an artifact zip. A Rekor

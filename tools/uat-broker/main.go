@@ -70,8 +70,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/uatbroker"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/uatbroker"
 )
 
 // defaultRegistryPath is the registry location relative to the repo root,

@@ -21,8 +21,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
 )
 
 // TestWrapCriteria_Nil verifies that wrapping a nil upstream criteria

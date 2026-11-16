@@ -21,7 +21,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // errWriter wraps an io.Writer and retains the first write error encountered.

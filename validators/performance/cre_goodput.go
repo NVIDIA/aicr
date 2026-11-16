@@ -21,8 +21,8 @@ import (
 	"strconv"
 	"strings"
 
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/validators"
+	aicrErrors "aicr.run/pkg/errors"
+	"aicr.run/validators"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"

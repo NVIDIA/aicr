@@ -15,7 +15,7 @@
 // Package artifact defines the neutral release inventory and catalog bindings.
 package artifact
 
-import "github.com/NVIDIA/aicr/pkg/header"
+import "aicr.run/pkg/header"
 
 const (
 	APIVersion    = header.AuthoringGroupVersion

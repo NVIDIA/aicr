@@ -19,9 +19,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/bom"
-	"github.com/NVIDIA/aicr/pkg/constraints/expr"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bom"
+	"aicr.run/pkg/constraints/expr"
+	"aicr.run/pkg/recipe"
 )
 
 // Recipe constraint names that pin the node OS.

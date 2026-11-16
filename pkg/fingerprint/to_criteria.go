@@ -14,7 +14,7 @@
 
 package fingerprint
 
-import "github.com/NVIDIA/aicr/pkg/recipe"
+import "aicr.run/pkg/recipe"
 
 // ToCriteria projects the fingerprint into a recipe.Criteria, resolving each
 // enum value against reg so non-OSS values contributed by a `--data` overlay

@@ -17,11 +17,11 @@ package verifier
 import (
 	"strconv"
 
-	"github.com/NVIDIA/aicr/pkg/allocpolicy"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/allocpolicy"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 )
 
 // checkRecipeIdentity binds the pointer's and predicate's identity claims to

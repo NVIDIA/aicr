@@ -25,9 +25,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // ChecksumFileName is the standard name for checksum files.

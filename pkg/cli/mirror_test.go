@@ -21,7 +21,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/aicr/pkg/mirror"
+	"aicr.run/pkg/mirror"
 )
 
 func TestMirrorCmd_HasListSubcommand(t *testing.T) {

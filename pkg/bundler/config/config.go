@@ -22,10 +22,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/deprecation"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/deprecation"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
@@ -1034,7 +1034,7 @@ func WithDeterministic(deterministic bool) Option {
 
 // WithCertificateIdentityRegexp overrides the default identity pinning pattern
 // for binary attestation verification during bundle creation. The pattern must
-// contain "github.com/NVIDIA/aicr/". This is intended for testing with binaries
+// contain "github.com/NVIDIA/aicr/". This is intended for testing with binaries // module-rename:keep
 // attested by non-release workflows (e.g., build-attested.yaml).
 func WithCertificateIdentityRegexp(pattern string) Option {
 	return func(c *Config) {

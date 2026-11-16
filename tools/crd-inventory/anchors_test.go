@@ -26,8 +26,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // TestHealthCheckCRDAssertionsAnchored checks the CRDs asserted by each

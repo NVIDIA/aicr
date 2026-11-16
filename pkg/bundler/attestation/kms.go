@@ -18,7 +18,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // Compile-time assertion that KMSAttester satisfies the Attester interface.

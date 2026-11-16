@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/manifest"
+	"aicr.run/pkg/manifest"
 )
 
 // Google ships the GPUDirect-TCPXO NCCL plugin installer and the workload-side

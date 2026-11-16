@@ -31,7 +31,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/bundler/deployer/localformat"
 )
 
 // testGenerateTimeout bounds the context for in-test Generate calls.

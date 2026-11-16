@@ -25,10 +25,10 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	aicr "aicr.run/pkg/client/v1"
+	appcfg "aicr.run/pkg/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // uncoveredDims extracts the dimension names from a criteria-coverage failure

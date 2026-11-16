@@ -45,10 +45,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/chainsaw"
-	"github.com/NVIDIA/aicr/pkg/chainsawgate/runner"
-	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
-	"github.com/NVIDIA/aicr/pkg/logging"
+	"aicr.run/pkg/chainsaw"
+	"aicr.run/pkg/chainsawgate/runner"
+	k8sclient "aicr.run/pkg/k8s/client"
+	"aicr.run/pkg/logging"
 )
 
 // version is overridden at build time via -ldflags -X.

@@ -21,7 +21,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // NICInfoAnnotation is the node annotation GKE multi-networking populates with

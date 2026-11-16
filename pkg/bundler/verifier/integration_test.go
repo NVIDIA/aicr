@@ -20,7 +20,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
+	"aicr.run/pkg/bundler/checksum"
 )
 
 // TestIntegration_VerifyChecksumOnly tests the full verify flow for a bundle

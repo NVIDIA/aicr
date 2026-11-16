@@ -21,7 +21,7 @@ import (
 	"sort"
 	"strings"
 
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrErrors "aicr.run/pkg/errors"
 	"github.com/distribution/reference"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )

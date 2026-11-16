@@ -23,10 +23,10 @@ import (
 
 	storeoci "oras.land/oras-go/v2/content/oci"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/oci"
+	"aicr.run/pkg/bundler/result"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/oci"
 	"github.com/urfave/cli/v3"
 )
 

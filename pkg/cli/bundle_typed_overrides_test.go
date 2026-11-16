@@ -26,9 +26,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func typedOverrideFlags() []cli.Flag {

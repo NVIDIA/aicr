@@ -36,7 +36,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/measurement"
 )
 
 func TestRecipe_Validate(t *testing.T) {

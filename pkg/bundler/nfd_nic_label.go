@@ -20,8 +20,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
 )
 
 // The nfd component name, values paths, stripped feature key, and label

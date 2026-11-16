@@ -21,8 +21,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/tuning"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/tuning"
 )
 
 // markdownOptions configures table rendering.

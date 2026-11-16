@@ -27,10 +27,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
 	"github.com/Masterminds/semver/v3"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
 	"gopkg.in/yaml.v3"
 )
 

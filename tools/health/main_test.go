@@ -24,11 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/allowlist"
-	"github.com/NVIDIA/aicr/pkg/evidence/index"
-	"github.com/NVIDIA/aicr/pkg/health"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/testgrid"
+	"aicr.run/pkg/evidence/allowlist"
+	"aicr.run/pkg/evidence/index"
+	"aicr.run/pkg/health"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/testgrid"
 )
 
 // budgetCeiling is the compute-budget gate referenced by the ADR-009 epic

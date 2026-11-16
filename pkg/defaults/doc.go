@@ -32,7 +32,7 @@
 //
 // Import and use constants directly:
 //
-//	import "github.com/NVIDIA/aicr/pkg/defaults"
+//	import "aicr.run/pkg/defaults"
 //
 //	ctx, cancel := context.WithTimeout(ctx, defaults.CollectorTimeout)
 //	defer cancel()

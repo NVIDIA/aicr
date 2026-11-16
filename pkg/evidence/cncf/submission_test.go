@@ -29,11 +29,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/evidence/cncf/upstreamvalidator"
-	"github.com/NVIDIA/aicr/pkg/evidence/redact"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/evidence/cncf/upstreamvalidator"
+	"aicr.run/pkg/evidence/redact"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // landscapeURL is the CNCF landscape the vendored validator fetches.

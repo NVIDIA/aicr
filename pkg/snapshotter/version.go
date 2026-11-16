@@ -14,7 +14,7 @@
 
 package snapshotter
 
-import "github.com/NVIDIA/aicr/pkg/header"
+import "aicr.run/pkg/header"
 
 // FullAPIVersion is the complete API version string stamped into snapshot
 // headers. Snapshot is on the ADR-022 stable artifact track, so this aliases

@@ -39,9 +39,9 @@ import (
 func TestLoadForAnalysis(t *testing.T) {
 	t.Parallel()
 
-	loaded := loadForAnalysis(t, "github.com/NVIDIA/aicr/pkg/cli", "github.com/NVIDIA/aicr/pkg/server")
+	loaded := loadForAnalysis(t, "aicr.run/pkg/cli", "aicr.run/pkg/server")
 
-	for _, path := range []string{"github.com/NVIDIA/aicr/pkg/cli", "github.com/NVIDIA/aicr/pkg/server"} {
+	for _, path := range []string{"aicr.run/pkg/cli", "aicr.run/pkg/server"} {
 		lp, ok := loaded[path]
 		if !ok {
 			t.Fatalf("package %s missing from load result", path)

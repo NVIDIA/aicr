@@ -39,7 +39,7 @@ import (
 
 	cyclonedx "github.com/CycloneDX/cyclonedx-go"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // maxInputBytes bounds the document read. k8s-aibom stores BOMs inline only

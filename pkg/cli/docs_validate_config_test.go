@@ -20,8 +20,8 @@ import (
 	"strings"
 	"testing"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
+	aicr "aicr.run/pkg/client/v1"
+	appcfg "aicr.run/pkg/config"
 )
 
 // docsAICRConfigBlocks returns every fenced YAML block in path whose body

@@ -22,10 +22,10 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // convertCTRF reads all phase CTRF reports from bundleDir/ctrf/ and

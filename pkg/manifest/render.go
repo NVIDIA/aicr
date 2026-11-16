@@ -24,9 +24,9 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 )
 
 // RenderInput provides the data needed to render a manifest template.

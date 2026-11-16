@@ -16,8 +16,8 @@
 package labels
 
 import (
-	"github.com/NVIDIA/aicr/pkg/header"
-	k8slabels "github.com/NVIDIA/aicr/pkg/k8s/labels"
+	"aicr.run/pkg/header"
+	k8slabels "aicr.run/pkg/k8s/labels"
 )
 
 // Standard Kubernetes label keys. These are aliases of pkg/k8s/labels, which

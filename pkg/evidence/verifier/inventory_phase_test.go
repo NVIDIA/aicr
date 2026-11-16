@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"aicr.run/pkg/evidence/attestation"
 )
 
 // TestCheckPhaseDigests_Match confirms a freshly built bundle's on-disk CTRF

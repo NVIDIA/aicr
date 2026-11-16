@@ -18,8 +18,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	evidenceindex "github.com/NVIDIA/aicr/pkg/evidence/index"
+	"aicr.run/pkg/errors"
+	evidenceindex "aicr.run/pkg/evidence/index"
 )
 
 // RequireEvidenceEnvVar names the environment variable PublishedEvidenceRequired

@@ -18,10 +18,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/deployertest"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat/localformattest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/deployer/deployertest"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/bundler/deployer/localformat/localformattest"
+	"aicr.run/pkg/recipe"
 )
 
 // TestGenerate_VendorChartsVerifiesRegistryDigest proves this deployer hands

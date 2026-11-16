@@ -14,7 +14,7 @@
 
 package attestation
 
-import "github.com/NVIDIA/aicr/pkg/evidence/canonical"
+import "aicr.run/pkg/evidence/canonical"
 
 // The canonicalization and subject digests live in pkg/evidence/canonical, a
 // leaf package, so producers outside the evidence pipeline can compute the

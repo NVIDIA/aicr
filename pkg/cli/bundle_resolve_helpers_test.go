@@ -22,9 +22,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/oci"
+	bundlercfg "aicr.run/pkg/bundler/config"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/oci"
 )
 
 // === resolveDeployer ===

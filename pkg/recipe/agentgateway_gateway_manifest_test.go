@@ -22,7 +22,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/manifest"
+	"aicr.run/pkg/manifest"
 )
 
 const agentgatewayGatewayManifest = "components/agentgateway/manifests/inference-gateway.yaml"

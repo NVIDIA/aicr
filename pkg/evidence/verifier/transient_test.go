@@ -22,7 +22,7 @@ import (
 
 	"oras.land/oras-go/v2/registry/remote/errcode"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // TestClassifyFailure_TransientVsIntegrity is the diagnostic split #2083 asks

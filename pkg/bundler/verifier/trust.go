@@ -19,8 +19,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/constraints"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/constraints"
+	"aicr.run/pkg/errors"
 )
 
 // TrustLevel represents the verification trust level of a bundle.

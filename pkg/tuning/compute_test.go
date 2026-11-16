@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/tuning"
+	"aicr.run/pkg/tuning"
 )
 
 // wantRow is the version-agnostic shape of a row: the tuple that does NOT change

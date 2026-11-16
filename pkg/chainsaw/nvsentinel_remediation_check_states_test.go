@@ -24,7 +24,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 // remediationStepWorkloads maps each step's global toggle to the Deployment

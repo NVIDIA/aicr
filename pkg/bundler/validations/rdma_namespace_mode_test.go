@@ -19,8 +19,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/recipe"
 )
 
 func TestCheckRDMANamespaceModeCoherent(t *testing.T) {

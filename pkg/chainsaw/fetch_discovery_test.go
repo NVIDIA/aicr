@@ -34,9 +34,9 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // stubDiscovery is a minimal discovery.DiscoveryInterface that serves a fixed

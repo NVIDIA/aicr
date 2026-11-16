@@ -18,8 +18,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/upgrade"
 )
 
 // The projection is the only place either axis can be lost: what it drops, the

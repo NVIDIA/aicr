@@ -37,7 +37,7 @@ import (
 	_ "github.com/sigstore/sigstore/pkg/signature/kms/gcp"
 	_ "github.com/sigstore/sigstore/pkg/signature/kms/hashivault"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // ctxKeySigningKey is the structured-error context key carrying the KMS key

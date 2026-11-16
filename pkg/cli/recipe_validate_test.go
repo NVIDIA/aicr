@@ -25,8 +25,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 func TestRecipeValidateJSONFailure(t *testing.T) {

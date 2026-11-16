@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/fingerprint"
 )
 
 const sampleRecipeYAML = `apiVersion: aicr.run/v1

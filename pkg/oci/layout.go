@@ -24,8 +24,8 @@ import (
 
 	oras "oras.land/oras-go/v2"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	apperrors "aicr.run/pkg/errors"
 )
 
 // WriteLayout packages cfg.SourceDir exactly as PackageAndPush does and

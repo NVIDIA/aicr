@@ -18,8 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/config"
+	"aicr.run/pkg/header"
 )
 
 func newValid() *config.AICRConfig {

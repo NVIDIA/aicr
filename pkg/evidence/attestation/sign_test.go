@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func signableSignPointer() *Pointer {

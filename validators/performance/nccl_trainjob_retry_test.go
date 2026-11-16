@@ -21,9 +21,9 @@ import (
 	"testing"
 	"time"
 
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrErrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"

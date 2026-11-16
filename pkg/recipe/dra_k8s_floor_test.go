@@ -26,9 +26,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/constraints"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/version"
+	"aicr.run/pkg/constraints"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/version"
 )
 
 // k8sServerVersionConstraint is the measurement path whose floor this guard
