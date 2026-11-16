@@ -741,7 +741,8 @@ Four sentinels exist today, with deliberately different lifecycles:
 | `##AICR-IMAGE##` + one space | `validators.EmitImage` | `parseSentinels` (same pass) | one `ctrf.PodImage` (image, digest and platform), appended to `TestResult.Images` | **no**, stripped as transport | **yes**, if `PodImage.Valid` |
 
 The orchestrator also adds the validator container's own image to
-`TestResult.Images`, with its registry digest when its pod reports one.
+`TestResult.Images`, with its registry digest when its pod reports one. See
+[Recorded validator digests](evidence-publishing.md#recorded-validator-digests).
 
 The runner (`validators.Run`) emits one `##AICR-EXTRA##` line before the check
 starts, `resultSchema: "1"` (`ctrf.ResultSchemaVersion`), the result-contract
@@ -1157,10 +1158,10 @@ SHA="0123456789abcdef0123456789abcdef01234567"  # replace with the full SHA of a
 AICR_VALIDATOR_IMAGE_TAG="sha-${SHA}" aicr validate -r recipe.yaml -s snapshot.yaml --phase performance
 ```
 
-**Not when emitting evidence.** `aicr validate --emit-attestation` refuses a
-mutable validator tag and fails closed, because the attestation records
-validator images by tag alone — so the `:edge` form above is rejected there
-while the `:sha-<commit>` form is accepted. See
+**Not when emitting evidence.** `aicr validate --emit-attestation` fails
+closed on a mutable tag for any image it lists with no recorded digest, such
+as the image of a check whose pod could not be read. So the `:edge` form above
+can be rejected there and the `:sha-<commit>` form is accepted. See
 [Validator image provenance](evidence-publishing.md#validator-image-provenance).
 Drop the override for an evidence run, or pass
 `--allow-mutable-validator-tags` if the evidence is disposable.
