@@ -41,6 +41,11 @@
 # QUALIFY_TIMEOUT bounds the suite (default 90m).
 # QUALIFY_VALIDATION=1 installs or upgrades with validation.enabled; the
 # suite's deployment validation scenario sets it for its own upgrade.
+# AICR_E2E_VERSION, AICR_E2E_IMAGE and AICR_E2E_VALIDATOR_IMAGES replace every
+# candidate's own AICR. make operator-qualify-published sets them to the
+# published release's, because the suite disables the kind recipe's components
+# by the names the first plan lists, and a newer AICR that adds a component
+# would change the plan mid-upgrade.
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"

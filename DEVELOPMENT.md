@@ -662,7 +662,7 @@ Its unit and envtest suites run in `make test`. The targets below cover the rest
 | `CANDIDATE_VERSION=<version> make operator-candidate` | Build a release candidate of the current commit into `dist/candidate` (clean tree required) |
 | `make operator-candidate-verify` | Build the candidate twice and require identical bytes |
 | `make operator-qualify` | Fault-injection suite against `dist/candidate`, upgraded to `dist/candidate-next` |
-| `make operator-qualify-published` | Lifecycle scenarios from the newest published release (attestations verified), upgraded to `dist/candidate` |
+| `make operator-qualify-published` | Lifecycle scenarios from the newest published release (attestations verified), upgraded to `dist/candidate`, both on the published release's AICR |
 
 The operator accepts development settings (`development.bypassApprovals`, `development.skipDiscovery`) only when built with the `aicr_operator_development` build tag and without a release version. A plain `go build` or `ko build` refuses them. `ko` adds the tag when `AICR_OPERATOR_DEVELOPMENT=true`, which `make operator-skeleton` sets.
 
