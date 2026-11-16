@@ -1377,6 +1377,29 @@ caller-supplied regardless of `Config`, which is why the REST `/v1/bundle`
 handler can set `Config` and `OutputDir`/`Timeout` in the same struct
 literal and have all three take effect.
 
+`MakeBundle` renders into a private `.aicr-stage-*` directory, inside
+`OutputDir` when it exists and beside it when it does not, and moves the
+bundle into `OutputDir` only once it is complete. A call that fails while
+rendering removes the stage and leaves `OutputDir` as it found it. A call
+that is killed leaves the stage behind, and a later call with checksums on
+fails on it until you delete it. An `OutputDir` that holds an earlier bundle
+is replaced when that bundle's `checksums.txt` lists a matching
+`bundle-info.yaml`. An earlier bundle made with
+`config.WithIncludeChecksums(false)` is not recognized, so a later call with
+checksums on fails on any of its files the new bundle does not write.
+Every top-level folder named like a component folder, such as
+`001-notes/`, is removed whatever it holds, even when the new bundle does not
+write it, and so are the other leftover entries
+[Output directory](../user/bundling.md#output-directory) lists. Other content
+that is neither part of the earlier bundle nor named like the new bundle's
+output fails the call. With `config.WithIncludeChecksums(false)`, nothing
+else is checked. A top-level entry the new bundle also writes is replaced
+whole, so a directory such as `data/` loses every file the new bundle does
+not write, and other top-level entries are kept. The earlier bundle's
+`checksums.txt` and attestation files are removed, because they describe
+content the new bundle replaced and it carries none of its own. Copy out any
+file you need before reusing `OutputDir`.
+
 To generate a class-partitioned bundle set ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)),
 set `Split` and give `OutputDir` a path that does not exist yet; the set is
 published there atomically, and the helm deployer is the only one supported:

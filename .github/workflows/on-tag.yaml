@@ -1182,7 +1182,10 @@ jobs:
   # The lifecycle scenarios from the newest published release older than this
   # tag, attestations verified, upgraded to this candidate, run through a
   # rollout with deployment validation required, rolled back and uninstalled
-  # in the documented order (make operator-qualify-published). A failure
+  # in the documented order (make operator-qualify-published). Both operators
+  # run the published release's AICR: a newer AICR that adds a component to
+  # the kind recipe changes the plan mid-upgrade, and operator-validation runs
+  # this tag's AICR. A failure
   # blocks :latest and publishing, as ADR-027 requires of an operator gate;
   # the version aliases it runs against are already promoted. It runs
   # third-party images on privileged kind nodes, so it holds neither the
