@@ -39,6 +39,8 @@ namespaces:
       podSecurity: privileged
     - name: nvsentinel
       podSecurity: privileged
+    - name: nktp
+      podSecurity: privileged
     - name: nvidia-network-operator
       podSecurity: privileged
 # The validation subtest runs AICR's deployment validation as the chart's
