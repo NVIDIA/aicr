@@ -209,6 +209,26 @@ If the cluster has more than two worker security groups (e.g. a separate
 inference node group), repeat the `9090` rule for each SG that can host the
 orchestrator — on a fallback placement it may land on any of them.
 
+### Inference gateway rule — for in-cluster clients on other node groups
+
+The `agentgateway` proxy behind the inference gateway runs on the system node
+group, and it listens on the Gateway listener port itself (`80` in AICR's
+Gateway), not on a remapped high port. In-cluster clients on other node groups,
+such as a workload on the GPU nodes calling the gateway's Service, reach that
+port on the proxy pod directly. Allow ingress on the listener port from every
+security group that hosts such clients into the **system security group**.
+Otherwise their requests time out.
+
+A NetworkPolicy on `agentgateway-system` must allow the same traffic. Unlike a
+security group, it applies even when the client runs on the gateway's own node.
+
+The `inference-gateway` conformance check does not need this rule. Its traffic
+probe is scheduled onto a node running a gateway proxy pod, so with AICR's
+single proxy replica its requests to the gateway stay on that node. Its test
+backends still run on the GPU nodes, though, so the GPU security group must
+admit TCP `8080` from the system security group, the hop from the gateway to
+the backends.
+
 ### Example
 
 Using AICR's own `--system-node-selector`/`--accelerated-node-selector`

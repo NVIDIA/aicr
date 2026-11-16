@@ -265,6 +265,13 @@ type gatewayTrafficScenario struct {
 	// be read.
 	attachedRoutes    []string
 	attachedRoutesErr error
+	// proxyNamespace and proxySelector select the Gateway's proxy pods behind
+	// a Service-backed data plane, and proxyTolerations are the tolerations
+	// one of those pods carries; all unset when there is no proxy pod to
+	// co-locate the probe with.
+	proxyNamespace   string
+	proxySelector    map[string]string
+	proxyTolerations []corev1.Toleration
 
 	readProbeLogs func(ctx context.Context) (string, error)
 
@@ -396,6 +403,40 @@ func (s *gatewayTrafficScenario) resolveEndpoint(ctx context.Context) error {
 		}
 	}
 	s.endpoint = fmt.Sprintf("http://%s.%s.svc:%d%s%s", selected.Name, selected.Namespace, svcPort, s.routePath, gatewayTrafficRequestPath)
+	return s.resolveProxyPlacement(ctx, selected)
+}
+
+// resolveProxyPlacement records the selector and tolerations of the proxy
+// pods behind the selected Service, for the probe to be co-located with one.
+// A Service without a selector, or with no live pod behind it, leaves the
+// probe's placement unconstrained.
+func (s *gatewayTrafficScenario) resolveProxyPlacement(ctx context.Context, svc *corev1.Service) error {
+	if len(svc.Spec.Selector) == 0 {
+		slog.Warn("gateway proxy Service has no selector; traffic probe placement is unconstrained",
+			"service", svc.Namespace+"/"+svc.Name)
+		return nil
+	}
+	pods, err := s.clientset.CoreV1().Pods(svc.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: metav1.FormatLabelSelector(&metav1.LabelSelector{MatchLabels: svc.Spec.Selector}),
+	})
+	if err != nil {
+		return classifyK8sReadError(err, "proxy pods of Service "+svc.Namespace+"/"+svc.Name)
+	}
+	live := make([]corev1.Pod, 0, len(pods.Items))
+	for _, p := range pods.Items {
+		if p.DeletionTimestamp == nil && p.Status.Phase != corev1.PodFailed && p.Status.Phase != corev1.PodSucceeded {
+			live = append(live, p)
+		}
+	}
+	if len(live) == 0 {
+		slog.Warn("no live proxy pod behind the gateway Service; traffic probe placement is unconstrained",
+			"service", svc.Namespace+"/"+svc.Name)
+		return nil
+	}
+	sort.Slice(live, func(i, j int) bool { return live[i].Name < live[j].Name })
+	s.proxyNamespace = svc.Namespace
+	s.proxySelector = svc.Spec.Selector
+	s.proxyTolerations = live[0].Spec.Tolerations
 	return nil
 }
 
@@ -724,10 +765,14 @@ func (s *gatewayTrafficScenario) probe(ctx *validators.Context) error {
 	}
 	recordRawTextArtifact(ctx, "Gateway traffic: probe",
 		fmt.Sprintf("kubectl get pod %s -n %s", gatewayTrafficProbeName, ns),
-		fmt.Sprintf("Endpoint:         %s\nHost header:      %s\nHeader requests:  %d with %s: %s\nWeighted rounds:  up to %d of %d requests each\nReady window:     %s (%d consecutive routed request pairs)",
-			s.endpoint, s.routeHostname, s.headerRequests, gatewayTrafficHeaderName, gatewayTrafficHeaderValue, s.rounds, s.requests, s.routeReadyWindow, s.consecutive))
+		fmt.Sprintf("Endpoint:         %s\nHost header:      %s\nPlacement:        %s\nHeader requests:  %d with %s: %s\nWeighted rounds:  up to %d of %d requests each\nReady window:     %s (%d consecutive routed request pairs)",
+			s.endpoint, s.routeHostname, s.probePlacement(), s.headerRequests, gatewayTrafficHeaderName, gatewayTrafficHeaderValue, s.rounds, s.requests, s.routeReadyWindow, s.consecutive))
 
-	result, waitErr := waitForTerminalPodWithin(ctx.Ctx, s.clientset, ns, gatewayTrafficProbeName, "traffic probe pod", s.probeTimeout)
+	what := "traffic probe pod"
+	if len(s.proxySelector) > 0 {
+		what = fmt.Sprintf("traffic probe pod (required by pod affinity to run on a node with a Gateway proxy pod in %s)", s.proxyNamespace)
+	}
+	result, waitErr := waitForTerminalPodWithin(ctx.Ctx, s.clientset, ns, gatewayTrafficProbeName, what, s.probeTimeout)
 	logs, logErr := s.readProbeLogs(ctx.Ctx)
 	if logErr != nil {
 		logs = logErr.Error()
@@ -996,7 +1041,10 @@ func buildGatewayTrafficHTTPRoute(ns string, profile *validators.InferenceGatewa
 }
 
 // buildGatewayTrafficProbe is the probe pod. Its activeDeadlineSeconds caps
-// its lifetime past the probe wait so a leaked pod ends on its own.
+// its lifetime past the probe wait so a leaked pod ends on its own. With proxy
+// placement recorded, a required pod affinity puts it on a node running a
+// proxy pod, so its requests to the gateway do not cross node-group network
+// rules such as per-node-group security groups; NetworkPolicy still applies.
 func buildGatewayTrafficProbe(ns string, s *gatewayTrafficScenario) *corev1.Pod {
 	spec := gatewayTrafficPodSpec(corev1.Container{
 		Name:    gatewayTrafficProbeContainer,
@@ -1020,10 +1068,54 @@ func buildGatewayTrafficProbe(ns string, s *gatewayTrafficScenario) *corev1.Pod 
 	spec.RestartPolicy = corev1.RestartPolicyNever
 	lifetime := s.probeTimeout + defaults.K8sCleanupTimeout + gpuCheckSkewAndFlushMargin
 	spec.ActiveDeadlineSeconds = ptr.To(int64(lifetime / time.Second))
+	if len(s.proxySelector) > 0 {
+		spec.Affinity = &corev1.Affinity{PodAffinity: &corev1.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+				LabelSelector: &metav1.LabelSelector{MatchLabels: s.proxySelector},
+				Namespaces:    []string{s.proxyNamespace},
+				TopologyKey:   corev1.LabelHostname,
+			}},
+		}}
+		spec.Tolerations = mergeTolerations(spec.Tolerations, s.proxyTolerations)
+	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: gatewayTrafficProbeName, Namespace: ns, Labels: map[string]string{hpaAppLabelKey: gatewayTrafficProbeName}},
 		Spec:       spec,
 	}
+}
+
+// mergeTolerations returns base plus each toleration in extra it does not
+// already contain. A base that tolerates every taint is returned as is.
+func mergeTolerations(base, extra []corev1.Toleration) []corev1.Toleration {
+	for _, t := range base {
+		if t.Key == "" && t.Operator == corev1.TolerationOpExists && t.Effect == "" {
+			return base
+		}
+	}
+	out := append([]corev1.Toleration(nil), base...)
+	for _, e := range extra {
+		dup := false
+		for _, t := range out {
+			if t.MatchToleration(&e) && ptr.Equal(t.TolerationSeconds, e.TolerationSeconds) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// probePlacement describes where the probe pod is scheduled, for the probe
+// artifact.
+func (s *gatewayTrafficScenario) probePlacement() string {
+	if len(s.proxySelector) == 0 {
+		return "unconstrained"
+	}
+	return fmt.Sprintf("on a node running a Gateway proxy pod (%s, %s)", s.proxyNamespace,
+		metav1.FormatLabelSelector(&metav1.LabelSelector{MatchLabels: s.proxySelector}))
 }
 
 // httpRouteAcceptedByGateway reports whether the route's status carries a

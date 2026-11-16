@@ -37,6 +37,7 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/utils/ptr"
 )
 
 // Probe logs as gatewayTrafficProbeScript prints them for the verdicts the
@@ -476,6 +477,217 @@ func TestGatewayTrafficResolveEndpoint_ServiceListDenied(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "not found") {
 		t.Fatalf("error = %v, want a read failure that is not reported as absence", err)
 	}
+}
+
+// systemTaintTolerations are the tolerations a proxy pod pinned to tainted
+// system nodes carries.
+var systemTaintTolerations = []corev1.Toleration{
+	{Key: "dedicated", Operator: corev1.TolerationOpEqual, Value: "system-workload", Effect: corev1.TaintEffectNoSchedule},
+	{Key: "dedicated", Operator: corev1.TolerationOpEqual, Value: "system-workload", Effect: corev1.TaintEffectNoExecute},
+}
+
+func proxyService(ns string, selector map[string]string, ports ...int32) *corev1.Service {
+	svc := clusterIPService(ns, "inference-gateway", ports...)
+	svc.Spec.Selector = selector
+	return svc
+}
+
+func proxyPod(ns, name string, podLabels map[string]string, phase corev1.PodPhase, deleting bool, tolerations []corev1.Toleration) *corev1.Pod {
+	p := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: podLabels},
+		Spec:       corev1.PodSpec{Tolerations: tolerations},
+		Status:     corev1.PodStatus{Phase: phase},
+	}
+	if deleting {
+		p.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		p.Finalizers = []string{"test/hold"}
+	}
+	return p
+}
+
+// TestGatewayTrafficResolveEndpoint_ProxyPlacement pins which data planes
+// record proxy placement for the probe: a Service-backed one with a live proxy
+// pod does, with that pod's tolerations; a selector-less Service, one with no
+// live pod, and an address-backed data plane do not.
+func TestGatewayTrafficResolveEndpoint_ProxyPlacement(t *testing.T) {
+	t.Parallel()
+	svcProfile := agentgatewayProfile()
+	addrProfile := addressGatewayProfile()
+	ns := svcProfile.Namespace
+	sel := map[string]string{"gateway.networking.k8s.io/gateway-name": "inference-gateway"}
+	tests := []struct {
+		name            string
+		profile         *validators.InferenceGatewayProfile
+		addresses       []any
+		objects         []runtime.Object
+		wantSelector    map[string]string
+		wantTolerations []corev1.Toleration
+	}{
+		{
+			name: "live proxy pod sets selector, namespace and its tolerations", profile: svcProfile,
+			objects: []runtime.Object{
+				proxyService(ns, sel, 80),
+				proxyPod(ns, "inference-gateway-b", sel, corev1.PodRunning, false, nil),
+				proxyPod(ns, "inference-gateway-a", sel, corev1.PodRunning, false, systemTaintTolerations),
+			},
+			wantSelector: sel, wantTolerations: systemTaintTolerations,
+		},
+		{
+			name: "deleting and finished proxy pods are skipped", profile: svcProfile,
+			objects: []runtime.Object{
+				proxyService(ns, sel, 80),
+				proxyPod(ns, "inference-gateway-a", sel, corev1.PodRunning, true, nil),
+				proxyPod(ns, "inference-gateway-b", sel, corev1.PodFailed, false, nil),
+				proxyPod(ns, "inference-gateway-c", sel, corev1.PodPending, false, systemTaintTolerations),
+			},
+			wantSelector: sel, wantTolerations: systemTaintTolerations,
+		},
+		{
+			name: "no live proxy pod leaves placement unconstrained", profile: svcProfile,
+			objects: []runtime.Object{
+				proxyService(ns, sel, 80),
+				proxyPod(ns, "inference-gateway-a", sel, corev1.PodSucceeded, false, systemTaintTolerations),
+			},
+		},
+		{
+			name: "Service without a selector leaves placement unconstrained", profile: svcProfile,
+			objects: []runtime.Object{clusterIPService(ns, "inference-gateway", 80)},
+		},
+		{
+			name: "address-backed data plane leaves placement unconstrained", profile: addrProfile,
+			addresses: []any{gatewayAddress("IPAddress", "10.0.0.1")},
+			objects:   []runtime.Object{proxyPod(addrProfile.Namespace, "gw-a", sel, corev1.PodRunning, false, systemTaintTolerations)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := k8sfake.NewClientset(tt.objects...)
+			s, err := newGatewayTrafficScenario(c, nil, tt.profile, trafficTestGateway(tt.profile, []any{httpListener(80, "")}, tt.addresses), nil)
+			if err != nil {
+				t.Fatalf("newGatewayTrafficScenario: %v", err)
+			}
+			if err := s.resolveEndpoint(context.Background()); err != nil {
+				t.Fatalf("resolveEndpoint: %v", err)
+			}
+			if fmt.Sprint(s.proxySelector) != fmt.Sprint(tt.wantSelector) {
+				t.Errorf("proxySelector = %v, want %v", s.proxySelector, tt.wantSelector)
+			}
+			if fmt.Sprint(s.proxyTolerations) != fmt.Sprint(tt.wantTolerations) {
+				t.Errorf("proxyTolerations = %v, want %v", s.proxyTolerations, tt.wantTolerations)
+			}
+			wantNS := ""
+			if tt.wantSelector != nil {
+				wantNS = tt.profile.Namespace
+			}
+			if s.proxyNamespace != wantNS {
+				t.Errorf("proxyNamespace = %q, want %q", s.proxyNamespace, wantNS)
+			}
+		})
+	}
+}
+
+// TestGatewayTrafficResolveEndpoint_ProxyPodListDenied pins that a proxy pod
+// list the check cannot complete is a read failure, not silently an
+// unconstrained probe.
+func TestGatewayTrafficResolveEndpoint_ProxyPodListDenied(t *testing.T) {
+	t.Parallel()
+	profile := agentgatewayProfile()
+	sel := map[string]string{"app": "inference-gateway"}
+	c := k8sfake.NewClientset(proxyService(profile.Namespace, sel, 80))
+	c.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, k8serrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "", fmt.Errorf("denied"))
+	})
+	s, err := newGatewayTrafficScenario(c, nil, profile, trafficTestGateway(profile, []any{httpListener(80, "")}, nil), nil)
+	if err != nil {
+		t.Fatalf("newGatewayTrafficScenario: %v", err)
+	}
+	if err := s.resolveEndpoint(context.Background()); err == nil {
+		t.Fatal("resolveEndpoint succeeded, want a read failure")
+	}
+	if s.proxySelector != nil {
+		t.Errorf("proxySelector = %v, want unset after a failed read", s.proxySelector)
+	}
+}
+
+// TestGatewayTrafficProbeColocatesWithProxy pins the probe's placement: with
+// proxy placement recorded it requires a node running a proxy pod in the
+// gateway's namespace (hostname topology) and adds the proxy pod's
+// tolerations to its own; without it the probe has no affinity.
+func TestGatewayTrafficProbeColocatesWithProxy(t *testing.T) {
+	t.Parallel()
+	gpu := []corev1.Toleration{{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}}
+	sel := map[string]string{"gateway.networking.k8s.io/gateway-name": "inference-gateway"}
+	base := func(tol []corev1.Toleration) *gatewayTrafficScenario {
+		return &gatewayTrafficScenario{tolerations: tol, endpoint: "http://gw/v1/chat/completions", routeHostname: "h",
+			primaryWeight: 70, alternateWeight: 30, probeTimeout: time.Minute, routeReadyWindow: 30 * time.Second}
+	}
+
+	t.Run("co-located with the proxy", func(t *testing.T) {
+		t.Parallel()
+		s := base(gpu)
+		s.proxyNamespace, s.proxySelector = "agentgateway-system", sel
+		// The first proxy toleration duplicates the validator's; it is not repeated.
+		s.proxyTolerations = append(append([]corev1.Toleration(nil), gpu...), systemTaintTolerations...)
+		pod := buildGatewayTrafficProbe("ns", s)
+		if pod.Spec.Affinity == nil || pod.Spec.Affinity.PodAffinity == nil {
+			t.Fatalf("probe affinity = %+v, want a pod affinity to the proxy", pod.Spec.Affinity)
+		}
+		terms := pod.Spec.Affinity.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+		if len(terms) != 1 {
+			t.Fatalf("required affinity terms = %d, want 1", len(terms))
+		}
+		term := terms[0]
+		if term.TopologyKey != corev1.LabelHostname {
+			t.Errorf("topologyKey = %q, want %q", term.TopologyKey, corev1.LabelHostname)
+		}
+		if fmt.Sprint(term.Namespaces) != "[agentgateway-system]" {
+			t.Errorf("namespaces = %v, want the gateway's namespace", term.Namespaces)
+		}
+		if term.LabelSelector == nil || fmt.Sprint(term.LabelSelector.MatchLabels) != fmt.Sprint(sel) {
+			t.Errorf("label selector = %+v, want %v", term.LabelSelector, sel)
+		}
+		want := append(append([]corev1.Toleration(nil), gpu...), systemTaintTolerations...)
+		if fmt.Sprint(pod.Spec.Tolerations) != fmt.Sprint(want) {
+			t.Errorf("probe tolerations = %v, want %v", pod.Spec.Tolerations, want)
+		}
+	})
+
+	t.Run("tolerate-all stays tolerate-all", func(t *testing.T) {
+		t.Parallel()
+		s := base(nil)
+		s.proxyNamespace, s.proxySelector, s.proxyTolerations = "agentgateway-system", sel, systemTaintTolerations
+		pod := buildGatewayTrafficProbe("ns", s)
+		if fmt.Sprint(pod.Spec.Tolerations) != fmt.Sprint([]corev1.Toleration{{Operator: corev1.TolerationOpExists}}) {
+			t.Errorf("probe tolerations = %v, want tolerate-all only", pod.Spec.Tolerations)
+		}
+		if pod.Spec.Affinity == nil {
+			t.Error("probe must still be co-located with the proxy")
+		}
+	})
+
+	t.Run("same toleration with a different tolerationSeconds is kept", func(t *testing.T) {
+		t.Parallel()
+		notReady := corev1.Toleration{Key: "node.kubernetes.io/not-ready", Operator: corev1.TolerationOpExists,
+			Effect: corev1.TaintEffectNoExecute, TolerationSeconds: ptr.To(int64(300))}
+		longer := notReady
+		longer.TolerationSeconds = ptr.To(int64(600))
+		got := mergeTolerations([]corev1.Toleration{notReady}, []corev1.Toleration{notReady, longer})
+		if want := []corev1.Toleration{notReady, longer}; fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("mergeTolerations = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("no proxy placement means no affinity", func(t *testing.T) {
+		t.Parallel()
+		pod := buildGatewayTrafficProbe("ns", base(gpu))
+		if pod.Spec.Affinity != nil {
+			t.Errorf("probe affinity = %+v, want none", pod.Spec.Affinity)
+		}
+		if fmt.Sprint(pod.Spec.Tolerations) != fmt.Sprint(gpu) {
+			t.Errorf("probe tolerations = %v, want the validator's", pod.Spec.Tolerations)
+		}
+	})
 }
 
 // Fake controllers for the traffic scenario: the kubelet and the Deployment
