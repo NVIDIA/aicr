@@ -23,6 +23,7 @@ import (
 
 	"aicr.run/pkg/defaults"
 	"aicr.run/pkg/k8s/pod"
+	"github.com/distribution/reference"
 	"github.com/opencontainers/go-digest"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -85,7 +86,7 @@ func ContainerImage(ctx context.Context, client kubernetes.Interface, p *corev1.
 		return PodImage{}, false
 	}
 	if cs, ok := pod.ContainerStatus(p, containerName); ok {
-		img.Digest = registryDigest(cs.ImageID)
+		img.Digest = registryDigest(img.Image, cs.ImageID)
 	}
 	if img.Digest != "" {
 		img.Platform = nodePlatform(ctx, client, p.Spec.NodeName)
@@ -93,16 +94,26 @@ func ContainerImage(ctx context.Context, client kubernetes.Interface, p *corev1.
 	return img, true
 }
 
-// registryDigest returns the registry digest in a container status imageID,
-// ignoring a runtime scheme prefix such as docker-pullable://. It returns ""
-// when imageID names no registry manifest, including a bare sha256:<hex>
-// local image ID.
-func registryDigest(imageID string) string {
+// registryDigest returns the registry digest in a container status imageID
+// for image, ignoring a runtime scheme prefix such as docker-pullable://. It
+// returns "" when imageID names no registry manifest, as a bare sha256:<hex>
+// local image ID does, or names a repository other than image's.
+func registryDigest(image, imageID string) string {
 	if _, rest, ok := strings.Cut(imageID, "://"); ok {
 		imageID = rest
 	}
 	at := strings.LastIndex(imageID, "@")
 	if at <= 0 || !isSHA256Digest(imageID[at+1:]) {
+		return ""
+	}
+	// An image loaded onto the node without a registry can carry a digest
+	// under a runtime-generated name, such as docker.io/library/import-<date>.
+	got, err := reference.ParseNormalizedNamed(imageID[:at])
+	if err != nil {
+		return ""
+	}
+	want, err := reference.ParseNormalizedNamed(image)
+	if err != nil || got.Name() != want.Name() {
 		return ""
 	}
 	return imageID[at+1:]

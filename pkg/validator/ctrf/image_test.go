@@ -53,24 +53,34 @@ func TestPodImageValid(t *testing.T) {
 }
 
 func TestRegistryDigest(t *testing.T) {
+	const image = "ghcr.io/x/y:v1"
 	tests := []struct {
 		name    string
+		image   string
 		imageID string
 		want    string
 	}{
-		{"containerd repo digest", "ghcr.io/x/y@" + testImageDigest, testImageDigest},
-		{"docker-pullable scheme", "docker-pullable://ghcr.io/x/y@" + testImageDigest, testImageDigest},
-		{"registry with port", "localhost:5001/x/y@" + testImageDigest, testImageDigest},
-		{"bare local image ID", testImageDigest, ""},
-		{"docker local image ID", "docker://" + testImageDigest, ""},
-		{"invalid digest", "ghcr.io/x/y@sha256:abc", ""},
-		{"digest without algorithm", "example.com/image@invalid", ""},
-		{"empty", "", ""},
+		{"containerd repo digest", image, "ghcr.io/x/y@" + testImageDigest, testImageDigest},
+		{"docker-pullable scheme", image, "docker-pullable://ghcr.io/x/y@" + testImageDigest, testImageDigest},
+		{"registry with port", "localhost:5001/x/y:v1", "localhost:5001/x/y@" + testImageDigest, testImageDigest},
+		{"short Docker Hub name", "busybox:1.37", "docker.io/library/busybox@" + testImageDigest, testImageDigest},
+		{"digest other than the spec pin", "ghcr.io/x/y:v1@sha256:" + strings.Repeat("b", 64),
+			"ghcr.io/x/y@" + testImageDigest, testImageDigest},
+		{"kind side-load", "ko.local/validator:v1",
+			"docker.io/library/import-2026-11-16@" + testImageDigest, ""},
+		{"other repository", image, "ghcr.io/x/z@" + testImageDigest, ""},
+		{"unparsable spec image", "Ghcr.io/X/Y:v1", "ghcr.io/x/y@" + testImageDigest, ""},
+		{"unparsable imageID name", image, "ghcr.io/X/Y@" + testImageDigest, ""},
+		{"bare local image ID", image, testImageDigest, ""},
+		{"docker local image ID", image, "docker://" + testImageDigest, ""},
+		{"invalid digest", image, "ghcr.io/x/y@sha256:abc", ""},
+		{"digest without algorithm", image, "example.com/image@invalid", ""},
+		{"empty", image, "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := registryDigest(tt.imageID); got != tt.want {
-				t.Errorf("registryDigest(%q) = %q, want %q", tt.imageID, got, tt.want)
+			if got := registryDigest(tt.image, tt.imageID); got != tt.want {
+				t.Errorf("registryDigest(%q, %q) = %q, want %q", tt.image, tt.imageID, got, tt.want)
 			}
 		})
 	}
@@ -108,6 +118,8 @@ func TestContainerImage(t *testing.T) {
 		{"unreadable node omits platform", podOn("gone", "ghcr.io/x/validator@"+testImageDigest),
 			PodImage{Image: image, Digest: testImageDigest}, true},
 		{"no registry digest", podOn("gpu-0", testImageDigest), PodImage{Image: image}, true},
+		{"side-loaded image", podOn("gpu-0", "docker.io/library/import-2026-11-16@"+testImageDigest),
+			PodImage{Image: image}, true},
 		{"nil pod", nil, PodImage{}, false},
 		{"no such container", &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{
 			{Name: "sidecar", Image: "example.com/sidecar:v1"},
