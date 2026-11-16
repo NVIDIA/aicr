@@ -54,7 +54,11 @@ spec:
               metadata:
                 name: controller
                 namespace: knative-serving
+              # status.replicas counts old pods too. Requiring it to equal
+              # spec.replicas rejects a rollout whose old pod is still serving
+              # while its replacement is unready.
               ((spec.replicas || `0`) > `0`): true
+              ((status.replicas || `0`) == spec.replicas): true
               ((status.availableReplicas || `0`) == spec.replicas): true
               ((status.updatedReplicas || `0`) == spec.replicas): true
               ((status.observedGeneration || `0`) == metadata.generation): true
@@ -66,6 +70,7 @@ spec:
                 name: webhook
                 namespace: knative-serving
               ((spec.replicas || `0`) > `0`): true
+              ((status.replicas || `0`) == spec.replicas): true
               ((status.availableReplicas || `0`) == spec.replicas): true
               ((status.updatedReplicas || `0`) == spec.replicas): true
               ((status.observedGeneration || `0`) == metadata.generation): true
@@ -77,6 +82,7 @@ spec:
                 name: activator
                 namespace: knative-serving
               ((spec.replicas || `0`) > `0`): true
+              ((status.replicas || `0`) == spec.replicas): true
               ((status.availableReplicas || `0`) == spec.replicas): true
               ((status.updatedReplicas || `0`) == spec.replicas): true
               ((status.observedGeneration || `0`) == metadata.generation): true
@@ -88,6 +94,7 @@ spec:
                 name: autoscaler
                 namespace: knative-serving
               ((spec.replicas || `0`) > `0`): true
+              ((status.replicas || `0`) == spec.replicas): true
               ((status.availableReplicas || `0`) == spec.replicas): true
               ((status.updatedReplicas || `0`) == spec.replicas): true
               ((status.observedGeneration || `0`) == metadata.generation): true
@@ -99,6 +106,7 @@ spec:
                 name: autoscaler-hpa
                 namespace: knative-serving
               ((spec.replicas || `0`) > `0`): true
+              ((status.replicas || `0`) == spec.replicas): true
               ((status.availableReplicas || `0`) == spec.replicas): true
               ((status.updatedReplicas || `0`) == spec.replicas): true
               ((status.observedGeneration || `0`) == metadata.generation): true
@@ -110,6 +118,7 @@ spec:
                 name: net-kourier-controller
                 namespace: knative-serving
               ((spec.replicas || `0`) > `0`): true
+              ((status.replicas || `0`) == spec.replicas): true
               ((status.availableReplicas || `0`) == spec.replicas): true
               ((status.updatedReplicas || `0`) == spec.replicas): true
               ((status.observedGeneration || `0`) == metadata.generation): true
@@ -121,6 +130,7 @@ spec:
                 name: 3scale-kourier-gateway
                 namespace: knative-serving
               ((spec.replicas || `0`) > `0`): true
+              ((status.replicas || `0`) == spec.replicas): true
               ((status.availableReplicas || `0`) == spec.replicas): true
               ((status.updatedReplicas || `0`) == spec.replicas): true
               ((status.observedGeneration || `0`) == metadata.generation): true
