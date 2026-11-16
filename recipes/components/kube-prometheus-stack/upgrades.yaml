@@ -17,12 +17,27 @@
 # Alertmanager image from 84.4.0, and only Grafana, kube-state-metrics, rules,
 # dashboards and a Prometheus patch release from 83.7.0 (the AKS pin), so the
 # steps are about the values change.
+#
+# No AICR release pins 84.5.0, so a released cluster crosses the reduction and
+# the later chart bump in one upgrade. The reduction is the only boundary that
+# asks anything of an operator, so its to range reaches through the current pin
+# and skips lists the safe boundary inside it. A jump from below 84.5.0 then
+# lands on the reduction steps, and a bundle at the pin carries them, rather
+# than being told to stop at a version AICR never shipped.
+#
+# The steps were run for that direct jump on a single-node Kind v1.37.0
+# cluster, 2026-11-15, with the v1.2.0 EKS bundle (84.4.0, Grafana, PVC) as
+# the start and each bundle's own install.sh: the three leftovers carried the
+# names step 3 deletes and nothing else stayed behind, host port 9100 was free
+# for nktp's node-exporter, Prometheus queries were unavailable for about 36
+# seconds, and redeploying the v1.2.0 bundle brought the full stack back.
 apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: kube-prometheus-stack
 transitions:
   - from: "<84.5.0"
-    to: "84.5.0"
+    to: ">=84.5.0 <=88.6.5"
+    skips: ["88.6.5"]
     verdict: manual
     summary: >-
       The upgrade deletes Grafana, Alertmanager, node-exporter,
