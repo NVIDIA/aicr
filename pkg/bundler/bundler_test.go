@@ -483,6 +483,12 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	checksumsDir := func(t *testing.T, dir string) {
+		t.Helper()
+		if err := os.Mkdir(filepath.Join(dir, checksum.ChecksumFileName), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	fresh := t.TempDir()
 	writeTestBundle(t, fresh)
 	want := slices.Sorted(maps.Keys(treeSnapshot(t, fresh)))
@@ -519,6 +525,7 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 		{name: "foreign file in a populated static directory", setup: writeFile(filepath.Join("static", "stale.txt")), wantErr: true},
 		{name: "foreign directory in place of a bundle file", setup: writeFile(filepath.Join("README.md", "stale.txt")), wantErr: true},
 		{name: "sha256sum manifest", setup: sha256sumManifest, wantErr: true},
+		{name: "directory named checksums.txt", setup: checksumsDir, wantErr: true},
 		{
 			name:      "foreign file without checksums",
 			setup:     writeFile("stale.txt"),
@@ -530,6 +537,12 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 			setup:     sha256sumManifest,
 			opts:      []config.Option{config.WithIncludeChecksums(false)},
 			survivors: []string{"snapshot.yaml", checksum.ChecksumFileName},
+		},
+		{
+			name:      "directory named checksums.txt without checksums",
+			setup:     checksumsDir,
+			opts:      []config.Option{config.WithIncludeChecksums(false)},
+			survivors: []string{checksum.ChecksumFileName},
 		},
 		{
 			name:      "earlier bundle beside an attestation file without checksums",
