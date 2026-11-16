@@ -18,7 +18,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // CatalogEntry describes a single overlay entry in the recipe catalog.

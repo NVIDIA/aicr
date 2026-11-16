@@ -17,9 +17,9 @@ package aicr
 import (
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/artifact"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // RecipeDiagnostic describes a problem in a recipe authoring artifact.

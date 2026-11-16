@@ -18,8 +18,8 @@ import (
 	stderrors "errors"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/artifact"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/errors"
 )
 
 // ArtifactOptions selects the same inventory and exceptions as AICRConfig.

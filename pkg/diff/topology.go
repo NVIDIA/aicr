@@ -17,8 +17,8 @@ package diff
 import (
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/collector/topology"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/collector/topology"
+	"aicr.run/pkg/measurement"
 )
 
 // NodeTopology carries every label and taint reading twice: as items, and as

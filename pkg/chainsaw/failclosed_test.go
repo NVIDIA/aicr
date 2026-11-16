@@ -24,7 +24,7 @@ import (
 	"github.com/kyverno/chainsaw/pkg/apis/v1alpha1"
 	"sigs.k8s.io/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // requireInvalidRequest asserts a rejection carries ErrCodeInvalidRequest, the

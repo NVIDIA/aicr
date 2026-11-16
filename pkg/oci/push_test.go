@@ -44,10 +44,10 @@ import (
 	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry/remote/errcode"
 
-	"github.com/NVIDIA/aicr/pkg/bundler"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler"
+	"aicr.run/pkg/bundler/config"
+	apperrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // testOCIResult holds common results from OCI packaging operations in tests.

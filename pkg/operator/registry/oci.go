@@ -17,7 +17,7 @@ package registry
 import (
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
+	"aicr.run/pkg/operator/defaults"
 )
 
 // MirrorOCIChart copies a chart from an upstream OCI registry into

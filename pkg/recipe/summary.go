@@ -15,8 +15,8 @@
 package recipe
 
 import (
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
 )
 
 // RecipeSummaryKind is the kind of a Summary document. It differs from

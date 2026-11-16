@@ -142,7 +142,7 @@ workspace paths. Use local file paths only when explicitly requested.
 
 **Errors (always use pkg/errors):**
 ```go
-import "github.com/NVIDIA/aicr/pkg/errors"
+import "aicr.run/pkg/errors"
 
 // Simple error
 return errors.New(errors.ErrCodeNotFound, "GPU not found")
@@ -164,7 +164,7 @@ In files that import `pkg/errors`, the stdlib `errors` package is aliased as `st
 ```go
 import (
     stderrors "errors"
-    "github.com/NVIDIA/aicr/pkg/errors"
+    "aicr.run/pkg/errors"
 )
 
 // GOOD - idiomatic, works through wrap chains

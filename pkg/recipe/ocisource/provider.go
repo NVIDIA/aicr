@@ -24,10 +24,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/oci"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/defaults"
+	apperrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/oci"
+	"aicr.run/pkg/recipe"
 )
 
 const closedSource = "OCI recipe source (closed)"

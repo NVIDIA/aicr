@@ -20,7 +20,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // newConstraint is the only place IncludePrerelease is set. Masterminds

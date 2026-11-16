@@ -30,9 +30,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/artifact"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 	"github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
 	"gopkg.in/yaml.v3"
 )

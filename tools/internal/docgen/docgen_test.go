@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NVIDIA/aicr/tools/internal/docgen"
+	"aicr.run/tools/internal/docgen"
 )
 
 func TestWriteRendered(t *testing.T) {

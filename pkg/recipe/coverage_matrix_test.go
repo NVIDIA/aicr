@@ -21,7 +21,7 @@ import (
 	"sort"
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 

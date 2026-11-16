@@ -55,13 +55,13 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/helm"
-	"github.com/NVIDIA/aicr/pkg/inventory"
-	"github.com/NVIDIA/aicr/pkg/k8s/client"
-	"github.com/NVIDIA/aicr/pkg/logging"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/helm"
+	"aicr.run/pkg/inventory"
+	"aicr.run/pkg/k8s/client"
+	"aicr.run/pkg/logging"
+	"aicr.run/pkg/recipe"
 )
 
 const usageHeader = `Usage: go run ./tools/cleanup [flags]

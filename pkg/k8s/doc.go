@@ -53,7 +53,7 @@
 //
 // For most use cases, import and use the client sub-package:
 //
-//	import "github.com/NVIDIA/aicr/pkg/k8s/client"
+//	import "aicr.run/pkg/k8s/client"
 //
 //	// Get shared client instance
 //	clientset, _, err := client.GetKubeClient()
@@ -61,8 +61,8 @@
 // For agent deployment, import the agent sub-package:
 //
 //	import (
-//	    "github.com/NVIDIA/aicr/pkg/k8s/agent"
-//	    "github.com/NVIDIA/aicr/pkg/runid"
+//	    "aicr.run/pkg/k8s/agent"
+//	    "aicr.run/pkg/runid"
 //	)
 //
 //	// Deploy snapshot agent. RunID scopes every object the deployment

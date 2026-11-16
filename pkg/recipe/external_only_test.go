@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 func TestExternalOnlyProviderNeverReadsEmbedded(t *testing.T) {

@@ -17,7 +17,7 @@ package aicrjob
 import (
 	"fmt"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // AICR CLI exit codes, frozen at v1 (NVIDIA/aicr pkg/errors/exitcode.go at

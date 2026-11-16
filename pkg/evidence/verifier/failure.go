@@ -20,8 +20,8 @@ import (
 
 	"oras.land/oras-go/v2/registry/remote/errcode"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/internal/boundedio"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/internal/boundedio"
 )
 
 // recordFailure sets the exit code and the failure cause together, so the two

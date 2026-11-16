@@ -19,8 +19,8 @@ import (
 	"os"
 	"path/filepath"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/errors"
 )
 
 // Signer signs the in-toto Statement carrying the recipe-evidence

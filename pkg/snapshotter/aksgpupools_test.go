@@ -23,9 +23,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	k8scollector "aicr.run/pkg/collector/k8s"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/serializer"
 )
 
 func writePoolsFile(t *testing.T, content string) string {

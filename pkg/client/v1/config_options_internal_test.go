@@ -17,9 +17,9 @@ package aicr
 import (
 	"testing"
 
-	appconfig "github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	appconfig "aicr.run/pkg/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // RecipeResolveOptions returns opaque functional options. The external

@@ -26,9 +26,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 const testGPUUUID = "GPU-0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"

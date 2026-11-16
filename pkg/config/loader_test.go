@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/config"
+	"aicr.run/pkg/config"
 )
 
 const validYAML = `kind: AICRConfig

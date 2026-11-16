@@ -23,7 +23,7 @@
 package main
 
 import (
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/validators"
 )
 
 func main() {

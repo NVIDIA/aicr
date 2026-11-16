@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicr "aicr.run/pkg/client/v1"
 )
 
 // REST is one of the four surfaces ROADMAP.md freezes at v1, and the curl

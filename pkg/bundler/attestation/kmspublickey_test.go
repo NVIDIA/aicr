@@ -19,9 +19,9 @@ import (
 	stderrors "errors"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func TestResolveKMSPublicKey_UnknownScheme(t *testing.T) {

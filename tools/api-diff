@@ -38,7 +38,7 @@ has_tools apidiff git yq
 # from the module cache instead of the current source tree.
 cd "${REPO_ROOT}"
 
-readonly PACKAGE='github.com/NVIDIA/aicr/pkg/client/v1'
+readonly PACKAGE='aicr.run/pkg/client/v1'
 readonly MODULE_PATH="${PACKAGE%/pkg/client/v1}"
 # apidiff treats an alias to an external named type as only the target package
 # path plus type name; it does not recursively compare the target definition.
@@ -53,17 +53,17 @@ readonly MODULE_PATH="${PACKAGE%/pkg/client/v1}"
 # alias|target package|root type. Each mapping is kept explicit so the
 # syntax-aware exhaustiveness check can detect alias retargeting.
 readonly ALIAS_TARGETS=(
-    'ArtifactOptions|github.com/NVIDIA/aicr/pkg/artifact|Options'
-    'BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config'
-    'BundleAttester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester'
-    'OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions'
-    'BundleArtifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output'
-    'CriteriaRegistry|github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry'
-    'BundleVerifyReport|github.com/NVIDIA/aicr/pkg/bundler/verifier|VerifyResult'
-    'EvidenceVerification|github.com/NVIDIA/aicr/pkg/evidence/verifier|VerifyResult'
-    'UpgradeReport|github.com/NVIDIA/aicr/pkg/upgrade|Report'
-    'CNCFRequirementAggregate|github.com/NVIDIA/aicr/pkg/evidence/cncf|Aggregate'
-    'RecipeSummary|github.com/NVIDIA/aicr/pkg/recipe|Summary'
+    'ArtifactOptions|aicr.run/pkg/artifact|Options'
+    'BundleConfig|aicr.run/pkg/bundler/config|Config'
+    'BundleAttester|aicr.run/pkg/bundler/attestation|Attester'
+    'OIDCResolveOptions|aicr.run/pkg/bundler/attestation|ResolveOptions'
+    'BundleArtifact|aicr.run/pkg/bundler/result|Output'
+    'CriteriaRegistry|aicr.run/pkg/recipe|CriteriaRegistry'
+    'BundleVerifyReport|aicr.run/pkg/bundler/verifier|VerifyResult'
+    'EvidenceVerification|aicr.run/pkg/evidence/verifier|VerifyResult'
+    'UpgradeReport|aicr.run/pkg/upgrade|Report'
+    'CNCFRequirementAggregate|aicr.run/pkg/evidence/cncf|Aggregate'
+    'RecipeSummary|aicr.run/pkg/recipe|Summary'
 )
 readonly GO_MOD_FILE="${REPO_ROOT}/go.mod"
 readonly EXCEPTIONS_FILE="${API_DIFF_EXCEPTIONS_FILE:-${REPO_ROOT}/pkg/client/v1/api-diff-exceptions.yaml}"

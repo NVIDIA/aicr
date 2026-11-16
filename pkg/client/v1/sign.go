@@ -17,10 +17,10 @@ package aicr
 import (
 	"context"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	evattest "github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	recipecat "github.com/NVIDIA/aicr/pkg/recipe/catalog"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/errors"
+	evattest "aicr.run/pkg/evidence/attestation"
+	recipecat "aicr.run/pkg/recipe/catalog"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
 )

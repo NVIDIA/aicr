@@ -17,7 +17,7 @@ package bundler
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 // TestInjectDRAChartVersionAnnotation_PositiveCase pins the happy

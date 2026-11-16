@@ -185,8 +185,8 @@ func classify(obj types.Object) symbolClass {
 func TestPackageQualifiedRefs(t *testing.T) {
 	t.Parallel()
 
-	loaded := loadForAnalysis(t, "github.com/NVIDIA/aicr/pkg/server")
-	refs := packageQualifiedRefs(loaded["github.com/NVIDIA/aicr/pkg/server"], "github.com/NVIDIA/aicr/")
+	loaded := loadForAnalysis(t, "aicr.run/pkg/server")
+	refs := packageQualifiedRefs(loaded["aicr.run/pkg/server"], "github.com/NVIDIA/aicr/")
 
 	// pkg/server is known to reference pkg/errors behaviorally and to name the
 	// facade. If either disappears the gate's own inputs have changed.
@@ -371,8 +371,8 @@ func (f fixtureImporter) Import(path string) (*types.Package, error) {
 func TestForeignMethodRefs(t *testing.T) {
 	t.Parallel()
 
-	loaded := loadForAnalysis(t, "github.com/NVIDIA/aicr/pkg/server")
-	refs := foreignMethodRefs(loaded["github.com/NVIDIA/aicr/pkg/server"], "github.com/NVIDIA/aicr/")
+	loaded := loadForAnalysis(t, "aicr.run/pkg/server")
+	refs := foreignMethodRefs(loaded["aicr.run/pkg/server"], "github.com/NVIDIA/aicr/")
 
 	if len(refs) == 0 {
 		t.Fatal("no foreign-type method calls found in pkg/server; the pass is not working")

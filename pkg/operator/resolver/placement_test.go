@@ -24,8 +24,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/registry/registrytest"
 )
 
 // groupPaths is one placement group's paths in AICR v1.0.0's

@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/allocpolicy"
+	"aicr.run/pkg/allocpolicy"
 )
 
 func cksCriteria(accelerator CriteriaAcceleratorType) *Criteria {

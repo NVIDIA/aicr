@@ -25,8 +25,8 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 	"github.com/sigstore/sigstore/pkg/oauthflow"
 )
 

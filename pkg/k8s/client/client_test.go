@@ -23,9 +23,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func assertKubeconfigErrorContext(t *testing.T, err error, wantKubeconfig string) {

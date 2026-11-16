@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // Chart content a wrapper archive carries. AICR's install script and

@@ -28,11 +28,11 @@ import (
 	"github.com/google/go-containerregistry/pkg/registry"
 	"gopkg.in/yaml.v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/serializer"
 )
 
 func TestValidateImageRefsUse(t *testing.T) {

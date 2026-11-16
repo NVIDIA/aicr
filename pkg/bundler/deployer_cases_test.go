@@ -17,7 +17,7 @@ package bundler
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"aicr.run/pkg/bundler/config"
 )
 
 // deployerCase is one bundle shape a cross-deployer guard test must cover:

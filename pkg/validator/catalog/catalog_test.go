@@ -23,11 +23,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	operatordefaults "github.com/NVIDIA/aicr/pkg/operator/defaults"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/defaults"
+	operatordefaults "aicr.run/pkg/operator/defaults"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
+	v1 "aicr.run/pkg/validator/v1"
 	"gopkg.in/yaml.v3"
 )
 

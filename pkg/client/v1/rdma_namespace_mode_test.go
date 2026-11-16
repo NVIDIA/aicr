@@ -18,9 +18,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
 )
 
 func rdmaModeSnapshot(readings map[string]measurement.Reading) *snapshotter.Snapshot {

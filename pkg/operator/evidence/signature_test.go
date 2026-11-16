@@ -24,7 +24,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // The fingerprint read from a key signature's hint is the one AICR names

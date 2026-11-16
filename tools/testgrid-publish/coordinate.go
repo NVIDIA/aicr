@@ -15,7 +15,7 @@
 package main
 
 import (
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 // RecipeCriteria holds the resolved dimensions extracted from recipe.yaml.

@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 // TestNetworkOperatorReadinessRequiresEveryNicClusterPolicy exercises the

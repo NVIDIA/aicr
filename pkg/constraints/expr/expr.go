@@ -29,8 +29,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/version"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/version"
 )
 
 // Operator represents a comparison operator in constraint expressions.

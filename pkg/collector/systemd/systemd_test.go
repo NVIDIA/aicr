@@ -20,7 +20,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/measurement"
 )
 
 func TestSystemDCollector_Collect_ContextCancellation(t *testing.T) {

@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"testing"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 )
 
 func TestParseOutputTarget(t *testing.T) {

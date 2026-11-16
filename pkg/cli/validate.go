@@ -26,16 +26,16 @@ import (
 	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/defaults"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	"github.com/NVIDIA/aicr/pkg/validator/labels"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator"
+	"aicr.run/pkg/validator/ctrf"
+	"aicr.run/pkg/validator/labels"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 // validateNameBase is the prefix applied to the live-capture snapshot

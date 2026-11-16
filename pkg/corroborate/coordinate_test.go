@@ -21,8 +21,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/recipe"
 )
 
 func TestCriteriaFromCoordinate(t *testing.T) {

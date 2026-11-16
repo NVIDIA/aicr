@@ -25,9 +25,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat/localformattest"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/deployer/localformat/localformattest"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 const testBundlerVersion = "v1.0.0"

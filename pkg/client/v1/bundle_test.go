@@ -25,11 +25,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler"
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/config"
+	aicr "aicr.run/pkg/client/v1"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 // resolveEmbeddedTrainingRecipe resolves a known-good embedded recipe

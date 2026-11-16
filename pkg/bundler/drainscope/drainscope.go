@@ -34,8 +34,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // ComponentName is the registry name of the component whose values Apply

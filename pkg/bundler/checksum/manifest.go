@@ -23,7 +23,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // Entry is one checksums.txt payload record.

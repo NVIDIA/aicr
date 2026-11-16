@@ -18,7 +18,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // ResolvedLeaf pairs a leaf catalog entry with its hermetic resolution outcome.

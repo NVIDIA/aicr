@@ -19,11 +19,11 @@ import (
 	"log/slog"
 	"strings"
 
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/validator/catalog"
+	"aicr.run/validators"
 	"github.com/Masterminds/semver/v3"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
-	"github.com/NVIDIA/aicr/validators"
 )
 
 const dynamoPlatformComponent = "dynamo-platform"
