@@ -48,3 +48,4 @@ transitions:
       - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.91.0
       - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.92.0
       - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.93.0
+      - https://github.com/prometheus-operator/prometheus-operator/releases/tag/v0.93.1
