@@ -51,7 +51,7 @@ type EvidenceOptions struct {
 
 	// BOMPath optionally embeds a CycloneDX BOM; when empty a recipe-bound
 	// BOM is synthesized from the recipe's component refs and the validator
-	// catalog images that ran.
+	// images the phase results recorded.
 	BOMPath string
 
 	// Push, when set, is the OCI reference to push the (optionally signed)
@@ -79,8 +79,8 @@ type EvidenceOptions struct {
 	// because the attestation would name that image by a tag that can move.
 	AllowMutableValidatorTags bool
 
-	// Commit is the build commit. It resolves the validator catalog for the
-	// bundle's BOM and is stamped into the predicate as AICRCommit. The
+	// Commit is the build commit. It resolves the validator catalog whose
+	// version the predicate records, and is stamped into it as AICRCommit. The
 	// Client has no commit of its own, so it is supplied per call.
 	Commit string
 

@@ -1270,7 +1270,8 @@ After the command finishes:
     ├── recipe.yaml               # canonical post-resolution recipe
     ├── snapshot.yaml             # snapshot at validate-time (minimized by default)
     ├── bom.cdx.json              # CycloneDX BOM (auto-generated from
-    │                             #   recipe + validator catalog when
+    │                             #   recipe, recorded validator images
+    │                             #   and observed cluster images when
     │                             #   --bom is omitted)
     ├── ctrf/                     # per-phase test results (per-test stdout/message omitted by default)
     ├── manifest.json             # per-file sha256 inventory

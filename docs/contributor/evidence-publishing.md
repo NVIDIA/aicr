@@ -94,8 +94,8 @@ caller cannot read Nodes. A validator reports the images of workloads it
 launches, such as the `aiperf-bench` Job, with the `##AICR-IMAGE##` sentinel.
 
 `validatorImages` lists each distinct image, digest and platform in the
-bundled CTRF reports, after redaction. The catalog supplies
-`validatorCatalogVersion` and the auto BOM's validator images.
+bundled CTRF reports, after redaction. The catalog supplies only
+`validatorCatalogVersion`.
 
 - A check records its validator image once its Job is created, even if it
   skips itself in its pod.
