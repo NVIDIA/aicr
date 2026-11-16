@@ -282,7 +282,24 @@ func TestExtractComponentValuesInstallSizing(t *testing.T) {
 			},
 		},
 		{
-			name: "--set request above a row's limit fails", set: map[string]string{"operator.resources.requests.memory": "900Mi"},
+			name: "no count: a limit below a --set request is left out of its row", wantLim: "8Gi",
+			set: map[string]string{"operator.resources.requests.memory": "900Mi"},
+			wantRows: []argocdhelm.SizingRow{
+				{MaxNodes: 250, Values: map[string]any{}},
+				{MaxNodes: 450, Values: resourcesValues(nil, "1Gi")},
+			},
+		},
+		{
+			name: "count selects another row: the undercut limit is left out", nodes: 400, wantLim: "8Gi",
+			set: map[string]string{"operator.resources.requests.memory": "900Mi"},
+			wantRows: []argocdhelm.SizingRow{
+				{MaxNodes: 250, Values: map[string]any{}},
+				{MaxNodes: 450, Values: resourcesValues(nil, "1Gi")},
+			},
+		},
+		{
+			name: "count selects a row whose limit a --set request exceeds", nodes: 200,
+			set:      map[string]string{"operator.resources.requests.memory": "900Mi"},
 			wantCode: errors.ErrCodeInvalidRequest,
 		},
 		{name: "--dynamic sized path rejected", dynamic: []string{"operator.resources"}, wantCode: errors.ErrCodeInvalidRequest},

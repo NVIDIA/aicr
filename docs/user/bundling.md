@@ -571,7 +571,8 @@ each request and limit becomes the smaller of the recipe's value and the
 tier's. With no count, or a count above the highest tier, the bundle is
 unchanged. It never touches a path set by the recipe's inline overrides, a
 profile-locked path, or a `--set`, `--set-json` or `--set-file` override, and
-a bundle whose override leaves a sized request above its limit fails.
+a bundle whose count and override leave a sized request above its limit
+fails.
 
 ```bash
 aicr bundle --recipe recipe.yaml --nodes 200 --output ./bundles
@@ -600,8 +601,8 @@ With `--vendor-charts` the charts are sized when the bundle is generated,
 like local charts, so state `--nodes` then: `sizing.nodeCount` does not
 lower them.
 
-Each sized child Application carries `aicr.nvidia.com/sizing-node-count`, and
-`aicr.nvidia.com/sizing-tier` when a tier changed its values. A component's
+Each sized child Application carries `aicr.run/sizing-node-count`, and
+`aicr.run/sizing-tier` when a tier changed its values. A component's
 own root-chart values still win over the tier. The chart does not compare
 quantities, so an install-time request above the selected limit is rejected
 by the API server when Argo CD syncs, not by `helm install`.

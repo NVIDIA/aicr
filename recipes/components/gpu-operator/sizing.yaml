@@ -35,6 +35,7 @@ resources:
           - sets: [limits]
             kind: instantaneous
             gpuNodes: 141
+            nodes: 147
             pods: 5500
             max: 319Mi
             date: 2026-10-14

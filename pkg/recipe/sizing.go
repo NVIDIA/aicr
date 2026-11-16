@@ -225,6 +225,25 @@ func (r *SizingResource) validate(file string) error {
 			above[field] = q
 		}
 	}
+	// A field a tier leaves out runs at today's value there, so no tier
+	// above it may set less.
+	omitted := map[string]int{}
+	for i := range r.Tiers {
+		t := &r.Tiers[i]
+		set := t.quantities()
+		for _, field := range []string{SizingFieldRequests, SizingFieldLimits} {
+			if _, ok := set[field]; !ok {
+				if _, seen := omitted[field]; !seen {
+					omitted[field] = t.MaxNodes
+				}
+				continue
+			}
+			if below, seen := omitted[field]; seen {
+				return sizingErr(file, "resource %q tier maxNodes %d: sets %s memory, which tier maxNodes %d below it leaves out",
+					r.Path, t.MaxNodes, field, below)
+			}
+		}
+	}
 	return nil
 }
 

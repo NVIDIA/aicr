@@ -24,7 +24,9 @@ a value is a data change.
   recipe's inline `overrides`, an ADR-015 profile lock set, or a `--set`,
   `--set-json` or `--set-file` override.
 - After every override, a sized request above its limit fails the bundle with
-  `ErrCodeInvalidRequest`.
+  `ErrCodeInvalidRequest`. On `argocd-helm` only the row the bundle's own
+  `--nodes` selects is checked; every other row leaves out a limit that is
+  below the static request, so a bundle with no count always builds.
 - On `argocd-helm`, an upstream chart that is not vendored is sized at install
   time: the bundler writes `static/<name>-sizing.yaml` with one row per tier
   bound, and the child Application template merges the row
@@ -73,11 +75,15 @@ The loader fails closed on: an `apiVersion` or `kind` other than
 `aicr.run/v1beta1` and `ComponentSizing`; a malformed `path`; a `basis` other
 than `gpuNodes`; `maxNodes` values that do not strictly ascend; an
 unparseable quantity; a limit below its request; a tier value above the same
-field in the next higher tier; a limit at or below a `truncatedAt` recorded
+field in the next higher tier; a request or limit set in a tier above one
+that leaves it out; a limit at or below a `truncatedAt` recorded
 in the same tier; a tier that sets `requests` or `limits` with no measurement
 whose `sets` names it; and a measurement missing `kind`, `gpuNodes`, `max` or
 `date`, a windowed one missing `window`, or a windowed one that sets `limits`
-missing `nodes`.
+missing `nodes`. Any one failure rejects the whole file.
+
+An instantaneous reading that sets a limit without `nodes` covers clusters
+only up to its `gpuNodes` in total.
 
 `TestRegistrySizingPathsAreSet` fails when a sizing path sets memory in none
 of the component's `values*.yaml` files, so a key renamed by a chart bump
@@ -105,7 +111,8 @@ manifests reads: those are rendered at generation time and cannot follow
   OOM-killed is not a limit candidate. If the tier holds one, add the nearest
   reading above the bound whose peak exceeds the limit that killed it; the
   limit is still the highest peak among all candidates. With no such reading
-  above the bound, leave the limit out of the tier.
+  above the bound, leave the limit out of the tier and of every tier above
+  it.
 - **Instantaneous readings** stand in for p90 as they are, and × 1.7 for the
   peak.
 - **DaemonSets:** the request uses the median across pods of each pod's p90;
@@ -114,9 +121,10 @@ manifests reads: those are rendered at generation time and cannot follow
   the drifted peak.
 - **Rounding:** up to a multiple of 256Mi below 2Gi, of 512Mi from 2Gi.
 - **Ordering:** derive tiers from the lowest up. A tier's request and limit
-  are each at least the tier below's; a tier may equal the tier above.
+  are each at least the tier below's; a tier may equal the tier above. A
+  request or limit one tier leaves out is left out of every tier above it.
 - **The values files are the ceiling:** leave out a request or limit whose
-  requirement is at or above the values file's, in that tier and every tier
+  requirement, after rounding, is at or above the values file's, in that tier and every tier
   above it. Where values files differ for a path, use the highest. A values
   file whose limit is below a peak measured on its own platform is undersized:
   fix that file.
