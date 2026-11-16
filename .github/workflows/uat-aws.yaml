@@ -126,14 +126,17 @@ jobs:
     #                       DCGM diagnostic before uncordon                    = 240
     # uat-run.yaml accepts nvsentinel_remediation on helmfile+training only.
     #
-    # Total = ~30 setup + <UAT> + ~8 debug + ~8 LB cleanup + ~55 teardown. The
-    # worst case is the remediation row: ~30 + 240 + ~8 + ~8 + ~55 = ~341, so
-    # 350 leaves ~9m of teardown headroom; argocd+training is ~316. The
-    # diagnostic (#3089) cannot be trimmed from a run that asserts the uncordon
-    # after it. The "not shipped today" argocd+inference row would be ~331,
-    # inside this cap. If this grows further the lever is trimming bounded
-    # work above.
-    timeout-minutes: 350
+    # Total = ~40 setup + <UAT> + ~8 debug + ~8 LB cleanup + ~55 teardown.
+    # Setup includes up to 20m of GPU capacity wait in Bringup Infra (the CT
+    # cluster config sets capacityTimeout: 20m, #3832). The worst case is the
+    # remediation row: ~40 + 240 + ~8 + ~8 + ~55 = ~351, so 360, the
+    # GitHub-hosted job maximum, leaves ~9m of teardown headroom;
+    # argocd+training is ~326. The diagnostic (#3089) cannot be trimmed from a
+    # run that asserts the uncordon after it. The "not shipped today"
+    # argocd+inference row would be ~341, inside this cap. The cap cannot be
+    # raised further, so if this grows the lever is trimming bounded work
+    # above.
+    timeout-minutes: 360
     permissions:
       contents: read
       actions: read

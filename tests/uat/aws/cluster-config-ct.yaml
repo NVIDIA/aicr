@@ -166,6 +166,14 @@ network:
 
 compute:
   eks:
+    # How long Terraform waits for the GPU worker ASG to reach healthy capacity
+    # (actuator default 10m). Since v0.5.4 the wait rides out failed scaling
+    # activities, but on 2026-11-15 targeted launches against the CT
+    # reservation kept failing with InsufficientInstanceCapacity for over 10m
+    # while it reported free instances (#3832). The extra wait is budgeted in
+    # the uat-aws.yaml job timeout.
+    autoscaling:
+      capacityTimeout: 20m
     nodeGroups:
       system:
         instanceType: m7i.xlarge
