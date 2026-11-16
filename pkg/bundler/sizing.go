@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"slices"
 	"strconv"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -126,7 +127,7 @@ func (b *DefaultBundler) installRows(p sizingPlan, ref *recipe.ComponentRef, val
 	skip := func(path string) bool {
 		return p.recipeSets(path) || overrideReaches(sets, path) || overrideReaches(typed, path)
 	}
-	return installSizingRows(ref, values, skip, p.sz)
+	return installSizingRows(ref, values, skip, p.sz, b.Config.EstimatedNodeCount())
 }
 
 // installSizing returns the rows of every component in componentValues that
@@ -194,11 +195,13 @@ func recipeSetsPath(rr *recipe.RecipeResult, ref *recipe.ComponentRef) func(stri
 
 // installSizingRows builds one row per tier bound for an argocd-helm
 // component sized at install: each row holds the fields that tier lowers
-// from the final values, skipping every path skip reaches. A row merged
-// over values must keep each request within its limit. Rows above the
-// highest one that lowers something are dropped.
+// from the final values, skipping every path skip reaches. The row that
+// count n selects must keep each request within its limit; any other row
+// leaves out a limit that would undercut a request, so a bundle with no
+// count builds whatever its overrides. Rows above the highest one that
+// lowers something are dropped.
 func installSizingRows(ref *recipe.ComponentRef, values map[string]any, skip func(string) bool,
-	sz *recipe.ComponentSizing) ([]argocdhelm.SizingRow, error) {
+	sz *recipe.ComponentSizing, n int) ([]argocdhelm.SizingRow, error) {
 
 	var bounds []int
 	for i := range sz.Resources {
@@ -209,6 +212,11 @@ func installSizingRows(ref *recipe.ComponentRef, values map[string]any, skip fun
 	slices.Sort(bounds)
 	bounds = slices.Compact(bounds)
 
+	selected := -1
+	if i, _ := slices.BinarySearch(bounds, n); n > 0 && i < len(bounds) {
+		selected = bounds[i]
+	}
+
 	rows := make([]argocdhelm.SizingRow, 0, len(bounds))
 	last := -1
 	for _, bound := range bounds {
@@ -218,10 +226,14 @@ func installSizingRows(ref *recipe.ComponentRef, values map[string]any, skip fun
 			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest, "failed to size component memory", err,
 				map[string]any{errCtxKeyComponent: ref.Name})
 		}
-		if err := checkSizedRequestsWithinLimits(merged, sz, bound); err != nil {
-			return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("sized memory request exceeds its limit at sizing.nodeCount %d", bound), err,
-				map[string]any{errCtxKeyComponent: ref.Name})
+		if bound == selected {
+			if err := checkSizedRequestsWithinLimits(merged, sz, bound); err != nil {
+				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("sized memory request exceeds its limit at sizing.nodeCount %d", bound), err,
+					map[string]any{errCtxKeyComponent: ref.Name})
+			}
+		} else {
+			applied = dropUndercutLimits(applied, merged)
 		}
 		row := argocdhelm.SizingRow{MaxNodes: bound, Values: map[string]any{}}
 		for _, a := range applied {
@@ -233,6 +245,25 @@ func installSizingRows(ref *recipe.ComponentRef, values map[string]any, skip fun
 		rows = append(rows, row)
 	}
 	return rows[:last+1], nil
+}
+
+// dropUndercutLimits removes from applied each lowered limit that is below
+// the memory request beside it in merged.
+func dropUndercutLimits(applied []sizedField, merged map[string]any) []sizedField {
+	const limitSuffix = "." + recipe.SizingFieldLimits + ".memory"
+	return slices.DeleteFunc(applied, func(a sizedField) bool {
+		base, isLimit := strings.CutSuffix(a.Path, limitSuffix)
+		if !isLimit {
+			return false
+		}
+		reqV, ok := component.GetValueByPath(merged, base+"."+recipe.SizingFieldRequests+".memory")
+		if !ok {
+			return false
+		}
+		req, reqErr := quantityOf(reqV)
+		lim, limErr := quantityOf(a.To)
+		return reqErr == nil && limErr == nil && req.Cmp(lim) > 0
+	})
 }
 
 // rejectDynamicSizedPaths fails when a --dynamic path overlaps a path sizing

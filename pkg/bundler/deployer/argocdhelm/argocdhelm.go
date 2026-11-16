@@ -108,6 +108,7 @@ import (
 	"aicr.run/pkg/bundler/deployer/localformat"
 	"aicr.run/pkg/component"
 	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
 	"aicr.run/pkg/recipe"
 	"aicr.run/pkg/serializer"
 )
@@ -206,8 +207,8 @@ const rootValuesSizingKey = "sizing"
 
 const (
 	sizingFileSuffix             = "-sizing"
-	annotationSizingNodeCount    = "aicr.nvidia.com/sizing-node-count"
-	annotationSizingTier         = "aicr.nvidia.com/sizing-tier"
+	annotationSizingNodeCount    = header.Domain + "/sizing-node-count"
+	annotationSizingTier         = header.Domain + "/sizing-tier"
 	sizingTierAnnotationSentinel = "__aicr_sizing_tier__"
 )
 
