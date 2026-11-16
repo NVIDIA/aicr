@@ -198,7 +198,7 @@ gate.
 | Bundle layout and artifact schemas | `pkg/bundler/testdata/layout/manifests/` and `api/aicr/v1/schemas/baseline/`, gated by `make test` |
 
 An integrator can implement the snapshot, recipe, bundle, validate, and
-evidence workflows through `github.com/NVIDIA/aicr/pkg/client/v1` without
+evidence workflows through `aicr.run/pkg/client/v1` without
 importing another AICR `pkg/*` package. [RELEASE.md](RELEASE.md#deprecation-policy)
 defines breaking changes and the deprecation policy for every surface; breaking
 changes after v1 require a major version bump. Artifact maturity is a separate
