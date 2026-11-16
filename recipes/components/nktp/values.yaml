@@ -23,7 +23,10 @@
 # absolute CPU as before. The HPA divides usage by the whole pod's request,
 # including the native otc-sidecar (20m on the gateways and watchdog, 10m on
 # large_target_metrics): (request + sidecar) x target equals NKTP's default.
-# Memory requests, all limits, and replica floors stay NKTP's.
+# Cluster-scoped pods without an HPA (target allocators, cluster_events, the
+# kube-state-metrics shard Deployments) keep a 100m floor, since their load
+# grows with cluster size; per-node pods drop further. Memory requests, all
+# limits, and replica floors stay NKTP's.
 
 # Collectors schedule ahead of workloads but never evict a running pod. The
 # field is immutable: changing it on an installed cluster means deleting the
@@ -150,7 +153,7 @@ watchdog:
     targetAllocator:
       resources:
         requests:
-          cpu: 50m
+          cpu: 100m
     volumeClaimTemplates: []
     volumeMounts:
       - name: internal-tls-server
@@ -180,7 +183,7 @@ large_target_metrics:
     targetAllocator:
       resources:
         requests:
-          cpu: 50m
+          cpu: 100m
 
 daemonset:
   kubernetes:
@@ -190,16 +193,47 @@ daemonset:
     targetAllocator:
       resources:
         requests:
-          cpu: 50m
+          cpu: 100m
 
 cluster_events:
   kubernetes:
     resources:
       requests:
-        cpu: 50m
+        cpu: 100m
 
 kube-state-metrics:
   kubernetes:
     resources:
       requests:
         cpu: 25m
+  deployments:
+    unscheduled-pods:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m
+    workloads:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m
+    networking:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m
+    storage:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m
+    configuration:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m
+    cluster:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m
