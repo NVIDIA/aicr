@@ -706,9 +706,6 @@ func (g *Generator) writeSources(helmSources map[string]*HelmRepoSourceData,
 // as readily as it removes empty directories. Lstat rather than Stat
 // additionally rejects a symlink here.
 //
-// Only a Generator called directly can find anything at this path.
-// DefaultBundler generates into a new staging directory.
-//
 // The guarantee stops there. This is a check-then-act on a path, so a symlink
 // planted between this call and the MkdirAll or Remove that follows is not
 // caught. Closing that would require openat-based operations throughout, and

@@ -527,8 +527,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 // break, without writing to outputDir: a dynamic path that intersects a
 // guarded path, whose stub in the root values.yaml the lock would reject on
 // every render, and stale artifacts of a guarded component the bundle omits.
-// Generate runs it for direct callers. The bundler runs it against the real
-// output directory, because Generate writes into a fresh stage.
+// Generate runs it against its own outputDir, so a caller that generates into
+// a staging directory must also run it against the real output directory.
 func ValidateDriverOwnership(
 	ctx context.Context, result *recipe.RecipeResult, dynamicValues map[string][]string,
 	vendorCharts bool, outputDir string,
@@ -1172,9 +1172,6 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 // The check matters most before removal, since os.Remove unlinks regular files
 // as readily as it removes empty directories. Lstat rather than Stat
 // additionally rejects a symlink here.
-//
-// Only a Generator called directly can find anything at this path.
-// DefaultBundler generates into a new staging directory.
 //
 // The guarantee stops there. This is a check-then-act on a path, so a symlink
 // planted between this call and the MkdirAll or Remove that follows is not

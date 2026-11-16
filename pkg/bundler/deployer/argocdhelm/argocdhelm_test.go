@@ -2032,9 +2032,6 @@ func TestGenerate_StaleStaticPathIsNotDestroyed(t *testing.T) {
 			// checkStaticPath's own message and DO pin the error code in both
 			// directions -- including the no-ErrCodeInternal check that keeps
 			// the CLI exit code at 2. Do not relax those.
-			//
-			// DefaultBundler generates into a new staging directory, so only
-			// a Generator called directly can meet a stale static/.
 			IncludeChecksums: true,
 		}
 	}
