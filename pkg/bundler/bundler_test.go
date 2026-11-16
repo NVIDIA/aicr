@@ -6519,6 +6519,27 @@ func TestMake_CopiesOnlyTrackedDataFiles(t *testing.T) {
 	}
 }
 
+func TestMake_RejectsFIFOUnderData(t *testing.T) {
+	dataDir := providertest.WriteDir(t, map[string][]byte{
+		recipe.RegistryFileName: []byte(providertest.EmptyRegistryYAML),
+	})
+	if err := unix.Mkfifo(filepath.Join(dataDir, "pipe.yaml"), 0o600); err != nil {
+		t.Skipf("FIFO unsupported: %v", err)
+	}
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rr := closedWorldRecipeResult()
+	rr.BindDataProvider(dataDirProvider(t, dataDir))
+	dir := filepath.Join(t.TempDir(), "out")
+	_, err = b.Make(t.Context(), rr, dir)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if _, statErr := os.Lstat(dir); !stderrors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("rejected run left output at %s: %v", dir, statErr)
+	}
+}
+
 func TestMake_OutputNamesPublishedDir(t *testing.T) {
 	tests := []struct {
 		name string
