@@ -1383,7 +1383,11 @@ bundle into `OutputDir` only once it is complete. A call that fails while
 rendering removes the stage and leaves `OutputDir` as it found it. A call
 that is killed leaves the stage behind, and a later call with checksums on
 fails on it until you delete it. An `OutputDir` that holds an earlier bundle
-is replaced. Every top-level folder named like a component folder, such as
+is replaced when that bundle's `checksums.txt` lists a matching
+`bundle-info.yaml`. An earlier bundle made with
+`config.WithIncludeChecksums(false)` is not recognized, so a later call with
+checksums on fails on any of its files the new bundle does not write.
+Every top-level folder named like a component folder, such as
 `001-notes/`, is removed whatever it holds, even when the new bundle does not
 write it, and so are the other leftover entries
 [Output directory](../user/bundling.md#output-directory) lists. Other content
