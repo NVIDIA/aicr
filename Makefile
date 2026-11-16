@@ -121,7 +121,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell check-docs-links bom-pinning-check check-depproxy-kit check-runner-labels check-upgrade-records check-dynamo-runtime-image ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, Dynamo runtime image tag, vendored action digests, and runner labels)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell check-docs-links bom-pinning-check check-depproxy-kit check-runner-labels check-upgrade-records check-dynamo-runtime-image check-module-path ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, Dynamo runtime image tag, vendored action digests, runner labels, and the pre-rename module path)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
@@ -131,6 +131,10 @@ check-depproxy-kit: ## Verifies the vendored Go proxy action matches upstream di
 .PHONY: check-runner-labels
 check-runner-labels: ## Rejects the floating ubuntu-latest runner label under .github/
 	@./tools/check-runner-labels
+
+.PHONY: check-module-path
+check-module-path: ## Fails on any line that still names the pre-rename Go module path (#3834)
+	@GOFLAGS="-mod=readonly" go run ./tools/module-rename -check -from github.com/NVIDIA/aicr # module-rename:keep
 
 # Standalone target — NOT part of `make lint` because it requires Docker
 # (the validator runs in the same image renovatebot/github-action wraps).
