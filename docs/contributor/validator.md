@@ -1347,8 +1347,10 @@ snapshot agent's namespaced objects (the bare run ID or a name ending in
 ClusterRoleBinding (exactly `defaults.AgentClusterRoleName` + `-` + run ID).
 A candidate must be older than the age floor
 (`defaults.ValidationSweepMinAge`, 2h — above `ValidationOperationTimeout` and
-every catalog wait envelope, pinned in `pkg/defaults/timeouts_test.go` and
-`pkg/validator/catalog/catalog_test.go`) and pass a liveness guard: below the
+every embedded catalog wait envelope, pinned in `pkg/defaults/timeouts_test.go`
+and `pkg/validator/catalog/catalog_test.go`; a `--data` catalog that raises a
+check's `timeout` past it needs an `--older-than` above `v1.WaitEnvelopeFor`
+of that timeout, i.e. the timeout plus 4m5s) and pass a liveness guard: below the
 default floor, no non-terminal pods in a test namespace, and no validator Job
 carrying the run's
 `aicr.run/run-id` label in any namespace for run-scoped objects (a run started

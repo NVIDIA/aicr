@@ -192,6 +192,97 @@ func TestSweepCmd_TableConfigMapOutputRejectedBeforeApply(t *testing.T) {
 	}
 }
 
+// TestSweepCmd_BadOutputRejectedBeforeCluster: a malformed cm:// URI or an
+// unwritable --output file is rejected before the command contacts the
+// cluster — a rejection that came after the apply would have already deleted.
+func TestSweepCmd_BadOutputRejectedBeforeCluster(t *testing.T) {
+	tests := []struct {
+		name   string
+		format string
+		output string
+	}{
+		{"file in a missing directory", "table", filepath.Join(t.TempDir(), "missing", "report.txt")},
+		{"malformed ConfigMap URI", "json", "cm://no-name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := newScriptedAPIServer(t, sweepCluster(true))
+			kubeconfig := rec.writeKubeconfig(t, t.TempDir())
+
+			_, err := runSweep(t, nonTerminalReader(t), "--kubeconfig", kubeconfig,
+				"--yes", "--format", tt.format, "--output", tt.output)
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if got := rec.seen(); len(got) != 0 {
+				t.Errorf("the command contacted the cluster before rejecting the output: %v", got)
+			}
+		})
+	}
+}
+
+// TestSweepCmd_OutputCheckKeepsExistingReport: the pre-flight output check
+// does not truncate, so a run that fails before writing leaves an existing
+// report intact.
+func TestSweepCmd_OutputCheckKeepsExistingReport(t *testing.T) {
+	rec := newScriptedAPIServer(t, func(method, path string) (int, string) {
+		if method == http.MethodGet && path == "/api/v1/namespaces" {
+			return http.StatusForbidden, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Forbidden","code":403}`
+		}
+		return http.StatusOK, `{"items":[]}`
+	})
+	kubeconfig := rec.writeKubeconfig(t, t.TempDir())
+	outPath := filepath.Join(t.TempDir(), "report.json")
+	const previous = `{"previous":"report"}`
+	if err := os.WriteFile(outPath, []byte(previous), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := runSweep(t, nonTerminalReader(t), "--kubeconfig", kubeconfig,
+		"--yes", "--format", "json", "--output", outPath)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeUnauthorized)
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != previous {
+		t.Errorf("existing report = %q, want it untouched: %q", data, previous)
+	}
+}
+
+// TestSweepCmd_ReportWriteFailureKeepsApplyError: when the report cannot be
+// written after an apply that itself failed, the apply's error still reaches
+// the caller alongside the write error.
+func TestSweepCmd_ReportWriteFailureKeepsApplyError(t *testing.T) {
+	outDir := filepath.Join(t.TempDir(), "out")
+	if err := os.Mkdir(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cluster := sweepCluster(true)
+	rec := newScriptedAPIServer(t, func(method, path string) (int, string) {
+		if method == http.MethodDelete {
+			// The destination passed the pre-flight check; removing it now
+			// makes the post-apply report write fail.
+			if err := os.RemoveAll(outDir); err != nil {
+				t.Errorf("remove output dir: %v", err)
+			}
+			return http.StatusInternalServerError, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"InternalError","code":500}`
+		}
+		return cluster(method, path)
+	})
+	kubeconfig := rec.writeKubeconfig(t, t.TempDir())
+
+	_, err := runSweep(t, nonTerminalReader(t), "--kubeconfig", kubeconfig,
+		"--yes", "--format", "json", "--output", filepath.Join(outDir, "report.json"))
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), sweepTestNamespace) {
+		t.Errorf("error lost the apply failure naming %s: %v", sweepTestNamespace, err)
+	}
+	if !strings.Contains(err.Error(), "output file") {
+		t.Errorf("error lost the report write failure: %v", err)
+	}
+}
+
 func TestSweepCmd_NonTTYWithoutYesFails(t *testing.T) {
 	rec := newScriptedAPIServer(t, sweepCluster(true))
 	kubeconfig := rec.writeKubeconfig(t, t.TempDir())

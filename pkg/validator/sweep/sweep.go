@@ -493,17 +493,30 @@ func drainJobEvents(ctx context.Context, watcher watch.Interface, pending map[st
 }
 
 // handleJobEvent processes one settle-window Job event, reporting done when
-// every pending run is accounted for. A closed channel or an error event
-// fails closed exactly as the main loop does: liveness was not observed for
-// the whole window.
+// every pending run is accounted for. A dead context classifies through
+// WrapCtxErr first, since an interrupt can close the result channel. A
+// closed channel or an error event fails closed with ErrCodeUnavailable —
+// liveness was not observed for the whole window — except a Forbidden
+// error event, which is the caller's missing watch grant.
 func handleJobEvent(ctx context.Context, event watch.Event, ok bool, pending map[string][]*Object) (done bool, err error) {
+	if ctx.Err() != nil {
+		return false, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout,
+			"sweep interrupted while waiting for validation runs to go quiet")
+	}
 	if !ok {
 		return false, errors.New(errors.ErrCodeUnavailable,
 			"the apiserver ended the job watch before the settle window did, "+
 				"so liveness was not observed for the whole window; nothing was deleted — re-run")
 	}
 	if event.Type == watch.Error {
-		return false, classifyWatchError(ctx, "jobs", apierrors.FromObject(event.Object))
+		watchErr := apierrors.FromObject(event.Object)
+		if apierrors.IsForbidden(watchErr) {
+			return false, errors.Wrap(errors.ErrCodeUnauthorized,
+				"cannot watch jobs: grant the caller 'watch jobs'", watchErr)
+		}
+		return false, errors.Wrap(errors.ErrCodeUnavailable,
+			"the apiserver ended the job watch with an error event before the settle window did, "+
+				"so liveness was not observed for the whole window; nothing was deleted — re-run", watchErr)
 	}
 	if j, isJob := event.Object.(*batchv1.Job); isJob {
 		keepRun(pending, j.Labels[labels.RunID])

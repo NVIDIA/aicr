@@ -1508,14 +1508,17 @@ func TestExecuteSettleWatchClosedEarlyFailsClosed(t *testing.T) {
 // TestExecuteSettleWatchErrorEventFailsClosed: a watch.Error event — whatever
 // its Status — ends the observation before the window did, so the apply
 // fails closed and deletes nothing. An Expired (410) Status gets no special
-// recovery: any early end aborts.
+// recovery: any early end aborts as Unavailable; only a Forbidden Status
+// reports the caller's missing watch grant.
 func TestExecuteSettleWatchErrorEventFailsClosed(t *testing.T) {
 	tests := []struct {
 		name   string
 		status *metav1.Status
+		want   errors.ErrorCode
 	}{
-		{"internal error Status", &apierrors.NewInternalError(fmt.Errorf("boom")).ErrStatus},
-		{"expired (Gone) Status", &apierrors.NewResourceExpired("resource version too old").ErrStatus},
+		{"internal error Status", &apierrors.NewInternalError(fmt.Errorf("boom")).ErrStatus, errors.ErrCodeUnavailable},
+		{"expired (Gone) Status", &apierrors.NewResourceExpired("resource version too old").ErrStatus, errors.ErrCodeUnavailable},
+		{"forbidden Status", &apierrors.NewForbidden(schema.GroupResource{Group: "batch", Resource: "jobs"}, "", fmt.Errorf("no watch")).ErrStatus, errors.ErrCodeUnauthorized},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1527,9 +1530,7 @@ func TestExecuteSettleWatchErrorEventFailsClosed(t *testing.T) {
 			dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), testPodGroupListKinds)
 
 			err := Execute(context.Background(), cs, dyn, report)
-			// Both Statuses fall through classifyWatchError to its default:
-			// neither is Forbidden nor a context death, so both are Internal.
-			errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+			errorstest.WantReportedCode(t, err, tt.want)
 			if deletes := deleteActions(cs); len(deletes) != 0 {
 				t.Errorf("Execute deleted %d objects with the settle watch unproven: %v", len(deletes), deletes)
 			}
@@ -1599,7 +1600,16 @@ func TestDrainJobEventsAfterTheWindow(t *testing.T) {
 		fw := watch.NewFakeWithChanSize(1, false)
 		fw.Error(&apierrors.NewInternalError(fmt.Errorf("boom")).ErrStatus)
 		_, pending := newPending()
-		errorstest.WantReportedCode(t, drainJobEvents(context.Background(), fw, pending), errors.ErrCodeInternal)
+		errorstest.WantReportedCode(t, drainJobEvents(context.Background(), fw, pending), errors.ErrCodeUnavailable)
+	})
+
+	t.Run("a close under a canceled context reports the interrupt", func(t *testing.T) {
+		fw := watch.NewFake()
+		fw.Stop()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, pending := newPending()
+		errorstest.WantReportedCode(t, drainJobEvents(ctx, fw, pending), errors.ErrCodeCanceled)
 	})
 }
 
@@ -2127,5 +2137,16 @@ func TestValidatorRunName(t *testing.T) {
 				t.Errorf("validatorRunName(%q) = (%q, %v), want (%q, %v)", tt.obj, id, ok, tt.wantID, tt.wantOK)
 			}
 		})
+	}
+}
+
+// TestOverriddenTimeoutHeadroomMatchesDocs pins the "timeout plus 4m5s"
+// --older-than guidance for --data catalogs that raise a check timeout
+// (pkg/cli/sweep.go, cli-reference.md, validator.md, go-library.md,
+// validator-extension.md) to the wait envelope it describes.
+func TestOverriddenTimeoutHeadroomMatchesDocs(t *testing.T) {
+	const timeout = 3 * time.Hour
+	if got, want := v1.WaitEnvelopeFor(timeout)-timeout, 4*time.Minute+5*time.Second; got != want {
+		t.Errorf("WaitEnvelopeFor headroom = %v, documented as %v: update the docs", got, want)
 	}
 }

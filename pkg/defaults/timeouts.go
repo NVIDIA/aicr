@@ -210,7 +210,8 @@ const (
 	// before `aicr sweep` will delete it (the --older-than default). It must
 	// exceed ValidationOperationTimeout, the facade-level cap on an entire
 	// Client.ValidateState run, and with it the largest per-check wait
-	// envelope (v1.WaitEnvelopeFor of the largest catalog timeout plus result
+	// envelope (v1.WaitEnvelopeFor of the largest embedded catalog timeout —
+	// a --data catalog may raise a timeout past it — plus result
 	// capture and pod termination wait — see ValidationOperationTimeout
 	// above): anything younger may still belong to a run whose own cleanup
 	// has simply not reached it yet, and the sweeper must never race a live

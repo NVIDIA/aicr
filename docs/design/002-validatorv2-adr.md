@@ -229,7 +229,7 @@ and NCCL namespace/Trainer cleanup can exceed the 30s cleanup grace. SIGKILL, OO
 crashes cannot run deferred cleanup. Orphaned per-run resources — the
 `aicr.run/gpu-test-run`-labeled test namespaces and Run:ai residue, plus
 run-scoped RBAC and ConfigMaps — are reclaimed out of band by `aicr sweep`,
-the label-based sweeper shipped for this issue.
+the label-based sweeper shipped for #1632.
 
 Operator SIGINT/SIGTERM preserves completed and partial current-phase CTRF results,
 records unstarted checks in that phase as skipped, and returns `ErrCodeCanceled`

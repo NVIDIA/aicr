@@ -1029,7 +1029,7 @@ deleted:
 plan, err := client.PlanValidationSweep(ctx, aicr.SweepOptions{
 	Kubeconfig: "", // empty follows the standard chain: flag, KUBECONFIG, ~/.kube/config, in-cluster
 	Namespace:  "aicr-validation",
-	OlderThan: 2 * time.Hour,
+	OlderThan:  2 * time.Hour,
 })
 if err != nil {
 	log.Fatalf("sweep plan: %v", err)
@@ -1060,8 +1060,9 @@ result, err := client.ApplyValidationSweep(ctx, plan)
   alongside an `ErrCodeInternal` naming them.
 - `SweepOptions.OlderThan` defaults to `defaults.ValidationSweepMinAge` (2h)
   when zero; negative is rejected. The floor outlasts the facade's whole-run
-  cap and the largest single-check envelope (which bounds a test
-  namespace's life), not a whole uncapped CLI run; the liveness guards
+  cap and the largest embedded single-check envelope (which bounds a test
+  namespace's life), not a whole uncapped CLI run; a `--data` catalog that
+  raises a check's `timeout` needs `OlderThan` above that timeout plus 4m5s; the liveness guards
   (below the default floor, no non-terminal pods in a test namespace — at
   or above the floor an aged namespace cannot belong to a live check and
   leaked workloads never go terminal, so it is deleted with its pods; no

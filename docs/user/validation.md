@@ -1639,8 +1639,9 @@ or a crash may prevent a termination message, and a missing pod with a terminal
 Job deadline condition still uses the Job-level `failed` classification
 described above, carrying the check's own message when one was observed.
 Namespaces, pods and PodGroups a check leaves behind after SIGKILL or a crash
-carry the `aicr.run/gpu-test-run` label, and the run-scoped RBAC and ConfigMaps
-carry `aicr.run/run-id`; [`aicr sweep`](cli-reference.md#aicr-sweep) deletes
+carry the `aicr.run/gpu-test-run` label; the run-scoped ConfigMaps and
+snapshot-agent RBAC carry `aicr.run/run-id`, and the validator ServiceAccount
+and ClusterRoleBinding are matched by name (`aicr-validator-<run-id>`); [`aicr sweep`](cli-reference.md#aicr-sweep) deletes
 those orphans once they outlive its two-hour age floor.
 
 Scripts that gate on validation outcome should treat **any non-zero code** as
