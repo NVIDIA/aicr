@@ -482,13 +482,12 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 // bundleStagePrefix names the private directory a single bundle is built in.
 const bundleStagePrefix = ".aicr-stage-"
 
-// staleOutputFiles are top-level files an earlier bundle can hold that a new
-// bundle need not write. provenance.yaml is written only for a vendored
-// bundle, and undeploy.sh only by older helm bundles.
+// staleOutputFiles are top-level files of an earlier bundle that publishing
+// removes even when the new bundle does not write them.
 var staleOutputFiles = []string{localformat.ProvenanceFileName, "undeploy.sh"}
 
-// staleOutputDirs are top-level directories an earlier bundle can leave
-// empty, argocd-helm's static/ and flux's sources/.
+// staleOutputDirs are top-level directories of an earlier bundle that
+// publishing removes when they are empty.
 var staleOutputDirs = []string{"static", "sources"}
 
 // bundleStage is the private directory a single bundle is built in. When dir
