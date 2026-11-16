@@ -25,13 +25,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/internal/gkenet"
+	aicrErrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/validator/ctrf"
+	v1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
+	"aicr.run/validators/internal/gkenet"
 )
 
 // ncclRuntimeSource says where the benchmark runtime came from. It is the

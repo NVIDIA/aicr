@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/deprecation"
+	"aicr.run/pkg/deprecation"
 )
 
 func TestNew(t *testing.T) {

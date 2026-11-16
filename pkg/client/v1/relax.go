@@ -19,8 +19,8 @@ import (
 	"log/slog"
 	"slices"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // CriteriaDimension names one criteria dimension subject to the

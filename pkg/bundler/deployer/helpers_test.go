@@ -23,9 +23,9 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // assertErrorCode verifies err is a *errors.StructuredError with the given code.

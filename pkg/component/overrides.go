@@ -22,8 +22,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 )
 
 // ApplyMapOverrides applies overrides to a map[string]any using dot-notation

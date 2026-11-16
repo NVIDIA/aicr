@@ -20,8 +20,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/recipe"
 	"gopkg.in/yaml.v3"
 )
 

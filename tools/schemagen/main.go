@@ -32,10 +32,10 @@ import (
 	"reflect"
 	"sort"
 
-	releaseartifact "github.com/NVIDIA/aicr/pkg/artifact"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/schema"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	releaseartifact "aicr.run/pkg/artifact"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/schema"
+	"aicr.run/pkg/snapshotter"
 )
 
 // SchemaBaseURI is the canonical location the generated documents claim.

@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 // TestNodewrightOperatorHealthCheckClusterStates runs the shipped health check

@@ -22,10 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/evidence/verifier"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/evidence/verifier"
+	"aicr.run/pkg/fingerprint"
 )
 
 func TestCheckTrustedRegistry(t *testing.T) {

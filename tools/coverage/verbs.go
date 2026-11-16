@@ -17,7 +17,7 @@ package main
 import (
 	"sort"
 
-	"github.com/NVIDIA/aicr/pkg/cli"
+	"aicr.run/pkg/cli"
 	v3 "github.com/urfave/cli/v3"
 )
 

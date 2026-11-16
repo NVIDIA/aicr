@@ -28,9 +28,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/artifact"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 

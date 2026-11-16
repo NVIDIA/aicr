@@ -38,10 +38,10 @@ import (
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bom"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/helm"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bom"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/helm"
+	"aicr.run/pkg/recipe"
 )
 
 const crdsOnly = "CRDs only"

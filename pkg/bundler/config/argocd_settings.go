@@ -19,8 +19,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/deprecation"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/deprecation"
+	"aicr.run/pkg/errors"
 )
 
 // ArgoCDSettings is the typed form of the Argo CD bundle settings, shared by

@@ -28,11 +28,11 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/bundler/bundleinfo"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/header"
 )
 
 func sample() *bundleinfo.BundleInfo {

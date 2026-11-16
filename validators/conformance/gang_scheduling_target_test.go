@@ -23,11 +23,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	v1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"

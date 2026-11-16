@@ -23,7 +23,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // ociPURLPrefix is the purl scheme+type every product identifier in
@@ -53,7 +53,7 @@ var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 // is structurally independent of the committed source, so a `tooling` that
 // grows again in .openvex.json cannot reach a signed attestation
 // (NVIDIA/aicr#2706).
-const projectionTooling = "openvex-bind (github.com/NVIDIA/aicr/tools/openvex-bind); statements curated manually"
+const projectionTooling = "openvex-bind (aicr.run/tools/openvex-bind); statements curated manually"
 
 // Options names the platform manifest a projection binds to.
 type Options struct {

@@ -24,9 +24,9 @@ import (
 	"github.com/urfave/cli/v3"
 	"golang.org/x/term"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // assumeYesFlag builds the shared --yes / --assume-yes bypass flag for the

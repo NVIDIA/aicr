@@ -22,8 +22,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bom"
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
+	"aicr.run/pkg/bom"
+	"aicr.run/pkg/helm/helmtest"
 )
 
 func TestCatalogDriverTargetsQualify(t *testing.T) {

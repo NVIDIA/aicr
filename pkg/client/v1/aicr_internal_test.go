@@ -30,12 +30,12 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
-	"github.com/NVIDIA/aicr/pkg/validator"
+	"aicr.run/pkg/defaults"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
+	"aicr.run/pkg/validator"
 )
 
 // blockingDataProvider wraps an underlying DataProvider but holds

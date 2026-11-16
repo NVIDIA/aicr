@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	appconfig "github.com/NVIDIA/aicr/pkg/config"
+	appconfig "aicr.run/pkg/config"
 )
 
 // ValidateSettings is a plain value, so most of its coverage lives in the

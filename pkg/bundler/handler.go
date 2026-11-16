@@ -30,14 +30,14 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/result"
+	"aicr.run/pkg/defaults"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
 )
 
 const (

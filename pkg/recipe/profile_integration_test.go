@@ -19,9 +19,9 @@ import (
 	"strings"
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // The embedded catalog declares no profile, so the unit tests around

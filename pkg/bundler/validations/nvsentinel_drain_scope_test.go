@@ -19,12 +19,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
-	"github.com/NVIDIA/aicr/pkg/component"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/drainscope"
+	"aicr.run/pkg/component"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
 )
 
 // TestCheckNVSentinelDrainScopeCoherent covers the gate's decision table. A

@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/bundler/deployer/localformat"
 )
 
 // ownsCRDsComponent is the shared input for the apply-crds.sh cases. Only

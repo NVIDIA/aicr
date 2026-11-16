@@ -20,7 +20,7 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // Supported AICR range: >=1.0.0, <2.0.0. v1 surfaces are frozen;

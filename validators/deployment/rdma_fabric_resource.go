@@ -23,9 +23,9 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/manifest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/manifest"
+	"aicr.run/pkg/recipe"
 )
 
 // Resource prefixes applied when a manifest does not carry one:

@@ -21,9 +21,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/operator/config"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
-	"github.com/NVIDIA/aicr/pkg/operator/version"
+	"aicr.run/pkg/operator/config"
+	"aicr.run/pkg/operator/registry"
+	"aicr.run/pkg/operator/version"
 )
 
 // isolate points client config discovery at nothing, so a test can never

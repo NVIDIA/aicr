@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"testing"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 const snapshotFixture = "snapshot-kind-no-gpu.json"

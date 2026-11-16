@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 const (

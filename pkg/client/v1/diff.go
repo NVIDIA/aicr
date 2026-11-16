@@ -19,9 +19,9 @@ import (
 	stderrors "errors"
 	"io"
 
-	"github.com/NVIDIA/aicr/pkg/diff"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/diff"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/snapshotter"
 )
 
 // SnapshotChangeKind describes how a snapshot value changed.

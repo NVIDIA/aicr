@@ -21,7 +21,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 // The AKS family is the first embedded adopter of an ADR-015 configuration

@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/measurement"
 	"github.com/stretchr/testify/assert"
 )
 

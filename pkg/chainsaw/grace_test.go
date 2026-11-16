@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 func TestIsNotFoundErr(t *testing.T) {

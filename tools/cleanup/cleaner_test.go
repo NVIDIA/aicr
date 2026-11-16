@@ -35,11 +35,11 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	k8slabels "github.com/NVIDIA/aicr/pkg/k8s/labels"
-	vlabels "github.com/NVIDIA/aicr/pkg/validator/labels"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	k8slabels "aicr.run/pkg/k8s/labels"
+	vlabels "aicr.run/pkg/validator/labels"
 )
 
 var (

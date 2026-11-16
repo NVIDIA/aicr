@@ -23,10 +23,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/gatemanifest"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 	"sigs.k8s.io/yaml"
 )
 

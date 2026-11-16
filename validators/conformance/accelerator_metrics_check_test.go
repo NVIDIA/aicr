@@ -21,9 +21,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/validators"
 )
 
 const dcgmSampleLabels = `{gpu="0",UUID="GPU-aaaa",device="nvidia0",modelName="NVIDIA H100",Hostname="node-a",namespace="",pod="",container=""}`

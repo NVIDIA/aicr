@@ -23,8 +23,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/validation"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 )
 
 // objectNameKeys are the value keys Helm's chart.fullname and chart.name

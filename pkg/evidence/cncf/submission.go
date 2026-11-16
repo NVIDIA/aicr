@@ -27,10 +27,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/cncf/upstreamvalidator"
-	"github.com/NVIDIA/aicr/pkg/evidence/redact"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/cncf/upstreamvalidator"
+	"aicr.run/pkg/evidence/redact"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // SubmissionInput is everything WriteSubmission renders from: the run's

@@ -22,9 +22,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/constraints/expr"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/constraints/expr"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 )
 
 type effectiveProfileDeclaration struct {

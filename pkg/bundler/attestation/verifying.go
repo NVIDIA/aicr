@@ -24,8 +24,8 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/verify"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/trust"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/trust"
 )
 
 // TrustedRootSource resolves the Sigstore trust anchors a verification should

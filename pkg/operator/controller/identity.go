@@ -22,8 +22,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/evidence"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/evidence"
 )
 
 // OperatorImage reads the operator's own image from its pod, for evidence:

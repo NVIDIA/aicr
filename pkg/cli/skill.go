@@ -22,7 +22,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // skillCmdFlags returns the flags for the skill command.

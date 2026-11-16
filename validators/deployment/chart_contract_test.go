@@ -31,8 +31,8 @@ import (
 	"testing"
 	"time"
 
-	aicrhelm "github.com/NVIDIA/aicr/pkg/helm"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	aicrhelm "aicr.run/pkg/helm"
+	"aicr.run/pkg/recipe"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"

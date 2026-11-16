@@ -23,8 +23,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/recipe"
 )
 
 // TestGPUOperatorTolerationsWithoutAcceleratedInput renders a stock leaf with

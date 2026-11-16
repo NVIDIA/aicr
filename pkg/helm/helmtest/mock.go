@@ -19,7 +19,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/NVIDIA/aicr/pkg/helm"
+	"aicr.run/pkg/helm"
 )
 
 // MockRenderer is a test double for helm.Renderer that returns canned

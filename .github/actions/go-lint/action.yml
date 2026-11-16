@@ -148,3 +148,9 @@ runs:
     - name: Reject floating runner labels
       shell: bash
       run: make check-runner-labels
+
+    # A -X flag or prefix string that still names the pre-rename module path
+    # builds and passes everything else while matching nothing (#3834).
+    - name: Reject the pre-rename Go module path
+      shell: bash
+      run: make check-module-path

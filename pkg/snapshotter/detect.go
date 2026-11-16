@@ -18,8 +18,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
+	"aicr.run/pkg/defaults"
+	k8sclient "aicr.run/pkg/k8s/client"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

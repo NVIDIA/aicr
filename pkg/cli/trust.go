@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/trust"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/trust"
 	"github.com/urfave/cli/v3"
 )
 

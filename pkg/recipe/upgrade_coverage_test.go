@@ -28,8 +28,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/upgrade"
 )
 
 // upgradeBaseRecipesEnv names a directory holding the recipes tree of the

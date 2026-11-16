@@ -23,9 +23,9 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/measurement"
 )
 
 // SubtypeGKEGPUPools is the K8s measurement subtype carrying GKE GPU

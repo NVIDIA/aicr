@@ -44,7 +44,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // AdvertiserExternal is the only non-empty advertiser value. It declares

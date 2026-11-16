@@ -28,13 +28,13 @@ import (
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/util/validation"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	helmutil "github.com/NVIDIA/aicr/pkg/helm"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/errors"
+	helmutil "aicr.run/pkg/helm"
+	"aicr.run/pkg/recipe"
 )
 
 //go:embed templates/README.md.tmpl

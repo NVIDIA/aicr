@@ -21,7 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/bundler/deployer/localformat"
 )
 
 // StubPuller is a localformat.ChartPuller that returns StubArchive(c) for every

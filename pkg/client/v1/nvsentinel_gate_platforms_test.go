@@ -18,8 +18,8 @@ import (
 	"sort"
 	"testing"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/recipe"
 )
 
 // Vacuity floors for the catalog-derived sweep below. They are deliberately

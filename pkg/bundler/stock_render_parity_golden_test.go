@@ -32,11 +32,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
+	"aicr.run/pkg/serializer"
 )
 
 const (

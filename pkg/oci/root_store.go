@@ -36,7 +36,7 @@ import (
 	storeoci "oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/errdef"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 )
 
 const rootStoreIngestDir = "ingest"

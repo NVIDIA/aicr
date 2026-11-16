@@ -20,11 +20,11 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/k8s/client"
-	"github.com/NVIDIA/aicr/pkg/k8s/labels"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/k8s/client"
+	"aicr.run/pkg/k8s/labels"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	accorev1 "k8s.io/client-go/applyconfigurations/core/v1"
 )

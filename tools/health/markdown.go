@@ -20,12 +20,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/allowlist"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/health"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/testgrid"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/allowlist"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/health"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/testgrid"
 )
 
 // detailDimensions is the fixed render order for the per-dimension structural

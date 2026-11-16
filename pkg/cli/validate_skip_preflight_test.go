@@ -24,10 +24,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/header"
 )
 
 // skipPreflightRecipeYAML is the same criteria-less RecipeResult that

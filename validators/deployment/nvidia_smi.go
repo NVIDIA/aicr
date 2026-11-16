@@ -22,12 +22,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/constraints"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	podutil "github.com/NVIDIA/aicr/pkg/k8s/pod"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/helper"
+	"aicr.run/pkg/constraints"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	podutil "aicr.run/pkg/k8s/pod"
+	"aicr.run/validators"
+	"aicr.run/validators/helper"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

@@ -17,7 +17,7 @@ package corroborate
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 func pass(id string, allow bool) SignerResult {

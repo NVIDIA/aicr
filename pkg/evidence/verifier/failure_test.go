@@ -21,7 +21,7 @@ import (
 
 	"oras.land/oras-go/v2/registry/remote/errcode"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 func TestClassifyFailure_RegistryStatusTakesPrecedence(t *testing.T) {

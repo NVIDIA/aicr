@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // writeMarkdown renders a human-readable summary: a distinct-host table grouped

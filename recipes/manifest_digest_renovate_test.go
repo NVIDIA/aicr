@@ -25,7 +25,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bom"
+	"aicr.run/pkg/bom"
 )
 
 // crdDigestLineRE finds every digest held in a CRD sibling field, the two

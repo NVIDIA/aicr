@@ -50,7 +50,7 @@ import (
 	"github.com/yuin/goldmark/text"
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 const navPath = "docs/index.yml"

@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/tuning"
+	"aicr.run/pkg/tuning"
 )
 
 func TestRenderTable_Deterministic(t *testing.T) {
