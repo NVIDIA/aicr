@@ -227,10 +227,15 @@ find the proxy pods, which it does for AICR's agentgateway through the proxy
 Service's selector. Its traffic probe is then scheduled onto a node running a
 gateway proxy pod, so with AICR's single proxy replica its requests to the
 gateway stay on that node. If the proxy Service has no selector or no live pod,
-the probe is not pinned and may need this rule like any other client. Its test
-backends still run on the GPU nodes, though, so the GPU security group must
-admit TCP `8080` from the system security group, the hop from the gateway to
-the backends.
+the probe is not pinned and may need this rule like any other client.
+
+The check's test backends are not pinned to any node group. They run on any
+node the validator's tolerations admit (every node when none are set), so the
+gateway's hop to them can leave the system node group. Allow TCP `8080` from the
+system security group into every security group that can host them, not only
+the GPU group. On a cluster with another admitted node group, such as a
+`cpu-worker` group, a rule on the GPU group alone still fails the check with
+`did not reach the test backends`.
 
 ### Example
 

@@ -370,7 +370,9 @@ profile (agentgateway is `service-endpoints`).
 For a `service-endpoints` data plane the probe pod is scheduled onto a node
 running one of the proxy Service's pods: a required pod affinity on the Service
 selector in the Gateway's namespace, with `kubernetes.io/hostname` topology,
-plus that pod's tolerations. With the single proxy replica AICR ships, the
+plus the tolerations of the youngest live proxy pod, added to the context
+tolerations (a tolerate-all set is left as is). With the single proxy replica
+AICR ships, the
 probe's requests to the gateway then stay on that node, so node-group network
 rules such as EKS per-node-group security groups cannot block them. A
 NetworkPolicy still applies. If the probe cannot fit on that node, it fails as
