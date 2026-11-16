@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/NVIDIA/aicr/pkg/collector/file"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/collector/file"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/measurement"
 )
 
 var (

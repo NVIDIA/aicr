@@ -23,9 +23,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 )
 
 // emptyCell stands in for an empty value or an empty section so a column or

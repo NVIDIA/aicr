@@ -26,11 +26,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/inventory"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/inventory"
+	"aicr.run/pkg/upgrade"
 )
 
 // Component names here are synthetic and match no registry entry, so no

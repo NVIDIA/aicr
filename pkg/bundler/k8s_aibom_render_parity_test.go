@@ -30,9 +30,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/recipe"
 )
 
 // One stock recipe declares k8s-aibom, h100-gke-cos-inference, under ADR-019's

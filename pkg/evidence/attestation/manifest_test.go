@@ -22,9 +22,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func TestBuildManifest_DeterministicOrder(t *testing.T) {

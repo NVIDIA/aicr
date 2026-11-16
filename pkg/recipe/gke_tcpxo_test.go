@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // tcpxoTestMapping returns a valid ordered mapping with distinct networks.

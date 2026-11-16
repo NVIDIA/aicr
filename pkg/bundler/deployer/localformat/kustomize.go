@@ -20,7 +20,7 @@ import (
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // buildKustomize runs `kustomize build` against path using the in-process

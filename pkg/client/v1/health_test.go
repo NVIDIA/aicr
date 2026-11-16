@@ -19,9 +19,9 @@ import (
 	"errors"
 	"testing"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/health"
+	aicr "aicr.run/pkg/client/v1"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/health"
 )
 
 // wantInvalidRequest fails the test unless err carries ErrCodeInvalidRequest.

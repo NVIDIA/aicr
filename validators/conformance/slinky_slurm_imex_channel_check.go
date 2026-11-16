@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/errors"
+	"aicr.run/validators"
 	"golang.org/x/sync/errgroup"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

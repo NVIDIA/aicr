@@ -17,7 +17,7 @@ package argocdtest
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 type recordingTB struct {

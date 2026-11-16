@@ -26,8 +26,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/errors"
 )
 
 const bundleGenerationCopyBufferSize = 32 * 1024

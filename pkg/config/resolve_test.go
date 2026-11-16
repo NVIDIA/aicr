@@ -20,9 +20,9 @@ import (
 	"strings"
 	"testing"
 
-	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	bundlercfg "aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/config"
+	"aicr.run/pkg/recipe"
 )
 
 // === RecipeSpec.ResolveCriteria ===

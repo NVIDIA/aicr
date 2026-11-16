@@ -20,7 +20,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // MarshalYAMLDeterministic marshals v to YAML with mapping keys sorted

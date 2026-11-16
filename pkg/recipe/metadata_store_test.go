@@ -25,11 +25,11 @@ import (
 	"strings"
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/manifest"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/manifest"
+	"aicr.run/pkg/recipe/providertest"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 )

@@ -23,8 +23,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/inventory"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/inventory"
 )
 
 // fakeInventory answers each deployer's read from its own entry, and records

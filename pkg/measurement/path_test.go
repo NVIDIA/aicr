@@ -17,9 +17,9 @@ package measurement
 import (
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func TestParsePath(t *testing.T) {

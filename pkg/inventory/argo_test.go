@@ -40,9 +40,9 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // The fixtures below are the deployer's golden Applications

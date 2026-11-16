@@ -20,8 +20,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // WithRetry returns a Renderer that retries r's renders only when they fail

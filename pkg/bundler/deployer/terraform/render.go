@@ -22,11 +22,11 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	helmutil "github.com/NVIDIA/aicr/pkg/helm"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	helmutil "aicr.run/pkg/helm"
 )
 
 // bundleData is the render input shared by every generated file. One struct

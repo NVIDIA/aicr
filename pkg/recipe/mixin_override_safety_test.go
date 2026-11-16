@@ -21,8 +21,8 @@ import (
 	"strings"
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 // newNvsentinelAllowlistStore builds a MetadataStore backed by an

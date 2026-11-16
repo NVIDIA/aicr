@@ -19,10 +19,10 @@ import (
 	"log/slog"
 	"strings"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/oci"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/oci"
 )
 
 // SignExistingOptions controls SignExisting. It signs a bundle that has

@@ -24,9 +24,9 @@ import (
 	"testing"
 	"unicode"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/recipe"
 )
 
 const testBundlerVersion = "v1.0.0"

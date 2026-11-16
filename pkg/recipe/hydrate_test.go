@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // TestHydrateHealthCheckAsserts exercises the hydration step that loads

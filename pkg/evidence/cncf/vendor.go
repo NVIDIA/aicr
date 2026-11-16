@@ -22,7 +22,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // Vendor is the product metadata a CNCF submission's PRODUCT.yaml carries:

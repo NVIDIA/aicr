@@ -25,10 +25,10 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
-	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
+	k8sclient "aicr.run/pkg/k8s/client"
 )
 
 // Release statuses of a Helm storage record's newest revision.

@@ -47,7 +47,7 @@ that build their own renderer.
 ### 1. Generate a run ID
 
 ```go
-import v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+import v1 "aicr.run/pkg/validator/v1"
 
 runID := v1.GenerateRunID()
 // Example: "20260514-143052-a1b2c3d4e5f6g7h8"
@@ -57,8 +57,8 @@ runID := v1.GenerateRunID()
 
 ```go
 import (
-    v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-    "github.com/NVIDIA/aicr/pkg/validator"
+    v1 "aicr.run/pkg/validator/v1"
+    "aicr.run/pkg/validator"
 )
 
 err := validator.EnsureDataConfigMaps(
@@ -78,8 +78,8 @@ Kubernetes API objects and is not part of the v1 wire contract.
 
 ```go
 import (
-    v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-    "github.com/NVIDIA/aicr/pkg/validator/catalog"
+    v1 "aicr.run/pkg/validator/v1"
+    "aicr.run/pkg/validator/catalog"
 )
 
 cat, err := catalog.LoadWithDataProvider(ctx, nil, version, commit)
@@ -260,10 +260,10 @@ import (
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
     "k8s.io/client-go/kubernetes"
 
-    "github.com/NVIDIA/aicr/pkg/snapshotter"
-    "github.com/NVIDIA/aicr/pkg/validator"
-    "github.com/NVIDIA/aicr/pkg/validator/catalog"
-    v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+    "aicr.run/pkg/snapshotter"
+    "aicr.run/pkg/validator"
+    "aicr.run/pkg/validator/catalog"
+    v1 "aicr.run/pkg/validator/v1"
 )
 
 func RunValidation(

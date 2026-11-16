@@ -155,9 +155,9 @@ at the shared staging name.
 		"context"
 		"time"
 
-		"github.com/NVIDIA/aicr/pkg/k8s/agent"
-		"github.com/NVIDIA/aicr/pkg/k8s/client"
-		"github.com/NVIDIA/aicr/pkg/runid"
+		"aicr.run/pkg/k8s/agent"
+		"aicr.run/pkg/k8s/client"
+		"aicr.run/pkg/runid"
 	)
 
 	func main() {

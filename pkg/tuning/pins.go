@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // PackagePin identifies a pinned nodewright package (by image basename) and its

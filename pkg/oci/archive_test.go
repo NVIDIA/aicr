@@ -31,7 +31,7 @@ import (
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/content/file"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 )
 
 func TestPackage_SourceFilesArchiveContainsOnlyFrozenSortedSelection(t *testing.T) {

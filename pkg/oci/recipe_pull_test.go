@@ -39,9 +39,9 @@ import (
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/errcode"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/defaults"
+	apperrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 type testRecipeArtifact struct {

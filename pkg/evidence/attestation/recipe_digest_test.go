@@ -21,11 +21,11 @@ import (
 	"strings"
 	"testing"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 )
 
 // aksProfiledOverlayPath is the embedded catalog's profile-bearing AKS

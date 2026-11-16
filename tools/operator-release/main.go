@@ -38,7 +38,7 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/NVIDIA/aicr/pkg/operator/version"
+	"aicr.run/pkg/operator/version"
 )
 
 func main() {

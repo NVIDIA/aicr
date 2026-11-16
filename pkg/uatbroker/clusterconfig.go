@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 

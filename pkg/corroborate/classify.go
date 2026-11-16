@@ -15,7 +15,7 @@
 package corroborate
 
 import (
-	"github.com/NVIDIA/aicr/pkg/evidence/allowlist"
+	"aicr.run/pkg/evidence/allowlist"
 )
 
 // Class is a corroboration source class. A signer's class is derived from its

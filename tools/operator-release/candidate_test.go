@@ -42,10 +42,10 @@ import (
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/registry/remote"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
-	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/operator/registry"
+	"aicr.run/pkg/operator/registry/registrytest"
 )
 
 const demoValues = `# Installation values.

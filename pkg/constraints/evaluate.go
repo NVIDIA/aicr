@@ -19,9 +19,9 @@ package constraints
 import (
 	stderrors "errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
 )
 
 // EvalResult represents the result of evaluating a single constraint.

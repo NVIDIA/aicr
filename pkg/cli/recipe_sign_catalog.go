@@ -22,7 +22,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicr "aicr.run/pkg/client/v1"
 )
 
 func recipeSignCatalogCmd() *cli.Command {

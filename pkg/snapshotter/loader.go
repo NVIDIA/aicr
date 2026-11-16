@@ -18,9 +18,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/serializer"
 )
 
 // LoadFromFile reads a snapshot from path (local file, HTTP(S) URL, or cm://

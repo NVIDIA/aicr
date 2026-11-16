@@ -24,9 +24,9 @@ import (
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 const testRetryStep = "test step"

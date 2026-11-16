@@ -23,7 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"aicr.run/pkg/defaults"
 )
 
 // A sweep deletes the gvr objects in namespace that match selects. An empty

@@ -29,8 +29,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // RespondJSON writes a JSON response with the given status code and data.

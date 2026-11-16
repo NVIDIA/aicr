@@ -30,7 +30,7 @@ import (
 	"github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // pushSigstoreReferrer attaches a Sigstore bundle to subject the way AICR

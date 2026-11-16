@@ -31,8 +31,8 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/sign"
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // fingerprintTestPEM and fingerprintTestWant pin PublicKeyFingerprint to an

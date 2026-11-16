@@ -29,10 +29,10 @@ import (
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator/ctrf"
+	v1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
 )
 
 func topoEntry(name, pci string) string {

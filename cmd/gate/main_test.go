@@ -24,9 +24,9 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/chainsaw"
-	"github.com/NVIDIA/aicr/pkg/chainsawgate/runner"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/chainsaw"
+	"aicr.run/pkg/chainsawgate/runner"
+	"aicr.run/pkg/errors"
 )
 
 func TestProgressLine(t *testing.T) {

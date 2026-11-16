@@ -39,9 +39,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
 )
 
 func main() {

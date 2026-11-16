@@ -18,8 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 )
 
 // ComponentEnabledKey is the special value-override path that toggles whether a

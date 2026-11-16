@@ -23,10 +23,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe/providertest"
 	"gopkg.in/yaml.v3"
 )
 

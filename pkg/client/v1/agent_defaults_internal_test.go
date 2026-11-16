@@ -18,8 +18,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/snapshotter"
 )
 
 // TestApplyAgentDefaults covers the field an SDK caller used to have to know

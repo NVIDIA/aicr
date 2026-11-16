@@ -23,8 +23,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/recipe"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"

@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/manifest"
+	"aicr.run/pkg/manifest"
 )
 
 // TestWriteLocalHelmFolder_AllManifestsEmpty pins the fix for the single-package

@@ -21,8 +21,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/serializer"
 )
 
 func TestConfiguredRecipeResultVersionAndStrictDecode(t *testing.T) {

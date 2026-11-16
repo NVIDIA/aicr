@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // SlackPayload renders the weekly digest as a ready-to-POST incoming-webhook

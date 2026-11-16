@@ -19,7 +19,7 @@ import (
 	stderrors "errors"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // TestPrecompiledDriverExcludesGDRCopy asserts that no resolved recipe enables

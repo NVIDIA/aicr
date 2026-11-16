@@ -26,12 +26,12 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/validator"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // A bad spec.validate.evidence.cncf block (a notApplicable or documented

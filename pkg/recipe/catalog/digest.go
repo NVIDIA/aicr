@@ -20,9 +20,9 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // digestAlgoSHA256 is the algorithm key used in SLSA-style digest maps.

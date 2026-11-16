@@ -24,9 +24,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 func TestResultString(t *testing.T) {

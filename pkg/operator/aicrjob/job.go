@@ -28,9 +28,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // Stage is one AICR command the operator runs as a Job.

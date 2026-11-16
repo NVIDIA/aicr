@@ -24,9 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/measurement"
 	l8kconfig "github.com/nvidia/k8s-launch-kit/pkg/config"
 	l8kdisc "github.com/nvidia/k8s-launch-kit/pkg/networkoperatorplugin/discovery"
 	"k8s.io/client-go/rest"

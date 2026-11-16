@@ -23,11 +23,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/constraints"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/constraints"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
+	"aicr.run/pkg/serializer"
 )
 
 func TestClassifyResolve(t *testing.T) {

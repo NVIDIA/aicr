@@ -14,7 +14,7 @@
 
 package config
 
-import "github.com/NVIDIA/aicr/pkg/allocpolicy"
+import "aicr.run/pkg/allocpolicy"
 
 // DriverOwnershipFamily names the registry components that share one set of
 // GPU driver-ownership leaf paths.

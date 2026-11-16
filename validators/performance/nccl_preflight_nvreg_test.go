@@ -31,10 +31,10 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/defaults"
+	aicrErrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/validators"
 )
 
 func TestParseNVregFromParams(t *testing.T) {

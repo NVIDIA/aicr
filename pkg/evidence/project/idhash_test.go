@@ -19,7 +19,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"aicr.run/pkg/evidence/attestation"
 )
 
 // testIssuer and testIdentity are the verified (issuer, identity) fixture

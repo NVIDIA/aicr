@@ -25,15 +25,15 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/NVIDIA/aicr/pkg/collector"
-	"github.com/NVIDIA/aicr/pkg/collector/k8s"
-	"github.com/NVIDIA/aicr/pkg/collector/topology"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/collector"
+	"aicr.run/pkg/collector/k8s"
+	"aicr.run/pkg/collector/topology"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe/oskind"
+	"aicr.run/pkg/serializer"
 )
 
 // NodeSnapshotter collects system configuration measurements from the current node.

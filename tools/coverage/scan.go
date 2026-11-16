@@ -22,7 +22,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // maxScanFileBytes bounds how much of a signal file we read; runner scripts and

@@ -17,7 +17,7 @@ package attestation
 import (
 	"github.com/sigstore/sigstore-go/pkg/sign"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"aicr.run/pkg/defaults"
 )
 
 // TransparencyPolicy decides which transparency logs and timestamp authorities

@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // writeZip creates a zip at path containing the given name->content entries.

@@ -28,10 +28,10 @@ import (
 	"github.com/urfave/cli/v3"
 	"gopkg.in/yaml.v3"
 
-	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	bundlercfg "aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/snapshotter"
 )
 
 // The --argocd-* flags. Each mirrors a field of

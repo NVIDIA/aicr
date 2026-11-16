@@ -25,16 +25,16 @@ import (
 	"testing"
 	"time"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 func TestBuild_RejectsMissingRequiredFields(t *testing.T) {

@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"aicr.run/pkg/defaults"
 )
 
 func TestParseConfig(t *testing.T) {

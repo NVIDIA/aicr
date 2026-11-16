@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 var errInvalid = errors.New(errors.ErrCodeInvalidRequest, "")

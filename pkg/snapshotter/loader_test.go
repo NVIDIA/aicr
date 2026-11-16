@@ -20,12 +20,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/serializer"
 )
 
 func TestLoadFromFile(t *testing.T) {

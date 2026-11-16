@@ -21,8 +21,8 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // RunMetaSchemaVersion is the meta.json schema GP4 reads (Contract 3, written

@@ -21,14 +21,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/evidence/canonical"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/bundleinfo"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/evidence/canonical"
+	"aicr.run/pkg/recipe"
 	"sigs.k8s.io/yaml"
 )
 

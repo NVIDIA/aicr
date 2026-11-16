@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 func TestReportedCode(t *testing.T) {

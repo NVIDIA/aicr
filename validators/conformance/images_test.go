@@ -19,7 +19,7 @@ import (
 
 	"github.com/distribution/reference"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"aicr.run/pkg/defaults"
 )
 
 // TestTestPodImagesFullyQualified guards against short image names, which

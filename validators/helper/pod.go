@@ -22,10 +22,10 @@ import (
 	"strings"
 	"time"
 
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	podutil "github.com/NVIDIA/aicr/pkg/k8s/pod"
+	aicrErrors "aicr.run/pkg/errors"
+	podutil "aicr.run/pkg/k8s/pod"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"aicr.run/pkg/defaults"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

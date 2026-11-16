@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	pkgerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	pkgerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/measurement"
 )
 
 // expiredCtxTimeout is short enough that the context is guaranteed already

@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // TestExportTests pins the export rule (ADR-007 amendment, decision 6): the

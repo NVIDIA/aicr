@@ -19,7 +19,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // hclString renders s as an HCL quoted string literal.

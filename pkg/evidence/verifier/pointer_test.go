@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"aicr.run/pkg/evidence/attestation"
 )
 
 func TestLoadAndValidatePointer_HappyPath(t *testing.T) {

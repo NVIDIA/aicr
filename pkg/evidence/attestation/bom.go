@@ -21,15 +21,15 @@ import (
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 
-	"github.com/NVIDIA/aicr/pkg/bom"
-	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/internal/boundedio"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"aicr.run/pkg/bom"
+	k8scollector "aicr.run/pkg/collector/k8s"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/internal/boundedio"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator/catalog"
 )
 
 // LoadOrGenerateBOM returns the CycloneDX BOM bytes to embed. When bomPath

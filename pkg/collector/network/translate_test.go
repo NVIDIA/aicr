@@ -18,8 +18,8 @@ import (
 	stderrors "errors"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/measurement"
 	l8kconfig "github.com/nvidia/k8s-launch-kit/pkg/config"
 )
 

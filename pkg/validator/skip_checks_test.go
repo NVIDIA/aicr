@@ -18,12 +18,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/evidence/redact"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/evidence/redact"
+	"aicr.run/pkg/validator/catalog"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // skipChecksCatalog is the fixture both suites below run against: three

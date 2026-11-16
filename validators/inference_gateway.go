@@ -15,7 +15,7 @@
 package validators
 
 import (
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	v1 "aicr.run/pkg/validator/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 

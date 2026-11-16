@@ -26,15 +26,15 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/oci"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/result"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/oci"
+	"aicr.run/pkg/serializer"
 	"github.com/urfave/cli/v3"
 )
 

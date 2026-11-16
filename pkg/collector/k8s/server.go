@@ -18,8 +18,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/measurement"
 	"k8s.io/client-go/discovery"
 )
 

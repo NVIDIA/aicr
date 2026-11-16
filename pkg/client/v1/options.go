@@ -21,8 +21,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/validator"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator"
 )
 
 // Option configures a Client.

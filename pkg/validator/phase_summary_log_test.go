@@ -22,7 +22,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"aicr.run/pkg/validator/catalog"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/informers"

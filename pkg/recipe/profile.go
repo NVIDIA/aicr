@@ -27,11 +27,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/allocpolicy"
-	"github.com/NVIDIA/aicr/pkg/artifact"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/allocpolicy"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/serializer"
 )
 
 // RecipeProfileAPIVersion is the emitter version for RecipeMetadata and

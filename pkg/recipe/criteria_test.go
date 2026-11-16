@@ -24,7 +24,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/serializer"
 )
 
 func TestParseCriteriaServiceType(t *testing.T) {

@@ -20,9 +20,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/recipe"
 )
 
 // The workload name, and the images docs/user/container-images.md discloses

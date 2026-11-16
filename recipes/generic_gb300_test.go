@@ -27,12 +27,12 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
-	"github.com/NVIDIA/aicr/pkg/manifest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/manifest"
+	"aicr.run/pkg/recipe"
 )
 
 // TestGenericGB300DevicePluginMOFEDStaysOff pins MOFED_ENABLED to an
