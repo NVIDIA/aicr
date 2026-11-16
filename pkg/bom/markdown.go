@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // stickyWriter wraps an io.Writer and remembers the first write error so the

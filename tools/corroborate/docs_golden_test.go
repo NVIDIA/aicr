@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/corroborate"
+	"aicr.run/pkg/corroborate"
 )
 
 // docsDir is the relative path from tools/corroborate/ to the user docs root.

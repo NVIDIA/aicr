@@ -35,9 +35,9 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func TestVerifyBundle(t *testing.T) {

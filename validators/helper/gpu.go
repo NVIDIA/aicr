@@ -19,7 +19,7 @@ import (
 	"context"
 	"fmt"
 
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrErrors "aicr.run/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"

@@ -19,8 +19,8 @@ import (
 	"math"
 	"strings"
 
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	aicrErrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // creCombination is a recipe criteria pair a Cluster Readiness Engine check can

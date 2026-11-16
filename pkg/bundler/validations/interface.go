@@ -17,8 +17,8 @@ package validations
 import (
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/recipe"
 )
 
 // ValidationFunc is the signature for validation check functions.

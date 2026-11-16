@@ -26,9 +26,9 @@ import (
 	"github.com/kyverno/chainsaw/pkg/apis/v1alpha1"
 	"sigs.k8s.io/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // shortCircuitCtxTimeout bounds runs whose asserts are expected to fail, so

@@ -21,9 +21,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // readinessDecl builds a single-value declaration carrying both a

@@ -25,11 +25,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/checksum"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/defaults"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 // kmsURISchemes are the cosign KMS URI prefixes accepted for Mode A signing.

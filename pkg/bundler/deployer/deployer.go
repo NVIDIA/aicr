@@ -30,7 +30,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // Release is one Helm release a deployer emits, reported so the bundler can

@@ -23,8 +23,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/uatbroker"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/uatbroker"
 	"gopkg.in/yaml.v3"
 )
 

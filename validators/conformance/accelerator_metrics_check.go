@@ -22,8 +22,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/errors"
+	"aicr.run/validators"
 )
 
 const dcgmExporterURL = "http://nvidia-dcgm-exporter.gpu-operator.svc:9400/metrics"

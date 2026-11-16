@@ -50,14 +50,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	helmutil "github.com/NVIDIA/aicr/pkg/helm"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/bundler/checksum"
+	bundlercfg "aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/errors"
+	helmutil "aicr.run/pkg/helm"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 )
 
 //go:embed templates/application.yaml.tmpl

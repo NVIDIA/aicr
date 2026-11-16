@@ -35,9 +35,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	"github.com/NVIDIA/aicr/pkg/operator/manager"
+	"aicr.run/pkg/operator/aicrjob"
+	"aicr.run/pkg/operator/defaults"
+	"aicr.run/pkg/operator/manager"
 )
 
 // The chart renders exactly the AICR versions the operator supports, and

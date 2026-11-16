@@ -28,10 +28,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/allowlist"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/allowlist"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/recipe"
 )
 
 // EnvVar is the process-wide opt-in. A value of 1, true, yes, or on enables

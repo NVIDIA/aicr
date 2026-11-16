@@ -25,8 +25,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/errors"
 )
 
 // BuildManifest walks bundleDir and computes a deterministic manifest

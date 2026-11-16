@@ -19,7 +19,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/NVIDIA/aicr/pkg/inventory"
+	"aicr.run/pkg/inventory"
 )
 
 // releaseKey identifies a release by name and install namespace, as helm list

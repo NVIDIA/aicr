@@ -17,7 +17,7 @@ package collector
 import (
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/measurement"
 )
 
 // Collector defines the interface for collecting system measurement data.

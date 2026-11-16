@@ -21,9 +21,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/deprecation"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/deprecation"
+	aicrerrors "aicr.run/pkg/errors"
 	"github.com/google/uuid"
 )
 

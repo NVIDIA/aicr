@@ -23,10 +23,10 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	evidenceindex "github.com/NVIDIA/aicr/pkg/evidence/index"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	evidenceindex "aicr.run/pkg/evidence/index"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 func TestRequireEvidenceAcceptsOnlyPublishedPointers(t *testing.T) {

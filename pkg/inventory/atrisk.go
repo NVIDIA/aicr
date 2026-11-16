@@ -28,10 +28,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/metadata"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
-	"github.com/NVIDIA/aicr/pkg/k8s/labels"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	k8sclient "aicr.run/pkg/k8s/client"
+	"aicr.run/pkg/k8s/labels"
 )
 
 // Ownership markers recognized by owned.

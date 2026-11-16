@@ -37,8 +37,8 @@ import (
 	"oras.land/oras-go/v2/registry/remote/errcode"
 	"oras.land/oras-go/v2/registry/remote/retry"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/operator/registry"
 )
 
 // pushTimeout bounds publishing a candidate.

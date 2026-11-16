@@ -26,8 +26,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s/pod"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/k8s/pod"
 )
 
 // Format represents the output format type

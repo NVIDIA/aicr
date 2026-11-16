@@ -20,10 +20,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/validator/catalog"
 )
 
 // TestGPUCheckWorkBudgetsFitCatalogTimeouts pins the containment arithmetic

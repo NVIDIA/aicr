@@ -28,9 +28,9 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/NVIDIA/aicr/pkg/collector/k8s"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
+	"aicr.run/pkg/collector/k8s"
+	"aicr.run/pkg/errors"
+	k8sclient "aicr.run/pkg/k8s/client"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"

@@ -35,19 +35,19 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
-	bundlerresult "github.com/NVIDIA/aicr/pkg/bundler/result"
-	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appconfig "github.com/NVIDIA/aicr/pkg/config"
-	evverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
-	"github.com/NVIDIA/aicr/pkg/health"
-	"github.com/NVIDIA/aicr/pkg/oci"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	bundlerconfig "aicr.run/pkg/bundler/config"
+	bundlerresult "aicr.run/pkg/bundler/result"
+	bundleverifier "aicr.run/pkg/bundler/verifier"
+	aicr "aicr.run/pkg/client/v1"
+	appconfig "aicr.run/pkg/config"
+	evverifier "aicr.run/pkg/evidence/verifier"
+	"aicr.run/pkg/health"
+	"aicr.run/pkg/oci"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/upgrade"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // TestStability_Client pins the Client constructor, its option type, and

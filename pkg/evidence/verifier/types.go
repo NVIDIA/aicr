@@ -15,7 +15,7 @@
 package verifier
 
 import (
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"aicr.run/pkg/evidence/attestation"
 )
 
 // InputForm enumerates supported bundle transport shapes.

@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/types"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/types"
 )
 
 func TestNewBaseBundler(t *testing.T) {

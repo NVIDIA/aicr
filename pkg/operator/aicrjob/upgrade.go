@@ -17,7 +17,7 @@ package aicrjob
 import (
 	"encoding/json"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
 )
 
 // UpgradeReport is the subset of `aicr upgrade-check --format json` the

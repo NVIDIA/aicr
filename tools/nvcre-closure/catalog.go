@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // Catalog entry files are Go templates, not YAML: `{{ lib "..." }}` directives

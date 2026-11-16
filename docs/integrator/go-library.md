@@ -6,12 +6,12 @@ state can import AICR directly. This page is for those consumers.
 
 ## Which package to import
 
-**Import the `github.com/NVIDIA/aicr/pkg/client/v1` package.** This is the
+**Import the `aicr.run/pkg/client/v1` package.** This is the
 compatibility-reviewed facade and the surface AICR intends to stabilize at
 v1.0.
 
 ```go
-import aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+import aicr "aicr.run/pkg/client/v1"
 ```
 
 The facade provides a single `Client` type with constructors for the
@@ -25,7 +25,7 @@ surface](./public-api.md) for the details.
 ## Runnable examples
 
 Each facade entry point below has a compiled counterpart in
-[`pkg/client/v1`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#pkg-examples).
+[`pkg/client/v1`](https://pkg.go.dev/aicr.run/pkg/client/v1#pkg-examples).
 They are ordinary Go example functions, so `go test` builds them on every
 change — a facade change that breaks one of these fails in AICR's tree rather
 than in yours.
@@ -67,14 +67,17 @@ copying from the examples, which are complete and known to build.
 ## Installing
 
 ```bash
-go get github.com/NVIDIA/aicr@latest
+go get aicr.run@latest
 ```
 
 For reproducibility in downstream projects, pin a specific tag:
 
 ```bash
-go get github.com/NVIDIA/aicr@v1.0.0
+go get aicr.run@vX.Y.Z
 ```
+
+Releases up to v1.2.0 were published as `github.com/NVIDIA/aicr`. {/* module-rename:keep */}
+To upgrade past them, change your imports to `aicr.run` and run `go mod tidy`.
 
 ## Quick start
 
@@ -86,7 +89,7 @@ import (
 	"log"
 	"time"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicr "aicr.run/pkg/client/v1"
 )
 
 func main() {
@@ -791,7 +794,7 @@ import (
 	"context"
 	"errors"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicr "aicr.run/pkg/client/v1"
 )
 
 func useOCIRecipes(ctx context.Context, repository, manifestDigest, tempDir string) (retErr error) {
@@ -1227,7 +1230,7 @@ import (
 	"context"
 	"errors"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicr "aicr.run/pkg/client/v1"
 )
 
 func resolveCommittedConfig(ctx context.Context) (retErr error) {
@@ -2094,8 +2097,8 @@ with the same code, so this works through wrap chains:
 ```go
 import (
 	stderrors "errors"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicr "aicr.run/pkg/client/v1"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 _, err := client.ResolveRecipe(ctx, req)
@@ -2107,7 +2110,7 @@ case stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeNotFound, "")):
 }
 ```
 
-Runnable version: [`Example_errorCodes`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#example-package-ErrorCodes).
+Runnable version: [`Example_errorCodes`](https://pkg.go.dev/aicr.run/pkg/client/v1#example-package-ErrorCodes).
 
 Reach for `errors.As` only when you need the error's *payload* rather than
 its class — `se.Context`, which carries structured detail such as a coverage

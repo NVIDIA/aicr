@@ -14,7 +14,7 @@
 
 package constraints
 
-import "github.com/NVIDIA/aicr/pkg/constraints/expr"
+import "aicr.run/pkg/constraints/expr"
 
 // The expression grammar lives in the leaf package pkg/constraints/expr so
 // pkg/recipe can parse constraint values without importing this package,

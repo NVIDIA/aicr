@@ -18,8 +18,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 )
 
 // Zarf package config schema. Pinned to the v1alpha1 API defined in

@@ -20,7 +20,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
+	bundlerconfig "aicr.run/pkg/bundler/config"
 )
 
 // TestBundleOptions_BundlerConfig_FoldsFlatFields asserts bundlerConfig's

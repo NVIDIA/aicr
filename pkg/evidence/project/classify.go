@@ -17,7 +17,7 @@ package project
 import (
 	"regexp"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/allowlist"
+	"aicr.run/pkg/evidence/allowlist"
 )
 
 // Class is the trust classification recorded for a verified signer. It

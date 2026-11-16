@@ -20,8 +20,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/recipe"
 )
 
 // The gpu-operator values path and toolkit variable read by

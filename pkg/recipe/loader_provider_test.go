@@ -20,10 +20,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 // newTestLayeredProvider builds a LayeredDataProvider over a temp dir holding a

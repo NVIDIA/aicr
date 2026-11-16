@@ -17,10 +17,10 @@ package aicr
 import (
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/snapshotter"
 )
 
 // LoadSnapshot reads a previously captured snapshot and returns it in the

@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"aicr.run/pkg/validator/catalog"
 )
 
 // Every catalog entry that runs the conformance image must name a check the

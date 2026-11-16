@@ -20,7 +20,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 // TestReadBoundedFile pins the size-guard helper used for binary

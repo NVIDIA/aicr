@@ -24,9 +24,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	aicr "aicr.run/pkg/client/v1"
+	appcfg "aicr.run/pkg/config"
+	"aicr.run/pkg/recipe"
 )
 
 // writeYAML writes content to a temp file in the test's temp dir and returns its path.

@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"regexp"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // SchemaVersion is the plan document schema this operator writes. It reads

@@ -23,10 +23,10 @@ import (
 	"testing"
 	"time"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/evidence/attestation"
 )
 
 func stepByNumber(t *testing.T, r *VerifyResult, step int) *StepResult {

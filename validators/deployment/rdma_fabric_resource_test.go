@@ -20,8 +20,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/validators/helper"
+	"aicr.run/pkg/recipe"
+	"aicr.run/validators/helper"
 )
 
 // TestRDMAFabricResources_RealManifests derives the fabric resources from the

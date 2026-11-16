@@ -18,8 +18,8 @@ import (
 	"net/http"
 	"time"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 )
 
 // healthResponse represents health check response

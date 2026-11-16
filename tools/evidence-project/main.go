@@ -43,11 +43,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/evidence/project"
-	"github.com/NVIDIA/aicr/pkg/evidence/verifier"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/evidence/project"
+	"aicr.run/pkg/evidence/verifier"
 )
 
 // options is the parsed command line.

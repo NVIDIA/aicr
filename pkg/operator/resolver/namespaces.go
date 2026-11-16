@@ -19,8 +19,8 @@ import (
 	"slices"
 	"strings"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/plan"
 )
 
 // ReasonNamespaceNotAllowed marks a plan that renders a release into a

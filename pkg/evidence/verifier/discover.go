@@ -20,9 +20,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/allowlist"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/allowlist"
+	"aicr.run/pkg/evidence/attestation"
 )
 
 // EvidenceDirName is the repo-relative root of the committed evidence tree.

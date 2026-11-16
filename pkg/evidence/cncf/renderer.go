@@ -39,8 +39,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // Parsed templates cached at package level to avoid re-parsing on every render call.

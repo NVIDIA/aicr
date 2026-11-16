@@ -14,7 +14,7 @@
 
 package corroborate
 
-import "github.com/NVIDIA/aicr/pkg/validator/ctrf"
+import "aicr.run/pkg/validator/ctrf"
 
 // State is a corroboration cell state. Its ordering under PhaseRollup is given
 // by phasePriority (worst-first), not the declaration order here.

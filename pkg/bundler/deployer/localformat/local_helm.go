@@ -26,9 +26,9 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/manifest"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/manifest"
 )
 
 // kindNamespaceRE matches a top-level YAML "kind: Namespace" line. Used to

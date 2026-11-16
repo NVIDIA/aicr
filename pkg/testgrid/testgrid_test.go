@@ -20,8 +20,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/corroborate"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/corroborate"
+	"aicr.run/pkg/recipe"
 )
 
 func TestLinkFor(t *testing.T) {
