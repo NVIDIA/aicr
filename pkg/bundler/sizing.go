@@ -88,15 +88,6 @@ func (b *DefaultBundler) planSizing(ctx context.Context, rr *recipe.RecipeResult
 	return p, nil
 }
 
-// rejectDynamic applies rejectDynamicSizedPaths to a component sized at
-// install.
-func (p sizingPlan) rejectDynamic(componentName string, dynPaths map[string]struct{}) error {
-	if p.sz == nil || !p.atInstall {
-		return nil
-	}
-	return rejectDynamicSizedPaths(componentName, dynPaths, p.sz)
-}
-
 // finishSizing runs once every override is applied. Each row of a component
 // sized at install, and the values of any other sized component, must keep
 // every request within its limit.
@@ -118,14 +109,17 @@ func (b *DefaultBundler) finishSizing(p sizingPlan, ref *recipe.ComponentRef, va
 }
 
 // installRows builds the argocd-helm rows of a component sized at install,
-// leaving out every path an override reaches.
+// leaving out every path an override or a --dynamic path reaches: the
+// dynamic path's root value is merged after the row and would mask it.
 func (b *DefaultBundler) installRows(p sizingPlan, ref *recipe.ComponentRef, values map[string]any,
 	provider recipe.DataProvider) ([]argocdhelm.SizingRow, error) {
 
 	sets := b.getValueOverridesForComponent(ref.Name, provider)
 	typed := b.getTypedValueOverridesForComponent(ref.Name, provider)
+	dynamic := b.dynamicPathSetFor(ref.Name, provider)
 	skip := func(path string) bool {
-		return p.recipeSets(path) || overrideReaches(sets, path) || overrideReaches(typed, path)
+		return p.recipeSets(path) || overrideReaches(sets, path) || overrideReaches(typed, path) ||
+			overrideReaches(dynamic, path)
 	}
 	return installSizingRows(ref, values, skip, p.sz, b.Config.EstimatedNodeCount())
 }
@@ -266,25 +260,6 @@ func dropUndercutLimits(applied []sizedField, merged map[string]any) []sizedFiel
 	})
 }
 
-// rejectDynamicSizedPaths fails when a --dynamic path overlaps a path sizing
-// writes: its pre-filled root value would always mask the selected row.
-func rejectDynamicSizedPaths(componentName string, dynPaths map[string]struct{}, sz *recipe.ComponentSizing) error {
-	for i := range sz.Resources {
-		for _, field := range []string{recipe.SizingFieldRequests, recipe.SizingFieldLimits} {
-			sized := sz.Resources[i].Path + "." + field + ".memory"
-			for dyn := range dynPaths {
-				if recipe.PathsIntersect(dyn, sized) {
-					return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-						"component %q: --dynamic path %q overlaps %q, which sizing.nodeCount sets at install; "+
-							"override it at install time as a root-chart value instead",
-						componentName, dyn, sized))
-				}
-			}
-		}
-	}
-	return nil
-}
-
 // applySizing lowers each memory request and limit the sizing document names
 // to the tier covering n, writing min(resolved, tier). A field the values do
 // not set is skipped, as is one skip reports.
@@ -345,8 +320,8 @@ func checkSizedRequestsWithinLimits(values map[string]any, sz *recipe.ComponentS
 		if _, ok := r.TierFor(n); !ok {
 			continue
 		}
-		reqV, hasReq := component.GetValueByPath(values, r.Path+".requests.memory")
-		limV, hasLim := component.GetValueByPath(values, r.Path+".limits.memory")
+		reqV, hasReq := component.GetValueByPath(values, r.Path+"."+recipe.SizingFieldRequests+".memory")
+		limV, hasLim := component.GetValueByPath(values, r.Path+"."+recipe.SizingFieldLimits+".memory")
 		if !hasReq || !hasLim {
 			continue
 		}
@@ -358,7 +333,7 @@ func checkSizedRequestsWithinLimits(values map[string]any, sz *recipe.ComponentS
 		}
 		if req.Cmp(lim) > 0 {
 			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-				"%s memory request %v is above its limit %v after overrides; raise the limit or lower the request",
+				"%s memory request %v is above its limit %v at this node count; raise the limit or lower the request",
 				r.Path, reqV, limV))
 		}
 	}

@@ -161,8 +161,9 @@ type BundleOptions struct {
 	// WorkloadSelector labels the workloads WorkloadGate protects.
 	WorkloadSelector map[string]string
 
-	// Nodes is the estimated node count used for capacity-aware rendering.
-	// 0 means unset.
+	// Nodes is the estimated GPU node count. It is written to the registry's
+	// nodeCountPaths and selects the memory tier of each component with a
+	// sizing file (ADR-030). 0 means unset.
 	Nodes int
 
 	// StorageClass / SharedStorageClass name the Kubernetes StorageClasses

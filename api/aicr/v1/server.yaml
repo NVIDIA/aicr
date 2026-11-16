@@ -1232,7 +1232,11 @@ components:
       name: nodes
       in: query
       required: false
-      description: Estimated GPU node count for bundle-time injections.
+      description: >-
+        Estimated GPU node count for bundle-time injections. It also lowers the
+        memory of controllers with a sizing table to the tier for that count
+        (with deployer=argocd-helm, it sets the default sizing.nodeCount
+        instead). 0 means unset.
       schema:
         type: integer
         minimum: 0

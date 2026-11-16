@@ -1952,9 +1952,6 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 			if err := b.rejectDynamicRequiredNodeSelectorPaths(ref.Name, provider, dynPaths); err != nil {
 				return nil, err
 			}
-			if err := sizing.rejectDynamic(ref.Name, dynPaths); err != nil {
-				return nil, err
-			}
 			for path := range dynPaths {
 				policy.optOut[path] = struct{}{}
 			}

@@ -302,7 +302,14 @@ func TestExtractComponentValuesInstallSizing(t *testing.T) {
 			set:      map[string]string{"operator.resources.requests.memory": "900Mi"},
 			wantCode: errors.ErrCodeInvalidRequest,
 		},
-		{name: "--dynamic sized path rejected", dynamic: []string{"operator.resources"}, wantCode: errors.ErrCodeInvalidRequest},
+		{name: "--dynamic block leaves the component unsized", dynamic: []string{"operator.resources"}, wantLim: "8Gi"},
+		{
+			name: "--dynamic field left out of every row", dynamic: []string{"operator.resources.limits.memory"}, wantLim: "8Gi",
+			wantRows: []argocdhelm.SizingRow{
+				{MaxNodes: 250, Values: resourcesValues("256Mi", nil)},
+				{MaxNodes: 450, Values: resourcesValues("256Mi", nil)},
+			},
+		},
 		{name: "vendored charts size at generation time", vendor: true, nodes: 200, wantLim: "768Mi"},
 		{name: "local chart sizes at generation time", local: true, nodes: 200, wantLim: "768Mi"},
 	}

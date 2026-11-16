@@ -576,8 +576,9 @@ Rendering:
   child Application, and `aicr.run/sizing-tier` (the row's
   `maxNodes`) only on one whose values a row changed. Both keys are built
   from `header.Domain` ([ADR-013](013-aicr-run-domain-migration.md)).
-- A `--dynamic` export of a sized path is rejected at bundle time. Its
-  pre-filled root value would otherwise always mask the selected row.
+- A `--dynamic` export of a sized path wins over sizing: the request or
+  limit it reaches is left out of every row, because its pre-filled root
+  value is merged after the selected row.
 
 Each component is sized from exactly one count: on an `argocd-helm`
 bundle, `--nodes` sets the default `sizing.nodeCount` and sizes the
@@ -654,7 +655,7 @@ by following this section.
    - the generation-time sizing pass, the post-override request ≤ limit
      check, and the SDK's negative-count check;
    - the `argocd-helm` root value, per-tier static files, template
-     selection, annotations and `--dynamic` guard;
+     selection, annotations and `--dynamic` handling;
    - the user docs, `docs/contributor/component-sizing.md` and its
      pointer in `.claude/CLAUDE.md` (mirrored to `AGENTS.md`).
 
