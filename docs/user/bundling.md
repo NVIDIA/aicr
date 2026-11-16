@@ -565,8 +565,7 @@ recipes each row names; a row with no recipe applies to all of them. Their
 **Smaller clusters: state a GPU node count.** `aicr bundle --nodes N` lowers
 the memory of each controller that has a sizing table
 (`recipes/components/<name>/sizing.yaml`) to the measured tier covering N GPU
-nodes. Today these are the GPU Operator and the Network Operator's
-maintenance-operator subchart. Sizing only lowers a value:
+nodes. Today that is the GPU Operator. Sizing only lowers a value:
 each request and limit becomes the smaller of the recipe's value and the
 tier's. With no count, or a count above the highest tier, the bundle is
 unchanged. It never touches a path set by the recipe's inline overrides, a
