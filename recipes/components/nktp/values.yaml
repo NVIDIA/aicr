@@ -12,9 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# NKTP (NVKE Telemetry Pipeline) Helm values, ADR-026. Collector resources are
-# NKTP's to tune and are not overridden here. Images are the chart's defaults
-# at the pinned chart version (ADR-006).
+# NKTP (NVKE Telemetry Pipeline) Helm values, ADR-026. Images are the chart's
+# defaults at the pinned chart version (ADR-006).
+#
+# CPU requests are four to five times below NKTP's defaults (#3849): at those
+# defaults NKTP reserved 6.45 vCPU on a 3x 4-vCPU system pool while using under
+# 1 vCPU cluster-wide, starving nvsentinel's per-node pods. Each autoscaled
+# collector's targetCPUUtilization rises by the same factor, so it scales out
+# at the same absolute CPU as before. Memory requests, all limits, and replica
+# floors stay NKTP's.
 
 # Collectors schedule ahead of workloads but never evict a running pod. The
 # field is immutable: changing it on an installed cluster means deleting the
@@ -64,6 +70,11 @@ metrics-server:
 # list without the queue mount, so re-copy it on a chart bump.
 gateway_metrics:
   kubernetes:
+    resources:
+      requests:
+        cpu: 50m
+    autoscaler:
+      targetCPUUtilization: 300
     volumeClaimTemplates: []
     volumeMounts:
       - name: internal-tls-server
@@ -82,6 +93,11 @@ gateway_metrics:
 
 gateway_logs:
   kubernetes:
+    resources:
+      requests:
+        cpu: 50m
+    autoscaler:
+      targetCPUUtilization: 300
     volumeClaimTemplates: []
     volumeMounts:
       - name: internal-tls-server
@@ -100,6 +116,11 @@ gateway_logs:
 
 gateway_traces:
   kubernetes:
+    resources:
+      requests:
+        cpu: 50m
+    autoscaler:
+      targetCPUUtilization: 300
     volumeClaimTemplates: []
     volumeMounts:
       - name: internal-tls-server
@@ -118,6 +139,15 @@ gateway_traces:
 
 watchdog:
   kubernetes:
+    resources:
+      requests:
+        cpu: 25m
+    autoscaler:
+      targetCPUUtilization: 300
+    targetAllocator:
+      resources:
+        requests:
+          cpu: 50m
     volumeClaimTemplates: []
     volumeMounts:
       - name: internal-tls-server
@@ -136,3 +166,37 @@ watchdog:
             queue_size: 8388608
       service:
         extensions: [health_check]
+
+large_target_metrics:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 125m
+    autoscaler:
+      targetCPUUtilization: 300
+    targetAllocator:
+      resources:
+        requests:
+          cpu: 50m
+
+daemonset:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 100m
+    targetAllocator:
+      resources:
+        requests:
+          cpu: 50m
+
+cluster_events:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 50m
+
+kube-state-metrics:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 25m
