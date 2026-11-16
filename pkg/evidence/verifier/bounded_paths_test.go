@@ -67,6 +67,10 @@ func TestVerifierFilesystemPathsAreBounded(t *testing.T) {
 			_, err := CheckPhaseDigestsContext(ctx, mat, pred)
 			return err
 		}},
+		{"checkValidatorImages", func(ctx context.Context) error {
+			_, err := checkValidatorImages(ctx, mat, pred)
+			return err
+		}},
 		{"hashFile", func(ctx context.Context) error {
 			_, err := hashFile(ctx, dir, attestation.RecipeFilename, 0)
 			return err

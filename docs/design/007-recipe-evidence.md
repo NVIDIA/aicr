@@ -936,7 +936,8 @@ auto-detected input form — OCI ref or unpacked directory):
    trust the constraint outcome the contributor recorded; it
    recomputes it.
 9. **Phase results surface.** Read CTRF results from the bundle; verify
-   per-phase `ctrfDigest` against the predicate.
+   per-phase `ctrfDigest` against the predicate, and check that
+   `validatorImages` matches the image records in those reports.
 10. **BOM cross-reference.** Confirm `bom.digest` matches predicate;
     count chart-default sub-images for the disclosure
     ("BOM contains N chart-default sub-images NOT covered by this
