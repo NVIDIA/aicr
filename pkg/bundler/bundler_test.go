@@ -196,7 +196,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 	t.Run("final inventory includes and binds recipe", func(t *testing.T) {
 		dir := t.TempDir()
 		output, _, err := newRun(t).runDeployer(
-			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
+			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), &bundleStage{dir: dir, path: dir}, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
 		}
@@ -245,7 +245,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		r := &bundleRun{DefaultBundler: b}
 		_, _, err := r.runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
-			closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
+			closedWorldRecipeResult(), &bundleStage{dir: dir, path: dir}, nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
@@ -265,7 +265,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		dir := t.TempDir()
 		r := &bundleRun{DefaultBundler: b}
 		output, _, err := r.runDeployer(
-			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
+			context.Background(), closedWorldTestDeployer{}, closedWorldRecipeResult(), &bundleStage{dir: dir, path: dir}, nil, nil, time.Now())
 		if err != nil {
 			t.Fatalf("runDeployer() error = %v", err)
 		}
@@ -300,7 +300,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		dir := t.TempDir()
 		_, _, err := newRun(t).runDeployer(
 			context.Background(), closedWorldTestDeployer{writeUnmanaged: true},
-			closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
+			closedWorldRecipeResult(), &bundleStage{dir: dir, path: dir}, nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 			t.Errorf("runDeployer() error = %v, want ErrCodeInvalidRequest", err)
 		}
@@ -311,7 +311,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 		cancel()
 		dir := t.TempDir()
 		_, _, err := newRun(t).runDeployer(
-			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), dir, dir, nil, nil, time.Now())
+			ctx, closedWorldTestDeployer{}, closedWorldRecipeResult(), &bundleStage{dir: dir, path: dir}, nil, nil, time.Now())
 		if errorstest.ReportedCode(err) != errors.ErrCodeTimeout {
 			t.Errorf("runDeployer() error = %v, want ErrCodeTimeout", err)
 		}
@@ -481,7 +481,8 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 		name  string
 		setup func(t *testing.T, dir string)
 		opts  []config.Option
-		// wantErr expects ErrCodeInvalidRequest and an unchanged directory.
+		// wantErr expects ErrCodeInvalidRequest, an unchanged directory and
+		// no Attest call.
 		wantErr bool
 		// survivors are the entries kept beside the bundle.
 		survivors []string
@@ -504,6 +505,7 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 		{name: "edited file of an earlier bundle", setup: earlierBundle(false, filepath.Join("data", "extra", "a.yaml")), wantErr: true},
 		{name: "foreign file in an earlier bundle directory", setup: earlierBundle(false, filepath.Join("data", "extra", "notes.txt")), wantErr: true},
 		{name: "foreign file", setup: writeFile("stale.txt"), wantErr: true},
+		{name: "foreign file with attestation", setup: writeFile("stale.txt"), opts: []config.Option{config.WithAttest(true)}, wantErr: true},
 		{name: "foreign file in a populated static directory", setup: writeFile(filepath.Join("static", "stale.txt")), wantErr: true},
 		{name: "foreign directory in place of a bundle file", setup: writeFile(filepath.Join("README.md", "stale.txt")), wantErr: true},
 		{name: "sha256sum manifest", setup: func(t *testing.T, dir string) {
@@ -542,13 +544,18 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 			dir := t.TempDir()
 			tt.setup(t, dir)
 			before := treeSnapshot(t, dir)
-			b, err := New(WithConfig(config.NewConfig(tt.opts...)))
+			attester := &closedWorldTestAttester{}
+			b, err := New(WithConfig(config.NewConfig(tt.opts...)),
+				WithAttester(attester), WithVerifiedBinaryAttestation([]byte("stub")))
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
 			_, err = b.Make(t.Context(), closedWorldRecipeResult(), dir)
 			if tt.wantErr {
 				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				if attester.called != 0 {
+					t.Errorf("Attest() calls = %d, want 0", attester.called)
+				}
 				if after := treeSnapshot(t, dir); !reflect.DeepEqual(after, before) {
 					t.Errorf("rejected run changed the directory:\nbefore %v\nafter  %v",
 						slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))

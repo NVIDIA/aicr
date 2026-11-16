@@ -468,7 +468,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if err != nil {
 		return nil, err
 	}
-	out, inventory, err := r.runDeployer(ctx, d, recipeResult, stage.path, dir, dataFiles, upgradeNotes, start)
+	out, inventory, err := r.runDeployer(ctx, d, recipeResult, stage, dataFiles, upgradeNotes, start)
 	if err != nil {
 		return nil, err
 	}
@@ -570,28 +570,19 @@ func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.In
 	for i, e := range staged {
 		names[i] = e.Name()
 	}
+	var earlier bundlePaths
+	if inventory != nil {
+		var checkErr error
+		if earlier, checkErr = s.requireReplaceable(ctx, inventory.RelativeFiles()); checkErr != nil {
+			return checkErr
+		}
+	}
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read output directory %s", s.dir), err)
 	}
 
-	var earlier, owned bundlePaths
-	if inventory != nil {
-		var earlierErr error
-		if earlier, earlierErr = earlierBundle(ctx, s.dir); earlierErr != nil {
-			return earlierErr
-		}
-		owned = newBundlePaths()
-		for _, rel := range inventory.RelativeFiles() {
-			owned.add(rel)
-		}
-		for rel := range earlier.files {
-			owned.add(rel)
-		}
-	}
-
 	stageName := filepath.Base(s.path)
-	skipped := []string{stageName}
 	var replaced []string
 	for _, e := range entries {
 		name := e.Name()
@@ -602,16 +593,8 @@ func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.In
 		if staleErr != nil {
 			return staleErr
 		}
-		if stale {
-			skipped = append(skipped, name)
-		}
 		if stale || slices.Contains(names, name) || earlier.has(name, e.IsDir()) {
 			replaced = append(replaced, name)
-		}
-	}
-	if inventory != nil {
-		if ownErr := requireBundleOutput(ctx, s.dir, owned, skipped); ownErr != nil {
-			return ownErr
 		}
 	}
 
@@ -635,6 +618,42 @@ func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.In
 		}
 	}
 	return nil
+}
+
+// requireReplaceable returns ErrCodeInvalidRequest unless publishing may
+// replace every entry of the existing dir, because it is stale output, part
+// of the earlier bundle in dir, or one of files, the slash-separated files the
+// new bundle writes. It returns the earlier bundle's files.
+func (s *bundleStage) requireReplaceable(ctx context.Context, files []string) (bundlePaths, error) {
+	earlier, err := earlierBundle(ctx, s.dir)
+	if err != nil {
+		return bundlePaths{}, err
+	}
+	owned := newBundlePaths()
+	for _, rel := range files {
+		owned.add(rel)
+	}
+	for rel := range earlier.files {
+		owned.add(rel)
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return bundlePaths{}, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read output directory %s", s.dir), err)
+	}
+	skipped := []string{filepath.Base(s.path)}
+	for _, e := range entries {
+		stale, staleErr := isStaleOutput(s.dir, e)
+		if staleErr != nil {
+			return bundlePaths{}, staleErr
+		}
+		if stale {
+			skipped = append(skipped, e.Name())
+		}
+	}
+	if err := requireBundleOutput(ctx, s.dir, owned, skipped); err != nil {
+		return bundlePaths{}, err
+	}
+	return earlier, nil
 }
 
 // removeSigningFiles removes the regular files among dir's checksums.txt and
@@ -1578,11 +1597,12 @@ func (b *DefaultBundler) resolveArgoDeployerOptions() (*config.ArgoDeployerOptio
 // notice despite the process-wide once-per-subject deduplication.
 var warnDeprecated = deprecation.Warn
 
-// runDeployer executes a deployer into dir and builds the result output as
-// it reads once dir is published at publishedDir. It also returns the
-// verified checksum inventory of dir, nil when checksums are disabled.
+// runDeployer executes a deployer into the stage and builds the result output
+// as it reads once the stage is published. It also returns the verified
+// checksum inventory of the stage, nil when checksums are disabled.
 // dataFiles is the list of external data file paths already copied by Make().
-func (r *bundleRun) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir, publishedDir string, dataFiles []string, upgradeNotes []upgrade.BundleNote, start time.Time) (*result.Output, *checksum.Inventory, error) {
+func (r *bundleRun) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, stage *bundleStage, dataFiles []string, upgradeNotes []upgrade.BundleNote, start time.Time) (*result.Output, *checksum.Inventory, error) {
+	dir, publishedDir := stage.path, stage.dir
 	output, err := d.Generate(ctx, dir)
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
@@ -1626,10 +1646,25 @@ func (r *bundleRun) runDeployer(ctx context.Context, d deployer.Deployer, recipe
 	output.Files = append(output.Files, filepath.Join(dir, bundleinfo.FileName))
 	output.TotalSize += infoSize
 
+	verifyOpts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
 	if r.Config.IncludeChecksums() {
 		if checksumErr := checksum.WriteChecksums(ctx, dir, output); checksumErr != nil {
 			return nil, nil, errors.PropagateOrWrap(
 				checksumErr, errors.ErrCodeInternal, "failed to finalize bundle checksums")
+		}
+		// Publishing checks again. Checking before signing keeps a run that
+		// cannot publish from signing a bundle it discards.
+		if stage.inPlace {
+			_, staged, _, verifyErr := checksum.ReadAndVerifyBundle(ctx, dir, verifyOpts)
+			if verifyErr != nil {
+				return nil, nil, errors.PropagateOrWrap(
+					verifyErr, errors.ErrCodeInternal, "failed bundle inventory verification")
+			}
+			// attestBundleAt writes the attestation files after this check.
+			files := append(staged.RelativeFiles(), attestation.BundleMetadataPaths()...)
+			if _, checkErr := stage.requireReplaceable(ctx, files); checkErr != nil {
+				return nil, nil, checkErr
+			}
 		}
 	}
 
@@ -1640,7 +1675,6 @@ func (r *bundleRun) runDeployer(ctx context.Context, d deployer.Deployer, recipe
 	}
 	var inventory *checksum.Inventory
 	if r.Config.IncludeChecksums() {
-		verifyOpts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
 		var verifyErr error
 		_, inventory, _, verifyErr = checksum.ReadAndVerifyBundle(ctx, dir, verifyOpts)
 		if verifyErr != nil {
