@@ -1,0 +1,4 @@
+# Paths tools/module-rename never rewrites or checks, one per line.
+# An entry ending in "/" covers everything under it. "#" starts a comment.
+# A single line elsewhere that must keep the old path carries the inline
+# marker module-rename:keep instead of an entry here.
