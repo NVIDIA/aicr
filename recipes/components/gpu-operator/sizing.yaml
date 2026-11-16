@@ -65,7 +65,7 @@ resources:
       - maxNodes: 700
         limits: {memory: 1Gi}
         measurements:
-          - sets: [limits]
+          - sets: []
             kind: windowed
             window: 24h
             gpuNodes: 656
@@ -75,10 +75,11 @@ resources:
             max: 744Mi
             date: 2026-11-04
             ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6645492766
-          - sets: []
+          - sets: [limits]
             kind: windowed
             window: 7d
             gpuNodes: 656
+            nodes: 670
             p90: 599Mi
             max: 747Mi
             date: 2026-11-06
