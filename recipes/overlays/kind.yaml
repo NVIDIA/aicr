@@ -133,8 +133,8 @@ spec:
               memory: 512Mi
 
     # nktp: one replica per central collector to fit a kind node; collector
-    # resources are NKTP's (ADR-026). kind ships no resource metrics API, and
-    # its kubelets serve self-signed certificates.
+    # CPU requests come from the component values (#3849). kind ships no
+    # resource metrics API, and its kubelets serve self-signed certificates.
     - name: nktp
       type: Helm
       overrides:
