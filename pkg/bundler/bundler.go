@@ -560,8 +560,9 @@ func (s *bundleStage) publish(ctx context.Context, inventory *checksum.Inventory
 // output, then moves the stage's entries in. Any other entry survives, unless
 // inventory is set. Then an entry made up only of earlierBundle files is
 // removed too, and any other entry fails publishing before dir changes.
-// Without inventory, it also removes the earlier bundle's checksums.txt and
-// attestation files, which would vouch for content the new bundle replaced.
+// Without inventory, it also removes the checksums.txt and attestation files
+// of an earlier bundle that earlierBundle recognizes, which would vouch for
+// content the new bundle replaced.
 func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.Inventory) error {
 	staged, err := os.ReadDir(s.path)
 	if err != nil {
@@ -571,11 +572,17 @@ func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.In
 	for i, e := range staged {
 		names[i] = e.Name()
 	}
-	var earlier bundlePaths
+	var earlier, signing bundlePaths
 	if inventory != nil {
 		var checkErr error
 		if earlier, checkErr = s.requireReplaceable(ctx, inventory.RelativeFiles()); checkErr != nil {
 			return checkErr
+		}
+	} else {
+		// Read before the removals below, which can take bundle-info.yaml.
+		var signErr error
+		if signing, signErr = earlierBundle(ctx, s.dir); signErr != nil {
+			return signErr
 		}
 	}
 	entries, err := os.ReadDir(s.dir)
@@ -609,7 +616,7 @@ func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.In
 		}
 	}
 	if inventory == nil {
-		if rmErr := removeSigningFiles(s.dir); rmErr != nil {
+		if rmErr := removeSigningFiles(s.dir, signing); rmErr != nil {
 			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
 				"failed to remove the earlier bundle's checksums and attestation from %s, leaving the bundle in %s",
 				s.dir, s.keep()), rmErr)
@@ -661,10 +668,14 @@ func (s *bundleStage) requireReplaceable(ctx context.Context, files []string) (b
 }
 
 // removeSigningFiles removes the regular files among dir's checksums.txt and
-// attestation files, then the attestation directory if that leaves it empty.
-// Other files in the attestation directory are kept.
-func removeSigningFiles(dir string) error {
+// attestation files that earlier, from earlierBundle, holds. When earlier
+// holds attestation files, it then removes the attestation directory if that
+// leaves it empty. Other files in the attestation directory are kept.
+func removeSigningFiles(dir string, earlier bundlePaths) error {
 	for _, rel := range append([]string{checksum.ChecksumFileName}, attestation.BundleMetadataPaths()...) {
+		if !earlier.files[rel] {
+			continue
+		}
 		p := filepath.Join(dir, filepath.FromSlash(rel))
 		info, err := os.Lstat(p)
 		if stderrors.Is(err, os.ErrNotExist) {
@@ -679,6 +690,9 @@ func removeSigningFiles(dir string) error {
 		if err := os.Remove(p); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to remove %s", p), err)
 		}
+	}
+	if !earlier.dirs[attestation.AttestationDir] {
+		return nil
 	}
 	attestDir := filepath.Join(dir, attestation.AttestationDir)
 	info, err := os.Lstat(attestDir)

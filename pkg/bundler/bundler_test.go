@@ -473,6 +473,16 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 		"data", filepath.Join("data", recipe.RegistryFileName),
 		filepath.Join("data", "extra"), filepath.Join("data", "extra", "a.yaml"),
 	}
+	sha256sumManifest := func(t *testing.T, dir string) {
+		t.Helper()
+		snapshot := filepath.Join(dir, "snapshot.yaml")
+		if err := os.WriteFile(snapshot, []byte("kind: Snapshot\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := checksum.GenerateChecksums(t.Context(), dir, []string{snapshot}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	fresh := t.TempDir()
 	writeTestBundle(t, fresh)
 	want := slices.Sorted(maps.Keys(treeSnapshot(t, fresh)))
@@ -508,21 +518,24 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 		{name: "foreign file with attestation", setup: writeFile("stale.txt"), opts: []config.Option{config.WithAttest(true)}, wantErr: true},
 		{name: "foreign file in a populated static directory", setup: writeFile(filepath.Join("static", "stale.txt")), wantErr: true},
 		{name: "foreign directory in place of a bundle file", setup: writeFile(filepath.Join("README.md", "stale.txt")), wantErr: true},
-		{name: "sha256sum manifest", setup: func(t *testing.T, dir string) {
-			t.Helper()
-			snapshot := filepath.Join(dir, "snapshot.yaml")
-			if err := os.WriteFile(snapshot, []byte("kind: Snapshot\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if err := checksum.GenerateChecksums(t.Context(), dir, []string{snapshot}); err != nil {
-				t.Fatal(err)
-			}
-		}, wantErr: true},
+		{name: "sha256sum manifest", setup: sha256sumManifest, wantErr: true},
 		{
 			name:      "foreign file without checksums",
 			setup:     writeFile("stale.txt"),
 			opts:      []config.Option{config.WithIncludeChecksums(false)},
 			survivors: []string{"stale.txt"},
+		},
+		{
+			name:      "sha256sum manifest without checksums",
+			setup:     sha256sumManifest,
+			opts:      []config.Option{config.WithIncludeChecksums(false)},
+			survivors: []string{"snapshot.yaml", checksum.ChecksumFileName},
+		},
+		{
+			name:      "earlier bundle beside an attestation file without checksums",
+			setup:     earlierBundle(false, attestation.AttestationDir),
+			opts:      []config.Option{config.WithIncludeChecksums(false)},
+			survivors: append(slices.Clone(earlierData), attestation.AttestationDir),
 		},
 		{
 			name:      "attested earlier bundle without checksums",
