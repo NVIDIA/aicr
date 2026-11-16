@@ -354,3 +354,30 @@ func TestExtractComponentValuesInstallSizing(t *testing.T) {
 		})
 	}
 }
+
+func TestQuantityOf(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      any
+		want    string
+		wantErr bool
+	}{
+		{name: "string", in: "1Gi", want: "1Gi"},
+		{name: "int is bytes", in: 1024, want: "1024"},
+		{name: "int64 is bytes", in: int64(2048), want: "2048"},
+		{name: "float64 is bytes", in: float64(4096), want: "4096"},
+		{name: "unparseable string", in: "lots", wantErr: true},
+		{name: "unsupported type", in: true, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := quantityOf(tt.in)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("quantityOf(%v) error = %v, wantErr %v", tt.in, err, tt.wantErr)
+			}
+			if !tt.wantErr && got.String() != tt.want {
+				t.Errorf("quantityOf(%v) = %s, want %s", tt.in, got.String(), tt.want)
+			}
+		})
+	}
+}
