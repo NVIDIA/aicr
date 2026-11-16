@@ -9,7 +9,7 @@
       "installGoTools": false
     },
     "ghcr.io/devcontainers/features/node:1": {
-      "version": "20"
+      "version": "26"
     },
     "ghcr.io/devcontainers/features/sshd:1": {},
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
