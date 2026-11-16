@@ -89,6 +89,14 @@ if [[ "$1" == "version" && "$2" == "-m" ]]; then
             ;;
     esac
 fi
+if [[ "$1" == "run" && "$2" == "./tools/module-rename" ]]; then
+    printf 'module-rename %s\n' "${*:3}" >>"${GIT_LOG}"
+    if [[ "${MODULE_RENAME_SCENARIO:-correct}" == "failure" ]]; then
+        echo "mock module-rename failure" >&2
+        exit 42
+    fi
+    exit 0
+fi
 if [[ "$1" == "run" && "$2" == "./tools/api-diff-closure" ]]; then
     alias_mode=false
     closure_dir=""
@@ -205,6 +213,7 @@ fi
 if [[ "$1" == "worktree" && "$2" == "add" ]]; then
     printf 'baseline=%s\n' "$5" >>"${GIT_LOG}"
     mkdir -p "$4"
+    printf 'module %s\n' "${BASELINE_MODULE:-$(awk '$1 == "module" { print $2; exit }' "${API_DIFF_TEST_REPO_ROOT}/go.mod")}" >"$4/go.mod"
     exit 0
 fi
 if [[ "$1" == "worktree" && "$2" == "prune" ]]; then
@@ -590,8 +599,23 @@ unset APIDIFF_REPORT
 check_rc "compatible-only-report-succeeds" 0
 check_contains "compatible-only-change-is-reported" "Client.New: added"
 check_contains "compatible-only-report-is-clean" "No incompatible"
+check_absent "same-module-baseline-is-not-aligned" "Aligning baseline module path"
+check_log_absent "same-module-baseline-is-not-renamed" "module-rename"
 check_apidiff_log_equals "compatible-only-report-loads-facade-and-alias-targets-once" \
     "$(expected_apidiff_log "${REPO_ROOT}")"
+
+CURRENT_MODULE="$(awk '$1 == "module" { print $2; exit }' "${REPO_ROOT}/go.mod")"
+export BASELINE_MODULE=example.com/legacy
+run decision v9.8.7 "" "${EMPTY_EXCEPTIONS}"
+check_rc "cross-module-baseline-succeeds" 0
+check_contains "cross-module-baseline-is-aligned" "Aligning baseline module path example.com/legacy to ${CURRENT_MODULE}"
+check_log_contains "cross-module-baseline-renames-in-go-only-mode" "-from example.com/legacy -to ${CURRENT_MODULE} -go-only"
+check_contains "cross-module-baseline-is-clean" "No incompatible"
+export MODULE_RENAME_SCENARIO=failure
+run decision v9.8.7 "" "${EMPTY_EXCEPTIONS}"
+unset MODULE_RENAME_SCENARIO BASELINE_MODULE
+check_rc "cross-module-align-failure" 19
+check_contains "cross-module-align-failure-is-explained" "Could not align baseline v9.8.7"
 
 alias_target_cases=(
     'artifact-options|github.com/NVIDIA/aicr/pkg/artifact|Options.Inventory: removed'

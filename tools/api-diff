@@ -76,6 +76,7 @@ readonly EXIT_DUPLICATE_ACKNOWLEDGEMENT=15
 readonly EXIT_INCOMPATIBLE_CHANGES=16
 readonly EXIT_APIDIFF_VERSION_MISMATCH=17
 readonly EXIT_ALIAS_CONTRACT_MISMATCH=18
+readonly EXIT_BASELINE_ALIGN_FAILED=19
 
 # These statuses are part of the decision-flow test contract. They prevent a
 # failure in an earlier branch from satisfying an assertion for a later one.
@@ -319,6 +320,21 @@ trap cleanup EXIT
 msg "Comparing ${PACKAGE} and its transparent alias targets against ${baseline}"
 git worktree prune
 git worktree add --detach "${release_worktree}" "${baseline}" >/dev/null
+
+# A baseline released under an earlier module path names every package by that
+# path, so apidiff would compare unrelated package paths. Rewrite the temporary
+# worktree's go.mod and Go imports to the current path first; once the baseline
+# shares the current path this is a no-op.
+baseline_module="$(awk '$1 == "module" { print $2; exit }' "${release_worktree}/go.mod" 2>/dev/null || true)"
+if [[ -z "${baseline_module}" ]]; then
+    api_diff_err "${EXIT_BASELINE_ALIGN_FAILED}" "Could not read the module path of baseline ${baseline}."
+fi
+if [[ "${baseline_module}" != "${MODULE_PATH}" ]]; then
+    msg "Aligning baseline module path ${baseline_module} to ${MODULE_PATH}"
+    if ! go run ./tools/module-rename -dir "${release_worktree}" -from "${baseline_module}" -to "${MODULE_PATH}" -go-only >/dev/null; then
+        api_diff_err "${EXIT_BASELINE_ALIGN_FAILED}" "Could not align baseline ${baseline} module path ${baseline_module} to ${MODULE_PATH}."
+    fi
+fi
 
 current_root_args=()
 for spec in "${ALIAS_TARGETS[@]}"; do
