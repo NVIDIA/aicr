@@ -16,8 +16,9 @@
 # defaults at the pinned chart version (ADR-006).
 #
 # CPU requests are four to five times below NKTP's defaults (#3849): at those
-# defaults NKTP reserved 6.45 vCPU on a 3x 4-vCPU system pool while using under
-# 1 vCPU cluster-wide, starving nvsentinel's per-node pods. Each autoscaled
+# defaults NKTP reserved 6.68 vCPU (sidecars included) on a 3x 4-vCPU system
+# pool while using under 1 vCPU cluster-wide, starving nvsentinel's per-node
+# pods. Each autoscaled
 # collector's targetCPUUtilization is raised so it scales out at the same
 # absolute CPU as before. The HPA divides usage by the whole pod's request,
 # including the native otc-sidecar (20m on the gateways and watchdog, 10m on
