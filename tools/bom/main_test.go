@@ -22,9 +22,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bom"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
+	"aicr.run/pkg/bom"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/helm/helmtest"
 )
 
 // writeTestRegistry writes a minimal registry YAML to path and returns the

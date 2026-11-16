@@ -17,7 +17,7 @@ package v1
 import (
 	"fmt"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // DependencyRequirement is the strength of a dependency affinity.

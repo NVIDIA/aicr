@@ -18,7 +18,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/inventory"
+	"aicr.run/pkg/inventory"
 )
 
 // inventoryFixture is declared out of sorted order, and every component's

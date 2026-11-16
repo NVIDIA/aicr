@@ -19,9 +19,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
-	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator/catalog"
+	validatorv1 "aicr.run/pkg/validator/v1"
 )
 
 // Every leaf that resolves slinky-slurm on a GPU service must select

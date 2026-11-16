@@ -17,7 +17,7 @@ package inventory
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // TestScopeCovers is the contract of the three tiers. Every case is named for

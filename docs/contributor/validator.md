@@ -1009,6 +1009,7 @@ be set from the catalog or a `--data` overlay:
 |----------|--------------|---------|
 | `HF_TOKEN` | `inference-perf` | Hugging Face token for model downloads; see [`inference-perf`](#inference-perf-model-concurrency-and-weights-cache). |
 | `AICR_RUNAI_PROJECT_NAMESPACE` | `gang-scheduling` | The Run:ai Project namespace (`runai-<project>`) the gang test pods run in when the recipe declares `runai-cluster`. Required there: the check fails with `ErrCodeInvalidRequest` when it is unset, when the namespace does not exist, or when it carries no `runai/queue` label (so it is not a Project namespace). Ignored on every other recipe. The constant is `defaults.EnvRunaiProjectNamespace`. |
+| `AICR_SERVICE_METRICS_QUERY_URL` | `ai-service-metrics` | Base URL of the Prometheus query API the check reads instead of NKTP's `otel-lgtm` (the upstream `-service-metrics-query-url` flag); the check appends `/api/v1/query`. It applies whatever the recipe, so a recipe without `nktp` runs instead of skipping. A value that is not an `http` or `https` base URL, or that carries credentials, fails the run with `ErrCodeInvalidRequest` before the cluster is prepared when the run would deploy this check (`Validator.preflightForwardedEnv`), and `BuildJobPlan` repeats the check, so it never reaches a Job spec (`ParseServiceMetricsQueryURL` in `pkg/validator/v1`). The constant is `defaults.EnvServiceMetricsQueryURL`. |
 | `AICR_SANDBOX_RUNTIME_CLASS` | `workload-sandboxing` | Names the sandboxed `RuntimeClass` to test instead of auto-detecting one by the gVisor/Kata keywords (the upstream `-sandbox-runtime-class` flag); a name the cluster has no class for fails the check with `ErrCodeInvalidRequest`. |
 | `AICR_SANDBOX_PROBE_IMAGE` | `workload-sandboxing` | Replaces the vanilla probe image (`docker.io/library/ubuntu:22.04`, not rewritten by `AICR_VALIDATOR_IMAGE_REGISTRY`) with a full reference for mirrors; the image must provide a POSIX `/bin/sh`, `uname`, `cat`, `ls`, `wc`, `head`, `awk` and `tr` for the probe script; the probe pods carry the `--image-pull-secret` Secrets copied into the per-run namespace, as every probe pod in this package does. |
 | `AICR_INFERENCE_PERF_NO_CLEANUP` | `inference-perf` | When true (`strconv.ParseBool`), leaves the per-run namespace in place for inspection; forwarded as `1`. |
@@ -1491,9 +1492,13 @@ package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
 checks: `nccl-cre-all-reduce-bw` and `cre-training-goodput`. Neither branches on
 service or accelerator — `creQualifiedEntries` in
 `validators/performance/cre_qualification.go` records which combinations are
-qualified and the catalog entry and node cap each was measured with, so a new
-combination is an entry there plus a measured threshold rather than a new code
-path. `nccl-cre-all-reduce-bw` is qualified on `eks` x `h100` with
+qualified and the catalog entry, node cap and workload image each was measured
+with, so a new combination is an entry there plus a measured threshold rather
+than a new code path. The image is pinned by digest and submitted as the
+category's `options.image`; it must match
+`recipes/components/nvcre/workload-images.yaml`, which
+`TestCREQualifiedImagesMatchWorkloadClosure` enforces, so a chart bump that
+re-derives that file also moves the pins. `nccl-cre-all-reduce-bw` is qualified on `eks` x `h100` with
 `communication/nccl-all-reduce`, and `cre-training-goodput` on the same
 combination with `training/nemotron5-8b`, each capped at two nodes. A
 combination with no entry skips. Both create the

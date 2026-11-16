@@ -19,7 +19,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 const (

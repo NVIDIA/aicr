@@ -23,8 +23,8 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // Provider node-pool projections (ADR-015 DD3).

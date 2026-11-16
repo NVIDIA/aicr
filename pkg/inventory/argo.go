@@ -27,8 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // argoApplicationResource names the CRD in messages and in error context, in

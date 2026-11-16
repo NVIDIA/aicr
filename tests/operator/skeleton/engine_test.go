@@ -34,11 +34,11 @@ import (
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/controller"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/controller"
+	"aicr.run/pkg/operator/engine/argocd"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/registry"
 )
 
 const (

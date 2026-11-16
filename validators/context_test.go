@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"aicr.run/pkg/defaults"
 	corev1 "k8s.io/api/core/v1"
 )
 

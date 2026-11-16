@@ -31,15 +31,15 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/internal/gkenet"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/validator/ctrf"
+	validatorv1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
+	"aicr.run/validators/internal/gkenet"
 )
 
 // shippedMapping is the eight-NIC mapping a GKE cluster named "c1" records.

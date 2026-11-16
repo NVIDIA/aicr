@@ -26,10 +26,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/header"
 )
 
 type unexpectedLoadProvider struct {

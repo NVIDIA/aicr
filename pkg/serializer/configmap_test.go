@@ -21,9 +21,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s/labels"
-	"github.com/NVIDIA/aicr/pkg/k8s/pod"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/k8s/labels"
+	"aicr.run/pkg/k8s/pod"
 )
 
 func TestParseConfigMapURI(t *testing.T) {

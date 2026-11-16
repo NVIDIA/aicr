@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/config"
+	"aicr.run/pkg/config"
 )
 
 func TestVerifyResolve_NilReceiver(t *testing.T) {

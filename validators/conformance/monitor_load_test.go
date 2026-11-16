@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // promScrapePools renders a successful /api/v1/scrape_pools response.

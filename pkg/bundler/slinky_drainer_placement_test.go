@@ -19,10 +19,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/validations"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/validations"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/recipe"
 	"k8s.io/apimachinery/pkg/labels"
 )
 

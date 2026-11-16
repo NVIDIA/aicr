@@ -18,7 +18,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // nameSeparator joins the parts of every name this package matches on. Both

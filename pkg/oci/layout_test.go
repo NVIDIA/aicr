@@ -27,8 +27,8 @@ import (
 	storeoci "oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry/remote"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	apperrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func TestParseOutputTargetLayout(t *testing.T) {

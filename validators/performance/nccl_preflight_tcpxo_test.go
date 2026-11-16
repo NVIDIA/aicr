@@ -17,7 +17,7 @@ package main
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 func TestGKETCPXOPreflightApplies(t *testing.T) {

@@ -18,12 +18,12 @@ import (
 	"context"
 	"time"
 
-	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	evattest "github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	evverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
-	recipecat "github.com/NVIDIA/aicr/pkg/recipe/catalog"
+	bundleverifier "aicr.run/pkg/bundler/verifier"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	evattest "aicr.run/pkg/evidence/attestation"
+	evverifier "aicr.run/pkg/evidence/verifier"
+	recipecat "aicr.run/pkg/recipe/catalog"
 )
 
 // TrustedIdentityPattern is the default certificate-identity regexp that

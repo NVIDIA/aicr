@@ -20,8 +20,8 @@ import (
 	"maps"
 	"sort"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/measurement"
 )
 
 // Structured-error context keys added by constraint-path annotation.

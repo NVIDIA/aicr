@@ -21,7 +21,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // Upstream PRODUCT.yaml status vocabulary at the pinned validator revision

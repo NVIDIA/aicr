@@ -21,12 +21,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator/ctrf"
+	"aicr.run/validators"
 )
 
 // TestClassifyNCCLAllReduceBWResult pins the #2122 applicability contract at the

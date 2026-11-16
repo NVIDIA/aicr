@@ -26,7 +26,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // imageRefsGuard is the output an image-reference file must stay out of: the

@@ -18,7 +18,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/measurement"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

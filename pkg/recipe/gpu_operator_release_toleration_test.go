@@ -18,8 +18,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/recipe"
 )
 
 // TestGPUOperatorLeavesTolerateNVSentinelReleaseTaint requires every leaf that

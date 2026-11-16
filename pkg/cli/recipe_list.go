@@ -24,11 +24,11 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/health"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/health"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 )
 
 // healthNotApplicable is the placeholder rendered in the status/coverage table

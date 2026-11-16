@@ -18,10 +18,10 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/internal/gkenet"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/validators"
+	"aicr.run/validators/internal/gkenet"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 

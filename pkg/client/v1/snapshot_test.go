@@ -24,9 +24,9 @@ import (
 	"testing"
 	"time"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	aicr "aicr.run/pkg/client/v1"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/snapshotter"
 )
 
 // validSnapshotBody is a snapshot the loader accepts. Tests that are not

@@ -79,7 +79,7 @@ func TestGeneratePolicy(t *testing.T) {
 // generator and the gate itself so the two can never diverge.
 func observedReferences(t *testing.T) map[reference]bool {
 	t.Helper()
-	const prefix = "github.com/NVIDIA/aicr/"
+	const prefix = "aicr.run/"
 	paths := analyzedPackagePaths(t, prefix)
 	loaded := loadForAnalysis(t, paths...)
 
@@ -186,7 +186,7 @@ func dropInternalRefs(refs map[reference]bool) map[reference]bool {
 func TestAnalyzedPackagePathsCoversWholeSubtree(t *testing.T) {
 	t.Parallel()
 
-	const prefix = "github.com/NVIDIA/aicr/"
+	const prefix = "aicr.run/"
 	paths := analyzedPackagePaths(t, prefix)
 
 	got := make(map[string]bool, len(paths))

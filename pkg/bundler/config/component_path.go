@@ -19,7 +19,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // safePathPattern validates that value path segments contain only safe characters.

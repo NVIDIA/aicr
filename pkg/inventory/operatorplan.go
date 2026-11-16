@@ -29,8 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // What the AICR Operator writes on its Argo CD Applications and plan

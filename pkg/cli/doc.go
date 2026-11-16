@@ -193,5 +193,5 @@
 //
 // Version information is embedded at build time using ldflags:
 //
-//	go build -ldflags="-X 'github.com/NVIDIA/aicr/pkg/cli.version=1.0.0'"
+//	go build -ldflags="-X 'aicr.run/pkg/cli.version=1.0.0'"
 package cli

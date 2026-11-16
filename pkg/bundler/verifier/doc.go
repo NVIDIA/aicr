@@ -50,5 +50,5 @@
 // and a repository pattern matching NVIDIA/aicr workflows. This ensures the
 // binary was built by NVIDIA CI. The pattern can be overridden via
 // VerifyOptions.CertificateIdentityRegexp but must always contain the
-// github.com/NVIDIA/aicr/ prefix.
+// github.com/NVIDIA/aicr/ prefix. // module-rename:keep
 package verifier

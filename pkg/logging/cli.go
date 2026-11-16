@@ -23,7 +23,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // ANSI color codes

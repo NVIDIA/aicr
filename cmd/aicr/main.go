@@ -15,7 +15,7 @@
 package main
 
 import (
-	"github.com/NVIDIA/aicr/pkg/cli"
+	"aicr.run/pkg/cli"
 )
 
 func main() {

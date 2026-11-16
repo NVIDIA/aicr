@@ -20,14 +20,14 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/redact"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/evidence/redact"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator/ctrf"
+	validatorv1 "aicr.run/pkg/validator/v1"
 )
 
 // fullSnapshot builds a snapshot exercising every collector measurement type

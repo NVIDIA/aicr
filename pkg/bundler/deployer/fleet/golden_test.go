@@ -21,8 +21,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat/localformattest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/deployer/localformat/localformattest"
+	"aicr.run/pkg/recipe"
 )
 
 // update regenerates goldens under testdata/ when set via `go test -update`.

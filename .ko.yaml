@@ -42,9 +42,9 @@ builds:
       - -tags={{ if eq (index .Env "AICR_OPERATOR_DEVELOPMENT") "true" }}aicr_operator_development{{ end }}
     ldflags:
       - -s -w
-      - -X github.com/NVIDIA/aicr/pkg/operator/version.Version={{ or (index .Env "AICR_OPERATOR_VERSION") "v0.0.0-dev" }}
-      - -X github.com/NVIDIA/aicr/pkg/operator/version.Commit={{ .Git.FullCommit }}
-      - -X github.com/NVIDIA/aicr/pkg/operator/version.Date={{ or (index .Env "AICR_OPERATOR_DATE") "unknown" }}
+      - -X aicr.run/pkg/operator/version.Version={{ or (index .Env "AICR_OPERATOR_VERSION") "v0.0.0-dev" }}
+      - -X aicr.run/pkg/operator/version.Commit={{ .Git.FullCommit }}
+      - -X aicr.run/pkg/operator/version.Date={{ or (index .Env "AICR_OPERATOR_DATE") "unknown" }}
   # The operator's in-cluster registry (registry.inCluster in
   # charts/aicr-operator), built with the operator.
   - id: aicr-registry

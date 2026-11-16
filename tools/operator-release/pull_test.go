@@ -35,9 +35,9 @@ import (
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry/remote"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
-	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/operator/registry"
+	"aicr.run/pkg/operator/registry/registrytest"
 )
 
 func TestLatestStable(t *testing.T) {

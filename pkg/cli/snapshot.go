@@ -27,13 +27,13 @@ import (
 	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/collector"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/collector"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/snapshotter"
 )
 
 // resolveSnapshotNodeSelector resolves the snapshot node selector with

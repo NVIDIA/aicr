@@ -23,12 +23,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"aicr.run/pkg/bundler/config"
 
-	"github.com/NVIDIA/aicr/pkg/artifact"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
-	"github.com/NVIDIA/aicr/recipes"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
+	"aicr.run/recipes"
 )
 
 func TestArtifactBundleCaptureRetainsOriginalInputs(t *testing.T) {

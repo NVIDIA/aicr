@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 // TestGKEGB200RDMAHealthCheckClusterStates drives the shipped health check

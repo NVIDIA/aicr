@@ -19,7 +19,7 @@ import (
 	"strconv"
 	"strings"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 // Structured-error context keys used by path parsing and extraction.

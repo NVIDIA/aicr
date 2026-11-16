@@ -34,12 +34,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/evidence"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/evidence"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/registry"
 )
 
 const (

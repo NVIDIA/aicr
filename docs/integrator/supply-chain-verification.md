@@ -604,12 +604,12 @@ package URLs):
   },
   "packages": [
     {
-      "name": "github.com/NVIDIA/aicr",
+      "name": "aicr.run",
       "versionInfo": "v0.8.12",
       "externalRefs": [
         {
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/github.com/NVIDIA/aicr@v0.8.12"
+          "referenceLocator": "pkg:golang/aicr.run@v0.8.12"
         }
       ]
     }
@@ -632,9 +632,9 @@ other:
   "components": [
     {
       "type": "library",
-      "name": "github.com/NVIDIA/aicr",
+      "name": "aicr.run",
       "version": "v0.8.12",
-      "purl": "pkg:golang/github.com/NVIDIA/aicr@v0.8.12",
+      "purl": "pkg:golang/aicr.run@v0.8.12",
       "licenses": [{"license": {"id": "Apache-2.0"}}]
     }
   ]

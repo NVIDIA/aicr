@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/manifest"
+	"aicr.run/pkg/manifest"
 )
 
 const (

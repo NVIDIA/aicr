@@ -18,7 +18,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // mockHardwareDetector is a test double for the HardwareDetector interface.

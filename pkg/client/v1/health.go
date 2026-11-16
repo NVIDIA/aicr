@@ -17,8 +17,8 @@ package aicr
 import (
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/health"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/health"
 )
 
 // ComputeHealth scores the structural health of every leaf recipe in this

@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 // TestGenerate_CRDsApplyEverySync pins the two properties that make Argo CD

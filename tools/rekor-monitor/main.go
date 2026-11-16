@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 	tlog "github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/merkle/proof"
 )

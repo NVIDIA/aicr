@@ -124,8 +124,11 @@ func TestRenderIsDeterministic(t *testing.T) {
 	if !strings.Contains(out, "sourceCommit: "+doc.SourceCommit) {
 		t.Errorf("rendered output dropped the source commit:\n%s", out)
 	}
-	if !strings.Contains(out, "workloads pull by tag, not by digest") {
-		t.Errorf("rendered header no longer states that the workloads pull by tag:\n%s", out)
+	if !strings.Contains(out, "options.image pulls by tag, not by digest") {
+		t.Errorf("rendered header no longer states that an unpinned Certification pulls by tag:\n%s", out)
+	}
+	if !strings.Contains(out, "nccl-cre-all-reduce-bw and cre-training-goodput checks pin") {
+		t.Errorf("rendered header no longer states that AICR's CRE checks pin the recorded digests:\n%s", out)
 	}
 }
 

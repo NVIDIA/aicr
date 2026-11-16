@@ -25,9 +25,9 @@ import (
 	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/snapshotter"
 )
 
 // TestSnapshotTemplateFlagCombinations tests all combinations of --template, --format, and --output flags.

@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/serializer"
 )
 
 // computeChecksum computes the SHA256 checksum of the given content.

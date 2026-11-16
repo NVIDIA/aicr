@@ -30,10 +30,10 @@ import (
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/evidence"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	"aicr.run/pkg/operator/aicrjob"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/evidence"
+	"aicr.run/pkg/operator/registry"
 )
 
 const (

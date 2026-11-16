@@ -2,7 +2,7 @@
 
 AICR is both a CLI and a Go library. This page documents the
 stability contract for every exported Go package. External consumers
-should prefer the `github.com/NVIDIA/aicr/pkg/client/v1` facade described
+should prefer the `aicr.run/pkg/client/v1` facade described
 in the [Go library integration guide](./go-library.md).
 
 ## Stability tiers
@@ -17,7 +17,7 @@ in the [Go library integration guide](./go-library.md).
 
 | Package | Tier | Purpose |
 |---------|------|---------|
-| `github.com/NVIDIA/aicr/pkg/client/v1` | **Public (stable)** | Facade: `Client`, `NewClient`, `NewClientContext`, request/result types, source constructors. |
+| `aicr.run/pkg/client/v1` | **Public (stable)** | Facade: `Client`, `NewClient`, `NewClientContext`, request/result types, source constructors. |
 | `pkg/recipe` | Public (evolving) | Recipe resolution, criteria, overlay system, component registry. |
 | `pkg/bundler` | Public (evolving) | Per-component Helm/Kustomize bundle generation. |
 | `pkg/validator` | Public (evolving) | Constraint evaluation, three-phase validation (executed in order: Deployment, Conformance, Performance). |
@@ -62,7 +62,7 @@ in the [Go library integration guide](./go-library.md).
 
 ## Facade type ownership
 
-The `github.com/NVIDIA/aicr/pkg/client/v1` package is Public (stable). Types
+The `aicr.run/pkg/client/v1` package is Public (stable). Types
 reachable from this surface are either facade-owned structs or transparent
 aliases — the table below documents which.
 
@@ -102,7 +102,7 @@ unrelated exports in their evolving packages remain free to change.
 
 ## Recommended consumption pattern
 
-1. Use `github.com/NVIDIA/aicr/pkg/client/v1` for all library integration by default.
+1. Use `aicr.run/pkg/client/v1` for all library integration by default.
 2. If the facade does not yet expose a feature you need, open an issue
    against [NVIDIA/aicr](https://github.com/NVIDIA/aicr) describing the
    missing capability — we'd rather extend the facade than have

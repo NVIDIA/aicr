@@ -27,13 +27,13 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/NVIDIA/aicr/pkg/bom"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/helm"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bom"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/helm"
+	"aicr.run/pkg/recipe"
 )
 
 const logKeyComponent = "component"

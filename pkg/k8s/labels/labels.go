@@ -17,7 +17,7 @@
 // neither has to import the other to agree on label keys and values.
 package labels
 
-import "github.com/NVIDIA/aicr/pkg/header"
+import "aicr.run/pkg/header"
 
 // Standard Kubernetes label keys.
 const (

@@ -24,7 +24,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // Pin is one component's chart pin as declared in recipes/registry.yaml,

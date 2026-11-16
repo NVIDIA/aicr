@@ -15,8 +15,8 @@
 package localformat
 
 import (
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/header"
 )
 
 // Annotations stamped into every generated wrapper Chart.yaml, aliased from

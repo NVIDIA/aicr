@@ -19,8 +19,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/recipe"
 
 	corev1 "k8s.io/api/core/v1"
 )

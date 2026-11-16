@@ -17,9 +17,9 @@ package main
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func TestCoordinateFor(t *testing.T) {

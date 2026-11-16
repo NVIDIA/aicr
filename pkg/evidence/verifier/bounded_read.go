@@ -17,7 +17,7 @@ package verifier
 import (
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/internal/boundedio"
+	"aicr.run/pkg/evidence/internal/boundedio"
 )
 
 // readBoundedFile reads path into memory, capped at max bytes and bounded by

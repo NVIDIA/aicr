@@ -45,10 +45,10 @@ import (
 	"strings"
 	"time"
 
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	helmutil "aicr.run/pkg/helm"
 	"github.com/Masterminds/semver/v3"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	helmutil "github.com/NVIDIA/aicr/pkg/helm"
 	"sigs.k8s.io/yaml"
 )
 

@@ -21,11 +21,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 )
 
 // k8sServerVersionConstraint is the recipe constraint whose value is

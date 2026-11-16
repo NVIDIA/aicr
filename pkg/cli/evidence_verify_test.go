@@ -23,11 +23,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 func TestEvidenceCmd_RegistersVerifySubcommand(t *testing.T) {

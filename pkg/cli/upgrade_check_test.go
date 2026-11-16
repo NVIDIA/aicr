@@ -26,9 +26,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/upgrade"
 )
 
 // Component names below are synthetic and match no registry entry, so nothing

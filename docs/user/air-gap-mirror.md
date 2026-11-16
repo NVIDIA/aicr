@@ -371,7 +371,15 @@ rewrite, such as the NCCL runtime image (override it with
 probe image of the `driver-runtime-management` and `workload-sandboxing`
 conformance checks (override it with `AICR_DRIVER_RUNTIME_IMAGE` and
 `AICR_SANDBOX_PROBE_IMAGE`, each a full reference to your copy); see
-[Validation](validation.md).
+[Validation](validation.md). The opt-in CRE checks `nccl-cre-all-reduce-bw`
+and `cre-training-goodput` pull their workload images by digest with no
+override variable, so mirror them at the digests
+`recipes/components/nvcre/workload-images.yaml` records; see the CRE section
+of [Validation](validation.md). Their references keep the `public.ecr.aws` and
+`nvcr.io` hosts, so a disconnected cluster also needs its nodes' container
+runtime to redirect both registries to your mirror, for example with a
+containerd registry mirror per host. A digest reference resolves through such a
+mirror unchanged.
 
 The inference performance check also runs the Dynamo runtime images
 `nvcr.io/nvidia/ai-dynamo/vllm-runtime` and

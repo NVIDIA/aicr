@@ -24,8 +24,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	errs "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	errs "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 // adequateBuildTimeout is the "plenty of headroom" deadline for the

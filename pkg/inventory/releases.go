@@ -20,7 +20,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
-	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
+	k8sclient "aicr.run/pkg/k8s/client"
 )
 
 // Releases holds every record ReadReleases attributes, in reader order,

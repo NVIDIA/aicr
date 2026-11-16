@@ -28,11 +28,11 @@ import (
 	"net/url"
 	"strings"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/defaults"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
 

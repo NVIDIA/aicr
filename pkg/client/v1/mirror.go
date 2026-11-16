@@ -17,10 +17,10 @@ package aicr
 import (
 	"context"
 
-	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/mirror"
+	bundlerconfig "aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/mirror"
 )
 
 // Mirror inventory is the last SDK parity gap under #2016 (#2025). Air-gap

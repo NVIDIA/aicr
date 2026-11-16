@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bom"
+	"aicr.run/pkg/bom"
 )
 
 // TestComponentManifestImagesAreFullyQualified asserts that every image

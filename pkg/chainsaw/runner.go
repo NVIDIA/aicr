@@ -45,9 +45,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/chainsaw/validation"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/chainsaw/validation"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // ResourceFetcher abstracts fetching Kubernetes resources for testability.

@@ -30,8 +30,8 @@ import (
 	yamlv3 "gopkg.in/yaml.v3"
 	"sigs.k8s.io/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // runChainsawTestInProcess executes a Chainsaw Test YAML in-process,

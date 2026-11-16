@@ -18,8 +18,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 )
 
 // Hauler manifest schema version. Pinned to the stable v1 API introduced

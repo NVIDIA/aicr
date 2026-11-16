@@ -24,10 +24,10 @@ import (
 
 	urfave "github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/verifier"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 )
 
 // runCompletion runs the root command with --generate-shell-completion appended

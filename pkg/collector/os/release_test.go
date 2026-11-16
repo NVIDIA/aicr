@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/measurement"
 )
 
 const releaseSubtypeName = "release"

@@ -26,10 +26,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator/ctrf"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )

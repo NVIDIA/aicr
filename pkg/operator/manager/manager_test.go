@@ -26,8 +26,8 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 func TestDefaultOptionsAreValid(t *testing.T) {

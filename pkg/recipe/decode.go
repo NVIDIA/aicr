@@ -19,9 +19,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
 

@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"aicr.run/pkg/defaults"
 )
 
 // writeSource drops a source document into a temp dir and returns its path.

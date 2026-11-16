@@ -19,8 +19,8 @@ import (
 	"math"
 	"strings"
 
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	aicrErrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // creCombination is a recipe criteria pair a Cluster Readiness Engine check can
@@ -54,12 +54,22 @@ type creCombination struct {
 // NVTE_FUSED_ATTN already set by the base image.
 // A combination with no entry reports the check unqualified, so it skips rather
 // than failing a healthy cluster.
+//
+// Each Image is the image the catalog selects for that entry on eks x h100,
+// pinned to the digest recipes/components/nvcre/workload-images.yaml records
+// for the CRE version the registry pins. A chart bump re-derives that file, and
+// TestCREQualifiedImagesMatchWorkloadClosure then fails until the pins follow.
+// The NCCL entry's EFA override already runs its trainer and workers on the
+// nccl-tests image; the pin also moves the launcher's fix-ssh-permissions init
+// container, the one container left on pytorch:26.01-py3, onto it.
 var creQualifiedEntries = map[string]map[creCombination]creCatalogEntry{
 	checkNameCRENCCLAllReduceBW: {
 		{Service: recipe.CriteriaServiceEKS, Accelerator: recipe.CriteriaAcceleratorH100}: {
 			Domain:   creNCCLDomain,
 			Variant:  creNCCLVariant,
 			MaxNodes: 2,
+			Image: "public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9" +
+				"@sha256:6cabd2c0c37bfa09921912919b747d3b804298966e28e301dbfefc5c7dd3bfe2",
 		},
 	},
 	checkNameCRETrainingGoodput: {
@@ -67,6 +77,7 @@ var creQualifiedEntries = map[string]map[creCombination]creCatalogEntry{
 			Domain:   creTrainingDomain,
 			Variant:  creTrainingVariant,
 			MaxNodes: 2,
+			Image:    "nvcr.io/nvidia/pytorch:25.08-py3@sha256:ace9a848c0ae543317e3c4763b6b4248961c47902625abfe3c77a0fb931c50fb",
 		},
 	},
 }

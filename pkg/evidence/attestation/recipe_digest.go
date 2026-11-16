@@ -17,9 +17,9 @@ package attestation
 import (
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 )
 
 // ComputeRecipeDigest loads a recipe or overlay from path (auto-hydrating

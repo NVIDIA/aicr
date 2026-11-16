@@ -28,10 +28,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	"aicr.run/pkg/operator/aicrjob"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/registry"
 )
 
 // ReasonChartSourceUnsupported marks a release whose rendered directory holds

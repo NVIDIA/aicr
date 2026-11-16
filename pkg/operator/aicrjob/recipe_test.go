@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // Golden fixtures were produced by each supported AICR minor's pinned image

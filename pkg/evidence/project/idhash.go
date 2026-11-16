@@ -17,7 +17,7 @@ package project
 import (
 	"encoding/hex"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"aicr.run/pkg/evidence/attestation"
 )
 
 // idHashLen is the number of hex characters retained from the signer
