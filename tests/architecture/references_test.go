@@ -186,7 +186,7 @@ func TestPackageQualifiedRefs(t *testing.T) {
 	t.Parallel()
 
 	loaded := loadForAnalysis(t, "aicr.run/pkg/server")
-	refs := packageQualifiedRefs(loaded["aicr.run/pkg/server"], "github.com/NVIDIA/aicr/")
+	refs := packageQualifiedRefs(loaded["aicr.run/pkg/server"], "aicr.run/")
 
 	// pkg/server is known to reference pkg/errors behaviorally and to name the
 	// facade. If either disappears the gate's own inputs have changed.
@@ -372,7 +372,7 @@ func TestForeignMethodRefs(t *testing.T) {
 	t.Parallel()
 
 	loaded := loadForAnalysis(t, "aicr.run/pkg/server")
-	refs := foreignMethodRefs(loaded["aicr.run/pkg/server"], "github.com/NVIDIA/aicr/")
+	refs := foreignMethodRefs(loaded["aicr.run/pkg/server"], "aicr.run/")
 
 	if len(refs) == 0 {
 		t.Fatal("no foreign-type method calls found in pkg/server; the pass is not working")

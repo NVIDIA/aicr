@@ -127,7 +127,7 @@ const (
 	TrustedRepositoryPattern = `^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.*`
 
 	// requiredRepoPrefix includes the scheme+domain to ensure github.com is the
-	// actual domain, not a path segment (e.g., "evil.com/github.com/NVIDIA/aicr/"
+	// actual domain, not a path segment (e.g., "evil.com/github.com/NVIDIA/aicr/" // module-rename:keep
 	// would bypass a domain-less check). The escaped form handles regex patterns.
 	requiredRepoPrefix        = "://github.com/NVIDIA/aicr/"
 	requiredRepoPrefixEscaped = `://github\.com/NVIDIA/aicr/`

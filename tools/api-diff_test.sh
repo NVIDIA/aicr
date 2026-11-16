@@ -854,7 +854,7 @@ EOF
         cat >"${internal_fixture}/pkg/bundler/config/config.go" <<'EOF'
 package config
 
-import "github.com/NVIDIA/aicr/internal/sdkcontract"
+import "aicr.run/internal/sdkcontract"
 
 type Config struct {
 	Contract sdkcontract.Contract
@@ -901,11 +901,11 @@ EOF
         RC=$?
         check_rc "reachable-internal-target-incompatibility-fails-closed" 16
         check_contains "reachable-internal-target-incompatibility-is-scoped" \
-            "Transparent alias reachable-type changes: github.com/NVIDIA/aicr/internal/sdkcontract (Contract)"
+            "Transparent alias reachable-type changes: aicr.run/internal/sdkcontract (Contract)"
         check_contains "reachable-internal-target-incompatibility-is-reported" \
             "Contract.Legacy: changed from string to int"
         check_absent "reachable-internal-target-is-not-silently-ignored" \
-            "Ignoring internal package github.com/NVIDIA/aicr/internal/sdkcontract"
+            "Ignoring internal package aicr.run/internal/sdkcontract"
     fi
 fi
 

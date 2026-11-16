@@ -141,6 +141,12 @@ linters:
               desc: "Deprecated since Go 1.16. Use io and os packages instead."
             - pkg: math/rand$
               desc: "Use math/rand/v2 for new code, or crypto/rand for security-sensitive code."
+        # The module moved to aicr.run (#3834); an import of the old path pulls a pre-rename release in as a dependency.
+        legacy-module-path:
+          list-mode: lax
+          deny:
+            - pkg: github.com/NVIDIA/aicr  # module-rename:keep
+              desc: "Pre-rename import path of AICR's Go module; import aicr.run instead (#3834)."
         # The operator consumes AICR only through the pinned image and its
         # published artifacts (ADR-027). An AICR package outside the operator
         # needs its own allow entry here.
@@ -158,7 +164,7 @@ linters:
             - aicr.run/pkg/operator
             - aicr.run/tests/operator
           deny:
-            - pkg: github.com/NVIDIA/aicr/
+            - pkg: aicr.run/
               desc: "The operator runs AICR as a pinned image and computes no recipe, bundle, snapshot, verdict or evidence in process (ADR-027)."
 
   exclusions:

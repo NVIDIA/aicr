@@ -141,7 +141,7 @@ builds:
 
 
 # `proxy: false` controls where goreleaser gets *this project's* source: with it
-# true, goreleaser re-downloads github.com/NVIDIA/aicr at the tag from a proxy and
+# true, goreleaser re-downloads aicr.run at the tag from a proxy and
 # builds that copy instead of the checkout. That is a different question from where
 # dependencies come from, and we want the checkout — it is what CI verified.
 #
