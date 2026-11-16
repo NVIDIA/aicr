@@ -800,6 +800,39 @@ func TestBundleStagePublish_KeepsStageOnFailure(t *testing.T) {
 	}
 }
 
+func TestBundleStagePublish_Canceled(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing bool
+	}{
+		{name: "missing output directory"},
+		{name: "existing output directory", existing: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "out")
+			if tt.existing {
+				writeTestFile(t, filepath.Join(dir, "001-old", "v.yaml"), []byte("old"), 0600)
+			}
+			s, err := stageBundle(t.Context(), dir)
+			if err != nil {
+				t.Fatalf("stageBundle: %v", err)
+			}
+			t.Cleanup(s.discard)
+			writeTestFile(t, filepath.Join(s.path, "README.md"), []byte("new"), 0600)
+			before := treeSnapshot(t, filepath.Dir(dir))
+
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			errorstest.WantReportedCode(t, s.publish(ctx, nil), errors.ErrCodeCanceled)
+			if after := treeSnapshot(t, filepath.Dir(dir)); !reflect.DeepEqual(after, before) {
+				t.Errorf("canceled publish changed the tree:\nbefore %v\nafter  %v", before, after)
+			}
+		})
+	}
+}
+
 func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
 	// helm and helmfile ignore the repo URL; the GitOps deployers need one.
 	tests := allDeployerCases()

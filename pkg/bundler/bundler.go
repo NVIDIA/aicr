@@ -542,6 +542,9 @@ func (s *bundleStage) publish(ctx context.Context, inventory *checksum.Inventory
 	if s.inPlace {
 		return s.publishInPlace(ctx, inventory)
 	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "bundle publish canceled")
+	}
 	if err := renameNoReplace(s.path, s.dir); err != nil {
 		code := errors.ErrCodeInternal
 		if destinationTaken(err) {
@@ -597,6 +600,9 @@ func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.In
 		}
 	}
 
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "bundle publish canceled")
+	}
 	for _, name := range replaced {
 		if rmErr := os.RemoveAll(filepath.Join(s.dir, name)); rmErr != nil {
 			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
