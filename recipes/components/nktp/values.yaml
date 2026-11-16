@@ -18,9 +18,11 @@
 # CPU requests are four to five times below NKTP's defaults (#3849): at those
 # defaults NKTP reserved 6.45 vCPU on a 3x 4-vCPU system pool while using under
 # 1 vCPU cluster-wide, starving nvsentinel's per-node pods. Each autoscaled
-# collector's targetCPUUtilization rises by the same factor, so it scales out
-# at the same absolute CPU as before. Memory requests, all limits, and replica
-# floors stay NKTP's.
+# collector's targetCPUUtilization is raised so it scales out at the same
+# absolute CPU as before. The HPA divides usage by the whole pod's request,
+# including the native otc-sidecar (20m on the gateways and watchdog, 10m on
+# large_target_metrics): (request + sidecar) x target equals NKTP's default.
+# Memory requests, all limits, and replica floors stay NKTP's.
 
 # Collectors schedule ahead of workloads but never evict a running pod. The
 # field is immutable: changing it on an installed cluster means deleting the
@@ -74,7 +76,7 @@ gateway_metrics:
       requests:
         cpu: 50m
     autoscaler:
-      targetCPUUtilization: 300
+      targetCPUUtilization: 231
     volumeClaimTemplates: []
     volumeMounts:
       - name: internal-tls-server
@@ -97,7 +99,7 @@ gateway_logs:
       requests:
         cpu: 50m
     autoscaler:
-      targetCPUUtilization: 300
+      targetCPUUtilization: 231
     volumeClaimTemplates: []
     volumeMounts:
       - name: internal-tls-server
@@ -120,7 +122,7 @@ gateway_traces:
       requests:
         cpu: 50m
     autoscaler:
-      targetCPUUtilization: 300
+      targetCPUUtilization: 231
     volumeClaimTemplates: []
     volumeMounts:
       - name: internal-tls-server
@@ -143,7 +145,7 @@ watchdog:
       requests:
         cpu: 25m
     autoscaler:
-      targetCPUUtilization: 300
+      targetCPUUtilization: 200
     targetAllocator:
       resources:
         requests:
@@ -173,7 +175,7 @@ large_target_metrics:
       requests:
         cpu: 125m
     autoscaler:
-      targetCPUUtilization: 300
+      targetCPUUtilization: 283
     targetAllocator:
       resources:
         requests:
