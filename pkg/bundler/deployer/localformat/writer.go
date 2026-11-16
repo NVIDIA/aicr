@@ -757,22 +757,8 @@ func pruneStaleFolders(outputDir string) error {
 		return errors.Wrap(errors.ErrCodeInternal, "read output dir", err)
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
 		name := e.Name()
-		// Must be NNN-<something>: 3 digits then a hyphen.
-		if len(name) < 4 || name[3] != '-' {
-			continue
-		}
-		ok := true
-		for i := range 3 {
-			if name[i] < '0' || name[i] > '9' {
-				ok = false
-				break
-			}
-		}
-		if !ok {
+		if !e.IsDir() || !IsFolderName(name) {
 			continue
 		}
 		full, joinErr := deployer.SafeJoin(outputDir, name)
@@ -785,6 +771,20 @@ func pruneStaleFolders(outputDir string) error {
 		}
 	}
 	return nil
+}
+
+// IsFolderName reports whether name matches the [0-9][0-9][0-9]-* pattern
+// of an emitted component folder.
+func IsFolderName(name string) bool {
+	if len(name) < 4 || name[3] != '-' {
+		return false
+	}
+	for i := range 3 {
+		if name[i] < '0' || name[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // writeFile writes contents to path with the given mode, returning any
