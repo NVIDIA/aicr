@@ -16,6 +16,7 @@ package bundler
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	stderrors "errors"
 	"fmt"
@@ -524,15 +525,13 @@ func stageBundle(ctx context.Context, dir string) (*bundleStage, error) {
 		parent = dir
 	}
 
-	stage, err := os.MkdirTemp(parent, bundleStagePrefix)
-	if err != nil {
+	// os.Mkdir applies the umask, which os.MkdirTemp's fixed 0700 does not, and
+	// the stage becomes the bundle root when dir is absent.
+	stage := filepath.Join(parent, bundleStagePrefix+rand.Text())
+	if err := os.Mkdir(stage, 0755); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create bundle staging directory", err)
 	}
 	s.path = stage
-	if chmodErr := os.Chmod(stage, 0755); chmodErr != nil {
-		s.discard()
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to set bundle staging directory mode", chmodErr)
-	}
 	return s, nil
 }
 

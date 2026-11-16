@@ -635,6 +635,33 @@ func TestMake_RejectsInvalidOutputRoot(t *testing.T) {
 	}
 }
 
+// Not parallel, because the umask is process-wide.
+func TestMake_PublishedRootHonorsUmask(t *testing.T) {
+	tests := []struct {
+		umask int
+		want  fs.FileMode
+	}{
+		{umask: 0o022, want: 0o755},
+		{umask: 0o077, want: 0o700},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("umask %04o", tt.umask), func(t *testing.T) {
+			old := unix.Umask(tt.umask)
+			t.Cleanup(func() { unix.Umask(old) })
+			dir := filepath.Join(t.TempDir(), "out")
+			writeTestBundle(t, dir)
+			info, err := os.Stat(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := info.Mode().Perm(); got != tt.want {
+				t.Errorf("published root mode = %04o, want %04o", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBundleStagePublish_ExistingDir(t *testing.T) {
 	writeFiles := func(t *testing.T, root string, files map[string]string) {
 		t.Helper()
