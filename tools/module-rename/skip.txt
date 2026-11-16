@@ -2,3 +2,16 @@
 # An entry ending in "/" covers everything under it. "#" starts a comment.
 # A single line elsewhere that must keep the old path carries the inline
 # marker module-rename:keep instead of an entry here.
+
+CHANGELOG.md        # release history is point-in-time
+docs/design/        # ADRs are point-in-time
+demos/              # names the repository and Sigstore identities, not imports
+install             # names the repository that built the binary
+
+# Held until the first release under the new module path, so published docs
+# never show an install command that does not resolve yet. Remove these four
+# entries in the follow-up docs change after that release (#3834).
+docs/user/
+docs/integrator/
+README.md
+ROADMAP.md
