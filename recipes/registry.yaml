@@ -224,13 +224,15 @@ components:
       assertFile: checks/network-operator/health-check.yaml
     upgrades:
       file: components/network-operator/upgrades.yaml
-    sizing:
-      file: components/network-operator/sizing.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/network-operator
-      # Moving to 26.10.0 or later: measure operator.resources for
-      # components/network-operator/sizing.yaml (see its header).
+      # Not sized by node count (ADR-030): both controllers cache every Pod,
+      # so their memory tracks pods, not GPU nodes. Measure each on a fixed
+      # release and add components/network-operator/sizing.yaml then:
+      # operator.resources from 26.10.0 (Mellanox/network-operator#3173),
+      # maintenance-operator-chart.operator.resources from the release that
+      # carries Mellanox/maintenance-operator#276.
       # renovate: datasource=helm depName=network-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
       defaultVersion: "26.7.1"
       defaultNamespace: nvidia-network-operator
