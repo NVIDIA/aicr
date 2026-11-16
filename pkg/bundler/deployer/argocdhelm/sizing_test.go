@@ -243,7 +243,7 @@ func TestValidateSizing(t *testing.T) {
 }
 
 func TestRenderSizingTierAnnotationRequiresOnePlaceholder(t *testing.T) {
-	line := annotationSizingTier + ": " + sizingTierAnnotationSentinel + "\n"
+	line := annotationSizingTier + ": " + tierSentinel + "\n"
 	for _, in := range []string{"metadata: {}\n", line + line} {
 		if _, err := renderSizingTierAnnotation([]byte(in)); err == nil {
 			t.Errorf("renderSizingTierAnnotation(%q) error = nil, want one", in)

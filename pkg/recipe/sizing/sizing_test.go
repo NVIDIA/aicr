@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package recipe
+package sizing
 
 import (
 	"context"
@@ -28,6 +28,7 @@ import (
 
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
 	"aicr.run/pkg/recipe/providertest"
 )
 
@@ -74,7 +75,7 @@ resources:
       - maxNodes: 300
 `
 
-func TestParseComponentSizing(t *testing.T) {
+func TestParse(t *testing.T) {
 	tests := []struct {
 		name    string
 		old     string
@@ -118,7 +119,7 @@ func TestParseComponentSizing(t *testing.T) {
 				}
 				doc = strings.Replace(doc, tt.old, tt.new, 1)
 			}
-			s, err := parseComponentSizing([]byte(doc), "sizing.yaml")
+			s, err := parse([]byte(doc), "sizing.yaml")
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -139,7 +140,7 @@ func TestParseComponentSizing(t *testing.T) {
 	}
 }
 
-func TestParseComponentSizingRejectsStructure(t *testing.T) {
+func TestParseRejectsStructure(t *testing.T) {
 	tests := []struct {
 		name    string
 		doc     string
@@ -164,7 +165,7 @@ func TestParseComponentSizingRejectsStructure(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := parseComponentSizing([]byte(tt.doc), "sizing.yaml")
+			_, err := parse([]byte(tt.doc), "sizing.yaml")
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
 			}
@@ -173,8 +174,8 @@ func TestParseComponentSizingRejectsStructure(t *testing.T) {
 	}
 }
 
-func TestSizingResourceTierFor(t *testing.T) {
-	s, err := parseComponentSizing([]byte(validSizing), "sizing.yaml")
+func TestResourceTierFor(t *testing.T) {
+	s, err := parse([]byte(validSizing), "sizing.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,16 +199,16 @@ func TestSizingResourceTierFor(t *testing.T) {
 	}
 }
 
-func TestLoadComponentSizing(t *testing.T) {
+func TestLoad(t *testing.T) {
 	dp := providertest.NewMap(map[string][]byte{"components/x/sizing.yaml": []byte(validSizing)})
-	s, err := LoadComponentSizing(context.Background(), dp, "x", "components/x/sizing.yaml")
+	s, err := Load(context.Background(), dp, "x", "components/x/sizing.yaml")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if s.Resources[0].Path != "operator.resources" {
 		t.Fatalf("unexpected document: %+v", s)
 	}
-	if _, err := LoadComponentSizing(context.Background(), dp, "x", "components/x/missing.yaml"); err == nil {
+	if _, err := Load(context.Background(), dp, "x", "components/x/missing.yaml"); err == nil {
 		t.Fatal("expected an error for a missing file")
 	}
 }
@@ -215,7 +216,7 @@ func TestLoadComponentSizing(t *testing.T) {
 // TestRegistrySizingFilesLoad loads every sizing file the embedded registry
 // references; the tier values themselves are validated empirically, not here.
 func TestRegistrySizingFilesLoad(t *testing.T) {
-	registry, err := GetComponentRegistry()
+	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +224,7 @@ func TestRegistrySizingFilesLoad(t *testing.T) {
 		if c.Sizing.File == "" {
 			continue
 		}
-		if _, err := LoadComponentSizing(context.Background(), nil, c.Name, c.Sizing.File); err != nil {
+		if _, err := Load(context.Background(), nil, c.Name, c.Sizing.File); err != nil {
 			t.Errorf("component %q: %v", c.Name, err)
 		}
 	}
@@ -232,7 +233,7 @@ func TestRegistrySizingFilesLoad(t *testing.T) {
 // TestRegistrySizingFilesShareBounds fails when two sizing files declare
 // different maxNodes sets, so one count selects the same row in each.
 func TestRegistrySizingFilesShareBounds(t *testing.T) {
-	registry, err := GetComponentRegistry()
+	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +243,7 @@ func TestRegistrySizingFilesShareBounds(t *testing.T) {
 		if c.Sizing.File == "" {
 			continue
 		}
-		sz, err := LoadComponentSizing(context.Background(), nil, c.Name, c.Sizing.File)
+		sz, err := Load(context.Background(), nil, c.Name, c.Sizing.File)
 		if err != nil {
 			t.Fatalf("component %q: %v", c.Name, err)
 		}
@@ -266,16 +267,16 @@ func TestRegistrySizingFilesShareBounds(t *testing.T) {
 // its component's values files, so a typo or a key renamed by a chart bump
 // cannot turn sizing into a silent no-op.
 func TestRegistrySizingPathsAreSet(t *testing.T) {
-	registry, err := GetComponentRegistry()
+	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
-	fsys := GetEmbeddedFS()
+	fsys := recipe.GetEmbeddedFS()
 	for _, c := range registry.Components {
 		if c.Sizing.File == "" {
 			continue
 		}
-		sz, err := LoadComponentSizing(context.Background(), nil, c.Name, c.Sizing.File)
+		sz, err := Load(context.Background(), nil, c.Name, c.Sizing.File)
 		if err != nil {
 			t.Fatalf("component %q: %v", c.Name, err)
 		}
@@ -329,11 +330,11 @@ func valueAt(m map[string]any, dotted string) (any, bool) {
 // memory request would end above a tier's limit: every bundle of that file at
 // a count in the tier would fail the request-within-limit check.
 func TestRegistrySizingKeepsRequestsWithinLimits(t *testing.T) {
-	registry, err := GetComponentRegistry()
+	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
-	fsys := GetEmbeddedFS()
+	fsys := recipe.GetEmbeddedFS()
 	quantity := func(m map[string]any, dotted string) (resource.Quantity, bool) {
 		v, ok := valueAt(m, dotted)
 		if !ok {
@@ -346,7 +347,7 @@ func TestRegistrySizingKeepsRequestsWithinLimits(t *testing.T) {
 		if c.Sizing.File == "" {
 			continue
 		}
-		sz, err := LoadComponentSizing(context.Background(), nil, c.Name, c.Sizing.File)
+		sz, err := Load(context.Background(), nil, c.Name, c.Sizing.File)
 		if err != nil {
 			t.Fatalf("component %q: %v", c.Name, err)
 		}
@@ -364,18 +365,18 @@ func TestRegistrySizingKeepsRequestsWithinLimits(t *testing.T) {
 				t.Fatalf("%s: %v", f, yamlErr)
 			}
 			for _, r := range sz.Resources {
-				req, hasReq := quantity(values, r.Path+"."+SizingFieldRequests+".memory")
-				lim, hasLim := quantity(values, r.Path+"."+SizingFieldLimits+".memory")
+				req, hasReq := quantity(values, r.Path+"."+Requests+".memory")
+				lim, hasLim := quantity(values, r.Path+"."+Limits+".memory")
 				if !hasReq || !hasLim {
 					continue
 				}
 				for i := range r.Tiers {
 					set := r.Tiers[i].quantities()
 					sizedReq, sizedLim := req, lim
-					if q, ok := set[SizingFieldRequests]; ok && q.Cmp(sizedReq) < 0 {
+					if q, ok := set[Requests]; ok && q.Cmp(sizedReq) < 0 {
 						sizedReq = q
 					}
-					if q, ok := set[SizingFieldLimits]; ok && q.Cmp(sizedLim) < 0 {
+					if q, ok := set[Limits]; ok && q.Cmp(sizedLim) < 0 {
 						sizedLim = q
 					}
 					if sizedReq.Cmp(sizedLim) > 0 {

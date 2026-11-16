@@ -6,7 +6,7 @@ count a user states with `aicr bundle --nodes` or, on an `argocd-helm`
 bundle, `sizing.nodeCount`. This page is how you write or refine one.
 
 The design is ADR-030 ([#3642](https://github.com/NVIDIA/aicr/issues/3642)).
-The schema and loader live in `pkg/recipe/sizing.go`; the generation-time pass
+The schema and loader live in the `pkg/recipe/sizing` package; the generation-time pass
 in `pkg/bundler/sizing.go`; the install-time rows and template in
 `pkg/bundler/deployer/argocdhelm/sizing.go`. The ADR holds the rules below;
 the tier values and their readings live only in the sizing files, so tuning

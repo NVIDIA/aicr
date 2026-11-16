@@ -126,7 +126,7 @@ func addSizingAnnotations(app map[string]any) error {
 		metadata["annotations"] = annotations
 	}
 	annotations[annotationSizingNodeCount] = "{{ $aicrSizingNodeCount }}"
-	annotations[annotationSizingTier] = sizingTierAnnotationSentinel
+	annotations[annotationSizingTier] = tierSentinel
 	return nil
 }
 
@@ -134,7 +134,7 @@ func addSizingAnnotations(app map[string]any) error {
 // with one rendered only when the selected row changes a value; a YAML map
 // cannot hold a conditional entry.
 func renderSizingTierAnnotation(out []byte) ([]byte, error) {
-	marker := []byte(annotationSizingTier + ": " + sizingTierAnnotationSentinel + "\n")
+	marker := []byte(annotationSizingTier + ": " + tierSentinel + "\n")
 	if bytes.Count(out, marker) != 1 {
 		return nil, errors.New(errors.ErrCodeInternal, "sizing tier annotation placeholder not found exactly once")
 	}
