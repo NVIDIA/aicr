@@ -222,9 +222,12 @@ Otherwise their requests time out.
 A NetworkPolicy on `agentgateway-system` must allow the same traffic. Unlike a
 security group, it applies even when the client runs on the gateway's own node.
 
-The `inference-gateway` conformance check does not need this rule. Its traffic
-probe is scheduled onto a node running a gateway proxy pod, so with AICR's
-single proxy replica its requests to the gateway stay on that node. Its test
+The `inference-gateway` conformance check does not need this rule when it can
+find the proxy pods, which it does for AICR's agentgateway through the proxy
+Service's selector. Its traffic probe is then scheduled onto a node running a
+gateway proxy pod, so with AICR's single proxy replica its requests to the
+gateway stay on that node. If the proxy Service has no selector or no live pod,
+the probe is not pinned and may need this rule like any other client. Its test
 backends still run on the GPU nodes, though, so the GPU security group must
 admit TCP `8080` from the system security group, the hop from the gateway to
 the backends.

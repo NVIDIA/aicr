@@ -433,7 +433,15 @@ func (s *gatewayTrafficScenario) resolveProxyPlacement(ctx context.Context, svc 
 			"service", svc.Namespace+"/"+svc.Name)
 		return nil
 	}
-	sort.Slice(live, func(i, j int) bool { return live[i].Name < live[j].Name })
+	// Youngest first, as an orphan from an earlier rollout is the pod least
+	// likely to carry the current tolerations; the name breaks ties.
+	sort.Slice(live, func(i, j int) bool {
+		ti, tj := live[i].CreationTimestamp, live[j].CreationTimestamp
+		if !ti.Equal(&tj) {
+			return tj.Before(&ti)
+		}
+		return live[i].Name < live[j].Name
+	})
 	s.proxyNamespace = svc.Namespace
 	s.proxySelector = svc.Spec.Selector
 	s.proxyTolerations = live[0].Spec.Tolerations

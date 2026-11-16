@@ -505,6 +505,12 @@ func proxyPod(ns, name string, podLabels map[string]string, phase corev1.PodPhas
 	return p
 }
 
+// withCreated sets the pod's creation time to age ago.
+func withCreated(p *corev1.Pod, age time.Duration) *corev1.Pod {
+	p.CreationTimestamp = metav1.NewTime(time.Now().Add(-age))
+	return p
+}
+
 // TestGatewayTrafficResolveEndpoint_ProxyPlacement pins which data planes
 // record proxy placement for the probe: a Service-backed one with a live proxy
 // pod does, with that pod's tolerations; a selector-less Service, one with no
@@ -529,6 +535,15 @@ func TestGatewayTrafficResolveEndpoint_ProxyPlacement(t *testing.T) {
 				proxyService(ns, sel, 80),
 				proxyPod(ns, "inference-gateway-b", sel, corev1.PodRunning, false, nil),
 				proxyPod(ns, "inference-gateway-a", sel, corev1.PodRunning, false, systemTaintTolerations),
+			},
+			wantSelector: sel, wantTolerations: systemTaintTolerations,
+		},
+		{
+			name: "youngest live proxy pod supplies the tolerations", profile: svcProfile,
+			objects: []runtime.Object{
+				proxyService(ns, sel, 80),
+				withCreated(proxyPod(ns, "inference-gateway-a", sel, corev1.PodRunning, false, nil), time.Hour),
+				withCreated(proxyPod(ns, "inference-gateway-z", sel, corev1.PodRunning, false, systemTaintTolerations), time.Minute),
 			},
 			wantSelector: sel, wantTolerations: systemTaintTolerations,
 		},
