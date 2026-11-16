@@ -225,8 +225,8 @@ func (r *SizingResource) validate(file string) error {
 			above[field] = q
 		}
 	}
-	// A field a tier leaves out runs at today's value there, so no tier
-	// above it may set less.
+	// A field a tier leaves out runs at the values file's value there, so
+	// no tier above it may set less.
 	omitted := map[string]int{}
 	for i := range r.Tiers {
 		t := &r.Tiers[i]

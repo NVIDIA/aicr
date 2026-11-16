@@ -88,9 +88,9 @@ func (b *DefaultBundler) planSizing(ctx context.Context, rr *recipe.RecipeResult
 	return p, nil
 }
 
-// finishSizing runs once every override is applied. Each row of a component
-// sized at install, and the values of any other sized component, must keep
-// every request within its limit.
+// finishSizing runs once every override is applied and fails when a sized
+// request ends above its limit at the bundle's node count. Rows of a
+// component sized at install follow installSizingRows.
 func (b *DefaultBundler) finishSizing(p sizingPlan, ref *recipe.ComponentRef, values map[string]any,
 	provider recipe.DataProvider) error {
 
@@ -309,8 +309,8 @@ func applySizing(values map[string]any, skip func(string) bool, sz *recipe.Compo
 	return applied, nil
 }
 
-// checkSizedRequestsWithinLimits fails when a resource sizing would size at n
-// ends with its memory request above its limit after every override.
+// checkSizedRequestsWithinLimits fails when a resource with a tier at n ends
+// with its memory request above its limit after every override.
 func checkSizedRequestsWithinLimits(values map[string]any, sz *recipe.ComponentSizing, n int) error {
 	if sz == nil {
 		return nil
