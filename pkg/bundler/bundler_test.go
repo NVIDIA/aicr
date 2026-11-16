@@ -834,7 +834,7 @@ func TestBundleStagePublish_Canceled(t *testing.T) {
 }
 
 func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
-	// helm and helmfile ignore the repo URL; the GitOps deployers need one.
+	// helm and helmfile ignore the repo URL. The GitOps deployers need one.
 	tests := allDeployerCases()
 
 	for _, tt := range tests {

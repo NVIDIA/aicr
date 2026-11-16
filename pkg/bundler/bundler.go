@@ -845,7 +845,8 @@ func requireBundleOutput(ctx context.Context, dir string, owned bundlePaths, ski
 	})
 }
 
-// unexpectedOutput reports an entry of dir that is not part of the bundle.
+// unexpectedOutput returns the ErrCodeInvalidRequest error for rel, an entry
+// of dir that is not part of the bundle.
 func unexpectedOutput(dir, rel string, isDir bool) error {
 	kind := "file"
 	if isDir {
