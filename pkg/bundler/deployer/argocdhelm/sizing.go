@@ -26,9 +26,10 @@ import (
 )
 
 // validateSizing rejects install-time sizing the chart could not render: a
-// negative default count, rows for a component that does not read its values
-// from static/, rows out of order, and a sizing file that would overwrite
-// another component's static values.
+// negative default count, a component whose values use the reserved root key
+// sizing, rows for a component that does not read its values from static/,
+// rows out of order, and a sizing file that would overwrite another
+// component's static values.
 func (g *Generator) validateSizing() error {
 	if g.SizingNodeCount < 0 {
 		return errors.New(errors.ErrCodeInvalidRequest,
