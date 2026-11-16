@@ -41,12 +41,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/index"
-	"github.com/NVIDIA/aicr/pkg/health"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/testgrid"
-	"github.com/NVIDIA/aicr/tools/internal/docgen"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/index"
+	"aicr.run/pkg/health"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/testgrid"
+	"aicr.run/tools/internal/docgen"
 )
 
 // matrixFile is the basename of the rendered Markdown matrix written under

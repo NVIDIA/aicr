@@ -21,9 +21,9 @@ import (
 	"strconv"
 	"strings"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/validator/ctrf"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 // Extra keys a check may publish with EmitExtra. Each must have a value

@@ -26,13 +26,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // phaseLogOverlayYAML is the smallest leaf overlay that hydrates against the

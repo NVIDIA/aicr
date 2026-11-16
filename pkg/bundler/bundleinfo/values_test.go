@@ -34,11 +34,11 @@ import (
 
 	stderrors "errors"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/bundler/bundleinfo"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/header"
 )
 
 // valuesBundle writes a minimal but valid bundle-info.yaml naming the given

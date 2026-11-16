@@ -41,7 +41,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/verifier"
+	"aicr.run/pkg/evidence/verifier"
 )
 
 func main() {

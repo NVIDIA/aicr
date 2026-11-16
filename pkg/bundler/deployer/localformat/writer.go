@@ -29,11 +29,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	helmutil "github.com/NVIDIA/aicr/pkg/helm"
-	"github.com/NVIDIA/aicr/pkg/manifest"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
+	helmutil "aicr.run/pkg/helm"
+	"aicr.run/pkg/manifest"
 )
 
 // Component is the per-component input for Write. Fields mirror the subset of

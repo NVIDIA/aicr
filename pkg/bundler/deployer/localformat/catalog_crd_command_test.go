@@ -34,7 +34,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	"github.com/NVIDIA/aicr/pkg/k8s/k8stest"
+	"aicr.run/pkg/k8s/k8stest"
 )
 
 const (

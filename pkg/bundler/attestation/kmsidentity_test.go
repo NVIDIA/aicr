@@ -26,9 +26,9 @@ import (
 
 	"github.com/sigstore/sigstore/pkg/signature"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func TestKMSIdentityFallbackIdentity(t *testing.T) {

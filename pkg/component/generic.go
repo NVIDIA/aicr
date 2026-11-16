@@ -21,9 +21,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/result"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // Deprecated: ComponentConfig is unused in production code. The declarative

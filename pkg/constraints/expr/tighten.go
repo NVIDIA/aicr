@@ -18,7 +18,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/version"
+	"aicr.run/pkg/version"
 )
 
 // fullPrecision is the component count pkg/version treats as fully

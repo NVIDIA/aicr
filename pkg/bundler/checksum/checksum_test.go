@@ -26,9 +26,9 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // fifoCancelTimeout is the deadline the FIFO test relies on to fire while the

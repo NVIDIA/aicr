@@ -126,14 +126,17 @@ jobs:
     #                       DCGM diagnostic before uncordon                    = 240
     # uat-run.yaml accepts nvsentinel_remediation on helmfile+training only.
     #
-    # Total = ~30 setup + <UAT> + ~8 debug + ~8 LB cleanup + ~55 teardown. The
-    # worst case is the remediation row: ~30 + 240 + ~8 + ~8 + ~55 = ~341, so
-    # 350 leaves ~9m of teardown headroom; argocd+training is ~316. The
-    # diagnostic (#3089) cannot be trimmed from a run that asserts the uncordon
-    # after it. The "not shipped today" argocd+inference row would be ~331,
-    # inside this cap. If this grows further the lever is trimming bounded
-    # work above.
-    timeout-minutes: 350
+    # Total = ~40 setup + <UAT> + ~8 debug + ~8 LB cleanup + ~55 teardown.
+    # Setup includes up to 20m of GPU capacity wait in Bringup Infra (the CT
+    # cluster config sets capacityTimeout: 20m, #3832). The worst case is the
+    # remediation row: ~40 + 240 + ~8 + ~8 + ~55 = ~351, so 360, the
+    # GitHub-hosted job maximum, leaves ~9m of teardown headroom;
+    # argocd+training is ~326. The diagnostic (#3089) cannot be trimmed from a
+    # run that asserts the uncordon after it. The "not shipped today"
+    # argocd+inference row would be ~341, inside this cap. The cap cannot be
+    # raised further, so if this grows the lever is trimming bounded work
+    # above.
+    timeout-minutes: 360
     permissions:
       contents: read
       actions: read
@@ -186,14 +189,23 @@ jobs:
         ${{ inputs.test_config_dir }}/${{ inputs.accelerator }}-${{ inputs.intent }}${{
           inputs.deployer != 'helmfile' && format('-{0}', inputs.deployer) || ''
         }}-config.yaml
-      # v0.5.3 — carries deployment.stateLocation (mchmarny/cluster#51, first
-      # released in v0.5.2), which decouples the S3 backend region from the
+      # v0.5.4 — the worker ASG sets ignore_failed_scaling_activities = true
+      # (mchmarny/cluster#63), so a transient InsufficientInstanceCapacity no
+      # longer ends the capacity wait: Terraform waits up to the capacity
+      # timeout and returns once healthy capacity reaches the target (#3832).
+      # The rest of the v0.5.3..v0.5.4 delta reaching EKS: awscli 2.34.63 ->
+      # 2.40.3 (upstream #64), and newer bundled Terraform providers under
+      # unchanged constraints (aws 6.68.0 -> 6.73.0, http 3.6.2 -> 3.6.3, tls
+      # 4.4.1 -> 4.4.2). The shared-code changes add the OKE provider only.
+      #
+      # Carried forward from v0.5.2/v0.5.3: deployment.stateLocation
+      # (mchmarny/cluster#51), which decouples the S3 backend region from the
       # provider region. The GB300 lane needs it: the state bucket is named
       # per-account and so exists in one region only (us-east-1), while that
       # lane provisions into us-east-2, and before this the backend region was
       # derived from .deployment.location and init was answered with an S3 301
-      # (#3162). v0.5.3 itself adds only image hardening (upstream #53: base
-      # image, kubectl and kubelogin bumps, VEX statements).
+      # (#3162). v0.5.3 added only image hardening (upstream #53: base image,
+      # kubectl and kubelogin bumps, VEX statements).
       #
       # Carried forward from v0.5.1: GPU-conditional worker taints (non-GPU
       # worker pools stay untainted) + native GB300 EFA
@@ -212,7 +224,7 @@ jobs:
       #
       # Tag carried alongside the digest so the version is legible here; the
       # digest is what pins. Same form as the GKE pin in uat-gcp.yaml.
-      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.3@sha256:ff1a04bedf1aa4b30e316404a69a60068b269c6bba3a9d09231f68a69b7898b6"
+      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.4@sha256:13aa5793aea0e74c73986d52e0c5bd7b46fbeb39d4a630f45eef95142ca64552"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Target platform(s) for the main-cell image builds (snapshot-agent + the
@@ -400,7 +412,7 @@ jobs:
           # this step is main-only.
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           go build \
-            -ldflags "-X github.com/NVIDIA/aicr/pkg/cli.version=main -X github.com/NVIDIA/aicr/pkg/cli.commit=${COMMIT_SHA} -X github.com/NVIDIA/aicr/pkg/cli.date=${BUILD_DATE}" \
+            -ldflags "-X aicr.run/pkg/cli.version=main -X aicr.run/pkg/cli.commit=${COMMIT_SHA} -X aicr.run/pkg/cli.date=${BUILD_DATE}" \
             -o ./aicr ./cmd/aicr
           # Assert the stamp actually landed — a broken ldflags target path would
           # otherwise silently leave the binary on the default dev/unknown

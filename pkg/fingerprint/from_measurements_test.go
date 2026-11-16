@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/measurement"
 )
 
 // k8sMeasurement builds a TypeK8s measurement with optional server

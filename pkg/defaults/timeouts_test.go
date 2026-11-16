@@ -124,11 +124,12 @@ func TestJobEnvelopeMarginInvariant(t *testing.T) {
 }
 
 // TestSigstoreRetryBudgetInvariant guards the contract that the retry
-// budget fits inside the outer SigstoreSignTimeout ceiling: worst-case
-// wall-clock is SigstoreRetryBudget * SigstoreAttemptTimeout plus the
-// sum of backoffs between attempts, and that total must not exceed
-// SigstoreSignTimeout — otherwise the inner retry loop would race the
-// outer deadline. See issue #1249.
+// budget fits inside the outer SigstoreSignTimeout ceiling. One retry
+// loop's worst-case wall-clock is SigstoreRetryBudget *
+// SigstoreAttemptTimeout plus the sum of backoffs between attempts. Keyless
+// signing runs one loop for the Fulcio certificate and one for the bundle,
+// and both must fit inside SigstoreSignTimeout, otherwise the bundle loop
+// would race the outer deadline.
 //
 // Caveat: the Rekor v2 signing path (attestation.transparencyForOptions) may
 // prepend a cold-cache TUF signing-config fetch that draws from the same caller
@@ -149,6 +150,9 @@ func TestSigstoreRetryBudgetInvariant(t *testing.T) {
 		t.Fatalf("SigstoreRetryBackoffFactor must be >= 1; got %d", SigstoreRetryBackoffFactor)
 	}
 
+	// The Fulcio certificate request and the bundle signing.
+	const signSteps = 2
+
 	// Compute worst-case: every attempt hits the per-attempt timeout,
 	// every backoff between attempts is taken in full.
 	totalAttempts := SigstoreRetryBudget * SigstoreAttemptTimeout
@@ -158,12 +162,13 @@ func TestSigstoreRetryBudgetInvariant(t *testing.T) {
 		totalBackoffs += backoff
 		backoff *= time.Duration(SigstoreRetryBackoffFactor)
 	}
-	worstCase := totalAttempts + totalBackoffs
+	perStep := totalAttempts + totalBackoffs
+	worstCase := signSteps * perStep
 	if worstCase > SigstoreSignTimeout {
 		t.Errorf("worst-case retry budget %v exceeds SigstoreSignTimeout %v "+
-			"(attempts: %d × %v = %v, backoffs: %v) — raise SigstoreSignTimeout "+
+			"(%d steps × (attempts: %d × %v = %v, backoffs: %v)). Raise SigstoreSignTimeout "+
 			"or tighten the per-attempt / backoff knobs in lockstep",
-			worstCase, SigstoreSignTimeout, SigstoreRetryBudget,
+			worstCase, SigstoreSignTimeout, signSteps, SigstoreRetryBudget,
 			SigstoreAttemptTimeout, totalAttempts, totalBackoffs)
 	}
 }

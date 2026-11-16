@@ -30,10 +30,10 @@ import (
 
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/oci"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/oci"
 )
 
 func TestPush_RejectsEmptyOpts(t *testing.T) {

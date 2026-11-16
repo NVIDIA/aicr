@@ -25,8 +25,8 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/trust"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/trust"
 )
 
 // sentinelSource returns a TrustedRootSource that records that it was called

@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 func signableSignPointer() *Pointer {
@@ -257,6 +257,15 @@ func TestUnsatisfiableSigningFailsBeforeAnyNetworkLeg(t *testing.T) {
 
 	t.Run("sign statement", func(t *testing.T) {
 		_, err := signEvidenceStatement(context.Background(), []byte(`{}`), keylessNoTLog)
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+
+	t.Run("empty statement", func(t *testing.T) {
+		// Reaching the certificate request fails Unavailable.
+		_, err := signEvidenceStatement(context.Background(), nil, bundleattest.ResolveOptions{
+			IdentityToken: "tok",
+			FulcioURL:     "http://127.0.0.1:1",
+		})
 		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 	})
 

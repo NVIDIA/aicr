@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"aicr.run/pkg/bundler/config"
 )
 
 // tr builds a minimally valid transition for mutation in tests.

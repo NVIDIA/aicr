@@ -20,7 +20,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/bundler/deployer/localformat"
 )
 
 // writeFolder lays out one bundled chart folder under root and returns the

@@ -23,8 +23,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // Validator orchestrates validation runs using containerized validators.

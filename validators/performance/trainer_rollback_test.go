@@ -20,9 +20,9 @@ import (
 	"strings"
 	"testing"
 
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrErrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

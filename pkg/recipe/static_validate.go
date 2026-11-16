@@ -28,10 +28,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/artifact"
-	"github.com/NVIDIA/aicr/pkg/chainsaw/validation"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/chainsaw/validation"
+	"aicr.run/pkg/defaults"
+	aicrerrors "aicr.run/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 

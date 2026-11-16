@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
+	"aicr.run/pkg/operator/plan"
 )
 
 // Bundle layout identity at AICR v1.0.0 (pkg/bundler/bundleinfo).

@@ -24,9 +24,9 @@ import (
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/errors"
 )
 
 // AttestationFileSuffix is the conventional suffix for attestation files.

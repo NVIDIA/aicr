@@ -19,7 +19,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // schemaVersion is the contract between this tool and the

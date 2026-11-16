@@ -34,10 +34,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/chainsaw"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/chainsaw"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 )
 
 const (

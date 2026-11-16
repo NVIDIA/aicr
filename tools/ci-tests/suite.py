@@ -20,7 +20,7 @@ from pathlib import Path
 import sys
 
 
-MODULE = "github.com/NVIDIA/aicr/"
+MODULE = "aicr.run/"
 SHARDS = ("recipe", "a", "b")
 # Median package seconds from 11 successful Linux race/coverage runs, 2026-11-12.
 # These are balancing weights, not predictions of concurrent command wall time.

@@ -18,9 +18,9 @@ import (
 	"fmt"
 	"strings"
 
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
+	aicrErrors "aicr.run/pkg/errors"
+	v1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
 )

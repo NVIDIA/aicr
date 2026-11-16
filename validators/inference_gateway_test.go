@@ -18,8 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/recipe"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 // TestResolveInferenceGatewayProfile covers the Context plumbing; the

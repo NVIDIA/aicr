@@ -22,7 +22,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // Candidate is one version Renovate offers for a pin. Published is zero when

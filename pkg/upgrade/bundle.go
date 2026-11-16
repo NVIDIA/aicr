@@ -22,7 +22,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // GuideFile is the bundle-root file WriteGuide renders into.

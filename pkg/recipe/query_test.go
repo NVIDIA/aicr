@@ -17,7 +17,7 @@ package recipe
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/serializer"
 )
 
 const testQueryService = "eks"

@@ -23,7 +23,7 @@ import (
 
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // ReadFile reads path into memory bounded three ways: by size (max bytes), by

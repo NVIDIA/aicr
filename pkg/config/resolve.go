@@ -23,13 +23,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/oci"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator"
+	bundlercfg "aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/verifier"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/oci"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator"
 )
 
 // BundleResolved is the typed-domain projection of BundleSpec produced by
@@ -104,6 +104,9 @@ type BundleResolved struct {
 
 	// SharedStorageClass is spec.bundle.scheduling.sharedStorageClass.
 	SharedStorageClass string
+
+	// RuntimeMetrics is spec.bundle.runtimeMetrics, validated.
+	RuntimeMetrics bundlercfg.RuntimeMetrics
 
 	// Attest is spec.bundle.attestation.enabled.
 	Attest bool
@@ -225,6 +228,13 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 
 	if err := resolveAttestation(b.Attestation, out); err != nil {
 		return nil, err
+	}
+
+	if m := b.RuntimeMetrics; m != nil {
+		if err := recipe.ValidateRuntimeMetrics(m.Series, m.Namespaces); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.bundle.runtimeMetrics", err)
+		}
+		out.RuntimeMetrics = bundlercfg.RuntimeMetrics{Series: m.Series, Namespaces: m.Namespaces}.Clone()
 	}
 
 	if b.Registry != nil {

@@ -21,7 +21,7 @@ import (
 	"slices"
 	"strings"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // identity is the canonical form desiredStateDigest covers: the

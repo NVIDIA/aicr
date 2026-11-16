@@ -27,8 +27,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	aicrerrors "aicr.run/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 

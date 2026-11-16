@@ -17,7 +17,7 @@ package recipe
 import (
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // Coordinate is the canonical placement of a recipe within the

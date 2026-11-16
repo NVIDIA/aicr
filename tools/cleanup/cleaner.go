@@ -35,12 +35,12 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/inventory"
-	"github.com/NVIDIA/aicr/pkg/k8s"
-	k8slabels "github.com/NVIDIA/aicr/pkg/k8s/labels"
-	vlabels "github.com/NVIDIA/aicr/pkg/validator/labels"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/inventory"
+	"aicr.run/pkg/k8s"
+	k8slabels "aicr.run/pkg/k8s/labels"
+	vlabels "aicr.run/pkg/validator/labels"
 )
 
 // aicrCRDGroups are the CRD API groups owned by AICR components. A CRD matches

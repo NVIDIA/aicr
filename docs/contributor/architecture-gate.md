@@ -13,7 +13,7 @@ enforces that boundary mechanically. It resolves every package under
 `./pkg/cli/...` and `./pkg/server/...` (via `go list`, so a future
 split like `pkg/cli/foo` is covered automatically instead of needing
 to be added by hand), type-checks each one from source, walks every
-symbol they reference into a package under `github.com/NVIDIA/aicr/`,
+symbol they reference into a package under `aicr.run/`,
 and compares that observed reference set against the committed policy
 in `tests/architecture/facade-policy.yaml`. A reference the policy
 doesn't account for fails the build. References between packages

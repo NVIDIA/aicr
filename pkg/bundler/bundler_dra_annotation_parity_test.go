@@ -24,9 +24,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/recipe"
 )
 
 // draBundleMakeTimeout bounds each Make call this file's parity tests issue —

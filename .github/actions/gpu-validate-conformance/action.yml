@@ -23,7 +23,8 @@ inputs:
 # No Karpenter/KWOK on this real-GPU cluster. Validator pods tolerate every
 # taint, so they schedule onto KWOK simulated nodes, where KWOK fakes a
 # successful exit without running them and serves no logs (#3818). Without
-# Karpenter, cluster-autoscaling records a skip here.
+# Karpenter, cluster-autoscaling records a skip here; it runs alone afterwards
+# in gpu-validate-cluster-autoscaling.
 runs:
   using: 'composite'
   steps:

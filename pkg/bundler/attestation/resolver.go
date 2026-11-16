@@ -22,7 +22,7 @@ import (
 
 	"github.com/sigstore/sigstore-go/pkg/root"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // ResolveOptions selects an OIDC token source for keyless signing. Callers

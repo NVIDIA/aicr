@@ -15,9 +15,9 @@
 package snapshotter
 
 import (
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/measurement"
 )
 
 // NewSnapshot creates a new Snapshot instance with an initialized Measurements slice.

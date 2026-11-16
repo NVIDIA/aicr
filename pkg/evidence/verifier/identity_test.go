@@ -22,8 +22,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/allocpolicy"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"aicr.run/pkg/allocpolicy"
+	"aicr.run/pkg/evidence/attestation"
 )
 
 // TestCheckRecipeIdentity pins the content binding: pointer/predicate

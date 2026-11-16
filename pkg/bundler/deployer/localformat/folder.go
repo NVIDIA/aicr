@@ -14,7 +14,7 @@
 
 package localformat
 
-import "github.com/NVIDIA/aicr/pkg/bundler/deployer"
+import "aicr.run/pkg/bundler/deployer"
 
 // FolderKind classifies a written folder by the presence/absence of Chart.yaml.
 type FolderKind int

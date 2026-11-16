@@ -20,10 +20,10 @@ import (
 	"strings"
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/measurement"
 )
 
 const constraintPathTestBase = `kind: RecipeMetadata

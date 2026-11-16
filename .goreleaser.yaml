@@ -29,9 +29,9 @@ builds:
       -w
       -s
       -extldflags "-static"
-      -X github.com/NVIDIA/aicr/pkg/cli.version={{.Version}}
-      -X github.com/NVIDIA/aicr/pkg/cli.commit={{.FullCommit}}
-      -X github.com/NVIDIA/aicr/pkg/cli.date={{.Date}}
+      -X aicr.run/pkg/cli.version={{.Version}}
+      -X aicr.run/pkg/cli.commit={{.FullCommit}}
+      -X aicr.run/pkg/cli.date={{.Date}}
     hooks:
       post:
         ## cosign attestation (Rekor v2) with slsa provenance v1.
@@ -104,9 +104,9 @@ builds:
       -w
       -s
       -extldflags "-static"
-      -X github.com/NVIDIA/aicr/pkg/server.version={{.Version}}
-      -X github.com/NVIDIA/aicr/pkg/server.commit={{.FullCommit}}
-      -X github.com/NVIDIA/aicr/pkg/server.date={{.Date}}
+      -X aicr.run/pkg/server.version={{.Version}}
+      -X aicr.run/pkg/server.commit={{.FullCommit}}
+      -X aicr.run/pkg/server.date={{.Date}}
     hooks:
       post:
         ## Binary attestation for the aicrd server binary. Same cosign attest-blob
@@ -141,7 +141,7 @@ builds:
 
 
 # `proxy: false` controls where goreleaser gets *this project's* source: with it
-# true, goreleaser re-downloads github.com/NVIDIA/aicr at the tag from a proxy and
+# true, goreleaser re-downloads aicr.run at the tag from a proxy and
 # builds that copy instead of the checkout. That is a different question from where
 # dependencies come from, and we want the checkout — it is what CI verified.
 #

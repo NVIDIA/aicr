@@ -20,8 +20,8 @@ import (
 	"io"
 	"os"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // extrasOut is the destination for the sentinel lines. Nil means the CURRENT

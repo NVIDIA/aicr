@@ -17,7 +17,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/config"
+	"aicr.run/pkg/config"
 )
 
 func TestAccessors_NilTolerant(t *testing.T) {

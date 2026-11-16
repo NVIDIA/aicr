@@ -25,9 +25,9 @@ import (
 	"github.com/google/go-containerregistry/pkg/registry"
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
 )
 
 // newEvidenceTestInputs returns a Client, a recipe it owns and a snapshot,

@@ -18,8 +18,8 @@ import (
 	"math"
 	"testing"
 
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
+	v1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 

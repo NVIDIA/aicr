@@ -121,7 +121,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell check-docs-links bom-pinning-check check-depproxy-kit check-runner-labels check-upgrade-records check-dynamo-runtime-image ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, Dynamo runtime image tag, vendored action digests, and runner labels)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml check-docs-shell check-docs-links bom-pinning-check check-depproxy-kit check-runner-labels check-upgrade-records check-dynamo-runtime-image check-module-path ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, Dynamo runtime image tag, vendored action digests, runner labels, and the pre-rename module path)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
@@ -131,6 +131,10 @@ check-depproxy-kit: ## Verifies the vendored Go proxy action matches upstream di
 .PHONY: check-runner-labels
 check-runner-labels: ## Rejects the floating ubuntu-latest runner label under .github/
 	@./tools/check-runner-labels
+
+.PHONY: check-module-path
+check-module-path: ## Fails on any line that still names the pre-rename Go module path (#3834)
+	@GOFLAGS="-mod=readonly" go run ./tools/module-rename -check -from github.com/NVIDIA/aicr # module-rename:keep
 
 # Standalone target — NOT part of `make lint` because it requires Docker
 # (the validator runs in the same image renovatebot/github-action wraps).
@@ -353,7 +357,7 @@ test-shell: ## Runs shell unit tests (tools/*_test.sh, tools/component-test/*_te
 # exposed it: with an ambient `GOFLAGS=-trimpath`, `runtime.Caller` returns
 # trimmed paths, so the `repositoryPath` helper in tests/notices and
 # tests/releasepolicy resolves the repo root to the literal module path
-# "github.com/NVIDIA/aicr" and every file open fails. Reproduced and confirmed —
+# "aicr.run" and every file open fails. Reproduced and confirmed —
 # both suites fail with ambient -trimpath and pass with GOFLAGS assigned.
 #
 # So: keep the assignment. It pins the resolution mode AND makes these targets
@@ -379,7 +383,7 @@ test-go:
 	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
 	AICR_CRITERIA_STRICT=1 \
 	$(GO_TEST_COMMAND) -coverprofile=coverage.full.out $$packages || exit 1; \
-	grep -v '^github.com/NVIDIA/aicr/validators/' coverage.full.out > coverage.out; \
+	grep -v '^aicr.run/validators/' coverage.full.out > coverage.out; \
 	echo "Test coverage:"; \
 	go tool cover -func=coverage.out | tail -1
 
@@ -1194,8 +1198,8 @@ AICR_E2E_VALIDATOR_IMAGES  ?= $(shell yq -r '.operator.aicr_validator_images | [
 OPERATOR_VERSION           ?= v0.0.0-dev
 OPERATOR_TAGS              ?= aicr_operator_development
 OPERATOR_LDFLAGS           := -s -w \
-	-X github.com/NVIDIA/aicr/pkg/operator/version.Version=$(OPERATOR_VERSION) \
-	-X github.com/NVIDIA/aicr/pkg/operator/version.Commit=$(COMMIT)
+	-X aicr.run/pkg/operator/version.Version=$(OPERATOR_VERSION) \
+	-X aicr.run/pkg/operator/version.Commit=$(COMMIT)
 
 .PHONY: operator-build
 operator-build: ## Builds the operator (development opt-in) and the kubectl-aicr plugin into dist/

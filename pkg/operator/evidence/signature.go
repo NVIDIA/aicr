@@ -21,7 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // KeyFingerprint is the fingerprint of the KMS key that signed AICR's

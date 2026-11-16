@@ -18,7 +18,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/NVIDIA/aicr/pkg/server"
+	"aicr.run/pkg/server"
 )
 
 func main() {

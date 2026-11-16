@@ -25,7 +25,7 @@ import (
 	oras "oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 )
 
 type contextReadCloser struct {

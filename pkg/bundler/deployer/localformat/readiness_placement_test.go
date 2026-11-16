@@ -29,10 +29,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/bundler/gatemanifest"
+	"aicr.run/pkg/helm/helmtest"
 )
 
 const readinessHelmTimeout = 30 * time.Second

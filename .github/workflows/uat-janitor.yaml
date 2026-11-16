@@ -112,7 +112,8 @@ jobs:
     env:
       GCP_PROJECT_ID: "eidosx"
       JANITOR_CONFIG: "tests/uat/gcp/cluster-config.yaml"
-      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.17@sha256:8bfffd412d98276ee1000a6c083514e6b28928416cc37602ec637ed3a2167c99"
+      # Same pin as GKE_ACTUATOR_IMAGE in uat-gcp.yaml; rotate them together.
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/gke:v0.5.20@sha256:e0956f0b3c44517b6a269ca5775c617d0f118554b42c6766284de86aace4734b"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -146,7 +147,7 @@ jobs:
     env:
       AWS_REGION: "us-east-1"
       JANITOR_CONFIG: "tests/uat/aws/cluster-config.yaml"
-      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.3@sha256:ff1a04bedf1aa4b30e316404a69a60068b269c6bba3a9d09231f68a69b7898b6"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.4@sha256:13aa5793aea0e74c73986d52e0c5bd7b46fbeb39d4a630f45eef95142ca64552"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -184,7 +185,7 @@ jobs:
     env:
       AWS_REGION: "us-east-1"
       JANITOR_CONFIG: "tests/uat/aws/cluster-config-gb200.yaml"
-      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.3@sha256:ff1a04bedf1aa4b30e316404a69a60068b269c6bba3a9d09231f68a69b7898b6"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks:v0.5.4@sha256:13aa5793aea0e74c73986d52e0c5bd7b46fbeb39d4a630f45eef95142ca64552"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

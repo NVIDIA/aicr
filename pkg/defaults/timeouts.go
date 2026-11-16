@@ -420,32 +420,32 @@ const (
 	// for typing the user code) makes the shared ceiling cramped.
 	OIDCAuthTimeout = 5 * time.Minute
 
-	// SigstoreSignTimeout bounds the non-interactive Sigstore signing flow:
-	// Fulcio certificate issuance (token-exchange + cert mint) plus Rekor
-	// transparency-log submission. Two HTTP round-trips against public-good
-	// infrastructure; 2 minutes leaves comfortable headroom for
-	// SigstoreRetryBudget attempts plus exponential backoff without letting
-	// a hung peer block a CLI invocation indefinitely. Distinct from
+	// SigstoreSignTimeout bounds the non-interactive Sigstore signing flow.
+	// Keyless signing runs two steps in sequence, the Fulcio certificate
+	// request and then the bundle signing with its Rekor submission. Each
+	// step retries up to SigstoreRetryBudget attempts with exponential
+	// backoff, and this ceiling covers both steps' worst case without
+	// letting a hung peer block a CLI invocation indefinitely. Distinct from
 	// OIDCAuthTimeout, which covers the interactive user-driven step that
 	// precedes this flow.
-	SigstoreSignTimeout = 2 * time.Minute
+	SigstoreSignTimeout = 4 * time.Minute
 
-	// SigstoreAttemptTimeout bounds a single sign.Bundle invocation. The
-	// AICR-side wrapper in pkg/bundler/attestation/signing.go retries up
+	// SigstoreAttemptTimeout bounds a single Sigstore request, either a
+	// Fulcio certificate request or a sign.Bundle call. The AICR-side
+	// wrapper in pkg/bundler/attestation/signing.go retries each step up
 	// to SigstoreRetryBudget attempts, each bounded by this per-attempt
 	// timeout. The outer SigstoreSignTimeout ceiling caps the total
 	// wall-clock so a chain of slow Rekor responses can't blow past the
 	// structured deadline contract.
 	SigstoreAttemptTimeout = 35 * time.Second
 
-	// SigstoreRetryBudget is the maximum number of sign.Bundle attempts
-	// the wrapper makes before returning the last error. Retries fire
+	// SigstoreRetryBudget is the maximum number of attempts per signing
+	// step the wrapper makes before returning the last error. Retries fire
 	// only when the error classifies as ErrCodeUnavailable (transient
-	// Fulcio/Rekor failure) — never on ErrCodeTimeout (caller deadline,
+	// Fulcio/Rekor failure), never on ErrCodeTimeout (caller deadline,
 	// not worth burning more budget) or other structured failure modes.
 	// Three attempts absorbs the typical Sigstore Rekor flake window
-	// observed in #1244 and #1245 without inflating wall-clock for the
-	// healthy path. See issue #1249.
+	// without inflating wall-clock for the healthy path.
 	SigstoreRetryBudget = 3
 
 	// SigstoreRetryInitialBackoff is the wait between attempt 1 and

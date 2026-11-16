@@ -21,11 +21,11 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/NVIDIA/aicr/pkg/bom"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/mirror"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bom"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/mirror"
+	"aicr.run/pkg/recipe"
 )
 
 // Chart values keys of the GPU Operator driver and its GDRCopy and GDS

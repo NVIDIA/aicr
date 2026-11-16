@@ -19,7 +19,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"aicr.run/pkg/defaults"
 )
 
 func TestAKSDynamoInferencePerformanceGoalsFollowPattern(t *testing.T) {

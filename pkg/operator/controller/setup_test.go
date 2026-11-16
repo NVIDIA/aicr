@@ -22,8 +22,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
+	"aicr.run/pkg/operator/defaults"
+	"aicr.run/pkg/operator/engine/argocd"
 )
 
 // Each controller runs one worker; only the rollout controller bounds a

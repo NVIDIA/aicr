@@ -26,7 +26,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/NVIDIA/aicr/pkg/k8s/k8stest"
+	"aicr.run/pkg/k8s/k8stest"
 )
 
 // testClientset is a real Kubernetes clientset backed by envtest (API server + etcd).

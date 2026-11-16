@@ -19,8 +19,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/snapshotter"
 )
 
 // topologySnap builds a NodeTopology measurement in one of the two encodings.

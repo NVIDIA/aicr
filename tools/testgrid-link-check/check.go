@@ -19,8 +19,8 @@ import (
 	"io"
 	"sort"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/testgrid"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/testgrid"
 )
 
 // state is a link's classification against the live dashboard data.

@@ -18,8 +18,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // ResolveCRDOwners reports which of refs may have their CRDs replaced on

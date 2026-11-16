@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	evidenceindex "github.com/NVIDIA/aicr/pkg/evidence/index"
+	evidenceindex "aicr.run/pkg/evidence/index"
 )
 
 func TestRequireEvidenceQueryParameter(t *testing.T) {
