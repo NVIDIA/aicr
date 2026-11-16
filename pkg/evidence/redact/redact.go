@@ -81,7 +81,8 @@ const (
 	//   - v10 added the resultSchema stamp naming the result contract the
 	//     validator image spoke.
 	//   - v11 added the no-metrics-backend skipReason code.
-	//   - v12 added the per-test images carrier (boundImages).
+	//   - v12 added the per-test images carrier (boundImages) and the
+	//     platform extra.
 	PolicyVersion = "v12"
 )
 
@@ -339,6 +340,9 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	// check as observed either way and uses it only to word the reason. Only
 	// the versions a reader knows are publishable.
 	ctrf.ExtraKeyResultSchema: closedSet(ctrf.ResultSchemaVersion),
+
+	// The validator binary's os/arch.
+	ctrf.ExtraKeyPlatform: ctrf.IsPlatform,
 }
 
 // ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.

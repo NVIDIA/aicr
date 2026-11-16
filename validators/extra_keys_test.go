@@ -73,6 +73,7 @@ var extraKeySamples = map[string]string{
 	ExtraKeyVersionSatisfied:    FormatBool(false),
 	ExtraKeyObservationOnly:     FormatBool(true),
 	ExtraKeyResultSchema:        ctrf.ResultSchemaVersion,
+	ExtraKeyPlatform:            "linux/arm64",
 }
 
 // sharedKeyValues resolves the constants extra_keys.go re-exports from
@@ -82,6 +83,7 @@ var sharedKeyValues = map[string]string{
 	"ctrf.ExtraKeySkipReason":      ctrf.ExtraKeySkipReason,
 	"ctrf.ExtraKeyObservationOnly": ctrf.ExtraKeyObservationOnly,
 	"ctrf.ExtraKeyResultSchema":    ctrf.ExtraKeyResultSchema,
+	"ctrf.ExtraKeyPlatform":        ctrf.ExtraKeyPlatform,
 }
 
 // constsWithPrefix returns the string value of each constant in extra_keys.go

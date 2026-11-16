@@ -22,6 +22,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -133,19 +134,19 @@ func withTempTerminationLog(t *testing.T) string {
 	return tmp
 }
 
-// TestPublishResultSchema verifies the stamp every result carries: one extra
-// sentinel line with the current contract version, and a failed write
-// surfaces as an error rather than a warning, since the runner fails the
-// check on it.
-func TestPublishResultSchema(t *testing.T) {
-	t.Run("writes the stamp", func(t *testing.T) {
+// TestPublishStamps verifies the stamps every result carries: one extra
+// sentinel line with the current contract version and the binary's platform,
+// and a failed write surfaces as an error rather than a warning, since the
+// runner fails the check on it.
+func TestPublishStamps(t *testing.T) {
+	t.Run("writes the stamps", func(t *testing.T) {
 		var buf bytes.Buffer
 		orig := extrasOut
 		extrasOut = &buf
 		t.Cleanup(func() { extrasOut = orig })
 
-		if err := publishResultSchema(); err != nil {
-			t.Fatalf("publishResultSchema() error = %v", err)
+		if err := publishStamps(); err != nil {
+			t.Fatalf("publishStamps() error = %v", err)
 		}
 		payload, ok := strings.CutPrefix(strings.TrimSuffix(buf.String(), "\n"), ctrf.ExtraLinePrefix)
 		if !ok {
@@ -155,9 +156,15 @@ func TestPublishResultSchema(t *testing.T) {
 		if err := json.Unmarshal([]byte(payload), &got); err != nil {
 			t.Fatalf("payload %q: %v", payload, err)
 		}
-		want := map[string]string{ctrf.ExtraKeyResultSchema: ctrf.ResultSchemaVersion}
+		want := map[string]string{
+			ctrf.ExtraKeyResultSchema: ctrf.ResultSchemaVersion,
+			ctrf.ExtraKeyPlatform:     runtime.GOOS + "/" + runtime.GOARCH,
+		}
 		if !maps.Equal(got, want) {
-			t.Errorf("stamp = %v, want %v", got, want)
+			t.Errorf("stamps = %v, want %v", got, want)
+		}
+		if redacted := redactedExtra(got); !maps.Equal(redacted, want) {
+			t.Errorf("redaction changed the stamps: %v", redacted)
 		}
 	})
 	t.Run("a failed write is an error", func(t *testing.T) {
@@ -165,7 +172,7 @@ func TestPublishResultSchema(t *testing.T) {
 		extrasOut = errWriter{}
 		t.Cleanup(func() { extrasOut = orig })
 
-		err := publishResultSchema()
+		err := publishStamps()
 		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInternal)
 	})
 }
