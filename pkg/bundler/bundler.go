@@ -513,6 +513,9 @@ func stageBundle(ctx context.Context, dir string) (*bundleStage, error) {
 	case err != nil:
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("failed to inspect output directory %s", dir), err)
+	case info.Mode()&os.ModeSymlink != 0 || !info.IsDir() && !info.Mode().IsRegular():
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("output path %s is a symlink or special object, not a directory", dir))
 	case !info.IsDir():
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("output path %s is not a directory", dir))

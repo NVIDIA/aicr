@@ -598,14 +598,42 @@ func TestMake_RejectsInvalidOutputRoot(t *testing.T) {
 		setup func(t *testing.T, dir string)
 		// output is the path under dir passed to Make, dir itself when empty.
 		output string
+		// wantMsg, when set, is a substring the error must contain.
+		wantMsg string
 	}{
 		{
-			name:   "output path is a file",
-			output: "out",
+			name:    "output path is a file",
+			output:  "out",
+			wantMsg: "is not a directory",
 			setup: func(t *testing.T, dir string) {
 				t.Helper()
 				if err := os.WriteFile(filepath.Join(dir, "out"), []byte("mine"), 0600); err != nil {
 					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:    "output path is a symlink to a directory",
+			output:  "out",
+			wantMsg: "symlink or special object",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.Mkdir(filepath.Join(dir, "target"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("target", filepath.Join(dir, "out")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:    "output path is a fifo",
+			output:  "out",
+			wantMsg: "symlink or special object",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := unix.Mkfifo(filepath.Join(dir, "out"), 0600); err != nil {
+					t.Skipf("FIFO unsupported: %v", err)
 				}
 			},
 		},
@@ -640,6 +668,9 @@ func TestMake_RejectsInvalidOutputRoot(t *testing.T) {
 			before := treeSnapshot(t, dir)
 			_, err = b.Make(context.Background(), closedWorldRecipeResult(), filepath.Join(dir, tt.output))
 			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if tt.wantMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantMsg)) {
+				t.Errorf("Make() error = %v, want it to contain %q", err, tt.wantMsg)
+			}
 			if after := treeSnapshot(t, dir); !reflect.DeepEqual(after, before) {
 				t.Errorf("rejected run changed the directory:\nbefore %v\nafter  %v",
 					slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))
