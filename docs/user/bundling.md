@@ -581,8 +581,8 @@ aicr bundle --recipe recipe.yaml --nodes 200 --output ./bundles
 Count the GPU nodes the cluster will reach before you next regenerate the
 bundle: a count too high only keeps the default values, while one too low
 risks OOM kills. A cluster with a large CPU pool or far more pods per node
-than usual should state a higher count or override; each tier records the
-total nodes and pods of the readings behind it.
+than usual should state a higher count or override; a tier's readings record
+the cluster's total nodes, and its pods where known.
 
 An `argocd-helm` bundle sizes its upstream charts at install time instead,
 from the root value `sizing.nodeCount`, which defaults to the bundle's
@@ -603,7 +603,8 @@ lower them.
 
 Each sized child Application carries `aicr.run/sizing-node-count`, and
 `aicr.run/sizing-tier` when a tier changed its values. A component's
-own root-chart values still win over the tier. The chart does not compare
+own root-chart values still win over the tier, and so does a `--dynamic`
+path: a request or limit made dynamic is not sized. The chart does not compare
 quantities, so an install-time request above the selected limit is rejected
 by the API server when Argo CD syncs, not by `helm install`.
 

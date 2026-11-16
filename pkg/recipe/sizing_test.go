@@ -16,6 +16,7 @@ package recipe
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"path"
 	"slices"
@@ -23,6 +24,7 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
@@ -305,15 +307,83 @@ func TestRegistrySizingPathsAreSet(t *testing.T) {
 }
 
 func hasPath(m map[string]any, dotted string) bool {
+	_, ok := valueAt(m, dotted)
+	return ok
+}
+
+func valueAt(m map[string]any, dotted string) (any, bool) {
 	var cur any = m
 	for _, k := range strings.Split(dotted, ".") {
 		next, ok := cur.(map[string]any)
 		if !ok {
-			return false
+			return nil, false
 		}
 		if cur, ok = next[k]; !ok {
-			return false
+			return nil, false
 		}
 	}
-	return true
+	return cur, true
+}
+
+// TestRegistrySizingKeepsRequestsWithinLimits fails when a values file's
+// memory request would end above a tier's limit: every bundle of that file at
+// a count in the tier would fail the request-within-limit check.
+func TestRegistrySizingKeepsRequestsWithinLimits(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fsys := GetEmbeddedFS()
+	quantity := func(m map[string]any, dotted string) (resource.Quantity, bool) {
+		v, ok := valueAt(m, dotted)
+		if !ok {
+			return resource.Quantity{}, false
+		}
+		q, parseErr := resource.ParseQuantity(fmt.Sprint(v))
+		return q, parseErr == nil
+	}
+	for _, c := range registry.Components {
+		if c.Sizing.File == "" {
+			continue
+		}
+		sz, err := LoadComponentSizing(context.Background(), nil, c.Name, c.Sizing.File)
+		if err != nil {
+			t.Fatalf("component %q: %v", c.Name, err)
+		}
+		files, err := fs.Glob(fsys, path.Join("components", c.Name, "values*.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			data, readErr := fs.ReadFile(fsys, f)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			var values map[string]any
+			if yamlErr := yaml.Unmarshal(data, &values); yamlErr != nil {
+				t.Fatalf("%s: %v", f, yamlErr)
+			}
+			for _, r := range sz.Resources {
+				req, hasReq := quantity(values, r.Path+"."+SizingFieldRequests+".memory")
+				lim, hasLim := quantity(values, r.Path+"."+SizingFieldLimits+".memory")
+				if !hasReq || !hasLim {
+					continue
+				}
+				for i := range r.Tiers {
+					set := r.Tiers[i].quantities()
+					sizedReq, sizedLim := req, lim
+					if q, ok := set[SizingFieldRequests]; ok && q.Cmp(sizedReq) < 0 {
+						sizedReq = q
+					}
+					if q, ok := set[SizingFieldLimits]; ok && q.Cmp(sizedLim) < 0 {
+						sizedLim = q
+					}
+					if sizedReq.Cmp(sizedLim) > 0 {
+						t.Errorf("%s: %s request %s is above the limit %s at tier maxNodes %d",
+							f, r.Path, sizedReq.String(), sizedLim.String(), r.Tiers[i].MaxNodes)
+					}
+				}
+			}
+		}
+	}
 }

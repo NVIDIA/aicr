@@ -30,6 +30,7 @@ import (
 	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/helm/helmtest"
 	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 // Fixture rows only; real tiers are validated empirically, not in unit tests.
@@ -140,6 +141,10 @@ func TestHelmTemplate_Sizing(t *testing.T) {
 			wantReq: "256Mi", wantLim: "4Gi", wantCount: "200", wantTier: "250"},
 		{name: "negative count fails", args: []string{"--set", "sizing.nodeCount=-1"}, wantErrMatch: "nodeCount"},
 		{name: "fractional count fails", valuesFile: "sizing:\n  nodeCount: 250.5\n", wantErrMatch: "nodeCount"},
+		{name: "negative count fails with the schema skipped", args: []string{"--skip-schema-validation", "--set", "sizing.nodeCount=-1"},
+			wantErrMatch: "must be a whole number"},
+		{name: "fractional count fails with the schema skipped", args: []string{"--skip-schema-validation"},
+			valuesFile: "sizing:\n  nodeCount: 250.5\n", wantErrMatch: "must be a whole number"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -305,4 +310,32 @@ func TestReadmeDocumentsSizingOnlyWhenSized(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateSizingRejectsReservedRootKey(t *testing.T) {
+	registryYAML := `apiVersion: aicr.run/v1beta1
+kind: ComponentRegistry
+components:
+  - name: sizer
+    displayName: Sizer
+    class: ops
+    valueOverrideKeys: [sizing]
+    helm:
+      defaultRepository: https://charts.example.com
+      defaultChart: example/sizer
+      defaultVersion: v1.0.0
+`
+	dataDir := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: []byte(registryYAML)})
+	layered, err := recipe.NewLayeredDataProvider(recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""),
+		recipe.LayeredProviderConfig{ExternalDir: dataDir})
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{{
+		Name: "sizer", Namespace: "sizer", Chart: "sizer", Version: "v1.0.0",
+		Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com",
+	}})
+	rr.BindDataProvider(layered)
+	g := &Generator{RecipeResult: rr}
+	errorstest.WantReportedCode(t, g.validateSizing(), errors.ErrCodeInvalidRequest)
 }

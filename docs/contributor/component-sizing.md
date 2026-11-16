@@ -32,6 +32,10 @@ a value is a data change.
   bound, and the child Application template merges the row
   `sizing.nodeCount` selects between the static values and the component's
   root-chart values. Vendored and local charts are sized at generation time.
+  The template does not compare quantities, so a request set at install time
+  above the selected limit is rejected by the API server at sync.
+- A `--dynamic` path wins over sizing: a request or limit it reaches is left
+  out of every row, because its root-chart value is merged after the row.
 - A path that a bundle-rendered manifest reads is never sized: that manifest
   is rendered at generation time and cannot see install-time values.
 

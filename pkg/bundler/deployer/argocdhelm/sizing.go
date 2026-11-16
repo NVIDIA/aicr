@@ -34,6 +34,17 @@ func (g *Generator) validateSizing() error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("sizing node count must be zero or positive, got %d", g.SizingNodeCount))
 	}
+	// The root values key "sizing" holds nodeCount in every bundle, so no
+	// component's values may live under it. A component the registry cannot
+	// resolve is reported where its values are written.
+	for i := range g.RecipeResult.ComponentRefs {
+		name := g.RecipeResult.ComponentRefs[i].Name
+		if key, err := resolveOverrideKey(name, g.RecipeResult.DataProvider()); err == nil && key == rootValuesSizingKey {
+			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"component %q uses the root values key %q, which argocd-helm reserves for sizing.nodeCount",
+				name, rootValuesSizingKey))
+		}
+	}
 	for name, rows := range g.SizingRows {
 		var ref *recipe.ComponentRef
 		for i := range g.RecipeResult.ComponentRefs {
@@ -78,11 +89,14 @@ func sizingRowsDocument(rows []SizingRow) map[string]any {
 // sets $aicrSizingNodeCount, $aicrSizingRow and $aicrSizingTier (0 when the
 // selected row changes nothing). Both operands of the comparison go through
 // int64: --set delivers the count as int64 and a values file as float64, and
-// Helm's comparison functions fail on that mix. A count of 0, or above every
+// Helm's comparison functions fail on that mix. A fractional count fails
+// here because int64 would truncate it into a lower row, and the schema
+// that rejects it can be skipped. A count of 0, or above every
 // row, selects nothing.
 func sizingSelector(componentName string) string {
-	return fmt.Sprintf(`{{- $aicrSizingNodeCount := int64 ((.Values.%[1]s | default dict).nodeCount | default 0) -}}
-{{- if lt $aicrSizingNodeCount 0 }}{{ fail (printf "%[1]s.nodeCount must be zero or positive, got %%d" $aicrSizingNodeCount) }}{{ end -}}
+	return fmt.Sprintf(`{{- $aicrSizingRawCount := (.Values.%[1]s | default dict).nodeCount | default 0 -}}
+{{- $aicrSizingNodeCount := int64 $aicrSizingRawCount -}}
+{{- if or (lt $aicrSizingNodeCount 0) (ne (float64 $aicrSizingRawCount) (float64 $aicrSizingNodeCount)) }}{{ fail (printf "%[1]s.nodeCount must be a whole number, zero or positive, got %%v" $aicrSizingRawCount) }}{{ end -}}
 {{- $aicrSizingRow := dict -}}
 {{- $aicrSizingTier := 0 -}}
 {{- $aicrSizingFound := false -}}

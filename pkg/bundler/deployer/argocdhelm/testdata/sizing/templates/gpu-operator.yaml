@@ -1,8 +1,9 @@
 {{- $childName := printf "%s%s" ((.Values.deployer | default dict).namePrefix | default "") "gpu-operator" -}}
 {{- if gt (len $childName) 53 }}{{ fail (printf "deployer.namePrefix produces child Application name %q (%d chars): child Application names are capped at 53 characters because Argo CD derives the Helm release name from the Application name for Helm-rendered children" $childName (len $childName)) }}{{ end -}}
 {{- if eq $childName (.Values.appName | default "aicr-stack" | toString) }}{{ fail (printf "child Application name %q collides with the parent Application name: choose a different deployer.namePrefix or appName" $childName) }}{{ end -}}
-{{- $aicrSizingNodeCount := int64 ((.Values.sizing | default dict).nodeCount | default 0) -}}
-{{- if lt $aicrSizingNodeCount 0 }}{{ fail (printf "sizing.nodeCount must be zero or positive, got %d" $aicrSizingNodeCount) }}{{ end -}}
+{{- $aicrSizingRawCount := (.Values.sizing | default dict).nodeCount | default 0 -}}
+{{- $aicrSizingNodeCount := int64 $aicrSizingRawCount -}}
+{{- if or (lt $aicrSizingNodeCount 0) (ne (float64 $aicrSizingRawCount) (float64 $aicrSizingNodeCount)) }}{{ fail (printf "sizing.nodeCount must be a whole number, zero or positive, got %v" $aicrSizingRawCount) }}{{ end -}}
 {{- $aicrSizingRow := dict -}}
 {{- $aicrSizingTier := 0 -}}
 {{- $aicrSizingFound := false -}}
