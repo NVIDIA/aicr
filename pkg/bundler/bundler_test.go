@@ -506,6 +506,16 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 		{name: "foreign file", setup: writeFile("stale.txt"), wantErr: true},
 		{name: "foreign file in a populated static directory", setup: writeFile(filepath.Join("static", "stale.txt")), wantErr: true},
 		{name: "foreign directory in place of a bundle file", setup: writeFile(filepath.Join("README.md", "stale.txt")), wantErr: true},
+		{name: "sha256sum manifest", setup: func(t *testing.T, dir string) {
+			t.Helper()
+			snapshot := filepath.Join(dir, "snapshot.yaml")
+			if err := os.WriteFile(snapshot, []byte("kind: Snapshot\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := checksum.GenerateChecksums(t.Context(), dir, []string{snapshot}); err != nil {
+				t.Fatal(err)
+			}
+		}, wantErr: true},
 		{
 			name:      "foreign file without checksums",
 			setup:     writeFile("stale.txt"),

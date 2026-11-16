@@ -737,8 +737,9 @@ func (p bundlePaths) has(rel string, isDir bool) bool {
 
 // earlierBundle returns the files in dir that the bundle described by its
 // checksums.txt wrote and that still match their digests, along with
-// checksums.txt and that bundle's attestation files. It is empty when dir
-// holds no checksums.txt that parses.
+// checksums.txt and that bundle's attestation files. It is empty unless dir
+// holds a checksums.txt that parses and lists a matching bundle-info.yaml,
+// because sha256sum writes a manifest in the same format.
 func earlierBundle(ctx context.Context, dir string) (bundlePaths, error) {
 	p := newBundlePaths()
 	f, err := os.Open(filepath.Join(dir, checksum.ChecksumFileName))
@@ -776,6 +777,9 @@ func earlierBundle(ctx context.Context, dir string) (bundlePaths, error) {
 		if digestErr == nil && hex.EncodeToString(digest) == entry.Digest {
 			p.add(entry.Path)
 		}
+	}
+	if !p.files[bundleinfo.FileName] {
+		return newBundlePaths(), nil
 	}
 	p.add(checksum.ChecksumFileName)
 	for _, rel := range opts.AllowedMetadataPaths {
