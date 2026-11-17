@@ -167,7 +167,7 @@ testing_tools:
   # tools/setup-tools covers local dev on other platforms.
   setup_envtest_sha256_linux_amd64: '94534f83896f3b09934d9570b213fbda04aa5c17457942270928cdca0317bf9b'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
-  helm: 'v4.3.1'
+  helm: 'v4.3.2'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
   helm_diff: 'v3.15.15'
   # helm_diff_checksums are refreshed automatically by tools/update-helm-diff-checksums
@@ -180,14 +180,14 @@ testing_tools:
     darwin_amd64: '214d890745b45679400442552ad4554fb4df622b92d031931536eff85bdb46c2'
     darwin_arm64: 'af2834052ba32fe8006a44a31db16cad30baf1c46f6b59160b092974578d7798'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
-  helmfile: 'v1.8.3'
+  helmfile: 'v1.8.4'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
   # via Renovate postUpgradeTasks whenever the helmfile version above is bumped.
   helmfile_checksums:
-    linux_amd64: '7d79c6d2099a4819213873164eda23bdbd32f1404fec7a7104d934e5d102596f'
-    linux_arm64: 'e035c0338e31e0a8054ae798280532d32edcfbb7d6c4993e3b2efa2dc40647ce'
-    darwin_amd64: '043c4139987ad0009416575a0d52480af45b651f4dc85a90133199e8f9d6a71c'
-    darwin_arm64: 'a80eda044f1b73adc9ca051d34c787444203f31c3b9d5328a6b27c3ff02520ff'
+    linux_amd64: '1f19ced8adb0cdf2350e94ca598cf64e390d8c21d0d9b4bdc1c9f246d4591c9d'
+    linux_arm64: '96f898a9faf236e06c5e65bf39a7f4ca727f5e911be1b28e2c2f80adabc132ed'
+    darwin_amd64: '859ab46d4608ebc1005c5f7c3c07d35562330340795b40750dbb316aae608390'
+    darwin_arm64: '61e7fa5401269785d6ee7bc1eac21e614371c00c705fda6e2e9f9d02c0fbc7b3'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.8.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools
@@ -200,7 +200,7 @@ testing_tools:
     darwin_amd64: 'ddb56002ff8c6265f55ec40c82eb0ef0dddec5127dd12d4fc5e7953453481f4b'
     darwin_arm64: '502bef17dd822217e82590e9ccf01c1e26a56b3fa34a835789b9af73e82a169a'
   # renovate: datasource=github-releases depName=mikefarah/yq depType=testing_tools
-  yq: 'v4.54.2'
+  yq: 'v4.54.3'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
   awscli: '1.46.3'
@@ -210,7 +210,7 @@ testing_tools:
   # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
   # serves TLS with a mkcert cert (see mkcert below).
   # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
-  ministack_image: 'ministackorg/ministack:1.5.39'
+  ministack_image: 'ministackorg/ministack:1.5.40'
   # OpenBAO: the Linux Foundation Apache-2.0 fork of HashiCorp Vault, used by the
   # Vault KMS e2e to exercise the hashivault:// signing/verification path against
   # a real Transit secrets engine. API-identical to Vault; the sigstore hashivault
@@ -275,7 +275,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v2.1.2'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
-  zarf: 'v1.0.0'
+  zarf: 'v1.0.1'
 # Quality Thresholds
 quality:
   coverage_threshold: '83'
