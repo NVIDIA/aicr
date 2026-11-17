@@ -45,7 +45,7 @@
 #   nvsentinel-mongodb at one member with smaller requests, so it fits one
 #       runner node.
 #
-# PREREQUISITES: go, kind, kubectl, helm, yq, jq
+# PREREQUISITES: go, kind, kubectl, helm, yq, jq, openssl
 #
 # ENVIRONMENT VARIABLES:
 #   CLUSTER_NAME   Kind cluster name (default: aicr-3092-kind).
@@ -427,7 +427,7 @@ test_delete_uncordons() {
   fi
 }
 
-has_tools go kind kubectl helm yq jq
+has_tools go kind kubectl helm yq jq openssl
 WORK=$(mktemp -d)
 export KUBECONFIG="${WORK}/kubeconfig"
 

@@ -44,7 +44,7 @@
 #   nvsentinel-mongodb at one member with smaller requests, and the analyzer
 #       at a smaller CPU request, so everything fits one runner node.
 #
-# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl
+# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl, openssl
 #
 # ENVIRONMENT VARIABLES:
 #   CLUSTER_NAME   Kind cluster name (default: aicr-nvsentinel-hea-e2e).
@@ -498,7 +498,7 @@ msg "=========================================="
 msg "nvsentinel-health-events-analyzer mixin e2e"
 msg "=========================================="
 
-has_tools go kind kubectl helm yq jq curl
+has_tools go kind kubectl helm yq jq curl openssl
 WORK=$(mktemp -d)
 export KUBECONFIG="${WORK}/kubeconfig"
 

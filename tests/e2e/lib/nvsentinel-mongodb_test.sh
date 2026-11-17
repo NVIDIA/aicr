@@ -69,7 +69,7 @@ setup() {
     (if $issuing == "yes" then [{type: "Issuing", status: "True"}] else [] end))}}' >"${FIX}/certificate.json"
   cp "${WORK}/${5:-$2}.crt" "${FIX}/served.pem"
   : >"${FIX}/deletes"
-  rm -f "${FIX}/reissue"
+  rm -f "${FIX}/reissue" "${FIX}/ca-after-read"
   STUB_DELAY=0
 }
 
@@ -77,7 +77,9 @@ setup() {
 # like a timed-out request, when that exceeds its --request-timeout. exec
 # answers like openssl s_client with the served certificate. A delete of the
 # client Secret records itself and, when FIX/reissue names a certificate, puts
-# it back signed by that certificate's CA, as cert-manager would.
+# it back signed by that certificate's CA, as cert-manager would. When
+# FIX/ca-after-read names a CA, the CA Secret switches to it right after its
+# first read, as a re-issue in the middle of a pass would.
 kubectl() {
   local verb="" kind="" name="" timeout=""
   while (($#)); do
@@ -104,7 +106,13 @@ kubectl() {
     sleep "${STUB_DELAY}"
   fi
   case "${verb} ${kind}" in
-    "get secret") cat "${FIX}/secret-${name}.json" 2>/dev/null ;;
+    "get secret")
+      cat "${FIX}/secret-${name}.json" 2>/dev/null
+      if [[ ${name} == "${NVSENTINEL_MONGODB_CA_CERT}" && -s "${FIX}/ca-after-read" ]]; then
+        secret "${name}" "$(cat "${FIX}/ca-after-read")"
+        rm -f "${FIX}/ca-after-read"
+      fi
+      ;;
     "get certificate") cat "${FIX}/certificate.json" ;;
     "get perconaservermongodb") printf 'ready' ;;
     "get statefulset") printf '1' ;;
@@ -158,6 +166,12 @@ run_case "a CA cert-manager is still issuing is waited on" 1 0 "the CA Certifica
 # current, but the listener still presents the earlier certificate.
 setup ca2 server2 client2 no server1
 run_case "mongod still serving the earlier certificate is waited on" 1 0 "MongoDB to serve a certificate"
+
+# Every certificate chains to ca1, but the CA is re-issued as ca2 right after
+# the helper first reads it, so ca1 is no longer current when the checks pass.
+setup ca1 server1 client1 no
+echo ca2 >"${FIX}/ca-after-read"
+run_case "a CA re-issued during a pass is not reported as current" 1 0 "by the deadline"
 
 setup ca2 server2 client2 no
 if out=$(set -u; nvsentinel_mongodb_ensure_tls_chain kind-test nvsentinel $((SECONDS - 1)) 2>&1); then

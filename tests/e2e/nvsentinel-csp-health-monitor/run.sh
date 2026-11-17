@@ -61,7 +61,7 @@
 # off, since cordoning Kind's only node trips it, and local-path-storage added
 # to node-drainer's system namespaces, as in tests/e2e/nvsentinel-remediation.
 #
-# PREREQUISITES: go, kind, kubectl, helm, yq, jq, timeout
+# PREREQUISITES: go, kind, kubectl, helm, yq, jq, timeout, openssl
 #
 # ENVIRONMENT VARIABLES:
 #   CLUSTER_NAME   Kind cluster name (default: aicr-nvsentinel-csp-e2e).
@@ -635,7 +635,7 @@ msg "=========================================="
 msg "nvsentinel-csp-health-monitor mixins e2e"
 msg "=========================================="
 
-has_tools go kind kubectl helm yq jq timeout
+has_tools go kind kubectl helm yq jq timeout openssl
 WORK=$(mktemp -d)
 export KUBECONFIG="${WORK}/kubeconfig"
 

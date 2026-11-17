@@ -57,7 +57,7 @@
 #       at a smaller CPU request, so everything fits one runner node beside
 #       kubernetes-object-monitor.
 #
-# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl
+# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl, openssl
 #
 # ENVIRONMENT VARIABLES:
 #   CLUSTER_NAME   Kind cluster name (default: aicr-3091-external-remediation-e2e).
@@ -990,7 +990,7 @@ msg "=========================================="
 msg "nvsentinel-external-remediation mixin e2e"
 msg "=========================================="
 
-has_tools go kind kubectl helm yq jq curl
+has_tools go kind kubectl helm yq jq curl openssl
 WORK=$(mktemp -d)
 export KUBECONFIG="${WORK}/kubeconfig"
 

@@ -58,7 +58,7 @@
 # The GPU reset itself cannot run on Kind (no nvidia RuntimeClass); the test
 # reads only that it is requested after collection.
 #
-# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl
+# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl, openssl
 #
 # ENVIRONMENT VARIABLES:
 #   CLUSTER_NAME   Kind cluster name (default: aicr-nvsentinel-lc-e2e).
@@ -579,7 +579,7 @@ msg "=========================================="
 msg "nvsentinel-log-collector mixin e2e"
 msg "=========================================="
 
-has_tools go kind kubectl helm yq jq curl
+has_tools go kind kubectl helm yq jq curl openssl
 WORK=$(mktemp -d)
 export KUBECONFIG="${WORK}/kubeconfig"
 

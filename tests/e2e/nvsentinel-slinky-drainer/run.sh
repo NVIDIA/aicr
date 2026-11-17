@@ -59,7 +59,7 @@
 #       not installed here, so the selectors only have to get the bundle past
 #       the gate.
 #
-# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl
+# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl, openssl
 #
 # ENVIRONMENT VARIABLES:
 #   CLUSTER_NAME   Kind cluster name (default: aicr-nvsentinel-slinky-drainer-e2e).
@@ -578,7 +578,7 @@ msg "=========================================="
 msg "nvsentinel-slinky-drainer mixin e2e"
 msg "=========================================="
 
-has_tools go kind kubectl helm yq jq curl
+has_tools go kind kubectl helm yq jq curl openssl
 WORK=$(mktemp -d)
 export KUBECONFIG="${WORK}/kubeconfig"
 

@@ -41,7 +41,7 @@
 #       runner node. Percona refuses a one-member replica set without
 #       unsafeFlags.replsetSize.
 #
-# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl
+# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl, openssl
 #
 # ENVIRONMENT VARIABLES:
 #   CLUSTER_NAME   Kind cluster name (default: aicr-nvsentinel-remediation-e2e).
@@ -477,7 +477,7 @@ msg "=========================================="
 msg "nvsentinel-observe mixin dry-run e2e"
 msg "=========================================="
 
-has_tools go kind kubectl helm yq jq curl
+has_tools go kind kubectl helm yq jq curl openssl
 WORK=$(mktemp -d)
 export KUBECONFIG="${WORK}/kubeconfig"
 

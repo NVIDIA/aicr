@@ -40,7 +40,7 @@
 # only through the resume token. The sink and token
 # endpoint are plain http, which the gate allows; a real sink should be https.
 #
-# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl
+# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl, openssl
 #
 # ENVIRONMENT VARIABLES:
 #   CLUSTER_NAME   Kind cluster name (default: aicr-nvsentinel-ee-e2e).
@@ -580,7 +580,7 @@ msg "=========================================="
 msg "nvsentinel-event-exporter mixin e2e"
 msg "=========================================="
 
-has_tools go kind kubectl helm yq jq curl
+has_tools go kind kubectl helm yq jq curl openssl
 WORK=$(mktemp -d)
 export KUBECONFIG="${WORK}/kubeconfig"
 

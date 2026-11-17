@@ -145,7 +145,15 @@ nvsentinel_mongodb_ensure_tls_chain() {
       elif ! _nvsentinel_mongodb_served_by "${ctx}" "${ns}" "${ca}"; then
         next="MongoDB to serve a certificate signed by CA ${ca_fp}"
       elif ((SECONDS < _nvsentinel_mongodb_deadline)); then
-        return 0
+        # cert-manager can re-issue the CA while the checks above run, so the
+        # certificates may chain to one that is no longer current.
+        if _nvsentinel_mongodb_ca_settled "${ctx}" "${ns}" &&
+          [[ $(_nvsentinel_mongodb_pem "${ctx}" "${ns}" "${NVSENTINEL_MONGODB_CA_CERT}" tls.crt |
+            _nvsentinel_mongodb_fingerprint) == "${ca_fp}" ]] &&
+          ((SECONDS < _nvsentinel_mongodb_deadline)); then
+          return 0
+        fi
+        next="the CA Certificate to settle"
       else
         waiting="checks that finish before the deadline; they passed only after it"
         break
