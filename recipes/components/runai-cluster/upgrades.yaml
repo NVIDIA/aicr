@@ -1,0 +1,39 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: runai-cluster
+transitions:
+  # from starts at 3.0.20, the release AICR pinned before 3.0.24 and the only
+  # one assessed here; an origin below it resolves to blocked.
+  - from: ">=3.0.20 <3.0.24"
+    to: "3.0.24"
+    verdict: safe
+    verifiedBy: >-
+      Upstream release notes 3.0.21 through 3.0.23 (dsx-ai-factory/run-ai),
+      which list fixes under the project's fix-only patch policy; 3.0.24
+      adds no commit over 3.0.23. The RunaiConfig CRD gains one optional
+      field (s3FileSystemMountCheckEnabled), applied by the chart's
+      crd-upgrader hook. helm template with AICR's values renders the same
+      Deployments and hook Jobs, each still reached by the registry's three
+      toleration paths, and the RunaiConfig condition types the health check
+      reads are unchanged in the cluster SDK at 3.0.24.
+    summary: >-
+      Patch releases of fixes; the embedded KAI resource-management moves
+      from v0.18.3 to v0.18.8. Nothing to change on upgrade.
+    references:
+      - https://github.com/dsx-ai-factory/run-ai/releases/tag/3.0.21
+      - https://github.com/dsx-ai-factory/run-ai/releases/tag/3.0.23
+      - https://github.com/dsx-ai-factory/run-ai/releases/tag/3.0.24

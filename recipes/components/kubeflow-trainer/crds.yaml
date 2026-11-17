@@ -32,5 +32,5 @@ charts:
       - trainingruntimes.trainer.kubeflow.org
       - trainjobs.trainer.kubeflow.org
     repository: oci://ghcr.io/kubeflow/charts
-    sourceVersion: 2.2.0
+    sourceVersion: 2.2.1
 component: kubeflow-trainer

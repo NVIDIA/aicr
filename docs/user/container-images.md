@@ -28,7 +28,7 @@ The catalog lists the driver version that the default chart render carries. Vers
 ## Summary
 
 - Components: **58**
-- Unique images: **158**
+- Unique images: **154**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -41,15 +41,15 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 |-----------|------|-------|----------------|--------|
 | agentgateway | helm | agentgateway | v1.5.0 | 1 |
 | agentgateway-crds | helm | agentgateway-crds | v1.5.0 | 0 |
-| aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
+| aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.68.0 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
-| cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
+| cert-manager | helm | jetstack/cert-manager | v1.20.5 | 4 |
 | cert-manager-ocp | manifest | — | — | 0 |
 | cert-manager-ocp-olm | manifest | — | — | 0 |
 | dra-node-labeler | manifest | — | — | 1 |
 | dranet | manifest | — | — | 1 |
 | dynamo-platform | helm | dynamo-platform | 1.4.2 | 1 |
-| gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
+| gatekeeper | helm | gatekeeper/gatekeeper | 3.23.1 | 3 |
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-gb200-rdma | manifest | — | — | 2 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
@@ -59,15 +59,15 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | grove | helm | grove-charts | v0.1.0-alpha.13 | 1 |
 | k8s-aibom | helm | k8s-aibom | 1.6.2 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
-| k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
-| k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
-| kai-scheduler | helm | kai-scheduler | v0.16.9 | 12 |
+| k8s-nim-operator | helm | k8s-nim-operator | 3.1.4 | 1 |
+| k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.4 | 1 |
+| kai-scheduler | helm | kai-scheduler | v0.16.18 | 12 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.5.0 | 2 |
-| kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
-| kueue | helm | kueue | 0.19.6 | 1 |
-| mariadb-operator | helm | mariadb-operator | 26.10.1 | 1 |
-| mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.1 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.7.0 | 23 |
+| kubeflow-trainer | helm | kubeflow-trainer | 2.2.1 | 4 |
+| kueue | helm | kueue | 0.19.13 | 1 |
+| mariadb-operator | helm | mariadb-operator | 26.10.2 | 1 |
+| mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.2 | 0 |
+| network-operator | helm | nvidia/network-operator | 26.7.1 | 20 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.20.1 | 1 |
@@ -87,14 +87,14 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | psmdb-operator | helm | psmdb-operator | 1.23.2 | 1 |
 | rdma-modules | manifest | — | — | 1 |
-| runai-cluster | helm | runai-cluster | 3.0.20 | 10 |
+| runai-cluster | helm | runai-cluster | 3.0.24 | 10 |
 | slinky-drainer | manifest | — | — | 1 |
 | slinky-drainer-crds | manifest | — | — | 0 |
-| slinky-slurm | helm | slurm | 1.2.2 | 5 |
-| slinky-slurm-operator | helm | slurm-operator | 1.2.2 | 2 |
-| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.2 | 0 |
+| slinky-slurm | helm | slurm | 1.2.4 | 5 |
+| slinky-slurm-operator | helm | slurm-operator | 1.2.4 | 2 |
+| slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.4 | 0 |
 | slinky-topograph | helm | topograph/topograph | 1.1.0 | 1 |
-| slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.1 | 1 |
+| slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.2 | 1 |
 | sriov-ib-networks | manifest | — | — | 0 |
 | topograph | helm | topograph/topograph | 1.1.0 | 1 |
 
@@ -107,8 +107,7 @@ from the component's registry default above.
 |-----------|-----------------|-------------|--------|
 | dynamo-platform | 1.5.0 | b300-mk8s-ubuntu-inference-dynamo | 1 |
 | kai-scheduler | v0.17.1 | b300-mk8s-ubuntu-inference-dynamo | 12 |
-| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 23 |
-| network-operator | 26.7.1 | vr200-nvke-ubuntu-training | 23 |
+| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 20 |
 
 ## Images by component
 
@@ -122,12 +121,12 @@ _No images extracted._
 
 ### aws-ebs-csi-driver
 
-- `public.ecr.aws/csi-components/csi-attacher:v4.11.0-eksbuild.4`
-- `public.ecr.aws/csi-components/csi-node-driver-registrar:v2.16.0-eksbuild.4`
-- `public.ecr.aws/csi-components/csi-provisioner:v6.2.0-eksbuild.3`
-- `public.ecr.aws/csi-components/csi-resizer:v2.1.0-eksbuild.4`
-- `public.ecr.aws/csi-components/livenessprobe:v2.18.0-eksbuild.4`
-- `public.ecr.aws/ebs-csi-driver/aws-ebs-csi-driver:v1.59.0`
+- `public.ecr.aws/csi-components/csi-attacher:v4.13.0-eksbuild.5`
+- `public.ecr.aws/csi-components/csi-node-driver-registrar:v2.18.0-eksbuild.5`
+- `public.ecr.aws/csi-components/csi-provisioner:v6.4.0-eksbuild.5`
+- `public.ecr.aws/csi-components/csi-resizer:v2.3.0-eksbuild.5`
+- `public.ecr.aws/csi-components/livenessprobe:v2.20.0-eksbuild.5`
+- `public.ecr.aws/ebs-csi-driver/aws-ebs-csi-driver:v1.68.0`
 
 ### aws-efa
 
@@ -135,10 +134,10 @@ _No images extracted._
 
 ### cert-manager
 
-- `quay.io/jetstack/cert-manager-cainjector:v1.20.2`
-- `quay.io/jetstack/cert-manager-controller:v1.20.2`
-- `quay.io/jetstack/cert-manager-startupapicheck:v1.20.2`
-- `quay.io/jetstack/cert-manager-webhook:v1.20.2`
+- `quay.io/jetstack/cert-manager-cainjector:v1.20.5`
+- `quay.io/jetstack/cert-manager-controller:v1.20.5`
+- `quay.io/jetstack/cert-manager-startupapicheck:v1.20.5`
+- `quay.io/jetstack/cert-manager-webhook:v1.20.5`
 
 ### cert-manager-ocp
 
@@ -162,9 +161,9 @@ _No images extracted._
 
 ### gatekeeper
 
-- `curlimages/curl:8.12.0`
-- `openpolicyagent/gatekeeper-crds:v3.22.2`
-- `openpolicyagent/gatekeeper:v3.22.2`
+- `curlimages/curl:8.20.0`
+- `openpolicyagent/gatekeeper-crds:v3.23.1`
+- `openpolicyagent/gatekeeper:v3.23.1`
 
 ### gcp-driver-installer
 
@@ -224,26 +223,26 @@ _No images extracted._
 
 ### k8s-nim-operator
 
-- `nvcr.io/nvidia/cloud-native/k8s-nim-operator:v3.1.0`
+- `nvcr.io/nvidia/cloud-native/k8s-nim-operator:v3.1.4`
 
 ### k8s-nim-operator-ocp
 
-- `nvcr.io/nvidia/cloud-native/k8s-nim-operator:v3.1.0`
+- `nvcr.io/nvidia/cloud-native/k8s-nim-operator:v3.1.4`
 
 ### kai-scheduler
 
-- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.16.9`
-- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.16.18`
 
 ### kube-prometheus-stack
 
@@ -252,18 +251,18 @@ _No images extracted._
 
 ### kubeflow-trainer
 
-- `ghcr.io/kubeflow/trainer/trainer-controller-manager:v2.2.0`
+- `ghcr.io/kubeflow/trainer/trainer-controller-manager:v2.2.1`
 - `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be`
 - `registry.k8s.io/jobset/jobset:v0.11.0`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21@sha256:8d9e10fd589a34ab8a0aa64f7e70ad075c8f1c69bea176350f8d211367697e3d`
 
 ### kueue
 
-- `registry.k8s.io/kueue/kueue:v0.19.6`
+- `registry.k8s.io/kueue/kueue:v0.19.13`
 
 ### mariadb-operator
 
-- `ghcr.io/mariadb-operator/mariadb-operator:26.10.1`
+- `ghcr.io/mariadb-operator/mariadb-operator:26.10.2`
 
 ### mariadb-operator-crds
 
@@ -280,20 +279,17 @@ _No images extracted._
 - `ghcr.io/mellanox/nic-configuration-operator-daemon@sha256:35e38f05004116ee3c0489c9da9dc0639d69e0a75e9a5b90a5a44be2cdee72bd`
 - `ghcr.io/mellanox/nic-configuration-operator@sha256:8e2247c3832bdbd8f046731a2be1cfbf446e2ff8eb1b173b7dea8965ed470796`
 - `ghcr.io/mellanox/nvidia-k8s-ipam@sha256:47e1bb84ac97f9af49f97b49c2de44b4ba82b890b487880edc5c9adf86a176f7`
-- `nvcr.io/nvidia/cloud-native/network-operator:v26.7.0`
+- `nvcr.io/nvidia/cloud-native/network-operator:v26.7.1`
 - `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
-- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
-- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`
-- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/nic-configuration-operator:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
-- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
-- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.0@sha256:d3235d1f7be1fe825f23feddd714bc44acd0bad305ca598b365cd134f14ae28e`
+- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:842b3816c66623cef061daf9d904c411085c525898e8b95777e531d77b3a7b4e`
+- `nvcr.io/nvidia/mellanox/multus-cni@sha256:19279347b71a1077eaed8479f8fff491fd9a578bc0ff8efcf13ea08270574fd0`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon@sha256:908d278e140b1276b978acf26c3f8d4a1bbc22c7085cc86bda94644987d3d74b`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator@sha256:3f2d82afbe9e850ff0ace3d1ebff43cef70f83256a6c9632640c7c2f7e7840a8`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:f4012b9c5ee18603def8e842c58861b2524c8da5a946ec9c3e5957de7395a22c`
+- `nvcr.io/nvidia/mellanox/plugins@sha256:9758670f426e238805aba61a1c83a96ae10506dd973845b60477230672c06163`
+- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.1@sha256:7e5935818437bdeb3461f1c8a7107e2725dcba30a62e14bffcdaa4ea703d70f3`
 
 ### network-operator-ocp
 
@@ -399,15 +395,15 @@ _No images extracted._
 ### runai-cluster
 
 - `ghcr.io/dsx-ai-factory/workload-map/karta-operator:0.2.6`
-- `ghcr.io/kai-scheduler/gpu-fractioning/operator:v0.1.6`
-- `ghcr.io/kai-scheduler/kai-resource-management/helm-hooks:v0.18.3`
-- `ghcr.io/kai-scheduler/kai-resource-management/krm-operator:v0.18.3`
-- `ghcr.io/kai-scheduler/kai-scheduler/helm-hooks:v0.18.3`
-- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.18.3`
-- `nvcr.io/nvidia/runai-oss/go-operator:3.0.20`
-- `nvcr.io/nvidia/runai-oss/helm-hooks-handler:3.0.20`
-- `nvcr.io/nvidia/runai-oss/karta-migrate:3.0.20`
-- `nvcr.io/nvidia/runai-oss/runai-crd-upgrader:3.0.20`
+- `ghcr.io/kai-scheduler/gpu-fractioning/operator:v0.1.9`
+- `ghcr.io/kai-scheduler/kai-resource-management/helm-hooks:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-resource-management/krm-operator:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/helm-hooks:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.18.8`
+- `nvcr.io/nvidia/runai-oss/go-operator:3.0.24`
+- `nvcr.io/nvidia/runai-oss/helm-hooks-handler:3.0.24`
+- `nvcr.io/nvidia/runai-oss/karta-migrate:3.0.24`
+- `nvcr.io/nvidia/runai-oss/runai-crd-upgrader:3.0.24`
 
 ### slinky-drainer
 
@@ -427,8 +423,8 @@ _No images extracted._
 
 ### slinky-slurm-operator
 
-- `ghcr.io/slinkyproject/slurm-operator-webhook:1.2.2`
-- `ghcr.io/slinkyproject/slurm-operator:1.2.2`
+- `ghcr.io/slinkyproject/slurm-operator-webhook:1.2.4`
+- `ghcr.io/slinkyproject/slurm-operator:1.2.4`
 
 ### slinky-slurm-operator-crds
 
@@ -484,42 +480,13 @@ _No images extracted._
 - `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
-- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
-- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`
-- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/nic-configuration-operator:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
-- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
-- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.0@sha256:d3235d1f7be1fe825f23feddd714bc44acd0bad305ca598b365cd134f14ae28e`
-
-### network-operator@26.7.1 (variant)
-
-- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0-ubuntu24.04-amd64`
-- `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
-- `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
-- `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
-- `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin@sha256:cabce074d10a0f1d62135e2cc5442d65b49094b95b8297fdd024a1a5f461319f`
-- `ghcr.io/mellanox/k8s-rdma-shared-dev-plugin@sha256:9f468fdc4449e65e4772575f83aa85840a00f97165f9a00ba34695c91d610fbd`
-- `ghcr.io/mellanox/nic-configuration-operator-daemon@sha256:35e38f05004116ee3c0489c9da9dc0639d69e0a75e9a5b90a5a44be2cdee72bd`
-- `ghcr.io/mellanox/nic-configuration-operator@sha256:8e2247c3832bdbd8f046731a2be1cfbf446e2ff8eb1b173b7dea8965ed470796`
-- `ghcr.io/mellanox/nvidia-k8s-ipam@sha256:47e1bb84ac97f9af49f97b49c2de44b4ba82b890b487880edc5c9adf86a176f7`
-- `nvcr.io/nvidia/cloud-native/network-operator:v26.7.1`
-- `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
-- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
-- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:2d28133fdee8c263e19b4d0656bf58d30513c9d13e47ef84bd68c5499b3c18ce`
-- `nvcr.io/nvidia/mellanox/multus-cni:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/multus-cni@sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163`
-- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/nic-configuration-operator:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785`
-- `nvcr.io/nvidia/mellanox/plugins:network-operator-v26.7.1`
-- `nvcr.io/nvidia/mellanox/plugins@sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1`
-- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.0@sha256:d3235d1f7be1fe825f23feddd714bc44acd0bad305ca598b365cd134f14ae28e`
+- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:842b3816c66623cef061daf9d904c411085c525898e8b95777e531d77b3a7b4e`
+- `nvcr.io/nvidia/mellanox/multus-cni@sha256:19279347b71a1077eaed8479f8fff491fd9a578bc0ff8efcf13ea08270574fd0`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon@sha256:908d278e140b1276b978acf26c3f8d4a1bbc22c7085cc86bda94644987d3d74b`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator@sha256:3f2d82afbe9e850ff0ace3d1ebff43cef70f83256a6c9632640c7c2f7e7840a8`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:f4012b9c5ee18603def8e842c58861b2524c8da5a946ec9c3e5957de7395a22c`
+- `nvcr.io/nvidia/mellanox/plugins@sha256:9758670f426e238805aba61a1c83a96ae10506dd973845b60477230672c06163`
+- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.1@sha256:7e5935818437bdeb3461f1c8a7107e2725dcba30a62e14bffcdaa4ea703d70f3`
 
 <!-- END AICR-BOM -->
 

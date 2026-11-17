@@ -108,3 +108,52 @@ transitions:
       - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.6
       - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.5
       - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.4
+  - from: ">=0.19.6 <0.19.13"
+    to: "0.19.13"
+    verdict: manual
+    summary: >-
+      From 0.19.9 kueue rejects an invalid
+      metrics.localQueueMetrics.localQueueSelector at startup, so a cluster
+      whose override enables LocalQueue metrics with a selector that does not
+      parse crash-loops after the upgrade; before 0.19.9 the invalid
+      selector was ignored and every LocalQueue was reported. AICR enables
+      neither, so a default install needs nothing.
+    precondition: >-
+      Know whether your kueue override enables LocalQueue metrics. Check
+      `kubectl get configmap kueue-manager-config -n kueue-system -o jsonpath='{.data.controller_manager_config\.yaml}'`
+      for metrics.localQueueMetrics.enable: true with a localQueueSelector.
+      If it is absent or false, the fix-selector step does not apply.
+    stepsByDeployer:
+      - deployers: [helm, helmfile, terraform]
+        steps:
+          - id: fix-selector
+            description: >-
+              Only if the override enables metrics.localQueueMetrics: make
+              its localQueueSelector a valid label selector, or remove it,
+              in managerConfig.controllerManagerConfigYaml, and regenerate
+              the 0.19.13 bundle with it.
+            reason: >-
+              0.19.9 and later validate the selector at startup and refuse to
+              start on an invalid one.
+          - id: upgrade-kueue
+            description: >-
+              Re-run install.sh (helm), helmfile apply (helmfile), or
+              terraform apply on the regenerated bundle (terraform).
+            reason: Moves kueue to 0.19.13.
+      - steps:
+          - id: fix-selector
+            description: >-
+              Only if the override enables metrics.localQueueMetrics: make
+              its localQueueSelector a valid label selector, or remove it,
+              in managerConfig.controllerManagerConfigYaml, in the same
+              commit that moves the kueue release to 0.19.13.
+            reason: >-
+              0.19.9 and later validate the selector at startup and refuse to
+              start on an invalid one.
+          - id: sync-kueue
+            description: >-
+              Sync or reconcile the kueue release.
+            reason: Moves kueue to 0.19.13.
+    references:
+      - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.9
+      - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.13

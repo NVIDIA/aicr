@@ -34,7 +34,7 @@ charts:
       - schedulingshards.kai.scheduler
       - topologies.kai.scheduler
     repository: oci://ghcr.io/kai-scheduler/kai-scheduler
-    sourceVersion: v0.16.9
+    sourceVersion: v0.16.18
   - chart: kai-scheduler
     repository: oci://ghcr.io/kai-scheduler/kai-scheduler
     sourceVersion: v0.17.1

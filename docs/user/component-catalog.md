@@ -521,7 +521,7 @@ Both policies fire when a **DaemonSet-owned Pod** in a watched namespace has bee
 | Operator | Required label | Coverage |
 |---|---|---|
 | `gpu-operator` (v26.7.2) | `app.kubernetes.io/managed-by: gpu-operator` | Confirmed on a live H100 cluster at v26.7.0 and re-read on a live GB300 cluster at v26.7.1 and v26.7.2: all nine operand DaemonSets (driver, toolkit, device-plugin, DCGM, DCGM exporter, validator, GFD, MIG manager, MPS control), and the running Pods inherit it. The bundled node-feature-discovery subchart does not carry it and is out of scope. |
-| `network-operator` (26.7.0) | `ds-owner: NicClusterPolicy` | Verified in the v26.7.0 source and docs; the earlier 26.4.1 behavior was also exercised on Kind. The label is applied per-operand, not uniformly, so coverage depends on which `NicClusterPolicy` a recipe ships -- see below. |
+| `network-operator` (26.7.1) | `ds-owner: NicClusterPolicy` | Verified in the v26.7.0 source and docs, and unchanged in v26.7.1, which touches nothing under `pkg/` or `manifests/`; the earlier 26.4.1 behavior was also exercised on Kind. The label is applied per-operand, not uniformly, so coverage depends on which `NicClusterPolicy` a recipe ships -- see below. |
 
 **Network Operator coverage is partial, and it varies by recipe.** The `ds-owner` label is stamped per operand rather than by a shared helper, so which components a policy watches depends on what that recipe's `NicClusterPolicy` enables:
 
@@ -785,7 +785,7 @@ When a Slurm health check drains a node, that fact stays inside Slurm: Kubernete
 
 **It requires `slinky-slurm`.** The monitor watches worker pods in the namespace `slinky-slurm` deploys to (`slurm`), and only `slinky-slurm` creates them. `CheckNVSentinelSlurmDrainMonitorRequiresSlinky` blocks the bundle when the mixin is used on a recipe without `slinky-slurm`, with it disabled, or with the two namespaces out of step, because each of those deploys a monitor that runs and never sees a pod.
 
-**What it reads.** Worker pods are selected with `app.kubernetes.io/name=slurmd,app.kubernetes.io/component=worker`, the labels the Slinky slurm-operator's NodeSet controller sets. Those labels, the condition name, and the `.Message` field were verified against the slurm-operator v1.2.2 source this repo pins; `TestSlurmDrainMonitorSelectorPinnedToVerifiedSlinkyVersion` fails when `slinky-slurm-operator` is bumped, so the next version is re-checked rather than assumed. A reason that carries several causes (`a; b`) is split on `; `, and each part is matched on its own.
+**What it reads.** Worker pods are selected with `app.kubernetes.io/name=slurmd,app.kubernetes.io/component=worker`, the labels the Slinky slurm-operator's NodeSet controller sets. Those labels, the condition name, and the `.Message` field were verified against the slurm-operator v1.2.4 source this repo pins (unchanged since v1.2.2). From v1.2.4 the operator's default `preStop` also drains a terminating worker with reason `slurm-operator: Pod is terminating`, which the `slurm-operator:` rule below ignores; `TestSlurmDrainMonitorSelectorPinnedToVerifiedSlinkyVersion` fails when `slinky-slurm-operator` is bumped, so the next version is re-checked rather than assumed. A reason that carries several causes (`a; b`) is split on `; `, and each part is matched on its own.
 
 | Drain reason | Result |
 |---|---|
@@ -1696,7 +1696,7 @@ Do not also declare `kubeflow-trainer` locally. The mixin's ref sets `type`, `va
 
 Prerequisites: NVIDIA GPU Operator and cert-manager, both inherited from `base.yaml` by every stock recipe, plus Kubeflow Trainer, which is not — see the fragment above.
 
-NVCRE v0.8.2 expects Kubeflow Trainer **v2.2.1** — it pins `kubeflowTrainerVersion = "v2.2.1"` and its `setup status` reports the 2.2.0 that the registry defaults to as unsupported. The expectation did not move between v0.2.0 and v0.8.2. No functional break is known between the two versions: the CRD delta is documentation text plus one embedded PodSpec field NVCRE does not set. Aligning the global Trainer default is tracked separately.
+NVCRE v0.8.2 expects Kubeflow Trainer **v2.2.1** — it pins `kubeflowTrainerVersion = "v2.2.1"` — which is the registry default, so its `setup status` reports a supported Trainer. A cluster still running 2.2.0 is reported as unsupported; no functional break is known between the two versions: the CRD delta is documentation text plus one embedded PodSpec field NVCRE does not set.
 
 ### Cluster-scoped objects and release ownership
 
@@ -2960,7 +2960,7 @@ New components are added declaratively in `recipes/registry.yaml` — no Go code
 
 ## Topology-aware scheduling with Kueue and Topograph
 
-Kueue topology-aware scheduling (TAS) is on by default in the shipped Kueue (0.19.6) but only reads node labels; it does not create them. The `platform=kueue` leaves install [Topograph](https://github.com/dsx-ai-factory/topograph) with the `k8s` engine to write the labels, and wire Kueue's `Topology` and `ResourceFlavor` to them. Recipes without `--platform kueue` are unchanged. `platform` takes a single value, so these leaves cannot be combined with `--platform kubeflow`: there is no recipe that installs Kubeflow Trainer together with Kueue TAS. Kueue itself can queue `TrainJob`s (Trainer v2.0.0 or later, `trainer.kubeflow.org/trainjob` is already enabled in the shipped Kueue config), but topology-aware placement of `TrainJob`s is not covered by Kueue's TrainJob documentation and has not been verified here.
+Kueue topology-aware scheduling (TAS) is on by default in the shipped Kueue (0.19.13) but only reads node labels; it does not create them. The `platform=kueue` leaves install [Topograph](https://github.com/dsx-ai-factory/topograph) with the `k8s` engine to write the labels, and wire Kueue's `Topology` and `ResourceFlavor` to them. Recipes without `--platform kueue` are unchanged. `platform` takes a single value, so these leaves cannot be combined with `--platform kubeflow`: there is no recipe that installs Kubeflow Trainer together with Kueue TAS. Kueue itself can queue `TrainJob`s (Trainer v2.0.0 or later, `trainer.kubeflow.org/trainjob` is already enabled in the shipped Kueue config), but topology-aware placement of `TrainJob`s is not covered by Kueue's TrainJob documentation and has not been verified here.
 
 | Leaf | Provider | Topology levels (widest first) |
 |------|----------|--------------------------------|
@@ -3928,7 +3928,7 @@ default since 0.15, fails on its own with `cannot use a TAS profile with TAS
 disabled`. The manager reached `1/1 Running` only with all nine set false
 together.
 
-AICR now pins 0.19.6, which adds a tenth: `TASPartialSlices` is new in 0.19.6,
+From 0.19.6 (AICR pins 0.19.13) there is a tenth: `TASPartialSlices` is new in 0.19.6,
 defaults on, and requires TAS, so at 0.19.6 the nine above still fail with
 `TASPartialSlices requires TopologyAwareScheduling to be enabled`. Checked
 against 0.19.6 by running kueue's own feature-gate validation:

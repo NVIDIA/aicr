@@ -33,3 +33,17 @@ transitions:
       from the chart label. Nothing to change on upgrade.
     references:
       - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.2/CHANGELOG/CHANGELOG-1.2.md
+  - from: ">=1.2.2 <1.2.4"
+    to: "1.2.4"
+    verdict: safe
+    verifiedBy: >-
+      Upstream changelog CHANGELOG-1.2.md (SlinkyProject/slurm-operator) at
+      v1.2.4. helm template of the slurm chart at 1.2.2 and 1.2.4 with
+      AICR's values differs only in the chart label, the partition config
+      string now being quoted (same value), and an empty lifecycle: {} on
+      the NodeSet's slurmd, which the operator treats as unset.
+    summary: >-
+      Chart patch releases; the rendered resources are unchanged in effect.
+      Nothing to change on upgrade.
+    references:
+      - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.4/CHANGELOG/CHANGELOG-1.2.md

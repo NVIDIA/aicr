@@ -51,3 +51,21 @@ transitions:
     references:
       - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.17.0
       - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.17.1
+  - from: ">=0.16.9 <0.16.18"
+    to: "0.16.18"
+    verdict: safe
+    verifiedBy: >-
+      Upstream release notes v0.16.10 through v0.16.18 (kai-scheduler/KAI-Scheduler),
+      which list bug fixes and dependency CVE bumps on the v0.16 LTS line
+      and no action required. The 0.16.18 chart's crds/ and values.yaml are
+      byte-identical to v0.16.9 (diff -r of the two pulled charts); the
+      templates differ only in two ServiceAccount subjects on the OpenShift
+      SCC binding and the API version a topology-migration script reads.
+      helm template with AICR's values differs only in the operator and
+      crd-upgrader image tags.
+    summary: >-
+      Patch releases on the v0.16 LTS line; CRDs and values are unchanged.
+      Nothing to change on upgrade.
+    references:
+      - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.16.18
+      - https://github.com/kai-scheduler/KAI-Scheduler/blob/main/SUPPORT.md
