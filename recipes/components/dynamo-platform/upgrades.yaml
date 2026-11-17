@@ -76,7 +76,8 @@ transitions:
       adopts objects it does not own, so a same-named object it did not create
       blocks reconciliation. Invalid DYN_REQUEST_PLANE or DYN_EVENT_PLANE
       values now fail workers at startup, and the NIXL Prometheus port moves
-      from 19090 to 9090. The hook runs from docker.io/library/python:3.12-slim.
+      from 19090 to 9090. An init container named runtime is now reserved.
+      The hook runs from docker.io/library/python:3.12-slim.
     precondition: >-
       This guidance starts at the 1.5.0 record's landing point, assessed
       against the 1.6.0 through 1.6.2 release changes. 1.6.1 and 1.6.2 change
@@ -94,10 +95,23 @@ transitions:
           - id: mirror-preflight-image
             description: >-
               On mirrored or air-gapped registries, mirror
-              docker.io/library/python:3.12-slim before upgrading.
+              docker.io/library/python:3.12-slim, then set
+              dynamo-operator.grovePreflight.image to the mirrored reference,
+              and dynamo-operator.grovePreflight.imagePullSecrets if the
+              mirror needs credentials.
             reason: >-
               The preflight hook cannot start without it, which stalls the
               upgrade before any Dynamo object changes.
+          - id: rename-runtime-init-container
+            description: >-
+              Rename any unrelated init container named runtime in Dynamo
+              workloads. For intentional runtime sidecars, give the image a
+              semantic-version tag or set runtimeVersionOverride.
+            reason: >-
+              1.6.0 reserves the runtime init container name. Declaring one
+              with restartPolicy Always switches the component into native
+              sidecar mode, and the runtime version then resolves from that
+              container's image.
           - id: check-workload-config
             description: >-
               Check Dynamo workloads for DYN_REQUEST_PLANE and DYN_EVENT_PLANE
