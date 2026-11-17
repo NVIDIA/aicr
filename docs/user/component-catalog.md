@@ -44,7 +44,7 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **k8s-ephemeral-storage-metrics** | `ops` | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **k8s-aibom** | `ops` | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Ships by default in two stock recipes, `h100-gke-cos-inference` and its Dynamo descendant `h100-gke-cos-inference-dynamo`; available by opt-in on any other GKE recipe with `aicr recipe --runtime-inventory enabled`, including the `b200`, `gb200`, and `gb300` GKE Dynamo recipes. On the two recipes that ship it by default, decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | `ops` | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
-| **grove** | `ops` | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. Upgrading from `v0.1.0-alpha.12` requires a CRD apply — see [Upgrade Notes](#grove-v010-alpha12-to-v010-alpha13) below. | [Grove](https://github.com/ai-dynamo/grove) |
+| **grove** | `ops` | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. Upgrading from `v0.1.0-alpha.12` requires a CRD apply — see [Upgrade Notes](#grove-v010-alpha12-to-v010-alpha13) below. Upgrading from `v0.1.0-alpha.13` requires a CRD apply too — see [Upgrade Notes](#grove-v010-alpha13-to-v010-alpha14) below. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | `ops` | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a ZMQ-based KV-cache event plane, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **agentgateway-crds** | `ops` | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | `ops` | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
@@ -2046,7 +2046,7 @@ AICR's values, at AICR's request
   left in place deployed in 24s with the controller Ready and not `Degraded`.
   `helm rollback` to v1.5.1 with the v1.6.1 CRDs left in place reached Ready in
   18s. Each AIBOM regenerates once in each direction.
-- **Dynamo.** With dynamo-platform 1.4.2 (the version AICR pins, whose
+- **Dynamo.** With dynamo-platform 1.4.2 (the version AICR pinned then, whose
   `DynamoGraphDeployment` storage is still `v1alpha1` behind a conversion
   webhook), one multinode graph produced exactly one AIBOM, owned by the
   graph, with its Grove `PodCliqueSet`, cliques and pods rolled up into it.
@@ -3292,6 +3292,33 @@ Apply the new CRDs before upgrading:
      | kubectl apply --server-side --force-conflicts -f -
    ```
 2. Resume whichever deployer you use, as in the section above.
+
+No resource migration is needed, and fresh installs are unaffected.
+
+### `grove`: `v0.1.0-alpha.13` to `v0.1.0-alpha.14`
+
+alpha.14 adds a coherent update strategy for PodCliqueSets. It writes new
+status fields on the `podcliques.grove.io`, `podcliquescalinggroups.grove.io`
+and `podcliquesets.grove.io` CRDs, such as `lastProgressedAt`, and drops some
+older ones. All CRDs stay at `v1alpha1`.
+
+As with alpha.13, `helm upgrade` never applies changed `crds/`. A plain chart
+bump keeps the alpha.13 CRDs, and the API server silently drops the new
+status fields. Apply the new CRDs before upgrading:
+
+1. Apply the alpha.14 CRDs directly from the chart:
+   ```bash
+   helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts --version v0.1.0-alpha.14 \
+     | sed -n '/^---$/,$p' \
+     | kubectl apply --server-side --force-conflicts -f -
+   ```
+2. Resume whichever deployer you use, as in the sections above.
+
+**Order matters for `dynamo-platform` 1.6.** Its chart runs a pre-install and
+pre-upgrade check that requires a `grove-operator` image at alpha.14 or later,
+fully rolled out. Upgrade grove first and let its rollout finish before
+upgrading `dynamo-platform`. AICR's generated bundles already install grove
+first.
 
 No resource migration is needed, and fresh installs are unaffected.
 

@@ -69,3 +69,54 @@ transitions:
     references:
       - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.16.18
       - https://github.com/kai-scheduler/KAI-Scheduler/blob/main/SUPPORT.md
+  - from: ">=0.17.1 <0.18.8"
+    to: "=0.18.8"
+    verdict: manual
+    summary: >-
+      0.18.0 changes the chart's GPU sharing default from off to
+      NonMemoryEnforced, so a release that never set global.gpuSharingMode
+      starts admitting fractional GPU requests the admission webhook used to
+      reject. It also removes the phase, running, pending, failed and succeeded
+      fields from PodGroup status, and replaces the crd-upgrader hook image with
+      helm-hooks.
+    precondition: >-
+      This guidance covers the 0.17.1 record's landing point through 0.18.7,
+      assessed against the 0.18.0 through 0.18.8 release changes. CRD names and
+      served versions are unchanged across the range.
+    stepsByDeployer:
+      - steps:
+          - id: pin-gpu-sharing-mode
+            description: >-
+              Export the installed values. Set global.gpuSharingMode explicitly
+              before applying the new bundle: Disabled keeps the pre-0.18
+              behavior, which AICR's values pin. Choose another mode only if
+              fractional GPU sharing is intended.
+            reason: >-
+              Leaving the value empty adopts NonMemoryEnforced and changes
+              admission for every GPU workload without any other signal.
+          - id: check-podgroup-status-readers
+            description: >-
+              Find dashboards, alerts or controllers that read PodGroup
+              status.phase or the running, pending, failed or succeeded
+              counters, and move them to status.schedulingConditions.
+            reason: >-
+              Those fields no longer exist, so their readers see empty values
+              rather than an error.
+          - id: mirror-hook-image
+            description: >-
+              On mirrored or air-gapped registries, mirror the helm-hooks image
+              at the new tag before upgrading.
+            reason: >-
+              The pre-upgrade hook that applies the CRDs runs from helm-hooks
+              now, and a missing image stalls the upgrade before any CRD moves.
+          - id: reconcile-and-verify
+            description: >-
+              Apply the generated bundle through the selected deployer, then
+              verify webhook readiness and scheduling of representative queued
+              and gang workloads before resuming normal submissions.
+            reason: >-
+              Controller readiness alone does not show that queues and gang
+              admission survived the upgrade.
+    references:
+      - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.18.0
+      - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.18.8
