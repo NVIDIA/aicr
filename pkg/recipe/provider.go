@@ -84,7 +84,8 @@ func readExternalFile(baseDir, relPath string, maxBytes int64, allowSymlinks boo
 
 // openExternalFile opens relPath under baseDir using the path-confinement
 // strategy appropriate to the provider's symlink policy. See readExternalFile
-// for the rationale.
+// for the rationale. It returns an ErrCodeInvalidRequest error when relPath
+// is not a regular file.
 func openExternalFile(baseDir, relPath string, allowSymlinks bool) (*os.File, error) {
 	if !allowSymlinks {
 		root, err := os.OpenRoot(baseDir)
@@ -93,6 +94,13 @@ func openExternalFile(baseDir, relPath string, allowSymlinks bool) (*os.File, er
 				fmt.Sprintf("failed to open base directory %q", baseDir), err)
 		}
 		defer func() { _ = root.Close() }()
+		info, err := root.Stat(relPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireRegularExternalFile(relPath, info); err != nil {
+			return nil, err
+		}
 		return root.Open(relPath)
 	}
 	// AllowSymlinks=true: caller opted into symlinks at walk time, but the
@@ -119,7 +127,25 @@ func openExternalFile(baseDir, relPath string, allowSymlinks bool) (*os.File, er
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("external data path %q resolves outside base directory", relPath))
 	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireRegularExternalFile(relPath, info); err != nil {
+		return nil, err
+	}
 	return os.Open(resolved) //nolint:gosec // resolved is verified to be within canonicalBase above
+}
+
+// requireRegularExternalFile returns an ErrCodeInvalidRequest error unless
+// info, the stat of relPath, describes a regular file. Opening a FIFO blocks
+// until a writer appears, which no context can interrupt.
+func requireRegularExternalFile(relPath string, info os.FileInfo) error {
+	if info.Mode().IsRegular() {
+		return nil
+	}
+	return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+		fmt.Sprintf("external data path %q is not a regular file", relPath))
 }
 
 // DataProvider abstracts access to recipe data files.
@@ -443,7 +469,7 @@ func (p *LayeredDataProvider) ExternalDir() string {
 // size limit and symlink policy as ReadFile.
 func (p *LayeredDataProvider) ReadExternalFile(ctx context.Context, relPath string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, fmt.Sprintf("context canceled before reading %q", relPath), err)
+		return nil, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, fmt.Sprintf("context ended before reading %q", relPath))
 	}
 	lookupPath := filepath.ToSlash(relPath)
 	if !p.externalFiles[lookupPath] {
