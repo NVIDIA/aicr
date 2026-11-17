@@ -141,7 +141,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
   ctlptl: '0.9.6'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
-  tilt: '0.37.8'
+  tilt: '0.37.9'
   # Keep in step with sigs.k8s.io/controller-runtime in go.mod: setup-envtest is
   # released from that repo under the tools/setup-envtest/vX.Y.Z tag series, and
   # the envtest control-plane binaries it fetches are matched to the
