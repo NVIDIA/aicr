@@ -56,14 +56,19 @@ transitions:
               topology names neither, which it used to accept.
           - id: apply-and-verify-taint
             description: >-
-              Apply the regenerated bundle with your deployer, then confirm
-              every ebs-csi-node pod is ready and no Node still carries the
-              ebs.csi.aws.com/agent-not-ready taint. If one does, set
+              Apply the regenerated bundle with your deployer, then wait for
+              every ebs-csi-node pod to be ready and its Node to drop the
+              ebs.csi.aws.com/agent-not-ready taint. Only if a ready pod's
+              ebs-plugin container keeps logging "Failed to remove
+              agent-not-ready taint" with an error naming the
+              ValidatingAdmissionPolicy ebs-csi-node, set
               node.validatingAdmissionPolicy.enabled to false and re-apply.
             reason: >-
-              The new policy denies the taint removal when the node-name
-              claim is missing, leaving the node unschedulable for EBS
-              volumes.
+              Upstream recommends that taint on every node while it starts,
+              so its presence alone is not a failure. The policy denies its
+              removal only when the token lacks the node-name claim, which
+              would leave the node unschedulable for EBS volumes.
     references:
       - https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/master/CHANGELOG.md
       - https://github.com/kubernetes-sigs/aws-ebs-csi-driver/pull/3092
+      - https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/v1.68.0/docs/install.md

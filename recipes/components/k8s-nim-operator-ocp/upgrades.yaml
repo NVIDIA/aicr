@@ -31,10 +31,12 @@ transitions:
       metric, so a NIMService or NIMPipeline outside those rules is rejected
       on its next update.
     precondition: >-
-      Know whether you deploy with AICR's components/k8s-nim-operator-ocp
-      values or your own, and whether any NIMService or NIMPipeline uses DRA
-      claim creation with attributeSelectors, or autoscaling with more than
-      five metrics. AICR ships none.
+      Know whether you deploy with AICR's components/k8s-nim-operator-ocp values
+      or your own, and whether any NIMService or NIMPipeline uses DRA claim
+      creation with attributeSelectors, or autoscaling with more than five
+      metrics. AICR ships none. The apply-bundle step relies on the chart
+      default operator.upgradeCRD: true, which AICR does not override; if your
+      values set it false, apply the 3.1.4 CRDs yourself first.
     stepsByDeployer:
       - steps:
           - id: keep-openshift-rbac

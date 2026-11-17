@@ -24,7 +24,11 @@ transitions:
     verifiedBy: >-
       Upstream release notes v1.20.3, v1.20.4 and v1.20.5
       (cert-manager/cert-manager): security and dependency fixes on the
-      supported 1.20 line, with no action required. The 1.20.5 chart differs
+      supported 1.20 line. The v1.20.3 notes label the GHSA-8rvj-mm4h-c258
+      cert-manager-edit RBAC change potentially breaking for tooling that
+      creates Challenge or Order objects directly, outside the Certificate
+      flow; no AICR component does, so it needs no action here. The 1.20.5
+      chart differs
       from 1.20.2 only in Chart.yaml, the README and templates/rbac.yaml
       (diff -r of the two pulled charts); its CRDs and values.yaml are
       byte-identical.

@@ -156,4 +156,5 @@ transitions:
             reason: Moves kueue to 0.19.13.
     references:
       - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.9
+      - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.12
       - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.13
