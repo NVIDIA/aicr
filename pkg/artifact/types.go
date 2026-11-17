@@ -69,6 +69,15 @@ type Bindings struct {
 	IgnoredArtifacts map[string]Ignored `json:"ignoredArtifacts" yaml:"ignoredArtifacts,omitempty"`
 }
 
+// Values of Chart.CRDOwnership and CRDOwnership.Policy.
+const (
+	CRDOwnershipRetain = "retain"
+
+	CRDPolicyUnchanged = "unchanged"
+	CRDPolicyRetained  = "retained"
+	CRDPolicyDisabled  = "disabled"
+)
+
 // Chart binds a chart archive to one component.
 type Chart struct {
 	Component    string `json:"component" yaml:"component"`

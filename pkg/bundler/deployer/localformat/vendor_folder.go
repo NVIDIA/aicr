@@ -194,7 +194,6 @@ func writeVendoredHelmFolder(
 	// inconsistently.
 	rec.Name = c.Name
 	rec.TarballName = tarball
-	rec.Name = c.Name
 
 	return Folder{
 		Index:       idx,

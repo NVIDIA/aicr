@@ -27,17 +27,21 @@ import (
 	"slices"
 	"strings"
 
+	"aicr.run/pkg/artifact"
 	"aicr.run/pkg/defaults"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/recipe"
 	"gopkg.in/yaml.v3"
 )
 
+// chartsDir is the directory a Helm chart keeps its subcharts in.
+const chartsDir = "charts"
+
 // CheckVendoredCRDOwnership verifies retained ownership against the archives
 // that will be installed. Archives maps selected component names to local paths.
 func CheckVendoredCRDOwnership(ctx context.Context, result *recipe.RecipeResult, archives map[string]string) error {
 	provenance := result.Metadata.Artifacts
-	if provenance == nil || provenance.CRDOwnership == nil || provenance.CRDOwnership.Policy != "retained" || len(archives) == 0 {
+	if provenance == nil || provenance.CRDOwnership == nil || provenance.CRDOwnership.Policy != artifact.CRDPolicyRetained || len(archives) == 0 {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
@@ -142,14 +146,17 @@ func collectVendoredCRDs(ctx context.Context, data []byte, exclusions []string, 
 		if nextErr != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "read chart archive", nextErr)
 		}
+		// Helm skips a pax global header, which git archive writes.
+		if header.Typeflag == tar.TypeXGlobalHeader {
+			continue
+		}
 		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeDir {
-			return errors.New(errors.ErrCodeInvalidRequest, "chart archive contains a non-regular entry")
+			return errors.New(errors.ErrCodeInvalidRequest, "chart archive contains a non-regular entry: "+header.Name)
 		}
 		if header.Typeflag == tar.TypeDir || excludedCRDPath(header.Name, exclusions) {
 			continue
 		}
-		nested := strings.Contains(header.Name, "/charts/") && strings.HasSuffix(header.Name, ".tgz")
-		crd := strings.Contains(header.Name, "/crds/") && (path.Ext(header.Name) == ".yaml" || path.Ext(header.Name) == ".yml")
+		crd, nested := chartRootEntry(header.Name)
 		if !nested && !crd {
 			continue
 		}
@@ -178,10 +185,32 @@ func collectVendoredCRDs(ctx context.Context, data []byte, exclusions []string, 
 	}
 }
 
+// chartRootEntry classifies an archive entry by where Helm reads it: a CRD
+// file under a chart root's crds/ directory, or a packaged subchart under its
+// charts/ directory. Paths such as templates/crds/ are neither, since Helm
+// renders those as templates.
+func chartRootEntry(name string) (crd, nested bool) {
+	parts := strings.Split(path.Clean(name), "/")[1:]
+	for len(parts) > 2 && parts[0] == chartsDir {
+		parts = parts[2:]
+	}
+	if len(parts) < 2 {
+		return false, false
+	}
+	switch parts[0] {
+	case "crds":
+		ext := path.Ext(name)
+		return ext == ".yaml" || ext == ".yml" || ext == ".json", false
+	case chartsDir:
+		return false, len(parts) == 2 && strings.HasSuffix(name, ".tgz")
+	}
+	return false, false
+}
+
 func excludedCRDPath(name string, exclusions []string) bool {
 	parts := strings.Split(name, "/")
 	for i := 1; i < len(parts); i++ {
-		if parts[i-1] != "charts" {
+		if parts[i-1] != chartsDir {
 			continue
 		}
 		for _, excluded := range exclusions {

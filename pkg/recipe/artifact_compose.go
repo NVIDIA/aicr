@@ -150,7 +150,7 @@ func composeCapturedArtifacts(ctx context.Context, embedded, external map[string
 			repository = strings.TrimSuffix(repository, "/")
 			if old.DefaultRepository != repository || path.Base(old.DefaultChart) != chart || old.DefaultVersion != item.Version || old.DefaultDigest != item.ArchiveDigest || old.DefaultDigest == "" {
 				changed = append(changed, component.Name)
-				unretained = unretained || binding.CRDOwnership != "retain"
+				unretained = unretained || binding.CRDOwnership != artifact.CRDOwnershipRetain
 			}
 			component.Helm.DefaultRepository = repository
 			component.Helm.DefaultChart = chart
@@ -225,7 +225,7 @@ func validateArtifactCRDLayer(bindings *artifact.Bindings, externalLayer bool, e
 }
 
 func composeArtifactCRDOwnership(registry *ComponentRegistry, changed []string, unretained bool) *artifact.CRDOwnership {
-	policy := &artifact.CRDOwnership{Policy: "unchanged", Changed: changed, Owners: []string{}}
+	policy := &artifact.CRDOwnership{Policy: artifact.CRDPolicyUnchanged, Changed: changed, Owners: []string{}}
 	slices.Sort(policy.Changed)
 	for i := range registry.Components {
 		component := &registry.Components[i]
@@ -239,10 +239,10 @@ func composeArtifactCRDOwnership(registry *ComponentRegistry, changed []string, 
 	}
 	slices.Sort(policy.Owners)
 	if unretained {
-		policy.Policy = "disabled"
+		policy.Policy = artifact.CRDPolicyDisabled
 		slog.Warn("artifact chart identities changed; disabling catalog CRD ownership", "changed", changed, "disabledOwners", policy.Owners)
 	} else if len(changed) > 0 {
-		policy.Policy = "retained"
+		policy.Policy = artifact.CRDPolicyRetained
 	}
 	return policy
 }

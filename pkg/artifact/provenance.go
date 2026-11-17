@@ -151,18 +151,18 @@ func validateCRDOwnership(p *Provenance) error {
 		if !ok {
 			return invalid("crdOwnership changed component requires an applied chart")
 		}
-		unretained = unretained || retention != "retain"
+		unretained = unretained || retention != CRDOwnershipRetain
 	}
 	switch policy.Policy {
-	case "unchanged":
+	case CRDPolicyUnchanged:
 		if len(policy.Changed) != 0 {
 			return invalid("unchanged crdOwnership requires no changed charts")
 		}
-	case "retained":
+	case CRDPolicyRetained:
 		if len(policy.Changed) == 0 || unretained {
 			return invalid("retained crdOwnership requires every changed chart to retain")
 		}
-	case "disabled":
+	case CRDPolicyDisabled:
 		if !unretained {
 			return invalid("disabled crdOwnership requires a changed chart without retain")
 		}

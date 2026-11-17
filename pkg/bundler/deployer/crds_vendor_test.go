@@ -20,6 +20,7 @@ import (
 	"compress/gzip"
 	"context"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,7 +42,11 @@ func crdArchive(t *testing.T, files map[string][]byte) []byte {
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	for name, data := range files {
-		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: int64(len(data))}); err != nil {
+		header := &tar.Header{Name: name, Mode: 0600, Size: int64(len(data))}
+		if path.Base(name) == "pax_global_header" {
+			header = &tar.Header{Typeflag: tar.TypeXGlobalHeader, Name: name, PAXRecords: map[string]string{"comment": "test"}}
+		}
+		if err := tw.WriteHeader(header); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := tw.Write(data); err != nil {
@@ -80,6 +85,8 @@ func TestVendoredRetainedCRDs(t *testing.T) {
 		{"excluded packaged mongodb", "retained", "excluded", true, false},
 		{"excluded unpacked mongodb", "retained", "unpacked", true, false},
 		{"distinct", "retained", "distinct", true, false},
+		{"templated and non-root crds", "retained", "templated", true, false},
+		{"json collision", "retained", "json", true, true},
 		{"nonvendored attestation", "retained", "collision", false, false},
 		{"disabled", "disabled", "collision", true, false},
 		{"unchanged", "unchanged", "collision", true, false},
@@ -98,6 +105,12 @@ func TestVendoredRetainedCRDs(t *testing.T) {
 				ownerFiles["nvsentinel/charts/mongodb-store-1.0.0.tgz"] = crdArchive(t, map[string][]byte{"mongodb-store/crds/shared.yaml": crdDocument("shared.test", "Webhook")})
 			case "unpacked":
 				ownerFiles["nvsentinel/charts/mongodb-store/crds/shared.yaml"] = shared
+			case "templated":
+				ownerFiles["nvsentinel/templates/crds/shared.yaml"] = []byte("{{- if .Values.crds }}\n" + string(shared) + "{{- end }}\n")
+				ownerFiles["nvsentinel/files/crds/shared.yaml"] = shared
+				ownerFiles["nvsentinel/pax_global_header"] = nil
+			case "json":
+				ownerFiles["nvsentinel/crds/shared.json"] = []byte(`{"kind":"CustomResourceDefinition","metadata":{"name":"shared.test"}}`)
 			}
 			puller := crdPuller{"nvsentinel": crdArchive(t, ownerFiles), "psmdb-operator": crdArchive(t, map[string][]byte{"psmdb-operator/Chart.yaml": []byte("apiVersion: v2\nname: psmdb-operator\nversion: 1.0.0\n"), "psmdb-operator/crds/shared.yaml": shared})}
 			registry := "apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents:\n"

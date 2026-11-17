@@ -639,6 +639,9 @@ func (g *Generator) checkVendoredCRDs(ctx context.Context, outputDir string, fol
 				archives[record.Name] = filepath.Join(outputDir, folder.Dir, "charts", record.TarballName)
 			}
 		}
+		if archives[record.Name] == "" {
+			return errors.New(errors.ErrCodeInternal, "vendored chart has no bundle folder: "+record.Name)
+		}
 	}
 	return deployer.CheckVendoredCRDOwnership(ctx, g.RecipeResult, archives)
 }
