@@ -576,11 +576,12 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// Run AIPerf benchmark. On failure, surface the captured pod logs so the
 	// CTRF report contains enough signal to diagnose (pip install errors,
 	// aiperf CLI failures, connection refused, etc.). Without this, the
-	// error chain alone ("pod failed") is unactionable.
+	// error chain alone ("pod failed") is unactionable. Each line is logged
+	// as a field, so a benchmark line cannot pose as a result sentinel.
 	logs, err := runAIPerfJob(ctx, endpoint, config.model, config.concurrency, config.aiperfJobName)
 	if err != nil {
 		if logs != "" {
-			fmt.Printf("AIPerf pod logs:\n%s\n", logs)
+			emitDiagnosticBlock("AIPerf pod logs", logs)
 		}
 		// Preserve the underlying code (ErrCodeTimeout for pod-wait deadline,
 		// ErrCodeInternal for Create/log-fetch failures).
