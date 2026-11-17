@@ -36,6 +36,16 @@ const (
 	knativeServingNamespace = "knative-serving"
 )
 
+// knativeBundledServing records, for each knative-operator chart pin, the
+// Serving releases of that pin's minor line the operator image bundles. The
+// operator installs only what it bundles, so a version outside this list
+// leaves the KnativeServing resource unreconciled. Source: the directories
+// under cmd/operator/kodata/knative-serving at tag knative-<pin> in
+// github.com/knative/operator. Add an entry with every operator bump.
+var knativeBundledServing = map[string][]string{
+	"v1.23.1": {"1.23.0"},
+}
+
 // TestKnativeRegisteredWithoutOverlay keeps both Knative components
 // installable from the registry while no shipped overlay or mixin references
 // them. Adoption by a stock recipe removes the overlay half of this test.
@@ -89,7 +99,8 @@ func TestKnativeRegisteredWithoutOverlay(t *testing.T) {
 // KnativeServing resource requests in step with the operator pin. The
 // operator can install only the Serving releases its image bundles, so an
 // operator bump that leaves this version behind eventually requests one the
-// operator no longer carries.
+// operator no longer carries, and a patch the operator never bundled, such
+// as 1.23.99 against v1.23.1, is one it cannot install at all.
 func TestKnativeServingVersionMatchesOperator(t *testing.T) {
 	t.Parallel()
 
@@ -111,6 +122,16 @@ func TestKnativeServingVersionMatchesOperator(t *testing.T) {
 	if got, want := majorMinor(version), majorMinor(operator.Helm.DefaultVersion); got != want {
 		t.Errorf("%s version %s is Serving %s, but knative-operator is pinned at %s (%s); bump them together",
 			knativeServingValuesFile, version, got, operator.Helm.DefaultVersion, want)
+	}
+
+	bundled, ok := knativeBundledServing[operator.Helm.DefaultVersion]
+	if !ok {
+		t.Fatalf("knativeBundledServing has no entry for knative-operator %s; record the Serving releases that operator bundles",
+			operator.Helm.DefaultVersion)
+	}
+	if !slices.Contains(bundled, version) {
+		t.Errorf("%s version %s is not a Serving release knative-operator %s bundles (%s)",
+			knativeServingValuesFile, version, operator.Helm.DefaultVersion, strings.Join(bundled, ", "))
 	}
 }
 
