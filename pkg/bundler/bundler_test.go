@@ -473,6 +473,22 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 		"data", filepath.Join("data", recipe.RegistryFileName),
 		filepath.Join("data", "extra"), filepath.Join("data", "extra", "a.yaml"),
 	}
+	sha256sumManifest := func(t *testing.T, dir string) {
+		t.Helper()
+		snapshot := filepath.Join(dir, "snapshot.yaml")
+		if err := os.WriteFile(snapshot, []byte("kind: Snapshot\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := checksum.GenerateChecksums(t.Context(), dir, []string{snapshot}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checksumsDir := func(t *testing.T, dir string) {
+		t.Helper()
+		if err := os.Mkdir(filepath.Join(dir, checksum.ChecksumFileName), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	fresh := t.TempDir()
 	writeTestBundle(t, fresh)
 	want := slices.Sorted(maps.Keys(treeSnapshot(t, fresh)))
@@ -508,21 +524,31 @@ func TestMake_ReusesOutputDir(t *testing.T) {
 		{name: "foreign file with attestation", setup: writeFile("stale.txt"), opts: []config.Option{config.WithAttest(true)}, wantErr: true},
 		{name: "foreign file in a populated static directory", setup: writeFile(filepath.Join("static", "stale.txt")), wantErr: true},
 		{name: "foreign directory in place of a bundle file", setup: writeFile(filepath.Join("README.md", "stale.txt")), wantErr: true},
-		{name: "sha256sum manifest", setup: func(t *testing.T, dir string) {
-			t.Helper()
-			snapshot := filepath.Join(dir, "snapshot.yaml")
-			if err := os.WriteFile(snapshot, []byte("kind: Snapshot\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if err := checksum.GenerateChecksums(t.Context(), dir, []string{snapshot}); err != nil {
-				t.Fatal(err)
-			}
-		}, wantErr: true},
+		{name: "sha256sum manifest", setup: sha256sumManifest, wantErr: true},
+		{name: "directory named checksums.txt", setup: checksumsDir, wantErr: true},
 		{
 			name:      "foreign file without checksums",
 			setup:     writeFile("stale.txt"),
 			opts:      []config.Option{config.WithIncludeChecksums(false)},
 			survivors: []string{"stale.txt"},
+		},
+		{
+			name:      "sha256sum manifest without checksums",
+			setup:     sha256sumManifest,
+			opts:      []config.Option{config.WithIncludeChecksums(false)},
+			survivors: []string{"snapshot.yaml", checksum.ChecksumFileName},
+		},
+		{
+			name:      "directory named checksums.txt without checksums",
+			setup:     checksumsDir,
+			opts:      []config.Option{config.WithIncludeChecksums(false)},
+			survivors: []string{checksum.ChecksumFileName},
+		},
+		{
+			name:      "earlier bundle beside an attestation file without checksums",
+			setup:     earlierBundle(false, attestation.AttestationDir),
+			opts:      []config.Option{config.WithIncludeChecksums(false)},
+			survivors: append(slices.Clone(earlierData), attestation.AttestationDir),
 		},
 		{
 			name:      "attested earlier bundle without checksums",
@@ -585,14 +611,42 @@ func TestMake_RejectsInvalidOutputRoot(t *testing.T) {
 		setup func(t *testing.T, dir string)
 		// output is the path under dir passed to Make, dir itself when empty.
 		output string
+		// wantMsg, when set, is a substring the error must contain.
+		wantMsg string
 	}{
 		{
-			name:   "output path is a file",
-			output: "out",
+			name:    "output path is a file",
+			output:  "out",
+			wantMsg: "is not a directory",
 			setup: func(t *testing.T, dir string) {
 				t.Helper()
 				if err := os.WriteFile(filepath.Join(dir, "out"), []byte("mine"), 0600); err != nil {
 					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:    "output path is a symlink to a directory",
+			output:  "out",
+			wantMsg: "symlink or special object",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := os.Mkdir(filepath.Join(dir, "target"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("target", filepath.Join(dir, "out")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:    "output path is a fifo",
+			output:  "out",
+			wantMsg: "symlink or special object",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if err := unix.Mkfifo(filepath.Join(dir, "out"), 0600); err != nil {
+					t.Skipf("FIFO unsupported: %v", err)
 				}
 			},
 		},
@@ -627,6 +681,9 @@ func TestMake_RejectsInvalidOutputRoot(t *testing.T) {
 			before := treeSnapshot(t, dir)
 			_, err = b.Make(context.Background(), closedWorldRecipeResult(), filepath.Join(dir, tt.output))
 			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if tt.wantMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.wantMsg)) {
+				t.Errorf("Make() error = %v, want it to contain %q", err, tt.wantMsg)
+			}
 			if after := treeSnapshot(t, dir); !reflect.DeepEqual(after, before) {
 				t.Errorf("rejected run changed the directory:\nbefore %v\nafter  %v",
 					slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))
@@ -6503,6 +6560,27 @@ func TestMake_CopiesOnlyTrackedDataFiles(t *testing.T) {
 	}
 	if info.Mode().Perm()&0o100 == 0 {
 		t.Errorf("data/hooks/run.sh mode = %v, want the execute bit kept", info.Mode())
+	}
+}
+
+func TestMake_RejectsFIFOUnderData(t *testing.T) {
+	dataDir := providertest.WriteDir(t, map[string][]byte{
+		recipe.RegistryFileName: []byte(providertest.EmptyRegistryYAML),
+	})
+	if err := unix.Mkfifo(filepath.Join(dataDir, "pipe.yaml"), 0o600); err != nil {
+		t.Skipf("FIFO unsupported: %v", err)
+	}
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	rr := closedWorldRecipeResult()
+	rr.BindDataProvider(dataDirProvider(t, dataDir))
+	dir := filepath.Join(t.TempDir(), "out")
+	_, err = b.Make(t.Context(), rr, dir)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if _, statErr := os.Lstat(dir); !stderrors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("rejected run left output at %s: %v", dir, statErr)
 	}
 }
 
