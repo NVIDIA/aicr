@@ -685,6 +685,63 @@ b200-gke-cos-training-kubeflow:
   checksums.txt: 19a025e1209d76f2579a251299bc540ef52c50ee6c2537c93f103d49f468c540
   deploy.sh: 511155dc137c29bbe9b1c483d38d32b9fea07535102e90b9dea0568ca801e3c8
   recipe.yaml: 699b4c5833a44442d65112f168ba9676ea7d2016c61b6f7bce32ab83e19ee1b4
+b300-any:
+  001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
+  001-nodewright-operator/upstream.env: 8e4f7653a969c4147e83f356f7eac24d08e37f9f9786e8ebf5855e150fdb4125
+  001-nodewright-operator/values.yaml: 51fa2415047c28bd86ba33936eaa3de9f79c6ad8ed584a152570dd02e3112299
+  002-prometheus-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  002-prometheus-operator-crds/install.sh: 4c10c479d2d735c3024bf809520a4efb7f97904cda4fe211f9374189ea3292d4
+  002-prometheus-operator-crds/upstream.env: 79fc2ce93f1bb62225f9b62cfe618fde8081bce8f7a6d9a56f3a118346da4a4c
+  002-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
+  003-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  003-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
+  003-cert-manager/upstream.env: 8984ad504d9290d252f1fd39602328bce17d424b3a96e1dc794b4887b949c01e
+  003-cert-manager/values.yaml: ce084da8e50e390f133c8b1598cc26d5cdc6655fc7e4a2a475a7fcbee4d8b22e
+  004-kube-prometheus-stack/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  004-kube-prometheus-stack/install.sh: b3575fdaa7b355db924a2cd2e8a18f82372979a4752fd89fa352a0a0f98837d6
+  004-kube-prometheus-stack/upstream.env: e8eba5b5883a2940a976460e3366ae05f2fc861db832e960743b8318091b7ce2
+  004-kube-prometheus-stack/values.yaml: 4c81e1bef3e2dab901eba66a058faad6bd0cee7f061b07bcb51704c13a3c6568
+  005-k8s-ephemeral-storage-metrics/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  005-k8s-ephemeral-storage-metrics/install.sh: 727160f359e5476c7211551f781f1a857aedd834922ed255197f7059d78ea816
+  005-k8s-ephemeral-storage-metrics/upstream.env: dbb5b7f8b156e8f1ad3ace176d3d1bef38280a533242107e49e0b76b24fbf435
+  005-k8s-ephemeral-storage-metrics/values.yaml: bd965e10e0f6eca07d732ea00d66e8327c176acfdc52d998809f7d4d53e056e8
+  006-nfd/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  006-nfd/install.sh: 5c227d83014c06be94fb79a62887679fa8fa9f88c076ad8f1083f7aab8d80bb0
+  006-nfd/upstream.env: d32e82295f07818de16529268751b4274b225110ad6b0ae02948a8084ccc311e
+  006-nfd/values.yaml: b25e2475f944bfcd6dd8a9f2fc7b0a88c8b0b6ba07c8177715764c1eb89c335a
+  007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
+  007-gpu-operator/upstream.env: 7ffe32c2e799396b13d0fefc870cdab28e82e363681d0d5301c09d3d98c3ffdd
+  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
+  008-kai-scheduler/upstream.env: 28796b9c560ab50439fa444585d161dfdb838c82420680a85a0e6eeef3fb7af0
+  008-kai-scheduler/values.yaml: 478f75baf393a9f6c9425b543f8ea2b3103b090e75dea49284805e0ddd625265
+  009-nktp/apply-crds.sh: cad6e5470f0193c3715f0a0a3c3ee47f95e38aac506cd3d44aefe0c9b252c81d
+  009-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  009-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
+  009-nktp/upstream.env: 94169fe94a82d7b5544e2cb69c55ee3e1d009d7704307622fcfd074e002bcc2b
+  009-nktp/values.yaml: aebd3e2b98799442085c53daf55fb814eaea7649fbb9d1c1aaabae24bbe21173
+  010-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  010-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
+  010-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
+  010-nvidia-dra-driver-gpu/values.yaml: 13baa7381abbc06291f63a7e94b790ad95c7f205d30e91528198c9f11ef25420
+  011-nvsentinel/apply-crds.sh: fb49c9bf7cadd9719c047c71db55af605156b4ff53d5728566ebd6d6d0cae706
+  011-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  011-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
+  011-nvsentinel/upstream.env: a2aa056470989f3f7489cf7eb06c6e69da94bc8570cee8db0ee2a74d7994198b
+  011-nvsentinel/values.yaml: b597218adaa6789a1458cc1dd1df95d0959db62bd80076cf31d8284c9e73f282
+  012-prometheus-adapter/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
+  012-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
+  012-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
+  012-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
+  README.md: 1f755bdad52b9f70853b4dea90595f7c840ef03386d802627644c9f089c13704
+  UPGRADING.md: ee1750f523c62e135f7c52c5aaee6231b34f451109d9ca8ebae85dac08f4e1c0
+  bundle-info.yaml: a68e7a3e22190836ee64b84eb3e74220efe3c4027374b9deab470659ba092760
+  checksums.txt: 43534b078bdb15ad48ad875922752e25dc795ae2c254bc2c7a866f04ae8789d9
+  deploy.sh: 89f3f76a7b045285f1cc4032bba8e528b1c1ce86e523d1c07163b3879b0b15db
+  recipe.yaml: 9efdc68471b569bf4912344197b25a940d4dc5f69edfff058e0b5ee6f4149663
 b300-mk8s-ubuntu-inference-dynamo:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
@@ -721,10 +778,10 @@ b300-mk8s-ubuntu-inference-dynamo:
   008-dynamo-platform/values.yaml: ab8ac46a506de550847a751b278d102bb28bec24dc8caf1645338df385b8ccfa
   README.md: 1b841b04212cbe2275683d486b62243022fdded02f6dc16ab01400b8d9502fbe
   UPGRADING.md: 7f7463f8fea597447ada0530dfc0c4a8019c667a471235572ffaa0dc1fdbe4f4
-  bundle-info.yaml: a9bad5d4c86366be597963a0cbd1aceb4edbbcbbaf9f9db79df9de3b7e3ffa99
-  checksums.txt: ce2be9d858bcb7b2027b1fd41fd562d9f090d5344732f20d1d13f4a65780796b
+  bundle-info.yaml: f98058cc231474a58d7c348f9adc4130e0984dbe854916a60cc2500a439fbb62
+  checksums.txt: f28434e030ef022a7312027dcb528d79b99e9f882e7da2f39df8274f6dc089ca
   deploy.sh: 69c5a1de4d4464652bed7673ef13020c0317f19f1e196ea663be5d9c4dc79d14
-  recipe.yaml: c747422bd12bd717d05cde921d08c306f2859723c549e739d6ed39a91f1eba51
+  recipe.yaml: 1ce36a344ad7be4eac2af38c63e6f1cc5012bd24919924a0e18b70fafee4d042
 bcm-inference:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
