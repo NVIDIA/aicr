@@ -201,7 +201,7 @@ type ComponentConfig struct {
 	// never touches it again, and Flux's helm-controller inherits that via
 	// its `spec.upgrade.crds: Skip` default, so a chart bump whose CRDs
 	// changed otherwise runs a new controller against the previous schema.
-	// Flux, helm, and helmfile consume this through
+	// Flux and helm consume this through
 	// deployer.ResolveCRDOwners. Argo CD does not: it applies a chart's CRDs
 	// on every sync regardless, so it needs no opt-in and honors none.
 	//

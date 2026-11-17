@@ -2485,6 +2485,14 @@ those two deployers. Audit the chart it points at, then run the manual command.
 Argo CD applies whatever CRDs the rendered chart contains, so an override does
 not change it.
 
+Inventory bindings can clear ownership for the entire catalog. External
+catalog authors can set `crdOwnership: retain` on every changed chart binding
+to preserve it, including after registry relocation. Vendored Helm and Flux
+bundles then check archive CRDs for ownership collisions and webhook conversion,
+respecting subchart exclusions. Vendoring remains optional. The recipe records
+the outcome in `metadata.artifacts.crdOwnership`; see
+[CRD ownership under bindings](artifact-inventory.md#crd-ownership-under-bindings).
+
 When you run the command below depends on your deployer, because only some of
 them do it for you:
 

@@ -236,6 +236,10 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, err
 	}
 	g.vendorRecords = writeResult.VendoredCharts
+	if crdErr := g.checkVendoredCRDs(ctx, outputDir, writeResult.Folders); crdErr != nil {
+		return nil, crdErr
+	}
+
 	output.Entrypoint = fileDeployScript
 	output.Releases = writeResult.Releases()
 	for _, f := range writeResult.Folders {
@@ -625,4 +629,16 @@ type deployTemplateData struct {
 	// ordinary bundle (the historical table), prometheus-operator-crds in a
 	// class directory, since that is the component that ships the CRDs.
 	MonitoringCRDsOwner string
+}
+
+func (g *Generator) checkVendoredCRDs(ctx context.Context, outputDir string, folders []localformat.Folder) error {
+	archives := map[string]string{}
+	for _, record := range g.vendorRecords {
+		for _, folder := range folders {
+			if folder.Name == record.Name {
+				archives[record.Name] = filepath.Join(outputDir, folder.Dir, "charts", record.TarballName)
+			}
+		}
+	}
+	return deployer.CheckVendoredCRDOwnership(ctx, g.RecipeResult, archives)
 }

@@ -80,10 +80,13 @@ func artifactInventoryActive(provider DataProvider, options artifact.Options) (b
 
 func mergedArtifactBindings(embedded, external map[string][]byte) (*artifact.Bindings, error) {
 	var layers []*artifact.Bindings
-	for _, files := range []map[string][]byte{embedded, external} {
+	for layer, files := range []map[string][]byte{embedded, external} {
 		if data, ok := files[artifactBindingsPath]; ok {
 			binding, err := artifact.ParseBindings(data)
 			if err != nil {
+				return nil, err
+			}
+			if err := validateArtifactCRDLayer(binding, layer == 1, external); err != nil {
 				return nil, err
 			}
 			layers = append(layers, binding)
@@ -126,7 +129,7 @@ func composeCapturedArtifacts(ctx context.Context, embedded, external map[string
 		return nil, err
 	}
 	oldCharts := map[string]HelmConfig{}
-	changed := []string{}
+	changed, unretained := []string{}, false
 	writes := map[string][]string{}
 	for _, item := range inventory.Artifacts {
 		if err := ctx.Err(); err != nil {
@@ -147,6 +150,7 @@ func composeCapturedArtifacts(ctx context.Context, embedded, external map[string
 			repository = strings.TrimSuffix(repository, "/")
 			if old.DefaultRepository != repository || path.Base(old.DefaultChart) != chart || old.DefaultVersion != item.Version || old.DefaultDigest != item.ArchiveDigest || old.DefaultDigest == "" {
 				changed = append(changed, component.Name)
+				unretained = unretained || binding.CRDOwnership != "retain"
 			}
 			component.Helm.DefaultRepository = repository
 			component.Helm.DefaultChart = chart
@@ -173,7 +177,7 @@ func composeCapturedArtifacts(ctx context.Context, embedded, external map[string
 			p.provenance.Applied = append(p.provenance.Applied, artifact.Applied{Artifact: item, Image: &binding})
 		}
 	}
-	disableChangedArtifactCRDOwnership(&registry, changed)
+	p.provenance.CRDOwnership = composeArtifactCRDOwnership(&registry, changed, unretained)
 	p.files[registryFileName], composeErr = yaml.Marshal(&registry)
 	if composeErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "encode artifact registry", composeErr)
@@ -194,19 +198,53 @@ func artifactComponentsByName(registry *ComponentRegistry) map[string]*Component
 	return byName
 }
 
-func disableChangedArtifactCRDOwnership(registry *ComponentRegistry, changed []string) {
-	if len(changed) > 0 {
-		owners := []string{}
-		for i := range registry.Components {
-			component := &registry.Components[i]
-			if component.OwnsCRDs {
-				owners = append(owners, component.Name)
-			}
+func validateArtifactCRDLayer(bindings *artifact.Bindings, externalLayer bool, external map[string][]byte) error {
+	retained := []string{}
+	for _, binding := range bindings.Charts {
+		if binding.CRDOwnership != "" {
+			retained = append(retained, binding.Component)
+		}
+	}
+	if len(retained) == 0 {
+		return nil
+	}
+	slices.Sort(retained)
+	var registry ComponentRegistry
+	if data := external[registryFileName]; len(data) > 0 {
+		if err := yaml.Unmarshal(data, &registry); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "decode external artifact registry", err)
+		}
+	}
+	entries := artifactComponentsByName(&registry)
+	for _, component := range retained {
+		if !externalLayer || entries[component] == nil {
+			return artifact.Invalid("artifact-target-invalid", "crdOwnership requires an external binding and external registry entry: "+component)
+		}
+	}
+	return nil
+}
+
+func composeArtifactCRDOwnership(registry *ComponentRegistry, changed []string, unretained bool) *artifact.CRDOwnership {
+	policy := &artifact.CRDOwnership{Policy: "unchanged", Changed: changed, Owners: []string{}}
+	slices.Sort(policy.Changed)
+	for i := range registry.Components {
+		component := &registry.Components[i]
+		if component.OwnsCRDs {
+			policy.Owners = append(policy.Owners, component.Name)
+		}
+		if unretained {
 			component.OwnsCRDs = false
 			component.OwnsCRDsExcludeSubcharts = nil
 		}
-		slog.Warn("artifact chart identities changed; disabling catalog CRD ownership", "changed", changed, "disabledOwners", owners)
 	}
+	slices.Sort(policy.Owners)
+	if unretained {
+		policy.Policy = "disabled"
+		slog.Warn("artifact chart identities changed; disabling catalog CRD ownership", "changed", changed, "disabledOwners", policy.Owners)
+	} else if len(changed) > 0 {
+		policy.Policy = "retained"
+	}
+	return policy
 }
 
 func (p *ArtifactProvider) initializeProvenance(options artifact.Options, byName map[string]*ComponentConfig, inventoryPaths ...string) error {

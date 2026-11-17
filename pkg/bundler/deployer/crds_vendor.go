@@ -1,0 +1,232 @@
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package deployer
+
+import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"context"
+	stderrors "errors"
+	"fmt"
+	"io"
+	"os"
+	"path"
+	"slices"
+	"strings"
+
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"gopkg.in/yaml.v3"
+)
+
+// CheckVendoredCRDOwnership verifies retained ownership against the archives
+// that will be installed. Archives maps selected component names to local paths.
+func CheckVendoredCRDOwnership(ctx context.Context, result *recipe.RecipeResult, archives map[string]string) error {
+	provenance := result.Metadata.Artifacts
+	if provenance == nil || provenance.CRDOwnership == nil || provenance.CRDOwnership.Policy != "retained" || len(archives) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
+	defer cancel()
+	owners, exclusions, err := ResolveCRDPolicy(ctx, result.DataProvider(), result.ComponentRefs)
+	if err != nil {
+		return err
+	}
+	names := make([]string, 0, len(archives))
+	for name := range archives {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	sets := map[string]map[string]bool{}
+	for _, name := range names {
+		if err := ctx.Err(); err != nil {
+			return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "check vendored CRDs")
+		}
+		set, err := readVendoredCRDs(ctx, archives[name], exclusions[name])
+		if err != nil {
+			return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "read vendored CRDs for "+name)
+		}
+		sets[name] = set
+	}
+	for _, owner := range names {
+		if !owners[owner] {
+			continue
+		}
+		crds := make([]string, 0, len(sets[owner]))
+		for crd := range sets[owner] {
+			crds = append(crds, crd)
+		}
+		slices.Sort(crds)
+		for _, crd := range crds {
+			if err := ctx.Err(); err != nil {
+				return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "compare vendored CRDs")
+			}
+			if sets[owner][crd] {
+				return crdOwnershipConflict(crd, owner, owner, "uses webhook conversion")
+			}
+			for _, other := range names {
+				if _, found := sets[other][crd]; other != owner && found {
+					return crdOwnershipConflict(crd, owner, other, "is shipped by both components")
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func crdOwnershipConflict(crd, owner, other, detail string) error {
+	return errors.NewWithContext(errors.ErrCodeConflict,
+		fmt.Sprintf("crd-ownership-conflict: CRD %s owned by %s %s (%s)", crd, owner, detail, other),
+		map[string]any{"reason": "crd-ownership-conflict", "crd": crd, "owner": owner, "component": other})
+}
+
+func readVendoredCRDs(ctx context.Context, filename string, exclusions []string) (map[string]bool, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "open vendored chart", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, defaults.HelmChartArtifactLimit+1))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "read vendored chart", err)
+	}
+	if int64(len(data)) > defaults.HelmChartArtifactLimit {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "vendored chart exceeds size limit")
+	}
+	set := map[string]bool{}
+	budget := defaults.HelmChartArtifactLimit
+	if err := collectVendoredCRDs(ctx, data, exclusions, set, &budget, 0); err != nil {
+		return nil, err
+	}
+	return set, nil
+}
+
+func collectVendoredCRDs(ctx context.Context, data []byte, exclusions []string, set map[string]bool, budget *int64, depth int) error {
+	if depth > defaults.ArtifactDocumentDepth {
+		return errors.New(errors.ErrCodeInvalidRequest, "chart nesting exceeds limit")
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "decode chart gzip", err)
+	}
+	defer gz.Close()
+	limited := &io.LimitedReader{R: gz, N: *budget + 1}
+	tr := tar.NewReader(limited)
+	for {
+		if err := ctx.Err(); err != nil {
+			return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "read chart CRDs")
+		}
+		before := limited.N
+		header, nextErr := tr.Next()
+		*budget -= before - limited.N
+		if *budget < 0 {
+			return errors.New(errors.ErrCodeInvalidRequest, "expanded charts exceed size limit")
+		}
+		if stderrors.Is(nextErr, io.EOF) {
+			return nil
+		}
+		if nextErr != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "read chart archive", nextErr)
+		}
+		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeDir {
+			return errors.New(errors.ErrCodeInvalidRequest, "chart archive contains a non-regular entry")
+		}
+		if header.Typeflag == tar.TypeDir || excludedCRDPath(header.Name, exclusions) {
+			continue
+		}
+		nested := strings.Contains(header.Name, "/charts/") && strings.HasSuffix(header.Name, ".tgz")
+		crd := strings.Contains(header.Name, "/crds/") && (path.Ext(header.Name) == ".yaml" || path.Ext(header.Name) == ".yml")
+		if !nested && !crd {
+			continue
+		}
+		limit := defaults.MaxExternalDataFileBytes
+		if nested {
+			limit = defaults.HelmChartArtifactLimit
+		}
+		if header.Size > limit || header.Size > *budget {
+			return errors.New(errors.ErrCodeInvalidRequest, "chart entry exceeds size limit")
+		}
+		before = limited.N
+		content, readErr := io.ReadAll(tr)
+		*budget -= before - limited.N
+		if readErr != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "read chart entry", readErr)
+		}
+		if nested {
+			if err := collectVendoredCRDs(ctx, content, exclusions, set, budget, depth+1); err != nil {
+				return err
+			}
+			// Nested expansion consumes the same total budget as the parent archive.
+			limited.N = *budget + 1
+		} else if err := decodeVendoredCRDs(ctx, content, set); err != nil {
+			return err
+		}
+	}
+}
+
+func excludedCRDPath(name string, exclusions []string) bool {
+	parts := strings.Split(name, "/")
+	for i := 1; i < len(parts); i++ {
+		if parts[i-1] != "charts" {
+			continue
+		}
+		for _, excluded := range exclusions {
+			if parts[i] == excluded {
+				return true
+			}
+			suffix, ok := strings.CutPrefix(parts[i], excluded+"-")
+			if ok && len(suffix) > 0 && suffix[0] >= '0' && suffix[0] <= '9' && strings.HasSuffix(suffix, ".tgz") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func decodeVendoredCRDs(ctx context.Context, data []byte, set map[string]bool) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	for {
+		if err := ctx.Err(); err != nil {
+			return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "decode chart CRDs")
+		}
+		var document struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Conversion struct {
+					Strategy string `yaml:"strategy"`
+				} `yaml:"conversion"`
+			} `yaml:"spec"`
+		}
+		err := decoder.Decode(&document)
+		if stderrors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "decode chart CRD", err)
+		}
+		if document.Kind != "CustomResourceDefinition" {
+			continue
+		}
+		if document.Metadata.Name == "" {
+			return errors.New(errors.ErrCodeInvalidRequest, "chart CRD has no metadata.name")
+		}
+		set[document.Metadata.Name] = set[document.Metadata.Name] || document.Spec.Conversion.Strategy == "Webhook"
+	}
+}

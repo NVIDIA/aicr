@@ -401,6 +401,10 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		resources = append(resources, compResources...)
 	}
 
+	if crdErr := g.checkVendoredCRDs(ctx, outputDir); crdErr != nil {
+		return nil, crdErr
+	}
+
 	// Write root kustomization.yaml.
 	sort.Strings(resources)
 	if err := writeTemplate(output, kustomizationTemplate, RootKustomizationData{Resources: resources},
@@ -468,6 +472,7 @@ func (g *Generator) resolveVendoring(
 	refs []recipe.ComponentRef,
 ) (localformat.ChartPuller, map[string]string, error) {
 
+	g.vendorRecords = nil
 	if !g.VendorCharts {
 		return g.Puller, nil, nil
 	}
@@ -1023,7 +1028,7 @@ func buildComponentSummaries(sortedRefs []recipe.ComponentRef, preManifests, man
 
 // resolveCRDOwners records which components may replace their CRDs on upgrade,
 // so each HelmRelease can pick between CreateReplace and helm-controller's Skip
-// default. The guard is shared with the helm and helmfile deployers; see
+// default. The guard is shared with the helm deployer; see
 // deployer.ResolveCRDOwners for why a registry failure is fatal here.
 func (g *Generator) resolveCRDOwners(ctx context.Context, refs []recipe.ComponentRef) error {
 	owners, err := deployer.ResolveCRDOwners(ctx, g.RecipeResult.DataProvider(), refs)
@@ -1037,3 +1042,11 @@ func (g *Generator) resolveCRDOwners(ctx context.Context, refs []recipe.Componen
 // ownsCRDs reports whether the named component may replace its CRDs on
 // upgrade. Unknown components are false.
 func (g *Generator) ownsCRDs(name string) bool { return g.crdOwners[name] }
+
+func (g *Generator) checkVendoredCRDs(ctx context.Context, outputDir string) error {
+	archives := map[string]string{}
+	for _, record := range g.vendorRecords {
+		archives[record.Name] = filepath.Join(outputDir, record.Name, "charts", record.TarballName)
+	}
+	return deployer.CheckVendoredCRDOwnership(ctx, g.RecipeResult, archives)
+}

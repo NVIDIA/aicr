@@ -22,6 +22,12 @@ func (p *Provenance) Clone() *Provenance {
 		return nil
 	}
 	result := *p
+	if p.CRDOwnership != nil {
+		policy := *p.CRDOwnership
+		policy.Changed = slices.Clone(policy.Changed)
+		policy.Owners = slices.Clone(policy.Owners)
+		result.CRDOwnership = &policy
+	}
 	result.AllowCatalogPins = slices.Clone(p.AllowCatalogPins)
 	result.Applied = slices.Clone(p.Applied)
 	for i := range result.Applied {
@@ -112,5 +118,56 @@ func ValidateProvenance(p *Provenance) error {
 	if err := ValidateBindings(bindings); err != nil {
 		return err
 	}
+	if err := validateCRDOwnership(p); err != nil {
+		return err
+	}
 	return Account(inventory, bindings)
+}
+
+func validateCRDOwnership(p *Provenance) error {
+	policy := p.CRDOwnership
+	if policy == nil {
+		return Invalid("artifact-inputs-mismatch", "artifact provenance lacks crdOwnership; re-resolve the recipe")
+	}
+	if policy.Changed == nil || policy.Owners == nil {
+		return invalid("provenance requires crdOwnership and its arrays")
+	}
+	for _, names := range [][]string{policy.Changed, policy.Owners} {
+		for i, name := range names {
+			if !validName(name) || (i > 0 && names[i-1] >= name) {
+				return invalid("crdOwnership names must be valid, sorted and unique")
+			}
+		}
+	}
+	charts := map[string]string{}
+	for _, entry := range p.Applied {
+		if entry.Chart != nil {
+			charts[entry.Chart.Component] = entry.Chart.CRDOwnership
+		}
+	}
+	unretained := false
+	for _, name := range policy.Changed {
+		retention, ok := charts[name]
+		if !ok {
+			return invalid("crdOwnership changed component requires an applied chart")
+		}
+		unretained = unretained || retention != "retain"
+	}
+	switch policy.Policy {
+	case "unchanged":
+		if len(policy.Changed) != 0 {
+			return invalid("unchanged crdOwnership requires no changed charts")
+		}
+	case "retained":
+		if len(policy.Changed) == 0 || unretained {
+			return invalid("retained crdOwnership requires every changed chart to retain")
+		}
+	case "disabled":
+		if !unretained {
+			return invalid("disabled crdOwnership requires a changed chart without retain")
+		}
+	default:
+		return invalid("invalid crdOwnership policy")
+	}
+	return nil
 }

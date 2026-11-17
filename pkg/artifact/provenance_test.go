@@ -27,7 +27,7 @@ func TestValidateProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := &Provenance{InventoryDigest: "sha256:" + strings.Repeat("a", 64), BindingsDigest: "sha256:" + strings.Repeat("b", 64), BaseCatalogDigest: "sha256:" + strings.Repeat("c", 64), AllowCatalogPins: []string{}, Verification: "metadata-only", Applied: []Applied{{Artifact: inventory.Artifacts[0], Chart: &Chart{Component: "controller"}}}, Ignored: []IgnoredIdentity{}}
+	base := &Provenance{CRDOwnership: &CRDOwnership{Policy: "unchanged", Changed: []string{}, Owners: []string{}}, InventoryDigest: "sha256:" + strings.Repeat("a", 64), BindingsDigest: "sha256:" + strings.Repeat("b", 64), BaseCatalogDigest: "sha256:" + strings.Repeat("c", 64), AllowCatalogPins: []string{}, Verification: "metadata-only", Applied: []Applied{{Artifact: inventory.Artifacts[0], Chart: &Chart{Component: "controller"}}}, Ignored: []IgnoredIdentity{}}
 	if err := ValidateProvenance(base); err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +35,23 @@ func TestValidateProvenance(t *testing.T) {
 		name   string
 		mutate func(*Provenance)
 	}{
+		{"missing policy", func(p *Provenance) { p.CRDOwnership = nil }},
+		{"bad policy", func(p *Provenance) { p.CRDOwnership.Policy = "other" }},
+		{"unsorted owners", func(p *Provenance) { p.CRDOwnership.Owners = []string{"z", "a"} }},
+		{"duplicate owners", func(p *Provenance) { p.CRDOwnership.Owners = []string{"a", "a"} }},
+		{"unchanged with changes", func(p *Provenance) { p.CRDOwnership.Changed = []string{"controller"} }},
+		{"retained without changes", func(p *Provenance) { p.CRDOwnership.Policy = "retained" }},
+		{"retained without attestation", func(p *Provenance) {
+			p.CRDOwnership.Policy = "retained"
+			p.CRDOwnership.Changed = []string{"controller"}
+		}},
+		{"disabled without changes", func(p *Provenance) { p.CRDOwnership.Policy = "disabled" }},
+		{"disabled with attestation", func(p *Provenance) {
+			p.CRDOwnership.Policy = "disabled"
+			p.CRDOwnership.Changed = []string{"controller"}
+			p.Applied[0].Chart.CRDOwnership = "retain"
+		}},
+		{"unknown changed chart", func(p *Provenance) { p.CRDOwnership.Policy = "disabled"; p.CRDOwnership.Changed = []string{"unknown"} }},
 		{"digest", func(p *Provenance) { p.InventoryDigest = "invalid" }},
 		{"verification", func(p *Provenance) { p.Verification = "verified" }},
 		{"missing array", func(p *Provenance) { p.Ignored = nil }},
