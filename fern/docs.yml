@@ -30,6 +30,10 @@ products:
         path: ../docs/index.yml
         slug: latest
         availability: stable
+      - display-name: v1.3.0
+        path: versions/v1.3.0.yml
+        slug: v1.3.0
+        availability: stable
 redirects:
   - source: "/aicr/index.html"
     destination: "/aicr/"
