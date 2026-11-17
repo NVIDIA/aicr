@@ -28,7 +28,7 @@ spec:
     assert: 5m
   steps:
     - name: validate-crds-established
-      # Verified against chart v0.16.18, which installs these six CRDs from
+      # Verified against chart v0.18.8, which installs these six CRDs from
       # crds/.
       try:
         - assert:

@@ -37,5 +37,5 @@ const (
 // make check-dynamo-runtime-image.
 const (
 	DynamoImageRepository = "nvcr.io/nvidia/ai-dynamo"
-	DynamoRuntimeImageTag = "1.4.2"
+	DynamoRuntimeImageTag = "1.6.2"
 )

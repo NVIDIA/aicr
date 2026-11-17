@@ -43,9 +43,9 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **aws-ebs-csi-driver** | `core` | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work without naming a class. **The driver still needs AWS credentials, which AICR does not configure** — see [EBS CSI Driver Credentials](#ebs-csi-driver-credentials). Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | `ops` | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **k8s-aibom** | `ops` | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Ships by default in two stock recipes, `h100-gke-cos-inference` and its Dynamo descendant `h100-gke-cos-inference-dynamo`; available by opt-in on any other GKE recipe with `aicr recipe --runtime-inventory enabled`, including the `b200`, `gb200`, and `gb300` GKE Dynamo recipes. On the two recipes that ship it by default, decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
-| **kai-scheduler** | `ops` | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
-| **grove** | `ops` | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. Upgrading from `v0.1.0-alpha.12` requires a CRD apply — see [Upgrade Notes](#grove-v010-alpha12-to-v010-alpha13) below. | [Grove](https://github.com/ai-dynamo/grove) |
-| **dynamo-platform** | `ops` | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a ZMQ-based KV-cache event plane, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
+| **kai-scheduler** | `ops` | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. On the `*-inference-dynamo` leaves, which ship Grove, AICR sets `scheduler.args.default-staleness-grace-period: "-1s"`: Grove's KAI backend owns PodGroup termination timing, so the Dynamo platform chart README requires KAI's own stale-PodGroup eviction off. Every other leaf keeps KAI's default cleanup. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
+| **grove** | `ops` | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. Upgrading from `v0.1.0-alpha.12` requires a CRD apply — see [Upgrade Notes](#grove-v010-alpha12-to-v010-alpha13) below. Upgrading from `v0.1.0-alpha.13` requires a CRD apply too — see [Upgrade Notes](#grove-v010-alpha13-to-v010-alpha14) below. | [Grove](https://github.com/ai-dynamo/grove) |
+| **dynamo-platform** | `ops` | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a ZMQ-based KV-cache event plane, and disaggregated prefill/decode. AICR pins the chart's Grove preflight hook image (`dynamo-operator.grovePreflight.image`, `docker.io/library/python:3.12-slim`) by digest, because the chart pulls it from Docker Hub by tag only; on a mirrored registry, point that value at the mirror. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **agentgateway-crds** | `ops` | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | `ops` | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **k8s-nim-operator** | `ops` | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. AICR installs the operator only — it creates no `NIMService` and no credentials; see [NIM workload credentials](#nim-workload-credentials). | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
@@ -2046,7 +2046,7 @@ AICR's values, at AICR's request
   left in place deployed in 24s with the controller Ready and not `Degraded`.
   `helm rollback` to v1.5.1 with the v1.6.1 CRDs left in place reached Ready in
   18s. Each AIBOM regenerates once in each direction.
-- **Dynamo.** With dynamo-platform 1.4.2 (the version AICR pins, whose
+- **Dynamo.** With dynamo-platform 1.4.2 (the version AICR pinned then, whose
   `DynamoGraphDeployment` storage is still `v1alpha1` behind a conversion
   webhook), one multinode graph produced exactly one AIBOM, owned by the
   graph, with its Grove `PodCliqueSet`, cliques and pods rolled up into it.
@@ -3294,6 +3294,60 @@ Apply the new CRDs before upgrading:
 2. Resume whichever deployer you use, as in the section above.
 
 No resource migration is needed, and fresh installs are unaffected.
+
+### `grove`: `v0.1.0-alpha.13` to `v0.1.0-alpha.14`
+
+alpha.14 changes four CRDs. All of them stay at `v1alpha1`.
+
+- **`podgangmaps.grove.io`:** alpha.14 drops `spec.entries[].anchorIndex`,
+  along with the alpha.13 CEL rule that every `Anchor` entry carry one
+  ([ai-dynamo/grove#831](https://github.com/ai-dynamo/grove/pull/831)).
+- **The three PodClique CRDs:** `podcliques.grove.io`,
+  `podcliquescalinggroups.grove.io` and `podcliquesets.grove.io` gain new
+  status fields for the coherent update strategy, such as
+  `lastProgressedAt`.
+
+As with alpha.13, `helm upgrade` never applies changed `crds/`, and a plain
+chart bump keeps the alpha.13 CRDs. Two things go wrong:
+
+- **Hard failure:** the old CEL rule rejects every `Anchor` PodGangMap write
+  from the alpha.14 operator, so PodCliqueSets stop progressing.
+- **Silent loss:** the API server drops the new status fields.
+
+Apply the new CRDs before upgrading:
+
+1. Apply the alpha.14 CRDs directly from the chart:
+   ```bash
+   helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts --version v0.1.0-alpha.14 \
+     | sed -n '/^---$/,$p' \
+     | kubectl apply --server-side --force-conflicts -f -
+   ```
+2. Resume whichever deployer you use, as in the sections above.
+
+**Order matters for `dynamo-platform` 1.6.** Its chart runs a pre-install and
+pre-upgrade check that requires a `grove-operator` image at alpha.14 or later,
+fully rolled out. The check runs once, with two retries, and does not wait,
+so upgrade grove first and let its rollout finish before upgrading
+`dynamo-platform`. This also applies to a fresh install.
+
+- `deploy.sh` (the `helm` deployer) waits for each release by default, so
+  grove is ready before `dynamo-platform` starts. With `--no-wait` it is not.
+- With `argocd` and `argocd-helm`, sync waves create grove's Application
+  first but do not wait for it to become healthy. Sync grove and wait for it
+  to be healthy before syncing `dynamo-platform`, or generate the bundle with
+  `--argocd-sync-retry-limit` (for example `5`, with
+  `--argocd-sync-retry-backoff-duration 30s`) to give grove more time before
+  the check is retried.
+
+If the check already failed, wait for the grove rollout to finish, then re-run
+`dynamo-platform`. On Argo CD, if the sync still fails after any automatic
+retries, wait for grove to be healthy and re-sync `dynamo-platform` manually.
+
+The same bundles set `scheduler.args.default-staleness-grace-period: "-1s"` on
+`kai-scheduler`, so applying the regenerated `kai-scheduler` release hands
+PodGroup termination timing to Grove, as the Dynamo chart README requires.
+
+No resource migration is needed.
 
 ### `dynamo-platform`: opting back into bundled NATS on a standing cluster
 

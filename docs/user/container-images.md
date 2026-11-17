@@ -28,7 +28,7 @@ The catalog lists the driver version that the default chart render carries. Vers
 ## Summary
 
 - Components: **58**
-- Unique images: **154**
+- Unique images: **140**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -48,7 +48,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | cert-manager-ocp-olm | manifest | — | — | 0 |
 | dra-node-labeler | manifest | — | — | 1 |
 | dranet | manifest | — | — | 1 |
-| dynamo-platform | helm | dynamo-platform | 1.4.2 | 1 |
+| dynamo-platform | helm | dynamo-platform | 1.6.2 | 2 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.23.1 | 3 |
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-gb200-rdma | manifest | — | — | 2 |
@@ -56,12 +56,12 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gpu-operator | helm | nvidia/gpu-operator | v26.7.2 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
-| grove | helm | grove-charts | v0.1.0-alpha.13 | 1 |
+| grove | helm | grove-charts | v0.1.0-alpha.14 | 1 |
 | k8s-aibom | helm | k8s-aibom | 1.6.2 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.4 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.4 | 1 |
-| kai-scheduler | helm | kai-scheduler | v0.16.18 | 12 |
+| kai-scheduler | helm | kai-scheduler | v0.18.8 | 12 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.5.0 | 2 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.1 | 4 |
 | kueue | helm | kueue | 0.19.13 | 1 |
@@ -105,8 +105,6 @@ from the component's registry default above.
 
 | Component | Variant Version | Declared By | Images |
 |-----------|-----------------|-------------|--------|
-| dynamo-platform | 1.5.0 | b300-mk8s-ubuntu-inference-dynamo | 1 |
-| kai-scheduler | v0.17.1 | b300-mk8s-ubuntu-inference-dynamo | 12 |
 | network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 20 |
 
 ## Images by component
@@ -157,7 +155,8 @@ _No images extracted._
 
 ### dynamo-platform
 
-- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.4.2`
+- `docker.io/library/python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b`
+- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.6.2`
 
 ### gatekeeper
 
@@ -211,7 +210,7 @@ _No images extracted._
 
 ### grove
 
-- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.13`
+- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.14`
 
 ### k8s-aibom
 
@@ -231,18 +230,18 @@ _No images extracted._
 
 ### kai-scheduler
 
-- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.16.18`
-- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.16.18`
-- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.16.18`
-- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.16.18`
-- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.16.18`
-- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.16.18`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.16.18`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.16.18`
-- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.16.18`
-- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.16.18`
-- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.16.18`
-- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.16.18`
+- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/helm-hooks:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.18.8`
 
 ### kube-prometheus-stack
 
@@ -445,25 +444,6 @@ _No images extracted._
 ### topograph
 
 - `nvcr.io/nvidia/topograph/topograph:v1.1.0`
-
-### dynamo-platform@1.5.0 (variant)
-
-- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.5.0`
-
-### kai-scheduler@v0.17.1 (variant)
-
-- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.17.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.17.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.17.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.17.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.17.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.17.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.17.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.17.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.17.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.17.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.17.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.17.1`
 
 ### network-operator@25.7.0 (variant)
 

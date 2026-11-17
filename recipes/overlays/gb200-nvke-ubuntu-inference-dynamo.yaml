@@ -47,6 +47,16 @@ spec:
       value: ">= 1.34"
 
   componentRefs:
+    # Grove's kai-scheduler backend owns PodGroup termination timing, so KAI's
+    # own stale-PodGroup eviction is disabled (Dynamo platform chart README,
+    # v1.5.0 upgrade notes). Recipes without Grove keep KAI's default cleanup.
+    - name: kai-scheduler
+      type: Helm
+      overrides:
+        scheduler:
+          args:
+            default-staleness-grace-period: "-1s"
+
     - name: grove
       type: Helm
       valuesFile: components/grove/values.yaml
