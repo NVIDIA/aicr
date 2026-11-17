@@ -34,5 +34,5 @@ charts:
       - issuers.cert-manager.io
       - orders.acme.cert-manager.io
     repository: https://charts.jetstack.io
-    sourceVersion: v1.20.2
+    sourceVersion: v1.20.5
 component: cert-manager

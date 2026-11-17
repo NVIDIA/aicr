@@ -55,20 +55,20 @@ spec:
   nvIpam:
     image: nvidia-k8s-ipam
     repository: nvcr.io/nvidia/mellanox
-    # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nvidia-k8s-ipam tag=network-operator-v26.7.0
-    version: sha256:9f80b77238e67229b3849b803d076e6b4c8d3514c428d8fa8ab46769932e1785
+    # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nvidia-k8s-ipam tag=network-operator-v26.7.1
+    version: sha256:f4012b9c5ee18603def8e842c58861b2524c8da5a946ec9c3e5957de7395a22c
     enableWebhook: false
   secondaryNetwork:
     cniPlugins:
       image: plugins
       repository: nvcr.io/nvidia/mellanox
-      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/plugins tag=network-operator-v26.7.0
-      version: sha256:ae947249ab1fcad77464fbbbd12c851ae905872f76ef4dda3a5944a32b3a2dc1
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/plugins tag=network-operator-v26.7.1
+      version: sha256:9758670f426e238805aba61a1c83a96ae10506dd973845b60477230672c06163
     multus:
       image: multus-cni
       repository: nvcr.io/nvidia/mellanox
-      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/multus-cni tag=network-operator-v26.7.0
-      version: sha256:2c9761eea72bb1ac06e288ee1982b835e8ee9e93d141a6436c3fa8d559be4163
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/multus-cni tag=network-operator-v26.7.1
+      version: sha256:19279347b71a1077eaed8479f8fff491fd9a578bc0ff8efcf13ea08270574fd0
   deploymentTolerations:
     - key: CriticalAddonsOnly
       operator: Exists

@@ -123,10 +123,21 @@ func GetTerminatedPodForJob(ctx context.Context, client kubernetes.Interface, na
 // HasTerminatedContainer reports whether the pod's container named
 // containerName is in the Terminated state.
 func HasTerminatedContainer(p *corev1.Pod, containerName string) bool {
+	cs, ok := ContainerStatus(p, containerName)
+	return ok && cs.State.Terminated != nil
+}
+
+// ContainerStatus returns the status of p's container named
+// containerName. It returns false when p is nil or has no status for that
+// container.
+func ContainerStatus(p *corev1.Pod, containerName string) (corev1.ContainerStatus, bool) {
+	if p == nil {
+		return corev1.ContainerStatus{}, false
+	}
 	for _, cs := range p.Status.ContainerStatuses {
 		if cs.Name == containerName {
-			return cs.State.Terminated != nil
+			return cs, true
 		}
 	}
-	return false
+	return corev1.ContainerStatus{}, false
 }

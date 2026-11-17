@@ -46,14 +46,15 @@ using the validator's standard tolerance. These are acceptance criteria, not
 claimed B300 measurements. Record actual throughput, latency, GPU occupancy and
 runtime image versions in qualification evidence. The stock inference validator
 selects the runtime version from the recipe's Dynamo component pin; this recipe
-uses operator and runtime 1.5.0. The qualified run sets
+follows the registry default, operator and runtime 1.6.2. The qualified run sets
 `AICR_INFERENCE_PERF_ROUTER_MODE=kv` in the `inference-perf` validator catalog
 entry. Record that override when reproducing the result; the default router mode
 is not what this evidence qualifies.
 
-The Network Operator 25.7.0 marketplace distribution, KAI Scheduler v0.17.1 and
-Dynamo platform 1.5.0 pins are scoped exceptions matching the reference stack.
-Other recipes continue to use registry defaults. Monitoring and lab-specific
+The Network Operator 25.7.0 marketplace distribution is a scoped exception
+matching the reference stack. Everything else follows the registry defaults,
+including dynamo-platform 1.6.2, grove v0.1.0-alpha.14 and KAI Scheduler
+v0.18.8. Monitoring and lab-specific
 Prometheus endpoints are not prerequisites of this minimal inference stack.
 
 The generated catalog image inventory uses registry chart sources and shared
@@ -68,6 +69,11 @@ recipe evidence before upstream submission, following
 [evidence publishing](../contributor/evidence-publishing.md).
 
 ## Qualification evidence boundary
+
+**This evidence predates the current recipe.** It was captured with Dynamo
+1.5.0 and KAI Scheduler v0.17.1, which the recipe pinned at the time. The recipe
+now follows the registry defaults (dynamo-platform 1.6.2, grove
+v0.1.0-alpha.14, KAI Scheduler v0.18.8), so it needs requalifying on that stack.
 
 The October 16, 2026 full run at source
 `3a80fbf9e10c806e1a554faa22d602978680a2e8` passed all eight checks in one

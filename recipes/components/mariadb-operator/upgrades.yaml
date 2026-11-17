@@ -370,3 +370,40 @@ transitions:
     references:
       - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md
       - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.1
+  - from: ">=26.10.0 <26.10.2"
+    to: "26.10.2"
+    verdict: manual
+    summary: >-
+      26.10.2 stops rewriting Amazon S3 endpoints to their dual-stack form, so
+      a Backup, PhysicalBackup, PointInTimeRecovery or Restore that reaches S3
+      only over IPv6 loses its endpoint unless it names the dual-stack one.
+      It also starts applying agent.lifecycle, so a MariaDB that sets it
+      rolls its Pods once. Upstream lists no other breaking change, and the
+      data-plane update is optional from 26.10.x.
+    precondition: >-
+      Know whether any MariaDB this operator manages backs up to Amazon S3
+      over IPv6, or sets spec.replication.agent.lifecycle or
+      spec.galera.agent.lifecycle. AICR's accounting database does neither:
+      it is a single non-HA instance with no Backup resources.
+    stepsByDeployer:
+      - steps:
+          - id: set-dualstack-endpoint
+            description: >-
+              Only if a Backup, PhysicalBackup, PointInTimeRecovery or
+              Restore relies on IPv6 to reach Amazon S3: set its endpoint to
+              s3.dualstack.<region>.amazonaws.com explicitly.
+            reason: >-
+              The operator and agent now honor the configured endpoint as
+              written instead of rewriting it, so an IPv4 endpoint on an
+              IPv6-only path stops working.
+          - id: apply-bundle
+            description: >-
+              Apply the regenerated bundle with your deployer. The bundle
+              moves mariadb-operator-crds before mariadb-operator.
+            reason: >-
+              Upstream requires the CRDs chart to move first; a MariaDB that
+              sets agent.lifecycle rolls its Pods once when the operator
+              reconciles it.
+    references:
+      - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.2
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.2.md

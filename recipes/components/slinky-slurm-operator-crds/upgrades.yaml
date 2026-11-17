@@ -32,3 +32,17 @@ transitions:
       upgrade.
     references:
       - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.2/CHANGELOG/CHANGELOG-1.2.md
+  - from: ">=1.2.2 <1.2.4"
+    to: "1.2.4"
+    verdict: safe
+    verifiedBy: >-
+      Upstream changelog CHANGELOG-1.2.md (SlinkyProject/slurm-operator) at
+      v1.2.4, whose v1.2.3 and v1.2.4 entries list no CRD or API change. The
+      slurm-operator-crds chart at 1.2.4 differs from 1.2.2 only in its chart
+      version and README (diff -r of the two pulled charts), so every CRD it
+      applies is byte-identical.
+    summary: >-
+      Chart version bump only; the CRDs are unchanged. Nothing to change on
+      upgrade.
+    references:
+      - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.4/CHANGELOG/CHANGELOG-1.2.md

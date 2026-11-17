@@ -79,7 +79,7 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 	}
 
 	// Extract container status from "validator" container
-	cs, found := findContainerStatus(jobPod.Status.ContainerStatuses, ValidatorContainerName)
+	cs, found := pod.ContainerStatus(jobPod, ValidatorContainerName)
 	if !found {
 		result.ExitCode = -1
 		result.TerminationMsg = fmt.Sprintf("container %q not found (validator package contract)", ValidatorContainerName)
@@ -268,7 +268,7 @@ func (d *Deployer) reportedTermination(ctx context.Context) (string, bool) {
 	if termPod == nil {
 		return "", false
 	}
-	cs, found := findContainerStatus(termPod.Status.ContainerStatuses, ValidatorContainerName)
+	cs, found := pod.ContainerStatus(termPod, ValidatorContainerName)
 	if !found || cs.State.Terminated == nil {
 		return "", false
 	}
@@ -339,7 +339,7 @@ func (d *Deployer) jobFailedCondition(ctx context.Context) (*batchv1.Job, batchv
 // than ValidatorMaxStdoutLines of output still survives; only then is the
 // sentinel-stripped remainder truncated and length-capped for human display.
 func processValidatorLogs(logs string) (extra map[string]string, prov *ctrf.RuntimeProvenance, stdout []string) {
-	cleaned, extra, prov := parseExtraSentinels(logs)
+	cleaned, extra, prov := parseSentinels(logs)
 	stdout = filterStdoutLines(
 		truncateLogLines(cleaned, defaults.ValidatorMaxStdoutLines),
 		defaults.ValidatorMaxStdoutLineLength,
@@ -347,13 +347,13 @@ func processValidatorLogs(logs string) (extra map[string]string, prov *ctrf.Runt
 	return extra, prov, stdout
 }
 
-// parseExtraSentinels returns logs with every ctrf.ExtraLinePrefix and
+// parseSentinels returns logs with every ctrf.ExtraLinePrefix and
 // ctrf.ProvenanceLinePrefix line removed as cleaned, the valid Extra payloads
 // merged as extra (a later value wins per key), and the last valid provenance
 // record as prov. A malformed line is logged and skipped without discarding
 // earlier payloads. extra is nil unless some line parsed to a non-empty
 // object, and prov is nil unless some record carried both digests.
-func parseExtraSentinels(logs string) (cleaned string, extra map[string]string, prov *ctrf.RuntimeProvenance) {
+func parseSentinels(logs string) (cleaned string, extra map[string]string, prov *ctrf.RuntimeProvenance) {
 	if !strings.Contains(logs, ctrf.ExtraLinePrefix) && !strings.Contains(logs, ctrf.ProvenanceLinePrefix) {
 		return logs, nil, nil
 	}
@@ -424,7 +424,7 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 	}
 
 	// Check container status from "validator" container first (before fetching logs)
-	cs, found := findContainerStatus(jobPod.Status.ContainerStatuses, ValidatorContainerName)
+	cs, found := pod.ContainerStatus(jobPod, ValidatorContainerName)
 	if !found {
 		result.ExitCode = -1
 		// Route through waitFailureMessage so an infra/unavailable waitCause is
@@ -603,19 +603,4 @@ func boundTerminationMsg(msg string, maxBytes int) string {
 // inside this file remain readable.
 func (d *Deployer) getPodForJob(ctx context.Context) (*corev1.Pod, error) {
 	return pod.GetPodForJob(ctx, d.config.Clientset, d.config.Namespace, d.jobName)
-}
-
-// findContainerStatus finds a container status by name in the pod's container
-// status list. Returns the container status and true if found, or a zero value
-// and false if not found.
-//
-// This helper ensures sidecar-safety by allowing explicit container name lookup
-// instead of assuming index 0 is the validator container.
-func findContainerStatus(statuses []corev1.ContainerStatus, name string) (corev1.ContainerStatus, bool) {
-	for _, cs := range statuses {
-		if cs.Name == name {
-			return cs, true
-		}
-	}
-	return corev1.ContainerStatus{}, false
 }

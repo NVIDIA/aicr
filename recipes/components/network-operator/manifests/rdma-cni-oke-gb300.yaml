@@ -15,7 +15,7 @@
 # Installs the rdma CNI plugin that the rdma-net attachment chains after
 # host-device (rdma-net-oke-gb300.yaml). NicClusterPolicy has no rdma-cni
 # field, so this is a plain DaemonSet. The image is the one network-operator
-# 26.7.0 pins for its SR-IOV operator; its entrypoint copies the plugin into
+# 26.7.1 pins for its SR-IOV operator; its entrypoint copies the plugin into
 # /host/opt/cni/bin and sleeps. Rendered only when rdmaCni.enabled is true
 # (exclusive RDMA network namespace mode; see rdma-net-oke-gb300.yaml).
 {{- $rdmaCni := false }}
@@ -55,7 +55,7 @@ spec:
         - operator: Exists
       containers:
         - name: rdma-cni
-          image: nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.0@sha256:d3235d1f7be1fe825f23feddd714bc44acd0bad305ca598b365cd134f14ae28e
+          image: nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.1@sha256:7e5935818437bdeb3461f1c8a7107e2725dcba30a62e14bffcdaa4ea703d70f3
           imagePullPolicy: IfNotPresent
           securityContext:
             privileged: true

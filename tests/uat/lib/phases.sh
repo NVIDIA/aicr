@@ -244,7 +244,7 @@ SERVE_NAMESPACE="${SERVE_NAMESPACE:-dynamo-workload}"
 SERVE_NAME="${SERVE_NAME:-vllm-agg}"
 SERVE_QUEUE="${SERVE_QUEUE:-dynamo}"
 SERVE_MODEL="${SERVE_MODEL:-Qwen/Qwen3-0.6B}"
-SERVE_RUNTIME_IMAGE="${SERVE_RUNTIME_IMAGE:-nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2}"
+SERVE_RUNTIME_IMAGE="${SERVE_RUNTIME_IMAGE:-nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.6.2}"
 # GPU pool placement, applied to BOTH graph components (#1644 — it keeps the
 # Frontend off the small CPU nodes, where its ~12GB image pull blew the
 # readiness budget). The demo pins nodeGroup=gpu-worker; every UAT cluster
