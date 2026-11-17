@@ -62,14 +62,17 @@ transitions:
           - id: carry-prestop-commands
             description: >-
               Only if a NodeSet sets spec.slurmd.lifecycle.preStop: add
-              `scontrol update nodename=$(hostname) state=down reason='...'`
-              and `scontrol update nodename=$(hostname) state=drain reason='...'`
-              to that handler.
+              `scontrol update nodename=$(hostname) state=down reason='slurm-operator: Pod is terminating'`
+              and `scontrol update nodename=$(hostname) state=drain reason='slurm-operator: Pod is terminating'`
+              to that handler, keeping the `slurm-operator: ` prefix on the
+              reason.
             reason: >-
               Your handler now replaces the operator's default rather than
               running alongside it, so without these commands the Slurm
               controller keeps scheduling onto a node whose pod is going
-              away.
+              away. The operator clears only drains whose reason carries its
+              `slurm-operator: ` prefix; a drain with any other reason stays
+              until an administrator clears it in Slurm.
           - id: plan-worker-rollout
             description: >-
               Apply the regenerated bundle with your deployer in a window
