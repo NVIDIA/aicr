@@ -635,9 +635,14 @@ func (g *Generator) checkVendoredCRDs(ctx context.Context, outputDir string, fol
 	archives := map[string]string{}
 	for _, record := range g.vendorRecords {
 		for _, folder := range folders {
-			if folder.Name == record.Name {
-				archives[record.Name] = filepath.Join(outputDir, folder.Dir, "charts", record.TarballName)
+			if folder.Name != record.Name {
+				continue
 			}
+			archive, err := deployer.SafeJoin(outputDir, filepath.Join(folder.Dir, "charts", record.TarballName))
+			if err != nil {
+				return err
+			}
+			archives[record.Name] = archive
 		}
 		if archives[record.Name] == "" {
 			return errors.New(errors.ErrCodeInternal, "vendored chart has no bundle folder: "+record.Name)

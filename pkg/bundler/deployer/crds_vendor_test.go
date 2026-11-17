@@ -87,6 +87,9 @@ func TestVendoredRetainedCRDs(t *testing.T) {
 		{"distinct", "retained", "distinct", true, false},
 		{"templated and non-root crds", "retained", "templated", true, false},
 		{"json collision", "retained", "json", true, true},
+		{"uppercase extension collision", "retained", "uppercase", true, true},
+		{"list collision", "retained", "list", true, true},
+		{"crds subdirectory named as an exclusion", "retained", "crdsdir", true, true},
 		{"nonvendored attestation", "retained", "collision", false, false},
 		{"disabled", "disabled", "collision", true, false},
 		{"unchanged", "unchanged", "collision", true, false},
@@ -109,6 +112,12 @@ func TestVendoredRetainedCRDs(t *testing.T) {
 				ownerFiles["nvsentinel/templates/crds/shared.yaml"] = []byte("{{- if .Values.crds }}\n" + string(shared) + "{{- end }}\n")
 				ownerFiles["nvsentinel/files/crds/shared.yaml"] = shared
 				ownerFiles["nvsentinel/pax_global_header"] = nil
+			case "uppercase":
+				ownerFiles["nvsentinel/crds/shared.YAML"] = shared
+			case "list":
+				ownerFiles["nvsentinel/crds/list.yaml"] = []byte("kind: List\nitems:\n- kind: CustomResourceDefinition\n  metadata:\n    name: shared.test\n")
+			case "crdsdir":
+				ownerFiles["nvsentinel/crds/charts/mongodb-store/shared.yaml"] = shared
 			case "json":
 				ownerFiles["nvsentinel/crds/shared.json"] = []byte(`{"kind":"CustomResourceDefinition","metadata":{"name":"shared.test"}}`)
 			}

@@ -1046,7 +1046,11 @@ func (g *Generator) ownsCRDs(name string) bool { return g.crdOwners[name] }
 func (g *Generator) checkVendoredCRDs(ctx context.Context, outputDir string) error {
 	archives := map[string]string{}
 	for _, record := range g.vendorRecords {
-		archives[record.Name] = filepath.Join(outputDir, record.Name, "charts", record.TarballName)
+		archive, err := deployer.SafeJoin(outputDir, filepath.Join(record.Name, "charts", record.TarballName))
+		if err != nil {
+			return err
+		}
+		archives[record.Name] = archive
 	}
 	return deployer.CheckVendoredCRDOwnership(ctx, g.RecipeResult, archives)
 }

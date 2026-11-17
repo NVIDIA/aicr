@@ -153,10 +153,10 @@ func collectVendoredCRDs(ctx context.Context, data []byte, exclusions []string, 
 		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeDir {
 			return errors.New(errors.ErrCodeInvalidRequest, "chart archive contains a non-regular entry: "+header.Name)
 		}
-		if header.Typeflag == tar.TypeDir || excludedCRDPath(header.Name, exclusions) {
+		if header.Typeflag == tar.TypeDir {
 			continue
 		}
-		crd, nested := chartRootEntry(header.Name)
+		crd, nested := chartRootEntry(header.Name, exclusions)
 		if !nested && !crd {
 			continue
 		}
@@ -188,42 +188,69 @@ func collectVendoredCRDs(ctx context.Context, data []byte, exclusions []string, 
 // chartRootEntry classifies an archive entry by where Helm reads it: a CRD
 // file under a chart root's crds/ directory, or a packaged subchart under its
 // charts/ directory. Paths such as templates/crds/ are neither, since Helm
-// renders those as templates.
-func chartRootEntry(name string) (crd, nested bool) {
+// renders those as templates. Entries of an excluded subchart are neither.
+func chartRootEntry(name string, exclusions []string) (crd, nested bool) {
 	parts := strings.Split(path.Clean(name), "/")[1:]
-	for len(parts) > 2 && parts[0] == chartsDir {
+	for len(parts) >= 2 && parts[0] == chartsDir {
+		if excludedSubchart(parts[1], exclusions) {
+			return false, false
+		}
+		if len(parts) == 2 {
+			return false, strings.HasSuffix(parts[1], ".tgz")
+		}
 		parts = parts[2:]
 	}
-	if len(parts) < 2 {
+	if len(parts) < 2 || parts[0] != "crds" {
 		return false, false
 	}
-	switch parts[0] {
-	case "crds":
-		ext := path.Ext(name)
-		return ext == ".yaml" || ext == ".yml" || ext == ".json", false
-	case chartsDir:
-		return false, len(parts) == 2 && strings.HasSuffix(name, ".tgz")
-	}
-	return false, false
+	ext := strings.ToLower(path.Ext(name))
+	return ext == ".yaml" || ext == ".yml" || ext == ".json", false
 }
 
-func excludedCRDPath(name string, exclusions []string) bool {
-	parts := strings.Split(name, "/")
-	for i := 1; i < len(parts); i++ {
-		if parts[i-1] != chartsDir {
-			continue
+// excludedSubchart reports whether a charts/ entry, an unpacked directory or
+// a packaged <name>-<version>.tgz, is one of the excluded subcharts.
+func excludedSubchart(entry string, exclusions []string) bool {
+	for _, excluded := range exclusions {
+		if entry == excluded {
+			return true
 		}
-		for _, excluded := range exclusions {
-			if parts[i] == excluded {
-				return true
-			}
-			suffix, ok := strings.CutPrefix(parts[i], excluded+"-")
-			if ok && len(suffix) > 0 && suffix[0] >= '0' && suffix[0] <= '9' && strings.HasSuffix(suffix, ".tgz") {
-				return true
-			}
+		suffix, ok := strings.CutPrefix(entry, excluded+"-")
+		if ok && len(suffix) > 0 && suffix[0] >= '0' && suffix[0] <= '9' && strings.HasSuffix(suffix, ".tgz") {
+			return true
 		}
 	}
 	return false
+}
+
+// vendoredCRDDocument is the part of a crds/ manifest the check reads. Items
+// carries the members of a List, which Helm flattens on install.
+type vendoredCRDDocument struct {
+	Kind     string `yaml:"kind"`
+	Metadata struct {
+		Name string `yaml:"name"`
+	} `yaml:"metadata"`
+	Spec struct {
+		Conversion struct {
+			Strategy string `yaml:"strategy"`
+		} `yaml:"conversion"`
+	} `yaml:"spec"`
+	Items []vendoredCRDDocument `yaml:"items"`
+}
+
+func (d *vendoredCRDDocument) record(set map[string]bool) error {
+	for i := range d.Items {
+		if err := d.Items[i].record(set); err != nil {
+			return err
+		}
+	}
+	if d.Kind != "CustomResourceDefinition" {
+		return nil
+	}
+	if d.Metadata.Name == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "chart CRD has no metadata.name")
+	}
+	set[d.Metadata.Name] = set[d.Metadata.Name] || d.Spec.Conversion.Strategy == "Webhook"
+	return nil
 }
 
 func decodeVendoredCRDs(ctx context.Context, data []byte, set map[string]bool) error {
@@ -232,17 +259,7 @@ func decodeVendoredCRDs(ctx context.Context, data []byte, set map[string]bool) e
 		if err := ctx.Err(); err != nil {
 			return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "decode chart CRDs")
 		}
-		var document struct {
-			Kind     string `yaml:"kind"`
-			Metadata struct {
-				Name string `yaml:"name"`
-			} `yaml:"metadata"`
-			Spec struct {
-				Conversion struct {
-					Strategy string `yaml:"strategy"`
-				} `yaml:"conversion"`
-			} `yaml:"spec"`
-		}
+		var document vendoredCRDDocument
 		err := decoder.Decode(&document)
 		if stderrors.Is(err, io.EOF) {
 			return nil
@@ -250,12 +267,8 @@ func decodeVendoredCRDs(ctx context.Context, data []byte, set map[string]bool) e
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest, "decode chart CRD", err)
 		}
-		if document.Kind != "CustomResourceDefinition" {
-			continue
+		if err := document.record(set); err != nil {
+			return err
 		}
-		if document.Metadata.Name == "" {
-			return errors.New(errors.ErrCodeInvalidRequest, "chart CRD has no metadata.name")
-		}
-		set[document.Metadata.Name] = set[document.Metadata.Name] || document.Spec.Conversion.Strategy == "Webhook"
 	}
 }
