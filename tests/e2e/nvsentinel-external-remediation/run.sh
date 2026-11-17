@@ -74,6 +74,8 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${DIR}/../../.." && pwd)"
 # shellcheck source=/dev/null
 . "${ROOT}/tools/common"
+# shellcheck source=/dev/null
+. "${ROOT}/tests/e2e/lib/nvsentinel-mongodb.sh"
 
 CLUSTER_NAME="${CLUSTER_NAME:-aicr-3091-external-remediation-e2e}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-false}"
@@ -415,6 +417,8 @@ install_bundle() {
   ((remaining > 0)) || err "nvsentinel's MongoDB client certificate was never issued"
   kc -n nvsentinel wait --for=condition=Ready certificate/nvsentinel-mongodb-app-client \
     --timeout="${remaining}s" || err "nvsentinel's MongoDB client certificate was never issued"
+  nvsentinel_mongodb_ensure_tls_chain "${KUBE_CONTEXT}" nvsentinel "${deadline}" ||
+    err "nvsentinel-mongodb: the client and server certificates do not chain to one CA"
 
   install_component "${BUNDLE_DIR}"
 
