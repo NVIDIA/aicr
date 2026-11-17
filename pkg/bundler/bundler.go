@@ -434,7 +434,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if dir == "" {
 		dir = "."
 	}
-	// A trailing separator would make the stage's parent the destination itself.
+	// The result reports dir as written, as its OutputDir and in deployment steps.
 	dir = filepath.Clean(dir)
 	// After component validations, so a bundle that ships gpu-operator hears
 	// CheckDriverOwnershipCoherence's dynamic-path verdict first. Checked
@@ -513,6 +513,9 @@ func stageBundle(ctx context.Context, dir string) (*bundleStage, error) {
 	case err != nil:
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("failed to inspect output directory %s", dir), err)
+	case info.Mode()&os.ModeSymlink != 0 || !info.IsDir() && !info.Mode().IsRegular():
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("output path %s is a symlink or special object, not a directory", dir))
 	case !info.IsDir():
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("output path %s is not a directory", dir))
@@ -560,8 +563,9 @@ func (s *bundleStage) publish(ctx context.Context, inventory *checksum.Inventory
 // output, then moves the stage's entries in. Any other entry survives, unless
 // inventory is set. Then an entry made up only of earlierBundle files is
 // removed too, and any other entry fails publishing before dir changes.
-// Without inventory, it also removes the earlier bundle's checksums.txt and
-// attestation files, which would vouch for content the new bundle replaced.
+// Without inventory, it also removes the checksums.txt and attestation files
+// of an earlier bundle that earlierBundle recognizes, which would vouch for
+// content the new bundle replaced.
 func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.Inventory) error {
 	staged, err := os.ReadDir(s.path)
 	if err != nil {
@@ -571,11 +575,17 @@ func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.In
 	for i, e := range staged {
 		names[i] = e.Name()
 	}
-	var earlier bundlePaths
+	var earlier, signing bundlePaths
 	if inventory != nil {
 		var checkErr error
 		if earlier, checkErr = s.requireReplaceable(ctx, inventory.RelativeFiles()); checkErr != nil {
 			return checkErr
+		}
+	} else {
+		// Read before the removals below, which can take bundle-info.yaml.
+		var signErr error
+		if signing, signErr = earlierBundle(ctx, s.dir); signErr != nil {
+			return signErr
 		}
 	}
 	entries, err := os.ReadDir(s.dir)
@@ -609,7 +619,7 @@ func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.In
 		}
 	}
 	if inventory == nil {
-		if rmErr := removeSigningFiles(s.dir); rmErr != nil {
+		if rmErr := removeSigningFiles(s.dir, signing); rmErr != nil {
 			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
 				"failed to remove the earlier bundle's checksums and attestation from %s, leaving the bundle in %s",
 				s.dir, s.keep()), rmErr)
@@ -661,10 +671,14 @@ func (s *bundleStage) requireReplaceable(ctx context.Context, files []string) (b
 }
 
 // removeSigningFiles removes the regular files among dir's checksums.txt and
-// attestation files, then the attestation directory if that leaves it empty.
-// Other files in the attestation directory are kept.
-func removeSigningFiles(dir string) error {
+// attestation files that earlier, from earlierBundle, holds. When earlier
+// holds attestation files, it then removes the attestation directory if that
+// leaves it empty. Other files in the attestation directory are kept.
+func removeSigningFiles(dir string, earlier bundlePaths) error {
 	for _, rel := range append([]string{checksum.ChecksumFileName}, attestation.BundleMetadataPaths()...) {
+		if !earlier.files[rel] {
+			continue
+		}
 		p := filepath.Join(dir, filepath.FromSlash(rel))
 		info, err := os.Lstat(p)
 		if stderrors.Is(err, os.ErrNotExist) {
@@ -679,6 +693,9 @@ func removeSigningFiles(dir string) error {
 		if err := os.Remove(p); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to remove %s", p), err)
 		}
+	}
+	if !earlier.dirs[attestation.AttestationDir] {
+		return nil
 	}
 	attestDir := filepath.Join(dir, attestation.AttestationDir)
 	info, err := os.Lstat(attestDir)
@@ -761,14 +778,22 @@ func (p bundlePaths) has(rel string, isDir bool) bool {
 // earlierBundle returns the files in dir that the bundle described by its
 // checksums.txt wrote and that still match their digests, along with
 // checksums.txt and that bundle's attestation files. It is empty unless dir
-// holds a checksums.txt that parses and lists a matching bundle-info.yaml,
-// because sha256sum writes a manifest in the same format.
+// holds a regular checksums.txt that parses and lists a matching
+// bundle-info.yaml, because sha256sum writes a manifest in the same format.
 func earlierBundle(ctx context.Context, dir string) (bundlePaths, error) {
 	p := newBundlePaths()
-	f, err := os.Open(filepath.Join(dir, checksum.ChecksumFileName))
+	manifestPath := filepath.Join(dir, checksum.ChecksumFileName)
+	info, err := os.Lstat(manifestPath)
 	if stderrors.Is(err, os.ErrNotExist) {
 		return p, nil
 	}
+	if err != nil {
+		return p, errors.Wrap(errors.ErrCodeInternal, "failed to inspect the earlier bundle's checksums", err)
+	}
+	if !info.Mode().IsRegular() {
+		return p, nil
+	}
+	f, err := os.Open(manifestPath)
 	if err != nil {
 		return p, errors.Wrap(errors.ErrCodeInternal, "failed to open the earlier bundle's checksums", err)
 	}
@@ -3753,11 +3778,12 @@ func (b *DefaultBundler) attestBundleAt(ctx context.Context, dir, publishedDir s
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write bundle attestation", writeErr)
 	}
 	attestFiles = append(attestFiles, attestation.BundleAttestationFile)
-	slog.Info("bundle attestation written", "path", bundleAttestPath)
+	slog.Info("bundle attestation written",
+		"path", filepath.Join(publishedDir, filepath.FromSlash(attestation.BundleAttestationFile)))
 
 	// Copy binary attestation into bundle — errors are fatal since the user
 	// opted into attestation (remove --attest to skip).
-	if err := b.verifyAndCopyBinaryAttestation(ctx, dir); err != nil {
+	if err := b.verifyAndCopyBinaryAttestation(ctx, dir, publishedDir); err != nil {
 		return nil, err
 	}
 	attestFiles = append(attestFiles, attestation.BinaryAttestationFile)
@@ -3766,8 +3792,9 @@ func (b *DefaultBundler) attestBundleAt(ctx context.Context, dir, publishedDir s
 }
 
 // verifyAndCopyBinaryAttestation resolves the running binary's attestation,
-// cryptographically verifies it (REQ-6), and copies it into the bundle directory.
-func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir string) error {
+// cryptographically verifies it (REQ-6), and copies it into the bundle
+// directory dir, which is published at publishedDir.
+func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir, publishedDir string) error {
 	// Injected, pre-verified attestation: write it directly. The caller
 	// verified identity + binary-digest binding at injection time, so we do
 	// not re-discover or re-verify here.
@@ -3842,7 +3869,8 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 		return errors.Wrap(errors.ErrCodeInternal,
 			"failed to copy binary attestation into bundle", copyErr)
 	}
-	slog.Info("binary attestation copied into bundle", "path", destPath)
+	slog.Info("binary attestation copied into bundle",
+		"path", filepath.Join(publishedDir, filepath.FromSlash(attestation.BinaryAttestationFile)))
 
 	return nil
 }
