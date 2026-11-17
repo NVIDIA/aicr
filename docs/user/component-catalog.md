@@ -1696,7 +1696,7 @@ Do not also declare `kubeflow-trainer` locally. The mixin's ref sets `type`, `va
 
 Prerequisites: NVIDIA GPU Operator and cert-manager, both inherited from `base.yaml` by every stock recipe, plus Kubeflow Trainer, which is not — see the fragment above.
 
-NVCRE v0.8.2 expects Kubeflow Trainer **v2.2.1** — it pins `kubeflowTrainerVersion = "v2.2.1"` — which is the registry default, so its `setup status` reports a supported Trainer. A cluster still running 2.2.0 is reported as unsupported; no functional break is known between the two versions: the CRD delta is documentation text plus one embedded PodSpec field NVCRE does not set.
+NVCRE v0.12.0 expects Kubeflow Trainer **v2.2.1** — it pins `kubeflowTrainerVersion = "v2.2.1"` — which is the registry default, so its `setup status` reports a supported Trainer. A cluster still running 2.2.0 is reported as unsupported; no functional break is known between the two versions: the CRD delta is documentation text plus one embedded PodSpec field NVCRE does not set.
 
 ### Cluster-scoped objects and release ownership
 
