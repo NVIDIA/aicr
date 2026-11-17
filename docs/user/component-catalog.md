@@ -3326,9 +3326,21 @@ Apply the new CRDs before upgrading:
 
 **Order matters for `dynamo-platform` 1.6.** Its chart runs a pre-install and
 pre-upgrade check that requires a `grove-operator` image at alpha.14 or later,
-fully rolled out. Upgrade grove first and let its rollout finish before
-upgrading `dynamo-platform`. AICR's generated bundles already install grove
-first.
+fully rolled out. The check runs once, with two retries, and does not wait,
+so upgrade grove first and let its rollout finish before upgrading
+`dynamo-platform`. This also applies to a fresh install.
+
+- `deploy.sh` (the `helm` deployer) waits for each release by default, so
+  grove is ready before `dynamo-platform` starts. With `--no-wait` it is not.
+- With `argocd` and `argocd-helm`, sync waves create grove's Application
+  first but do not wait for it to become healthy. Sync grove and wait for it
+  to be healthy before syncing `dynamo-platform`, or generate the bundle with
+  `--argocd-sync-retry-limit` (for example `5`, with
+  `--argocd-sync-retry-backoff-duration 30s`) so a failed check is retried.
+  Automated sync does not retry a failed revision on its own.
+
+If the check already failed, wait for the grove rollout to finish, then re-run
+or re-sync `dynamo-platform`.
 
 The same bundles set `scheduler.args.default-staleness-grace-period: "-1s"` on
 `kai-scheduler`, so applying the regenerated `kai-scheduler` release hands

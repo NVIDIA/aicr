@@ -91,7 +91,19 @@ transitions:
               finish before applying the dynamo-platform upgrade.
             reason: >-
               The preflight hook reads the running grove-operator image tag
-              and rollout status, and fails the upgrade until both qualify.
+              and rollout status once, with two retries, and fails the
+              upgrade unless both qualify. deploy.sh waits for grove unless
+              run with --no-wait, but Argo CD sync waves do not wait for
+              grove to become healthy: sync grove first and wait for it, or
+              generate the bundle with --argocd-sync-retry-limit.
+          - id: recover-failed-preflight
+            description: >-
+              If the dynamo-platform upgrade failed in its Grove preflight
+              Job, wait for the grove-operator rollout to finish, then re-run
+              the installer or re-sync dynamo-platform.
+            reason: >-
+              Argo CD's automated sync does not retry a failed revision on
+              its own, so the release stays failed until it is applied again.
           - id: mirror-preflight-image
             description: >-
               On mirrored or air-gapped registries, mirror
