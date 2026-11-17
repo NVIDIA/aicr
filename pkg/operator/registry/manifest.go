@@ -25,11 +25,15 @@ import (
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry/remote"
 
+	"aicr.run/pkg/operator/defaults"
 	operrors "aicr.run/pkg/operator/errors"
 )
 
 // maxManifestBytes bounds an OCI manifest. Real manifests are a few KiB.
 const maxManifestBytes = 4 << 20
+
+// dockerManifestListMediaType is the Docker format of an image index.
+const dockerManifestListMediaType = "application/vnd.docker.distribution.manifest.list.v2+json"
 
 // fetchManifest returns the decoded manifest m that ref, a tag or digest,
 // names in r, and its descriptor desc. It reads at most maxBytes and verifies
@@ -47,6 +51,38 @@ func fetchManifest(ctx context.Context, repo *remote.Repository, r Repository, r
 		return desc, ocispec.Manifest{}, invalid("%s is not an OCI manifest: %v", at, err)
 	}
 	return desc, m, nil
+}
+
+// IndexManifests returns the digests of the manifests the image index with
+// digest dgst in r lists. It returns none when the registry serves dgst as
+// anything other than an OCI image index or a Docker manifest list.
+func (c *Client) IndexManifests(ctx context.Context, r Repository, dgst string) ([]string, error) {
+	if !digestPattern.MatchString(dgst) {
+		return nil, invalid("image index %q is not a sha256 digest", dgst)
+	}
+	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
+	defer cancel()
+	repo, err := c.repository(r)
+	if err != nil {
+		return nil, err
+	}
+	desc, data, err := oras.FetchBytes(ctx, repo, dgst, oras.FetchBytesOptions{MaxBytes: maxManifestBytes})
+	if err != nil {
+		return nil, classify(err, fmt.Sprintf("fetch manifest %s@%s", r, dgst))
+	}
+	// An image manifest may carry a manifests field, which is not an index.
+	if desc.MediaType != ocispec.MediaTypeImageIndex && desc.MediaType != dockerManifestListMediaType {
+		return nil, nil
+	}
+	var index ocispec.Index
+	if err = json.Unmarshal(data, &index); err != nil {
+		return nil, invalid("%s@%s is not an OCI manifest: %v", r, dgst, err)
+	}
+	out := make([]string, 0, len(index.Manifests))
+	for _, m := range index.Manifests {
+		out = append(out, m.Digest.String())
+	}
+	return out, nil
 }
 
 // blob is content a manifest references.

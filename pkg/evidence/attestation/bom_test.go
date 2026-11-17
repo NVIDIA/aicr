@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
@@ -119,6 +120,33 @@ func TestValidatorImagesForPredicate(t *testing.T) {
 
 	if ValidatorImagesForPredicate(nil) != nil {
 		t.Errorf("nil catalog should produce nil slice")
+	}
+}
+
+func TestBomValidatorRefs(t *testing.T) {
+	tests := []struct {
+		name   string
+		images []ValidatorImage
+		want   []string
+	}{
+		{"nil", nil, nil},
+		{
+			name: "dedupes by image preserving order",
+			images: []ValidatorImage{
+				{Image: "ghcr.io/x/performance:v1"},
+				{Image: "ghcr.io/x/deployment:v1"},
+				{Image: "ghcr.io/x/performance:v1"},
+			},
+			want: []string{"ghcr.io/x/performance:v1", "ghcr.io/x/deployment:v1"},
+		},
+		{"skips empty image", []ValidatorImage{{}, {Image: "ghcr.io/x/deployment:v1"}}, []string{"ghcr.io/x/deployment:v1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bomValidatorRefs(tt.images); !slices.Equal(got, tt.want) {
+				t.Errorf("bomValidatorRefs() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -256,11 +284,9 @@ func TestLoadOrGenerateBOM_AutoFromRecipe(t *testing.T) {
 			{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Chart: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia", Version: "v25.10.1"},
 		},
 	}
-	cat := &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-		{Name: "operator-health", Image: "ghcr.io/x/deployment:latest"},
-	}}
+	images := []ValidatorImage{{Image: "ghcr.io/x/deployment:latest"}}
 
-	body, err := LoadOrGenerateBOM("", rec, nil, cat, "v0.1.0")
+	body, err := LoadOrGenerateBOM("", rec, nil, images, "v0.1.0")
 	if err != nil {
 		t.Fatalf("LoadOrGenerateBOM auto: %v", err)
 	}
@@ -293,13 +319,12 @@ func TestBuildAutoBOM_IncludesRecipeAndValidatorComponents(t *testing.T) {
 			{Name: "disabled-comp", Type: recipe.ComponentTypeHelm, Overrides: map[string]any{"enabled": false}},
 		},
 	}
-	cat := &catalog.ValidatorCatalog{Validators: []catalog.ValidatorEntry{
-		{Name: "a", Image: "ghcr.io/x/deployment:latest"},
-		{Name: "b", Image: "ghcr.io/x/deployment:latest"},
-		{Name: "c", Image: "ghcr.io/x/performance:latest"},
-	}}
+	images := []ValidatorImage{
+		{Image: "ghcr.io/x/deployment:latest"},
+		{Image: "ghcr.io/x/performance:latest"},
+	}
 
-	body, err := BuildAutoBOM(rec, nil, cat, "v0.1.0")
+	body, err := BuildAutoBOM(rec, nil, images, "v0.1.0")
 	if err != nil {
 		t.Fatalf("BuildAutoBOM: %v", err)
 	}
