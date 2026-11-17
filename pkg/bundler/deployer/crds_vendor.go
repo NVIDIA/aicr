@@ -31,6 +31,7 @@ import (
 	"aicr.run/pkg/defaults"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/recipe"
+	"github.com/Masterminds/semver/v3"
 	"gopkg.in/yaml.v3"
 )
 
@@ -214,8 +215,12 @@ func excludedSubchart(entry string, exclusions []string) bool {
 		if entry == excluded {
 			return true
 		}
-		suffix, ok := strings.CutPrefix(entry, excluded+"-")
-		if ok && len(suffix) > 0 && suffix[0] >= '0' && suffix[0] <= '9' && strings.HasSuffix(suffix, ".tgz") {
+		version, ok := strings.CutPrefix(entry, excluded+"-")
+		if !ok || !strings.HasSuffix(version, ".tgz") {
+			continue
+		}
+		// A full version, so mongodb-store-2-1.0.0.tgz is chart mongodb-store-2.
+		if _, err := semver.StrictNewVersion(strings.TrimSuffix(version, ".tgz")); err == nil {
 			return true
 		}
 	}

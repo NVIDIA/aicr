@@ -89,6 +89,8 @@ func TestVendoredRetainedCRDs(t *testing.T) {
 		{"json collision", "retained", "json", true, true},
 		{"uppercase extension collision", "retained", "uppercase", true, true},
 		{"list collision", "retained", "list", true, true},
+		{"subchart name extending an exclusion", "retained", "extended", true, true},
+		{"excluded prerelease mongodb", "retained", "prerelease", true, false},
 		{"crds subdirectory named as an exclusion", "retained", "crdsdir", true, true},
 		{"nonvendored attestation", "retained", "collision", false, false},
 		{"disabled", "disabled", "collision", true, false},
@@ -112,6 +114,10 @@ func TestVendoredRetainedCRDs(t *testing.T) {
 				ownerFiles["nvsentinel/templates/crds/shared.yaml"] = []byte("{{- if .Values.crds }}\n" + string(shared) + "{{- end }}\n")
 				ownerFiles["nvsentinel/files/crds/shared.yaml"] = shared
 				ownerFiles["nvsentinel/pax_global_header"] = nil
+			case "extended":
+				ownerFiles["nvsentinel/charts/mongodb-store-2-1.0.0.tgz"] = crdArchive(t, map[string][]byte{"mongodb-store-2/crds/shared.yaml": shared})
+			case "prerelease":
+				ownerFiles["nvsentinel/charts/mongodb-store-1.0.0-rc.1.tgz"] = crdArchive(t, map[string][]byte{"mongodb-store/crds/shared.yaml": shared})
 			case "uppercase":
 				ownerFiles["nvsentinel/crds/shared.YAML"] = shared
 			case "list":
