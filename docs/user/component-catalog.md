@@ -3336,17 +3336,18 @@ so upgrade grove first and let its rollout finish before upgrading
   first but do not wait for it to become healthy. Sync grove and wait for it
   to be healthy before syncing `dynamo-platform`, or generate the bundle with
   `--argocd-sync-retry-limit` (for example `5`, with
-  `--argocd-sync-retry-backoff-duration 30s`) so a failed check is retried.
-  Automated sync does not retry a failed revision on its own.
+  `--argocd-sync-retry-backoff-duration 30s`) to give grove more time before
+  the check is retried.
 
 If the check already failed, wait for the grove rollout to finish, then re-run
-or re-sync `dynamo-platform`.
+`dynamo-platform`. On Argo CD, if the sync still fails after any automatic
+retries, wait for grove to be healthy and re-sync `dynamo-platform` manually.
 
 The same bundles set `scheduler.args.default-staleness-grace-period: "-1s"` on
 `kai-scheduler`, so applying the regenerated `kai-scheduler` release hands
 PodGroup termination timing to Grove, as the Dynamo chart README requires.
 
-No resource migration is needed, and fresh installs are unaffected.
+No resource migration is needed.
 
 ### `dynamo-platform`: opting back into bundled NATS on a standing cluster
 

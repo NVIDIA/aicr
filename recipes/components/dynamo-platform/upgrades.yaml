@@ -95,15 +95,19 @@ transitions:
               upgrade unless both qualify. deploy.sh waits for grove unless
               run with --no-wait, but Argo CD sync waves do not wait for
               grove to become healthy: sync grove first and wait for it, or
-              generate the bundle with --argocd-sync-retry-limit.
+              generate the bundle with --argocd-sync-retry-limit (for example
+              5, with --argocd-sync-retry-backoff-duration 30s) to give grove
+              more time before the check is retried.
           - id: recover-failed-preflight
             description: >-
               If the dynamo-platform upgrade failed in its Grove preflight
               Job, wait for the grove-operator rollout to finish, then re-run
-              the installer or re-sync dynamo-platform.
+              the installer. On Argo CD, if the sync still fails after any
+              automatic retries, wait for grove to be healthy and re-sync
+              dynamo-platform manually.
             reason: >-
-              Argo CD's automated sync does not retry a failed revision on
-              its own, so the release stays failed until it is applied again.
+              A failed preflight leaves the release failed until it is
+              applied again with grove ready.
           - id: mirror-preflight-image
             description: >-
               On mirrored or air-gapped registries, mirror
