@@ -365,7 +365,22 @@ Service's in-cluster name for a `service-endpoints` data plane, the first
 declared `gateway-address` profile the probe connects to that status address
 from inside the cluster, so the address's `loadBalancerSourceRanges` and the
 load balancer's hairpin behavior apply to it; no shipped recipe declares that
-profile (agentgateway is `service-endpoints`). In a per-run namespace
+profile (agentgateway is `service-endpoints`).
+
+For a `service-endpoints` data plane the probe pod is scheduled onto a node
+running one of the proxy Service's pods: a required pod affinity on the Service
+selector in the Gateway's namespace, with `kubernetes.io/hostname` topology,
+plus the tolerations of the youngest live proxy pod, added to the context
+tolerations (a tolerate-all set is left as is). With the single proxy replica
+AICR ships, the
+probe's requests to the gateway then stay on that node, so node-group network
+rules such as EKS per-node-group security groups cannot block them. A
+NetworkPolicy still applies. If the probe cannot fit on that node, it fails as
+Unschedulable, and the error names the affinity. A selector-less Service, or
+one with no live pod, leaves the probe's placement unconstrained. A
+`gateway-address` data plane has no proxy pod, so its probe is not constrained.
+
+In a per-run namespace
 (`gateway-traffic-<token>`, the shared ownership token and UID-guarded
 cleanup, labeled `app.kubernetes.io/component=inference-perf` so a listener
 whose `allowedRoutes` selector admits the performance validator's namespaces

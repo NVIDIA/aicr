@@ -253,9 +253,13 @@ that meet it.
   workload.
 - Each stock platform's system pool must fit NKTP's central workloads, and
   qualification shows that it does.
-- AICR does not override collector resources. NKTP tunes each collector's
-  resource limits, memory limiter, and queues together, so an override would
-  have to retune all three and be requalified on every NKTP upgrade.
+- AICR overrides only collector CPU requests and HPA CPU targets (#3849).
+  NKTP's defaults reserved more CPU than a small system pool has. Each
+  autoscaled collector's `targetCPUUtilization` keeps NKTP's absolute scale-out
+  threshold, counting the native `otc-sidecar` request, so these values must be
+  re-derived from the chart's default requests, targets, and sidecar requests
+  on every NKTP chart bump. Memory requests, limits, the memory limiter, and
+  queues stay NKTP's.
 
 **Security and data.**
 
