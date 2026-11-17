@@ -3297,14 +3297,24 @@ No resource migration is needed, and fresh installs are unaffected.
 
 ### `grove`: `v0.1.0-alpha.13` to `v0.1.0-alpha.14`
 
-alpha.14 adds a coherent update strategy for PodCliqueSets. It writes new
-status fields on the `podcliques.grove.io`, `podcliquescalinggroups.grove.io`
-and `podcliquesets.grove.io` CRDs, such as `lastProgressedAt`, and drops some
-older ones. All CRDs stay at `v1alpha1`.
+alpha.14 changes four CRDs. All of them stay at `v1alpha1`.
 
-As with alpha.13, `helm upgrade` never applies changed `crds/`. A plain chart
-bump keeps the alpha.13 CRDs, and the API server silently drops the new
-status fields. Apply the new CRDs before upgrading:
+- **`podgangmaps.grove.io`:** alpha.14 drops `spec.entries[].anchorIndex`,
+  along with the alpha.13 CEL rule that every `Anchor` entry carry one
+  ([ai-dynamo/grove#831](https://github.com/ai-dynamo/grove/pull/831)).
+- **The three PodClique CRDs:** `podcliques.grove.io`,
+  `podcliquescalinggroups.grove.io` and `podcliquesets.grove.io` gain new
+  status fields for the coherent update strategy, such as
+  `lastProgressedAt`.
+
+As with alpha.13, `helm upgrade` never applies changed `crds/`, and a plain
+chart bump keeps the alpha.13 CRDs. Two things go wrong:
+
+- **Hard failure:** the old CEL rule rejects every `Anchor` PodGangMap write
+  from the alpha.14 operator, so PodCliqueSets stop progressing.
+- **Silent loss:** the API server drops the new status fields.
+
+Apply the new CRDs before upgrading:
 
 1. Apply the alpha.14 CRDs directly from the chart:
    ```bash

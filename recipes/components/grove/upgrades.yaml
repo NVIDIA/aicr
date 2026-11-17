@@ -204,14 +204,15 @@ transitions:
     to: "0.1.0-alpha.14"
     verdict: manual
     summary: >-
-      alpha.14 adds the coherent update strategy, which writes new status
-      fields on podcliques, podcliquescalinggroups and podcliquesets
-      (lastProgressedAt, updatedScheduledReplicas and update progress) and
-      drops others. helm upgrade never applies changed crds/, so a plain chart
-      bump keeps the alpha.13 CRDs and the API server silently prunes the new
-      fields from every status write. dynamo-platform 1.6 refuses to install or
-      upgrade until a grove-operator image at alpha.14 or later has finished
-      rolling out.
+      alpha.14 drops anchorIndex from podgangmaps entries, and with it the
+      alpha.13 CRD's CEL rule that every Anchor entry carry one. helm upgrade
+      never applies changed crds/, so a plain chart bump keeps that rule, the
+      API server rejects every Anchor-entry PodGangMap write from the alpha.14
+      operator, and PodCliqueSets stop progressing. The same skipped apply
+      silently prunes the new status fields alpha.14 writes on podcliques,
+      podcliquescalinggroups and podcliquesets. dynamo-platform 1.6 refuses to
+      install or upgrade until a grove-operator image at alpha.14 or later has
+      finished rolling out.
     stepsByDeployer:
       - deployers: [helm, helmfile]
         steps:
