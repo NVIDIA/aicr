@@ -44,7 +44,10 @@ transitions:
       kube-state-metrics, the default rules and the dashboards. Prometheus
       stops loading PrometheusRules, Probes and ScrapeConfigs, keeps only the
       series AICR components query, and moves from its PVC to an emptyDir, so
-      its history is lost.
+      its history is lost. A target of 85.0.0 or later also moves Prometheus
+      to a distroless image: a private registry that mirrors the stack's
+      images needs the -distroless Prometheus tag, and the container has no
+      shell for kubectl exec.
     precondition: >-
       Anything that reads this release's Grafana, Alertmanager or Prometheus
       history has another source, such as nktp.

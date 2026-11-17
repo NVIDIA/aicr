@@ -29,16 +29,16 @@ transitions:
       monitoring.coreos.com, the same served versions (v1 and v1alpha1), and
       only added optional fields and tightened validation, per the
       prometheus-operator v0.91.0 to v0.93.1 release notes (externalId in
-      SigV4, Mattermost and email threading receivers, staleSeriesCompaction
-      Threshold, chunkEncoding, unsigned fields rejecting negatives). The
-      CRD inventory regenerated at 31.0.1 lists the same CRDs the health
-      check asserts. In-place Helm upgrade on a single-node Kind v1.37.0
-      cluster, 2026-11-15: 28.0.1 to 31.0.1 with kube-prometheus-stack
-      84.5.0 still running. All ten CRDs carried the v0.93.1 schema, the
-      running Prometheus stayed Available and kept scraping its
-      ServiceMonitor targets, the v0.90.1 operator logged no warning or
-      error, the shipped health check passed, and the stack then upgraded to
-      88.6.5 on the new schema.
+      SigV4, Mattermost and email threading receivers,
+      staleSeriesCompactionThreshold, chunkEncoding, unsigned fields
+      rejecting negatives). The CRD inventory regenerated at 31.0.1 lists
+      the same CRDs the health check asserts. In-place Helm upgrade on a
+      single-node Kind v1.37.0 cluster, 2026-11-15: 28.0.1 to 31.0.1 with
+      kube-prometheus-stack 84.5.0 still running. All ten CRDs carried the
+      v0.93.1 schema, the running Prometheus stayed Available and kept
+      scraping its ServiceMonitor targets, the v0.90.1 operator logged no
+      warning or error, the shipped health check passed, and the stack then
+      upgraded to 88.6.5 on the new schema.
     summary: >-
       CRD schema update for prometheus-operator v0.93.1, applied in place by
       the release upgrade. Upgrade this release before kube-prometheus-stack,
