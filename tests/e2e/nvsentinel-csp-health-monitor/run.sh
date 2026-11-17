@@ -61,7 +61,7 @@
 # off, since cordoning Kind's only node trips it, and local-path-storage added
 # to node-drainer's system namespaces, as in tests/e2e/nvsentinel-remediation.
 #
-# PREREQUISITES: go, kind, kubectl, helm, yq, jq, timeout
+# PREREQUISITES: go, kind, kubectl, helm, yq, jq, timeout, openssl
 #
 # ENVIRONMENT VARIABLES:
 #   CLUSTER_NAME   Kind cluster name (default: aicr-nvsentinel-csp-e2e).
@@ -79,6 +79,8 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${DIR}/../../.." && pwd)"
 # shellcheck source=/dev/null
 . "${ROOT}/tools/common"
+# shellcheck source=/dev/null
+. "${ROOT}/tests/e2e/lib/nvsentinel-mongodb.sh"
 
 CLUSTER_NAME="${CLUSTER_NAME:-aicr-nvsentinel-csp-e2e}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-false}"
@@ -298,6 +300,8 @@ install_bundle() {
   ((remaining > 0)) || err "nvsentinel's MongoDB client certificate was never issued"
   kc -n nvsentinel wait --for=condition=Ready certificate/nvsentinel-mongodb-app-client \
     --timeout="${remaining}s" || err "nvsentinel's MongoDB client certificate was never issued"
+  nvsentinel_mongodb_ensure_tls_chain "${KUBE_CONTEXT}" nvsentinel "${deadline}" ||
+    err "nvsentinel-mongodb: the client and server certificates do not chain to one CA"
 
   install_component "${BUNDLE_DIR}"
 
@@ -631,7 +635,7 @@ msg "=========================================="
 msg "nvsentinel-csp-health-monitor mixins e2e"
 msg "=========================================="
 
-has_tools go kind kubectl helm yq jq timeout
+has_tools go kind kubectl helm yq jq timeout openssl
 WORK=$(mktemp -d)
 export KUBECONFIG="${WORK}/kubeconfig"
 

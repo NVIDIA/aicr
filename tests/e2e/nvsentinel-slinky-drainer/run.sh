@@ -59,7 +59,7 @@
 #       not installed here, so the selectors only have to get the bundle past
 #       the gate.
 #
-# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl
+# PREREQUISITES: go, kind, kubectl, helm, yq, jq, curl, openssl
 #
 # ENVIRONMENT VARIABLES:
 #   CLUSTER_NAME   Kind cluster name (default: aicr-nvsentinel-slinky-drainer-e2e).
@@ -75,6 +75,8 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${DIR}/../../.." && pwd)"
 # shellcheck source=/dev/null
 . "${ROOT}/tools/common"
+# shellcheck source=/dev/null
+. "${ROOT}/tests/e2e/lib/nvsentinel-mongodb.sh"
 
 CLUSTER_NAME="${CLUSTER_NAME:-aicr-nvsentinel-slinky-drainer-e2e}"
 KEEP_CLUSTER="${KEEP_CLUSTER:-false}"
@@ -289,6 +291,8 @@ install_bundle() {
   ((remaining > 0)) || err "nvsentinel's MongoDB client certificate was never issued"
   kc -n nvsentinel wait --for=condition=Ready certificate/nvsentinel-mongodb-app-client \
     --timeout="${remaining}s" || err "nvsentinel's MongoDB client certificate was never issued"
+  nvsentinel_mongodb_ensure_tls_chain "${KUBE_CONTEXT}" nvsentinel "${deadline}" ||
+    err "nvsentinel-mongodb: the client and server certificates do not chain to one CA"
 
   # In bundle order: node-drainer and the plugin exit at startup without the
   # CRD, and node-drainer without the template ConfigMap. With the wait
@@ -574,7 +578,7 @@ msg "=========================================="
 msg "nvsentinel-slinky-drainer mixin e2e"
 msg "=========================================="
 
-has_tools go kind kubectl helm yq jq curl
+has_tools go kind kubectl helm yq jq curl openssl
 WORK=$(mktemp -d)
 export KUBECONFIG="${WORK}/kubeconfig"
 
