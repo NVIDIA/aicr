@@ -50,8 +50,10 @@ on:
       - 'pkg/bundler/validations/nvsentinel_drain_scope.go'
       - 'tests/e2e/nvsentinel-event-exporter/**'
       - 'pkg/bundler/deployer/localformat/templates/**'
-      # run.sh sources tools/common and is invoked through a make target.
+      # run.sh sources tools/common and tests/e2e/lib/nvsentinel-mongodb.sh, and is
+      # invoked through a make target.
       - 'tools/common'
+      - 'tests/e2e/lib/nvsentinel-mongodb.sh'
       - 'Makefile'
       - '.github/workflows/nvsentinel-event-exporter-e2e.yaml'
       - '.github/actions/setup-build-tools/**'
