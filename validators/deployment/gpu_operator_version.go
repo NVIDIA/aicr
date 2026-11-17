@@ -137,9 +137,9 @@ func getVersionFromDeployment(ctx context.Context, clientset kubernetes.Interfac
 			fmt.Sprintf("failed to get deployment %s/%s", namespace, name), err)
 	}
 
-	// Strategy 1: Check standard version label
-	if version, ok := deployment.Labels["app.kubernetes.io/version"]; ok && version != "" {
-		return normalizeVersion(version), "", nil
+	// Strategy 1: Check standard version label. A blank value counts as absent.
+	if version := normalizeVersion(deployment.Labels["app.kubernetes.io/version"]); version != "" {
+		return version, "", nil
 	}
 
 	// Strategy 2: Parse version from container image tag. The first
@@ -159,9 +159,10 @@ func getVersionFromDeployment(ctx context.Context, clientset kubernetes.Interfac
 		}
 	}
 
-	// Strategy 3: Check annotations
-	if version, ok := deployment.Annotations["nvidia.com/gpu-operator-version"]; ok && version != "" {
-		return normalizeVersion(version), "", nil
+	// Strategy 3: Check annotations. A blank value counts as absent, so a
+	// digest-only image is still reported as pinned.
+	if version := normalizeVersion(deployment.Annotations["nvidia.com/gpu-operator-version"]); version != "" {
+		return version, "", nil
 	}
 
 	if pinnedImage != "" {

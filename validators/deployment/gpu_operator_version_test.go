@@ -248,6 +248,16 @@ func TestGetGPUOperatorVersion(t *testing.T) {
 			wantVer:    "v26.3.0",
 		},
 		{
+			name:       "digest only with a blank annotation is still reported as pinned",
+			deployment: operatorDeployment(digestOnly, nil, map[string]string{"nvidia.com/gpu-operator-version": "   "}),
+			wantPinned: digestOnly,
+		},
+		{
+			name:       "a blank version label falls through to the image tag",
+			deployment: operatorDeployment("nvcr.io/nvidia/gpu-operator:v25.10.1", map[string]string{"app.kubernetes.io/version": " "}, nil),
+			wantVer:    "v25.10.1",
+		},
+		{
 			name:       "untagged image without digest is an error",
 			deployment: operatorDeployment("nvcr.io/nvidia/gpu-operator", nil, nil),
 			wantErr:    true,
