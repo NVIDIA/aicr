@@ -1,0 +1,85 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: runai-cluster
+transitions:
+  # from starts at 3.0.20, the release AICR pinned before 3.0.24 and the only
+  # one assessed here; an origin below it resolves to blocked. The chart
+  # change itself is fix-only (upstream 3.0.21-3.0.23 notes; 3.0.24 adds no
+  # commit over 3.0.23); the RunaiConfig CRD gains one optional field, and
+  # helm template with AICR's values renders the same Deployments and hook
+  # Jobs. The verdict is manual because of how every upgrade is driven.
+  - from: ">=3.0.20 <3.0.24"
+    to: "3.0.24"
+    verdict: manual
+    summary: >-
+      Every runai-cluster upgrade needs a bootstrap token freshly issued by the
+      Run:ai control plane. controlPlane.bootstrapToken expires two hours after
+      it is issued, so the install's token no longer works, and install.sh
+      refuses to run Helm while it is empty. Upstream also requires the control
+      plane chart to be upgraded before the cluster chart. The chart change
+      itself is fix-only; the embedded KAI resource-management moves from
+      v0.18.3 to v0.18.8.
+    precondition: >-
+      Access to the Run:ai control plane this cluster registers with, to
+      upgrade it and to issue a new bootstrap token. AICR bundles runai-cluster
+      only for the helm deployer, because the token is an install-time secret
+      that may only be declared with --dynamic on helm.
+    stepsByDeployer:
+      - deployers: [helm]
+        steps:
+          - id: upgrade-control-plane
+            description: >-
+              Upgrade the Run:ai control plane Helm chart to 3.0.24 or later,
+              and wait for that upgrade to complete.
+            reason: >-
+              Upstream supports upgrading the cluster chart only after the
+              control plane upgrade has completed.
+          - id: issue-bootstrap-token
+            description: >-
+              Issue a new bootstrap token for this cluster from the Run:ai
+              control plane.
+            reason: >-
+              The token used at install expired two hours after it was issued,
+              and the chart's registration hooks need a valid one.
+          - id: fill-token
+            description: >-
+              In the regenerated bundle, set controlPlane.bootstrapToken in the
+              runai-cluster cluster-values.yaml to the new token.
+            reason: >-
+              install.sh refuses to run Helm while that value is empty.
+          - id: rerun-install
+            description: >-
+              Re-run deploy.sh, or the runai-cluster install.sh, within two
+              hours of issuing the token. Then clear the token from
+              cluster-values.yaml.
+            reason: >-
+              Moves runai-cluster to 3.0.24. Clearing the value keeps the token
+              from sitting at rest on the install machine.
+      - steps:
+          - id: use-helm-deployer
+            description: >-
+              Regenerate the bundle with --deployer helm, declaring
+              --dynamic runai:controlPlane.bootstrapToken, and follow the helm
+              steps.
+            reason: >-
+              aicr bundle accepts runai-cluster's bootstrap token only as a
+              --dynamic value on the helm deployer, so no other deployer can
+              carry the upgrade.
+    references:
+      - https://github.com/dsx-ai-factory/run-ai/blob/3.0.24/docs/installation-and-configuration/upgrade/plan-the-upgrade.md
+      - https://github.com/dsx-ai-factory/run-ai/releases/tag/3.0.23
+      - https://github.com/dsx-ai-factory/run-ai/releases/tag/3.0.24

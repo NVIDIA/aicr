@@ -37,5 +37,5 @@ charts:
       - nimpipelines.apps.nvidia.com
       - nimservices.apps.nvidia.com
     repository: https://helm.ngc.nvidia.com/nvidia
-    sourceVersion: 3.1.0
+    sourceVersion: 3.1.4
 component: k8s-nim-operator-ocp

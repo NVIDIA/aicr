@@ -378,11 +378,14 @@ func TestObjectMonitorImagePinnedEverywhere(t *testing.T) {
 //	                 nvidia-cuda-validator (a ClusterPolicy-owned Pod, not a
 //	                 DaemonSet).
 //	network-operator verified in the v26.7.0 source and its heterogeneous
-//	                 cluster documentation. The preceding 26.4.1 behavior was
-//	                 exercised on Kind against a hand-written NicClusterPolicy,
-//	                 on the mofed driver and rdma-shared-dp operands. No AICR
-//	                 hardware cluster with network-operator was available to
-//	                 confirm 26.7.0; treat this as the weaker of the two.
+//	                 cluster documentation, and carried to v26.7.1 because
+//	                 that release changes nothing under pkg/ or manifests/
+//	                 (where the per-operand label is stamped). The preceding
+//	                 26.4.1 behavior was exercised on Kind against a
+//	                 hand-written NicClusterPolicy, on the mofed driver and
+//	                 rdma-shared-dp operands. No AICR hardware cluster with
+//	                 network-operator was available to confirm 26.7.x; treat
+//	                 this as the weaker of the two.
 var objectMonitorOperandIdentities = []struct {
 	component    string
 	verifiedAt   string
@@ -399,7 +402,7 @@ var objectMonitorOperandIdentities = []struct {
 	},
 	{
 		component:    "network-operator",
-		verifiedAt:   "26.7.0",
+		verifiedAt:   "26.7.1",
 		label:        "ds-owner",
 		policy:       "network-operator-pod-health",
 		notCoveredBy: "nv-ipam-node, which omits the label upstream",

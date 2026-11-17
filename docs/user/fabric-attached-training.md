@@ -205,7 +205,7 @@ to list them; ask whoever provisions the cluster for the mapping.
 ### Do not set `resourcesPerNode`
 
 Let the runtime own the resource shape. On the pinned Kubeflow Trainer
-**v2.2.0**, `resourcesPerNode` on a TrainJob is not merged into the runtime's —
+**v2.2.1**, `resourcesPerNode` on a TrainJob is not merged into the runtime's —
 a value carrying `limits` or `requests` **replaces**
 the worker's resource requirements outright, so a job that sets it to ask for
 memory silently loses the runtime's `nvidia.com/gpu: 8` and TCPXO stops working.

@@ -17,7 +17,7 @@
 # Validates that the NVIDIA NIM Operator is running and healthy in the
 # nvidia-nim namespace. Also asserts nimservices / nimcaches /
 # nimpipelines.apps.nvidia.com are Established=True (verified against
-# chart 3.1.0; re-verify on defaultVersion bump). Checks that the
+# chart 3.1.4; re-verify on defaultVersion bump). Checks that the
 # k8s-nim-operator deployment has at least one available replica and
 # that no pods in the namespace are stuck in Pending, Failed, or
 # Unknown phases.

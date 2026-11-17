@@ -159,7 +159,7 @@ spec:
     image: my-registry/my-trainer:latest
 ```
 
-**Do not set `resourcesPerNode`.** On the pinned Kubeflow Trainer v2.2.0 a
+**Do not set `resourcesPerNode`.** On the pinned Kubeflow Trainer v2.2.1 a
 TrainJob value replaces the runtime's resource requirements outright rather
 than merging, so a job that sets it loses the `nvidia.com/gpu: "4"` request
 and with it the whole node. RDMA cannot be shared between Pods on a node, so

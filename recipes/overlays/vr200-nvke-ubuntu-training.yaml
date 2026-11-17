@@ -159,12 +159,13 @@ spec:
     # ofedDriver: NVKE runs the host's inbox mlx5_core, and DOCA-OFED must not
     # be installed on these nodes.
     #
-    # Pinned to chart 26.7.1 rather than the registry default of 26.7.0. The
-    # daemon in 26.7.0 has no firmware-discovery fallback, so a flint failure
-    # is fatal, and flint cannot read ConnectX-9 here. Measured on a VR200
-    # worker: 26.7.0 dies with "failed to discover NIC devices", 26.7.1 logs
-    # "flint failed, falling back to sysfs" and discovers every port. The
-    # manifest pins the matching daemon image and says why.
+    # Needs chart 26.7.1 or later, which is the registry default; this leaf
+    # pinned it while the default was still 26.7.0. The daemon in 26.7.0 has
+    # no firmware-discovery fallback, so a flint failure is fatal, and flint
+    # cannot read ConnectX-9 here. Measured on a VR200 worker: 26.7.0 dies
+    # with "failed to discover NIC devices", 26.7.1 logs "flint failed,
+    # falling back to sysfs" and discovers every port. The manifest pins the
+    # matching daemon image and says why.
     #
     # The rails below are RoCE, not IB. gb200-nvke's policy and its
     # sriov-ib-networks pair hardcode four ConnectX-7 IB rails per tray, and
@@ -178,7 +179,6 @@ spec:
     # and the default route, so it cannot be carved.
     - name: network-operator
       type: Helm
-      version: "26.7.1"
       valuesFile: components/network-operator/values-nvke-gb200.yaml
       manifestFiles:
         - components/network-operator/manifests/nic-cluster-policy-nvke-vr200.yaml
