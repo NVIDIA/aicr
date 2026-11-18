@@ -604,6 +604,12 @@ clusters is covered by [UAT](uat.md).
 - artifact schemas — `tools/schemagen` tests gate freshness, real-artifact
   validity, and breaking changes against `api/aicr/v1/schemas/baseline/`. See
   [API server](api-server.md#artifact-schema-gate).
+- operator contract — `TestOperatorReadsCommitAICR` in
+  `pkg/operator/resolver` builds `aicr` from the commit, runs `recipe`,
+  `bundle` and `upgrade-check` with the arguments the operator passes, and
+  feeds the output to the operator's parsers and plan builder. A field the
+  operator reads that the output no longer carries fails, naming the field and
+  the command.
 - `openapi-diff` — the REST contract in `api/aicr/v1/server.yaml` against its
   committed baseline, failing on unacknowledged breaking changes and on stale
   acknowledgements. See [API server](api-server.md#rest-contract-gate).

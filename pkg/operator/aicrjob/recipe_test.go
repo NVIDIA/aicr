@@ -155,15 +155,40 @@ func TestParseIgnoresAddedFields(t *testing.T) {
 	}
 }
 
+// commitSchemas is the commit's own copy of AICR's published schemas, which
+// tools/schemagen keeps in step with the Go types. Checking it alongside the
+// released copies catches a change the operator cannot read on the PR that
+// makes it.
+var commitSchemas = filepath.Join("..", "..", "..", "api", "aicr", "v1", "schemas")
+
+// schemaDirs maps each schema source to its directory: every fixture
+// version, and the commit.
+func schemaDirs() map[string]string {
+	dirs := map[string]string{"commit": commitSchemas}
+	for _, version := range fixtureVersions {
+		dirs[version] = filepath.Join("testdata", version, "schemas")
+	}
+	return dirs
+}
+
+func readSchema(t *testing.T, dir, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	return data
+}
+
 // Contract test against AICR's published schema: every field the operator
 // reads exists in the schema with the same name, and every field the schema
 // requires is one the operator reads.
 func TestRecipeResultMatchesAICRSchema(t *testing.T) {
 	t.Parallel()
-	for _, version := range fixtureVersions {
-		t.Run(version, func(t *testing.T) {
+	for source, dir := range schemaDirs() {
+		t.Run(source, func(t *testing.T) {
 			t.Parallel()
-			matchRecipeResultSchema(t, fixtureAt(t, version, filepath.Join("schemas", "RecipeResult.schema.json")))
+			matchRecipeResultSchema(t, readSchema(t, dir, "RecipeResult.schema.json"))
 		})
 	}
 }
