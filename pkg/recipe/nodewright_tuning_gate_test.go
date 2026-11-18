@@ -41,8 +41,8 @@ const (
 	nodewrightTuningGB300Manifest   = "components/nodewright-customizations/manifests/tuning-gb300.yaml"
 )
 
-// nodewrightTuningOKEGB300Manifest carries the CRI-O Multus and RDMA VF settle
-// packages beside nvidia-tuned, so tuningEnabled=false leaves the CR in place.
+// nodewrightTuningOKEGB300Manifest carries the CRI-O Multus package beside
+// nvidia-tuned, so tuningEnabled=false leaves the CR in place.
 const nodewrightTuningOKEGB300Manifest = "components/nodewright-customizations/manifests/tuning-oke-gb300.yaml"
 
 // renderNodewrightTuning renders the tuning manifest with the given component
@@ -411,10 +411,8 @@ func TestNodewrightTuningRKE2RDMAGate(t *testing.T) {
 
 // TestNodewrightTuningOKEGB300Gate pins the gates in tuning-oke-gb300.yaml:
 // tuningEnabled (default on) gates nvidia-tuned only, so the CR keeps the
-// host packages (CRI-O Multus drop-in, RDMA VF settle gate) when tuning is
-// off, and
-// enabled=false suppresses the CR. It also pins the package ordering and the
-// spcx_cc default.
+// CRI-O Multus drop-in when tuning is off, and enabled=false suppresses the
+// CR. It also pins the package ordering and the spcx_cc default.
 func TestNodewrightTuningOKEGB300Gate(t *testing.T) {
 	content, err := GetManifestContentWithContext(context.Background(), nil, nodewrightTuningOKEGB300Manifest)
 	if err != nil {
@@ -427,9 +425,9 @@ func TestNodewrightTuningOKEGB300Gate(t *testing.T) {
 		overrides map[string]any
 		want      []string
 	}{
-		{"default renders every package", nil, []string{"crio-multus-default-network", "nvidia-tuned", "rdma-vfs-settled"}},
-		{"tuning disabled keeps the host packages", map[string]any{"tuningEnabled": false}, []string{"crio-multus-default-network", "rdma-vfs-settled"}},
-		{"tuning disabled as string keeps the host packages", map[string]any{"tuningEnabled": "false"}, []string{"crio-multus-default-network", "rdma-vfs-settled"}},
+		{"default renders every package", nil, []string{"crio-multus-default-network", "nvidia-tuned"}},
+		{"tuning disabled keeps the host packages", map[string]any{"tuningEnabled": false}, []string{"crio-multus-default-network"}},
+		{"tuning disabled as string keeps the host packages", map[string]any{"tuningEnabled": "false"}, []string{"crio-multus-default-network"}},
 		{"component disabled suppresses the CR", map[string]any{"enabled": false}, nil},
 	}
 	for _, tt := range tests {
