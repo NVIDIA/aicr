@@ -22,6 +22,7 @@ import (
 	"aicr.run/pkg/constraints"
 	"aicr.run/pkg/errors"
 	"aicr.run/validators"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -115,7 +116,10 @@ func getGPUOperatorVersion(ctx context.Context, clientset kubernetes.Interface) 
 			if err == nil && (version != "" || pinnedImage != "") {
 				return version, pinnedImage, nil
 			}
-			if err != nil {
+			// Keep the most telling failure: a later NotFound (the operator
+			// lives elsewhere) must not replace a denied or timed-out read, or
+			// the caller reports an internal error instead of the RBAC cause.
+			if err != nil && (lastErr == nil || apierrors.IsNotFound(lastErr) || !apierrors.IsNotFound(err)) {
 				lastErr = err
 			}
 		}

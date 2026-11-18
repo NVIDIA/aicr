@@ -23,6 +23,7 @@
 //	deployment check-nvidia-smi
 //	deployment gke-gpu-nic-networks
 //	deployment gke-gpu-nic-topology
+//	deployment snapshot-requirements
 package main
 
 import (
@@ -31,11 +32,12 @@ import (
 
 func main() {
 	validators.Run(map[string]validators.CheckFunc{
-		"operator-health":      checkOperatorHealth,
-		"expected-resources":   checkExpectedResources,
-		"gpu-operator-version": checkGPUOperatorVersion,
-		"check-nvidia-smi":     checkNvidiaSMI,
-		"gke-gpu-nic-networks": checkGKEGPUNICNetworks,
-		"gke-gpu-nic-topology": checkGKEGPUNICTopology,
+		"operator-health":       checkOperatorHealth,
+		"expected-resources":    checkExpectedResources,
+		"gpu-operator-version":  checkGPUOperatorVersion,
+		"check-nvidia-smi":      checkNvidiaSMI,
+		"gke-gpu-nic-networks":  checkGKEGPUNICNetworks,
+		"gke-gpu-nic-topology":  checkGKEGPUNICTopology,
+		"snapshot-requirements": checkSnapshotRequirements,
 	})
 }
