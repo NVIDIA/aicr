@@ -58,8 +58,8 @@ A kernel-flavour measurement, so the recipe can require this, is a follow-up.
 ## The inference coordinate
 
 `vr200-nvke-ubuntu-inference` is the same node facts at `intent: inference`. It
-adds `agentgateway-crds` and `agentgateway` — the Gateway API surface — and
-nothing that serves a model; actual serving is
+adds `gateway-api-crds`, `agentgateway-crds` and `agentgateway` — the Gateway API
+surface — and nothing that serves a model; actual serving is
 `vr200-nvke-ubuntu-inference-dynamo`, described under **The workload leaves**.
 
 It declares the gateway rather than expecting one on the cluster because AICR

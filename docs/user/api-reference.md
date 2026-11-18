@@ -622,7 +622,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | Component | Description |
 |-----------|-------------|
 | `agentgateway` | Kubernetes Gateway API implementation for AI/ML inference (InferencePool routing) |
-| `agentgateway-crds` | Kubernetes Gateway API CRDs for AI/ML inference (Gateway API + Inference Extension) |
+| `agentgateway-crds` | agentgateway's own CRDs (agentgateway.dev); the Gateway API CRDs are in `gateway-api-crds` |
 | `aws-ebs-csi-driver` | Amazon EBS CSI driver (EKS) |
 | `aws-efa` | AWS Elastic Fabric Adapter device plugin (EKS) |
 | `cert-manager` | TLS certificate management |
@@ -632,6 +632,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `dranet` | DRA network driver for the ConnectX-9 RDMA fabric (VR200 RKE2) |
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
 | `gatekeeper` | OPA Gatekeeper policy controller |
+| `gateway-api-crds` | Gateway API + Inference Extension CRDs, installed ahead of the inference gateway |
 | `gcp-driver-installer` | Google cos-gpu-installer DaemonSet; renders only under `gpuStack=bundle-installer` and `gpuStack=dra` (GKE) |
 | `gke-gb200-rdma` | NCCL gIB (GPUDirect-RDMA over RoCE) plugin installer for GB200 (GKE) |
 | `gke-nccl-tcpxo` | NCCL TCPXO network plugin for optimized collective communication (GKE) |

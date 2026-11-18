@@ -47,6 +47,7 @@ componentRefs: ## emitted order (as generated) — chainsaw list asserts are per
   - name: cert-manager
   - name: dra-node-labeler
   - name: dynamo-platform
+  - name: gateway-api-crds
   - name: gpu-operator
   - name: grove
   - name: k8s-ephemeral-storage-metrics
@@ -63,6 +64,7 @@ componentRefs: ## emitted order (as generated) — chainsaw list asserts are per
   - name: prometheus-operator-crds
 
 deploymentOrder:
+  - gateway-api-crds
   - agentgateway-crds
   - nodewright-operator
   - nodewright-customizations

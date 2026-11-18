@@ -40,9 +40,9 @@
   │    ├── README.md        (root deployment guide)                        │
   │    ├── checksums.txt    (closed-world SHA256 payload inventory)        │
   │    ├── recipe.yaml      (resolved recipe; covered by checksums)        │
-  │    ├── 001-agentgateway-crds/              (agentgateway.dev CRDs)     │
-  │    ├── 002-agentgateway-crds-post/         (Gateway API + Inf-Ext CRDs)│
-  │    ├── 003-aws-efa/                        (Elastic Fabric Adapter)    │
+  │    ├── 001-aws-efa/                        (Elastic Fabric Adapter)    │
+  │    ├── 002-gateway-api-crds/               (Gateway API + Inf-Ext CRDs)│
+  │    ├── 003-agentgateway-crds/              (agentgateway.dev CRDs)     │
   │    ├── 004-nodewright-operator/            (node configuration)        │
   │    ├── 005-nodewright-customizations/      (H100 tuning)               │
   │    ├── 006-prometheus-operator-crds/       (monitoring CRDs)           │
@@ -69,7 +69,7 @@
   │  $ (cd bundle && aicr verify . && ./deploy.sh)                         │
   │                                                                        │
   │  selected components in deployment order (post-folders &               │
-  │  some steps omitted): agentgateway-crds ──▶ ... ──▶ cert-manager       │
+  │  some steps omitted): gateway-api-crds ──▶ ... ──▶ cert-manager        │
   │  ──▶ agentgateway ──▶ ... ──▶ gpu-operator ──▶ dynamo-platform ──▶ ... │
   │                                                                        │
   │  Result: Fully configured GPU cluster                                  │
@@ -139,6 +139,7 @@ publication revalidate a private snapshot and publish only that inventory.
 │  + os-ubuntu (Ubuntu constraints)   │  + os-ubuntu (Ubuntu constraints)   │
 │  eks-training.yaml                  │  eks-inference.yaml                 │
 │  (gpu-operator overrides)           │  + platform-inference (mixin)       │
+│                                     │  ├── gateway-api-crds (via mixin)   │
 │                                     │  ├── agentgateway-crds (via mixin)  │
 │                                     │  └── agentgateway (via mixin)       │
 │  h100-eks-training.yaml             │  h100-eks-inference.yaml            │
@@ -150,7 +151,7 @@ publication revalidate a private snapshot and publish only that inventory.
 │  └── kubeflow-trainer (via mixin)   │  └── dynamo-platform                │
 ├─────────────────────────────────────┴─────────────────────────────────────┤
 │  Unique training: kubeflow-trainer                                        │
-│  Unique inference: agentgateway-crds, agentgateway, grove, dynamo-platform│
+│  Unique inference: gateway-api-crds, agentgateway(-crds), grove, dynamo   │
 ├───────────────────────────────────────────────────────────────────────────┤
 │  Shared (base/eks/h100/hpa layers):                                       │
 │    cert-manager, kube-prometheus-stack, gpu-operator, kai-scheduler,      │
@@ -280,7 +281,7 @@ http://127.0.0.1:9090/chat.html
 │   │                            │   toolkit, DCGM, validator)              │         │
 │ 4 │ accelerator_metrics        │ gpu-operator (DCGM exporter)             │ base    │
 │ 5 │ ai_service_metrics         │ kube-prometheus-stack, prometheus-adapter│ base    │
-│ 6 │ ai_inference               │ agentgateway-crds, agentgateway          │ eks-inf │
+│ 6 │ ai_inference               │ gateway-api-crds, agentgateway(-crds)    │ eks-inf │
 │ 7 │ robust_controller          │ dynamo-platform                          │ dynamo  │
 │ 8 │ pod_autoscaling            │ prometheus-adapter + HPA                 │ base    │
 │ 9 │ cluster_autoscaling        │ EKS Auto Scaling Group (ASG)             │ infra   │

@@ -59,7 +59,8 @@ The Kind GPU workflows use these leaf recipes instead:
 | prometheus-adapter | monitoring | Helm | Deployment |
 | aws-ebs-csi-driver | kube-system | Helm | **Disabled by default** (EKS managed addon) |
 | aws-efa | kube-system | Helm | Device plugin DaemonSet |
-| agentgateway-crds | agentgateway-system | Helm | CRDs only (Gateway API + Inference Extension) |
+| gateway-api-crds | gateway-api-system | Manifest | CRDs only (Gateway API + Inference Extension) |
+| agentgateway-crds | agentgateway-system | Helm | CRDs only (agentgateway.dev) |
 | agentgateway | agentgateway-system | Helm | Controller Deployment |
 | nodewright-customizations | nodewright | Manifest | No workloads (NodeConfiguration CRs) |
 | nvidia-dra-driver-gpu | nvidia-dra-driver | Helm | Controller Deployment, kubelet-plugin DaemonSet |

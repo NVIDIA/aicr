@@ -18,13 +18,23 @@ metadata:
   name: platform-inference
 spec:
   componentRefs:
+    # The Gateway API and Inference Extension CRDs, owned by their own
+    # release and established before agentgateway-crds and agentgateway.
+    # Older bundles installed them under the agentgateway-crds-post release;
+    # a cluster installed that way needs the one-time ownership handover in
+    # docs/user/upgrading.md before it applies this bundle.
+    - name: gateway-api-crds
+      type: Helm
+      manifestFiles:
+        - components/gateway-api-crds/manifests/gateway-api-crds.yaml
+        - components/gateway-api-crds/manifests/inference-extension-crds.yaml
+
     - name: agentgateway-crds
       type: Helm
       source: oci://cr.agentgateway.dev/charts
       valuesFile: components/agentgateway-crds/values.yaml
-      manifestFiles:
-        - components/agentgateway-crds/manifests/gateway-api-crds.yaml
-        - components/agentgateway-crds/manifests/inference-extension-crds.yaml
+      dependencyRefs:
+        - gateway-api-crds
 
     - name: agentgateway
       type: Helm
@@ -33,6 +43,7 @@ spec:
       manifestFiles:
         - components/agentgateway/manifests/inference-gateway.yaml
       dependencyRefs:
+        - gateway-api-crds
         - agentgateway-crds
         - cert-manager
         - prometheus-operator-crds

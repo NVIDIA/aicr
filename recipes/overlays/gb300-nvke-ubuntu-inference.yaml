@@ -120,13 +120,18 @@ spec:
     # the bundle with `--set agentgateway:serviceType=ClusterIP`; otherwise the
     # Service sits at EXTERNAL-IP <pending>. Reachability only: the
     # inference-gateway check gates on ready endpoints, not an external address.
+    - name: gateway-api-crds
+      type: Helm
+      manifestFiles:
+        - components/gateway-api-crds/manifests/gateway-api-crds.yaml
+        - components/gateway-api-crds/manifests/inference-extension-crds.yaml
+
     - name: agentgateway-crds
       type: Helm
       source: oci://cr.agentgateway.dev/charts
       valuesFile: components/agentgateway-crds/values.yaml
-      manifestFiles:
-        - components/agentgateway-crds/manifests/gateway-api-crds.yaml
-        - components/agentgateway-crds/manifests/inference-extension-crds.yaml
+      dependencyRefs:
+        - gateway-api-crds
 
     - name: agentgateway
       type: Helm
@@ -135,6 +140,7 @@ spec:
       manifestFiles:
         - components/agentgateway/manifests/inference-gateway.yaml
       dependencyRefs:
+        - gateway-api-crds
         - agentgateway-crds
         - cert-manager
         - prometheus-operator-crds

@@ -382,6 +382,13 @@ A recipe that enables two inference gateway components fails the check; exactly
 one may be enabled. No shipped recipe uses `gateway-address`; it is covered by
 unit tests and by no CI lane.
 
+The Gateway API and Inference Extension CRDs come from the `gateway-api-crds`
+component. Every shipped inference recipe declares it; a recipe that is not built
+on those overlays must declare it itself, because naming it in `dependencyRefs`
+does not add it. A gateway other than agentgateway lists it in its own
+`dependencyRefs` so the CRDs are established first, and the recipe disables
+`agentgateway` and `agentgateway-crds`.
+
 The performance validator's `gateway-epp` routing mode attaches its HTTPRoute
 from a per-run namespace named `aicr-inference-perf-<run>`, so the Gateway's
 `HTTP` listener must allow routes from that namespace
