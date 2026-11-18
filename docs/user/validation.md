@@ -1064,6 +1064,13 @@ Three properties make it a scoping tool rather than a way to hide a failure:
   so a new check in a recipe runs and can fail, which forces a decision rather
   than hiding one.
 
+Skipping a CRE NCCL check (`nccl-cre-all-reduce-bw` or
+`nccl-cre-all-reduce-bw-net`) also ends its supersession: the validators no
+longer see that check's constraint, so the TrainJob check it replaces
+(`nccl-all-reduce-bw-nvls` or `nccl-all-reduce-bw-net`) runs instead of skipping
+as `superseded-by-cre`. A lane without `nvcre` therefore falls back to TrainJob
+coverage rather than measuring nothing.
+
 The CNCF conformance evidence path refuses the two flags together for a
 different reason. `pkg/evidence/cncf` renders one markdown file per
 *requirement* of the upstream checklist version selected from the cluster's
