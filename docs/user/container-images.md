@@ -567,7 +567,7 @@ across every image in a component and prints a summary report.
 ### Is it signed?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.3"  # replace with an image from the inventory above
 cosign tree "${IMAGE}"
 ```
 
@@ -578,7 +578,7 @@ attached — the image is unsigned.
 ### Does it have an SBOM?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.3"  # replace with an image from the inventory above
 cosign tree "${IMAGE}"
 ```
 
@@ -590,7 +590,7 @@ publishers attach SBOMs as registry referrers rather than the legacy
 ### Does it have build provenance?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.3"  # replace with an image from the inventory above
 cosign download attestation "${IMAGE}" \
   | jq -r 'select(.payload != null) | .payload' \
   | base64 -d \
