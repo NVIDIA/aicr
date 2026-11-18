@@ -113,6 +113,18 @@ type VendorRecord struct {
 	// this record (e.g. "helm-cli v3.20.2"). Audit-only; not used by
 	// downstream code.
 	PullerVersion string `json:"pullerVersion,omitempty"`
+	// Archive is the .tgz bytes written under charts/, kept in memory for
+	// bundle-time checks. It is never serialized.
+	Archive []byte `json:"-" yaml:"-"`
+}
+
+// VendoredArchives maps each record's component name to its archive bytes.
+func VendoredArchives(records []VendorRecord) map[string][]byte {
+	archives := make(map[string][]byte, len(records))
+	for _, record := range records {
+		archives[record.Name] = record.Archive
+	}
+	return archives
 }
 
 // ArchiveSHA256 returns the hex SHA-256 of a chart archive, the value a

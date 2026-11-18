@@ -22,7 +22,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
-	"os"
 	"path"
 	"slices"
 	"strings"
@@ -38,9 +37,10 @@ import (
 // chartsDir is the directory a Helm chart keeps its subcharts in.
 const chartsDir = "charts"
 
-// CheckVendoredCRDOwnership verifies retained ownership against the archives
-// that will be installed. Archives maps selected component names to local paths.
-func CheckVendoredCRDOwnership(ctx context.Context, result *recipe.RecipeResult, archives map[string]string) error {
+// CheckVendoredCRDOwnership verifies retained ownership against the chart
+// archives the bundle vendors. Archives maps selected component names to the
+// archive bytes written to the bundle.
+func CheckVendoredCRDOwnership(ctx context.Context, result *recipe.RecipeResult, archives map[string][]byte) error {
 	provenance := result.Metadata.Artifacts
 	if provenance == nil || provenance.CRDOwnership == nil || provenance.CRDOwnership.Policy != artifact.CRDPolicyRetained || len(archives) == 0 {
 		return nil
@@ -99,16 +99,7 @@ func crdOwnershipConflict(crd, owner, other, detail string) error {
 		map[string]any{"reason": "crd-ownership-conflict", "crd": crd, "owner": owner, "component": other})
 }
 
-func readVendoredCRDs(ctx context.Context, filename string, exclusions []string) (map[string]bool, error) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "open vendored chart", err)
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, defaults.HelmChartArtifactLimit+1))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "read vendored chart", err)
-	}
+func readVendoredCRDs(ctx context.Context, data []byte, exclusions []string) (map[string]bool, error) {
 	if int64(len(data)) > defaults.HelmChartArtifactLimit {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "vendored chart exceeds size limit")
 	}

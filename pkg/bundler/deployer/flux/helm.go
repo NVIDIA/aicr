@@ -435,6 +435,7 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 	rec.SHA256 = localformat.ArchiveSHA256(tgz)
 	rec.Name = ref.Name
 	rec.TarballName = tarball
+	rec.Archive = tgz
 
 	// Write charts/<tarball>.tgz.
 	chartsDir, err := deployer.SafeJoin(compDir, "charts")

@@ -222,16 +222,12 @@ func TestVendoredCRDArchiveValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			rr := &recipe.RecipeResult{}
 			rr.Metadata.Artifacts = &artifact.Provenance{CRDOwnership: &artifact.CRDOwnership{Policy: "retained"}}
-			filename := filepath.Join(t.TempDir(), "chart.tgz")
-			if err := os.WriteFile(filename, tt.data, 0600); err != nil {
-				t.Fatal(err)
-			}
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			if tt.cancel {
 				cancel()
 			}
-			if err := deployer.CheckVendoredCRDOwnership(ctx, rr, map[string]string{"owner": filename}); err == nil {
+			if err := deployer.CheckVendoredCRDOwnership(ctx, rr, map[string][]byte{"owner": tt.data}); err == nil {
 				t.Fatal("invalid chart accepted")
 			}
 		})
