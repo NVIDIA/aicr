@@ -853,7 +853,7 @@ page are the contract.
 | Check | Keys |
 |-------|------|
 | `nccl-all-reduce-bw*` | `runtimeSource`, `transport`, `workerNodes`, `gpusInvolved`, `fabric`, `achievedGbps`, `thresholdGbps`, `tolerancePct`, `passMargin` |
-| `nccl-cre-all-reduce-bw` | `achievedGbps`, `thresholdGbps`, `tolerancePct`, `passMargin` |
+| `nccl-cre-all-reduce-bw*` | `achievedGbps`, `thresholdGbps`, `tolerancePct`, `passMargin` |
 | `gke-gpu-nic-topology` | `nodesValidated`, `nodesTotal` |
 | `expected-resources` | `namespacesActive`, `namespacesExpected`, `draReady`, `draDesired`, `nodewrightComplete`, `nodewrightExpected`, and the RDMA gate's `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
 | `inference-perf` | `throughputTokPerSec`, `ttftP99Ms`, `throughputThreshold`, `scaledThreshold`, `ttftThresholdMs`, `gpusBenchmarked`, `gpusPerNode` |
@@ -1571,8 +1571,9 @@ Full list (defaults, semantics) is in the `validators/performance`
 package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
 `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls`. Inference:
 `inference-perf` (Dynamo + AIPerf). Public CRE
-checks: `nccl-cre-all-reduce-bw` and `cre-training-goodput`; only the EKS GB300
-kubeflow recipe declares one (see below), and the rest are opt-in. Neither branches on
+checks: `nccl-cre-all-reduce-bw`, `nccl-cre-all-reduce-bw-net` (the same run with NVLS and
+MNNVL disabled through the entry's `Env`) and `cre-training-goodput`; only the EKS GB300
+kubeflow recipe declares any (see below), and the rest are opt-in. None branches on
 service or accelerator — `creQualifiedEntries` in
 `validators/performance/cre_qualification.go` records which combinations are
 qualified and the catalog entry, node cap and workload image each was measured

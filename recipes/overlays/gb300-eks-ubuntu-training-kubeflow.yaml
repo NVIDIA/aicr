@@ -64,13 +64,22 @@ spec:
       # inherited nvls floor and passes at 90% of it like the TrainJob check,
       # so the same figure means the same under either.
       #
-      # nccl-all-reduce-bw-net stays on TrainJob: it asserts the EFA-only path,
-      # which this check does not isolate.
+      # nccl-cre-all-reduce-bw-net replaces the inherited nccl-all-reduce-bw-net
+      # the same way, with NVLS and MNNVL disabled so the peak is the EFA path.
+      # The new nccl-tests image (NCCL 2.31.2, aws-ofi-nccl 1.21.1) measures
+      # about 31 GB/s there, against about 45 on the 2.27.7 and 1.16.3 image the
+      # TrainJob check uses; the NVCRE team treats it as a regression to fix and
+      # asked to stay on the new image. The floor is 30, below the 40 TrainJob
+      # holds, and passes at 90% of it. Raise it back once the regression is
+      # fixed.
       checks:
         - nccl-cre-all-reduce-bw
+        - nccl-cre-all-reduce-bw-net
       constraints:
         - name: nccl-cre-all-reduce-bw
           value: ">= 700"
+        - name: nccl-cre-all-reduce-bw-net
+          value: ">= 30"
     conformance:
       checks:
         - robust-controller

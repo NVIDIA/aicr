@@ -42,6 +42,7 @@ const (
 	creNCCLDomain      = "communication"
 	creNCCLVariant     = "nccl-all-reduce"
 	creFabricEFA       = "efa"
+	creNetMaxBytes     = "4G"
 	creTrainingDomain  = "training"
 	creTrainingVariant = "nemotron5-8b"
 	// creGonePollInterval is how often waitForCREResourceGone re-Gets a CR
@@ -108,16 +109,33 @@ func uniqueCREResourceName(prefix string) (string, error) {
 // node labels and renders the wrong transport for one it cannot classify, so a
 // combination whose detection is not known to resolve names it.
 //
+// Env, when set, is submitted as spec.env, which CRE passes to every workload
+// pod of the run. It is how the net check disables NVLS and MNNVL.
+//
+// MaxBytes, when set, is submitted as spec.maxBytes, the largest message size
+// of the sweep. CRE defaults it to 32G on GB200 and GB300, and a sweep that
+// slow does not finish inside the run budget on a network-only path, where
+// bandwidth is flat from 16M upward.
+//
 // Supersedes names the TrainJob NCCL variant the check stands in for on the
-// combination; the zero value is the default variant. Only nccl-cre-all-reduce-bw
-// reads it.
+// combination; the zero value is the default variant. Only the CRE NCCL checks
+// read it.
 type creCatalogEntry struct {
 	Domain     string
 	Variant    string
 	MaxNodes   int
 	Image      string
 	Fabric     string
+	Env        []creEnvVar
+	MaxBytes   string
 	Supersedes ncclVariant
+}
+
+// creEnvVar is one spec.env entry. It is a slice element rather than a map
+// entry so the rendered Certification is deterministic.
+type creEnvVar struct {
+	Name  string
+	Value string
 }
 
 // buildCRECertification renders the Certification for one catalog entry,
@@ -167,6 +185,16 @@ func buildCRECertification(
 	}
 	if entry.Fabric != "" {
 		spec["fabric"] = entry.Fabric
+	}
+	if entry.MaxBytes != "" {
+		spec["maxBytes"] = entry.MaxBytes
+	}
+	if len(entry.Env) > 0 {
+		env := make([]any, 0, len(entry.Env))
+		for _, e := range entry.Env {
+			env = append(env, map[string]any{keyName: e.Name, keyValue: e.Value})
+		}
+		spec["env"] = env
 	}
 	addCRETarget(spec, nodes)
 

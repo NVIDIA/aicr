@@ -40,7 +40,9 @@ func supersedeCtx(
 
 func TestCRESupersedesTrainJobNCCL(t *testing.T) {
 	cre := recipe.Constraint{Name: checkNameCRENCCLAllReduceBW, Value: ">= 700"}
+	creNet := recipe.Constraint{Name: checkNameCRENCCLAllReduceBWNET, Value: ">= 30"}
 	nvls := recipe.Constraint{Name: constraintNameForVariant(variantNVLS), Value: ">= 700"}
+	net := recipe.Constraint{Name: constraintNameForVariant(variantNET), Value: ">= 30"}
 
 	tests := []struct {
 		name    string
@@ -57,6 +59,24 @@ func TestCRESupersedesTrainJobNCCL(t *testing.T) {
 		{
 			name:    "gb300 keeps the EFA-only net variant on TrainJob",
 			ctx:     supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorGB300, nvls, cre),
+			variant: variantNET,
+			want:    false,
+		},
+		{
+			name:    "gb300 supersedes the net variant when the CRE net constraint is declared",
+			ctx:     supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorGB300, nvls, net, cre, creNet),
+			variant: variantNET,
+			want:    true,
+		},
+		{
+			name:    "the CRE net constraint alone leaves the nvls variant on TrainJob",
+			ctx:     supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorGB300, nvls, net, creNet),
+			variant: variantNVLS,
+			want:    false,
+		},
+		{
+			name:    "CRE net constraint on a combination it is not qualified on",
+			ctx:     supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorH100, net, creNet),
 			variant: variantNET,
 			want:    false,
 		},
@@ -111,5 +131,17 @@ func TestCheckNCCLAllReduceBWSkipsWhenSuperseded(t *testing.T) {
 	err := checkNCCLAllReduceBWVariant(ctx, variantNVLS)
 	if !validators.IsSkip(err) {
 		t.Fatalf("expected a skip when the CRE check supersedes the nvls TrainJob check, got %v", err)
+	}
+}
+
+func TestCheckNCCLAllReduceBWNETSkipsWhenSuperseded(t *testing.T) {
+	ctx := supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorGB300,
+		recipe.Constraint{Name: constraintNameForVariant(variantNET), Value: ">= 30"},
+		recipe.Constraint{Name: checkNameCRENCCLAllReduceBWNET, Value: ">= 30"})
+	ctx.Ctx = t.Context()
+
+	err := checkNCCLAllReduceBWVariant(ctx, variantNET)
+	if !validators.IsSkip(err) {
+		t.Fatalf("expected a skip when the CRE net check supersedes the net TrainJob check, got %v", err)
 	}
 }

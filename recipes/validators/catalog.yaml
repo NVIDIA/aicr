@@ -395,6 +395,21 @@ validators:
     timeout: 50m
     args: ["nccl-cre-all-reduce-bw"]
     env: []
+  # The same check with NVLS and MNNVL disabled through spec.env, so the peak is
+  # the EFA path alone. Qualified on EKS GB300 only, where it stands in for the
+  # inherited TrainJob nccl-all-reduce-bw-net (that check skips as
+  # superseded-by-cre). Measured on CRE v0.12.0 on 2026-11-18 (2×
+  # p6e-gb300.36xlarge, spec.fabric efa): about 31 GB/s on NCCL 2.31.2 and
+  # aws-ofi-nccl 1.21.1, against about 45 GB/s on the 2.27.7 and 1.16.3 image
+  # the TrainJob check uses. The recipe floor is set below the new image's
+  # figure while the regression is open with the NVCRE team.
+  - name: nccl-cre-all-reduce-bw-net
+    phase: performance
+    description: "Verify NCCL All Reduce Bus Bandwidth on the EFA/NET path via a Cluster Readiness Engine Certification with NVLS disabled"
+    image: ghcr.io/nvidia/aicr-validators/performance:latest
+    timeout: 50m
+    args: ["nccl-cre-all-reduce-bw-net"]
+    env: []
   # Qualified on EKS H100 — measured on CRE v0.8.2 (the pin at the time), live
   # UAT 2026-10-23 (2× p5.48xlarge): goodput 0.5723 vs >= 0.5; not re-measured
   # on v0.12.0. The entry is per

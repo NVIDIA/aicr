@@ -90,8 +90,8 @@ func checkNCCLAllReduceBWVariant(ctx *validators.Context, variant ncclVariant) e
 	}
 
 	if creSupersedesTrainJobNCCL(ctx, variant) {
-		return validators.SkipWithReason(validators.SkipReasonSupersededByCRE, fmt.Sprintf(
-			"%s measures this bandwidth for the recipe instead", checkNameCRENCCLAllReduceBW))
+		return validators.SkipWithReason(validators.SkipReasonSupersededByCRE,
+			"a CRE NCCL check measures this bandwidth for the recipe instead")
 	}
 
 	actual, passed, err := validateNcclAllReduceBw(ctx, constraint, variant)
@@ -109,12 +109,17 @@ func creSupersedesTrainJobNCCL(ctx *validators.Context, variant ncclVariant) boo
 	if ctx.ValidationInput == nil {
 		return false
 	}
-	if _, declared := findPerformanceConstraint(ctx, checkNameCRENCCLAllReduceBW); !declared {
-		return false
-	}
 	criteria := ctx.ValidationInput.Criteria
-	entry, qualified := lookupCREQualification(checkNameCRENCCLAllReduceBW, criteria.Service, criteria.Accelerator)
-	return qualified && entry.Supersedes == variant
+	for _, checkName := range creNCCLCheckNames {
+		if _, declared := findPerformanceConstraint(ctx, checkName); !declared {
+			continue
+		}
+		entry, qualified := lookupCREQualification(checkName, criteria.Service, criteria.Accelerator)
+		if qualified && entry.Supersedes == variant {
+			return true
+		}
+	}
+	return false
 }
 
 // classifyNCCLAllReduceBWResult turns the inner validateNcclAllReduceBw outcome

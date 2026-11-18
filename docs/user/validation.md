@@ -550,18 +550,24 @@ recipe's plain criteria like any other embedded one.
 
 ### Cluster Readiness Engine checks
 
-A pair of Cluster Readiness Engine (CRE) checks runs against public CRE
+Three Cluster Readiness Engine (CRE) checks run against public CRE
 (`nvcre.nvidia.com`, [cluster-readiness-engine](https://github.com/NVIDIA/cluster-readiness-engine)).
-Neither check branches on service or accelerator; which combinations are
+None of them branches on service or accelerator; which combinations are
 qualified is recorded as data. Shipped overlays keep the TrainJob
 `nccl-all-reduce-bw*` path. The one exception is
 `gb300-eks-ubuntu-training-kubeflow`, which installs `nvcre` and declares
-`nccl-cre-all-reduce-bw` with `>= 700`. CRE reports one peak bus bandwidth, which
-on an NVL72 fabric is the NVLS path, so the check stands in for
-`nccl-all-reduce-bw-nvls`: that inherited check stays in the recipe but is
-reported as skipped (`superseded-by-cre`). `nccl-all-reduce-bw-net` keeps
-running on TrainJob, because it asserts the EFA-only path the CRE peak does
-not isolate. On every other overlay, nothing below runs unless you ask for it.
+`nccl-cre-all-reduce-bw` with `>= 700` and `nccl-cre-all-reduce-bw-net` with
+`>= 30`. CRE reports one peak bus bandwidth, which on an NVL72 fabric is the
+NVLS path, so `nccl-cre-all-reduce-bw` stands in for
+`nccl-all-reduce-bw-nvls`. `nccl-cre-all-reduce-bw-net` is the same run with
+NVLS and MNNVL disabled, so its peak is the EFA path alone, and it stands in for
+`nccl-all-reduce-bw-net`. The inherited TrainJob checks stay in the recipe but
+are reported as skipped (`superseded-by-cre`). The net floor is 30, below the 40
+the TrainJob check holds: on the newer `nccl-tests` image CRE selects (NCCL
+2.31.2, aws-ofi-nccl 1.21.1) the EFA-only path measures about 31 GB/s, against
+about 45 on the image the TrainJob check uses, and the NVCRE team is treating
+that as a regression to fix. Raise the floor once it is fixed. On every other
+overlay, nothing below runs unless you ask for it.
 
 Enabling a CRE check takes two steps and needs both. Add the `nvcre` component
 as described in
@@ -593,7 +599,8 @@ percentage (`>= 50`) can never be satisfied.
 
 | Check | What it measures | Qualified combinations |
 |---|---|---|
-| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100` |
+| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100`, `eks` x `gb300` |
+| `nccl-cre-all-reduce-bw-net` | The same run with `NCCL_NVLS_ENABLE=0` and `NCCL_MNNVL_ENABLE=0` set through `spec.env`, so the peak is the EFA/NET path | `eks` x `gb300` |
 | `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | `eks` x `h100` |
 
 The catalog entry each check drives, and the node footprint it runs on, come

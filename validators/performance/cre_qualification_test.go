@@ -17,6 +17,7 @@ package main
 import (
 	stderrors "errors"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -201,6 +202,67 @@ func TestCRENCCLQualificationSelectsFabricAndSupersededVariant(t *testing.T) {
 	}
 }
 
+// The net check is the default check with NVLS and MNNVL off. A dropped
+// variable would measure the NVLS path under a constraint calibrated for EFA,
+// and pass it.
+func TestCRENCCLNetQualificationDisablesNVLS(t *testing.T) {
+	entry, ok := lookupCREQualification(checkNameCRENCCLAllReduceBWNET,
+		creEKSGB300.Service, creEKSGB300.Accelerator)
+	if !ok {
+		t.Fatalf("%s is unqualified on eks x gb300", checkNameCRENCCLAllReduceBWNET)
+	}
+	if entry.Supersedes != variantNET {
+		t.Errorf("Supersedes = %q, want %q", entry.Supersedes, variantNET)
+	}
+	if entry.Fabric != creFabricEFA {
+		t.Errorf("Fabric = %q, want %q", entry.Fabric, creFabricEFA)
+	}
+	if entry.MaxBytes != creNetMaxBytes {
+		t.Errorf("MaxBytes = %q, want %q", entry.MaxBytes, creNetMaxBytes)
+	}
+	dflt, _ := lookupCREQualification(checkNameCRENCCLAllReduceBW, creEKSGB300.Service, creEKSGB300.Accelerator)
+	if entry.Image != dflt.Image {
+		t.Errorf("net check image %q differs from the default check's %q", entry.Image, dflt.Image)
+	}
+	if _, ok := lookupCREQualification(checkNameCRENCCLAllReduceBWNET, creEKSH100.Service, creEKSH100.Accelerator); ok {
+		t.Errorf("%s must stay unqualified on eks x h100", checkNameCRENCCLAllReduceBWNET)
+	}
+
+	obj := mustBuildCRECertification(t, "ns", "name", twoNodeGPUConfig(), entry)
+	env, found, err := unstructured.NestedSlice(obj.Object, "spec", "env")
+	if err != nil || !found {
+		t.Fatalf("spec.env missing: found=%v err=%v", found, err)
+	}
+	got := map[string]string{}
+	for _, e := range env {
+		m, _ := e.(map[string]any)
+		name, _ := m["name"].(string)
+		value, _ := m["value"].(string)
+		got[name] = value
+	}
+	for _, name := range []string{"NCCL_NVLS_ENABLE", "NCCL_MNNVL_ENABLE"} {
+		if got[name] != "0" {
+			t.Errorf("spec.env %s = %q, want \"0\"", name, got[name])
+		}
+	}
+	if len(env) != 2 {
+		t.Errorf("spec.env has %d entries, want exactly 2: %v", len(env), env)
+	}
+	if mb, _, _ := unstructured.NestedString(obj.Object, "spec", "maxBytes"); mb != creNetMaxBytes {
+		t.Errorf("spec.maxBytes = %q, want %q", mb, creNetMaxBytes)
+	}
+	dfltObj := mustBuildCRECertification(t, "ns", "name", twoNodeGPUConfig(), dflt)
+	if _, found, _ := unstructured.NestedString(dfltObj.Object, "spec", "maxBytes"); found {
+		t.Error("the default check must not set spec.maxBytes")
+	}
+
+	// The default check carries no env: its peak must stay the NVLS-class figure.
+	dobj := mustBuildCRECertification(t, "ns", "name", twoNodeGPUConfig(), dflt)
+	if _, found, _ := unstructured.NestedSlice(dobj.Object, "spec", "env"); found {
+		t.Errorf("the default %s must not set spec.env", checkNameCRENCCLAllReduceBW)
+	}
+}
+
 // spec.fabric reaches the Certification only when the entry names one, so the
 // H100 object stays byte-for-byte what it was qualified with.
 func TestBuildCRECertificationFabric(t *testing.T) {
@@ -232,8 +294,10 @@ func TestBuildCRECertificationFabric(t *testing.T) {
 // asserted, not population: a check keyed to an empty set skips everywhere,
 // which is a deliberate state, while a check missing from the record entirely
 // is an authoring slip that looks identical from the outside.
-func TestCREQualifiedEntriesCoverBothChecks(t *testing.T) {
-	for _, checkName := range []string{checkNameCRENCCLAllReduceBW, checkNameCRETrainingGoodput} {
+func TestCREQualifiedEntriesCoverEveryCheck(t *testing.T) {
+	for _, checkName := range []string{
+		checkNameCRENCCLAllReduceBW, checkNameCRENCCLAllReduceBWNET, checkNameCRETrainingGoodput,
+	} {
 		if _, ok := creQualifiedEntries[checkName]; !ok {
 			t.Errorf("%s is absent from the qualification record", checkName)
 		}
@@ -254,7 +318,7 @@ func TestCREChecksSkipUnqualifiedCombination(t *testing.T) {
 		if !found {
 			t.Fatal("constraint not found in the test context")
 		}
-		actual, passed, err := validateCRENcclAllReduceBw(ctx, constraint)
+		actual, passed, err := validateCRENcclAllReduceBw(ctx, checkNameCRENCCLAllReduceBW, constraint)
 		if err != nil {
 			t.Fatalf("unexpected error = %v", err)
 		}
@@ -299,7 +363,7 @@ func TestCREChecksRejectBadConstraintBeforeQualification(t *testing.T) {
 			if !found {
 				t.Fatal("constraint not found in the test context")
 			}
-			_, passed, err := validateCRENcclAllReduceBw(ctx, constraint)
+			_, passed, err := validateCRENcclAllReduceBw(ctx, checkNameCRENCCLAllReduceBW, constraint)
 			if err == nil {
 				t.Fatalf("error = nil, want a refusal for constraint %q", value)
 			}
@@ -347,7 +411,7 @@ func TestLookupCREQualificationUnqualified(t *testing.T) {
 				t.Fatalf("lookupCREQualification(%q, %s, %s) reported qualified with %+v",
 					tt.checkName, tt.service, tt.accelerator, entry)
 			}
-			if entry != (creCatalogEntry{}) {
+			if !reflect.DeepEqual(entry, creCatalogEntry{}) {
 				t.Errorf("entry = %+v, want zero value on an unqualified lookup", entry)
 			}
 		})

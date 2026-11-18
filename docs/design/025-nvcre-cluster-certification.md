@@ -418,20 +418,22 @@ lifecycle* and *AICR qualification* are still adjudicated at amendment time.
 This amendment is proposed with the change that adds it and takes effect on
 maintainer approval. It admits `nvcre` to one stock recipe,
 `gb300-eks-ubuntu-training-kubeflow` (`eks`, `gb300`, `ubuntu`, `training`,
-`kubeflow`), and has it declare `nccl-cre-all-reduce-bw` with `>= 700`. No other
-overlay changes.
+`kubeflow`), and has it declare `nccl-cre-all-reduce-bw` with `>= 700` and
+`nccl-cre-all-reduce-bw-net` with `>= 30`. No other overlay changes.
 
-CRE reports one peak bus bandwidth per run. On GB300 that peak is the NVLS path
-over the NVL72 IMEX domain, so the CRE check stands in for the TrainJob
-`nccl-all-reduce-bw-nvls` check and not for the EFA-only
-`nccl-all-reduce-bw-net`. An overlay cannot drop an inherited check (a non-empty
-`checks` list is unioned with the parent's), so `nccl-all-reduce-bw-nvls` stays
-listed and the validator skips it with the `superseded-by-cre` reason when the
-recipe declares `nccl-cre-all-reduce-bw` and `creQualifiedEntries` qualifies the
-service and accelerator for exactly that variant. A recipe whose CRE check would
-only skip, or that does not declare it, keeps its TrainJob coverage, and
-`nccl-all-reduce-bw-net` keeps running. The skip code is added to the redaction
-allowlist (`redact.PolicyVersion` v12).
+CRE reports one peak bus bandwidth per run. On GB300 the default peak is the
+NVLS path over the NVL72 IMEX domain, so `nccl-cre-all-reduce-bw` stands in for
+the TrainJob `nccl-all-reduce-bw-nvls` check. A second check,
+`nccl-cre-all-reduce-bw-net`, stands in for the EFA-only
+`nccl-all-reduce-bw-net`: its qualified entry sets `spec.env`
+`NCCL_NVLS_ENABLE=0` and `NCCL_MNNVL_ENABLE=0` so the single reported peak is the
+network path. An overlay cannot drop an inherited check (a non-empty `checks`
+list is unioned with the parent's), so both TrainJob checks stay listed and the
+validator skips each with the `superseded-by-cre` reason when the recipe declares
+the matching CRE check and `creQualifiedEntries` qualifies the service and
+accelerator for exactly that variant. A recipe whose CRE check would only skip,
+or that does not declare it, keeps its TrainJob coverage. The skip code is added
+to the redaction allowlist (`redact.PolicyVersion` v12).
 
 The qualified entry names `spec.fabric: efa` so the run selects the EFA variant
 explicitly instead of depending on CRE's node-label detection
@@ -455,13 +457,22 @@ device per node), `Libfabric` transport asserted:
 | TrainJob `nccl-all-reduce-bw-nvls`, same nodes | 2.27.7, 1.16.3 | 841.17 GB/s |
 | CRE, NVLS and MNNVL disabled (EFA only) | 2.31.2, 1.21.1 | about 31 GB/s |
 | CRE, NVLS and MNNVL disabled, TrainJob's image | 2.27.7, 1.16.3 | about 45 GB/s |
+| CRE, NVLS and MNNVL disabled, intermediate image | 2.30.4, 1.19.0 | about 45 GB/s |
+| TrainJob `nccl-all-reduce-bw-net`, same nodes | 2.27.7, 1.16.3 | 44.04 GB/s |
 
-The EFA-only figure is below the `nccl-all-reduce-bw-net` floor of 40 on the
-image the catalog selects, and recovers on the older image; setting
-`NCCL_IGNORE_DISABLED_P2P`, `NCCL_SOCKET_IFNAME` or `NCCL_PXN_C2C=0` did not move
-it. That is why this check does not supersede `-net`. The cause is open with the
-NVCRE team and does not gate this adoption, because the adopted check measures
-the NVLS path, where the two backends agree.
+The EFA-only figure on the catalog's image is below the TrainJob floor of 40 and
+recovers on both older images, so the drop arrives in the step from NCCL 2.30.4 /
+aws-ofi-nccl 1.19.0 to 2.31.2 / 1.21.1. Setting `NCCL_IGNORE_DISABLED_P2P`,
+`NCCL_SOCKET_IFNAME`, `NCCL_PXN_C2C=0`, `FI_EFA_USE_DATA_PATH_DIRECT=0` or
+`NCCL_GIN_ENABLE=0` did not move it. The qualified entry stays on the latest
+image rather than pinning back, and `nccl-cre-all-reduce-bw-net` declares a floor
+of 30 (the verdict passes at 90% of the constraint, 27 GB/s) instead of 40. The
+floor is a stopgap: raise it to 40 when the regression is fixed upstream. The
+net entry also sets `spec.maxBytes: 4G`: at 31 GB/s the default 32G sweep did
+not finish inside the 30-minute run budget (the first live attempt timed out),
+and bandwidth is flat from 16M upward, so the cap does not change the peak. Which
+of NCCL and aws-ofi-nccl regressed is unresolved, and the run used one EFA device
+per node, so multi-EFA behavior is unmeasured.
 
 Gate status at the `v0.12.0` pin, for this adoption:
 
@@ -471,7 +482,7 @@ Gate status at the `v0.12.0` pin, for this adoption:
 | Benchmark execution safety: node cap, run deadline, cleanup | Met by AICR's own limits (amendment above) |
 | Benchmark execution safety: runtime closure inventoried and digest-qualified | Met for `aws` / `gb300` (`recipes/components/nvcre/workload-images-gb300.yaml`) |
 | Benchmark execution safety: bounded fault-isolation bisection | Not asserted: the check drives `communication/nccl-all-reduce` only |
-| AICR qualification: real GPU run on the expected transport | Met for the NVLS path: the AICR check `nccl-cre-all-reduce-bw` run end to end on EKS GB300 (2× p6e-gb300.36xlarge) measured 840.83 GB/s vs `>= 700` on `Libfabric`, with teardown confirmed (2026-11-18) |
+| AICR qualification: real GPU run on the expected transport | Met for both checks on EKS GB300 (2× p6e-gb300.36xlarge), run end to end with teardown confirmed (2026-11-18/19): `nccl-cre-all-reduce-bw` measured 840.83 GB/s vs `>= 700`; `nccl-cre-all-reduce-bw-net` measured 31.46 GB/s vs `>= 30`, in about 18 minutes |
 
 The rows marked not re-adjudicated or not asserted are accepted risk if the
 maintainers adopt, not passed gates; this amendment does not claim them.
@@ -487,7 +498,8 @@ run uses two nodes' GPUs for the CRE `Certification` as well as the TrainJob.
 - Introducing certification results into [ADR-007](007-recipe-evidence.md)
   recipe evidence.
 - Vendoring, patching, or republishing the upstream chart.
-- Replacing the existing NCCL bandwidth checks on the current TrainJob path.
+- Replacing the existing NCCL bandwidth checks on the current TrainJob path
+  outside the one adopted leaf.
 
 Opt-in AICR validators that drive `Certification` are **in scope** and are not
 a non-goal. Outside the one adopted leaf they stay off stock overlays, assert

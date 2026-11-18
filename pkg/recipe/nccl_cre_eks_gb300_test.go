@@ -20,10 +20,11 @@ import (
 )
 
 // TestGB300EKSTrainingCREAdoption pins which GB300 EKS training recipes gate
-// NVLS bandwidth on a CRE Certification. Only the kubeflow leaf does. It lists
-// the CRE check next to the inherited TrainJob checks, because an overlay
-// cannot drop an inherited check; the validator skips the nvls TrainJob check as
-// superseded and keeps the EFA-only net check. The kubeflow leaf already
+// NCCL bandwidth on a CRE Certification. Only the kubeflow leaf does. It lists
+// the CRE checks next to the inherited TrainJob checks, because an overlay
+// cannot drop an inherited check; the validator skips the nvls and net
+// TrainJob checks as superseded. The net floor is lower on CRE (30) than on
+// TrainJob (40) while the new nccl-tests image's EFA regression is open. The kubeflow leaf already
 // carries kubeflow-trainer through the platform-kubeflow mixin that nvcre
 // needs. Attaching CRE to a shared base would install nvcre's CRDs and
 // cluster-scoped RBAC for every consumer of that base, including the Slurm and
@@ -31,9 +32,10 @@ import (
 // component.
 func TestGB300EKSTrainingCREAdoption(t *testing.T) {
 	const (
-		creCheck  = "nccl-cre-all-reduce-bw"
-		netCheck  = "nccl-all-reduce-bw-net"
-		nvlsCheck = "nccl-all-reduce-bw-nvls"
+		creCheck    = "nccl-cre-all-reduce-bw"
+		creNetCheck = "nccl-cre-all-reduce-bw-net"
+		netCheck    = "nccl-all-reduce-bw-net"
+		nvlsCheck   = "nccl-all-reduce-bw-nvls"
 	)
 
 	tests := []struct {
@@ -103,8 +105,10 @@ func TestGB300EKSTrainingCREAdoption(t *testing.T) {
 			if got := result.GetComponentRef("nvcre") != nil; got != tt.wantCRE {
 				t.Errorf("nvcre componentRef present = %v, want %v", got, tt.wantCRE)
 			}
-			if got := performanceCheckPresent(result.Validation, creCheck); got != tt.wantCRE {
-				t.Errorf("performance check %q present = %v, want %v", creCheck, got, tt.wantCRE)
+			for _, check := range []string{creCheck, creNetCheck} {
+				if got := performanceCheckPresent(result.Validation, check); got != tt.wantCRE {
+					t.Errorf("performance check %q present = %v, want %v", check, got, tt.wantCRE)
+				}
 			}
 
 			wants := []struct {
@@ -113,6 +117,7 @@ func TestGB300EKSTrainingCREAdoption(t *testing.T) {
 				value string
 			}{
 				{creCheck, tt.wantCRE, ">= 700"},
+				{creNetCheck, tt.wantCRE, ">= 30"},
 				{netCheck, tt.wantTrainJob, ">= 40"},
 				{nvlsCheck, tt.wantTrainJob, ">= 700"},
 			}
