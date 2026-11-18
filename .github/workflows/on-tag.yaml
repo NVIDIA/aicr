@@ -1212,16 +1212,15 @@ jobs:
   # The lifecycle scenarios from the newest published release older than this
   # tag, attestations verified, upgraded to this candidate, run through a
   # rollout with deployment validation required, rolled back and uninstalled
-  # in the documented order (make operator-qualify-published). Both operators
-  # run the published release's AICR: a newer AICR that adds a component to
-  # the kind recipe changes the plan mid-upgrade, and operator-validation runs
-  # this tag's AICR. A failure blocks the remaining version aliases, :latest
-  # and publishing, as ADR-027 requires of an operator gate; the validator and
-  # gate version aliases are already promoted. It runs
-  # third-party images on privileged kind nodes, so it holds neither the
-  # release's OIDC identity nor the Go proxy's
-  # credential; its modules come from the default proxy, as the PR lanes'
-  # do, and it publishes nothing.
+  # in the documented order (make operator-qualify-published). The published
+  # operator runs its own AICR and the candidate this tag's, so the upgrade
+  # moves AICR as the chart defaults do. A failure blocks the remaining
+  # version aliases, :latest and publishing, as ADR-027 requires of an
+  # operator gate; the validator and gate version aliases are already
+  # promoted. It runs third-party images on privileged kind nodes, so it
+  # holds neither the release's OIDC identity nor the Go proxy's credential;
+  # its modules come from the default proxy, as the PR lanes' do, and it
+  # publishes nothing.
   operator-lifecycle:
     name: Operator Lifecycle from the Published Release
     runs-on: ubuntu-24.04

@@ -183,8 +183,9 @@ const (
 // resources needing reconciliation — not a validator-wide lifecycle change.
 // It is not an absolute guarantee: startup skew beyond the margin, or a
 // SIGKILL, can still cut cleanup off. Leaked per-run namespaces carry the
-// gpuTestRunLabel ownership label for external sweeping (no sweeper exists
-// yet). The validator-wide lifecycle is covered elsewhere: Job-deadline
+// labels.GPUTestRun ownership label and are what `aicr sweep` deletes once
+// they outlive defaults.ValidationSweepMinAge. The validator-wide lifecycle
+// is covered elsewhere: Job-deadline
 // headroom (defaults.ValidatorJobDeadlineHeadroom) keeps the check's own
 // context first, SIGTERM cancels the running check with a grace window above
 // the cleanup budget (defaults.ValidatorTerminationGracePeriod), and the
