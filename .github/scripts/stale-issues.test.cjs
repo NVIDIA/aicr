@@ -20,6 +20,7 @@ function fixture({
   fieldError = null,
   transientLabelError = false,
   liveProbePriority = 'Medium',
+  liveProbeState = 'OPEN',
   lastEditedAt = null,
 } = {}) {
   const originalIssue = {
@@ -45,7 +46,8 @@ function fixture({
           return { repository: { issue: { lastEditedAt } } };
         }
         if (query.includes('filterBy')) {
-          return { repository: { issues: { nodes: args.priority === 'Medium' ? [{ number: 2 }] : [] } } };
+          const hasProbe = liveProbeState !== null && query.includes(liveProbeState) && args.priority === 'Medium';
+          return { repository: { issues: { nodes: hasProbe ? [{ number: 2 }] : [] } } };
         }
         return {
           repository: {
@@ -84,7 +86,7 @@ function fixture({
           listComments: async ({ since } = {}) => {
             const available = warning ? [...comments, warning, ...repliesAfterWarning] : comments;
             return available.filter(comment =>
-              since === undefined || Date.parse(comment.updated_at ?? comment.created_at) >= Date.parse(since));
+              since === undefined || Date.parse(comment.updated_at ?? comment.created_at) > Date.parse(since));
           },
           addLabels: async params => {
             await record('mark')(params);
@@ -315,7 +317,7 @@ test('a lagging bot label timestamp alone leaves the stale label in place', asyn
   assert.deepEqual(calls.map(([operation]) => operation), ['close', 'comment']);
 });
 
-test('reply between the stale warning and label keeps the issue active', async () => {
+test('reply in the same second as the stale warning keeps the issue active', async () => {
   const { args, calls } = fixture({
     repliesAfterWarning: [{ id: 2, user: { type: 'User' }, body: 'I replied', created_at: defaultDate }],
   });
@@ -327,4 +329,28 @@ test('transient label error retries with the same warning', async () => {
   const { args, calls } = fixture({ transientLabelError: true });
   await runStaleIssues({ ...args, now: Date.parse('2026-05-01T12:00:00Z') });
   assert.deepEqual(calls.map(([operation]) => operation), ['comment', 'mark', 'mark']);
+});
+
+test('live processing can verify Priority through a closed issue', async () => {
+  const { args, calls } = fixture({ liveProbeState: 'CLOSED' });
+  await runStaleIssues({ ...args, now: Date.parse('2026-05-01T12:00:00Z') });
+  assert.deepEqual(calls.map(([operation]) => operation), ['comment', 'mark']);
+});
+
+test('live processing fails without a prioritized issue in either state', async () => {
+  const { args, calls } = fixture({ liveProbeState: null });
+  await assert.rejects(
+    runStaleIssues({ ...args, now: Date.parse('2026-05-01T12:00:00Z') }),
+    /Cannot verify REST Priority access/,
+  );
+  assert.deepEqual(calls, []);
+});
+
+test('reply in the same second as the stale label prevents closure', async () => {
+  const { args, calls } = fixture({
+    ...oldStaleIssue,
+    comments: [{ id: 2, user: { type: 'User' }, body: 'Still active', created_at: defaultDate }],
+  });
+  await runStaleIssues({ ...args, now: Date.parse('2026-02-01T12:00:00Z') });
+  assert.deepEqual(calls.map(([operation]) => operation), ['clear']);
 });

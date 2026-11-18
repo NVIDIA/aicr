@@ -9,7 +9,8 @@ const protectionMonths = new Map([
   ['Medium', 6],
   ['Low', 0],
 ]);
-const day = 24 * 60 * 60 * 1000;
+const second = 1000;
+const day = 24 * 60 * 60 * second;
 const staleAfter = 90 * day;
 const closeAfter = 30 * day;
 const labelUpdateSkew = 15_000;
@@ -121,7 +122,7 @@ async function verifyLivePriorityRead(github, repo, fieldId) {
     const { repository } = await github.graphql(
       `query($owner: String!, $repo: String!, $priority: String!) {
         repository(owner: $owner, name: $repo) {
-          issues(first: 1, states: OPEN, orderBy: { field: CREATED_AT, direction: DESC },
+          issues(first: 1, states: [OPEN, CLOSED], orderBy: { field: CREATED_AT, direction: DESC },
             filterBy: { issueFieldValues: [{ fieldName: "Priority", singleSelectOptionValue: $priority }] }) {
             nodes { number }
           }
@@ -140,7 +141,7 @@ async function verifyLivePriorityRead(github, repo, fieldId) {
     }
     return;
   }
-  throw new Error('Cannot verify REST Priority access without a prioritized open issue');
+  throw new Error('Cannot verify REST Priority access without a prioritized issue');
 }
 
 function isActionsBot(user) {
@@ -160,6 +161,15 @@ async function wasEditedSince(github, issueRef, since) {
   return lastEditedAt !== null && parseTime(lastEditedAt) >= since;
 }
 
+async function commentsAtOrAfter(github, issueRef, cutoff) {
+  // Use the preceding second to keep comments at the documented exclusive boundary.
+  const since = new Date(cutoff - second).toISOString();
+  const comments = await github.paginate(github.rest.issues.listComments, {
+    ...issueRef, since, per_page: 100,
+  });
+  return comments.filter(comment => parseTime(comment.updated_at ?? comment.created_at) >= cutoff);
+}
+
 async function staleAction(github, issueRef, issue, now) {
   if (!hasLabel(issue, staleLabel)) {
     return 'mark';
@@ -173,13 +183,9 @@ async function staleAction(github, issueRef, issue, now) {
   if (lastStaleEvent?.event !== 'labeled') {
     throw new Error(`Missing current ${staleLabel} label event`);
   }
-  const marked = lastStaleEvent.created_at;
-  const markedAt = parseTime(marked);
+  const markedAt = parseTime(lastStaleEvent.created_at);
   const updatedAt = parseTime(issue.updated_at);
-  const comments = await github.paginate(
-    github.rest.issues.listComments,
-    { ...issueRef, since: marked, per_page: 100 },
-  );
+  const comments = await commentsAtOrAfter(github, issueRef, markedAt);
 
   const hasComment = comments.some(comment =>
     comment.user?.type === 'User' && comment.body?.trim() !== staleMessage);
@@ -202,9 +208,7 @@ async function staleAction(github, issueRef, issue, now) {
 async function addStaleLabelAfterWarning(github, issueRef, warning, fieldId, now) {
   const warnedAt = parseTime(warning?.created_at);
   for (const mayRetry of [true, false]) {
-    const comments = await github.paginate(github.rest.issues.listComments, {
-      ...issueRef, since: warning.created_at, per_page: 100,
-    });
+    const comments = await commentsAtOrAfter(github, issueRef, warnedAt);
     if (comments.some(comment => comment.id !== warning.id) ||
         await wasEditedSince(github, issueRef, warnedAt)) {
       return false;
