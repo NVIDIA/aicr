@@ -160,6 +160,12 @@ type Generator struct {
 	vendorRecords []localformat.VendorRecord
 }
 
+// VendorRecords returns a copy of the records the most recent Generate call
+// produced with VendorCharts on, or nil.
+func (g *Generator) VendorRecords() []localformat.VendorRecord {
+	return slices.Clone(g.vendorRecords)
+}
+
 // Generate creates a per-component Helm bundle from the configured generator fields.
 // Per-component folder content (Chart.yaml, values.yaml, install.sh, templates/*)
 // is delegated to pkg/bundler/deployer/localformat. The helm deployer owns only
