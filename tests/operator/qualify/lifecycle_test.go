@@ -101,9 +101,13 @@ func rollbackToInstalled(ctx context.Context, t *testing.T, active string) {
 		rt.Spec.Overrides, rt.Spec.Selection = saved.Overrides, saved.Selection
 	}
 	restored := false
-	// Later scenarios start from the saved inputs, whatever happens here.
+	t.Setenv("CANDIDATE_NEXT_DIR", filepath.Dir(os.Getenv("AICR_OPERATOR_QUALIFY_NEXT")))
+	// Later scenarios start from the next candidate and the saved inputs,
+	// whatever happens here; the plan stays pinned until the next candidate
+	// runs again.
 	defer func() {
 		if !restored {
+			run(context.WithoutCancel(ctx), t, "tools/operator-qualify", "upgrade")
 			patchRuntime(ctx, t, restore)
 		}
 	}()
@@ -149,7 +153,6 @@ func rollbackToInstalled(ctx context.Context, t *testing.T, active string) {
 	if written(ctx, t) != active || syncs(ctx, t) != before {
 		t.Fatalf("the older operator wrote the Application: plan %s, %d syncs (from %d)", written(ctx, t), syncs(ctx, t), before)
 	}
-	t.Setenv("CANDIDATE_NEXT_DIR", filepath.Dir(os.Getenv("AICR_OPERATOR_QUALIFY_NEXT")))
 	run(ctx, t, "tools/operator-qualify", "upgrade")
 	runsCandidate(ctx, t, &next)
 	patchRuntime(ctx, t, restore)
