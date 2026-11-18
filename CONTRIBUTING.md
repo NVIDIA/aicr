@@ -264,6 +264,10 @@ organization members and repository collaborators. Everyone can browse the
 | `Low` | P2 | Minor impact on users, tenants, or performance | No fix commitment |
 | Blank | Unprioritized | Awaiting a priority decision | Review within 7 days |
 
+Issue Triage mirrors the tier in one public label (`priority/P0`, `priority/P1`,
+or `priority/P2`). Clearing the native field removes the public label. To
+resync an existing issue, maintainers can run Issue Triage with its issue number.
+
 The feature and documentation request templates ask how important the change is
 to the reporter. The feature request scale runs from `Nice to have` up to
 `Critical`, and the documentation request scale from `Low` up to `Critical`.

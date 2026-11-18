@@ -15,9 +15,15 @@
 name: Issue Triage
 
 on:
-  issues:
-    types: [opened, reopened]
-  workflow_dispatch: {}
+  # The pinned actionlint predates field_added and field_removed.
+  # Select supported activities in job conditions until the linter supports them.
+  issues: {}
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to resync from native Priority
+        type: number
+        default: 0
 
 permissions:
   contents: read
@@ -30,6 +36,7 @@ jobs:
 
   triage:
     name: Auto-Triage Issues
+    if: github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'reopened')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -241,3 +248,34 @@ jobs:
             } else {
               core.info(`Issue already has ${areaLabel}`);
             }
+
+  sync-priority-label:
+    name: Sync public Priority label
+    if: >-
+      github.repository == 'NVIDIA/aicr'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && ((github.event_name == 'issues' && github.event.issue_field.name == 'Priority'
+      && (github.event.action == 'field_added' || github.event.action == 'field_removed'))
+      || (github.event_name == 'workflow_dispatch' && inputs.issue_number > 0))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    timeout-minutes: 5
+    concurrency:
+      group: issue-priority-label-${{ github.event.issue.number || inputs.issue_number }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout the default branch revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reconcile the issue label from native Priority
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+        with:
+          retries: 2
+          script: |
+            const syncPriorityLabel = require('./.github/scripts/sync-priority-label.cjs');
+            await syncPriorityLabel({ github, context, core, issueNumber: Number(process.env.ISSUE_NUMBER) });
