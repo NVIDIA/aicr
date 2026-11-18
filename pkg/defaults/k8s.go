@@ -52,6 +52,42 @@ const (
 	// gang-scheduling conformance check creates.
 	GangSchedulingTestNamespacePrefix = "gang-scheduling-test-"
 
+	// The gang-scheduling object name prefixes below are the names the
+	// conformance check writes for one run: prefix + the run's 16-byte hex
+	// token (+ a decimal member index for pods). `aicr sweep` matches
+	// residue in Run:ai Project namespaces by exactly these names, not by
+	// label alone, so a rename must move the check and the sweeper together.
+	GangSchedulingPodPrefix           = "gang-worker-"
+	GangSchedulingNegativePodPrefix   = "gang-neg-worker-"
+	GangSchedulingGroupPrefix         = "gang-group-"
+	GangSchedulingNegativeGroupPrefix = "gang-neg-group-"
+
+	// GPUTestNamespacePrefix prefixes the PER-RUN test namespace the GPU
+	// conformance checks create. A fresh namespace per run makes cleanup a
+	// single bounded operation — delete the namespace and wait — and closes
+	// the ambiguous-create leak window: once the namespace is Terminating,
+	// the NamespaceLifecycle admission plugin rejects subsequent Creates in
+	// it, and the namespace deletion controller durably garbage-collects any
+	// content that still lands before finalizing.
+	GPUTestNamespacePrefix = "aicr-gpu-test-"
+
+	// ClusterAutoscalingTestNamespacePrefix prefixes the per-run namespace
+	// the cluster-autoscaling conformance check creates. Unlike the other
+	// per-run namespaces its token is 4 random bytes (8 hex chars), not 16.
+	ClusterAutoscalingTestNamespacePrefix = "cluster-auto-test-"
+
+	// PodAutoscalingTestNamespacePrefix prefixes the per-run namespace the
+	// pod-autoscaling conformance check creates.
+	PodAutoscalingTestNamespacePrefix = "hpa-test-"
+
+	// AIServiceMetricsTestNamespacePrefix prefixes the per-run namespace the
+	// ai-service-metrics conformance check creates.
+	AIServiceMetricsTestNamespacePrefix = "ai-metrics-test-"
+
+	// InferenceGatewayTestNamespacePrefix prefixes the per-run namespace the
+	// inference-gateway traffic conformance check creates.
+	InferenceGatewayTestNamespacePrefix = "gateway-traffic-"
+
 	// EnvRunaiProjectNamespace names the Run:ai Project namespace the
 	// gang-scheduling conformance check runs its test pods in.
 	EnvRunaiProjectNamespace = "AICR_RUNAI_PROJECT_NAMESPACE"
@@ -60,6 +96,18 @@ const (
 	// API the ai-service-metrics conformance check reads instead of NKTP's
 	// otel-lgtm (the upstream -service-metrics-query-url flag).
 	EnvServiceMetricsQueryURL = "AICR_SERVICE_METRICS_QUERY_URL"
+)
+
+// The data ConfigMap prefixes below are the names a validation run writes
+// for its run ID (prefix + run ID): the snapshot input and the validation
+// recipe its validator Jobs mount, created and cleaned up by pkg/validator's
+// EnsureDataConfigMaps and cleanupDataConfigMaps. `aicr sweep` selects these
+// ConfigMaps by label AND exact name, so a rename must move the producer and
+// the sweeper together. The per-phase CTRF report ConfigMaps are named
+// separately, by pkg/validator/ctrf's ConfigMapName.
+const (
+	SnapshotConfigMapPrefix   = "aicr-snapshot-"
+	ValidationConfigMapPrefix = "aicr-validation-"
 )
 
 // K8sAccessReviewConcurrency bounds how many Self/SubjectAccessReview

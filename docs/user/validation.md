@@ -632,9 +632,9 @@ it.
 
 The goodput figure depends on the step count, because startup time counts
 against it. The step count comes from the NVCRE catalog entry, so a figure
-belongs to the CRE version that produced it: 0.5723 on two nodes with the
-pinned v0.8.2 (462.05 TFLOPS per GPU), and 0.5835 on v0.6.0, both measured on a
-NodeWright-tuned cluster. Both are single measurements, so set the constraint
+belongs to the CRE version that produced it: 0.5723 on two nodes with
+v0.8.2, the pin at the time and not re-measured on v0.12.0 (462.05 TFLOPS per
+GPU), and 0.5835 on v0.6.0, both measured on a NodeWright-tuned cluster. Both are single measurements, so set the constraint
 as a floor below the value your cluster reaches, not at it. Run it on nodes
 that completed NodeWright tuning: on a cluster that had not, with the distro
 EFA driver, no hugepages, and an 8 MB memlock limit, a two-node run hung in NCCL
@@ -1528,7 +1528,15 @@ aicr validate \
   validator ServiceAccount is reported before the agent is deployed.
 - `--no-cleanup` keeps the validator Jobs and ConfigMaps. The validator Jobs
   created no binding to leave behind; a live-capture agent's run-scoped RBAC
-  is kept as well.
+  is kept as well. Everything such a run keeps carries the labels
+  [`aicr sweep`](cli-reference.md#aicr-sweep) selects on — except the agent's
+  staging ConfigMap (`aicr-agent-snapshot-<run-id>`), which carries no
+  run-id label and is therefore never swept. The retained validator Jobs keep
+  the run's run-scoped objects guarded while they exist: the sweep's liveness
+  guard keeps every object of a run whose Job it can see. So those objects
+  become eligible once the TTL controller has removed the finished Jobs (one
+  hour after they finish) AND they are older than the sweep's `--older-than`
+  floor. `aicr sweep` never deletes the Jobs themselves.
 - Before deploying a validator that is placed next to another component's
   pods, the run lists pods in that component's namespace (for example
   `monitoring`) to warn when the placement selector matches nothing. Without
@@ -1629,9 +1637,12 @@ nil after cancellation. The pod's 60s grace (30s for cleanup, 30s to write the
 termination message) is best effort: blocking checks, long cleanup, SIGKILL, OOM
 or a crash may prevent a termination message, and a missing pod with a terminal
 Job deadline condition still uses the Job-level `failed` classification
-described above, carrying the check's own message when one was observed. No
-external orphan-resource sweeper is provided yet; namespaces a check leaves
-behind after SIGKILL or a crash carry the `aicr.run/gpu-test-run` label.
+described above, carrying the check's own message when one was observed.
+Namespaces, pods and PodGroups a check leaves behind after SIGKILL or a crash
+carry the `aicr.run/gpu-test-run` label; the run-scoped ConfigMaps and
+snapshot-agent RBAC carry `aicr.run/run-id`, and the validator ServiceAccount
+and ClusterRoleBinding are matched by name (`aicr-validator-<run-id>`); [`aicr sweep`](cli-reference.md#aicr-sweep) deletes
+those orphans once they outlive its two-hour age floor.
 
 Scripts that gate on validation outcome should treat **any non-zero code** as
 failure rather than branching on specific values, and should additionally

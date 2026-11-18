@@ -68,7 +68,6 @@ import (
 // error bound caps how many probe error samples the verdict carries; the
 // interpreter runs both scripts in defaults.PythonProbeImage.
 const (
-	gatewayTrafficTestPrefix      = "gateway-traffic-"
 	gatewayTrafficHostPrefix      = "ai-conformance-"
 	gatewayTrafficHostSuffix      = ".conformance.invalid"
 	gatewayTrafficPathPrefix      = "/ai-conformance-"
@@ -303,7 +302,7 @@ func newGatewayTrafficScenario(clientset kubernetes.Interface, dynClient dynamic
 	if err != nil {
 		return nil, err
 	}
-	run.namespace = gatewayTrafficTestPrefix + run.token
+	run.namespace = defaults.InferenceGatewayTestNamespacePrefix + run.token
 	// The documented listener contract admits routes from namespaces labeled
 	// app.kubernetes.io/component=inference-perf (the performance
 	// validator's per-run namespaces), so the traffic namespace carries that
