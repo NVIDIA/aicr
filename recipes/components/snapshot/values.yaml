@@ -32,8 +32,12 @@
 #   docs/user/component-catalog.md#snapshot.
 # - The agent's default requests are sized for large GPU nodes (the PageBroker
 #   sidecar asks for 8 CPU and 32Gi, the agent for 2 CPU and 1Gi, with a
-#   RAM-backed staging volume). Override pageBroker.resources, daemonset.resources
-#   and pageBroker.staging.sizeLimit on smaller nodes.
+#   RAM-backed staging volume), and the PageBroker pins a transfer ring of host
+#   memory (pageBroker.transferBufferCount slots of pageBroker.transferChunkBytes
+#   each) that a lower pageBroker.resources request does not shrink. Override
+#   pageBroker.resources, daemonset.resources, pageBroker.staging.sizeLimit and
+#   the ring on smaller nodes. On RKE2 also set runtime.socketPath and
+#   runtime.storageDir. See docs/user/component-catalog.md#snapshot.
 # - No fullnameOverride or nameOverride. The health check, and the chart's own
 #   guides, look for the Deployment snapshot-operator and the DaemonSet
 #   snapshot-agent.

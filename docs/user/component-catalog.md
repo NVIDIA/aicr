@@ -1729,17 +1729,26 @@ aicr recipe --service eks --accelerator h100 --os ubuntu --intent inference --pl
 STORAGE_CLASS="my-rwx-class"  # replace with a ReadWriteMany storage class
 aicr bundle -r recipe.yaml --shared-storage-class "${STORAGE_CLASS}" -o ./bundles
 
-# or an existing claim
-CLAIM="my-checkpoint-claim"  # replace with the name of an existing claim
+# or an existing claim, which must be in the snapshot namespace
+CLAIM="my-checkpoint-claim"  # replace with the name of an existing claim in the snapshot namespace
 aicr bundle -r recipe.yaml \
   --set snapshot:storage.pvc.create=false \
   --set "snapshot:storage.pvc.name=${CLAIM}" \
   -o ./bundles
 ```
 
-The chart does not check the access mode of a claim you supply.
+The chart mounts the claim by name in its own `snapshot` namespace, so a claim that exists only in another namespace cannot be mounted. The chart does not check the access mode of a claim you supply.
 
-**Sizing.** The agent pod's defaults suit large GPU nodes: the PageBroker sidecar requests 8 CPU and 32Gi, the agent 2 CPU and 1Gi, and checkpoint data stages in a RAM-backed volume of up to 64Gi. On smaller nodes override `pageBroker.resources`, `daemonset.resources` and `pageBroker.staging.sizeLimit` with `--set snapshot:...`.
+**Sizing.** The agent pod's defaults suit large GPU nodes: the PageBroker sidecar requests 8 CPU and 32Gi, the agent 2 CPU and 1Gi, and checkpoint data stages in a RAM-backed volume of up to 64Gi. The PageBroker also allocates and registers a transfer ring of host memory before it accepts GPU work: `pageBroker.transferBufferCount` slots (default `32`) of `pageBroker.transferChunkBytes` each (default `134217728`, 128 MiB). That reserves 4 GiB for each visible GPU, or 32 GiB on an eight-GPU node, so the node needs that much free allocatable memory on top of the agent's own request, plus process and staging overhead. `pageBroker.maxPinnedBytes` (default `0`, uncapped) limits the pinned total. `pageBroker.resources` sets only the scheduling request, so a lower request does not shrink the ring; it only lets the pod land on a node that may lack the memory. On smaller nodes size the ring with those keys and override `pageBroker.resources`, `daemonset.resources` and `pageBroker.staging.sizeLimit` to match, with `--set snapshot:...`.
+
+**RKE2.** RKE2 runs containerd at a different socket and storage path than the chart's defaults, which the chart's values file gives for RKE2. Set both on an RKE2 cluster:
+
+```shell
+aicr bundle -r recipe.yaml \
+  --set snapshot:runtime.socketPath=/run/k3s/containerd/containerd.sock \
+  --set snapshot:runtime.storageDir=/var/lib/rancher/rke2/agent/containerd \
+  -o ./bundles
+```
 
 **A privileged agent.** The `snapshot-agent` DaemonSet runs privileged with `hostPID`, `hostIPC` and `hostNetwork`, and mounts host paths for the container runtime, the kubelet's pods, seccomp and pod-resources directories, `/proc` and the cgroup tree. The `snapshot` namespace must allow privileged pods. On a cluster that enforces Pod Security Standards, label it `pod-security.kubernetes.io/enforce=privileged` before the install. The agent runs under the GPU Operator's `nvidia` RuntimeClass and on nodes labeled `nvidia.com/gpu.present=true`.
 
