@@ -272,14 +272,12 @@ Triage reviews the discussion before changing an assigned priority.
 
 #### Issue Queues
 
-Use [Ready to pick up](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Aready+no%3Aassignee+-label%3Ablocked+-label%3Aneeds-info+-label%3Aneeds-triage)
-to find unassigned issues approved for work. The
-[good first issues queue](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Aready+label%3A%22good+first+issue%22+no%3Aassignee+-label%3Ablocked+-label%3Aneeds-info+-label%3Aneeds-triage)
-adds the newcomer label.
-[Needs triage](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Aneeds-triage)
+Use [Ready](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Aready+no%3Aassignee+-label%3Ablocked+-label%3Aneeds-info+-label%3Aneeds-triage)
+to find unassigned issues approved for work.
+[Triage](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Aneeds-triage)
 tracks issues awaiting a triage decision.
 [Blocked](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Ablocked)
-and [Waiting on reporter](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Aneeds-info)
+and [Waiting](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Aneeds-info)
 show issues awaiting a dependency or more information.
 Use [Bugs](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+type%3ABug)
 and [Epics](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+type%3AEpic)
@@ -435,7 +433,7 @@ By making a contribution to this project, I certify that:
 
 **Recommended starting points:**
 
-1. Start with the [good first issues queue](#issue-queues)
+1. Start with the [Ready queue](#issue-queues)
 2. Read existing code in the package you're modifying before writing
 3. Run `make tools-check` to verify your environment; run `make tools-update` if any tool is behind
 4. Study the [Design Principles](#design-principles) section
