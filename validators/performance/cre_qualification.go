@@ -36,14 +36,15 @@ type creCombination struct {
 // accelerator, so qualifying a new combination is an entry here plus a measured
 // threshold in the recipe, never a new code path.
 //
-// nccl-cre-all-reduce-bw is qualified on eks x h100. It was re-measured on the
-// CRE version the registry pins, v0.8.2, on 2026-10-23 against 2x p5.48xlarge
+// nccl-cre-all-reduce-bw is qualified on eks x h100. It was re-measured on CRE
+// v0.8.2, the registry pin at the time, on 2026-10-23 against 2x p5.48xlarge
 // on a NodeWright-tuned cluster: 489.70 GB/s bus bandwidth, against 489.33 GB/s
 // from the TrainJob nccl-all-reduce-bw check on the same nodes and 489.80 GB/s
-// at the original 2026-09-02 qualification on v0.1.0.
+// at the original 2026-09-02 qualification on v0.1.0. It has not been
+// re-measured on the current pin, v0.12.0.
 //
 // cre-training-goodput is qualified on eks x h100 with training/nemotron5-8b,
-// measured on the same v0.8.2 run: goodput 0.5723, 462.05 TFLOPS per GPU, 0.914
+// measured on the same v0.8.2 run, also not re-measured on v0.12.0: goodput 0.5723, 462.05 TFLOPS per GPU, 0.914
 // s average step time, no lost work; 0.5835 on v0.6.0 with the catalog at
 // bfd321046 (NVCRE#487); 0.7671 on CRE v0.1.0. The step count comes from the
 // NVCRE catalog entry, and startup time counts against goodput, so a figure is

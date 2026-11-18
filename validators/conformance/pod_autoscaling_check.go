@@ -28,6 +28,7 @@ import (
 
 	"aicr.run/pkg/defaults"
 	"aicr.run/pkg/errors"
+	validatorlabels "aicr.run/pkg/validator/labels"
 	validatorv1 "aicr.run/pkg/validator/v1"
 	"aicr.run/validators"
 	"aicr.run/validators/helper"
@@ -73,10 +74,6 @@ const (
 	hpaMinReplicas int32 = 1
 	hpaMaxReplicas int32 = 2
 )
-
-// hpaTestPrefix names the per-run test namespace; leftovers from interrupted
-// runs are found by this prefix.
-const hpaTestPrefix = "hpa-test-"
 
 // prometheusReleaseLabel is the label kube-prometheus-stack's Prometheus
 // selects PodMonitors and ServiceMonitors by when selectors are not opened
@@ -350,7 +347,7 @@ func newHPAScenario(ctx *validators.Context, dynClient dynamic.Interface, metric
 	if err != nil {
 		return nil, err
 	}
-	run.namespace = hpaTestPrefix + run.token
+	run.namespace = defaults.PodAutoscalingTestNamespacePrefix + run.token
 	s := &hpaScenario{
 		clientset:             ctx.Clientset,
 		dynClient:             dynClient,
@@ -1324,7 +1321,7 @@ func buildHPAPodMonitor(monitorNamespace, name, namespace, runToken string) *uns
 	pm.SetKind("PodMonitor")
 	pm.SetName(name)
 	pm.SetNamespace(monitorNamespace)
-	pm.SetLabels(map[string]string{prometheusReleaseLabel: prometheusComponentName, gpuTestRunLabel: runToken})
+	pm.SetLabels(map[string]string{prometheusReleaseLabel: prometheusComponentName, validatorlabels.GPUTestRun: runToken})
 	return pm
 }
 
@@ -1334,7 +1331,7 @@ func buildHPAPodMonitor(monitorNamespace, name, namespace, runToken string) *uns
 // namespace does not reach a PodMonitor outside it. Best effort: a failure
 // here must not fail the run that found the leftovers.
 func pruneStaleHPAPodMonitors(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, monitorNamespace string) {
-	list, err := dynClient.Resource(podMonitorGVR).Namespace(monitorNamespace).List(ctx, metav1.ListOptions{LabelSelector: gpuTestRunLabel})
+	list, err := dynClient.Resource(podMonitorGVR).Namespace(monitorNamespace).List(ctx, metav1.ListOptions{LabelSelector: validatorlabels.GPUTestRun})
 	if err != nil {
 		slog.Warn("failed to list PodMonitors left by earlier runs", "namespace", monitorNamespace, "error", err)
 		return
@@ -1342,7 +1339,7 @@ func pruneStaleHPAPodMonitors(ctx context.Context, clientset kubernetes.Interfac
 	for i := range list.Items {
 		pm := &list.Items[i]
 		targets, _, _ := unstructured.NestedStringSlice(pm.Object, keySpec, "namespaceSelector", "matchNames")
-		if !strings.HasPrefix(pm.GetName(), hpaWorkloadName+"-") || len(targets) != 1 || !strings.HasPrefix(targets[0], hpaTestPrefix) {
+		if !strings.HasPrefix(pm.GetName(), hpaWorkloadName+"-") || len(targets) != 1 || !strings.HasPrefix(targets[0], defaults.PodAutoscalingTestNamespacePrefix) {
 			continue
 		}
 		// Only a definitive NotFound proves the run is over; any other
