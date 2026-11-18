@@ -2984,6 +2984,13 @@ asserts the five `kubeflow.org` CRDs are Established, the Deployment has
 rolled out, the webhook serving certificate was written, and the CA is
 injected into all five webhooks.
 
+**An image `aicr mirror` cannot see.** The operator adds an `init-pytorch`
+init container running `docker.io/library/alpine:3.10` to the workers of
+every PyTorchJob that has a Master replica. The reference is compiled into
+the operator, so `aicr mirror list` does not report it; a cluster without
+access to Docker Hub must mirror it separately. See
+[Explicit vs. implicit images](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md#explicit-vs-implicit-images).
+
 **Uninstalling the Training Operator.** The five CRDs carry
 `helm.sh/resource-policy: keep` and
 `argocd.argoproj.io/sync-options: Delete=false,Prune=false`. Uninstalling the
@@ -3024,9 +3031,21 @@ adopt -n kubeflow serviceaccount,service,deployment training-operator
 adopt -n kubeflow secret training-operator-webhook-cert
 ```
 
-The existing `mpijobs.kubeflow.org` CRD is not part of the release and stays
-as it is. With the v1 MPI scheme off nothing reconciles it, and Run:ai's page
-has you delete it before installing MPI Operator v2.
+An existing `mpijobs.kubeflow.org` CRD is not part of the release and stays
+as it is. Two operators define a CRD with that name, so check which one the
+cluster has before touching it:
+
+```bash
+kubectl get crd mpijobs.kubeflow.org -o jsonpath='{.spec.versions[?(@.served==true)].name}'
+```
+
+- `v2beta1`: the CRD is MPI Operator v2's, the one Run:ai runs MPI through.
+  Keep it. Deleting it deletes every `v2beta1` MPIJob in the cluster.
+- `v1` only: the CRD is Training Operator v1's. With the v1 MPI scheme off
+  nothing reconciles its jobs any more. Replacing it is a migration to MPI
+  Operator v2, not cleanup: Run:ai's page has you delete this CRD and then
+  install MPI Operator v2, and deleting it deletes every existing `v1` MPIJob.
+  Do it only once those jobs have finished or are no longer needed.
 
 **Prerequisites the health check expects.** The check asserts the
 `RunaiConfig` the install creates from the control plane's configuration
