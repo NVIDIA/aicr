@@ -51,11 +51,14 @@
 //     floor the pod guard no longer applies: an aged namespace cannot
 //     belong to a live check — the floor is pinned above every embedded
 //     check's wait envelope; a --data catalog that raises a check's
-//     timeout needs an OlderThan above v1.WaitEnvelopeFor of it — and
+//     timeout keeps the default unless v1.WaitEnvelopeFor of it exceeds
+//     the floor, and then needs an OlderThan above that envelope — and
 //     the workloads a killed run leaks never go
 //     terminal (a RestartPolicyAlways Deployment's pods keep Running,
 //     gang members the scheduler holds Pending), so the namespace is deleted
-//     with its pods. The floor does not bound a whole uncapped `aicr
+//     with its pods. Run:ai gang residue follows the same rule: below the
+//     floor a residue pod or PodGroup is kept while any gang pod of its run
+//     token is non-terminal. The floor does not bound a whole uncapped `aicr
 //     validate`, and a live run with cleanup on shows no Job between its
 //     checks, so Execute additionally re-plans against current cluster
 //     state, then lists the run-labeled Jobs and watches from the list's

@@ -21,6 +21,8 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"log/slog"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -60,11 +62,13 @@ What is swept:
     and single subject must all match what a run writes), the ConfigMaps a
     run writes for its run ID (exactly aicr-snapshot-<run-id>,
     aicr-validation-<run-id> or aicr-ctrf-<run-id>-<phase>), and
-    snapshot-agent RBAC carrying component=snapshot-agent with an
-    aicr.run/run-id label whose value the name must carry: the namespaced
-    names end in -<run-id>, and the ClusterRole and ClusterRoleBinding are
-    exactly aicr-node-reader-<run-id>. component=agent-rbac is
-    operator-owned and never matched.
+    namespaced snapshot-agent RBAC carrying component=snapshot-agent and
+    an aicr.run/run-id label, its name ending in -<run-id>;
+  - the snapshot agent's ClusterRole and ClusterRoleBinding, exactly
+    aicr-node-reader-<run-id> with the same labels, matched regardless of
+    --namespace: an aged run in another namespace loses this pair while its
+    namespaced RBAC there is kept. component=agent-rbac is operator-owned
+    and never matched.
 
 A candidate must ALSO be older than --older-than (default 2h, above the
 facade's whole-run cap and the largest single-check envelope, which is what
@@ -72,11 +76,14 @@ bounds a test namespace's life) and pass a liveness guard. Below the
 default floor a namespace is kept while any non-terminal pod runs in it;
 at or above the floor that guard no longer applies, because an aged
 namespace cannot belong to a live check — the floor is pinned above every
-embedded check's wait envelope; a --data catalog that raises a check's
-timeout needs --older-than above that timeout plus 4m5s — and the
+embedded check's wait envelope; keep the 2h default for a --data catalog that
+raises a check's timeout unless that timeout plus 4m5s exceeds it, then
+pass --older-than above that sum — and the
 workloads a killed run leaks never go
 terminal (a RestartPolicyAlways Deployment's pods keep Running, gang
 members the scheduler holds Pending), so the namespace is deleted with its pods.
+Run:ai gang residue follows the same rule: below the default floor a pod or
+PodGroup is kept while any gang pod of its run token is non-terminal.
 Run-scoped objects are kept while a validator Job carrying their run ID
 exists in ANY namespace (a run started with -n another-ns owns
 cluster-scoped agent RBAC that this sweep would otherwise orphan). A --no-cleanup run's retained Jobs keep its
@@ -127,8 +134,9 @@ Exit codes: 0 when nothing failed, dry-run, skipped and terminating objects
 included; 1 for flag-parse errors (an unreadable --older-than value or an
 unknown flag); 2 for validation errors the command itself raises (a
 non-positive --older-than, a duplicated flag, an unknown --format, an
-unsupported, malformed or unwritable output destination (checked before the
-cluster is touched), or a confirmation that could not be asked);
+unsupported or malformed output destination or an unwritable output file
+(checked before the cluster is touched; ConfigMap write access is not
+checked before the apply), or a confirmation that could not be asked);
 4 when a list or watch is forbidden; 5 when the operation timed out; 6 when
 the apiserver ended the settle watch early — nothing is deleted; re-run; 8
 when a delete failed or a list failed for a reason other than permissions (a
@@ -215,8 +223,22 @@ func runSweepCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 	dryRun := cmd.Bool("dry-run")
 	assumeYes := cmd.Bool(flagAssumeYes)
-	if err = checkSweepOutput(cmd.String(flagOutput)); err != nil {
+	createdOutput, err := checkSweepOutput(cmd.String(flagOutput))
+	if err != nil {
 		return err
+	}
+	reportWritten := false
+	if createdOutput != "" {
+		// The pre-flight created an empty file; an exit that writes no
+		// report must not leave it behind.
+		defer func() {
+			if reportWritten {
+				return
+			}
+			if rmErr := os.Remove(createdOutput); rmErr != nil && !stderrors.Is(rmErr, fs.ErrNotExist) {
+				slog.Warn("failed to remove unwritten sweep report file", "path", createdOutput, "error", rmErr)
+			}
+		}()
 	}
 
 	client, err := embeddedClient(ctx)
@@ -289,32 +311,40 @@ func runSweepCmd(ctx context.Context, cmd *cli.Command) error {
 		}
 		return err
 	}
+	reportWritten = true
 	return applyErr
 }
 
 // checkSweepOutput rejects a malformed cm:// URI or an unwritable --output
 // file before the cluster is touched, so a bad destination cannot surface
 // only after the apply has deleted. The file is opened without O_TRUNC so a
-// run that later fails before writing leaves an existing report intact.
-func checkSweepOutput(output string) error {
+// run that later fails before writing leaves an existing report intact. It
+// returns the file's path when the check created it, so the caller can
+// remove it if no report is written.
+func checkSweepOutput(output string) (string, error) {
 	output = strings.TrimSpace(output)
 	switch {
 	case output == "" || output == "-" || output == serializer.StdoutURI:
-		return nil
+		return "", nil
 	case strings.HasPrefix(output, serializer.ConfigMapURIScheme):
 		// Constructing the writer parses the URI without contacting the
 		// cluster, and reports a malformed one as InvalidRequest.
 		_, err := serializer.NewFileWriterOrStdoutWithKubeconfig(serializer.FormatJSON, output, "")
-		return err
+		return "", err
+	}
+	_, statErr := os.Stat(output)
+	created := ""
+	if stderrors.Is(statErr, fs.ErrNotExist) {
+		created = output
 	}
 	f, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("cannot write --output %q", output), err)
+		return "", errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("cannot write --output %q", output), err)
 	}
 	if err := f.Close(); err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("cannot write --output %q", output), err)
+		return "", errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("cannot write --output %q", output), err)
 	}
-	return nil
+	return created, nil
 }
 
 // printSweepPlan writes the target header and the plan table to w. In table
