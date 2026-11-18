@@ -1709,8 +1709,9 @@ components: []
 Generate the recipe with `--data`, then bundle it. Passing the overlay file directly to `aicr bundle -r` or `aicr validate -r` never reads `spec.mixins`, so the mixin cannot compose that way.
 
 ```shell
+DATA_DIR="./my-data"  # replace with the directory that holds overlays/ and registry.yaml
 aicr recipe --service eks --accelerator h100 --os ubuntu --intent inference --platform dynamo \
-  --data <dir> -o recipe.yaml
+  --data "${DATA_DIR}" -o recipe.yaml
 ```
 
 **What the mixin does:**
@@ -1725,12 +1726,14 @@ aicr recipe --service eks --accelerator h100 --os ubuntu --intent inference --pl
 
 ```shell
 # a ReadWriteMany storage class
-aicr bundle -r recipe.yaml --shared-storage-class <class> -o ./bundles
+STORAGE_CLASS="my-rwx-class"  # replace with a ReadWriteMany storage class
+aicr bundle -r recipe.yaml --shared-storage-class "${STORAGE_CLASS}" -o ./bundles
 
 # or an existing claim
+CLAIM="my-checkpoint-claim"  # replace with the name of an existing claim
 aicr bundle -r recipe.yaml \
   --set snapshot:storage.pvc.create=false \
-  --set snapshot:storage.pvc.name=<claim> \
+  --set "snapshot:storage.pvc.name=${CLAIM}" \
   -o ./bundles
 ```
 
