@@ -199,6 +199,7 @@ func newRootCmd() *cli.Command {
 			bundleCmd(),
 			bundleVerifyCmd(),
 			validateCmd(),
+			sweepCmd(),
 			evidenceCmd(),
 			diffCmd(),
 			upgradeCheckCmd(),

@@ -70,8 +70,9 @@
 #                       list — [training], [inference], or [training,
 #                       inference]. Absent defaults to [training] (the
 #                       pre-DC3 behavior); an explicit empty list ([]) opts the
-#                       reservation out of the nightly batch (bring-up mode —
-#                       manual dispatch only). DC3 (#1276) sets it to [training,
+#                       reservation out of the nightly batch (bring-up mode),
+#                       not out of the evening daytime-down, which covers every
+#                       non-kind row. DC3 (#1276) sets it to [training,
 #                       inference] on BOTH reservations so training and inference
 #                       both run nightly on both clouds. The batch runs the
 #                       intents SEQUENTIALLY within each version cell, through
@@ -89,7 +90,8 @@
 #   daytime-intent      (optional) opts this reservation into the daytime
 #                       human-access rotation (#1281, DC8) and picks the
 #                       flavor stood up during the working day: training |
-#                       inference. Empty/absent = nightly batch only. This is
+#                       inference. Empty/absent = out of the rotation, though
+#                       the evening daytime-down still covers the row. This is
 #                       the configurable cloud→flavor split — a data choice,
 #                       not hardcoded in a workflow — defaulting to
 #                       AWS=training, GCP=inference. Only ONE reservation per
