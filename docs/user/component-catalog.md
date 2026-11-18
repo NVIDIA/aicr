@@ -2954,7 +2954,7 @@ Operator v1 at v1.9.4, into the `kubeflow` namespace as Deployment
 Deployment up there to report each framework usable, and it reads the
 Deployment's image tag to learn the operator's version through a tag-to-version
 map the chart renders as a ConfigMap. Upstream tags the image by commit, and
-chart 3.0.20 knows tags only up to 1.9.3, so
+chart 3.0.24 knows tags only up to 1.9.3, so
 `components/runai-cluster/values.yaml` adds the 1.9.4 entries
 (`trainingOperatorImageTags`, keyed by the image tag and, because the operator
 reads whatever follows the reference's last colon, by the hex of the digest
