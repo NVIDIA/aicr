@@ -24,6 +24,8 @@
 # Exemptions:
 #   - lifecycle/frozen: Never goes stale
 #   - do-not-merge: PRs never go stale
+#   - Urgent/High issues: protected for one month from creation
+#   - Medium issues: protected for six months from creation
 #
 # Pattern from: gpu-operator
 
@@ -33,37 +35,43 @@ on:
   schedule:
     # Run daily at 6am UTC
     - cron: "0 6 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Preview stale issue changes with read-only access
+        type: boolean
+        default: false
+      priority_probe_issue:
+        description: AICR issue number with native Priority set (required for dry run)
+        type: number
+        default: 0
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   stale:
-    name: Mark stale issues and PRs
-    if: github.repository == 'nvidia/aicr'
+    name: Mark stale pull requests
+    if: >-
+      github.repository == 'nvidia/aicr'
+      && !inputs.dry_run
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     permissions:
-      issues: write
+      issues: read
       pull-requests: write
     timeout-minutes: 10
 
     steps:
       - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93  # v11.0.0
         with:
-          # Issue settings
-          stale-issue-message: |
-            This issue has been marked as stale due to 90 days of inactivity.
-            It will be closed in 30 days unless there is new activity.
-
-            To keep this issue open:
-            - Add a comment with an update
-            - Add the `lifecycle/frozen` label
-
-            If this issue is no longer relevant, it's okay to let it close.
-          days-before-stale: 90
-          stale-issue-label: 'lifecycle/stale'
-          exempt-issue-labels: 'lifecycle/frozen,good first issue'
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          remove-issue-stale-when-updated: false
 
           # PR settings (shorter timeline)
           stale-pr-message: |
@@ -80,12 +88,6 @@ jobs:
           exempt-pr-labels: 'lifecycle/frozen,do-not-merge'
 
           # Closing settings
-          close-issue-message: |
-            This issue was automatically closed due to inactivity after being marked as stale.
-
-            If you believe this issue is still relevant:
-            - Reopen with a comment providing updated details or context
-            - Add the `lifecycle/frozen` label to prevent it from being closed again
           close-pr-message: |
             This pull request was automatically closed due to inactivity after being marked as stale.
 
@@ -96,3 +98,52 @@ jobs:
 
           # Performance
           operations-per-run: 500
+
+  stale-issues:
+    name: Mark stale issues
+    if: >-
+      github.repository == 'nvidia/aicr'
+      && !inputs.dry_run
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            const runStaleIssues = require('./.github/scripts/stale-issues.cjs');
+            await runStaleIssues({ github, context, core });
+
+  preview-stale-issues:
+    name: Preview stale issues and verify Priority access
+    if: >-
+      github.repository == 'nvidia/aicr'
+      && github.event_name == 'workflow_dispatch'
+      && inputs.dry_run
+      && github.ref_type == 'branch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        env:
+          PRIORITY_PROBE_ISSUE: ${{ inputs.priority_probe_issue }}
+        with:
+          script: |
+            const runStaleIssues = require('./.github/scripts/stale-issues.cjs');
+            await runStaleIssues({
+              github, context, core,
+              dryRun: true,
+              priorityProbeIssue: Number(process.env.PRIORITY_PROBE_ISSUE),
+            });

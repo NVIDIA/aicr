@@ -16,11 +16,15 @@ name: Issue Triage
 
 on:
   issues:
-    types: [opened, labeled]
+    types: [opened, reopened]
   workflow_dispatch: {}
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
 
@@ -32,17 +36,25 @@ jobs:
       issues: write
     timeout-minutes: 5
     steps:
-      - name: Add needs-triage on new issue
-        if: github.event.action == 'opened'
+      - name: Queue new and reopened issues for triage
+        if: github.event.action == 'opened' || github.event.action == 'reopened'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         with:
           script: |
-            await github.rest.issues.addLabels({
+            const issue = {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              labels: ['needs-triage']
-            });
+            };
+            if (context.payload.action === 'reopened') {
+              const { data: current } = await github.rest.issues.get(issue);
+              const hasIntakeLabel = labels => labels.some(label => label.name === 'needs-triage');
+              const intakeCleared = hasIntakeLabel(context.payload.issue.labels) && !hasIntakeLabel(current.labels);
+              if (current.state !== 'open' || intakeCleared) {
+                return;
+              }
+            }
+            await github.rest.issues.addLabels({ ...issue, labels: ['needs-triage'] });
 
       - name: Infer area label on new issue
         if: github.event.action == 'opened'
@@ -217,41 +229,4 @@ jobs:
               });
             } else {
               core.info(`Issue already has ${areaLabel}`);
-            }
-
-            try {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                name: 'needs-triage',
-              });
-              core.info('Removed needs-triage after area assignment');
-            } catch (error) {
-              if (error.status === 404) {
-                core.info('needs-triage label not present');
-                return;
-              }
-              throw error;
-            }
-
-      - name: Remove needs-triage when triaged
-        if: >-
-          github.event.action == 'labeled' &&
-          github.event.label.name != 'needs-triage'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
-        with:
-          script: |
-            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            if (labels.some(l => l.name === 'needs-triage')) {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                name: 'needs-triage',
-              });
             }
