@@ -1431,6 +1431,11 @@ components:
         tolerationPaths:
           - dynamo-operator.controllerManager.tolerations
           - nats.podTemplate.merge.spec.tolerations
+    # The one path the opt-in dynamo-snapshot mixin sets: it turns on the
+    # operator's checkpoint/restore feature, which needs the snapshot component
+    # installed first. The chart default is false.
+    mixinSafeOverridePaths:
+      - dynamo-operator.checkpoint.enabled
     # What the planner queries at ai-dynamo/dynamo v1.6.2
     # (components/src/dynamo/planner/monitoring/traffic_metrics.py), in
     # frontend and router mode, plus the engines' speculative-decoding
@@ -1449,6 +1454,69 @@ components:
           - vllm:spec_decode_num_(accepted_tokens|drafts)_total
           - sglang:spec_accept_length
           - trtllm_spec_decode_acceptance_length
+
+  # Snapshot (github.com/ai-dynamo/snapshot): Kubernetes-native GPU
+  # checkpoint/restore. Not the `aicr snapshot` command, which captures cluster
+  # state. Registered the way Dynamo's chart treats it: a bundled dependency,
+  # off by default, next to Grove and KAI Scheduler, which AICR already installs
+  # as separate components. Referenced by no stock overlay; the opt-in
+  # dynamo-snapshot mixin links it to dynamo-platform, and
+  # TestSnapshotRegisteredWithoutStockConsumer keeps it that way.
+  #
+  # The pin follows dynamo-platform, not the newest Snapshot: Dynamo 1.6.2
+  # declares 0.2.0 as its Snapshot dependency, and Snapshot 0.3.0 removed the
+  # standby mode that Dynamo 1.6.2's restore path relies on.
+  # TestSnapshotPinFollowsDynamoPlatform fails a bump of either pin that leaves
+  # the other behind.
+  #
+  # No ownsCRDs. The three CRDs are v1alpha1 only with no conversion webhook
+  # and no other registry component ships them, so the flag would be allowed,
+  # but the chart already keeps them current: its crd-installer init container
+  # applies them on every rollout (crdUpgrade.enabled, default true). A deployer
+  # replacing them as well would add a second writer. Keep crdUpgrade.enabled
+  # true; if it is turned off, a pin bump needs the manual CRD step.
+  #
+  # Component test tier: deploy. The node agent needs real GPUs, CRIU and
+  # cuda-checkpoint, which the gpu-aware tier's mock GPUs do not provide, so the
+  # Kind test deploys the operator and CRDs and the agent DaemonSet has no GPU
+  # node. tools/component-test/detect-tier.sh picks deploy by itself while
+  # components/snapshot/values.yaml carries no GPU reference, so keep GPU
+  # wording out of that file. testTier is not used here: the registry header
+  # documents it, but the Go registry type has no such field and static
+  # validation rejects it.
+  - name: snapshot
+    displayName: Snapshot
+    class: ops
+    valueOverrideKeys:
+      - snapshot
+    healthCheck:
+      assertFile: checks/snapshot/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/ai-dynamo/snapshot
+      defaultChart: snapshot
+      # renovate: datasource=docker depName=ghcr.io/ai-dynamo/snapshot/snapshot
+      defaultVersion: "0.2.0"
+      # The chart's installation guide gives the privileged node agent a
+      # namespace of its own and runs workloads in others.
+      defaultNamespace: snapshot
+    # The checkpoint store is a ReadWriteMany claim by default (the chart's
+    # pvc template hard-codes the access mode), and AICR ships no shared
+    # storage, so the class is a bundle-time input: --shared-storage-class.
+    sharedStorageClassPaths:
+      - storage.pvc.storageClass
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - operator.nodeSelector
+        tolerationPaths:
+          - operator.tolerations
+      # No accelerated nodeSelectorPaths: the agent's chart default
+      # (nvidia.com/gpu.present) already targets GPU nodes, and a path here
+      # would replace it. Tolerations are mapped so the agent can land on
+      # tainted GPU nodes.
+      accelerated:
+        tolerationPaths:
+          - daemonset.tolerations
 
   - name: agentgateway-crds
     displayName: agentgateway-crds

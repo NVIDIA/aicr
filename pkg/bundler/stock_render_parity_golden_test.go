@@ -165,6 +165,15 @@ var stockRenderOptIns = []stockRenderOptIn{
 		covers: []string{"nktp"},
 	},
 	{
+		// No stock recipe selects snapshot yet. The opt-in dynamo-snapshot mixin
+		// adds it to a Dynamo leaf, ordered ahead of dynamo-platform, and turns
+		// on the Dynamo operator's checkpoint feature.
+		name:    "h100-eks-ubuntu-inference-dynamo+dynamo-snapshot",
+		leaf:    "h100-eks-ubuntu-inference-dynamo",
+		overlay: &overlayAddition{mixins: []string{"dynamo-snapshot"}},
+		covers:  []string{"snapshot"},
+	},
+	{
 		// The gpuStack=dra value (#2517) renders a different advertiser
 		// shape than the gke-default stock pass: the installer DaemonSet
 		// on, both device plugins off, whole-GPU DRA armed. No covers

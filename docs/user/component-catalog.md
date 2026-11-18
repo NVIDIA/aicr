@@ -46,6 +46,7 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **kai-scheduler** | `ops` | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. On the `*-inference-dynamo` leaves, which ship Grove, AICR sets `scheduler.args.default-staleness-grace-period: "-1s"`: Grove's KAI backend owns PodGroup termination timing, so the Dynamo platform chart README requires KAI's own stale-PodGroup eviction off. Every other leaf keeps KAI's default cleanup. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
 | **grove** | `ops` | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. Upgrading from `v0.1.0-alpha.12` requires a CRD apply — see [Upgrade Notes](#grove-v010-alpha12-to-v010-alpha13) below. Upgrading from `v0.1.0-alpha.13` requires a CRD apply too — see [Upgrade Notes](#grove-v010-alpha13-to-v010-alpha14) below. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | `ops` | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a ZMQ-based KV-cache event plane, and disaggregated prefill/decode. AICR pins the chart's Grove preflight hook image (`dynamo-operator.grovePreflight.image`, `docker.io/library/python:3.12-slim`) by digest, because the chart pulls it from Docker Hub by tag only; on a mirrored registry, point that value at the mirror. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
+| **snapshot** | `ops` | Kubernetes-native GPU checkpoint/restore for fast replica startup: an operator plus a privileged node agent on every GPU node. Dynamo's platform chart bundles it as an optional dependency, off by default, next to Grove and KAI Scheduler; AICR installs it as its own component, pinned to the version the pinned `dynamo-platform` declares. **Not installed by default:** no stock recipe selects it. See [Enabling Snapshot with Dynamo](#enabling-snapshot-with-dynamo). Installs into `snapshot`. Unrelated to the `aicr snapshot` command, which captures cluster state. | [Snapshot](https://github.com/ai-dynamo/snapshot) |
 | **agentgateway-crds** | `ops` | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | `ops` | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **k8s-nim-operator** | `ops` | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. AICR installs the operator only — it creates no `NIMService` and no credentials; see [NIM workload credentials](#nim-workload-credentials). | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
@@ -1669,6 +1670,81 @@ aicr bundle -r recipe.yaml \
 ```
 
 See [AKS GPU Setup](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-managed-profile) for the per-profile guidance.
+
+## Enabling Snapshot with Dynamo
+
+**snapshot** ([ai-dynamo/snapshot](https://github.com/ai-dynamo/snapshot)) is GPU checkpoint/restore: an operator and a privileged node agent that checkpoint an initialized inference replica and restore it in seconds instead of starting it from scratch. It is unrelated to the `aicr snapshot` command, which captures cluster state.
+
+Dynamo's platform chart lists Snapshot as a bundled dependency next to Grove and KAI Scheduler. It is off by default (`global.snapshot.install`), and the chart recommends installing it separately in production. AICR does the same for all three: `snapshot` is its own component and Dynamo's bundled copy stays off. Unlike Grove, Snapshot is optional (the Dynamo operator's checkpoint feature, `dynamo-operator.checkpoint.enabled`, is off by default), so no stock recipe selects it: `TestSnapshotRegisteredWithoutStockConsumer` keeps it that way, the same boundary [ADR-024](https://github.com/NVIDIA/aicr/blob/main/docs/design/024-lws-optional-component.md) draws for `lws`.
+
+**Opt in via the `dynamo-snapshot` mixin** (`recipes/mixins/dynamo-snapshot.yaml`) on your own overlay that inherits a Dynamo leaf:
+
+```yaml
+# <dir>/overlays/h100-eks-ubuntu-inference-dynamo-snapshot.yaml
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: h100-eks-ubuntu-inference-dynamo-snapshot
+spec:
+  base: h100-eks-ubuntu-inference-dynamo
+  criteria:
+    service: eks
+    accelerator: h100
+    os: ubuntu
+    intent: inference
+    platform: dynamo
+  mixins:
+    - dynamo-snapshot
+```
+
+The overlay inherits the Dynamo leaf and repeats its criteria, so it takes over as the leaf for those criteria. The catalog-registration rule described under [Audit Logging and Tracing](#audit-logging-and-tracing) applies here too: the overlay must be in the resolved catalog, either committed to `recipes/overlays/` or placed at `<dir>/overlays/` and loaded with `--data <dir>`. The data directory also needs a `registry.yaml`, and one that declares no components is enough:
+
+```yaml
+# <dir>/registry.yaml
+apiVersion: aicr.run/v1beta1
+kind: ComponentRegistry
+components: []
+```
+
+Generate the recipe with `--data`, then bundle it. Passing the overlay file directly to `aicr bundle -r` or `aicr validate -r` never reads `spec.mixins`, so the mixin cannot compose that way.
+
+```shell
+aicr recipe --service eks --accelerator h100 --os ubuntu --intent inference --platform dynamo \
+  --data <dir> -o recipe.yaml
+```
+
+**What the mixin does:**
+
+- Adds `snapshot` and orders it after `gpu-operator` and ahead of `dynamo-platform`.
+- Sets `dynamo-operator.checkpoint.enabled: true` on `dynamo-platform`. In the Dynamo 1.6.2 chart that adds `checkpoint.enabled: true` and the seccomp profile name `profiles/block-iouring.json` to the operator's configuration, the profile Snapshot's agent installs on each node. Nothing else in the Dynamo render changes.
+- Pins nothing: the version is the registry default.
+
+**Version.** The `snapshot` pin is the version the pinned `dynamo-platform` chart declares as its Snapshot dependency, which is `0.2.0` for Dynamo 1.6.2. It is not the newest Snapshot: Snapshot 0.3.0 removed the standby mode that Dynamo 1.6.2's restore path relies on, so the two have to move together. Do not bump `snapshot` on its own. `TestSnapshotPinFollowsDynamoPlatform` fails a bump of either pin that leaves the other behind, and when you bump `dynamo-platform` it asks you to record the Snapshot version its `Chart.yaml` declares.
+
+**Storage.** The chart creates a ReadWriteMany claim for checkpoints by default (`storage.pvc`, 1Ti, the default storage class), and AICR ships no shared storage. On a cluster whose default class is block-only, such as stock EKS, that claim cannot bind, so supply one of:
+
+```shell
+# a ReadWriteMany storage class
+aicr bundle -r recipe.yaml --shared-storage-class <class> -o ./bundles
+
+# or an existing claim
+aicr bundle -r recipe.yaml \
+  --set snapshot:storage.pvc.create=false \
+  --set snapshot:storage.pvc.name=<claim> \
+  -o ./bundles
+```
+
+The chart does not check the access mode of a claim you supply.
+
+**Sizing.** The agent pod's defaults suit large GPU nodes: the PageBroker sidecar requests 8 CPU and 32Gi, the agent 2 CPU and 1Gi, and checkpoint data stages in a RAM-backed volume of up to 64Gi. On smaller nodes override `pageBroker.resources`, `daemonset.resources` and `pageBroker.staging.sizeLimit` with `--set snapshot:...`.
+
+**A privileged agent.** The `snapshot-agent` DaemonSet runs privileged with `hostPID`, `hostIPC` and `hostNetwork`, and mounts host paths for the container runtime, the kubelet's pods, seccomp and pod-resources directories, `/proc` and the cgroup tree. The `snapshot` namespace must allow privileged pods. On a cluster that enforces Pod Security Standards, label it `pod-security.kubernetes.io/enforce=privileged` before the install. The agent runs under the GPU Operator's `nvidia` RuntimeClass and on nodes labeled `nvidia.com/gpu.present=true`.
+
+**Requirements** (the chart's README at this pin): Linux kernel 5.13 or newer, containerd or CRI-O, GPU Operator 26.3 or newer with CUDA driver 580 or newer and MIG disabled, and a ReadWriteMany storage class. AICR does not check them yet.
+
+**Known issue: restore on some nodes.** On some nodes a restore fails inside CRIU, for example with `CRIU restore failed: cg: cgroupd: recv req error`, unless `config.criu.mntnsCompatMode` is `true`. It was needed on a node with an NVIDIA A10, driver 580 and Amazon Linux 2023 (kernel 6.12), and the CRIU mount-namespace restore problem is tracked as [ai-dynamo/snapshot#144](https://github.com/ai-dynamo/snapshot/issues/144). Set it with `--set snapshot:config.criu.mntnsCompatMode=true`, restart the agent pods so they reload their configuration, and take a new checkpoint: the option is stored in the checkpoint, so checkpoints taken before the change keep failing.
+
+**Upgrades.** `snapshot` is not `ownsCRDs`. Its three CRDs (`podsnapshots`, `podsnapshotcontents` and `snapshotjobs.nvidia.com`) are `v1alpha1` only with no conversion webhook, and no other registry component ships them, so the flag would be allowed. The chart already keeps them current: its crd-installer init container applies them on every rollout (`crdUpgrade.enabled`, default `true`), and a deployer replacing them as well would add a second writer. Keep `crdUpgrade.enabled` true. If you turn it off, a pin bump needs the manual CRD step described under [Upgrading components that own CRDs](#upgrading-components-that-own-crds).
 
 ## Enabling NVCRE
 

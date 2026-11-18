@@ -677,6 +677,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `slinky-slurm-operator-crds` | CRDs for the SchedMD Slinky Slurm operator (`slinky.slurm.net`) |
 | `slinky-topograph` | Generates Slurm `topology.conf` from cloud topology APIs for topology-aware Slinky placement |
 | `slurm-accounting-mariadb` | Installation-managed MariaDB instance and Secret generation contract for Slurm accounting; installed only for AICR-provided Slurm accounting |
+| `snapshot` | Snapshot, GPU checkpoint/restore for fast replica startup (not installed by default; added by the opt-in `dynamo-snapshot` mixin) |
 | `sriov-ib-networks` | Per-rail SR-IOV InfiniBand networks for the Network Operator (NVKE GB200 overlay) |
 | `topograph` | Kubernetes-scoped Topograph; writes network-topology node labels for topology-aware Kueue scheduling (`platform=kueue` leaves) |
 
