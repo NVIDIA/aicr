@@ -1240,6 +1240,10 @@ operator-kind-up-floor: ## Creates the operator's kind cluster on the Kubernetes
 operator-kind-down: ## Deletes the operator's kind cluster
 	@./tools/operator-kind down
 
+.PHONY: operator-candidate-deps
+operator-candidate-deps: ## Fetches the operator candidate's modules and installs its ko, so the build can run with GOPROXY=off
+	@./tools/operator-candidate deps
+
 .PHONY: operator-candidate
 operator-candidate: ## Builds an operator candidate into dist/candidate (CANDIDATE_VERSION=v0.1.0-rc.1)
 	@./tools/operator-candidate build

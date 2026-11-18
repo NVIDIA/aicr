@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -991,24 +992,38 @@ func TestReleasePreflightRejectsMovedCurrentTag(t *testing.T) {
 	}
 }
 
+// operator-versions revalidates every image, not only the ones it promotes.
 func TestReleasePromotionRejectsPostPreflightAliasMutationWithoutWrites(t *testing.T) {
 	t.Parallel()
-	fixture := newStableReleaseFixture(t)
-	mapPath := filepath.Join(fixture.dir, "digests.json")
-	writeDigestMap(t, mapPath, fixture.digests)
-	validated := filepath.Join(fixture.dir, "validated.json")
-	result := runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "preflight", mapPath, validated)
-	if result.err != nil {
-		t.Fatalf("stable preflight failed: %v\n%s", result.err, result.output)
+	tests := []struct {
+		name    string
+		phase   []string
+		mutated string
+	}{
+		{name: "full promotion", mutated: "performance"},
+		{name: "operator-versions, image it does not promote", phase: []string{"operator-versions"}, mutated: "aicr"},
 	}
-	mutatedImage := releaseImages["performance"]
-	appendFile(t, fixture.digestState, mutatedImage+":latest\tsha256:"+strings.Repeat("f", 64)+"\n")
-	result = runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validated)
-	if result.err == nil {
-		t.Fatalf("promotion accepted post-preflight latest mutation\n%s", result.output)
-	}
-	if mutations := readOptional(t, fixture.mutations); mutations != "" {
-		t.Errorf("post-preflight mutation caused partial writes: %s", mutations)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newStableReleaseFixture(t)
+			mapPath := filepath.Join(fixture.dir, "digests.json")
+			writeDigestMap(t, mapPath, fixture.digests)
+			validated := filepath.Join(fixture.dir, "validated.json")
+			result := runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "preflight", mapPath, validated)
+			if result.err != nil {
+				t.Fatalf("stable preflight failed: %v\n%s", result.err, result.output)
+			}
+			appendFile(t, fixture.digestState, releaseImages[tc.mutated]+":latest\tsha256:"+strings.Repeat("f", 64)+"\n")
+			args := append([]string{"promote", validated}, tc.phase...)
+			result = runScript(t, fixture.environment(), ".github/scripts/release-images.sh", args...)
+			if result.err == nil {
+				t.Fatalf("promotion accepted post-preflight latest mutation\n%s", result.output)
+			}
+			if mutations := readOptional(t, fixture.mutations); mutations != "" {
+				t.Errorf("post-preflight mutation caused partial writes: %s", mutations)
+			}
+		})
 	}
 }
 
@@ -1140,10 +1155,11 @@ func TestReleasePromotionDefersLatestUntilEveryVersionIsVerified(t *testing.T) {
 	}
 }
 
-// The release workflow promotes the version aliases before the operator gate
-// and latest after it: the versions phase writes no latest, and the later
-// full promotion writes only latest.
-func TestReleaseStablePromotionSplitsVersionsFromLatest(t *testing.T) {
+// The release workflow promotes the operator gate's version aliases before
+// the gate and every other alias after release-check: operator-versions
+// writes only the gate's version aliases, and the later full promotion
+// writes the remaining version aliases before any latest (#3859).
+func TestReleaseStablePromotionSplitsOperatorVersionsFromTheRest(t *testing.T) {
 	t.Parallel()
 	fixture := newStableReleaseFixture(t)
 	mapPath := filepath.Join(fixture.dir, "digests.json")
@@ -1157,38 +1173,32 @@ func TestReleaseStablePromotionSplitsVersionsFromLatest(t *testing.T) {
 	}
 
 	preflight()
-	result := runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validated, "versions")
+	result := runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validated, "operator-versions")
 	if result.err != nil {
-		t.Fatalf("version promotion failed: %v\n%s", result.err, result.output)
+		t.Fatalf("operator version promotion failed: %v\n%s", result.err, result.output)
 	}
-	versions := strings.TrimSpace(readOptional(t, fixture.mutations))
-	lines := strings.Split(versions, "\n")
-	if len(lines) != len(releaseImages) {
-		t.Fatalf("version promotion mutations = %d, want %d\n%s", len(lines), len(releaseImages), versions)
-	}
-	for _, line := range lines {
-		if !strings.HasSuffix(line, "\t"+fixture.releaseTag) {
-			t.Errorf("version promotion wrote %q, want only %s aliases", line, fixture.releaseTag)
-		}
+	early := strings.TrimSpace(readOptional(t, fixture.mutations))
+	if got, want := writtenAliases(t, early), operatorGateAliases(fixture.releaseTag); !slices.Equal(got, want) {
+		t.Fatalf("operator-versions wrote %v, want %v", got, want)
 	}
 
 	preflight()
 	if result = runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validated); result.err != nil {
-		t.Fatalf("latest promotion failed: %v\n%s", result.err, result.output)
+		t.Fatalf("full promotion failed: %v\n%s", result.err, result.output)
 	}
 	all := strings.TrimSpace(readOptional(t, fixture.mutations))
-	added := strings.Split(strings.TrimSpace(strings.TrimPrefix(all, versions)), "\n")
-	if len(added) != len(releaseImages) {
-		t.Fatalf("latest promotion mutations = %d, want %d\n%s", len(added), len(releaseImages), all)
+	want := heldAliases(fixture.releaseTag)
+	for _, key := range sortedReleaseImageKeys() {
+		want = append(want, releaseImages[key]+":latest")
 	}
-	for _, line := range added {
-		if !strings.HasSuffix(line, "\tlatest") {
-			t.Errorf("latest promotion wrote %q, want only latest aliases", line)
-		}
+	if got := writtenAliases(t, strings.TrimPrefix(all, early)); !slices.Equal(got, want) {
+		t.Fatalf("full promotion wrote %v, want %v", got, want)
 	}
 
-	if result = runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validated, "latest"); result.err == nil {
-		t.Error("promotion accepted an unknown phase")
+	for _, phase := range []string{"versions", "latest"} {
+		if result = runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validated, phase); result.err == nil {
+			t.Errorf("promotion accepted the unknown phase %q", phase)
+		}
 	}
 }
 
@@ -1286,22 +1296,21 @@ func TestReleasePromotionPrereleaseWritesOnlyVersionAliases(t *testing.T) {
 	}
 	validatedPath := filepath.Join(fixture.dir, "validated.json")
 	writeJSON(t, validatedPath, validated)
-	result := runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validatedPath)
+	result := runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validatedPath, "operator-versions")
+	if result.err != nil {
+		t.Fatalf("operator version promotion failed: %v\n%s", result.err, result.output)
+	}
+	early := strings.TrimSpace(readOptional(t, fixture.mutations))
+	if got, want := writtenAliases(t, early), operatorGateAliases(fixture.releaseTag); !slices.Equal(got, want) {
+		t.Fatalf("operator-versions wrote %v, want %v", got, want)
+	}
+	result = runScript(t, fixture.environment(), ".github/scripts/release-images.sh", "promote", validatedPath)
 	if result.err != nil {
 		t.Fatalf("promote failed: %v\n%s", result.err, result.output)
 	}
-	mutations := strings.TrimSpace(readOptional(t, fixture.mutations))
-	lines := strings.Split(mutations, "\n")
-	if len(lines) != len(releaseImages) {
-		t.Fatalf("got %d mutations, want %d\n%s", len(lines), len(releaseImages), mutations)
-	}
-	for _, line := range lines {
-		if strings.HasSuffix(line, "\tlatest") {
-			t.Errorf("prerelease promoted latest: %s", line)
-		}
-		if !strings.HasSuffix(line, "\t"+fixture.releaseTag) {
-			t.Errorf("unexpected prerelease mutation: %s", line)
-		}
+	rest := strings.TrimPrefix(strings.TrimSpace(readOptional(t, fixture.mutations)), early)
+	if got, want := writtenAliases(t, rest), heldAliases(fixture.releaseTag); !slices.Equal(got, want) {
+		t.Fatalf("prerelease promotion wrote %v, want %v and no latest", got, want)
 	}
 }
 
@@ -1910,6 +1919,51 @@ func sortedImages() []string {
 	}
 	sort.Strings(images)
 	return images
+}
+
+// writtenAliases returns the image:alias of each fake crane tag mutation, in
+// order.
+func writtenAliases(t *testing.T, mutations string) []string {
+	t.Helper()
+	var aliases []string
+	for line := range strings.SplitSeq(strings.TrimSpace(mutations), "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) != 3 || fields[0] != "tag" {
+			t.Fatalf("malformed registry mutation: %q", line)
+		}
+		image, _, ok := strings.Cut(fields[1], "@")
+		if !ok {
+			t.Fatalf("registry mutation tags no digest: %q", line)
+		}
+		aliases = append(aliases, image+":"+fields[2])
+	}
+	return aliases
+}
+
+func sortedReleaseImageKeys() []string {
+	return slices.Sorted(maps.Keys(releaseImages))
+}
+
+// operatorGateAliases and heldAliases are the version aliases promoted before
+// and after the operator gate, in the script's image order.
+func operatorGateAliases(releaseTag string) []string {
+	var aliases []string
+	for _, key := range sortedReleaseImageKeys() {
+		if slices.Contains(operatorGateKeys, key) {
+			aliases = append(aliases, releaseImages[key]+":"+releaseTag)
+		}
+	}
+	return aliases
+}
+
+func heldAliases(releaseTag string) []string {
+	var aliases []string
+	for _, key := range sortedReleaseImageKeys() {
+		if !slices.Contains(operatorGateKeys, key) {
+			aliases = append(aliases, releaseImages[key]+":"+releaseTag)
+		}
+	}
+	return aliases
 }
 
 func assertVersionAliasesBeforeLatest(t *testing.T, mutations, releaseTag string) {
