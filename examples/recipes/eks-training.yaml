@@ -46,7 +46,7 @@ componentRefs:
     chart: gpu-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
-    version: v26.7.2
+    version: v26.7.3
     valuesFile: components/gpu-operator/values-eks-training.yaml
     dependencyRefs:
       - cert-manager

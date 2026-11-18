@@ -672,7 +672,7 @@ spec:
   sources:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
-      targetRevision: v26.7.2
+      targetRevision: v26.7.3
       chart: gpu-operator
       helm:
         valueFiles:

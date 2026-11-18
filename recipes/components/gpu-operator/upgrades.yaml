@@ -64,3 +64,28 @@ transitions:
     references:
       - https://github.com/NVIDIA/gpu-operator/milestone/7?closed=1
       - https://github.com/NVIDIA/gpu-operator/compare/v26.7.1...v26.7.2
+  - from: ">=26.7.2 <26.7.3"
+    to: "=26.7.3"
+    verdict: safe
+    verifiedBy: >-
+      Upstream v26.7.3 release notes and the v26.7.2 to v26.7.3 chart and
+      source diff: driver and k8s-driver-manager (v0.12.1) defaults are
+      unchanged, the only CRD change is descriptions in the bundled NFD
+      subchart's CRDs, which AICR disables, and every DCGM field name in
+      AICR's dcgm-exporter metrics CSV still resolves in DCGM 4.7 as a
+      deprecated alias.
+    summary: >-
+      Patch release. As in v26.7.2, the chart version label changes the driver
+      DaemonSet while its install config digest does not, so with
+      driver.upgradePolicy.autoUpgrade each node is cordoned and its driver pod
+      restarted in place without evicting GPU workloads. DCGM Exporter moves to
+      4.9.0, which renames its default metrics and changes some units; AICR
+      ships its own metrics CSV, so the metric names it exports are unchanged,
+      but a cluster that overrides the CSV with the chart default gets the new
+      names. Upstream lists k8s-driver-manager v0.13.0 as needed with the DRA
+      driver; the chart keeps v0.12.1, and overriding it restarts the driver on
+      each node and can evict GPU workloads.
+    references:
+      - https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/release-notes.html#v26-7-3
+      - https://github.com/NVIDIA/gpu-operator/compare/v26.7.2...v26.7.3
+      - https://github.com/NVIDIA/dcgm-exporter/releases/tag/4.9.0
