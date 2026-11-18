@@ -632,9 +632,9 @@ it.
 
 The goodput figure depends on the step count, because startup time counts
 against it. The step count comes from the NVCRE catalog entry, so a figure
-belongs to the CRE version that produced it: 0.5723 on two nodes with the
-pinned v0.8.2 (462.05 TFLOPS per GPU), and 0.5835 on v0.6.0, both measured on a
-NodeWright-tuned cluster. Both are single measurements, so set the constraint
+belongs to the CRE version that produced it: 0.5723 on two nodes with
+v0.8.2, the pin at the time and not re-measured on v0.12.0 (462.05 TFLOPS per
+GPU), and 0.5835 on v0.6.0, both measured on a NodeWright-tuned cluster. Both are single measurements, so set the constraint
 as a floor below the value your cluster reaches, not at it. Run it on nodes
 that completed NodeWright tuning: on a cluster that had not, with the distro
 EFA driver, no hugepages, and an 8 MB memlock limit, a two-node run hung in NCCL
