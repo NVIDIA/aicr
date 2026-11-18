@@ -152,15 +152,27 @@ package ahead of `nvidia-tuned`. It writes
 starting pods, and restarts CRI-O. `nvidia-tuned` runs there with
 `service: oci`, which takes the OCI GB300 profile and a reboot; its RDMA VF
 gate holds kubelet until the VFs have their driver bound and have stopped
-changing, so the SR-IOV device plugin's one-time scan sees all of them. Its DOCA Spectrum-X congestion control is set off with
-`spcx_cc: "off"`, because Oracle Cloud Agent 1.64 runs congestion control on
-the rails itself. With `--set nodewrightcustomizations:spcxCC=on`,
-`nvidia-tuned` (0.11.0 or later) defers to OCA's units when they are running,
-and otherwise runs congestion control itself, which fails on NICs whose
-firmware lacks `USER_PROGRAMMABLE_CC`. Neither shellscript package has an
-uninstall step. Before removing `network-operator` or disabling this component,
-delete the CRI-O drop-in and restart CRI-O on each node, or CRI-O keeps waiting
-for a Multus network that no longer exists and the node stays not ready.
+changing, so the SR-IOV device plugin's one-time scan sees all of them. Its
+DOCA Spectrum-X congestion control is set off with `spcx_cc: "off"`, because
+Oracle Cloud Agent 1.64 runs congestion control on the rails itself. With
+`--set nodewrightcustomizations:spcxCC=on`, `nvidia-tuned` (0.11.0 or later)
+defers to OCA's units when they are running, and otherwise runs congestion
+control itself, which fails on NICs whose firmware lacks
+`USER_PROGRAMMABLE_CC`. The CRI-O package has no uninstall step. Before
+removing `network-operator` or disabling this component, delete the CRI-O
+drop-in and restart CRI-O on each node, or CRI-O keeps waiting for a Multus
+network that no longer exists and the node stays not ready.
+
+Nodes tuned by a bundle that predates `nvidia-tuned` 0.11.2 also carry an
+`rdma-vfs-settled` unit, which Nodewright does not remove on upgrade. It holds
+kubelet for about 15 seconds on every boot after `nvidia-tuned`'s gate has
+already released. To remove it, run on each such node:
+
+```shell
+systemctl disable rdma-vfs-settled.service
+rm /etc/systemd/system/rdma-vfs-settled.service /usr/local/sbin/wait-rdma-vfs-settled.sh
+systemctl daemon-reload
+```
 
 The tuning CR is a normal release-managed resource (no Helm hooks), so once
 its gates leave no package to render (`tuningEnabled=false`, plus
