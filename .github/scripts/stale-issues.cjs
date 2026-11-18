@@ -12,6 +12,7 @@ const protectionMonths = new Map([
 const day = 24 * 60 * 60 * 1000;
 const staleAfter = 90 * day;
 const closeAfter = 30 * day;
+const labelUpdateSkew = 15_000;
 const apiVersion = { 'X-GitHub-Api-Version': '2026-03-10' };
 
 const staleMessage = `This issue has been marked as stale due to 90 days of inactivity.
@@ -57,9 +58,13 @@ function hasLabel(issue, label) {
   return issue.labels.some(entry => entry.name.toLowerCase() === label);
 }
 
-function isCandidate(issue, now) {
+function isEligible(issue) {
   return issue.state === 'open' && !issue.pull_request && !issue.locked &&
-    !exemptLabels.some(label => hasLabel(issue, label)) &&
+    !exemptLabels.some(label => hasLabel(issue, label));
+}
+
+function isCandidate(issue, now) {
+  return isEligible(issue) &&
     (hasLabel(issue, staleLabel) || now - parseTime(issue.updated_at) > staleAfter);
 }
 
@@ -111,15 +116,60 @@ async function readIssuePriority(github, issueRef, fieldId) {
   return values[0].single_select_option.name;
 }
 
+async function verifyLivePriorityRead(github, repo, fieldId) {
+  for (const expectedPriority of ['Medium', 'High', 'Urgent', 'Low']) {
+    const { repository } = await github.graphql(
+      `query($owner: String!, $repo: String!, $priority: String!) {
+        repository(owner: $owner, name: $repo) {
+          issues(first: 1, states: OPEN, orderBy: { field: CREATED_AT, direction: DESC },
+            filterBy: { issueFieldValues: [{ fieldName: "Priority", singleSelectOptionValue: $priority }] }) {
+            nodes { number }
+          }
+        }
+      }`,
+      { ...repo, priority: expectedPriority },
+    );
+    const probeNumber = repository.issues.nodes[0]?.number;
+    if (probeNumber === undefined) {
+      continue;
+    }
+
+    const actualPriority = await readIssuePriority(github, { ...repo, issue_number: probeNumber }, fieldId);
+    if (actualPriority !== expectedPriority) {
+      throw new Error('REST Priority read did not match the populated value from GraphQL');
+    }
+    return;
+  }
+  throw new Error('Cannot verify REST Priority access without a prioritized open issue');
+}
+
+function isActionsBot(user) {
+  return user?.type === 'Bot' && user.login === 'github-actions[bot]';
+}
+
+async function wasEditedSince(github, issueRef, since) {
+  const { repository } = await github.graphql(
+    `query($owner: String!, $repo: String!, $issue_number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        issue(number: $issue_number) { lastEditedAt }
+      }
+    }`,
+    issueRef,
+  );
+  const lastEditedAt = repository?.issue?.lastEditedAt;
+  return lastEditedAt !== null && parseTime(lastEditedAt) >= since;
+}
+
 async function staleAction(github, issueRef, issue, now) {
   if (!hasLabel(issue, staleLabel)) {
     return 'mark';
   }
 
   const events = await github.paginate(github.rest.issues.listEvents, { ...issueRef, per_page: 100 });
-  const lastStaleEvent = events.findLast(event =>
+  const markIndex = events.findLastIndex(event =>
     (event.event === 'labeled' || event.event === 'unlabeled') &&
     event.label?.name?.toLowerCase() === staleLabel);
+  const lastStaleEvent = events[markIndex];
   if (lastStaleEvent?.event !== 'labeled') {
     throw new Error(`Missing current ${staleLabel} label event`);
   }
@@ -133,11 +183,50 @@ async function staleAction(github, issueRef, issue, now) {
 
   const hasComment = comments.some(comment =>
     comment.user?.type === 'User' && comment.body?.trim() !== staleMessage);
-  // Both stale workflows post their warning before adding the label.
-  if (hasComment || updatedAt > markedAt) {
+  const timeAfterMark = updatedAt - markedAt;
+  if (hasComment || events.length > markIndex + 1 ||
+      timeAfterMark > labelUpdateSkew ||
+      (timeAfterMark > 0 && !isActionsBot(lastStaleEvent.actor))) {
     return 'clear';
   }
-  return now - markedAt > closeAfter ? 'close' : null;
+
+  const dueToClose = now - Math.max(markedAt, updatedAt) > closeAfter;
+  // GitHub can record the bot's label update slightly after the event. Check for
+  // issue edits separately because body edits are absent from the event list.
+  if ((timeAfterMark > 0 || dueToClose) && await wasEditedSince(github, issueRef, markedAt)) {
+    return 'clear';
+  }
+  return dueToClose ? 'close' : null;
+}
+
+async function addStaleLabelAfterWarning(github, issueRef, warning, fieldId, now) {
+  const warnedAt = parseTime(warning?.created_at);
+  for (const mayRetry of [true, false]) {
+    const comments = await github.paginate(github.rest.issues.listComments, {
+      ...issueRef, since: warning.created_at, per_page: 100,
+    });
+    if (comments.some(comment => comment.id !== warning.id) ||
+        await wasEditedSince(github, issueRef, warnedAt)) {
+      return false;
+    }
+
+    const priority = await readIssuePriority(github, issueRef, fieldId);
+    const { data: current } = await github.rest.issues.get(issueRef);
+    if (!isEligible(current) || hasLabel(current, staleLabel) ||
+        parseTime(current.updated_at) > warnedAt ||
+        protectedByPriority(priority, current.created_at, now)) {
+      return false;
+    }
+
+    try {
+      await github.rest.issues.addLabels({ ...issueRef, labels: [staleLabel] });
+      return true;
+    } catch (error) {
+      if (!mayRetry || ![500, 502, 503, 504].includes(error.status)) {
+        throw error;
+      }
+    }
+  }
 }
 
 module.exports = async function runStaleIssues({
@@ -155,6 +244,9 @@ module.exports = async function runStaleIssues({
       throw new Error('The probe issue must have a readable native Priority value');
     }
     core.info('Dry run verified a populated native Priority value');
+  } else {
+    await verifyLivePriorityRead(github, repo, fieldId);
+    core.info('Verified a populated native Priority value for live processing');
   }
   const issues = await github.paginate(github.rest.issues.listForRepo, {
     ...repo, state: 'open', per_page: 100, sort: 'created', direction: 'desc',
@@ -195,9 +287,12 @@ module.exports = async function runStaleIssues({
         await github.rest.issues.removeLabel({ ...issueRef, name: staleLabel });
         core.info(`Cleared stale label on #${issue.number}`);
       } else if (action === 'mark') {
-        await github.rest.issues.createComment({ ...issueRef, body: staleMessage });
-        await github.rest.issues.addLabels({ ...issueRef, labels: [staleLabel] });
-        core.info(`Marked #${issue.number} stale`);
+        const { data: warning } = await github.rest.issues.createComment({ ...issueRef, body: staleMessage });
+        if (await addStaleLabelAfterWarning(github, issueRef, warning, fieldId, now)) {
+          core.info(`Marked #${issue.number} stale`);
+        } else {
+          core.info(`Issue #${issue.number} changed after the stale warning`);
+        }
       } else if (action === 'close') {
         await github.rest.issues.update({ ...issueRef, state: 'closed', state_reason: 'not_planned' });
         await github.rest.issues.createComment({ ...issueRef, body: closeMessage });

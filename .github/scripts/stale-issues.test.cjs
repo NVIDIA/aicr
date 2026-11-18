@@ -15,8 +15,12 @@ function fixture({
   updates = {},
   events = [],
   comments = [],
+  repliesAfterWarning = [],
   canSeeIssueFields = true,
   fieldError = null,
+  transientLabelError = false,
+  liveProbePriority = 'Medium',
+  lastEditedAt = null,
 } = {}) {
   const originalIssue = {
     number: 1,
@@ -31,47 +35,71 @@ function fixture({
   const errors = [];
   const info = [];
   const record = operation => async params => calls.push([operation, params]);
+  let warning;
   const args = {
     context: { repo: { owner: 'NVIDIA', repo: 'aicr' } },
     core: { info: message => info.push(message), error: message => errors.push(message) },
     github: {
-      graphql: async () => ({
-        repository: {
-          viewerCanSeeIssueFields: canSeeIssueFields,
-          issueFields: {
-            nodes: [{
-              name: 'Priority',
-              fullDatabaseId: String(fieldId),
-              options: ['Urgent', 'High', 'Medium', 'Low'].map(name => ({ name })),
-            }],
+      graphql: async (query, args) => {
+        if (query.includes('lastEditedAt')) {
+          return { repository: { issue: { lastEditedAt } } };
+        }
+        if (query.includes('filterBy')) {
+          return { repository: { issues: { nodes: args.priority === 'Medium' ? [{ number: 2 }] : [] } } };
+        }
+        return {
+          repository: {
+            viewerCanSeeIssueFields: canSeeIssueFields,
+            issueFields: {
+              nodes: [{
+                name: 'Priority',
+                fullDatabaseId: String(fieldId),
+                options: ['Urgent', 'High', 'Medium', 'Low'].map(name => ({ name })),
+              }],
+            },
           },
-        },
-      }),
+        };
+      },
       request: async (route, args) => {
         assert.equal(route, 'GET /repos/{owner}/{repo}/issues/{issue_number}/issue-field-values');
         assert.equal(args.headers['X-GitHub-Api-Version'], '2026-03-10');
-        if (fieldError) {
+        if (args.issue_number !== 2 && fieldError) {
           throw fieldError;
         }
+        const selectedPriority = args.issue_number === 2 ? liveProbePriority : priority;
         return {
-          data: priority === undefined ? [] : [{
+          data: selectedPriority === null || selectedPriority === undefined ? [] : [{
             issue_field_id: fieldId,
             data_type: 'single_select',
-            single_select_option: { name: priority },
+            single_select_option: { name: selectedPriority },
           }],
         };
       },
-      paginate: async method => method(),
+      paginate: async (method, options) => method(options),
       rest: {
         issues: {
           listForRepo: async () => [originalIssue],
           get: async () => ({ data: { ...originalIssue, ...updates } }),
           listEvents: async () => events,
-          listComments: async () => comments,
-          addLabels: record('mark'),
+          listComments: async ({ since } = {}) => {
+            const available = warning ? [...comments, warning, ...repliesAfterWarning] : comments;
+            return available.filter(comment =>
+              since === undefined || Date.parse(comment.updated_at ?? comment.created_at) >= Date.parse(since));
+          },
+          addLabels: async params => {
+            await record('mark')(params);
+            if (transientLabelError) {
+              transientLabelError = false;
+              throw Object.assign(new Error('Service unavailable'), { status: 503 });
+            }
+          },
           removeLabel: record('clear'),
           update: record('close'),
-          createComment: record('comment'),
+          createComment: async params => {
+            await record('comment')(params);
+            warning = { id: 1, created_at: originalIssue.updated_at };
+            return { data: warning };
+          },
         },
       },
     },
@@ -117,9 +145,10 @@ for (const { name, now = '2026-04-30T15:00:00Z', expected, ...config } of cases)
   });
 }
 
+const actionsBot = { type: 'Bot', login: 'github-actions[bot]' };
 const oldStaleIssue = {
   issue: { labels: [staleLabel] },
-  events: [{ event: 'labeled', label: staleLabel, created_at: defaultDate }],
+  events: [{ event: 'labeled', label: staleLabel, created_at: defaultDate, actor: actionsBot }],
 };
 
 test('close and comment after 30 days without new activity', async () => {
@@ -140,17 +169,22 @@ for (const priority of ['Urgent', 'High']) {
 test('human comment clears the stale label', async () => {
   const { args, calls } = fixture({
     ...oldStaleIssue,
-    comments: [{ user: { type: 'User' }, body: 'This still matters' }],
+    comments: [{ user: { type: 'User' }, body: 'This still matters', created_at: '2026-01-03T12:00:00Z' }],
   });
   await runStaleIssues({ ...args, now: Date.parse('2026-02-01T12:00:00Z') });
   assert.deepEqual(calls.map(([operation]) => operation), ['clear']);
 });
 
 test('body edits clear stale status even when the REST timeline omits them', async () => {
-  for (const updatedAt of ['2026-01-01T12:00:01Z', '2026-01-21T12:00:00Z']) {
+  for (const [updatedAt, lastEditedAt] of [
+    ['2026-01-01T12:00:01Z', '2026-01-01T12:00:01Z'],
+    ['2026-01-01T12:01:00Z', null],
+    ['2026-01-21T12:00:00Z', null],
+  ]) {
     const { args, calls } = fixture({
       ...oldStaleIssue,
       issue: { ...oldStaleIssue.issue, updated_at: updatedAt },
+      lastEditedAt,
     });
     await runStaleIssues({ ...args, now: Date.parse('2026-03-01T12:00:00Z') });
     assert.deepEqual(calls.map(([operation]) => operation), ['clear']);
@@ -173,16 +207,37 @@ test('missing or superseded stale label event cannot close an issue', async () =
 });
 
 test('legacy warning before the label does not restart the stale clock', async () => {
-  const { args, calls } = fixture({
+  const initial = {
     ...oldStaleIssue,
     issue: {
       ...oldStaleIssue.issue,
       created_at: '2025-09-01T12:00:00Z',
       updated_at: '2026-01-01T11:59:59Z',
     },
-  });
-  await runStaleIssues({ ...args, now: Date.parse('2026-01-31T12:00:01Z') });
-  assert.deepEqual(calls.map(([operation]) => operation), ['close', 'comment']);
+    comments: [
+      {
+        user: { type: 'User' },
+        body: 'Historical report',
+        created_at: '2025-09-01T12:00:00Z',
+      },
+      {
+        user: { type: 'Bot', login: 'github-actions[bot]' },
+        body: 'This issue has been marked as stale due to 90 days of inactivity.',
+        created_at: '2026-01-01T11:59:59Z',
+      },
+    ],
+  };
+  const pastMark = '2026-01-02T12:00:00Z';
+  const afterReply = {
+    ...initial,
+    issue: { ...initial.issue, updated_at: defaultDate },
+    comments: [...initial.comments, { user: { type: 'User' }, body: 'Still relevant', created_at: pastMark }],
+  };
+  for (const [config, expected] of [[initial, ['close', 'comment']], [afterReply, ['clear']]]) {
+    const { args, calls } = fixture(config);
+    await runStaleIssues({ ...args, now: Date.parse('2026-01-31T12:00:01Z') });
+    assert.deepEqual(calls.map(([operation]) => operation), expected);
+  }
 });
 
 test('hidden priority field stops the job before any writes', async () => {
@@ -213,7 +268,7 @@ test('dry run reads populated priority and previews changes without writing', as
     {
       config: {
         ...oldStaleIssue,
-        comments: [{ user: { type: 'User' }, body: 'Still active' }],
+        comments: [{ user: { type: 'User' }, body: 'Still active', created_at: '2026-01-03T12:00:00Z' }],
       },
       plan: 'mark 0, clear 1, close 0',
     },
@@ -236,4 +291,40 @@ test('dry run fails when probe priority is blank or inaccessible', async () => {
     /must have a readable native Priority value/,
   );
   assert.deepEqual(calls, []);
+});
+
+test('live processing fails before writes when the probe REST value is hidden or mismatched', async () => {
+  for (const liveProbePriority of [null, 'Low']) {
+    const { args, calls } = fixture({ ...oldStaleIssue, liveProbePriority });
+    await assert.rejects(
+      runStaleIssues({ ...args, now: Date.parse('2026-05-01T12:00:00Z') }),
+      /REST Priority read did not match/,
+    );
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('a lagging bot label timestamp alone leaves the stale label in place', async () => {
+  const { args, calls } = fixture({
+    ...oldStaleIssue,
+    issue: { ...oldStaleIssue.issue, updated_at: '2026-01-01T12:00:01Z' },
+  });
+  await runStaleIssues({ ...args, now: Date.parse('2026-01-02T12:00:00Z') });
+  assert.deepEqual(calls, []);
+  await runStaleIssues({ ...args, now: Date.parse('2026-02-01T12:00:00Z') });
+  assert.deepEqual(calls.map(([operation]) => operation), ['close', 'comment']);
+});
+
+test('reply between the stale warning and label keeps the issue active', async () => {
+  const { args, calls } = fixture({
+    repliesAfterWarning: [{ id: 2, user: { type: 'User' }, body: 'I replied', created_at: defaultDate }],
+  });
+  await runStaleIssues({ ...args, now: Date.parse('2026-05-01T12:00:00Z') });
+  assert.deepEqual(calls.map(([operation]) => operation), ['comment']);
+});
+
+test('transient label error retries with the same warning', async () => {
+  const { args, calls } = fixture({ transientLabelError: true });
+  await runStaleIssues({ ...args, now: Date.parse('2026-05-01T12:00:00Z') });
+  assert.deepEqual(calls.map(([operation]) => operation), ['comment', 'mark', 'mark']);
 });

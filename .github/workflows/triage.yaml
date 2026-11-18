@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.issue.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.run_id }}-${{ github.event.action }}
   cancel-in-progress: false
 
 jobs:
@@ -46,13 +46,24 @@ jobs:
               repo: context.repo.repo,
               issue_number: context.issue.number,
             };
+            const { data: current } = await github.rest.issues.get(issue);
+            const hasIntakeLabel = labels => labels.some(label => label.name === 'needs-triage');
+            if (current.state !== 'open' || hasIntakeLabel(current.labels)) return;
+
             if (context.payload.action === 'reopened') {
-              const { data: current } = await github.rest.issues.get(issue);
-              const hasIntakeLabel = labels => labels.some(label => label.name === 'needs-triage');
-              const intakeCleared = hasIntakeLabel(context.payload.issue.labels) && !hasIntakeLabel(current.labels);
-              if (current.state !== 'open' || intakeCleared) {
-                return;
+              if (hasIntakeLabel(context.payload.issue.labels)) return;
+              const events = await github.paginate(github.rest.issues.listEvents, {
+                ...issue, per_page: 100
+              });
+              events.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id);
+              const reopened = events.findLastIndex(event => event.event === 'reopened');
+              if (reopened === -1) {
+                throw new Error('Issue reopen event is missing from the timeline');
               }
+              const intakeCleared = events.slice(reopened + 1).some(event =>
+                event.event === 'unlabeled' && event.label?.name === 'needs-triage'
+              );
+              if (intakeCleared) return;
             }
             await github.rest.issues.addLabels({ ...issue, labels: ['needs-triage'] });
 

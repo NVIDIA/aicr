@@ -71,8 +71,22 @@ jq -e '
       and all([.labels, .assignees, .issueFieldValues][]; .pageInfo.hasNextPage == false))
 ' "$triage_dir/issues.json" > /dev/null || exit 1
 
+jq -r '[.[].data.repository.issues.nodes[].id] | sort[]' \
+  "$triage_dir/issues.json" > "$triage_dir/scanned.ids" || exit 1
+gh api --paginate 'repos/NVIDIA/aicr/issues?state=open&per_page=100' \
+  --jq '.[] | select(has("pull_request") | not) | .node_id' \
+  > "$triage_dir/current.ids" || exit 1
+LC_ALL=C sort -u "$triage_dir/current.ids" > "$triage_dir/current-sorted.ids" || exit 1
+if ! cmp -s "$triage_dir/scanned.ids" "$triage_dir/current-sorted.ids"; then
+  echo 'Open issue membership changed during the scan' >&2
+  exit 1
+fi
+
 printf 'Issue snapshot: %s\n' "$triage_dir/issues.json"
 ```
+
+For a bulk run, compare the scanned IDs with the fresh inventory after
+pagination. If membership differs, restart the scan or report it as incomplete.
 
 Resolve the single-select `Priority` field and all four option IDs from
 `.data.repository.issueFields.nodes`. Require a single field, IDs for
@@ -194,12 +208,15 @@ individually. A comment requires approval of its exact body. Include a closure
 comment explaining the reason, the surviving issue when relevant, and how to
 reopen. Apply only authorized actions and keep manual-review issues read-only.
 
-Before each write, re-read the exact issue, native Priority configuration and
-value, labels, assignees, and any evidence on which the action depends. Recheck
-that any pending priority edit is permitted. If a relevant value has changed,
-leave that issue for review. Execute serially. On a failed mutation, stop,
-re-read before any retry, and report verified writes, uncertain outcomes,
-and actions still pending. Keep a per-issue record of each mutation.
+Start with the approved issue state as the expected state. Before each write,
+refresh the issue, native Priority configuration and value, labels, assignees,
+and any evidence on which the action depends. Recheck that any pending
+Priority edit is permitted. Compare the refreshed values with the expected
+state. After each verified write, advance the expected state by that approved
+change. Leave the issue for review when the refresh shows an unexpected change.
+Execute serially. On a failed mutation, stop, re-read before any retry, and
+report verified writes, uncertain outcomes, and actions still pending. Keep a
+per-issue record of each mutation.
 
 ### Native Priority changes
 
@@ -256,16 +273,21 @@ replacement endpoints that accept the issue's full field list.
   or `--reason duplicate --duplicate-of` for a duplicate. Verify the CLI
   supports `--duplicate-of` before offering those closures. For a cross-repo
   duplicate, pass the surviving issue's full URL. Verify native closed state
-  and reason directly. Report any status label cleanup that still needs review.
+  and reason directly. For a duplicate, read
+  `duplicateOf { number repository { nameWithOwner } }` from the closed issue
+  in GraphQL. Verify the surviving issue's repository and number against
+  the approved target. Report a mismatch or unreadable relationship as
+  unverified. Report any status label cleanup that still needs review.
 
 ## 5. Verify and report
 
 For each approved issue, read the resulting native state, Priority, workflow
 labels, and affected assignments directly. A closed issue must be checked
-directly because it leaves the open inventory. Re-read the complete open queue
-for a bulk run, check for multiple active labels or contradictory Ready state,
-and report all open issues with unset Priority. Confirm P2 Backlog issues are
-unassigned and report remaining P1 Backlog or P2 Ready exceptions.
+directly because it leaves the open inventory. For a bulk run, repeat the
+queue read and membership comparison, check for multiple active labels or
+contradictory Ready state, and report all open issues with unset Priority.
+Confirm P2 Backlog issues are unassigned and report remaining P1 Backlog
+or P2 Ready exceptions.
 
 Report **Verified changes**, **Manual review** and **Queue summary**. Include
 the remaining unprioritized or overdue issues, Ready counts, and any approvals

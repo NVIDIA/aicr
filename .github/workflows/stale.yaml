@@ -40,7 +40,7 @@ on:
       dry_run:
         description: Preview stale issue changes with read-only access
         type: boolean
-        default: false
+        default: true
       priority_probe_issue:
         description: AICR issue number with native Priority set (required for dry run)
         type: number
@@ -58,7 +58,7 @@ jobs:
     name: Mark stale pull requests
     if: >-
       github.repository == 'nvidia/aicr'
-      && !inputs.dry_run
+      && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
       && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     permissions:
@@ -103,7 +103,7 @@ jobs:
     name: Mark stale issues
     if: >-
       github.repository == 'nvidia/aicr'
-      && !inputs.dry_run
+      && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
       && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     permissions:
