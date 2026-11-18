@@ -42,9 +42,35 @@ spec:
     - name: K8s.server.version
       value: ">= 1.34"
 
-  componentRefs: []
+  componentRefs:
+    # Drives the performance check below. kubeflow-trainer arrives from the
+    # platform-kubeflow mixin, so it is not declared here (see "Enabling NVCRE"
+    # in docs/user/component-catalog.md).
+    - name: nvcre
+      type: Helm
+      valuesFile: components/nvcre/values.yaml
+      dependencyRefs:
+        - kubeflow-trainer
 
   validation:
+    performance:
+      # Replaces the inherited TrainJob nccl-all-reduce-bw-nvls check. An overlay
+      # cannot drop an inherited check (a non-empty checks list is unioned with
+      # the parent's), so that check stays listed and the validator skips it as
+      # superseded-by-cre while this check is declared and qualified for the
+      # combination. CRE reports one peak bus bandwidth, which on this
+      # NVL72 fabric is the NVLS path: 841 GB/s on CRE v0.12.0 against 841.17
+      # from the TrainJob check on the same nodes. The floor equals the
+      # inherited nvls floor and passes at 90% of it like the TrainJob check,
+      # so the same figure means the same under either.
+      #
+      # nccl-all-reduce-bw-net stays on TrainJob: it asserts the EFA-only path,
+      # which this check does not isolate.
+      checks:
+        - nccl-cre-all-reduce-bw
+      constraints:
+        - name: nccl-cre-all-reduce-bw
+          value: ">= 700"
     conformance:
       checks:
         - robust-controller

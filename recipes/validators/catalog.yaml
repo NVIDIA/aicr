@@ -372,13 +372,15 @@ validators:
     timeout: 30m
     args: ["nccl-all-reduce-bw-nvls"]
     env: []
-  # CRE-driven NCCL check. Opt-in only: no embedded overlay references this
-  # check, and shipped EKS H100 training keeps TrainJob nccl-all-reduce-bw.
+  # CRE-driven NCCL check. Only gb300-eks-ubuntu-training-kubeflow declares it,
+  # in place of the TrainJob nccl-all-reduce-bw-nvls it inherits (that check
+  # skips as superseded-by-cre); every other shipped recipe keeps TrainJob.
   # The check itself is provider-independent; creQualifiedEntries records the
   # qualified combinations. Qualified on EKS H100 — re-measured on CRE
   # v0.8.2 (the pin at the time), live UAT 2026-10-23 (2× p5.48xlarge):
   # 489.70 GB/s vs >= 300, against 489.80 GB/s at the original 2026-09-02 run
-  # on v0.1.0. Not re-measured on the current pin, v0.12.0.
+  # on v0.1.0 — and on EKS GB300, measured on CRE v0.12.0 on 2026-11-18
+  # (2× p6e-gb300.36xlarge, spec.fabric efa): 840.83 GB/s vs >= 700.
   #
   # The timeout covers the Certification wait, the measurement-finalize wait,
   # and the teardown in series, because the check's own context expires at this

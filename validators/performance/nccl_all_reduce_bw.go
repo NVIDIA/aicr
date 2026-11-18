@@ -89,8 +89,32 @@ func checkNCCLAllReduceBWVariant(ctx *validators.Context, variant ncclVariant) e
 		return validators.SkipWithReason(validators.SkipReasonNoConstraint, fmt.Sprintf("no %s constraint in recipe", name))
 	}
 
+	if creSupersedesTrainJobNCCL(ctx, variant) {
+		return validators.SkipWithReason(validators.SkipReasonSupersededByCRE, fmt.Sprintf(
+			"%s measures this bandwidth for the recipe instead", checkNameCRENCCLAllReduceBW))
+	}
+
 	actual, passed, err := validateNcclAllReduceBw(ctx, constraint, variant)
 	return classifyNCCLAllReduceBWResult(name, constraint, actual, passed, err)
+}
+
+// creSupersedesTrainJobNCCL reports whether the recipe's CRE NCCL check stands
+// in for the given TrainJob variant. An overlay cannot drop a check it
+// inherits, so a recipe that moves to CRE still lists the TrainJob check; this
+// is where it stops running. It requires the recipe to declare the CRE
+// constraint and the combination to be qualified for exactly this variant, so a
+// recipe whose CRE check would only skip keeps its TrainJob coverage, and a
+// variant the CRE measurement does not cover keeps running.
+func creSupersedesTrainJobNCCL(ctx *validators.Context, variant ncclVariant) bool {
+	if ctx.ValidationInput == nil {
+		return false
+	}
+	if _, declared := findPerformanceConstraint(ctx, checkNameCRENCCLAllReduceBW); !declared {
+		return false
+	}
+	criteria := ctx.ValidationInput.Criteria
+	entry, qualified := lookupCREQualification(checkNameCRENCCLAllReduceBW, criteria.Service, criteria.Accelerator)
+	return qualified && entry.Supersedes == variant
 }
 
 // classifyNCCLAllReduceBWResult turns the inner validateNcclAllReduceBw outcome

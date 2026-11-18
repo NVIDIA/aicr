@@ -838,7 +838,7 @@ codes are:
 `profile-lacks-variant`, `unsupported-service`, `unrecognized-platform`,
 `no-gpu-backed-nodeset`, `no-verifiable-nodes`, `dra-driver-not-installed`,
 `slurm-managed-gpus`, `simulated-nodes`, `no-metrics-backend`,
-`named-in-skip-checks`
+`superseded-by-cre`, `named-in-skip-checks`
 
 `named-in-skip-checks` is the one code minted by a *caller* (`--skip-check`)
 rather than a check.
@@ -1570,8 +1570,9 @@ silently fall back.
 Full list (defaults, semantics) is in the `validators/performance`
 package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
 `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls`. Inference:
-`inference-perf` (Dynamo + AIPerf). Opt-in public CRE
-checks: `nccl-cre-all-reduce-bw` and `cre-training-goodput`. Neither branches on
+`inference-perf` (Dynamo + AIPerf). Public CRE
+checks: `nccl-cre-all-reduce-bw` and `cre-training-goodput`; only the EKS GB300
+kubeflow recipe declares one (see below), and the rest are opt-in. Neither branches on
 service or accelerator — `creQualifiedEntries` in
 `validators/performance/cre_qualification.go` records which combinations are
 qualified and the catalog entry, node cap and workload image each was measured

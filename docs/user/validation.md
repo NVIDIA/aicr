@@ -550,11 +550,18 @@ recipe's plain criteria like any other embedded one.
 
 ### Cluster Readiness Engine checks
 
-An opt-in pair of Cluster Readiness Engine (CRE) checks runs against public CRE
+A pair of Cluster Readiness Engine (CRE) checks runs against public CRE
 (`nvcre.nvidia.com`, [cluster-readiness-engine](https://github.com/NVIDIA/cluster-readiness-engine)).
 Neither check branches on service or accelerator; which combinations are
 qualified is recorded as data. Shipped overlays keep the TrainJob
-`nccl-all-reduce-bw` path, so nothing below runs unless you ask for it.
+`nccl-all-reduce-bw*` path. The one exception is
+`gb300-eks-ubuntu-training-kubeflow`, which installs `nvcre` and declares
+`nccl-cre-all-reduce-bw` with `>= 700`. CRE reports one peak bus bandwidth, which
+on an NVL72 fabric is the NVLS path, so the check stands in for
+`nccl-all-reduce-bw-nvls`: that inherited check stays in the recipe but is
+reported as skipped (`superseded-by-cre`). `nccl-all-reduce-bw-net` keeps
+running on TrainJob, because it asserts the EFA-only path the CRE peak does
+not isolate. On every other overlay, nothing below runs unless you ask for it.
 
 Enabling a CRE check takes two steps and needs both. Add the `nvcre` component
 as described in

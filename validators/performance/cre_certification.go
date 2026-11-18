@@ -41,6 +41,7 @@ const (
 	creNCCLRunName     = "aicr-cre-nccl"
 	creNCCLDomain      = "communication"
 	creNCCLVariant     = "nccl-all-reduce"
+	creFabricEFA       = "efa"
 	creTrainingDomain  = "training"
 	creTrainingVariant = "nemotron5-8b"
 	// creGonePollInterval is how often waitForCREResourceGone re-Gets a CR
@@ -102,11 +103,21 @@ func uniqueCREResourceName(prefix string) (string, error) {
 // applies options.image after its platform overrides, so a pin must be the
 // image those overrides select on the combination, or the run changes what it
 // measures.
+//
+// Fabric, when set, is submitted as spec.fabric. CRE detects the fabric from
+// node labels and renders the wrong transport for one it cannot classify, so a
+// combination whose detection is not known to resolve names it.
+//
+// Supersedes names the TrainJob NCCL variant the check stands in for on the
+// combination; the zero value is the default variant. Only nccl-cre-all-reduce-bw
+// reads it.
 type creCatalogEntry struct {
-	Domain   string
-	Variant  string
-	MaxNodes int
-	Image    string
+	Domain     string
+	Variant    string
+	MaxNodes   int
+	Image      string
+	Fabric     string
+	Supersedes ncclVariant
 }
 
 // buildCRECertification renders the Certification for one catalog entry,
@@ -153,6 +164,9 @@ func buildCRECertification(
 		"gpusPerNode":   int64(gpuConfig.GPUCountPerNode),
 		"nodesPerJob":   int64(len(nodes)),
 		"timeoutPerJob": defaults.CRECertificationTimeout.String(),
+	}
+	if entry.Fabric != "" {
+		spec["fabric"] = entry.Fabric
 	}
 	addCRETarget(spec, nodes)
 

@@ -99,19 +99,29 @@ func TestCREQualifiedEntries(t *testing.T) {
 	}
 }
 
-// nvcreWorkloadClosurePath is the committed NVCRE workload closure, derived for
-// platform aws and gpuArchitecture h100, the selectors eks x h100 resolves to.
-const nvcreWorkloadClosurePath = "../../recipes/components/nvcre/workload-images.yaml"
+// creEKSGB300 is the second combination qualified for nccl-cre-all-reduce-bw.
+var creEKSGB300 = creCombination{
+	Service:     recipe.CriteriaServiceEKS,
+	Accelerator: recipe.CriteriaAcceleratorGB300,
+}
+
+// nvcreClosureFor names the committed NVCRE workload closure each qualified
+// combination pins its image from, with the platform and gpuArchitecture
+// selectors the closure was derived for. A combination absent here has no
+// closure to pin from.
+var nvcreClosureFor = map[creCombination]struct {
+	path, platform, architecture string
+}{
+	creEKSH100:  {"../../recipes/components/nvcre/workload-images.yaml", "aws", "h100"},
+	creEKSGB300: {"../../recipes/components/nvcre/workload-images-gb300.yaml", "aws", "gb300"},
+}
 
 // A qualified entry pins its workload image to the digest the closure records
-// for the pinned CRE version. A chart bump re-derives the closure, so a pin left
-// behind fails here instead of running bytes the closure no longer describes.
+// for the pinned CRE version. A chart bump re-derives the closures, so a pin
+// left behind fails here instead of running bytes the closure no longer
+// describes.
 func TestCREQualifiedImagesMatchWorkloadClosure(t *testing.T) {
-	data, err := os.ReadFile(nvcreWorkloadClosurePath)
-	if err != nil {
-		t.Fatalf("read %s: %v", nvcreWorkloadClosurePath, err)
-	}
-	var closure struct {
+	type closureFile struct {
 		Platform        string `json:"platform"`
 		GPUArchitecture string `json:"gpuArchitecture"`
 		Images          []struct {
@@ -119,42 +129,100 @@ func TestCREQualifiedImagesMatchWorkloadClosure(t *testing.T) {
 			Digest string `json:"digest"`
 		} `json:"images"`
 	}
-	if err := yaml.Unmarshal(data, &closure); err != nil {
-		t.Fatalf("parse %s: %v", nvcreWorkloadClosurePath, err)
-	}
-	if closure.Platform != "aws" || closure.GPUArchitecture != "h100" {
-		t.Fatalf("closure resolves platform %q, gpuArchitecture %q; the eks x h100 pins need aws, h100",
-			closure.Platform, closure.GPUArchitecture)
-	}
-	recorded := make(map[string]string, len(closure.Images))
-	for _, img := range closure.Images {
-		recorded[img.Image] = img.Digest
-	}
-
 	pinPattern := regexp.MustCompile(`^([^@\s]+:[^@\s]+)@(sha256:[0-9a-f]{64})$`)
+
 	for checkName, combinations := range creQualifiedEntries {
-		for combination := range combinations {
-			if combination != creEKSH100 {
-				t.Errorf("%s is qualified on %s x %s, which no committed closure covers; "+
-					"derive one for its platform and pin its image from it",
-					checkName, combination.Service, combination.Accelerator)
-			}
+		for combination, entry := range combinations {
+			t.Run(checkName+"/"+string(combination.Service)+"-"+string(combination.Accelerator), func(t *testing.T) {
+				source, ok := nvcreClosureFor[combination]
+				if !ok {
+					t.Fatalf("%s is qualified on %s x %s, which no committed closure covers; "+
+						"derive one for its platform and pin its image from it",
+						checkName, combination.Service, combination.Accelerator)
+				}
+				data, err := os.ReadFile(source.path)
+				if err != nil {
+					t.Fatalf("read %s: %v", source.path, err)
+				}
+				var closure closureFile
+				if err := yaml.Unmarshal(data, &closure); err != nil {
+					t.Fatalf("parse %s: %v", source.path, err)
+				}
+				if closure.Platform != source.platform || closure.GPUArchitecture != source.architecture {
+					t.Fatalf("%s resolves platform %q, gpuArchitecture %q; %s x %s needs %s, %s",
+						source.path, closure.Platform, closure.GPUArchitecture,
+						combination.Service, combination.Accelerator, source.platform, source.architecture)
+				}
+				recorded := make(map[string]string, len(closure.Images))
+				for _, img := range closure.Images {
+					recorded[img.Image] = img.Digest
+				}
+				match := pinPattern.FindStringSubmatch(entry.Image)
+				if match == nil {
+					t.Fatalf("Image = %q, want <repository>:<tag>@sha256:<64 hex>", entry.Image)
+				}
+				digest, found := recorded[match[1]]
+				if !found {
+					t.Fatalf("%s is not in %s; re-derive the pin from the closure", match[1], source.path)
+				}
+				if digest != match[2] {
+					t.Errorf("%s pins %s, the closure records %s", match[1], match[2], digest)
+				}
+			})
 		}
-		entry, ok := combinations[creEKSH100]
-		if !ok {
-			continue
-		}
-		t.Run(checkName, func(t *testing.T) {
-			match := pinPattern.FindStringSubmatch(entry.Image)
-			if match == nil {
-				t.Fatalf("Image = %q, want <repository>:<tag>@sha256:<64 hex>", entry.Image)
+	}
+}
+
+// Fabric and Supersedes are what separate the two NCCL combinations; a dropped
+// one would run the wrong transport or skip the wrong TrainJob check silently.
+func TestCRENCCLQualificationSelectsFabricAndSupersededVariant(t *testing.T) {
+	tests := []struct {
+		combination    creCombination
+		wantFabric     string
+		wantSupersedes ncclVariant
+	}{
+		{creEKSH100, "", variantDefault},
+		{creEKSGB300, "efa", variantNVLS},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.combination.Accelerator), func(t *testing.T) {
+			entry, ok := lookupCREQualification(checkNameCRENCCLAllReduceBW,
+				tt.combination.Service, tt.combination.Accelerator)
+			if !ok {
+				t.Fatalf("%s x %s is unqualified", tt.combination.Service, tt.combination.Accelerator)
 			}
-			digest, found := recorded[match[1]]
-			if !found {
-				t.Fatalf("%s is not in %s; re-derive the pin from the closure", match[1], nvcreWorkloadClosurePath)
+			if entry.Fabric != tt.wantFabric {
+				t.Errorf("Fabric = %q, want %q", entry.Fabric, tt.wantFabric)
 			}
-			if digest != match[2] {
-				t.Errorf("%s pins %s, the closure records %s", match[1], match[2], digest)
+			if entry.Supersedes != tt.wantSupersedes {
+				t.Errorf("Supersedes = %q, want %q", entry.Supersedes, tt.wantSupersedes)
+			}
+		})
+	}
+}
+
+// spec.fabric reaches the Certification only when the entry names one, so the
+// H100 object stays byte-for-byte what it was qualified with.
+func TestBuildCRECertificationFabric(t *testing.T) {
+	gpuConfig := twoNodeGPUConfig()
+	tests := []struct {
+		name       string
+		entry      creCatalogEntry
+		wantFabric string
+		wantSet    bool
+	}{
+		{"fabric named", creCatalogEntry{Domain: "d", Variant: "v", MaxNodes: 2, Fabric: "efa"}, "efa", true},
+		{"fabric unset", creCatalogEntry{Domain: "d", Variant: "v", MaxNodes: 2}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := mustBuildCRECertification(t, "ns", "name", gpuConfig, tt.entry)
+			got, found, err := unstructured.NestedString(obj.Object, "spec", "fabric")
+			if err != nil {
+				t.Fatalf("spec.fabric: %v", err)
+			}
+			if found != tt.wantSet || got != tt.wantFabric {
+				t.Errorf("spec.fabric = %q (found %v), want %q (found %v)", got, found, tt.wantFabric, tt.wantSet)
 			}
 		})
 	}

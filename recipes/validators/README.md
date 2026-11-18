@@ -52,7 +52,7 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `nccl-all-reduce-bw-net` | Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS) | 30m |
 | `nccl-all-reduce-bw-nvls` | Verify NCCL All Reduce Bus Bandwidth on the NVLS transport (MNNVL across an NVL72 IMEX domain) | 30m |
 | `inference-perf` | Verify inference throughput and TTFT p99 meet thresholds using AIPerf | 65m |
-| `nccl-cre-all-reduce-bw` | NCCL bus bandwidth via a CRE `Certification` (opt-in). Qualified on EKS H100 — live UAT 2026-10-23 on CRE v0.8.2 (the pin at the time; not re-measured on v0.12.0), 2× p5.48xlarge: 489.70 GB/s vs `>= 300` (passes at 90%, like `nccl-all-reduce-bw`). | 50m |
+| `nccl-cre-all-reduce-bw` | NCCL bus bandwidth via a CRE `Certification` (declared by `gb300-eks-ubuntu-training-kubeflow`, opt-in elsewhere). Qualified on EKS H100 — live UAT 2026-10-23 on CRE v0.8.2 (the pin at the time; not re-measured on v0.12.0), 2× p5.48xlarge: 489.70 GB/s vs `>= 300` (passes at 90%, like `nccl-all-reduce-bw`); and on EKS GB300 — 2026-11-18 on CRE v0.12.0 with `spec.fabric: efa`, 2× p6e-gb300.36xlarge: 840.83 GB/s vs `>= 700`, where it supersedes `nccl-all-reduce-bw-nvls`. | 50m |
 | `cre-training-goodput` | Training goodput via a CRE `Certification` (opt-in). Qualified on EKS H100 — live UAT 2026-10-23 on CRE v0.8.2 (the pin at the time; not re-measured on v0.12.0) and a NodeWright-tuned cluster, 2× p5.48xlarge: goodput 0.5723, 462.05 TFLOPS per GPU. | 50m |
 
 The TrainJob-path NCCL checks (`nccl-all-reduce-bw`, `-net`, `-nvls`) derive
