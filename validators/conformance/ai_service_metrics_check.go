@@ -52,9 +52,6 @@ const (
 	otelLGTMServiceName    = "lgtm"
 	otelLGTMPrometheusPort = 9090
 
-	// aiMetricsTestPrefix names the per-run test namespace; leftovers from
-	// interrupted runs are found by this prefix.
-	aiMetricsTestPrefix    = "ai-metrics-test-"
 	aiMetricsWorkloadName  = "ai-metrics-stub"
 	aiMetricsContainerName = "server"
 	aiMetricsPortName      = "http"
@@ -371,7 +368,7 @@ func newAIMetricsScenario(clientset kubernetes.Interface, dynClient dynamic.Inte
 	if err != nil {
 		return nil, err
 	}
-	run.namespace = aiMetricsTestPrefix + run.token
+	run.namespace = defaults.AIServiceMetricsTestNamespacePrefix + run.token
 	s := &aiMetricsScenario{
 		clientset:          clientset,
 		dynClient:          dynClient,

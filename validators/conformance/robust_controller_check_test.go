@@ -643,7 +643,7 @@ func TestReconcileKubeflowTrainJob(t *testing.T) {
 				t.Fatalf("list namespaces: %v", listErr)
 			}
 			for _, ns := range namespaces.Items {
-				if strings.HasPrefix(ns.Name, gpuTestNamespacePrefix) {
+				if strings.HasPrefix(ns.Name, defaults.GPUTestNamespacePrefix) {
 					t.Errorf("per-run namespace %s leaked", ns.Name)
 				}
 			}
