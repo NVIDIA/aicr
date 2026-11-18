@@ -2544,6 +2544,10 @@ for sub in ${EXCLUDE_SUBCHARTS}; do
 done
 crds=()
 while IFS= read -r crd; do
+  # Only a chart's own crds/ directory: <chart>/crds/ or
+  # <chart>/charts/<subchart>/crds/. A subchart named "crds" would otherwise
+  # contribute its Chart.yaml, which carries no kind and which kubectl rejects.
+  [[ "${crd#"${work}"/}" =~ ^[^/]+(/charts/[^/]+)*/crds/. ]] || continue
   crds+=("${crd}")
 done < <(find "${work}" -type f -path '*/crds/*' ${excluded[@]+"${excluded[@]}"} \( -name '*.yaml' -o -name '*.yml' \) | sort)
 
