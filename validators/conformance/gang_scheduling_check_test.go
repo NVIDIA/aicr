@@ -27,6 +27,7 @@ import (
 	"aicr.run/pkg/errors"
 
 	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/validator/labels"
 	"aicr.run/validators"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -131,8 +132,8 @@ func TestGangTestRunTokenAndLabel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ns.Labels[gpuTestRunLabel] != run.suffix {
-		t.Errorf("namespace label %s = %q, want the run token", gpuTestRunLabel, ns.Labels[gpuTestRunLabel])
+	if ns.Labels[labels.GPUTestRun] != run.suffix {
+		t.Errorf("namespace label %s = %q, want the run token", labels.GPUTestRun, ns.Labels[labels.GPUTestRun])
 	}
 }
 
