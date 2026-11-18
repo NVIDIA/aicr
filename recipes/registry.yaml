@@ -1403,6 +1403,26 @@ components:
       # renovate: datasource=helm depName=dynamo-platform registryUrl=https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultVersion: "1.6.2"
       defaultNamespace: dynamo-system
+    # The chart's Grove preflight hook (an Argo CD PreSync Job, backoffLimit 2,
+    # activeDeadlineSeconds 120) fails until grove-operator has rolled out.
+    # Sync waves create grove's Application first but do not wait for it to
+    # become healthy. With no syncPolicy.retry, the Argo CD AICR tests against
+    # (v3.x, argo-cd chart 9.5.14) already retries a failed automated sync 5
+    # times, but at a 5s base backoff those retries end after about 2.5
+    # minutes, too short for a slow grove rollout; once they run out, Argo CD
+    # starts no new auto-sync of the same revision. This retry keeps the 5
+    # attempts and widens the backoff to 30s, 1m, 2m, 3m, 3m, about 10 minutes
+    # of waits. Factor 2 and maxDuration 3m match Argo CD's defaults, written
+    # out so the Application does not depend on them.
+    argocd:
+      syncRetry:
+        whenComponents:
+          - grove
+        limit: 5
+        backoff:
+          duration: 30s
+          factor: 2
+          maxDuration: 3m
     nodeScheduling:
       system:
         nodeSelectorPaths:

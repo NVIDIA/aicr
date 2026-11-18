@@ -226,11 +226,17 @@ transitions:
               new status fields starts.
           - id: rerun-installer
             description: >-
-              Re-run install.sh (helm) or helmfile apply (helmfile).
+              Re-run deploy.sh (helm) or helmfile apply (helmfile). If you
+              re-run per-component install.sh scripts by hand instead, run
+              grove's, wait for the grove-operator rollout to finish, then run
+              dynamo-platform's.
             reason: >-
               AICR's generated install.sh already passes --force-conflicts on
-              Helm 4, and installs grove before dynamo-platform, so the
+              Helm 4. deploy.sh waits for grove's release (helm --wait) before
+              installing dynamo-platform, unless run with --no-wait, so the
               rollout completes before dynamo-platform's preflight checks it.
+              A per-component install.sh installs only its own release, and
+              waits only when deploy.sh asks it to.
       - deployers: [terraform]
         steps:
           - id: apply-new-crds
