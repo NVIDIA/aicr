@@ -567,7 +567,7 @@ Generate deployment bundles from a recipe.
 | `argocd-destination-server` | string | `https://kubernetes.default.svc` | Cluster API URL child Applications deploy to. The parent stays on the Argo CD cluster. |
 | `argocd-project` | string | `default` | Argo CD project for child Applications. The parent stays in `default`. |
 | `argocd-cascade-delete` | bool | false | Add Argo CD's resources finalizer to the parent and every child Application. |
-| `argocd-sync-retry-limit` | int | _(unset)_ | `spec.syncPolicy.retry.limit` on every child Application. Unset leaves Argo CD's auto-sync default; `0` disables retries. Required by the backoff parameters. |
+| `argocd-sync-retry-limit` | int | _(unset)_ | `spec.syncPolicy.retry.limit` on every child Application. Unset leaves Argo CD's auto-sync default, except where a component declares its own default (`dynamo-platform` when the recipe includes `grove`); set, it replaces those defaults. `0` disables retries. Required by the backoff parameters. |
 | `argocd-sync-retry-backoff-duration` | string | _(Argo CD: `5s`)_ | Delay before the first sync retry, as a Go duration (`30s`). |
 | `argocd-sync-retry-backoff-factor` | int | _(Argo CD: `2`)_ | Multiplier applied to the retry delay after each failed sync (at least `1`). |
 | `argocd-sync-retry-backoff-max-duration` | string | _(Argo CD: `3m`)_ | Upper bound on the delay between sync retries, as a Go duration (`5m`); must not be less than `argocd-sync-retry-backoff-duration`. |

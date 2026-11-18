@@ -1240,6 +1240,10 @@ operator-kind-up-floor: ## Creates the operator's kind cluster on the Kubernetes
 operator-kind-down: ## Deletes the operator's kind cluster
 	@./tools/operator-kind down
 
+.PHONY: operator-candidate-deps
+operator-candidate-deps: ## Fetches the operator candidate's modules and installs its ko, so the build can run with GOPROXY=off
+	@./tools/operator-candidate deps
+
 .PHONY: operator-candidate
 operator-candidate: ## Builds an operator candidate into dist/candidate (CANDIDATE_VERSION=v0.1.0-rc.1)
 	@./tools/operator-candidate build
@@ -1266,13 +1270,9 @@ operator-qualify: ## Runs the operator's fault-injection suite against dist/cand
 	@./tools/operator-qualify
 
 .PHONY: operator-qualify-published
-operator-qualify-published: ## Installs the newest published operator release and runs the lifecycle scenarios upgrading to dist/candidate, both on the published release's AICR
+operator-qualify-published: ## Installs the newest published operator release and runs the lifecycle scenarios upgrading to dist/candidate
 	@./tools/operator-qualify pull-published
-	@published="$${PUBLISHED_DIR:-dist/published}"; \
-	AICR_E2E_VERSION="$${AICR_E2E_VERSION:-$$(yq -r '.aicr.version' "$$published/candidate-values.yaml")}" \
-	AICR_E2E_IMAGE="$${AICR_E2E_IMAGE:-$$(yq -r '.aicr.image' "$$published/candidate-values.yaml")}" \
-	AICR_E2E_VALIDATOR_IMAGES="$${AICR_E2E_VALIDATOR_IMAGES:-$$(yq -r '.aicr.validatorImages | join(",")' "$$published/candidate-values.yaml")}" \
-	AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY=1 QUALIFY_TIMEOUT=45m CANDIDATE_DIR="$$published" CANDIDATE_NEXT_DIR=dist/candidate ./tools/operator-qualify
+	@AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY=1 QUALIFY_TIMEOUT=45m CANDIDATE_DIR="$${PUBLISHED_DIR:-dist/published}" CANDIDATE_NEXT_DIR=dist/candidate ./tools/operator-qualify
 
 # =============================================================================
 # Tilt Local Development
