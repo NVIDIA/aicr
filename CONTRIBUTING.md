@@ -178,7 +178,7 @@ Trust is established through evidence, not assertions. Every released artifact c
    - **Testing**: What testing was performed
    - **Risk Assessment**: Low / Medium / High, with rollout notes
    - **Checklist**: Verify all items
-3. Do not add a priority label (`P0`, `P1`, `P2`) to the PR. Priority is a field on the AICR Project board rather than a repository label, and the PR Label Guard workflow strips any `P<number>` label from a pull request. See [Issue Priority](#issue-priority).
+3. Track priority in the linked issue’s GitHub **Priority** field. The PR Label Guard workflow strips legacy `P<number>` labels from pull requests. See [Issue Priority](#issue-priority).
 
 ### Review Process
 
@@ -222,7 +222,7 @@ Automated bots manage the lifecycle of issues and pull requests:
 
 | When | Action |
 |------|--------|
-| On open | `needs-triage` label added to issues |
+| On open or reopen | `needs-triage` label added to issues |
 | 14 days of PR inactivity | PR author receives a reminder comment (once per PR) |
 | 30 days of PR inactivity | PR marked `lifecycle/stale` |
 | 30 days after being marked stale | Stale PR auto-closed |
@@ -242,6 +242,9 @@ automated action on that PR is the day-30 stale mark.
 Each bot runs on a daily schedule, so an action lands on its next scheduled run
 rather than the moment a threshold is crossed — expect up to ~24 hours of lag.
 
+Stale automation leaves issues open through their active fix targets. The target
+clock starts when the issue is created. See [Issue Priority](#issue-priority).
+
 **To stay out of the stale process entirely:** Add the `lifecycle/frozen` label.
 Exempt items are never marked `lifecycle/stale` in the first place, not merely
 spared from closing. `good first issue` also exempts issues, and `do-not-merge`
@@ -249,36 +252,40 @@ exempts pull requests.
 
 #### Issue Priority
 
-Maintainers track priority as a `Priority` field on the AICR Project board, with
-the values `P0`, `P1`, and `P2`. It is a board field, not a repository label, so
-it does not show up in an issue's labels and setting it needs a project-scoped
-token. Contributors cannot set that field, and there is no `P0`/`P1`/`P2` label
-to apply instead: the PR Label Guard workflow removes any `P<number>` label that
-lands on a pull request.
+Maintainers and triagers with field edit access set the native GitHub **Priority**
+field in the issue sidebar. NVIDIA currently restricts field visibility to
+organization members and repository collaborators. Everyone can browse the
+[repository’s shared issue views](https://github.com/NVIDIA/aicr/issues/views).
 
-Two of the issue templates also ask for a Priority, and that one is yours to set.
-The feature request scale runs from `Nice to have` up to `Critical`, and the
-documentation request scale from `Low` up to `Critical`. The dropdown records how
-important the change is to you, and triage reads it with the rest of the issue
-body. It is not the board field: the values differ, and the `P0` to `P2` below is
-set by maintainers.
+| GitHub Priority | NVIDIA priority | Applies to | Target from issue creation |
+|-----------------|-----------------|------------|----------------------------|
+| `Urgent` or `High` | P0 | Major functionality is broken, with significant impact and no workaround | Fix within 1 month |
+| `Medium` | P1 | Functionality falls short of expected behavior, with limited impact and a workaround | Fix within 6 months |
+| `Low` | P2 | Minor impact on users, tenants, or performance | No fix commitment |
+| Blank | Unprioritized | Awaiting a priority decision | Review within 7 days |
 
-What the values mean when maintainers triage:
+The feature and documentation request templates ask how important the change is
+to the reporter. The feature request scale runs from `Nice to have` up to
+`Critical`, and the documentation request scale from `Low` up to `Critical`.
+Describe the impact and any available workaround in the issue body or a comment.
+Triage reviews the discussion before changing an assigned priority.
 
-| Value | Applies to |
-|-------|------------|
-| `P0` | Active incidents only: data loss, a broken CI gate, or a security breach |
-| `P1` | Confirmed regressions, security issues, and anything blocking a contributor or an imminent release |
-| `P2` | The default for everything else |
+#### Issue Queues
 
-When the choice is between `P0` and `P1`, triage uses `P1`.
+Use [Ready](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Aready+no%3Aassignee+-label%3Ablocked+-label%3Aneeds-info+-label%3Aneeds-triage)
+to find unassigned issues approved for work.
+[Triage](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Aneeds-triage)
+tracks issues awaiting a triage decision.
+[Blocked](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Ablocked)
+and [Waiting](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+label%3Aneeds-info)
+show issues awaiting a dependency or more information.
+Use [Bugs](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+type%3ABug)
+and [Epics](https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+is%3Aopen+type%3AEpic)
+to browse open work by issue type.
 
-To argue for a different priority, say what the impact is: that it is a confirmed
-regression, that it carries security impact, or that it is blocking your work. On
-a new issue that goes in the template's Priority dropdown and in the body; on an
-issue that already exists, comment on it. Triage reads the full comment thread
-before changing a priority that is already set, so the case belongs there rather
-than in a label or a pull request.
+Triagers clear `needs-triage` after recording a disposition. Reopening an issue
+returns it to triage for a fresh workflow-state decision and preserves its
+Priority.
 
 ### Claiming an Issue
 
@@ -298,9 +305,9 @@ pending ([#3014](https://github.com/NVIDIA/aicr/issues/3014)):
 - **Pull requests:** at most 3 open, drafts included. A fourth may be closed;
   open it again when a slot frees up.
 - **Expiry:** an issue may be unassigned after 7 days without activity from you
-  (3 for [`P0`/`P1`](#issue-priority)). Activity is a comment on the issue until
-  you open the pull request, then a push to it; time a ready, green,
-  conflict-free pull request waits on a reviewer does not count. The pull
+  (3 days for [`Urgent`, `High`, or `Medium`](#issue-priority)). Activity is a
+  comment on the issue until you open the pull request, then a push to it. Time
+  a ready, green, conflict-free pull request waits on a reviewer does not count. The pull
   request stays open and counts toward your cap, but does not merge until you
   reclaim the issue.
 
@@ -426,7 +433,7 @@ By making a contribution to this project, I certify that:
 
 **Recommended starting points:**
 
-1. Start with issues labeled `good first issue`
+1. Start with the [Ready queue](#issue-queues)
 2. Read existing code in the package you're modifying before writing
 3. Run `make tools-check` to verify your environment; run `make tools-update` if any tool is behind
 4. Study the [Design Principles](#design-principles) section

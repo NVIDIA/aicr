@@ -466,11 +466,9 @@ func TestDocsClaimWalkAttributesFlagsToTheRightCommand(t *testing.T) {
 
 // docsPriorityLabelClaims matches prose asserting that P0/P1/P2 are labels.
 //
-// They are not. P0/P1/P2 are options on the AICR Project board's Priority
-// field, and the board is not the repository: `gh label list --repo NVIDIA/aicr
-// --limit 200` returns 40 labels, none of them P-prefixed. Setting the field
-// needs a project-scoped token, which is why contributors cannot set it and why
-// calling it a label sends them looking for something that is not there.
+// AICR maps the native GitHub issue Priority field to P0/P1/P2 tiers.
+// The supported values are Urgent and High for P0, Medium for P1, and Low
+// for P2. Repository labels track workflow state.
 //
 // This is gated rather than merely fixed because the same false sentence was
 // published in three files at once: CONTRIBUTING.md, AGENTS.md, and
@@ -499,8 +497,7 @@ func TestDocsClaimWalkAttributesFlagsToTheRightCommand(t *testing.T) {
 //
 //	assert (must fail):  P0, P1, and P2 are priority labels for issues.
 //	negate (must pass):  Do not add a priority label (`P0`, `P1`, `P2`) to the
-//	                     PR. Priority is a field on the AICR Project board
-//	                     rather than a repository label, ...
+//	                     PR. Use the linked issue's native Priority field.
 //
 // Both contain P-tokens, "priority label" and "labels". What separates them is
 // the copula: an assertion says the tokens ARE labels, whereas the correction
@@ -620,9 +617,8 @@ func TestDocsDoNotCallPriorityALabel(t *testing.T) {
 					continue
 				}
 				t.Errorf("%s:%d: describes issue priority as a label: %q\n"+
-					"        P0/P1/P2 are options on the AICR Project board's Priority\n"+
-					"        field, not repository labels. Say that priority is a board\n"+
-					"        field instead, as CONTRIBUTING.md's Issue Priority section does.",
+					"        P0/P1/P2 are tiers mapped from the native issue Priority field.\n"+
+					"        See the Issue Priority section of CONTRIBUTING.md.",
 					rel, i+1, strings.TrimSpace(line))
 				// One report per offending line: both patterns match the same
 				// sentence, and naming it twice buries the file list.
