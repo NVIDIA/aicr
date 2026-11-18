@@ -13,7 +13,8 @@ const second = 1000;
 const day = 24 * 60 * 60 * second;
 const staleAfter = 90 * day;
 const closeAfter = 30 * day;
-const labelUpdateSkew = 15_000;
+const closeRecoveryWindow = 7 * day;
+const eventUpdateSkew = 15 * second;
 const apiVersion = { 'X-GitHub-Api-Version': '2026-03-10' };
 
 const staleMessage = `This issue has been marked as stale due to 90 days of inactivity.
@@ -117,7 +118,7 @@ async function readIssuePriority(github, issueRef, fieldId) {
   return values[0].single_select_option.name;
 }
 
-async function verifyLivePriorityRead(github, repo, fieldId) {
+async function discoverLivePriorityProbe(github, repo) {
   for (const expectedPriority of ['Medium', 'High', 'Urgent', 'Low']) {
     const { repository } = await github.graphql(
       `query($owner: String!, $repo: String!, $priority: String!) {
@@ -131,17 +132,22 @@ async function verifyLivePriorityRead(github, repo, fieldId) {
       { ...repo, priority: expectedPriority },
     );
     const probeNumber = repository.issues.nodes[0]?.number;
-    if (probeNumber === undefined) {
-      continue;
+    if (probeNumber !== undefined) {
+      return { probeNumber, expectedPriority };
     }
-
-    const actualPriority = await readIssuePriority(github, { ...repo, issue_number: probeNumber }, fieldId);
-    if (actualPriority !== expectedPriority) {
-      throw new Error('REST Priority read did not match the populated value from GraphQL');
-    }
-    return;
   }
   throw new Error('Cannot verify REST Priority access without a prioritized issue');
+}
+
+async function verifyLivePriorityRead(github, repo, fieldId) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { probeNumber, expectedPriority } = await discoverLivePriorityProbe(github, repo);
+    const actualPriority = await readIssuePriority(github, { ...repo, issue_number: probeNumber }, fieldId);
+    if (actualPriority === expectedPriority) {
+      return;
+    }
+  }
+  throw new Error('REST Priority read did not match the populated value from GraphQL');
 }
 
 function isActionsBot(user) {
@@ -170,47 +176,97 @@ async function commentsAtOrAfter(github, issueRef, cutoff) {
   return comments.filter(comment => parseTime(comment.updated_at ?? comment.created_at) >= cutoff);
 }
 
+function isStaleTransition(event) {
+  return (event.event === 'labeled' || event.event === 'unlabeled') &&
+    event.label?.name?.toLowerCase() === staleLabel;
+}
+
+function isBotComment(comment, message) {
+  return isActionsBot(comment.user) && comment.body?.trim() === message;
+}
+
+function listEvents(github, issueRef) {
+  return github.paginate(github.rest.issues.listEvents, { ...issueRef, per_page: 100 });
+}
+
+async function findPendingWarning(github, issueRef, issue, now) {
+  if (hasLabel(issue, staleLabel) || !issue.comments || now - parseTime(issue.created_at) <= staleAfter) {
+    return undefined;
+  }
+  const updatedAt = parseTime(issue.updated_at);
+  const comments = await commentsAtOrAfter(github, issueRef, updatedAt);
+  return comments.findLast(comment =>
+    isBotComment(comment, staleMessage) && parseTime(comment.created_at) === updatedAt);
+}
+
 async function staleAction(github, issueRef, issue, now) {
   if (!hasLabel(issue, staleLabel)) {
     return 'mark';
   }
 
-  const events = await github.paginate(github.rest.issues.listEvents, { ...issueRef, per_page: 100 });
-  const markIndex = events.findLastIndex(event =>
-    (event.event === 'labeled' || event.event === 'unlabeled') &&
-    event.label?.name?.toLowerCase() === staleLabel);
+  const events = await listEvents(github, issueRef);
+  const markIndex = events.findLastIndex(isStaleTransition);
   const lastStaleEvent = events[markIndex];
   if (lastStaleEvent?.event !== 'labeled') {
     throw new Error(`Missing current ${staleLabel} label event`);
   }
   const markedAt = parseTime(lastStaleEvent.created_at);
   const updatedAt = parseTime(issue.updated_at);
-  const comments = await commentsAtOrAfter(github, issueRef, markedAt);
+  const beforeMark = events.slice(0, markIndex);
+  const botMark = isActionsBot(lastStaleEvent.actor);
+  const previousMark = beforeMark.findLast(isStaleTransition);
+  const previousMarkAt = previousMark ? parseTime(previousMark.created_at) : -Infinity;
+  const since = botMark ? Math.max(previousMarkAt, parseTime(issue.created_at)) : markedAt;
+  const comments = await commentsAtOrAfter(github, issueRef, since);
+  const warning = botMark && comments.findLast(comment => {
+    if (!isBotComment(comment, staleMessage)) {
+      return false;
+    }
+    const warnedAt = parseTime(comment.created_at);
+    return warnedAt > previousMarkAt && warnedAt <= markedAt;
+  });
+  if (botMark && !warning) {
+    return 'clear';
+  }
+  const activityAt = warning ? parseTime(warning.created_at) : markedAt;
 
   const hasComment = comments.some(comment =>
-    comment.user?.type === 'User' && comment.body?.trim() !== staleMessage);
+    comment.user?.type === 'User' && parseTime(comment.updated_at ?? comment.created_at) >= activityAt);
   const timeAfterMark = updatedAt - markedAt;
   if (hasComment || events.length > markIndex + 1 ||
-      timeAfterMark > labelUpdateSkew ||
-      (timeAfterMark > 0 && !isActionsBot(lastStaleEvent.actor))) {
+      (warning && beforeMark.some(event => parseTime(event.created_at) >= activityAt)) ||
+      timeAfterMark > eventUpdateSkew ||
+      (timeAfterMark > 0 && !botMark)) {
     return 'clear';
   }
 
   const dueToClose = now - Math.max(markedAt, updatedAt) > closeAfter;
   // GitHub can record the bot's label update slightly after the event. Check for
   // issue edits separately because body edits are absent from the event list.
-  if ((timeAfterMark > 0 || dueToClose) && await wasEditedSince(github, issueRef, markedAt)) {
+  if ((warning || timeAfterMark > 0 || dueToClose) && await wasEditedSince(github, issueRef, activityAt)) {
     return 'clear';
   }
   return dueToClose ? 'close' : null;
 }
 
+async function hasActivityAfterWarning(github, issueRef, warning) {
+  const warnedAt = parseTime(warning.created_at);
+  const comments = await commentsAtOrAfter(github, issueRef, warnedAt);
+  return comments.length !== 1 || comments[0].id !== warning.id ||
+    !isBotComment(comments[0], staleMessage) || await wasEditedSince(github, issueRef, warnedAt);
+}
+
+async function canResumeWarning(github, issueRef, warning) {
+  const warnedAt = parseTime(warning.created_at);
+  const events = await listEvents(github, issueRef);
+  return !events.some(event => parseTime(event.created_at) >= warnedAt) &&
+    !await hasActivityAfterWarning(github, issueRef, warning);
+}
+
 async function addStaleLabelAfterWarning(github, issueRef, warning, fieldId, now) {
   const warnedAt = parseTime(warning?.created_at);
   for (const mayRetry of [true, false]) {
-    const comments = await commentsAtOrAfter(github, issueRef, warnedAt);
-    if (comments.some(comment => comment.id !== warning.id) ||
-        await wasEditedSince(github, issueRef, warnedAt)) {
+    if (!await canResumeWarning(github, issueRef, warning)) {
       return false;
     }
 
@@ -224,13 +280,55 @@ async function addStaleLabelAfterWarning(github, issueRef, warning, fieldId, now
 
     try {
       await github.rest.issues.addLabels({ ...issueRef, labels: [staleLabel] });
-      return true;
     } catch (error) {
       if (!mayRetry || ![500, 502, 503, 504].includes(error.status)) {
         throw error;
       }
+      continue;
     }
+
+    if (await hasActivityAfterWarning(github, issueRef, warning)) {
+      await github.rest.issues.removeLabel({ ...issueRef, name: staleLabel });
+      return false;
+    }
+    return true;
   }
+}
+
+function isRecentlyClosedStale(issue, cutoff) {
+  return issue.state === 'closed' && issue.state_reason === 'not_planned' &&
+    !issue.pull_request && !issue.locked && hasLabel(issue, staleLabel) &&
+    parseTime(issue.closed_at) >= cutoff;
+}
+
+async function recoverCloseComment(github, issueRef, issue, cutoff, dryRun) {
+  const events = await listEvents(github, issueRef);
+  const closeIndex = events.findLastIndex(event => event.event === 'closed' || event.event === 'reopened');
+  const closed = events[closeIndex];
+  if (closed?.event !== 'closed' || closed.state_reason !== 'not_planned' || !isActionsBot(closed.actor) ||
+      Math.abs(parseTime(closed.created_at) - parseTime(issue.closed_at)) > eventUpdateSkew) {
+    return false;
+  }
+
+  // The other AICR jobs that close issues use the completed reason.
+  const mark = events.slice(0, closeIndex).findLast(event => event.event === 'reopened' || isStaleTransition(event));
+  if (mark?.event !== 'labeled') {
+    return false;
+  }
+  const cycleAt = parseTime(mark.created_at);
+  const comments = await commentsAtOrAfter(github, issueRef, cycleAt);
+  if (comments.some(comment => isBotComment(comment, closeMessage) && parseTime(comment.created_at) >= cycleAt)) {
+    return false;
+  }
+
+  const { data: current } = await github.rest.issues.get(issueRef);
+  if (!isRecentlyClosedStale(current, cutoff) || current.closed_at !== issue.closed_at) {
+    return false;
+  }
+  if (!dryRun) {
+    await github.rest.issues.createComment({ ...issueRef, body: closeMessage });
+  }
+  return true;
 }
 
 module.exports = async function runStaleIssues({
@@ -255,15 +353,34 @@ module.exports = async function runStaleIssues({
   const issues = await github.paginate(github.rest.issues.listForRepo, {
     ...repo, state: 'open', per_page: 100, sort: 'created', direction: 'desc',
   });
+  const recoveryCutoff = now - closeRecoveryWindow;
+  const closed = await github.paginate(github.rest.issues.listForRepo, {
+    ...repo, state: 'closed', labels: staleLabel, since: new Date(recoveryCutoff).toISOString(), per_page: 100,
+  });
 
   const planned = { clear: 0, mark: 0, close: 0 };
+  let recoveries = 0;
   let failures = 0;
-  for (const issue of issues) {
+  for (const issue of [...closed, ...issues]) {
     try {
-      if (!isCandidate(issue, now)) {
+      const issueRef = { ...repo, issue_number: issue.number };
+      if (issue.state === 'closed') {
+        if (isRecentlyClosedStale(issue, recoveryCutoff) &&
+            await recoverCloseComment(github, issueRef, issue, recoveryCutoff, dryRun)) {
+          recoveries++;
+          if (!dryRun) {
+            core.info(`Restored closure instructions on #${issue.number}`);
+          }
+        }
         continue;
       }
-      const issueRef = { ...repo, issue_number: issue.number };
+      if (!isEligible(issue)) {
+        continue;
+      }
+      const pendingWarning = await findPendingWarning(github, issueRef, issue, now);
+      if (!pendingWarning && !isCandidate(issue, now)) {
+        continue;
+      }
       let action = await staleAction(github, issueRef, issue, now);
       if (action === null) {
         continue;
@@ -271,7 +388,8 @@ module.exports = async function runStaleIssues({
 
       const priority = await readIssuePriority(github, issueRef, fieldId);
       const { data: current } = await github.rest.issues.get(issueRef);
-      if (!isCandidate(current, now) || issue.updated_at !== current.updated_at ||
+      if (!isEligible(current) || (!pendingWarning && !isCandidate(current, now)) ||
+          issue.updated_at !== current.updated_at ||
           hasLabel(issue, staleLabel) !== hasLabel(current, staleLabel)) {
         continue;
       }
@@ -283,6 +401,9 @@ module.exports = async function runStaleIssues({
         action = 'clear';
       }
       if (dryRun) {
+        if (pendingWarning && !await canResumeWarning(github, issueRef, pendingWarning)) {
+          continue;
+        }
         planned[action]++;
         continue;
       }
@@ -291,7 +412,8 @@ module.exports = async function runStaleIssues({
         await github.rest.issues.removeLabel({ ...issueRef, name: staleLabel });
         core.info(`Cleared stale label on #${issue.number}`);
       } else if (action === 'mark') {
-        const { data: warning } = await github.rest.issues.createComment({ ...issueRef, body: staleMessage });
+        const warning = pendingWarning ??
+          (await github.rest.issues.createComment({ ...issueRef, body: staleMessage })).data;
         if (await addStaleLabelAfterWarning(github, issueRef, warning, fieldId, now)) {
           core.info(`Marked #${issue.number} stale`);
         } else {
@@ -313,6 +435,7 @@ module.exports = async function runStaleIssues({
   }
   if (dryRun) {
     core.info(`Dry run: mark ${planned.mark}, clear ${planned.clear}, close ${planned.close}`);
+    core.info(`Dry run: restore closure instructions on ${recoveries} issue(s)`);
   }
   if (failures > 0) {
     throw new Error(`Stale issue processing failed for ${failures} issue(s)`);

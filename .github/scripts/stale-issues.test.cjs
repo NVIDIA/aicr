@@ -8,6 +8,8 @@ const runStaleIssues = require('./stale-issues.cjs');
 const defaultDate = '2026-01-01T12:00:00Z';
 const staleLabel = { name: 'lifecycle/stale' };
 const fieldId = 363192;
+const actionsBot = { type: 'Bot', login: 'github-actions[bot]' };
+const human = { type: 'User', login: 'contributor' };
 
 function fixture({
   priority,
@@ -16,6 +18,9 @@ function fixture({
   events = [],
   comments = [],
   repliesAfterWarning = [],
+  repliesAfterLabel = [],
+  warningCreatedAt,
+  labelError,
   canSeeIssueFields = true,
   fieldError = null,
   transientLabelError = false,
@@ -30,6 +35,7 @@ function fixture({
     labels: [],
     created_at: defaultDate,
     updated_at: defaultDate,
+    comments: comments.length,
     ...issue,
   };
   const calls = [];
@@ -80,16 +86,24 @@ function fixture({
       paginate: async (method, options) => method(options),
       rest: {
         issues: {
-          listForRepo: async () => [originalIssue],
-          get: async () => ({ data: { ...originalIssue, ...updates } }),
+          listForRepo: async ({ state }) => originalIssue.state === state ? [originalIssue] : [],
+          get: async () => ({
+            data: { ...originalIssue, ...(warning && { updated_at: warning.created_at }), ...updates },
+          }),
           listEvents: async () => events,
           listComments: async ({ since } = {}) => {
-            const available = warning ? [...comments, warning, ...repliesAfterWarning] : comments;
+            const available = warning ? [...comments, warning, ...repliesAfterWarning] : [...comments];
+            if (calls.some(([operation]) => operation === 'mark')) {
+              available.push(...repliesAfterLabel);
+            }
             return available.filter(comment =>
               since === undefined || Date.parse(comment.updated_at ?? comment.created_at) > Date.parse(since));
           },
           addLabels: async params => {
             await record('mark')(params);
+            if (labelError) {
+              throw labelError;
+            }
             if (transientLabelError) {
               transientLabelError = false;
               throw Object.assign(new Error('Service unavailable'), { status: 503 });
@@ -99,7 +113,9 @@ function fixture({
           update: record('close'),
           createComment: async params => {
             await record('comment')(params);
-            warning = { id: 1, created_at: originalIssue.updated_at };
+            warning = {
+              id: 1, user: actionsBot, body: params.body, created_at: warningCreatedAt ?? originalIssue.updated_at,
+            };
             return { data: warning };
           },
         },
@@ -147,10 +163,23 @@ for (const { name, now = '2026-04-30T15:00:00Z', expected, ...config } of cases)
   });
 }
 
-const actionsBot = { type: 'Bot', login: 'github-actions[bot]' };
+const legacyWarning = {
+  id: 91,
+  user: actionsBot,
+  body: `This issue has been marked as stale due to 90 days of inactivity.
+It will be closed in 30 days unless there is new activity.
+
+To keep this issue open:
+- Add a comment with an update
+- Add the \`lifecycle/frozen\` label
+
+If this issue is no longer relevant, it's okay to let it close.`,
+  created_at: defaultDate,
+};
 const oldStaleIssue = {
   issue: { labels: [staleLabel] },
   events: [{ event: 'labeled', label: staleLabel, created_at: defaultDate, actor: actionsBot }],
+  comments: [legacyWarning],
 };
 
 test('close and comment after 30 days without new activity', async () => {
@@ -171,7 +200,7 @@ for (const priority of ['Urgent', 'High']) {
 test('human comment clears the stale label', async () => {
   const { args, calls } = fixture({
     ...oldStaleIssue,
-    comments: [{ user: { type: 'User' }, body: 'This still matters', created_at: '2026-01-03T12:00:00Z' }],
+    comments: [legacyWarning, { user: human, body: 'This still matters', created_at: '2026-01-03T12:00:00Z' }],
   });
   await runStaleIssues({ ...args, now: Date.parse('2026-02-01T12:00:00Z') });
   assert.deepEqual(calls.map(([operation]) => operation), ['clear']);
@@ -223,8 +252,7 @@ test('legacy warning before the label does not restart the stale clock', async (
         created_at: '2025-09-01T12:00:00Z',
       },
       {
-        user: { type: 'Bot', login: 'github-actions[bot]' },
-        body: 'This issue has been marked as stale due to 90 days of inactivity.',
+        ...legacyWarning,
         created_at: '2026-01-01T11:59:59Z',
       },
     ],
@@ -270,7 +298,7 @@ test('dry run reads populated priority and previews changes without writing', as
     {
       config: {
         ...oldStaleIssue,
-        comments: [{ user: { type: 'User' }, body: 'Still active', created_at: '2026-01-03T12:00:00Z' }],
+        comments: [legacyWarning, { user: human, body: 'Still active', created_at: '2026-01-03T12:00:00Z' }],
       },
       plan: 'mark 0, clear 1, close 0',
     },
@@ -295,13 +323,53 @@ test('dry run fails when probe priority is blank or inaccessible', async () => {
   assert.deepEqual(calls, []);
 });
 
+test('live processing rediscovers Priority when the selected issue changes', async () => {
+  const { args, calls } = fixture({ liveProbePriority: 'Low' });
+  const { graphql, request } = args.github;
+  const probeNumbers = [2, 3];
+  const observations = [];
+  args.github.graphql = async (query, variables) => {
+    if (!query.includes('filterBy')) {
+      return graphql(query, variables);
+    }
+    const number = probeNumbers.shift();
+    assert.ok(number, 'expected at most two probe discoveries');
+    observations.push(['discover', number]);
+    return { repository: { issues: { nodes: [{ number }] } } };
+  };
+  args.github.request = async (route, params) => {
+    if (params.issue_number === 2 || params.issue_number === 3) {
+      observations.push(['read', params.issue_number]);
+    }
+    if (params.issue_number === 3) {
+      return {
+        data: [{ issue_field_id: fieldId, data_type: 'single_select', single_select_option: { name: 'Medium' } }],
+      };
+    }
+    return request(route, params);
+  };
+  await runStaleIssues({ ...args, now: Date.parse('2026-05-01T12:00:00Z') });
+  assert.deepEqual(observations, [['discover', 2], ['read', 2], ['discover', 3], ['read', 3]]);
+  assert.deepEqual(calls.map(([operation]) => operation), ['comment', 'mark']);
+});
+
 test('live processing fails before writes when the probe REST value is hidden or mismatched', async () => {
   for (const liveProbePriority of [null, 'Low']) {
     const { args, calls } = fixture({ ...oldStaleIssue, liveProbePriority });
+    const { graphql } = args.github;
+    let discoveries = 0;
+    args.github.graphql = async (query, variables) => {
+      if (query.includes('filterBy')) {
+        discoveries++;
+        assert.ok(discoveries <= 2, 'expected at most two probe discoveries');
+      }
+      return graphql(query, variables);
+    };
     await assert.rejects(
       runStaleIssues({ ...args, now: Date.parse('2026-05-01T12:00:00Z') }),
       /REST Priority read did not match/,
     );
+    assert.equal(discoveries, 2);
     assert.deepEqual(calls, []);
   }
 });
@@ -349,8 +417,122 @@ test('live processing fails without a prioritized issue in either state', async 
 test('reply in the same second as the stale label prevents closure', async () => {
   const { args, calls } = fixture({
     ...oldStaleIssue,
-    comments: [{ id: 2, user: { type: 'User' }, body: 'Still active', created_at: defaultDate }],
+    comments: [legacyWarning, { id: 2, user: human, body: 'Still active', created_at: defaultDate }],
   });
   await runStaleIssues({ ...args, now: Date.parse('2026-02-01T12:00:00Z') });
   assert.deepEqual(calls.map(([operation]) => operation), ['clear']);
+});
+
+test('resume an interrupted stale mark without repeating its warning', async () => {
+  const warnedAt = '2026-05-01T12:00:00Z';
+  const failed = fixture({
+    warningCreatedAt: warnedAt,
+    labelError: Object.assign(new Error('Service unavailable'), { status: 503 }),
+  });
+  await assert.rejects(runStaleIssues({ ...failed.args, now: Date.parse(warnedAt) }), /processing failed/);
+  assert.deepEqual(failed.calls.map(([operation]) => operation), ['comment', 'mark', 'mark']);
+  const warning = { id: 91, user: actionsBot, body: failed.calls[0][1].body, created_at: warnedAt };
+  const now = Date.parse('2026-05-02T12:00:00Z');
+  const issue = { updated_at: warnedAt };
+
+  const quiet = fixture({ issue, comments: [warning] });
+  await runStaleIssues({ ...quiet.args, now });
+  assert.deepEqual(quiet.calls.map(([operation]) => operation), ['mark']);
+
+  const skip = [
+    { comments: [warning, { id: 92, user: human, body: 'Still needed', created_at: warnedAt }] },
+    { comments: [warning], lastEditedAt: warnedAt },
+    { comments: [warning], events: [{ event: 'unlabeled', label: staleLabel, created_at: warnedAt, actor: human }] },
+    { comments: [{ ...warning, user: human }] },
+    { comments: [warning], issue: { ...issue, labels: [{ name: 'lifecycle/frozen' }] } },
+    { comments: [warning], priority: 'Medium' },
+  ];
+  for (const scenario of skip) {
+    const { args, calls } = fixture({ issue, ...scenario });
+    await runStaleIssues({ ...args, now });
+    assert.deepEqual(calls, []);
+  }
+
+  const removed = fixture({ issue, comments: [warning] });
+  let reads = 0;
+  removed.args.github.rest.issues.listComments = async () => ++reads === 1 ? [warning] : [];
+  await runStaleIssues({ ...removed.args, now });
+  assert.deepEqual(removed.calls, []);
+});
+
+test('a reply arriving during the label write clears stale status', async () => {
+  const warnedAt = '2026-05-01T12:00:00Z';
+  const { args, calls } = fixture({
+    warningCreatedAt: warnedAt,
+    repliesAfterLabel: [{ id: 2, user: human, body: 'I replied', created_at: warnedAt }],
+  });
+  await runStaleIssues({ ...args, now: Date.parse(warnedAt) });
+  assert.deepEqual(calls.map(([operation]) => operation), ['comment', 'mark', 'clear']);
+});
+
+test('a later run checks replies in the warning-to-label gap before closing', async () => {
+  const warnedAt = '2026-04-15T12:00:00Z';
+  const markedAt = '2026-04-15T12:00:01Z';
+  const initial = fixture({ warningCreatedAt: warnedAt });
+  await runStaleIssues({ ...initial.args, now: Date.parse(warnedAt) });
+  const warning = { id: 91, user: actionsBot, body: initial.calls[0][1].body, created_at: warnedAt };
+  const episode = {
+    issue: { labels: [staleLabel], updated_at: markedAt },
+    events: [{ event: 'labeled', label: staleLabel, created_at: markedAt, actor: actionsBot }],
+  };
+  const now = Date.parse('2026-05-16T12:00:00Z');
+  const quiet = fixture({ ...episode, comments: [warning] });
+  await runStaleIssues({ ...quiet.args, now: Date.parse('2026-05-15T12:00:01Z') });
+  assert.deepEqual(quiet.calls, []);
+  await runStaleIssues({ ...quiet.args, now });
+  assert.deepEqual(quiet.calls.map(([operation]) => operation), ['close', 'comment']);
+
+  const reply = { id: 92, user: human, body: 'Still active', created_at: warnedAt };
+  const interrupted = fixture({ ...episode, comments: [warning, reply] });
+  await runStaleIssues({ ...interrupted.args, now });
+  assert.deepEqual(interrupted.calls.map(([operation]) => operation), ['clear']);
+
+  const missingWarning = fixture({ ...episode, comments: [reply] });
+  await runStaleIssues({ ...missingWarning.args, now });
+  assert.deepEqual(missingWarning.calls.map(([operation]) => operation), ['clear']);
+});
+
+test('recover missing instructions only for a recent bot stale closure', async () => {
+  const closedAt = '2026-01-31T12:00:01Z';
+  const closed = {
+    event: 'closed', created_at: '2026-01-31T12:00:02Z', actor: actionsBot, state_reason: 'not_planned',
+  };
+  const issue = {
+    ...oldStaleIssue.issue,
+    state: 'closed', state_reason: 'not_planned', closed_at: closedAt, updated_at: closedAt,
+  };
+  const base = { issue, events: [...oldStaleIssue.events, closed], priority: 'Low' };
+  const now = Date.parse('2026-02-01T12:00:00Z');
+  const preview = fixture(base);
+  await runStaleIssues({ ...preview.args, now, dryRun: true, priorityProbeIssue: 1 });
+  assert.deepEqual(preview.calls, []);
+  assert.ok(preview.info.includes('Dry run: restore closure instructions on 1 issue(s)'));
+
+  const missing = fixture(base);
+  await runStaleIssues({ ...missing.args, now });
+  assert.deepEqual(missing.calls.map(([operation]) => operation), ['comment']);
+  const note = { id: 15, user: actionsBot, body: missing.calls[0][1].body, created_at: closedAt };
+  assert.match(note.body, /Reopen with a comment/);
+
+  const skip = [
+    { comments: [note] },
+    { comments: [{ ...note, created_at: '2026-01-31T11:59:59Z' }] },
+    { events: [...oldStaleIssue.events, { ...closed, actor: human }] },
+    { events: [...oldStaleIssue.events, { ...closed, state_reason: 'completed' }] },
+    { events: [...oldStaleIssue.events, { ...closed, created_at: '2026-01-30T12:00:00Z' }] },
+    { events: [closed] },
+    { events: [...base.events, { event: 'reopened', created_at: closedAt, actor: human }] },
+    { updates: { state: 'open', closed_at: null } },
+    { issue: { ...issue, closed_at: '2026-01-20T12:00:00Z' } },
+  ];
+  for (const scenario of skip) {
+    const { args, calls } = fixture({ ...base, ...scenario });
+    await runStaleIssues({ ...args, now });
+    assert.deepEqual(calls, []);
+  }
 });
