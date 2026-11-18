@@ -367,8 +367,10 @@ Pull requests run the same `qualification.yaml` through `merge-gate.yaml`.
 3. **Digest Resolution**: One authoritative seven-image digest map
 4. **Image Security**: Both platforms of every resolved digest are scanned
 5. **Attestation**: Platform SBOMs and reusable-workflow provenance for the same digests
-6. **Promotion**: Read-only preflight, all version aliases, then stable `latest`
-   aliases only after every version alias is verified
+6. **Promotion**: Read-only preflight, then the validator and gate version
+   aliases the operator gate reads; after the release integrity check, the
+   remaining version aliases, then stable `latest` aliases only after every
+   version alias is verified
 7. **Publication**: Require the exact release asset set, then publish the
    validated numeric GitHub release ID
 8. **Stable Distribution**: Publish Homebrew after publication
