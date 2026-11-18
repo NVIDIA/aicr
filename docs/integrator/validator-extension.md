@@ -180,6 +180,7 @@ validators:
 ```
 
 The external entry replaces the embedded `operator-health` validator entirely.
+If an override raises a check's `timeout`, pass [`aicr sweep --older-than`](../user/cli-reference.md#aicr-sweep) a value above that timeout plus 4m5s, so the sweep cannot delete the namespace of a check still running.
 
 ## Language-Agnostic Contract
 

@@ -375,9 +375,10 @@ validators:
   # CRE-driven NCCL check. Opt-in only: no embedded overlay references this
   # check, and shipped EKS H100 training keeps TrainJob nccl-all-reduce-bw.
   # The check itself is provider-independent; creQualifiedEntries records the
-  # qualified combinations. Qualified on EKS H100 — re-measured on the pinned
-  # CRE v0.8.2, live UAT 2026-10-23 (2× p5.48xlarge): 489.70 GB/s vs >= 300,
-  # against 489.80 GB/s at the original 2026-09-02 run on v0.1.0.
+  # qualified combinations. Qualified on EKS H100 — re-measured on CRE
+  # v0.8.2 (the pin at the time), live UAT 2026-10-23 (2× p5.48xlarge):
+  # 489.70 GB/s vs >= 300, against 489.80 GB/s at the original 2026-09-02 run
+  # on v0.1.0. Not re-measured on the current pin, v0.12.0.
   #
   # The timeout covers the Certification wait, the measurement-finalize wait,
   # and the teardown in series, because the check's own context expires at this
@@ -392,8 +393,9 @@ validators:
     timeout: 50m
     args: ["nccl-cre-all-reduce-bw"]
     env: []
-  # Qualified on EKS H100 — measured on the pinned CRE v0.8.2, live UAT
-  # 2026-10-23 (2× p5.48xlarge): goodput 0.5723 vs >= 0.5. The entry is per
+  # Qualified on EKS H100 — measured on CRE v0.8.2 (the pin at the time), live
+  # UAT 2026-10-23 (2× p5.48xlarge): goodput 0.5723 vs >= 0.5; not re-measured
+  # on v0.12.0. The entry is per
   # combination because training/nemotron5-56b needs minGPUs=32 and fails on
   # this SKU.
   - name: cre-training-goodput

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Remove Issue-Only Priority Labels'
-description: 'Remove P<number> priority labels from a pull request'
+description: 'Remove legacy P<number> labels and public Priority mirrors from a pull request'
 
 inputs:
   issue-number:
@@ -35,16 +35,18 @@ runs:
             return;
           }
 
-          const priorityLabelPattern = /^P\d+$/;
-          const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+          const legacyPriorityLabel = /^P\d+$/;
+          const publicPriorityLabel = /^priority\/P[012]$/i;
+          const labels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
             owner: context.repo.owner,
             repo: context.repo.repo,
             issue_number: issueNumber,
+            per_page: 100,
           });
 
           const present = labels
             .map(label => label.name)
-            .filter(name => priorityLabelPattern.test(name));
+            .filter(name => legacyPriorityLabel.test(name) || publicPriorityLabel.test(name));
 
           if (present.length === 0) {
             core.info('No issue-only priority labels found on this PR');

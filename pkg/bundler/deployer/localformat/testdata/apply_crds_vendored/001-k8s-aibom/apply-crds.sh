@@ -297,6 +297,17 @@ excluded_path() {
   return 1
 }
 
+# chart_crd_path reports whether $1, a path relative to the extraction root,
+# lies in a chart's own crds/ directory: <chart>/crds/ or
+# <chart>/charts/<subchart>/crds/. A bare '*/crds/*' also matches the files of
+# a subchart that is itself named "crds" (charts/crds/Chart.yaml,
+# charts/crds/values.yaml), which are chart metadata and carry no kind, so
+# kubectl rejects them. The CRDs of such a subchart sit one level deeper, in
+# charts/crds/crds/, and still match.
+chart_crd_path() {
+  [[ "$1" =~ ^[^/]+(/charts/[^/]+)*/crds/. ]]
+}
+
 # Read CRDs out of the chart archive rather than out of `helm show crds`.
 #
 # That command's output shape is version-dependent: Helm 4 prepends "---"
@@ -330,6 +341,7 @@ collect_crds() { # $1 = chart .tgz, $2 = destination directory
   while IFS= read -r f; do
     [[ -z "${f}" ]] && continue
     excluded_path "${f}" && continue
+    chart_crd_path "${f#"${work}"/}" || continue
     if ! cp "${f}" "${2}/$(printf '%s' "${f#"${work}"/}" | tr '/' '_')"; then
       rm -rf "${work}"
       return 1

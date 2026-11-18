@@ -15,34 +15,64 @@
 name: Issue Triage
 
 on:
-  issues:
-    types: [opened, labeled]
-  workflow_dispatch: {}
+  # The pinned actionlint predates field_added and field_removed.
+  # Select supported activities in job conditions until the linter supports them.
+  issues: {}
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to resync from native Priority
+        type: number
+        default: 0
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.run_id }}-${{ github.event.action }}
+  cancel-in-progress: false
 
 jobs:
 
   triage:
     name: Auto-Triage Issues
+    if: github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'reopened')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: write
     timeout-minutes: 5
     steps:
-      - name: Add needs-triage on new issue
-        if: github.event.action == 'opened'
+      - name: Queue new and reopened issues for triage
+        if: github.event.action == 'opened' || github.event.action == 'reopened'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         with:
           script: |
-            await github.rest.issues.addLabels({
+            const issue = {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              labels: ['needs-triage']
-            });
+            };
+            const { data: current } = await github.rest.issues.get(issue);
+            const hasIntakeLabel = labels => labels.some(label => label.name === 'needs-triage');
+            if (current.state !== 'open' || hasIntakeLabel(current.labels)) return;
+
+            if (context.payload.action === 'reopened') {
+              if (hasIntakeLabel(context.payload.issue.labels)) return;
+              const events = await github.paginate(github.rest.issues.listEvents, {
+                ...issue, per_page: 100
+              });
+              events.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id);
+              const reopened = events.findLastIndex(event => event.event === 'reopened');
+              if (reopened === -1) {
+                throw new Error('Issue reopen event is missing from the timeline');
+              }
+              const intakeCleared = events.slice(reopened + 1).some(event =>
+                event.event === 'unlabeled' && event.label?.name === 'needs-triage'
+              );
+              if (intakeCleared) return;
+            }
+            await github.rest.issues.addLabels({ ...issue, labels: ['needs-triage'] });
 
       - name: Infer area label on new issue
         if: github.event.action == 'opened'
@@ -219,39 +249,33 @@ jobs:
               core.info(`Issue already has ${areaLabel}`);
             }
 
-            try {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                name: 'needs-triage',
-              });
-              core.info('Removed needs-triage after area assignment');
-            } catch (error) {
-              if (error.status === 404) {
-                core.info('needs-triage label not present');
-                return;
-              }
-              throw error;
-            }
-
-      - name: Remove needs-triage when triaged
-        if: >-
-          github.event.action == 'labeled' &&
-          github.event.label.name != 'needs-triage'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+  sync-priority-label:
+    name: Sync public Priority label
+    if: >-
+      github.repository == 'NVIDIA/aicr'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && ((github.event_name == 'issues' && github.event.issue_field.name == 'Priority'
+      && (github.event.action == 'field_added' || github.event.action == 'field_removed'))
+      || (github.event_name == 'workflow_dispatch' && inputs.issue_number > 0))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    timeout-minutes: 5
+    concurrency:
+      group: issue-priority-label-${{ github.event.issue.number || inputs.issue_number }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout the default branch revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          persist-credentials: false
+      - name: Reconcile the issue label from native Priority
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+        with:
+          retries: 2
           script: |
-            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            if (labels.some(l => l.name === 'needs-triage')) {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                name: 'needs-triage',
-              });
-            }
+            const syncPriorityLabel = require('./.github/scripts/sync-priority-label.cjs');
+            await syncPriorityLabel({ github, context, core, issueNumber: Number(process.env.ISSUE_NUMBER) });
