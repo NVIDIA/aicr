@@ -52,7 +52,11 @@ spec:
               metadata:
                 name: lws-controller-manager
                 namespace: lws-system
+              # status.replicas counts old pods too. Requiring it to equal
+              # spec.replicas rejects a rollout whose old pod is still serving
+              # while its replacement is unready.
               ((spec.replicas || `0`) > `0`): true
+              ((status.replicas || `0`) == spec.replicas): true
               ((status.availableReplicas || `0`) == spec.replicas): true
               ((status.updatedReplicas || `0`) == spec.replicas): true
               ((status.observedGeneration || `0`) == metadata.generation): true
