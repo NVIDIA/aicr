@@ -37,6 +37,7 @@ var untrackedComponents = map[string]string{
 	"sriov-ib-networks":         "manifest-only: in-tree SR-IOV objects, no upstream chart",
 	"slinky-drainer":            "manifest-only: vendored from NVSentinel; image moves with nvsentinel's pin",
 	"slinky-drainer-crds":       "manifest-only: vendored from NVSentinel; moves with nvsentinel's pin",
+	"gateway-api-crds":          "manifest-only: vendored Gateway API and Inference Extension CRDs, no upstream chart",
 	"gpu-operator-ocp-olm":      "OpenShift OLM variant: subscription manifests, no chart",
 	"gpu-operator-ocp":          "OpenShift manifest variant, no chart",
 	"network-operator-ocp-olm":  "OpenShift OLM variant: subscription manifests, no chart",
