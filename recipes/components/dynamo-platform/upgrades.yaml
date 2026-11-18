@@ -92,17 +92,20 @@ transitions:
             reason: >-
               The preflight hook reads the running grove-operator image tag
               and rollout status once, with two retries, and fails the
-              upgrade unless both qualify. deploy.sh waits for grove unless
-              run with --no-wait, but Argo CD sync waves do not wait for
-              grove to become healthy: sync grove first and wait for it, or
-              generate the bundle with --argocd-sync-retry-limit (for example
-              5, with --argocd-sync-retry-backoff-duration 30s) to give grove
-              more time before the check is retried.
+              upgrade unless both qualify. deploy.sh waits for grove's release
+              unless run with --no-wait. Argo CD sync waves do not wait for
+              grove to become healthy, and Argo CD's default of 5 auto-sync
+              retries at a 5s base backoff ends after about 2.5 minutes. So
+              argocd and argocd-helm bundles that include grove retry the
+              dynamo-platform sync 5 times starting 30s apart, about 10
+              minutes of waits. A sync retry set with
+              --argocd-sync-retry-limit, or in a config file, replaces that
+              default.
           - id: recover-failed-preflight
             description: >-
               If the dynamo-platform upgrade failed in its Grove preflight
               Job, wait for the grove-operator rollout to finish, then re-run
-              the installer. On Argo CD, if the sync still fails after any
+              the installer. On Argo CD, if the sync still fails after its
               automatic retries, wait for grove to be healthy and re-sync
               dynamo-platform manually.
             reason: >-
@@ -121,13 +124,14 @@ transitions:
           - id: rename-runtime-init-container
             description: >-
               Rename any unrelated init container named runtime in Dynamo
-              workloads. For intentional runtime sidecars, give the image a
-              semantic-version tag or set runtimeVersionOverride.
+              workloads. An intentional runtime sidecar must set an image and
+              restartPolicy Always; give that image a semantic-version tag or
+              set runtimeVersionOverride.
             reason: >-
-              1.6.0 reserves the runtime init container name. Declaring one
-              with restartPolicy Always switches the component into native
-              sidecar mode, and the runtime version then resolves from that
-              container's image.
+              1.6.0 reserves the runtime init container name. Declaring an
+              init container named runtime is enough to switch the component
+              into native sidecar mode, and the runtime version then resolves
+              from that container's image.
           - id: check-workload-config
             description: >-
               Check Dynamo workloads for DYN_REQUEST_PLANE and DYN_EVENT_PLANE

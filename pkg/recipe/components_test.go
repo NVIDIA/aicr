@@ -1886,3 +1886,39 @@ func TestLoadComponentRegistry_HelmDefaultDigest(t *testing.T) {
 		})
 	}
 }
+
+func TestComponentRegistry_ValidateArgoCDSyncRetry(t *testing.T) {
+	tests := []struct {
+		name    string
+		retry   *ArgoCDSyncRetryConfig
+		wantErr string // empty: valid
+	}{
+		{name: "unset", retry: nil},
+		{name: "valid with condition", retry: &ArgoCDSyncRetryConfig{Limit: 5, WhenComponents: []string{"grove"}}},
+		{name: "valid without condition", retry: &ArgoCDSyncRetryConfig{Limit: 1}},
+		{name: "zero limit", retry: &ArgoCDSyncRetryConfig{Limit: 0},
+			wantErr: `component "dynamo": argocd.syncRetry.limit must be at least 1, got 0`},
+		{name: "unknown component", retry: &ArgoCDSyncRetryConfig{Limit: 5, WhenComponents: []string{"grov"}},
+			wantErr: `argocd.syncRetry.whenComponents names "grov", which is not another registry component`},
+		{name: "self reference", retry: &ArgoCDSyncRetryConfig{Limit: 5, WhenComponents: []string{"dynamo"}},
+			wantErr: `argocd.syncRetry.whenComponents names "dynamo", which is not another registry component`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &ComponentRegistry{Components: []ComponentConfig{
+				{Name: "grove", DisplayName: "grove"},
+				{Name: "dynamo", DisplayName: "dynamo", ArgoCD: ArgoCDComponentConfig{SyncRetry: tt.retry}},
+			}}
+			errs := registry.Validate()
+			if tt.wantErr == "" {
+				if len(errs) != 0 {
+					t.Errorf("Validate() = %v, want no errors", errs)
+				}
+				return
+			}
+			if len(errs) != 1 || !strings.Contains(errs[0].Error(), tt.wantErr) {
+				t.Errorf("Validate() = %v, want one error containing %q", errs, tt.wantErr)
+			}
+		})
+	}
+}

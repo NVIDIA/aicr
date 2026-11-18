@@ -2829,6 +2829,83 @@ func TestBundleGolden_SyncRetry(t *testing.T) {
 	}
 }
 
+// TestGenerate_RegistryDefaultSyncRetry pins that the dynamo-platform retry
+// the embedded registry declares for Grove recipes survives the
+// transformApplication round-trip, and that a bundle-wide retry replaces it.
+func TestGenerate_RegistryDefaultSyncRetry(t *testing.T) {
+	const groveDefault = "        retry:\n" +
+		"            backoff:\n" +
+		"                duration: 30s\n" +
+		"                factor: 2\n" +
+		"                maxDuration: 3m\n" +
+		"            limit: 5\n"
+	const userRetry = "        retry:\n            limit: 2\n"
+
+	tests := []struct {
+		name       string
+		withGrove  bool
+		retry      *config.SyncRetry
+		wantDynamo string // empty: no retry block
+		wantGrove  string
+	}{
+		{name: "grove present", withGrove: true, wantDynamo: groveDefault},
+		{name: "grove absent", withGrove: false},
+		{name: "bundle retry replaces the default", withGrove: true,
+			retry: &config.SyncRetry{Limit: 2}, wantDynamo: userRetry, wantGrove: userRetry},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dynamo := recipe.ComponentRef{
+				Name: "dynamo-platform", Namespace: "dynamo-system", Chart: "dynamo-platform",
+				Version: "1.6.2", Type: recipe.ComponentTypeHelm,
+				Source: "https://helm.ngc.nvidia.com/nvidia/ai-dynamo",
+			}
+			var refs []recipe.ComponentRef
+			if tt.withGrove {
+				dynamo.DependencyRefs = []string{"grove"}
+				refs = append(refs, recipe.ComponentRef{
+					Name: "grove", Namespace: "dynamo-system", Chart: "grove-charts",
+					Version: "v0.1.0-alpha.14", Type: recipe.ComponentTypeHelm,
+					Source: "oci://ghcr.io/ai-dynamo/grove",
+				})
+			}
+			refs = append(refs, dynamo)
+			rr := newRecipeResult("v1.0.0", refs)
+			for _, ref := range refs {
+				rr.DeploymentOrder = append(rr.DeploymentOrder, ref.Name)
+			}
+
+			outputDir := t.TempDir()
+			g := &Generator{RecipeResult: rr, Version: "v0.0.0-test", SyncRetry: tt.retry}
+			if _, err := g.Generate(context.Background(), outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+
+			check := func(name, want string) {
+				t.Helper()
+				raw, err := os.ReadFile(filepath.Join(outputDir, "templates", name+".yaml"))
+				if err != nil {
+					t.Fatalf("read %s template: %v", name, err)
+				}
+				got := string(raw)
+				if want == "" {
+					if strings.Contains(got, "retry:") {
+						t.Errorf("%s template has a retry, want none:\n%s", name, got)
+					}
+					return
+				}
+				if !strings.Contains(got, want) {
+					t.Errorf("%s template missing retry %q:\n%s", name, want, got)
+				}
+			}
+			check("dynamo-platform", tt.wantDynamo)
+			if tt.withGrove {
+				check("grove", tt.wantGrove)
+			}
+		})
+	}
+}
+
 // TestGenerateReportsLayout asserts Generate populates output.Entrypoint and
 // output.Releases with the layout it actually wrote to outputDir, mirroring
 // the flux and helmfile deployers' equivalent coverage. gpu-operator carries

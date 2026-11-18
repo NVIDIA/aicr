@@ -277,9 +277,10 @@ type Generator struct {
 	// overridable. See #1628.
 	CascadeDelete bool
 
-	// SyncRetry sets spec.syncPolicy.retry on every child Application.
-	// Baked at bundle time like CascadeDelete, not an install-time value.
-	// See #3264.
+	// SyncRetry sets spec.syncPolicy.retry on every child Application, and
+	// replaces the registry argocd.syncRetry defaults that apply when it is
+	// nil (see argocd.Generator.SyncRetry). Baked at bundle time like
+	// CascadeDelete, not an install-time value. See #3264.
 	SyncRetry *bundlercfg.SyncRetry
 
 	// DynamicValues maps component names to their dynamic value paths.
