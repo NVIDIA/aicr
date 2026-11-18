@@ -3330,17 +3330,20 @@ fully rolled out. The check runs once, with two retries, and does not wait,
 so upgrade grove first and let its rollout finish before upgrading
 `dynamo-platform`. This also applies to a fresh install.
 
-- `deploy.sh` (the `helm` deployer) waits for each release by default, so
+- `deploy.sh` (the `helm` deployer) waits for grove's release by default, so
   grove is ready before `dynamo-platform` starts. With `--no-wait` it is not.
+  A per-component `install.sh` installs only its own release, so if you run
+  them by hand, wait for the `grove-operator` rollout before running
+  `dynamo-platform`'s.
 - With `argocd` and `argocd-helm`, sync waves create grove's Application
-  first but do not wait for it to become healthy. Sync grove and wait for it
-  to be healthy before syncing `dynamo-platform`, or generate the bundle with
-  `--argocd-sync-retry-limit` (for example `5`, with
-  `--argocd-sync-retry-backoff-duration 30s`) to give grove more time before
-  the check is retried.
+  first but do not wait for it to become healthy. When the recipe includes
+  grove, the bundle therefore gives the `dynamo-platform` Application a sync
+  retry: up to 5 retries, 30s apart at first, doubling to at most 3m. A sync
+  retry you set with `--argocd-sync-retry-limit` or in a config file replaces
+  it.
 
 If the check already failed, wait for the grove rollout to finish, then re-run
-`dynamo-platform`. On Argo CD, if the sync still fails after any automatic
+`dynamo-platform`. On Argo CD, if the sync still fails after its automatic
 retries, wait for grove to be healthy and re-sync `dynamo-platform` manually.
 
 The same bundles set `scheduler.args.default-staleness-grace-period: "-1s"` on

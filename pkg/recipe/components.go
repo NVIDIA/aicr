@@ -267,6 +267,39 @@ type ComponentConfig struct {
 	MixinSafeOverridePaths []string `yaml:"mixinSafeOverridePaths,omitempty"`
 
 	Telemetry TelemetryConfig `yaml:"telemetry,omitempty"`
+
+	// ArgoCD holds what the argocd and argocd-helm deployers apply to this
+	// component's child Application. The other deployers ignore it.
+	ArgoCD ArgoCDComponentConfig `yaml:"argocd,omitempty"`
+}
+
+// ArgoCDComponentConfig is a component's Argo CD child Application settings.
+type ArgoCDComponentConfig struct {
+	// SyncRetry is the default spec.syncPolicy.retry for the component's
+	// primary child Application. A sync retry configured for the bundle
+	// (--argocd-sync-retry-*, or syncRetry in a config file) replaces it.
+	SyncRetry *ArgoCDSyncRetryConfig `yaml:"syncRetry,omitempty"`
+}
+
+// ArgoCDSyncRetryConfig is a registry-declared Argo CD sync retry. Limit and
+// Backoff use the shape of the config file's syncRetry; the argocd deployer
+// validates them when it renders the Application. An empty Backoff field
+// keeps Argo CD's default for that field.
+type ArgoCDSyncRetryConfig struct {
+	// WhenComponents limits the retry to recipes that include every named
+	// component. Empty applies it whenever the component is in the recipe.
+	WhenComponents []string `yaml:"whenComponents,omitempty"`
+
+	Limit   int64                        `yaml:"limit"`
+	Backoff ArgoCDSyncRetryBackoffConfig `yaml:"backoff,omitempty"`
+}
+
+// ArgoCDSyncRetryBackoffConfig is the retry backoff. Durations use Go
+// duration syntax (30s, 3m).
+type ArgoCDSyncRetryBackoffConfig struct {
+	Duration    string `yaml:"duration,omitempty"`
+	Factor      int64  `yaml:"factor,omitempty"`
+	MaxDuration string `yaml:"maxDuration,omitempty"`
 }
 
 // TelemetryConfig is a component's part in the runtime metrics contract
@@ -925,7 +958,38 @@ func (r *ComponentRegistry) Validate() []error {
 	}
 
 	errs = append(errs, r.validateTelemetry()...)
+	errs = append(errs, r.validateArgoCD()...)
 
+	return errs
+}
+
+// validateArgoCD checks what does not depend on the deployer: a sync retry
+// that retries at least once, and a condition naming other registry
+// components. The argocd deployer validates the backoff values it renders.
+func (r *ComponentRegistry) validateArgoCD() []error {
+	known := make(map[string]bool, len(r.Components))
+	for _, comp := range r.Components {
+		known[comp.Name] = true
+	}
+
+	var errs []error
+	for _, comp := range r.Components {
+		retry := comp.ArgoCD.SyncRetry
+		if retry == nil {
+			continue
+		}
+		if retry.Limit < 1 {
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"component %q: argocd.syncRetry.limit must be at least 1, got %d", comp.Name, retry.Limit)))
+		}
+		for _, name := range retry.WhenComponents {
+			if name == comp.Name || !known[name] {
+				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"component %q: argocd.syncRetry.whenComponents names %q, which is not another registry component",
+					comp.Name, name)))
+			}
+		}
+	}
 	return errs
 }
 
