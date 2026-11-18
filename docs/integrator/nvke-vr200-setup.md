@@ -242,7 +242,8 @@ RBAC but leaves `/etc/cni/net.d/00-multus.conflist` on every node, which sorts
 ahead of OVN-Kubernetes and fails every subsequent pod creation cluster-wide
 with `Unauthorized`. This was observed on this cluster.
 
-**It pins network-operator 26.7.1, not the registry default of 26.7.0.** The
+**It needs network-operator 26.7.1 or later.** The registry default is now
+26.7.1; this leaf pinned it while the default was still 26.7.0. The
 daemon in 26.7.0 has no firmware-discovery fallback, so a `flint` failure is
 fatal — and `flint` cannot read ConnectX-9 here. Measured on a worker: 26.7.0
 exits with `failed to discover NIC devices`, while 26.7.1 logs `flint failed,

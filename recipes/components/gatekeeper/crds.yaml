@@ -45,5 +45,5 @@ charts:
       - providers.externaldata.gatekeeper.sh
       - syncsets.syncset.gatekeeper.sh
     repository: https://open-policy-agent.github.io/gatekeeper/charts
-    sourceVersion: 3.22.2
+    sourceVersion: 3.23.1
 component: gatekeeper

@@ -40,5 +40,5 @@ charts:
       - sqljobs.k8s.mariadb.com
       - users.k8s.mariadb.com
     repository: oci://ghcr.io/mariadb-operator/charts
-    sourceVersion: 26.10.1
+    sourceVersion: 26.10.2
 component: mariadb-operator-crds

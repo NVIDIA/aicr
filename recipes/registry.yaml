@@ -222,7 +222,7 @@ components:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/network-operator
       # renovate: datasource=helm depName=network-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
-      defaultVersion: "26.7.0"
+      defaultVersion: "26.7.1"
       defaultNamespace: nvidia-network-operator
     nodeScheduling:
       system:
@@ -345,11 +345,13 @@ components:
       - certmanager
     healthCheck:
       assertFile: checks/cert-manager/health-check.yaml
+    upgrades:
+      file: components/cert-manager/upgrades.yaml
     helm:
       defaultRepository: https://charts.jetstack.io
       defaultChart: jetstack/cert-manager
       # renovate: datasource=helm depName=cert-manager registryUrl=https://charts.jetstack.io
-      defaultVersion: v1.20.2
+      defaultVersion: v1.20.5
       defaultNamespace: cert-manager
     nodeScheduling:
       system:
@@ -1257,11 +1259,13 @@ components:
       - awsebscsidriver
     healthCheck:
       assertFile: checks/aws-ebs-csi-driver/health-check.yaml
+    upgrades:
+      file: components/aws-ebs-csi-driver/upgrades.yaml
     helm:
       defaultRepository: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
       defaultChart: aws-ebs-csi-driver/aws-ebs-csi-driver
       # renovate: datasource=helm depName=aws-ebs-csi-driver registryUrl=https://kubernetes-sigs.github.io/aws-ebs-csi-driver
-      defaultVersion: 2.59.0
+      defaultVersion: 2.68.0
       defaultNamespace: kube-system
     nodeScheduling:
       system:
@@ -1347,7 +1351,7 @@ components:
       defaultRepository: oci://ghcr.io/kai-scheduler/kai-scheduler
       defaultChart: kai-scheduler
       # renovate: datasource=docker depName=ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler
-      defaultVersion: v0.16.9
+      defaultVersion: v0.18.8
       defaultNamespace: kai-scheduler
     nodeScheduling:
       system:
@@ -1374,7 +1378,7 @@ components:
       defaultRepository: oci://ghcr.io/ai-dynamo/grove
       defaultChart: grove-charts
       # renovate: datasource=docker depName=ghcr.io/ai-dynamo/grove/grove-charts
-      defaultVersion: "v0.1.0-alpha.13"
+      defaultVersion: "v0.1.0-alpha.14"
       defaultNamespace: dynamo-system
     nodeScheduling:
       system:
@@ -1397,8 +1401,28 @@ components:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-platform
       # renovate: datasource=helm depName=dynamo-platform registryUrl=https://helm.ngc.nvidia.com/nvidia/ai-dynamo
-      defaultVersion: "1.4.2"
+      defaultVersion: "1.6.2"
       defaultNamespace: dynamo-system
+    # The chart's Grove preflight hook (an Argo CD PreSync Job, backoffLimit 2,
+    # activeDeadlineSeconds 120) fails until grove-operator has rolled out.
+    # Sync waves create grove's Application first but do not wait for it to
+    # become healthy. With no syncPolicy.retry, the Argo CD AICR tests against
+    # (v3.x, argo-cd chart 9.5.14) already retries a failed automated sync 5
+    # times, but at a 5s base backoff those retries end after about 2.5
+    # minutes, too short for a slow grove rollout; once they run out, Argo CD
+    # starts no new auto-sync of the same revision. This retry keeps the 5
+    # attempts and widens the backoff to 30s, 1m, 2m, 3m, 3m, about 10 minutes
+    # of waits. Factor 2 and maxDuration 3m match Argo CD's defaults, written
+    # out so the Application does not depend on them.
+    argocd:
+      syncRetry:
+        whenComponents:
+          - grove
+        limit: 5
+        backoff:
+          duration: 30s
+          factor: 2
+          maxDuration: 3m
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -1407,7 +1431,7 @@ components:
         tolerationPaths:
           - dynamo-operator.controllerManager.tolerations
           - nats.podTemplate.merge.spec.tolerations
-    # What the planner queries at ai-dynamo/dynamo v1.4.2
+    # What the planner queries at ai-dynamo/dynamo v1.6.2
     # (components/src/dynamo/planner/monitoring/traffic_metrics.py), in
     # frontend and router mode, plus the engines' speculative-decoding
     # acceptance. The operator's PodMonitors live in this release's namespace
@@ -1481,11 +1505,13 @@ components:
       - nim
     healthCheck:
       assertFile: checks/k8s-nim-operator/health-check.yaml
+    upgrades:
+      file: components/k8s-nim-operator/upgrades.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: k8s-nim-operator
       # renovate: datasource=helm depName=k8s-nim-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
-      defaultVersion: "3.1.0"
+      defaultVersion: "3.1.4"
       defaultNamespace: nvidia-nim
     nodeScheduling:
       system:
@@ -1521,7 +1547,7 @@ components:
       defaultRepository: oci://registry.k8s.io/kueue/charts
       defaultChart: kueue
       # renovate: datasource=docker depName=registry.k8s.io/kueue/charts/kueue
-      defaultVersion: "0.19.6"
+      defaultVersion: "0.19.13"
       defaultNamespace: kueue-system
     nodeScheduling:
       system:
@@ -1555,11 +1581,13 @@ components:
     manifestsUseChartCRDs: true
     healthCheck:
       assertFile: checks/kubeflow-trainer/health-check.yaml
+    upgrades:
+      file: components/kubeflow-trainer/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/kubeflow/charts
       defaultChart: kubeflow-trainer
       # renovate: datasource=docker depName=ghcr.io/kubeflow/charts/kubeflow-trainer
-      defaultVersion: 2.2.0
+      defaultVersion: 2.2.1
       defaultNamespace: kubeflow
     nodeScheduling:
       system:
@@ -1619,15 +1647,17 @@ components:
     hasSelfRefCRDs: true
     healthCheck:
       assertFile: checks/runai-cluster/health-check.yaml
+    upgrades:
+      file: components/runai-cluster/upgrades.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/runai-oss
       defaultChart: runai-cluster
       # renovate: datasource=helm depName=runai-cluster registryUrl=https://helm.ngc.nvidia.com/nvidia/runai-oss
-      defaultVersion: "3.0.20"
-      # SHA-256 of runai-cluster-3.0.20.tgz as served by NGC (matches the
+      defaultVersion: "3.0.24"
+      # SHA-256 of runai-cluster-3.0.24.tgz as served by NGC (matches the
       # repository index). The repo publishes no .prov file, so this is the
       # only integrity anchor --vendor-charts has.
-      defaultDigest: sha256:bc30d1a688206b33ce02232a116143f556031e9f8f482ea5458131f01f9252ab
+      defaultDigest: sha256:bc7e19a9a02ad012cc426e0e7c4f062b62a88d4e9a00e719ad31887890e2700c
       # The chart's templates name this namespace outright, so the release
       # cannot live anywhere else. Its pre-install hook labels the namespace
       # pod-security.kubernetes.io/enforce=privileged itself.
@@ -1635,7 +1665,7 @@ components:
     # global.tolerations reaches the operator, the hook Jobs and the KAI
     # operator and KRM subcharts; karta and gpu-fractioning read only their
     # own tolerations value, so all three paths are needed to cover every
-    # pod the chart renders (verified by render at 3.0.20). global.nodeSelector
+    # pod the chart renders (verified by render at 3.0.24). global.nodeSelector
     # reaches only the KAI subcharts, so no nodeSelector path is mapped until
     # the chart threads one through.
     nodeScheduling:
@@ -1677,11 +1707,11 @@ components:
   # off. Re-enable it only when prometheus-operator-crds are already on
   # the cluster (base.yaml or a dependencyRef).
   #
-  # NVCRE v0.2.0 pins kubeflowTrainerVersion = "v2.2.1" and its
-  # `setup status` reports the 2.2.0 this registry defaults to as
-  # unsupported. No functional break is known between the two: the CRD
-  # delta is documentation text plus one embedded PodSpec field NVCRE does
-  # not set. Aligning the global Trainer default is tracked separately.
+  # NVCRE pins kubeflowTrainerVersion = "v2.2.1", which is the registry's
+  # kubeflow-trainer default; its `setup status` reports a cluster still on
+  # 2.2.0 as unsupported. No functional break is known between the two: the
+  # CRD delta is documentation text plus one embedded PodSpec field NVCRE
+  # does not set.
   #
   # No shipped overlay references this component (TestNVCRERegisteredWithoutOverlay).
   - name: nvcre
@@ -1744,7 +1774,7 @@ components:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator-crds
       # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm-operator-crds
-      defaultVersion: "1.2.2"
+      defaultVersion: "1.2.4"
       defaultNamespace: slinky
 
   - name: mariadb-operator-crds
@@ -1760,7 +1790,7 @@ components:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-operator-crds
       # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-operator-crds
-      defaultVersion: "26.10.1"
+      defaultVersion: "26.10.2"
       defaultNamespace: mariadb-system
 
   - name: mariadb-operator
@@ -1776,7 +1806,7 @@ components:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-operator
       # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-operator
-      defaultVersion: "26.10.1"
+      defaultVersion: "26.10.2"
       defaultNamespace: mariadb-system
     nodeScheduling:
       system:
@@ -1809,7 +1839,7 @@ components:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-cluster
       # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-cluster
-      defaultVersion: "26.10.1"
+      defaultVersion: "26.10.2"
       defaultNamespace: slurm
     storageClassPaths:
       - mariadb.storage.storageClassName
@@ -1851,7 +1881,7 @@ components:
       # file mirrors the chart defaults explicitly for documentation, but
       # an upstream default flip would otherwise pass through unnoticed.
       # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm-operator
-      defaultVersion: "1.2.2"
+      defaultVersion: "1.2.4"
       defaultNamespace: slinky
     nodeScheduling:
       system:
@@ -1883,7 +1913,7 @@ components:
       # pkg/recipe TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths
       # enforces their alignment with the scheduling paths below.
       # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm
-      defaultVersion: "1.2.2"
+      defaultVersion: "1.2.4"
       defaultNamespace: slurm
     sharedStorageClassPaths:
       - storage.home.storageClassName
@@ -1998,11 +2028,13 @@ components:
       - gatekeeper
     healthCheck:
       assertFile: checks/gatekeeper/health-check.yaml
+    upgrades:
+      file: components/gatekeeper/upgrades.yaml
     helm:
       defaultRepository: https://open-policy-agent.github.io/gatekeeper/charts
       defaultChart: gatekeeper/gatekeeper
       # renovate: datasource=helm depName=gatekeeper registryUrl=https://open-policy-agent.github.io/gatekeeper/charts
-      defaultVersion: 3.22.2
+      defaultVersion: 3.23.1
       defaultNamespace: gatekeeper-system
     nodeScheduling:
       # Gatekeeper is an admission controller — it has no GPU-bound workload,
@@ -2196,11 +2228,13 @@ components:
       # components/k8s-nim-operator-ocp/values.yaml for the
       # nameOverride/fullnameOverride pin that makes this safe.
       assertFile: checks/k8s-nim-operator/health-check.yaml
+    upgrades:
+      file: components/k8s-nim-operator-ocp/upgrades.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: k8s-nim-operator
       # renovate: datasource=helm depName=k8s-nim-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
-      defaultVersion: "3.1.0"
+      defaultVersion: "3.1.4"
       defaultNamespace: nvidia-nim
     nodeScheduling:
       system:

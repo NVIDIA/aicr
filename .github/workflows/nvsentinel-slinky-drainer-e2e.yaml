@@ -53,6 +53,7 @@ on:
       - 'pkg/bundler/validations/nvsentinel_drain_scope.go'
       - 'pkg/bundler/deployer/localformat/templates/**'
       - 'tools/common'
+      - 'tests/e2e/lib/nvsentinel-mongodb.sh'
       - 'Makefile'
       - '.github/workflows/nvsentinel-slinky-drainer-e2e.yaml'
       - '.github/actions/setup-build-tools/**'

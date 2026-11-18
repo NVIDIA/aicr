@@ -64,22 +64,16 @@ spec:
   # platforms never hit it because flint works there.
   nicConfigurationOperator:
     logLevel: info
-    # Tagged, not digest-pinned, which is the one place this file diverges from
-    # its neighbours. A crd-digest annotation carries `tag=network-operator-vX`
-    # and TestNetworkOperatorTagAnnotationsFollowChartPin requires that X equal
-    # registry.yaml's network-operator defaultVersion. This leaf deliberately
-    # pins the chart one patch ahead of that default, so a digest annotation
-    # here could only name a tag the guard rejects. The images stay on tags
-    # with an entry in imageDigestExemptions instead, which keeps the
-    # divergence inside this leaf rather than moving the whole fleet.
     operator:
       image: nic-configuration-operator
       repository: nvcr.io/nvidia/mellanox
-      version: network-operator-v26.7.1
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nic-configuration-operator tag=network-operator-v26.7.1
+      version: sha256:3f2d82afbe9e850ff0ace3d1ebff43cef70f83256a6c9632640c7c2f7e7840a8
     configurationDaemon:
       image: nic-configuration-operator-daemon
       repository: nvcr.io/nvidia/mellanox
-      version: network-operator-v26.7.1
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon tag=network-operator-v26.7.1
+      version: sha256:908d278e140b1276b978acf26c3f8d4a1bbc22c7085cc86bda94644987d3d74b
       imagePullSecrets: []
       # Unset by default, so the operator applies its own default
       # (manifests/state-nic-configuration-operator/070-config-daemon.yaml).
@@ -104,7 +98,8 @@ spec:
   nvIpam:
     image: nvidia-k8s-ipam
     repository: nvcr.io/nvidia/mellanox
-    version: network-operator-v26.7.1
+    # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nvidia-k8s-ipam tag=network-operator-v26.7.1
+    version: sha256:f4012b9c5ee18603def8e842c58861b2524c8da5a946ec9c3e5957de7395a22c
     enableWebhook: false
   # Required for the rails: a SriovNetwork renders a NetworkAttachmentDefinition
   # and multus is what attaches it to a pod.
@@ -120,11 +115,13 @@ spec:
     cniPlugins:
       image: plugins
       repository: nvcr.io/nvidia/mellanox
-      version: network-operator-v26.7.1
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/plugins tag=network-operator-v26.7.1
+      version: sha256:9758670f426e238805aba61a1c83a96ae10506dd973845b60477230672c06163
     multus:
       image: multus-cni
       repository: nvcr.io/nvidia/mellanox
-      version: network-operator-v26.7.1
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/multus-cni tag=network-operator-v26.7.1
+      version: sha256:19279347b71a1077eaed8479f8fff491fd9a578bc0ff8efcf13ea08270574fd0
   tolerations:
     - key: dedicated
       operator: Exists

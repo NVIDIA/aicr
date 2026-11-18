@@ -26,7 +26,7 @@
 # Emission gate — this file is loaded by the bundler only when the
 # resolved recipe attaches a NicClusterPolicy CR through a componentRef
 # manifest (recipeDeclaresRDMAFabric in pkg/bundler/readiness.go). The
-# pinned upstream Helm chart (26.7.0) does not template NCP even with
+# pinned upstream Helm chart (26.7.1) does not template NCP even with
 # deployCR=true, so overlays that include network-operator without
 # attaching an NCP have nothing to gate on and the gate would poll to
 # --max-wait timeout. At this commit, only aks.yaml (via
@@ -60,8 +60,9 @@
 # when the resolved recipe attaches no NCP CR.
 #
 # Verified against network-operator v26.7.0 source and CRD
-# (recipes/registry.yaml): the aggregate status.state field and the `ready`
-# value remain part of the v1alpha1 contract. Re-verify on defaultVersion bump
+# (recipes/registry.yaml), and unchanged in v26.7.1, which touches no api/
+# file and no CRD: the aggregate status.state field and the `ready` value
+# remain part of the v1alpha1 contract. Re-verify on defaultVersion bump
 # because the reduction rules for appliedStates have evolved across minors.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test

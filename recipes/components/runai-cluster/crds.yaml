@@ -42,5 +42,5 @@ charts:
       - schedulingshards.kai.scheduler
       - topologies.kai.scheduler
     repository: https://helm.ngc.nvidia.com/nvidia/runai-oss
-    sourceVersion: 3.0.20
+    sourceVersion: 3.0.24
 component: runai-cluster

@@ -356,7 +356,9 @@ type Generator struct {
 	// SyncRetry sets spec.syncPolicy.retry on every child Application,
 	// including the pre/post-manifest and readiness folders; the parent is
 	// unchanged. Nil leaves retry out, so Argo CD applies its auto-sync
-	// default. Baked at bundle time. See #3264.
+	// default, except on a primary Application whose component declares a
+	// registry argocd.syncRetry the recipe meets (dynamo-platform with grove).
+	// Set, it replaces every such default. Baked at bundle time. See #3264.
 	SyncRetry *bundlercfg.SyncRetry
 
 	// InlineUpstreamValues replaces the multi-source $values pattern for
@@ -590,6 +592,17 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, nameErr
 	}
 
+	// A bundle-wide retry replaces every registry default, so the registry
+	// is consulted only without one.
+	var defaultRetries map[string]*bundlercfg.SyncRetry
+	if g.SyncRetry == nil {
+		var retryErr error
+		defaultRetries, retryErr = componentSyncRetries(components, g.RecipeResult.DataProvider())
+		if retryErr != nil {
+			return nil, retryErr
+		}
+	}
+
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to create output directory", err)
@@ -714,6 +727,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		appData.Project = g.project()
 		appData.CascadeDelete = g.CascadeDelete
 		appData.SyncRetry = g.SyncRetry
+		if appData.SyncRetry == nil && f.Name == f.Parent {
+			appData.SyncRetry = defaultRetries[comp.Name]
+		}
 		appDataList = append(appDataList, appData)
 
 		folderDir, joinErr := deployer.SafeJoin(outputDir, f.Dir)
@@ -836,6 +852,54 @@ func (g *Generator) toLocalformatComponents(refs []recipe.ComponentRef, chartDig
 		})
 	}
 	return out
+}
+
+// componentSyncRetries returns the registry-declared argocd.syncRetry of each
+// component in refs whose whenComponents are all in refs. Components without
+// one, or whose condition the recipe does not meet, are absent. A declared
+// retry that Argo CD would reject fails with ErrCodeInvalidRequest.
+//
+// provider is the recipe-bound DataProvider; nil falls back to the embedded
+// registry.
+func componentSyncRetries(refs []recipe.ComponentRef, provider recipe.DataProvider) (map[string]*bundlercfg.SyncRetry, error) {
+	registry, err := recipe.GetComponentRegistryFor(provider)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load component registry")
+	}
+	inRecipe := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		inRecipe[ref.Name] = true
+	}
+	out := make(map[string]*bundlercfg.SyncRetry)
+	for _, ref := range refs {
+		cfg := registry.Get(ref.Name)
+		if cfg == nil || cfg.ArgoCD.SyncRetry == nil {
+			continue
+		}
+		declared := cfg.ArgoCD.SyncRetry
+		met := true
+		for _, name := range declared.WhenComponents {
+			if !inRecipe[name] {
+				met = false
+				break
+			}
+		}
+		if !met {
+			continue
+		}
+		retry := &bundlercfg.SyncRetry{
+			Limit:              declared.Limit,
+			BackoffDuration:    declared.Backoff.Duration,
+			BackoffFactor:      declared.Backoff.Factor,
+			BackoffMaxDuration: declared.Backoff.MaxDuration,
+		}
+		if err := retry.Validate(); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: invalid registry argocd.syncRetry", ref.Name), err)
+		}
+		out[ref.Name] = retry
+	}
+	return out, nil
 }
 
 // findComponentRef returns the ComponentRef whose Name matches parent, or nil.

@@ -1,0 +1,74 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: aws-ebs-csi-driver
+transitions:
+  # from starts at 2.59.0, the release AICR pinned before 2.68.0 and the only
+  # one assessed here; an origin below it resolves to blocked.
+  - from: ">=2.59.0 <2.68.0"
+    to: "2.68.0"
+    verdict: manual
+    summary: >-
+      Three changes in this span can break a customized install. Driver 1.63
+      stops publishing -fips images, so a values override pointing at one
+      fails to pull. Driver 1.67 rejects StorageClass topologies that name no
+      valid zone or zone ID. Chart 2.68 adds a ValidatingAdmissionPolicy, on
+      by default on Kubernetes 1.30 and later, that lets the node service
+      account update only its own Node, identified by the node-name claim in
+      its token, so a node pod without that claim cannot clear its
+      agent-not-ready taint.
+    precondition: >-
+      Know whether your values override the driver image with a -fips tag,
+      whether any StorageClass for ebs.csi.aws.com sets allowedTopologies,
+      and whether node service-account tokens carry the
+      authentication.kubernetes.io/node-name claim (the default since
+      Kubernetes 1.30). AICR's values set no image override and its default
+      StorageClass names no topology.
+    stepsByDeployer:
+      - steps:
+          - id: drop-fips-image
+            description: >-
+              Only if your values set a -fips image tag: remove the override
+              and set the chart's fips value to true instead.
+            reason: >-
+              The -fips images are no longer published from 1.63; FIPS mode
+              is now a runtime switch on the single image.
+          - id: check-storageclass-topology
+            description: >-
+              For each StorageClass with provisioner ebs.csi.aws.com and
+              allowedTopologies, confirm every value names an availability
+              zone or zone ID that exists in the region.
+            reason: >-
+              From 1.67 the driver rejects create and clone requests whose
+              topology names neither, which it used to accept.
+          - id: apply-and-verify-taint
+            description: >-
+              Apply the regenerated bundle with your deployer, then wait for
+              every ebs-csi-node pod to be ready and its Node to drop the
+              ebs.csi.aws.com/agent-not-ready taint. Only if a ready pod's
+              ebs-plugin container keeps logging "Failed to remove
+              agent-not-ready taint" with an error naming the
+              ValidatingAdmissionPolicy ebs-csi-node, set
+              node.validatingAdmissionPolicy.enabled to false and re-apply.
+            reason: >-
+              Upstream recommends that taint on every node while it starts,
+              so its presence alone is not a failure. The policy denies its
+              removal only when the token lacks the node-name claim, which
+              would leave the node unschedulable for EBS volumes.
+    references:
+      - https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/master/CHANGELOG.md
+      - https://github.com/kubernetes-sigs/aws-ebs-csi-driver/pull/3092
+      - https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/v1.68.0/docs/install.md

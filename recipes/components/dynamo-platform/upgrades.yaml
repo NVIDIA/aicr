@@ -66,3 +66,90 @@ transitions:
     references:
       - https://github.com/ai-dynamo/dynamo/releases/tag/v1.5.0
       - https://github.com/ai-dynamo/dynamo/blob/v1.5.0/deploy/helm/charts/platform/README.md
+  - from: ">=1.5.0 <1.6.2"
+    to: "=1.6.2"
+    verdict: manual
+    summary: >-
+      1.6 adds a pre-install and pre-upgrade hook that fails unless a
+      grove-operator image at v0.1.0-alpha.14 or later has finished rolling
+      out, and it needs kai-scheduler 0.17 or later. The operator no longer
+      adopts objects it does not own, so a same-named object it did not create
+      blocks reconciliation. Invalid DYN_REQUEST_PLANE or DYN_EVENT_PLANE
+      values now fail workers at startup, and the NIXL Prometheus port moves
+      from 19090 to 9090. An init container named runtime is now reserved.
+      The hook runs from docker.io/library/python:3.12-slim.
+    precondition: >-
+      This guidance starts at the 1.5.0 record's landing point, assessed
+      against the 1.6.0 through 1.6.2 release changes. 1.6.1 and 1.6.2 change
+      only images and CA bundles.
+    stepsByDeployer:
+      - steps:
+          - id: upgrade-dependencies-first
+            description: >-
+              Upgrade grove to v0.1.0-alpha.14 or later and kai-scheduler to
+              0.17 or later first, and wait for the grove-operator rollout to
+              finish before applying the dynamo-platform upgrade.
+            reason: >-
+              The preflight hook reads the running grove-operator image tag
+              and rollout status once, with two retries, and fails the
+              upgrade unless both qualify. deploy.sh waits for grove's release
+              unless run with --no-wait. Argo CD sync waves do not wait for
+              grove to become healthy, and Argo CD's default of 5 auto-sync
+              retries at a 5s base backoff ends after about 2.5 minutes. So
+              argocd and argocd-helm bundles that include grove retry the
+              dynamo-platform sync 5 times starting 30s apart, about 10
+              minutes of waits. A sync retry set with
+              --argocd-sync-retry-limit, or in a config file, replaces that
+              default.
+          - id: recover-failed-preflight
+            description: >-
+              If the dynamo-platform upgrade failed in its Grove preflight
+              Job, wait for the grove-operator rollout to finish, then re-run
+              the installer. On Argo CD, if the sync still fails after its
+              automatic retries, wait for grove to be healthy and re-sync
+              dynamo-platform manually.
+            reason: >-
+              A failed preflight leaves the release failed until it is
+              applied again with grove ready.
+          - id: mirror-preflight-image
+            description: >-
+              On mirrored or air-gapped registries, mirror
+              docker.io/library/python:3.12-slim, then set
+              dynamo-operator.grovePreflight.image to the mirrored reference,
+              and dynamo-operator.grovePreflight.imagePullSecrets if the
+              mirror needs credentials.
+            reason: >-
+              The preflight hook cannot start without it, which stalls the
+              upgrade before any Dynamo object changes.
+          - id: rename-runtime-init-container
+            description: >-
+              Rename any unrelated init container named runtime in Dynamo
+              workloads. An intentional runtime sidecar must set an image and
+              restartPolicy Always; give that image a semantic-version tag or
+              set runtimeVersionOverride.
+            reason: >-
+              1.6.0 reserves the runtime init container name. Declaring an
+              init container named runtime is enough to switch the component
+              into native sidecar mode, and the runtime version then resolves
+              from that container's image.
+          - id: check-workload-config
+            description: >-
+              Check Dynamo workloads for DYN_REQUEST_PLANE and DYN_EVENT_PLANE
+              values the release rejects, for scrapes or network policies
+              targeting NIXL metrics on port 19090, and for objects the
+              operator would manage that already exist under the same name
+              without its ownership.
+            reason: >-
+              Each one now fails at startup or reconciliation instead of
+              being tolerated.
+          - id: reconcile-and-verify
+            description: >-
+              Apply the generated bundle through the selected deployer, then
+              verify the Dynamo CRDs' storedVersions, webhook readiness and
+              reconciliation of existing DynamoGraphDeployments.
+            reason: >-
+              Operator readiness alone does not show that existing
+              deployments reconcile under the new release.
+    references:
+      - https://github.com/ai-dynamo/dynamo/releases/tag/v1.6.0
+      - https://github.com/ai-dynamo/dynamo/releases/tag/v1.6.2

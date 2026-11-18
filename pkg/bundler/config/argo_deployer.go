@@ -141,7 +141,8 @@ type ArgoDeployerOptions struct {
 	// to managed resources. See #1628.
 	CascadeDelete bool
 	// SyncRetry sets spec.syncPolicy.retry on every child Application. Nil
-	// leaves the field out, so Argo CD applies its own auto-sync default.
+	// leaves the field out, so Argo CD applies its own auto-sync default,
+	// except where a component's registry entry declares argocd.syncRetry.
 	// See #3264.
 	SyncRetry *SyncRetry
 }

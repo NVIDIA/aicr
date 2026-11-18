@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Run:ai cluster Helm values (runai-cluster 3.0.20).
+# Run:ai cluster Helm values (runai-cluster 3.0.24).
 #
 # Installs the NVIDIA Run:ai cluster side against a control plane the user
 # already runs: runai-operator, KAI Scheduler 0.18 and KAI Resource Management
@@ -77,7 +77,7 @@ openShift:
 # Tolerations. global.tolerations reaches the operator, the hook Jobs and
 # the KAI operator and KRM subcharts, but karta and gpu-fractioning read only
 # their own tolerations value, so the three paths together are what covers
-# every pod the chart renders (verified by render at 3.0.20). global.nodeSelector
+# every pod the chart renders (verified by render at 3.0.24). global.nodeSelector
 # reaches only the KAI subcharts, so no nodeSelector path is mapped in the
 # registry and system-node placement stays an upstream ask. The bundler
 # replaces all three lists when the bundle is generated with

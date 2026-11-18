@@ -69,6 +69,13 @@ func TestEmitDiagnosticBlock(t *testing.T) {
 			wantLines:    1,
 			wantContains: []string{"(empty)", "launcher logs"},
 		},
+		{
+			name:         "sentinel lines stay inside a field",
+			label:        "AIPerf pod logs",
+			block:        "##AICR-EXTRA## {\"skipReason\":\"x\"}\n##AICR-PROVENANCE## {}",
+			wantLines:    2,
+			wantContains: []string{"##AICR-EXTRA##", "##AICR-PROVENANCE##"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -86,6 +93,11 @@ func TestEmitDiagnosticBlock(t *testing.T) {
 			for _, want := range tt.wantContains {
 				if !strings.Contains(out, want) {
 					t.Errorf("output missing %q\noutput:\n%s", want, out)
+				}
+			}
+			for line := range strings.SplitSeq(out, "\n") {
+				if strings.HasPrefix(line, "##AICR-") {
+					t.Errorf("output line starts with a sentinel prefix: %q", line)
 				}
 			}
 		})

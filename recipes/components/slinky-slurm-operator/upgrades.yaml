@@ -42,3 +42,46 @@ transitions:
       grant it carries is also in the new role. Nothing to change on upgrade.
     references:
       - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.2/CHANGELOG/CHANGELOG-1.2.md
+  - from: ">=1.2.2 <1.2.4"
+    to: "1.2.4"
+    verdict: manual
+    summary: >-
+      From 1.2.3 a preStop handler set on a NodeSet's slurmd replaces the
+      operator's default one instead of merging with it. The default marks
+      the Slurm node down (and from 1.2.4 drained) as its pod terminates, so
+      a NodeSet with its own preStop stops doing that unless the handler
+      runs those commands itself. The operator also builds slurmd pods with
+      CAP_SYS_RESOURCE and an emptyDir spool volume, so worker pods are
+      replaced on upgrade.
+    precondition: >-
+      Know whether any NodeSet sets spec.slurmd.lifecycle.preStop. AICR's
+      slinky-slurm values set none, so a default install needs only the
+      rollout window.
+    stepsByDeployer:
+      - steps:
+          - id: carry-prestop-commands
+            description: >-
+              Only if a NodeSet sets spec.slurmd.lifecycle.preStop: add
+              `scontrol update nodename=$(hostname) state=down reason='slurm-operator: Pod is terminating'`
+              and `scontrol update nodename=$(hostname) state=drain reason='slurm-operator: Pod is terminating'`
+              to that handler, keeping the `slurm-operator: ` prefix on the
+              reason.
+            reason: >-
+              Your handler now replaces the operator's default rather than
+              running alongside it, so without these commands the Slurm
+              controller keeps scheduling onto a node whose pod is going
+              away. The operator clears only drains whose reason carries its
+              `slurm-operator: ` prefix; a drain with any other reason stays
+              until an administrator clears it in Slurm.
+          - id: plan-worker-rollout
+            description: >-
+              Apply the regenerated bundle with your deployer in a window
+              where slurmd worker pods may be replaced, and watch the
+              NodeSet rollout until every pod is ready.
+            reason: >-
+              The pod template the operator builds changes (an added
+              SYS_RESOURCE capability, an emptyDir spool volume and the new
+              preStop), so the NodeSet controller replaces worker pods
+              according to its updateStrategy.
+    references:
+      - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.4/CHANGELOG/CHANGELOG-1.2.md

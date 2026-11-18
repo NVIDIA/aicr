@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# NVIDIA NIM Operator OCP values (v3.1.0)
+# NVIDIA NIM Operator OCP values (v3.1.4)
 #
 # "Inherit the generic helm repo" integration (issue #1818, option 2): no
 # certified OLM operator exists for k8s-nim-operator, so this pulls the
@@ -38,6 +38,13 @@
 # health-check.yaml instead of a duplicate.
 nameOverride: k8s-nim-operator
 fullnameOverride: k8s-nim-operator
+
+# From chart 3.1.3 the operator ClusterRole renders its OpenShift rules (SCC
+# use on nonroot/anyuid/hostmount-anyuid, route.openshift.io/routes,
+# config.openshift.io/clusterversions and proxies) only when this is true;
+# it defaults to false. 3.1.0 rendered them unconditionally.
+openshift:
+  enabled: true
 
 operator:
   # Enable admission controller with cert-manager for TLS

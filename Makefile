@@ -339,8 +339,8 @@ test-tool-pins: ## Checks go.mod is the only pin for tools built from this modul
 	@GOFLAGS="-mod=readonly" go test -count=1 -run '^TestToolPinsLiveOnlyInGoMod$$' ./tests/architecture/
 
 .PHONY: test-shell
-test-shell: ## Runs shell unit tests (tools/*_test.sh, tools/component-test/*_test.sh, tests/uat/lib/*_test.sh, tests/uat/kind/*_test.sh; hermetic, no cluster)
-	@set -e; for t in tools/*_test.sh tools/component-test/*_test.sh tests/uat/lib/*_test.sh tests/uat/kind/*_test.sh; do [ -e "$$t" ] || continue; echo "Running $$t..."; bash "$$t"; done
+test-shell: ## Runs shell unit tests (tools/*_test.sh, tools/component-test/*_test.sh, tests/uat/lib/*_test.sh, tests/uat/kind/*_test.sh, tests/e2e/lib/*_test.sh; hermetic, no cluster)
+	@set -e; for t in tools/*_test.sh tools/component-test/*_test.sh tests/uat/lib/*_test.sh tests/uat/kind/*_test.sh tests/e2e/lib/*_test.sh; do [ -e "$$t" ] || continue; echo "Running $$t..."; bash "$$t"; done
 
 # validators/ tests run as part of `make test` but are excluded from the
 # coverage.out this target emits: per-package coverage there runs 41-92%
@@ -1239,6 +1239,10 @@ operator-kind-up-floor: ## Creates the operator's kind cluster on the Kubernetes
 .PHONY: operator-kind-down
 operator-kind-down: ## Deletes the operator's kind cluster
 	@./tools/operator-kind down
+
+.PHONY: operator-candidate-deps
+operator-candidate-deps: ## Fetches the operator candidate's modules and installs its ko, so the build can run with GOPROXY=off
+	@./tools/operator-candidate deps
 
 .PHONY: operator-candidate
 operator-candidate: ## Builds an operator candidate into dist/candidate (CANDIDATE_VERSION=v0.1.0-rc.1)
