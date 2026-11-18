@@ -264,9 +264,9 @@ jobs:
   # The lifecycle scenarios from the newest published release: its chart and
   # images, attestations verified, upgraded mid-rollout to this commit's
   # candidate, rolled back with helm rollback and uninstalled in the documented
-  # order (docs/operator/lifecycle.md). Each release keeps its own AICR
-  # default, so when the two defaults differ the upgrade also moves AICR
-  # within v1.
+  # order (docs/operator/lifecycle.md). Each side runs its own AICR, unless
+  # this commit's .settings.yaml pin is older than the published release's;
+  # then both run the published release's (tools/operator-qualify).
   qualify-published:
     name: Qualify an upgrade from the published release on Kubernetes newest
     needs: [matrix, prime-images]

@@ -42,10 +42,8 @@
 # QUALIFY_VALIDATION=1 installs or upgrades with validation.enabled; the
 # suite's deployment validation scenario sets it for its own upgrade.
 # AICR_E2E_VERSION, AICR_E2E_IMAGE and AICR_E2E_VALIDATOR_IMAGES replace every
-# candidate's own AICR. make operator-qualify-published sets them to the
-# published release's, because the suite disables the kind recipe's components
-# by the names the first plan lists, and a newer AICR that adds a component
-# would change the plan mid-upgrade.
+# candidate's own AICR. Unset, each candidate runs its own, unless the next
+# candidate's is older than the installed one's (see hold_aicr).
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -87,6 +85,43 @@ load_image() {
     docker exec -i "${node}" ctr -n k8s.io images import --digests --snapshotter=overlayfs - <"${tmp}/image.tar" >/dev/null
     docker exec "${node}" ctr -n k8s.io images tag --force "${repository}:${version}" "${repository}@${digest}" >/dev/null
   done < <(kind get nodes --name "${OPERATOR_KIND_CLUSTER}")
+}
+
+# older reports whether AICR release $1 precedes $2: an earlier release, or a
+# prerelease of $2.
+older() {
+  local a="${1%%-*}" b="${2%%-*}"
+  if [[ "${a}" == "${b}" ]]; then
+    [[ "$1" != "${a}" && "$2" == "${b}" ]]
+    return
+  fi
+  [[ "$(printf '%s\n' "${a}" "${b}" | sort -V | head -n 1)" == "${a}" ]]
+}
+
+# hold_aicr runs both candidates on the installed candidate's AICR when the
+# next candidate's is older, as when the published release is newer than the
+# .settings.yaml pin a pull request builds with: going back to an older AICR
+# takes pinning an earlier plan first (docs/operator/operations.md), which an
+# operator upgrade does not do. A newer AICR, such as a release tag's own, is
+# the upgrade the chart defaults give, and each candidate keeps its own.
+hold_aicr() {
+  local installed upgrade
+  if [[ -n "${AICR_E2E_VERSION:-}" || ! -f "${next}/candidate-values.yaml" ]]; then
+    return 0
+  fi
+  installed="$(yq -r '.aicr.version' "${candidate}/candidate-values.yaml")"
+  upgrade="$(yq -r '.aicr.version' "${next}/candidate-values.yaml")"
+  if [[ "${installed}" != v* || "${upgrade}" != v* ]]; then
+    echo "a candidate names no AICR release: ${installed} and ${upgrade}" >&2
+    return 1
+  fi
+  if older "${upgrade}" "${installed}"; then
+    AICR_E2E_VERSION="${installed}"
+    AICR_E2E_IMAGE="$(yq -r '.aicr.image' "${candidate}/candidate-values.yaml")"
+    AICR_E2E_VALIDATOR_IMAGES="$(yq -r '.aicr.validatorImages | join(",")' "${candidate}/candidate-values.yaml")"
+    export AICR_E2E_VERSION AICR_E2E_IMAGE AICR_E2E_VALIDATOR_IMAGES
+    echo "the next candidate's AICR is older than ${installed}; both run ${installed}"
+  fi
 }
 
 # install_candidate installs or upgrades the operator release to a
@@ -187,11 +222,14 @@ absolute() {
 
 run_tests() {
   AICR_OPERATOR_E2E_KUBECONFIG="${KUBECONFIG}" \
-    AICR_OPERATOR_E2E_AICR_VERSION="${AICR_E2E_VERSION:-$(yq -r '.aicr.version' "${candidate}/candidate-values.yaml")}" \
     AICR_OPERATOR_QUALIFY_CANDIDATE="$(absolute "${candidate}")/candidate.json" \
     AICR_OPERATOR_QUALIFY_NEXT="$(absolute "${next}")/candidate.json" \
     GOFLAGS="-mod=readonly" go test -count=1 -v -timeout="${QUALIFY_TIMEOUT:-90m}" ./tests/operator/qualify/...
 }
+
+if [[ "${1:-all}" != pull-published ]]; then
+  hold_aicr
+fi
 
 case "${1:-all}" in
 install)

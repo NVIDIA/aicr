@@ -88,17 +88,37 @@ func registryRestart(ctx context.Context, t *testing.T, active string) string {
 // installed candidate's release. The older operator runs by digest, reads every
 // plan and rollout the newer one wrote without stalling, rewrites none of them
 // and writes nothing to the engine; upgrading again returns to the next
-// candidate.
+// candidate. The installed candidate can run an older AICR, which rejects a
+// toggle naming a component its recipe lacks and would assess a move to the
+// plan it resolves, which operations.md has administrators avoid by pinning
+// a plan before lowering AICR. So the active plan is pinned and the toggles
+// go until the next candidate runs again: the older AICR assesses no
+// transition here.
 func rollbackToInstalled(ctx context.Context, t *testing.T, active string) {
 	t.Helper()
+	saved := getRuntime(ctx, t).Spec.DeepCopy()
+	patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) {
+		pin(rt, active)
+		rt.Spec.Overrides = releaseValues(rt.Spec.Overrides)
+	})
+	waitResolved(ctx, t)
+	waitReadyOn(ctx, t, active)
+	inputs := getRuntime(ctx, t).Status.InputDigest
 	plans := planVersions(ctx, t)
 	rollouts := rolloutGenerations(ctx, t)
 	before := syncs(ctx, t)
 	t.Setenv("CANDIDATE_DIR", filepath.Dir(os.Getenv("AICR_OPERATOR_QUALIFY_CANDIDATE")))
 	run(ctx, t, "tools/operator-qualify", "rollback")
 	runsCandidate(ctx, t, &candidate)
-	// Long enough for the older operator to resolve and reconcile every
-	// rollout once.
+	// The operator's version is one of the inputs, so the older operator
+	// resolves the runtime again, to a new input digest or a stall.
+	waitFor(t, resolveTimeout, "the older operator to resolve the runtime", func() bool {
+		rt := getRuntime(ctx, t)
+		c := cond(rt, v1alpha1.ConditionResolved)
+		return c.Status == metav1.ConditionTrue && rt.Status.InputDigest != inputs ||
+			c.Status == metav1.ConditionFalse && c.Reason != "Resolving"
+	})
+	// Long enough for it to reconcile every rollout once.
 	time.Sleep(time.Minute)
 	if c := cond(getRuntime(ctx, t), v1alpha1.ConditionStalled); c.Status == metav1.ConditionTrue {
 		t.Fatalf("the older operator stalled: %s: %s", c.Reason, c.Message)
@@ -119,6 +139,12 @@ func rollbackToInstalled(ctx context.Context, t *testing.T, active string) {
 	t.Setenv("CANDIDATE_NEXT_DIR", filepath.Dir(os.Getenv("AICR_OPERATOR_QUALIFY_NEXT")))
 	run(ctx, t, "tools/operator-qualify", "upgrade")
 	runsCandidate(ctx, t, &next)
+	patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Overrides, rt.Spec.Selection = saved.Overrides, saved.Selection
+	})
+	if digest := waitResolved(ctx, t); digest != active {
+		t.Fatalf("the restored inputs resolve plan %s, not the active plan %s", digest, active)
+	}
 	waitReadyOn(ctx, t, active)
 }
 
