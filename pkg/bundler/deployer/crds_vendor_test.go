@@ -93,6 +93,7 @@ func TestVendoredRetainedCRDs(t *testing.T) {
 		{"excluded prerelease mongodb", "retained", "prerelease", true, false},
 		{"excluded abbreviated version mongodb", "retained", "abbreviated", true, false},
 		{"backslash separators", "retained", "backslash", true, true},
+		{"dot-rooted archive", "retained", "dotroot", true, true},
 		{"dependency Helm ignores", "retained", "ignored", true, false},
 		{"crds subdirectory named as an exclusion", "retained", "crdsdir", true, true},
 		{"nonvendored attestation", "retained", "collision", false, false},
@@ -125,6 +126,8 @@ func TestVendoredRetainedCRDs(t *testing.T) {
 				ownerFiles["nvsentinel/charts/mongodb-store-1.2.tgz"] = crdArchive(t, map[string][]byte{"mongodb-store/crds/shared.yaml": shared})
 			case "backslash":
 				ownerFiles[`nvsentinel\crds\shared.yaml`] = shared
+			case "dotroot":
+				ownerFiles = map[string][]byte{"./Chart.yaml": ownerFiles["nvsentinel/Chart.yaml"], "./crds/shared.yaml": shared}
 			case "ignored":
 				ownerFiles["nvsentinel/charts/_disabled-1.0.0.tgz"] = crdArchive(t, map[string][]byte{"disabled/crds/shared.yaml": shared})
 			case "uppercase":

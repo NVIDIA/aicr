@@ -182,10 +182,15 @@ func collectVendoredCRDs(ctx context.Context, data []byte, exclusions []string, 
 // charts/ directory. Paths such as templates/crds/ are neither, since Helm
 // renders those as templates. Entries of an excluded subchart are neither.
 func chartRootEntry(name string, exclusions []string) (crd, nested bool) {
-	// Helm normalizes backslash separators and ignores charts/ entries whose
-	// names start with "_" or ".".
-	name = strings.ReplaceAll(name, `\`, "/")
-	parts := strings.Split(path.Clean(name), "/")[1:]
+	// As Helm does: a name with a backslash is split on backslashes, the raw
+	// first segment is dropped before cleaning, and charts/ entries whose
+	// names start with "_" or "." are ignored.
+	delimiter := "/"
+	if strings.Contains(name, `\`) {
+		delimiter = `\`
+	}
+	_, name, _ = strings.Cut(name, delimiter)
+	parts := strings.Split(path.Clean(strings.ReplaceAll(name, delimiter, "/")), "/")
 	for len(parts) >= 2 && parts[0] == chartsDir {
 		if strings.HasPrefix(parts[1], "_") || strings.HasPrefix(parts[1], ".") || excludedSubchart(parts[1], exclusions) {
 			return false, false
