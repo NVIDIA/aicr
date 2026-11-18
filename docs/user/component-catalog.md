@@ -3336,11 +3336,13 @@ so upgrade grove first and let its rollout finish before upgrading
   them by hand, wait for the `grove-operator` rollout before running
   `dynamo-platform`'s.
 - With `argocd` and `argocd-helm`, sync waves create grove's Application
-  first but do not wait for it to become healthy. When the recipe includes
-  grove, the bundle therefore gives the `dynamo-platform` Application a sync
-  retry: up to 5 retries, 30s apart at first, doubling to at most 3m. A sync
-  retry you set with `--argocd-sync-retry-limit` or in a config file replaces
-  it.
+  first but do not wait for it to become healthy. Argo CD's default of 5
+  auto-sync retries at a 5s base backoff ends after about 2.5 minutes, which
+  is too short for a slow grove rollout. When the recipe includes grove, the
+  bundle therefore gives the `dynamo-platform` Application a longer sync
+  retry: 5 retries, 30s apart at first, doubling to at most 3m, about 10
+  minutes of waits. A sync retry you set with `--argocd-sync-retry-limit` or
+  in a config file replaces it.
 
 If the check already failed, wait for the grove rollout to finish, then re-run
 `dynamo-platform`. On Argo CD, if the sync still fails after its automatic

@@ -672,9 +672,17 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 		if err := validateComponentClass(comp); err != nil {
 			return nil, err
 		}
+		if err := validateArgoCDSyncRetry(comp); err != nil {
+			return nil, err
+		}
 	}
 
 	if errs := registry.validateTelemetry(); len(errs) > 0 {
+		return nil, errs[0]
+	}
+	// whenComponents names other components, so it is checked once the whole
+	// registry is loaded rather than in the per-component loop above.
+	if errs := registry.validateArgoCDWhenComponents(); len(errs) > 0 {
 		return nil, errs[0]
 	}
 
@@ -963,26 +971,33 @@ func (r *ComponentRegistry) Validate() []error {
 	return errs
 }
 
-// validateArgoCD checks what does not depend on the deployer: a sync retry
-// that retries at least once, and a condition naming other registry
-// components. The argocd deployer validates the backoff values it renders.
+// validateArgoCD checks the registry's argocd.syncRetry declarations. The
+// argocd deployer validates the backoff values it renders. A bundle-wide sync
+// retry is configured elsewhere and may set a limit of 0 to disable retries.
 func (r *ComponentRegistry) validateArgoCD() []error {
+	var errs []error
+	for i := range r.Components {
+		if err := validateArgoCDSyncRetry(&r.Components[i]); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return append(errs, r.validateArgoCDWhenComponents()...)
+}
+
+// validateArgoCDWhenComponents rejects an argocd.syncRetry.whenComponents
+// entry that is not another registry component, which would otherwise leave
+// the retry silently unapplied.
+func (r *ComponentRegistry) validateArgoCDWhenComponents() []error {
 	known := make(map[string]bool, len(r.Components))
 	for _, comp := range r.Components {
 		known[comp.Name] = true
 	}
-
 	var errs []error
 	for _, comp := range r.Components {
-		retry := comp.ArgoCD.SyncRetry
-		if retry == nil {
+		if comp.ArgoCD.SyncRetry == nil {
 			continue
 		}
-		if retry.Limit < 1 {
-			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-				"component %q: argocd.syncRetry.limit must be at least 1, got %d", comp.Name, retry.Limit)))
-		}
-		for _, name := range retry.WhenComponents {
+		for _, name := range comp.ArgoCD.SyncRetry.WhenComponents {
 			if name == comp.Name || !known[name] {
 				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 					"component %q: argocd.syncRetry.whenComponents names %q, which is not another registry component",
@@ -991,6 +1006,18 @@ func (r *ComponentRegistry) validateArgoCD() []error {
 		}
 	}
 	return errs
+}
+
+// validateArgoCDSyncRetry rejects a registry argocd.syncRetry that would not
+// retry: a component default exists to add retries, so its limit must be at
+// least 1.
+func validateArgoCDSyncRetry(comp *ComponentConfig) error {
+	retry := comp.ArgoCD.SyncRetry
+	if retry == nil || retry.Limit >= 1 {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+		"component %q: argocd.syncRetry.limit must be at least 1, got %d", comp.Name, retry.Limit))
 }
 
 // validateTelemetry leaves to the bundler what depends on the recipe: whether

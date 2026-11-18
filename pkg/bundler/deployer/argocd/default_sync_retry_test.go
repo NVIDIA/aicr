@@ -25,6 +25,7 @@ import (
 	sigsyaml "sigs.k8s.io/yaml"
 
 	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/deployer"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/recipe"
@@ -66,8 +67,10 @@ func dynamoRecipe(withGrove bool) *recipe.RecipeResult {
 	return rr
 }
 
-// readSyncRetry returns spec.syncPolicy.retry of the Application at path,
-// or nil when it has none.
+// readSyncRetry returns spec.syncPolicy.retry of the Application at path, or
+// nil when the retry key is absent. A missing file, or spec, syncPolicy or
+// retry present but not a map, fails the test rather than reading as no
+// retry.
 func readSyncRetry(t *testing.T, path string) map[string]any {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -78,10 +81,35 @@ func readSyncRetry(t *testing.T, path string) map[string]any {
 	if err := sigsyaml.Unmarshal(raw, &app); err != nil {
 		t.Fatalf("parse %s: %v", path, err)
 	}
-	spec, _ := app["spec"].(map[string]any)
-	policy, _ := spec["syncPolicy"].(map[string]any)
-	retry, _ := policy["retry"].(map[string]any)
-	return retry
+	node := app
+	for _, key := range []string{"spec", "syncPolicy", "retry"} {
+		v, ok := node[key]
+		if !ok {
+			if key == "retry" {
+				return nil
+			}
+			t.Fatalf("%s: %s is missing", path, key)
+		}
+		m, ok := v.(map[string]any)
+		if !ok {
+			t.Fatalf("%s: %s is %T, want a map", path, key, v)
+		}
+		node = m
+	}
+	return node
+}
+
+// manifestFor returns the Application path Generate reported for release
+// name, failing the test when no such release was written.
+func manifestFor(t *testing.T, outputDir string, releases []deployer.Release, name string) string {
+	t.Helper()
+	for _, rel := range releases {
+		if rel.Name == name {
+			return filepath.Join(outputDir, rel.Manifest)
+		}
+	}
+	t.Fatalf("no %s release in %v", name, releases)
+	return ""
 }
 
 // TestGenerate_RegistryDefaultSyncRetry pins the dynamo-platform retry the
@@ -134,15 +162,15 @@ func TestGenerate_RegistryDefaultSyncRetry(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Generate() error = %v", err)
 			}
-			got := map[string]map[string]any{}
-			for _, rel := range out.Releases {
-				got[rel.Name] = readSyncRetry(t, filepath.Join(outputDir, rel.Manifest))
+			gotDynamo := readSyncRetry(t, manifestFor(t, outputDir, out.Releases, "dynamo-platform"))
+			if !reflect.DeepEqual(gotDynamo, tt.wantDynamo) {
+				t.Errorf("dynamo-platform retry = %v, want %v", gotDynamo, tt.wantDynamo)
 			}
-			if !reflect.DeepEqual(got["dynamo-platform"], tt.wantDynamo) {
-				t.Errorf("dynamo-platform retry = %v, want %v", got["dynamo-platform"], tt.wantDynamo)
-			}
-			if tt.withGrove && !reflect.DeepEqual(got["grove"], tt.wantGrove) {
-				t.Errorf("grove retry = %v, want %v", got["grove"], tt.wantGrove)
+			if tt.withGrove {
+				gotGrove := readSyncRetry(t, manifestFor(t, outputDir, out.Releases, "grove"))
+				if !reflect.DeepEqual(gotGrove, tt.wantGrove) {
+					t.Errorf("grove retry = %v, want %v", gotGrove, tt.wantGrove)
+				}
 			}
 		})
 	}

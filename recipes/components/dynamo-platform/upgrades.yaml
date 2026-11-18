@@ -94,9 +94,11 @@ transitions:
               and rollout status once, with two retries, and fails the
               upgrade unless both qualify. deploy.sh waits for grove's release
               unless run with --no-wait. Argo CD sync waves do not wait for
-              grove to become healthy, so argocd and argocd-helm bundles that
-              include grove retry the dynamo-platform sync up to 5 times,
-              starting 30s apart, until grove is ready. A sync retry set with
+              grove to become healthy, and Argo CD's default of 5 auto-sync
+              retries at a 5s base backoff ends after about 2.5 minutes. So
+              argocd and argocd-helm bundles that include grove retry the
+              dynamo-platform sync 5 times starting 30s apart, about 10
+              minutes of waits. A sync retry set with
               --argocd-sync-retry-limit, or in a config file, replaces that
               default.
           - id: recover-failed-preflight
