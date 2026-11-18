@@ -53,7 +53,9 @@ var snapshotCRDs = []string{
 
 // dynamoDeclaredSnapshot records, for each dynamo-platform chart version AICR
 // has pinned, the Snapshot version that chart's Chart.yaml declares as its
-// bundled dependency. Dynamo's checkpoint restore is only known to work with
+// bundled dependency. The table is typed by hand from that file: the test that
+// reads it catches a bump of either pin on its own and a dynamo-platform bump
+// with no new row, but it cannot tell that a row is wrong. Dynamo's checkpoint restore is only known to work with
 // the version it declares: Snapshot 0.3.0 removed the standby mode the Dynamo
 // 1.6.2 restore path expects, and restore aborts with "snapshot restore
 // context file not found".
@@ -160,9 +162,11 @@ func TestSnapshotRegisteredWithoutStockConsumer(t *testing.T) {
 }
 
 // TestSnapshotHealthCheckMatchesChart guards the names the health check asserts
-// as literals against what the chart renders, and against the values that
-// would change them: a fullnameOverride or nameOverride renames the operator
-// and agent, and the check would then report a healthy install as unhealthy.
+// as literals against the constants in this file (which record what the chart
+// renders at the pinned version; this test does not read the chart) and against
+// the values that would change them: a fullnameOverride or nameOverride renames
+// the operator and agent, and the check would then report a healthy install as
+// unhealthy. Re-render the chart when the pin moves.
 func TestSnapshotHealthCheckMatchesChart(t *testing.T) {
 	t.Parallel()
 

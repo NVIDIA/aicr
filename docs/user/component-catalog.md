@@ -1697,7 +1697,7 @@ spec:
     - dynamo-snapshot
 ```
 
-The overlay inherits the Dynamo leaf and repeats its criteria, so it takes over as the leaf for those criteria. The catalog-registration rule described under [Audit Logging and Tracing](#audit-logging-and-tracing) applies here too: the overlay must be in the resolved catalog, either committed to `recipes/overlays/` or placed at `<dir>/overlays/` and loaded with `--data <dir>`. The data directory also needs a `registry.yaml`, and one that declares no components is enough:
+Use the mixin only on a recipe that already includes `dynamo-platform`, as every `*-inference-dynamo` leaf does: on a recipe without it, the mixin adds a bare `dynamo-platform` that carries only the checkpoint override. The overlay inherits the Dynamo leaf and repeats its criteria, so it takes over as the leaf for those criteria. The catalog-registration rule described under [Audit Logging and Tracing](#audit-logging-and-tracing) applies here too: the overlay must be in the resolved catalog, either committed to `recipes/overlays/` or placed at `<dir>/overlays/` and loaded with `--data <dir>`. The data directory also needs a `registry.yaml`, and one that declares no components is enough:
 
 ```yaml
 # <dir>/registry.yaml
@@ -1743,7 +1743,7 @@ The chart does not check the access mode of a claim you supply.
 
 **A privileged agent.** The `snapshot-agent` DaemonSet runs privileged with `hostPID`, `hostIPC` and `hostNetwork`, and mounts host paths for the container runtime, the kubelet's pods, seccomp and pod-resources directories, `/proc` and the cgroup tree. The `snapshot` namespace must allow privileged pods. On a cluster that enforces Pod Security Standards, label it `pod-security.kubernetes.io/enforce=privileged` before the install. The agent runs under the GPU Operator's `nvidia` RuntimeClass and on nodes labeled `nvidia.com/gpu.present=true`.
 
-**Requirements** (the chart's README at this pin): Linux kernel 5.13 or newer, containerd or CRI-O, GPU Operator 26.3 or newer with CUDA driver 580 or newer and MIG disabled, and a ReadWriteMany storage class. AICR does not check them yet.
+**Requirements** (Snapshot's project README at v0.2.0): Linux kernel 5.13 or newer, containerd or CRI-O, GPU Operator 26.3 or newer with CUDA driver 580 or newer and MIG disabled, and a ReadWriteMany storage class. AICR does not check them yet.
 
 **Known issue: restore on some nodes.** On some nodes a restore fails inside CRIU, for example with `CRIU restore failed: cg: cgroupd: recv req error`, unless `config.criu.mntnsCompatMode` is `true`. It was needed on a node with an NVIDIA A10, driver 580 and Amazon Linux 2023 (kernel 6.12), and the CRIU mount-namespace restore problem is tracked as [ai-dynamo/snapshot#144](https://github.com/ai-dynamo/snapshot/issues/144). Set it with `--set snapshot:config.criu.mntnsCompatMode=true`, restart the agent pods so they reload their configuration, and take a new checkpoint: the option is stored in the checkpoint, so checkpoints taken before the change keep failing.
 
