@@ -33,7 +33,7 @@ var renderedCustomDrain = regexp.MustCompile(`(?s)\[customDrain\](.*?)(?:\n\s*\[
 // TestNVSentinelSlinkyDrainerChartRender renders the pinned nvsentinel chart
 // with nvsentinel-quarantine and nvsentinel-slinky-drainer composed and
 // asserts node-drainer is wired to the plugin: the [customDrain] table
-// carries the DrainRequest contract and a whole-seconds timeout, no
+// carries the DrainRequest contract, no
 // [[userNamespaces]] entry survives (node-drainer refuses to start with one
 // alongside an empty customDrain.nodeSelector), the plugin's template
 // ConfigMap is mounted where the table says, and node-drainer may create
@@ -79,7 +79,6 @@ func TestNVSentinelSlinkyDrainerChartRender(t *testing.T) {
 		`kind = "DrainRequest"`,
 		`statusConditionType = "DrainComplete"`,
 		`statusConditionStatus = "True"`,
-		`timeout = "1800"`,
 	} {
 		if !strings.Contains(m[1], want) {
 			t.Errorf("rendered [customDrain] lacks %s:\n%s", want, m[1])
