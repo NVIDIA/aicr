@@ -403,3 +403,9 @@ follows the `dynamo-platform` chart the recipe deploys, so a retag would run a
 runtime that differs from the operator. Registry redirection does not make the
 check fully offline, since its model-cache Job still downloads weights from
 Hugging Face.
+
+The opt-in `dynamo-snapshot-restore` conformance check runs only the
+`vllm-runtime` image, redirected by the same rule and tagged with the
+`dynamo-platform` version, and its worker downloads `Qwen/Qwen3-0.6B` from
+Hugging Face, so a disconnected cluster also needs that model reachable. Unlike
+`inference-perf`, it has no model-cache Job.

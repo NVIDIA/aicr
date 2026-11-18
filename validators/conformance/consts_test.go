@@ -51,6 +51,7 @@ func TestGPUCheckWorkBudgetsFitCatalogTimeouts(t *testing.T) {
 		"robust-controller":         robustControllerWorkBudget,
 		"inference-gateway":         inferenceGatewayWorkBudget,
 		"workload-sandboxing":       workloadSandboxingWorkBudget,
+		"dynamo-snapshot-restore":   dgdWorkBudget,
 	}
 	seen := map[string]bool{}
 	for _, v := range cat.Validators {

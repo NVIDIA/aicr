@@ -155,6 +155,31 @@ type checkContext struct {
 	signalCtx context.Context
 }
 
+// signalCtxKey keys the SIGTERM-only context in a check context's values, so it
+// stays reachable from contexts derived from it (a work budget, a poll).
+type signalCtxKey struct{}
+
+// Value exposes the SIGTERM-only context to SignalContext.
+func (c *checkContext) Value(key any) any {
+	if _, ok := key.(signalCtxKey); ok {
+		return c.signalCtx
+	}
+	return c.Context.Value(key)
+}
+
+// SignalContext returns a context that is canceled only when the container
+// receives SIGTERM (and when the check ends), never by a deadline. ctx may be any
+// context derived from a check's Ctx. A check whose deadline has already passed
+// uses it to tell a later SIGTERM from the timeout, because the timed context's
+// error cannot change after the deadline. A context that does not come from a
+// check is returned unchanged.
+func SignalContext(ctx context.Context) context.Context {
+	if sig, ok := ctx.Value(signalCtxKey{}).(context.Context); ok {
+		return sig
+	}
+	return ctx
+}
+
 // newCheckContext returns the context a check runs under: bounded by timeout
 // and canceled with cause errTerminated on SIGTERM. The returned cancel func
 // releases both and is safe to call more than once.

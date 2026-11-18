@@ -148,3 +148,31 @@ func TestRunCheckWithoutSIGTERM(t *testing.T) {
 		})
 	}
 }
+
+// TestSignalContext: after the check's deadline has passed, SignalContext still
+// reports a later SIGTERM, which the timed context cannot (its error stays
+// DeadlineExceeded). A context that is not a check's is returned unchanged.
+func TestSignalContext(t *testing.T) {
+	events, _ := fakeSIGTERM(t)
+	ctx, cancel := newCheckContext(time.Nanosecond)
+	defer cancel()
+	<-ctx.Done()
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("check context error = %v, want DeadlineExceeded", ctx.Err())
+	}
+	derived, cancelDerived := context.WithTimeout(ctx, time.Minute)
+	defer cancelDerived()
+	sig := SignalContext(derived)
+	if sig.Err() != nil {
+		t.Fatalf("SignalContext error = %v before SIGTERM, want nil: a deadline is not a signal", sig.Err())
+	}
+	events <- syscall.SIGTERM
+	select {
+	case <-sig.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("SignalContext was not canceled by SIGTERM after the deadline")
+	}
+	if plain := context.Background(); SignalContext(plain) != plain {
+		t.Error("SignalContext should return a context that is not a check's unchanged")
+	}
+}

@@ -1882,6 +1882,81 @@ the `--image-pull-secret` Secrets, copied into the per-run namespace as for
 the other probe pods (see the `driver-runtime-management` note above), so a
 mirror that needs credentials is served the same way as the validator image.
 
+### `dynamo-snapshot-restore` fails
+
+The check proves that [Snapshot](https://github.com/ai-dynamo/snapshot) (GPU
+checkpoint and restore) works through Dynamo, the way a Dynamo recipe uses it,
+which the prerequisites alone do not show; the deployment-phase
+`snapshot-requirements` check covers those. It does not call Snapshot's own API.
+It skips unless the recipe declares both `snapshot` and `dynamo-platform`. No
+embedded recipe lists it, so add `dynamo-snapshot-restore` to
+`spec.validation.conformance.checks` in a recipe copy that selects both.
+
+The check deploys a `DynamoGraphDeployment` with a frontend and one vLLM worker
+that serves Qwen/Qwen3-0.6B, with `experimental.checkpoint` enabled and
+`startupPolicy: WaitForCheckpoint`, on the vLLM runtime image of the recipe's
+`dynamo-platform` version. It then checks, through Dynamo:
+
+1. Dynamo's operator takes the checkpoint: the graph reports
+   `status.checkpoints.VllmDecodeWorker.ready`.
+2. The worker restores from it: the worker pod that is not the capture pod is
+   Ready, has `nvidia.com/Restored=True`, and its `nvidia.com/restore-from`
+   annotation names the checkpoint the graph reported. With `WaitForCheckpoint`
+   the serving worker starts only after the capture, so it is a restored one.
+3. The graph serves: it is Ready, and the frontend answers a chat completion
+   with the capital of France.
+
+A cold run takes a few minutes: the capture pulls the runtime image (about 10
+GB), downloads the model from Hugging Face, starts the engine and takes the
+checkpoint, and the restore then takes about a minute. The catalog timeout is
+35 minutes. The worker needs one free `nvidia.com/gpu` on a device-plugin node,
+and the cluster needs egress to Hugging Face, where the check downloads the model
+anonymously (it does not forward `HF_TOKEN`, so Hugging Face's anonymous rate
+limits apply). Capture and restore are scheduled on any device-plugin GPU node,
+so on a cluster with several GPU nodes the restore can land on another node,
+which needs a shared checkpoint store and compatible nodes, as Snapshot itself
+does. The check does not exercise DRA-allocated GPUs or a backend other than
+vLLM. The worker runs Dynamo's own entrypoint (`python3 -m dynamo.vllm`)
+unwrapped, which Dynamo's restore admission requires, so the `LD_LIBRARY_PATH`
+shell wrapper that `inference-perf` applies for GKE's device plugin cannot be
+used; the check has not been run on GKE. Grove is switched off for this graph
+(`nvidia.com/enable-grove: "false"`), so the check does not depend on how the
+cluster's Dynamo orchestrates workers.
+
+Its artifacts (`DynamoGraphDeployment after capture`, `Checkpoint`, `Restored
+worker`, `Frontend answer`) name the failing step:
+
+| Verdict excerpt | Meaning | Fix |
+|-----------------|---------|-----|
+| `Dynamo operator ... is not available`, `the DynamoGraphDeployment API is not served`, `snapshot operator ... is not available` or `snapshot node agent ... is not ready` | A component is not running. The check fails before it asks for a GPU | Look at the pods in the namespaces the recipe installs `dynamo-platform` and `snapshot` into |
+| `the Dynamo operator has checkpointing disabled` | Dynamo's admission webhook refused a graph that asks for a checkpoint, because `dynamo-operator.checkpoint.enabled` is not `true` on `dynamo-platform` | Set it (the `dynamo-snapshot` mixin does) and redeploy |
+| `no device-plugin GPU node for the Dynamo worker` or `is allocated through the device plugin` | The worker asks for `nvidia.com/gpu`, and either no node advertises it or the recipe's GPU allocation policy is DRA | Run the check on a cluster whose GPUs come from the device plugin |
+| `the Dynamo checkpoint did not complete: pod ... stuck` (`ErrImagePull`, `ImagePullBackOff`, `Unschedulable`) | A pod of the graph cannot start | The message names the pod and the reason. For an image, see the image note below; for `Unschedulable`, free a GPU |
+| `the Dynamo checkpoint did not complete: Dynamo's checkpoint SnapshotJob ... failed (...)` | Snapshot's capture failed. The message names the step, as `while <step>: <cause>` in Snapshot v0.3.0 and later | Read the node agent's log, `kubectl logs` on the `snapshot-agent` pod on that node |
+| `the Dynamo checkpoint did not complete: the DynamoGraphDeployment stayed failed for 30s` | Dynamo's operator reported the graph failed for 30 seconds in a row (a single failed reading is ignored, because the operator clears it on the next good reconcile). The message carries the graph's state | Read the Dynamo operator's log and the graph's conditions |
+| `the Dynamo checkpoint did not complete: pod ... failed` | The capture pod ended before the checkpoint, other than by the checkpoint itself (which exits 137 with reason `Error`). The message carries the end of its log | Usually the engine: a model that cannot download, or too little GPU memory |
+| `Dynamo did not report the worker's checkpoint ready` | The capture did not finish within the timeout. The message lists the graph's state and every pod | Look at which pod is not progressing: a slow image pull or model download, or a capture pod waiting for a GPU |
+| `the Dynamo worker ... did not restore from checkpoint ...: RestoreIncompatible` or `RestoreFailed` | The node agent refused or lost the restore. The message names the check or step | The agent log on that node. A restore that fails inside CRIU (for example `cgroupd: recv req error`) has needed the chart's `config.criu.mntnsCompatMode` on some nodes, see [ai-dynamo/snapshot#144](https://github.com/ai-dynamo/snapshot/issues/144); take a new checkpoint after changing it |
+| `the Dynamo graph was not Ready with a restored worker` | The worker did not become Ready, was not marked `Restored`, or was restored from a checkpoint other than the one the graph reported. The message shows the worker's `restore-from` annotation next to the checkpoint's name | An empty `restore-from` means the worker started without a restore: read the worker pod's events and the Dynamo operator's log |
+| `the Dynamo graph did not come up from the checkpoint: pod ... stuck: CrashLoopBackOff` | The restored worker's container keeps ending, which a Dynamo-managed worker (a Deployment) shows as a crash loop. The message carries the last exit and the previous container's log. In Snapshot v0.3.0 and later the restore proxy exits 112 when the pod's one restore was already used and 113 when it lost the restored process | The agent log on that node, and whether the Dynamo and Snapshot versions belong together (Dynamo 1.6.2 needs Snapshot 0.2.0) |
+| `the worker pod ended` | A worker pod reached the `Failed` or `Succeeded` phase, which a Deployment-managed worker rarely does | The agent log on that node |
+| `the restored Dynamo graph answered ... want "paris"` | The graph is Ready but the restored worker answers wrongly | Report it to the Snapshot project with the agent log |
+| `the frontend gave no answer` | The frontend never returned a chat completion. The message carries the last problem, for example `model not found` | The worker did not register with the frontend: read the worker's log |
+
+The runtime image is `nvcr.io/nvidia/ai-dynamo/vllm-runtime` at the recipe's
+`dynamo-platform` version, the same image `inference-perf` uses. The
+`AICR_VALIDATOR_IMAGE_REGISTRY` variable redirects it (see the
+[air-gapped mirror guide](air-gap-mirror.md)). The worker pods carry the
+`--image-pull-secret` Secrets, copied into the per-run namespace as for the other
+checks that create one. The check asks the frontend from inside its pod, over
+`127.0.0.1`, so it needs no route from the validator to the pod network. Deleting
+the graph makes Dynamo remove its pods, `SnapshotJob`, `PodSnapshot` and stored
+checkpoint. The check waits only until the `DynamoGraphDeployment` is gone and no
+pod of the graph is left in the per-run namespace, which frees the GPU and takes
+about a minute, and then deletes the per-run namespace whether or not Dynamo has
+finished removing the checkpoint objects. A check that is canceled stops waiting at
+once and deletes the namespace.
+
 ### `pod-autoscaling` fails with "Prometheus did not load the PodMonitor"
 
 When the recipe declares `kube-prometheus-stack`, the check creates its
