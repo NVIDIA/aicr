@@ -146,3 +146,16 @@ transitions:
     references:
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#mariadb-operator-2630-or-2660-to-26101
       - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md
+  - from: ">=26.10.1 <26.10.2"
+    to: "26.10.2"
+    verdict: safe
+    verifiedBy: >-
+      The mariadb-cluster chart at 26.10.2 differs from 26.10.1 only in its
+      Chart.yaml version and README (diff -r of the two pulled charts), so
+      the MariaDB resource it renders is unchanged. Upstream
+      UPGRADE_26.10.2.md lists no breaking change.
+    summary: >-
+      Chart version bump only; the rendered MariaDB resource is unchanged.
+      Nothing to change on upgrade.
+    references:
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.2.md

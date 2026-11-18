@@ -20,6 +20,11 @@
 global:
   tolerations:
     - operator: Exists
+  # v0.18.0 changed the chart's default from GPU sharing off to
+  # NonMemoryEnforced, under which the admission webhook admits fractional GPU
+  # requests it used to reject. AICR does not qualify fractional sharing, so
+  # pin the pre-0.18 behavior instead of inheriting the new default.
+  gpuSharingMode: Disabled
 
 # Disable post-delete hook job — it does not inherit global.tolerations
 # and will hang Pending on clusters with tainted nodes.
@@ -34,7 +39,7 @@ postCleanup:
 # (validators/conformance/gang_scheduling_check.go), so that queue is a hard
 # dependency of the check, not an optional extra. Workloads are unaffected —
 # Dynamo, for instance, uses the `dynamo` queue created by its own chart.
-# These are the chart's own defaults at v0.16.9; pinning them makes the
+# These are the chart's own defaults at v0.18.8; pinning them makes the
 # dependency visible here instead of relying on an upstream default that
 # could change under a version bump.
 #

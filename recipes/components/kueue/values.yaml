@@ -26,9 +26,10 @@ controllerManager:
 
 enablePrometheus: true
 
-# Pinned copy of the chart 0.19.6 default controllerManagerConfigYaml with
-# ONE deliberate change: integrations.frameworks is trimmed to the
-# frameworks AICR manages (batch/job, JobSet, TrainJob). The chart default
+# Pinned copy of the chart 0.19.13 default controllerManagerConfigYaml
+# (unchanged since 0.19.6) with ONE deliberate change:
+# integrations.frameworks is trimmed to the frameworks AICR manages
+# (batch/job, JobSet, TrainJob). The chart default
 # also enables mpijob/ray (rayjob, rayservice, raycluster)/appwrapper/pod/
 # deployment/statefulset/leaderworkerset integrations, webhook interception
 # surface we do not ship by default. The kubeflow v1 jobs (paddlejob,

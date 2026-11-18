@@ -1,0 +1,39 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: kubeflow-trainer
+transitions:
+  # from starts at 2.2.0, the release AICR pinned before 2.2.1 and the only
+  # one assessed here; an origin below it resolves to blocked.
+  - from: ">=2.2.0 <2.2.1"
+    to: "2.2.1"
+    verdict: safe
+    verifiedBy: >-
+      Upstream release notes v2.2.1 (kubeflow/trainer), which list fixes and
+      a Kubernetes 0.36 library update on the release-2.2 branch. The 2.2.1
+      chart differs from 2.2.0 in Chart.yaml, the README and its three CRDs
+      (diff -r of the two pulled charts); values.yaml is byte-identical.
+      With descriptions removed, the only schema change is in the PodSpec
+      embedded in TrainingRuntime and ClusterTrainingRuntime, where the alpha
+      Kubernetes workloadRef field becomes schedulingGroup; TrainJob's schema
+      is unchanged. helm template with AICR's values differs only in the
+      controller image tag.
+    summary: >-
+      Patch release of fixes. Helm leaves the CRDs in crds/ at 2.2.0, which
+      matters only for the alpha Kubernetes PodSpec scheduling-group field
+      AICR does not set. Nothing to change on upgrade.
+    references:
+      - https://github.com/kubeflow/trainer/releases/tag/v2.2.1

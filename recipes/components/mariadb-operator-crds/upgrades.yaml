@@ -117,3 +117,17 @@ transitions:
     references:
       - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.1.md
       - https://github.com/mariadb-operator/mariadb-operator/releases/tag/26.10.1
+  - from: ">=26.10.1 <26.10.2"
+    to: "26.10.2"
+    verdict: safe
+    verifiedBy: >-
+      Upstream UPGRADE_26.10.2.md (mariadb-operator/mariadb-operator), which
+      states the release has no breaking changes. The rendered CRDs at
+      26.10.2 differ from 26.10.1 only by added optional fields
+      (volumeAttributesClassName on storage, metrics.serviceMonitor.enabled,
+      MaxScale sidecarContainers); no field, version or validation is removed.
+    summary: >-
+      Adds optional CRD fields only. Nothing to change on upgrade; apply it
+      before mariadb-operator, which the bundle does.
+    references:
+      - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.2.md

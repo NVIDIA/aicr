@@ -21,6 +21,7 @@ transitions:
   # safe with that run in verifiedBy.
   - from: ">=26.4.1 <26.7.0"
     to: ">=26.7.0 <26.8.0"
+    skips: ["26.7.1"]
     verdict: manual
     summary: >-
       26.7.0 updates the NicClusterPolicy CRD in place and then rolls the
@@ -282,3 +283,19 @@ transitions:
     references:
       - https://docs.nvidia.com/networking/display/kubernetes2640/life-cycle-management.html
       - https://docs.nvidia.com/networking/display/kubernetes2570/life-cycle-management.html
+  - from: ">=26.7.0 <26.7.1"
+    to: "26.7.1"
+    verdict: safe
+    verifiedBy: >-
+      Upstream release notes v26.7.1 (Mellanox/network-operator), which list
+      a mofed wait-label fix and CVE fixes with no breaking change. The
+      v26.7.0...v26.7.1 source compare touches no file under api/, pkg/,
+      manifests/ or the chart's crds/ and templates/; the 26.7.1 chart's
+      values.yaml differs from 26.7.0 only in image tags. The
+      vr200-nvke-ubuntu-training leaf ran 26.7.1 before it became the
+      registry default.
+    summary: >-
+      Patch release; CRDs and chart templates are unchanged and only the
+      operator and operand image tags move. Nothing to change on upgrade.
+    references:
+      - https://github.com/Mellanox/network-operator/releases/tag/v26.7.1
