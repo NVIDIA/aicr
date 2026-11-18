@@ -122,9 +122,9 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    # Covers the sum of the sequential step budgets (tools 10 + bootstrap 65 +
+    # Covers the sum of the sequential step budgets (tools 10 + bootstrap 70 +
     # binary 20 + images 25 + prep 20 + install 90 + readiness 5 + topology 10 +
-    # gpu health 15 + conformance 45 + verify 5 + debug 8 = 318) plus headroom,
+    # gpu health 15 + conformance 45 + verify 5 + debug 8 = 323) plus headroom,
     # and stays under the 360-minute cap GitHub imposes on hosted runners: a
     # job-level value above that cap is silently clamped and the budget written
     # here would be fiction.

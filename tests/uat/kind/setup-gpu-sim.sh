@@ -197,7 +197,7 @@ MONITOR_PREPULL_NAMESPACE="kube-system"
 # keeps the margin the host
 # engine's budget has over its own cold pull. It runs after the host engine
 # rollout, not beside it, so the two pulls do not split the bandwidth the
-# host engine's 900s was sized on.
+# host engine's 1200s was sized on.
 MONITOR_PREPULL_TIMEOUT="${MONITOR_PREPULL_TIMEOUT:-1200s}"
 
 # The label the DEVICE PLUGIN selects on. The mock itself does not: chart
