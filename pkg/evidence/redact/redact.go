@@ -81,7 +81,9 @@ const (
 	//   - v10 added the resultSchema stamp naming the result contract the
 	//     validator image spoke.
 	//   - v11 added the no-metrics-backend skipReason code.
-	PolicyVersion = "v11"
+	//   - v12 added the per-test images carrier (boundImages) and the
+	//     platform extra.
+	PolicyVersion = "v12"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -338,6 +340,9 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	// check as observed either way and uses it only to word the reason. Only
 	// the versions a reader knows are publishable.
 	ctrf.ExtraKeyResultSchema: closedSet(ctrf.ResultSchemaVersion),
+
+	// The validator binary's os/arch.
+	ctrf.ExtraKeyPlatform: ctrf.IsPlatform,
 }
 
 // ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.
@@ -622,9 +627,22 @@ func collapseListSelectors(p string) string {
 	})
 }
 
+// boundImages returns, in a new slice, the records of in that pass
+// ctrf.PodImage.Valid, or nil when none do.
+func boundImages(in []ctrf.PodImage) []ctrf.PodImage {
+	var out []ctrf.PodImage
+	for _, img := range in {
+		if img.Valid() {
+			out = append(out, img)
+		}
+	}
+	return out
+}
+
 // ctrfAppliedRules is the static, sorted description of the CTRF scrub.
 var ctrfAppliedRules = []string{
 	"ctrf.tests.extra.allowlist",
+	"ctrf.tests.images.bound",
 	"ctrf.tests.omit:message",
 	"ctrf.tests.omit:stdout",
 	"ctrf.tests.runtimeProvenance.bound",
@@ -739,6 +757,9 @@ func CTRF(in *ctrf.Report) (*ctrf.Report, []string) {
 			tr.Message = ""
 			tr.Extra = allowlistExtra(tr.Extra)
 			tr.RuntimeProvenance = boundRuntimeProvenance(tr.RuntimeProvenance)
+			// Image refs are kept because the predicate's validatorImages
+			// already publishes them.
+			tr.Images = boundImages(tr.Images)
 			tests[i] = tr
 		}
 		out.Results.Tests = tests

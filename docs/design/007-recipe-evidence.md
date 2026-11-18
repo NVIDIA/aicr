@@ -611,11 +611,15 @@ aicrVersion: v0.13.0
 # Build commit of the aicr binary. Omitted when the binary has no commit stamp.
 aicrCommit: 0123456789abcdef0123456789abcdef01234567
 validatorCatalogVersion: v2.4.0
+# Each distinct image, digest and platform recorded in the bundled CTRF
+# reports. A run that recorded no digest adds an entry with an empty digest.
 validatorImages:
   - image: ghcr.io/nvidia/aicr/validator-deployment
     digest: sha256:...
+    platform: linux/amd64
   - image: ghcr.io/nvidia/aicr/validator-performance
     digest: sha256:...
+    platform: linux/amd64
 fingerprint:
   service: { value: eks }
   accelerator: { value: h100 }
@@ -932,7 +936,8 @@ auto-detected input form — OCI ref or unpacked directory):
    trust the constraint outcome the contributor recorded; it
    recomputes it.
 9. **Phase results surface.** Read CTRF results from the bundle; verify
-   per-phase `ctrfDigest` against the predicate.
+   per-phase `ctrfDigest` against the predicate, and check that
+   `validatorImages` matches the image records in those reports.
 10. **BOM cross-reference.** Confirm `bom.digest` matches predicate;
     count chart-default sub-images for the disclosure
     ("BOM contains N chart-default sub-images NOT covered by this

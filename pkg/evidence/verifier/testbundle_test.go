@@ -45,6 +45,22 @@ func buildTestBundleFailedPhase(t *testing.T) string {
 
 func buildBundle(t *testing.T, withPhaseFailure bool) string {
 	t.Helper()
+	report := &ctrf.Report{}
+	status := "passed"
+	report.Results.Summary = ctrf.Summary{Tests: 1, Passed: 1, Failed: 0, Skipped: 0}
+	if withPhaseFailure {
+		status = "failed"
+		report.Results.Summary = ctrf.Summary{Tests: 1, Passed: 0, Failed: 1, Skipped: 0}
+	}
+	return buildBundleWith(t, &validator.PhaseResult{
+		Phase: validator.PhaseDeployment, Status: status, Report: report, Duration: time.Second,
+	}, nil)
+}
+
+// buildBundleWith is buildTestBundle with the given deployment phase result
+// and predicate validatorImages.
+func buildBundleWith(t *testing.T, phase *validator.PhaseResult, images []attestation.ValidatorImage) string {
+	t.Helper()
 	dir := t.TempDir()
 
 	rec := &recipe.RecipeResult{
@@ -58,27 +74,17 @@ func buildBundle(t *testing.T, withPhaseFailure bool) string {
 		},
 	}
 	bom := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"name":"a"},{"name":"b"}]}`)
-	report := &ctrf.Report{}
-	status := "passed"
-	report.Results.Summary = ctrf.Summary{Tests: 1, Passed: 1, Failed: 0, Skipped: 0}
-	if withPhaseFailure {
-		status = "failed"
-		report.Results.Summary = ctrf.Summary{Tests: 1, Passed: 0, Failed: 1, Skipped: 0}
-	}
-	phaseResults := []*validator.PhaseResult{
-		{Phase: validator.PhaseDeployment, Status: status, Report: report, Duration: time.Second},
-	}
-
 	_, err := attestation.Build(context.Background(), attestation.BuildOptions{
-		OutputDir:    dir,
-		Recipe:       rec,
-		RecipeYAML:   []byte("apiVersion: aicr.run/v1\nkind: RecipeResult\n"),
-		Snapshot:     &snapshotter.Snapshot{},
-		SnapshotYAML: []byte("measurements: []\n"),
-		BOM:          attestation.BOMInputs{Body: bom, CycloneDXVersion: "1.6"},
-		PhaseResults: phaseResults,
-		AICRVersion:  "v0.13.0",
-		AttestedAt:   time.Date(2026, 5, 8, 10, 23, 11, 0, time.UTC),
+		OutputDir:       dir,
+		Recipe:          rec,
+		RecipeYAML:      []byte("apiVersion: aicr.run/v1\nkind: RecipeResult\n"),
+		Snapshot:        &snapshotter.Snapshot{},
+		SnapshotYAML:    []byte("measurements: []\n"),
+		BOM:             attestation.BOMInputs{Body: bom, CycloneDXVersion: "1.6"},
+		PhaseResults:    []*validator.PhaseResult{phase},
+		ValidatorImages: images,
+		AICRVersion:     "v0.13.0",
+		AttestedAt:      time.Date(2026, 5, 8, 10, 23, 11, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatalf("buildTestBundle: %v", err)

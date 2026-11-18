@@ -55,6 +55,13 @@ func EmitRuntimeProvenance(p *ctrf.RuntimeProvenance) error {
 	return emitSentinel(ctrf.ProvenanceLinePrefix, p, p == nil, "runtime provenance")
 }
 
+// EmitImage writes img to stdout as one ctrf.ImageLinePrefix line, which the
+// orchestrator appends to ctrf.TestResult.Images. Call it once for each pod the
+// validator launched whose image produced the check's result.
+func EmitImage(img ctrf.PodImage) error {
+	return emitSentinel(ctrf.ImageLinePrefix, img, false, "image")
+}
+
 func emitSentinel(prefix string, payload any, empty bool, what string) error {
 	if empty {
 		return nil

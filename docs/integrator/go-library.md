@@ -1726,7 +1726,7 @@ rest of `EvidenceOptions` stays yours, and the reasons differ:
 
 | Field | Why it is not derived |
 |---|---|
-| `Commit` | Names the running binary, not the document. It selects the validator catalog the bundle's BOM is built against. Set it after deriving. |
+| `Commit` | Names the running binary, not the document. It selects the validator catalog whose version the predicate records. Set it after deriving. |
 | `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file, and the signing mode it selects (a KMS `SigningKey`, private Sigstore endpoints) is set per invocation; resolve it at sign time. |
 | `NoSign`, `Full`, `AllowMutableValidatorTags` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. All three weaken the **artifact** — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads, `AllowMutableValidatorTags` lets the predicate name validator images that can later resolve to different code — and a checked-in file that can silently disable signing or provenance is a supply-chain downgrade no reviewer would see in a diff. |
 

@@ -35,6 +35,7 @@ import (
 	"aicr.run/pkg/defaults"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/validator/catalog"
+	"aicr.run/pkg/validator/ctrf"
 	"aicr.run/pkg/validator/labels"
 	validatorv1 "aicr.run/pkg/validator/v1"
 	"aicr.run/validators"
@@ -72,6 +73,9 @@ const (
 	// wrong logs. The full name is built in buildInferenceConfig and stored
 	// on inferenceWorkloadConfig.aiperfJobName.
 	aiperfJobNamePrefix = "aicr-aiperf"
+
+	// aiperfContainerName names the benchmark container in the AIPerf pod.
+	aiperfContainerName = "aiperf"
 
 	// aiperfResultSentinel delimits the AIPerf JSON output in the pod log
 	// stream. Everything before the first sentinel is treated as noise
@@ -3164,12 +3168,14 @@ func runAIPerfJob(ctx *validators.Context, endpoint, model string, concurrency i
 		defaults.InferencePerfPodTimeout,
 	)
 	if err != nil {
+		reportAIPerfImage(ctrf.PodImage{Image: params.image})
 		return "", errors.Wrap(errors.ErrCodeTimeout, "failed to find AIPerf pod", err)
 	}
 
 	slog.Info("Found AIPerf pod", "name", pod.Name)
 
 	err = podHelper.WaitForPodSuccess(ctx.Ctx, pod, defaults.InferencePerfJobTimeout)
+	reportAIPerfImage(aiperfPodImage(ctx.Ctx, ctx.Clientset, ctx.Namespace, pod.Name, params.image))
 	if err != nil {
 		logs, _ := podHelper.GetPodLogs(ctx.Ctx, pod)
 		return logs, errors.Wrap(errors.ErrCodeInternal, "AIPerf job failed", err)
@@ -3181,6 +3187,35 @@ func runAIPerfJob(ctx *validators.Context, endpoint, model string, concurrency i
 	}
 
 	return logs, nil
+}
+
+// reportAIPerfImage emits img as an image the check ran.
+func reportAIPerfImage(img ctrf.PodImage) {
+	if img.Digest == "" {
+		slog.Warn("AIPerf image has no recorded registry digest", "image", img.Image)
+	}
+	if err := validators.EmitImage(img); err != nil {
+		slog.Warn("failed to report AIPerf image", "error", err)
+	}
+}
+
+// aiperfPodImage returns the image the benchmark container of the pod named
+// podName ran. It returns ref with an empty Digest when the pod or its
+// container cannot be read, so the image is still listed by reference.
+func aiperfPodImage(ctx context.Context, client kubernetes.Interface, namespace, podName, ref string) ctrf.PodImage {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.K8sClientRequestTimeout)
+	defer cancel()
+	p, err := client.CoreV1().Pods(namespace).Get(getCtx, podName, metav1.GetOptions{})
+	if err != nil {
+		slog.Warn("failed to read AIPerf pod for its image digest", "pod", podName, "error", err)
+		return ctrf.PodImage{Image: ref}
+	}
+	img, ok := ctrf.ContainerImage(getCtx, client, p, aiperfContainerName)
+	if !ok {
+		slog.Warn("AIPerf pod has no benchmark container image", "pod", podName)
+		return ctrf.PodImage{Image: ref}
+	}
+	return img
 }
 
 // resolveAiperfImage returns the AIPerf benchmark image, applying the same
@@ -3435,6 +3470,7 @@ func validatePerfTuningEnvs() error {
 type aiperfRunParams struct {
 	requestCount int
 	warmupCount  int
+	image        string
 }
 
 // buildAIPerfJob constructs the Kubernetes Job spec for running AIPerf.
@@ -3539,7 +3575,7 @@ func buildAIPerfJob(namespace, jobName, endpoint, model string, concurrency int,
 					ImagePullSecrets: pullSecrets,
 					Containers: []v1.Container{
 						{
-							Name:  "aiperf",
+							Name:  aiperfContainerName,
 							Image: aiperfImage,
 							// Apply the same pull policy the outer validator
 							// Job uses (validatorv1.ImagePullPolicy handles the
@@ -3573,7 +3609,7 @@ func buildAIPerfJob(namespace, jobName, endpoint, model string, concurrency int,
 				},
 			},
 		},
-	}, aiperfRunParams{requestCount: requestCount, warmupCount: warmupCount}, nil
+	}, aiperfRunParams{requestCount: requestCount, warmupCount: warmupCount, image: aiperfImage}, nil
 }
 
 // cleanupAIPerfJob removes the AIPerf Job (if it exists) and waits for

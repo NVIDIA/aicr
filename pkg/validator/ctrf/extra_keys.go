@@ -15,8 +15,9 @@
 package ctrf
 
 // TestResult.Extra keys that both ends of the result contract read: the
-// validator images publish them (validators.EmitExtra) and the evidence
-// readers consume them (pkg/evidence/cncf, pkg/evidence/redact). They live
+// validator images publish them (validators.EmitExtra) and the orchestrator
+// and evidence readers consume them (pkg/validator/job, pkg/evidence/cncf,
+// pkg/evidence/redact). They live
 // here, the one package every side already imports, so the publisher and the
 // readers cannot drift apart; validators re-exports them as ExtraKey*.
 const (
@@ -34,6 +35,12 @@ const (
 	// present; the key only tells the reader whether the image predates
 	// ExtraKeyObservationOnly or dropped the marker.
 	ExtraKeyResultSchema = "resultSchema"
+
+	// ExtraKeyPlatform is the os/arch the validator binary runs as, stamped
+	// on every result with ExtraKeyResultSchema. The orchestrator records it
+	// as the validator image's PodImage.Platform when it cannot read the
+	// Node.
+	ExtraKeyPlatform = "platform"
 
 	// ExtraValueTrue is the published form of a true boolean extra.
 	ExtraValueTrue = "true"
