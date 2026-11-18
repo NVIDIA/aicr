@@ -1071,14 +1071,25 @@ jobs:
           install_yq: 'true'
           yq_version: ${{ steps.versions.outputs.yq }}
 
-      # Also installs ko from its pinned source, whose modules
-      # `go mod download` does not cover (#3860).
       - name: Warm the module cache through the proxy
+        shell: bash
+        run: go mod download
+
+      # A fresh token for ko's modules, so a slow proxy does not hold both
+      # fetches to one ~15-minute credential (see build-ko).
+      - name: Refresh the proxy credential
+        uses: ./.github/actions/setup-dgxc-goproxy
+        with:
+          mode: enforced
+
+      # ko resolves outside the main module, so `go mod download` fetches none
+      # of its modules; this builds it from its pinned source (#3860).
+      - name: Install ko through the proxy
         shell: bash
         run: make operator-candidate-deps
 
       # setup-dgxc-goproxy left a live Artifactory token in $RUNNER_TEMP
-      # (see build-ko). Nothing after the warm step contacts the proxy.
+      # (see build-ko). Nothing after this contacts the proxy.
       - name: Remove the proxy credential
         if: always()
         shell: bash
@@ -1086,8 +1097,8 @@ jobs:
 
       # Also checks the candidate for credential material and that its
       # linux/amd64 operator refuses development settings. GOPROXY=off fails a
-      # build that needs a module the warm step did not fetch, so no fetch can
-      # outlive the proxy token.
+      # build that needs a module the steps above did not fetch, so no fetch
+      # can outlive the proxy token.
       - name: Build the operator candidate
         env:
           CANDIDATE_VERSION: ${{ github.ref_name }}
@@ -1171,6 +1182,15 @@ jobs:
           yq_version: ${{ steps.versions.outputs.yq }}
 
       - name: Warm the module cache through the proxy
+        shell: bash
+        run: go mod download
+
+      - name: Refresh the proxy credential
+        uses: ./.github/actions/setup-dgxc-goproxy
+        with:
+          mode: enforced
+
+      - name: Install ko through the proxy
         shell: bash
         run: make operator-candidate-deps
 

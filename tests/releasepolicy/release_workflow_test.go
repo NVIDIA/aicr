@@ -1376,9 +1376,9 @@ func TestReleaseOperatorQualifiesTheTagsAICR(t *testing.T) {
 	}
 }
 
-// The operator candidate fetches every module, ko's included, in the warm
-// step, drops the proxy credential, and then builds with no module proxy, so
-// no fetch can outlive the token minted at the start of the job (#3860).
+// The operator candidate fetches the main module's graph, then ko's on a
+// refreshed token, drops the proxy credential, and builds with no module
+// proxy, so no fetch can outlive the token it runs under (#3860).
 func TestReleaseOperatorCandidateBuildsOffline(t *testing.T) {
 	jobs := mapValue(t, loadYAML(t, ".github/workflows/on-tag.yaml"), "jobs")
 	for job, target := range map[string]string{
@@ -1392,12 +1392,18 @@ func TestReleaseOperatorCandidateBuildsOffline(t *testing.T) {
 				return ok && strings.TrimSpace(fmt.Sprint(step["run"])) == command
 			})
 		}
+		download := runs("go mod download")
 		warm := runs("make operator-candidate-deps")
 		removal := runs(`rm -f "${RUNNER_TEMP}/dgxc-goauth"`)
 		build := runs("GOPROXY=off " + target)
 		if warm < 0 || build < 0 || warm >= build {
 			t.Errorf("%s must run %q with GOPROXY=off after make operator-candidate-deps", job, target)
 			continue
+		}
+		if refresh, _ := steps[warm-1].(map[string]any); download < 0 || download >= warm-1 ||
+			fmt.Sprint(refresh["uses"]) != "./.github/actions/setup-dgxc-goproxy" {
+
+			t.Errorf("%s must refresh the proxy credential between go mod download and make operator-candidate-deps", job)
 		}
 		if removal != warm+1 {
 			t.Errorf("%s must remove the proxy credential right after the warm step", job)

@@ -495,9 +495,10 @@ this tag's AICR image and validator images, also after `promote-versions`:
 AICR's Jobs as the operator builds them, recipe through deployment
 validation, with the validators pulled by their version aliases and the
 evidence checked against the pinned digests. Both candidate jobs fetch every
-module in their warm step (`make operator-candidate-deps`, which also builds
-the pinned ko from source), remove the Artifactory token, and then build with
-`GOPROXY=off`, so no fetch can outlive the token. `operator-publish` runs only
+module first: `go mod download`, then, on a refreshed Artifactory token, ko's
+modules (`make operator-candidate-deps` builds the pinned ko from source).
+They then remove the token and build with `GOPROXY=off`, so no fetch can
+outlive its token. `operator-publish` runs only
 after the release integrity check, and `operator-attest`
 (`attest-operator.yaml`) attests what it pushed. It publishes:
 
