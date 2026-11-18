@@ -166,7 +166,8 @@ network that no longer exists and the node stays not ready.
 Nodes tuned by a bundle that predates `nvidia-tuned` 0.11.2 also carry an
 `rdma-vfs-settled` unit, which Nodewright does not remove on upgrade. It holds
 kubelet for about 15 seconds on every boot after `nvidia-tuned`'s gate has
-already released. To remove it, run on each such node:
+already released. Once `nvidia-tuned` 0.11.2 has completed on a node, remove
+it there:
 
 ```shell
 systemctl disable rdma-vfs-settled.service
