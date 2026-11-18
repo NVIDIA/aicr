@@ -32,7 +32,7 @@ resources:
             max: 365Mi
             date: 2026-10-14
             ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6172508390
-          - sets: [limits]
+          - sets: []
             kind: instantaneous
             gpuNodes: 141
             nodes: 147
@@ -40,6 +40,36 @@ resources:
             max: 319Mi
             date: 2026-10-14
             ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6172508390
+          - sets: []
+            kind: windowed
+            window: 7d
+            gpuNodes: 150
+            nodes: 718
+            pods: 25700
+            p90: 277Mi
+            max: 385Mi
+            date: 2026-11-17
+            version: v26.3.0
+          - sets: [limits]
+            kind: windowed
+            window: 7d
+            gpuNodes: 237
+            nodes: 248
+            pods: 7899
+            p90: 493Mi
+            max: 577Mi
+            date: 2026-11-17
+            version: v25.3.4
+          - sets: []
+            kind: windowed
+            window: 7d
+            gpuNodes: 254
+            nodes: 488
+            pods: 12187
+            p90: 290Mi
+            max: 327Mi
+            date: 2026-11-17
+            version: v26.3.3
       - maxNodes: 450
         limits: {memory: 1Gi}
         measurements:
@@ -63,7 +93,7 @@ resources:
             date: 2026-10-14
             ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6172508390
       - maxNodes: 700
-        limits: {memory: 1Gi}
+        limits: {memory: 1280Mi}
         measurements:
           - sets: []
             kind: windowed
@@ -75,7 +105,7 @@ resources:
             max: 744Mi
             date: 2026-11-04
             ref: https://github.com/NVIDIA/aicr/issues/3214#issuecomment-6645492766
-          - sets: [limits]
+          - sets: []
             kind: windowed
             window: 7d
             gpuNodes: 656
@@ -83,6 +113,16 @@ resources:
             p90: 599Mi
             max: 747Mi
             date: 2026-11-06
+          - sets: [limits]
+            kind: windowed
+            window: 7d
+            gpuNodes: 651
+            nodes: 674
+            pods: 21831
+            p90: 653Mi
+            max: 827Mi
+            date: 2026-11-17
+            version: v26.3.3
       - maxNodes: 2000
         limits: {memory: 3584Mi}
         measurements:
