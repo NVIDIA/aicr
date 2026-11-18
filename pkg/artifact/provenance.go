@@ -126,8 +126,10 @@ func ValidateProvenance(p *Provenance) error {
 
 func validateCRDOwnership(p *Provenance) error {
 	policy := p.CRDOwnership
+	// Recipes resolved before crdOwnership existed stay readable; execution
+	// rejects them when the recorded and composed provenance digests differ.
 	if policy == nil {
-		return Invalid("artifact-inputs-mismatch", "artifact provenance lacks crdOwnership; re-resolve the recipe")
+		return nil
 	}
 	if policy.Changed == nil || policy.Owners == nil {
 		return invalid("provenance requires crdOwnership and its arrays")

@@ -31,11 +31,15 @@ func TestValidateProvenance(t *testing.T) {
 	if err := ValidateProvenance(base); err != nil {
 		t.Fatal(err)
 	}
+	older := base.Clone()
+	older.CRDOwnership = nil
+	if err := ValidateProvenance(older); err != nil {
+		t.Fatalf("provenance from before crdOwnership: %v", err)
+	}
 	for _, tt := range []struct {
 		name   string
 		mutate func(*Provenance)
 	}{
-		{"missing policy", func(p *Provenance) { p.CRDOwnership = nil }},
 		{"bad policy", func(p *Provenance) { p.CRDOwnership.Policy = "other" }},
 		{"unsorted owners", func(p *Provenance) { p.CRDOwnership.Owners = []string{"z", "a"} }},
 		{"duplicate owners", func(p *Provenance) { p.CRDOwnership.Owners = []string{"a", "a"} }},
