@@ -97,6 +97,16 @@ func registryRestart(ctx context.Context, t *testing.T, active string) string {
 func rollbackToInstalled(ctx context.Context, t *testing.T, active string) {
 	t.Helper()
 	saved := getRuntime(ctx, t).Spec.DeepCopy()
+	restore := func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Overrides, rt.Spec.Selection = saved.Overrides, saved.Selection
+	}
+	restored := false
+	// Later scenarios start from the saved inputs, whatever happens here.
+	defer func() {
+		if !restored {
+			patchRuntime(ctx, t, restore)
+		}
+	}()
 	patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) {
 		pin(rt, active)
 		rt.Spec.Overrides = releaseValues(rt.Spec.Overrides)
@@ -111,11 +121,14 @@ func rollbackToInstalled(ctx context.Context, t *testing.T, active string) {
 	run(ctx, t, "tools/operator-qualify", "rollback")
 	runsCandidate(ctx, t, &candidate)
 	// The operator's version is one of the inputs, so the older operator
-	// resolves the runtime again, to a new input digest or a stall.
+	// resolves the runtime again, to a new input digest or a stall, and
+	// reports its own AICR.
+	image := installedAICR(&candidate)
 	waitFor(t, resolveTimeout, "the older operator to resolve the runtime", func() bool {
 		rt := getRuntime(ctx, t)
 		c := cond(rt, v1alpha1.ConditionResolved)
-		return c.Status == metav1.ConditionTrue && rt.Status.InputDigest != inputs ||
+		ours := rt.Status.AICR != nil && rt.Status.AICR.Image == image
+		return ours && c.Status == metav1.ConditionTrue && rt.Status.InputDigest != inputs ||
 			c.Status == metav1.ConditionFalse && c.Reason != "Resolving"
 	})
 	// Long enough for it to reconcile every rollout once.
@@ -139,9 +152,8 @@ func rollbackToInstalled(ctx context.Context, t *testing.T, active string) {
 	t.Setenv("CANDIDATE_NEXT_DIR", filepath.Dir(os.Getenv("AICR_OPERATOR_QUALIFY_NEXT")))
 	run(ctx, t, "tools/operator-qualify", "upgrade")
 	runsCandidate(ctx, t, &next)
-	patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) {
-		rt.Spec.Overrides, rt.Spec.Selection = saved.Overrides, saved.Selection
-	})
+	patchRuntime(ctx, t, restore)
+	restored = true
 	if digest := waitResolved(ctx, t); digest != active {
 		t.Fatalf("the restored inputs resolve plan %s, not the active plan %s", digest, active)
 	}

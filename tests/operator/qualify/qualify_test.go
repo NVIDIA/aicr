@@ -527,7 +527,13 @@ func wholeRecipe(ctx context.Context, t *testing.T, c *candidateManifest) []stri
 		return a != nil && a.Image == image
 	})
 	patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) { rt.Spec.Overrides = releaseValues(rt.Spec.Overrides) })
-	components := recipeComponents(ctx, t, waitResolved(ctx, t))
+	digest := waitResolved(ctx, t)
+	// A plan keeps the recipe of the resolution that first wrote it, so a
+	// digest another AICR resolved first does not name this recipe.
+	if by := readPlan(ctx, t, digest).Provenance.AICRImage; by != image {
+		t.Fatalf("plan %s was first resolved by %s, so its recipe is not %s's", digest, by, image)
+	}
+	components := recipeComponents(ctx, t, digest)
 	t.Logf("%s resolves the kind recipe to %v", image, components)
 	return components
 }
