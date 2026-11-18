@@ -170,6 +170,7 @@ One-liner per field:
 | `mixinSafeOverridePaths` | Exact dotted value paths (e.g. `global.tracing.enabled`) a `RecipeMixin` may set on this component via `Overrides`. Empty (the default) means the component hasn't opted into mixin overrides — a mixin introducing it fresh still has unrestricted `valuesFile`/`overrides`, but once the component is already in the chain (or has a non-empty allowlist), every mixin Overrides path is validated against this list ([recipe.md](recipe.md#mixin-composition)) |
 | `telemetry.promql` | `monitorsFrom` (components whose monitors expose the data) and `series` (RE2 patterns on the scraped metric name) a component queries from the runtime Prometheus server ([recipe-development.md](../integrator/recipe-development.md#runtime-metrics-declarations)) |
 | `telemetry.promqlServer` | `namespaceSelectorPaths`, `monitorSelectorPaths`, `scrapeClassesPath`: value paths the bundler owns on the runtime Prometheus server and fills from the enabled consumers' declarations |
+| `argocd.syncRetry` | Default `spec.syncPolicy.retry` (`limit`, `backoff.duration`, `backoff.factor`, `backoff.maxDuration`) for the component's primary Argo CD Application, applied only when the recipe includes every component in `whenComponents`. A bundle-wide sync retry replaces it. `dynamo-platform` uses it to wait out its Grove preflight hook |
 | `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` | Narrow service-specific flags (see godoc) |
 
 ## `nodeScheduling.system` vs `accelerated`

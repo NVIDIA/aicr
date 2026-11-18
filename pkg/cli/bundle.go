@@ -1341,7 +1341,9 @@ Write the same artifact as an OCI image layout without pushing, then publish it:
 				Name: flagArgoCDSyncRetryLimit,
 				Usage: "Set spec.syncPolicy.retry.limit on every child Application: how many times Argo CD " +
 					"retries a failed sync (--deployer argocd or argocd-helm only). Unset leaves retry to " +
-					"Argo CD's auto-sync default; 0 disables retries. " +
+					"Argo CD's auto-sync default, except where a component declares its own default " +
+					"(dynamo-platform when the recipe includes grove); set, it replaces those defaults. " +
+					"0 disables retries. " +
 					"May also be supplied via spec.bundle.deployment.argocd.syncRetry.limit in --config.",
 				// Unset and 0 differ (see Usage), so the rendered "(default: 0)" misleads.
 				HideDefault: true,

@@ -1353,7 +1353,9 @@ components:
       required: false
       description: >-
         spec.syncPolicy.retry.limit on every child Application (argocd,
-        argocd-helm). Omit to leave retry to Argo CD's auto-sync default; 0
+        argocd-helm). Omit to leave retry to Argo CD's auto-sync default,
+        except where a component declares its own default (dynamo-platform
+        when the recipe includes grove); set, it replaces those defaults. 0
         disables retries. Required by the backoff parameters.
       schema:
         type: integer
