@@ -120,11 +120,17 @@ Under `disabled`, `owners` lists the ownership that was cleared. Under
 `retained`, Helm emits `apply-crds.sh` and Flux uses `CreateReplace` for selected
 owners whose refs still match the composed registry.
 
-Older binaries reject the unknown binding field; pin a binary that supports
-`crdOwnership` before adopting it. Saved artifact-bearing recipes from binaries
-without this provenance field must be re-resolved once. Changing the binding
-or relocating the inventory also requires re-resolution because input digests
-change.
+Every recipe resolved with an inventory records
+`metadata.artifacts.crdOwnership`, whether or not a binding sets `retain`.
+Older binaries reject that field, and the binding field, as unknown, so every
+reader of such a recipe or catalog needs a binary that supports
+`crdOwnership`.
+
+Artifact-bearing recipes saved by older binaries lack the record. Namespace-only
+inheritance and evidence verification still read them. Validation, discovery
+and bundling fail with `artifact-inputs-mismatch` until the recipe is
+re-resolved once. Changing the binding or relocating the inventory also
+requires re-resolution because input digests change.
 
 ## Resolve and consume recipes
 

@@ -577,10 +577,16 @@ provider pointer.
 Provenance validation requires every changed name to have an applied chart.
 Under `retained`, all changed charts must carry `crdOwnership: retain`; under
 `disabled`, at least one must lack it. Saved artifact-bearing recipes from
-older binaries lack this record and must be re-resolved: the full provenance
-digest differs (`artifact-inputs-mismatch`). Older binaries reject bindings
-with the unknown `crdOwnership` field. Catalogs adopting it must require a
-binary that supports the field, in addition to ADR-031's minimum version.
+older binaries lack this record. Readers that need no execution inputs
+(namespace-only inheritance, evidence verification) accept them. Execution
+requires re-resolution: the full provenance digest differs
+(`artifact-inputs-mismatch`).
+
+Every recipe resolved with an inventory carries `crdOwnership`, whether or not
+a binding sets `retain`. Older binaries decode v1beta2 strictly and reject
+both that record and bindings with the `crdOwnership` field. Consumers of
+those recipes, and catalogs adopting the binding field, must require a binary
+that supports `crdOwnership`, in addition to ADR-031's minimum version.
 
 Use [RFC 8785 JSON Canonicalization Scheme (JCS)][jcs] for all JSON hashed by
 `bindingsDigest` and `baseCatalogDigest`, including the embedded file-list
