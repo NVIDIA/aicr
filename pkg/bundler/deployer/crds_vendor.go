@@ -182,9 +182,12 @@ func collectVendoredCRDs(ctx context.Context, data []byte, exclusions []string, 
 // charts/ directory. Paths such as templates/crds/ are neither, since Helm
 // renders those as templates. Entries of an excluded subchart are neither.
 func chartRootEntry(name string, exclusions []string) (crd, nested bool) {
+	// Helm normalizes backslash separators and ignores charts/ entries whose
+	// names start with "_" or ".".
+	name = strings.ReplaceAll(name, `\`, "/")
 	parts := strings.Split(path.Clean(name), "/")[1:]
 	for len(parts) >= 2 && parts[0] == chartsDir {
-		if excludedSubchart(parts[1], exclusions) {
+		if strings.HasPrefix(parts[1], "_") || strings.HasPrefix(parts[1], ".") || excludedSubchart(parts[1], exclusions) {
 			return false, false
 		}
 		if len(parts) == 2 {
@@ -211,8 +214,12 @@ func excludedSubchart(entry string, exclusions []string) bool {
 			continue
 		}
 		// A full version, so mongodb-store-2-1.0.0.tgz is chart mongodb-store-2.
-		if _, err := semver.StrictNewVersion(strings.TrimSuffix(version, ".tgz")); err == nil {
-			return true
+		// Helm also accepts the abbreviated x and x.y forms.
+		version = strings.TrimSuffix(version, ".tgz")
+		for _, pad := range []string{"", ".0", ".0.0"} {
+			if _, err := semver.StrictNewVersion(version + pad); err == nil {
+				return true
+			}
 		}
 	}
 	return false
