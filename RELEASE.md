@@ -213,11 +213,14 @@ Every release must pass these automated gates before artifacts are published:
 Container builds first publish only a run-unique
 `candidate-<run-id>-<run-attempt>` tag. Version aliases stay unchanged until
 all seven candidate digests pass AICR's own gates (resolution, scans and
-attestation); `latest` and the public GitHub release stay unchanged until the
-operator gate passes too. Homebrew publication starts only after the GitHub
+attestation). The operator gate needs the validator and gate images' version
+aliases, so those are promoted first; the `aicr`, `aicrd` and `aiperf-bench`
+version aliases, `latest` and the public GitHub release stay unchanged until
+the operator gate passes too. Homebrew publication starts only after the GitHub
 release is public. If an AICR gate fails, the candidate tags stay available
 for diagnosis but are not promoted. If only the operator gate fails, the
-version aliases exist without a release; see [Release Pipeline](#release-pipeline).
+validator and gate version aliases exist without a release; see
+[Release Pipeline](#release-pipeline).
 
 ## How to Release
 
@@ -404,7 +407,7 @@ current release.
 ## Release Pipeline
 
 ```
-Tag Push --> CI --> Candidate Images --> Resolve Digests --> Scan + Attest --> Promote Version Aliases --> Operator Gate --> Promote latest --> Publish
+Tag Push --> CI --> Candidate Images --> Resolve Digests --> Scan + Attest --> Promote Operator Gate Version Aliases --> Operator Gate --> Promote Remaining Version Aliases and latest --> Publish
 ```
 
 The workflow resolves one authoritative seven-image digest map, scans both
@@ -416,17 +419,23 @@ public, even if registry aliases were changed out of band.
 
 Promotion runs in two jobs.
 
-- `promote-versions` creates and verifies all seven immutable version aliases
+- `promote-versions` creates and verifies the immutable version aliases of the
+  `deployment`, `conformance` and `performance` validators and of `aicr-gate`
   once AICR's own gates pass (`aicr-check`: resolution, scans and attestation).
   It runs before the operator gate, because the operator qualifies this tag's
-  AICR, which resolves its validator and gate images by the version tag.
+  AICR, which resolves those images by the version tag: the operator checks
+  each validator's tag against its pinned digest, and AICR's bundles name the
+  gate image by tag. The operator runs the `aicr` image by digest.
 - `promote-images` runs after `release-check`, the full gate including the
-  operator. It runs the preflight again, finds the version aliases already in
-  place, and moves `latest` for a stable release.
+  operator. It runs the preflight again, finds the operator gate's version
+  aliases already in place, creates the `aicr`, `aicrd` and `aiperf-bench`
+  version aliases, and moves `latest` for a stable release.
 
-If the operator gate fails, the version aliases exist without a GitHub release.
-They are the same bytes that passed AICR's tests, scans and attestation, and the
-tag pins the commit, so a fix needs a new tag anyway. Promotion across seven
+If the operator gate fails, the validator and gate version aliases exist
+without a GitHub release, but no `aicr`, `aicrd` or `aiperf-bench` version tag
+does. They are
+the same bytes that passed AICR's tests, scans and attestation, and the tag
+pins the commit, so a fix needs a new tag anyway. Promotion across seven
 GHCR repositories is not
 transactional, so a registry failure while updating `latest` can leave a mix of
 prior and current aliases. Re-running the failed jobs with the same candidate is
@@ -485,7 +494,10 @@ candidate (`make operator-qualify-published`), after `promote-versions`.
 this tag's AICR image and validator images, also after `promote-versions`:
 AICR's Jobs as the operator builds them, recipe through deployment
 validation, with the validators pulled by their version aliases and the
-evidence checked against the pinned digests. `operator-publish` runs only
+evidence checked against the pinned digests. Both candidate jobs fetch every
+module in their warm step (`make operator-candidate-deps`, which also builds
+the pinned ko from source), remove the Artifactory token, and then build with
+`GOPROXY=off`, so no fetch can outlive the token. `operator-publish` runs only
 after the release integrity check, and `operator-attest`
 (`attest-operator.yaml`) attests what it pushed. It publishes:
 

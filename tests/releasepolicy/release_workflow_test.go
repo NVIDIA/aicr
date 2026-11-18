@@ -41,6 +41,11 @@ var releaseImages = map[string]string{
 	"performance":  "ghcr.io/nvidia/aicr-validators/performance",
 }
 
+// operatorGateKeys are the releaseImages the operator gate reads by version
+// tag: the validators the operator pins and the gate image AICR's bundles
+// name. Their version aliases alone precede release-check (#3859).
+var operatorGateKeys = []string{"conformance", "deployment", "gate", "performance"}
+
 func TestReleaseCandidateBuildPolicy(t *testing.T) {
 	doc := loadYAML(t, ".github/workflows/on-tag.yaml")
 	jobs := mapValue(t, doc, "jobs")
@@ -1264,13 +1269,28 @@ func TestReleasePublicAliasWritesExistOnlyInPromotion(t *testing.T) {
 	if !jobTransitivelyDependsOn(jobs, "promote-images", "release-check") {
 		t.Error("latest promotion must be a descendant of release-check")
 	}
-	// Version aliases come before the operator gate, so the operator can
-	// qualify this tag's AICR, but only after AICR's own gates.
+	// The operator gate's version aliases come before it, so the operator can
+	// qualify this tag's AICR, but only after AICR's own gates. The rest wait
+	// for release-check (#3859).
 	if !jobTransitivelyDependsOn(jobs, "promote-versions", "aicr-check") {
 		t.Error("version promotion must be a descendant of aicr-check")
 	}
-	if !strings.Contains(marshalYAML(t, mapValue(t, jobs, "promote-versions")), "release-images.sh promote validated-digests.json versions") {
-		t.Error("promote-versions must promote only the version aliases")
+	for job, want := range map[string]string{
+		"promote-versions": ".github/scripts/release-images.sh promote validated-digests.json operator-versions",
+		"promote-images":   ".github/scripts/release-images.sh promote validated-digests.json",
+	} {
+		var commands []string
+		for _, raw := range sliceValue(t, mapValue(t, jobs, job), "steps") {
+			step, _ := raw.(map[string]any)
+			for line := range strings.SplitSeq(fmt.Sprint(step["run"]), "\n") {
+				if strings.Contains(line, "release-images.sh promote") {
+					commands = append(commands, strings.TrimSpace(line))
+				}
+			}
+		}
+		if !slices.Equal(commands, []string{want}) {
+			t.Errorf("%s must run exactly %q, runs %q", job, want, commands)
+		}
 	}
 	assertConcurrency(t, mapValue(t, jobs, "promote-versions"), "aicr-release-image-alias-promotion")
 }
@@ -1353,6 +1373,39 @@ func TestReleaseOperatorQualifiesTheTagsAICR(t *testing.T) {
 	}
 	if _, conditional := validation["if"]; conditional {
 		t.Error("operator-validation must not run when version promotion did not succeed")
+	}
+}
+
+// The operator candidate fetches every module, ko's included, in the warm
+// step, drops the proxy credential, and then builds with no module proxy, so
+// no fetch can outlive the token minted at the start of the job (#3860).
+func TestReleaseOperatorCandidateBuildsOffline(t *testing.T) {
+	jobs := mapValue(t, loadYAML(t, ".github/workflows/on-tag.yaml"), "jobs")
+	for job, target := range map[string]string{
+		"operator-candidate":    "make operator-candidate",
+		"operator-reproducible": "make operator-candidate-verify",
+	} {
+		steps := sliceValue(t, mapValue(t, jobs, job), "steps")
+		runs := func(command string) int {
+			return slices.IndexFunc(steps, func(s any) bool {
+				step, ok := s.(map[string]any)
+				return ok && strings.TrimSpace(fmt.Sprint(step["run"])) == command
+			})
+		}
+		warm := runs("make operator-candidate-deps")
+		removal := runs(`rm -f "${RUNNER_TEMP}/dgxc-goauth"`)
+		build := runs("GOPROXY=off " + target)
+		if warm < 0 || build < 0 || warm >= build {
+			t.Errorf("%s must run %q with GOPROXY=off after make operator-candidate-deps", job, target)
+			continue
+		}
+		if removal != warm+1 {
+			t.Errorf("%s must remove the proxy credential right after the warm step", job)
+			continue
+		}
+		if step, _ := steps[removal].(map[string]any); fmt.Sprint(step["if"]) != "always()" {
+			t.Errorf("%s must remove the proxy credential even when the warm step fails", job)
+		}
 	}
 }
 

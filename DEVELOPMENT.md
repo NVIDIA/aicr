@@ -659,6 +659,7 @@ Its unit and envtest suites run in `make test`. The targets below cover the rest
 | `make operator-kind-down` | Delete it |
 | `make operator-e2e` | Run the pinned AICR images as operator-built Jobs |
 | `make operator-skeleton` | Run the operator with the pinned Argo CD, one release end to end |
+| `make operator-candidate-deps` | Fetch every module the candidate build needs and build the pinned ko into `dist/tools`, so the build can then run with `GOPROXY=off` |
 | `CANDIDATE_VERSION=<version> make operator-candidate` | Build a release candidate of the current commit into `dist/candidate` (clean tree required) |
 | `make operator-candidate-verify` | Build the candidate twice and require identical bytes |
 | `make operator-qualify` | Fault-injection suite against `dist/candidate`, upgraded to `dist/candidate-next` |
