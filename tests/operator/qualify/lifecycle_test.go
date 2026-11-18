@@ -107,8 +107,10 @@ func rollbackToInstalled(ctx context.Context, t *testing.T, active string) {
 	// runs again.
 	defer func() {
 		if !restored {
-			run(context.WithoutCancel(ctx), t, "tools/operator-qualify", "upgrade")
-			patchRuntime(ctx, t, restore)
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
+			defer cancel()
+			run(cleanup, t, "tools/operator-qualify", "upgrade")
+			patchRuntime(cleanup, t, restore)
 		}
 	}()
 	patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) {
