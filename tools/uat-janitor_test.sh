@@ -431,6 +431,123 @@ if ! mktemp -u --suffix=.yaml >/dev/null 2>&1; then
 else
     check "re-logins before state access and destroy" "rc=0 trace=relogin,az storage,docker," "$(azure_reap 0)"
     check "failed re-login fails the reap, no destroy"  "rc=1 trace=relogin,"                  "$(azure_reap 1)"
+
+    echo "aws reap staging:"
+    # GB300's committed config carries a placeholder instanceType that the
+    # actuator's pre-destroy `terraform refresh` would look up, so reap() must
+    # substitute it from GPU_INSTANCE_TYPE while staging, or refuse before any
+    # LB helper, docker, or aws call. These stubs live in their own directory,
+    # prepended to PATH only inside aws_reap's subshell. aws and kubectl fail;
+    # docker records the config it was handed.
+    AWS_STUBS="${STUB_DIR}/aws-stubs"
+    AWS_TRACE="${AWS_STUBS}/trace"
+    AWS_STAGED="${AWS_STUBS}/staged.yaml"
+    AWS_LOG="${AWS_STUBS}/reap.log"
+    mkdir -p "${AWS_STUBS}"
+    for cli in aws kubectl; do
+        printf '#!/usr/bin/env bash\necho "%s $*" >>"%s"\nexit 1\n' "${cli}" "${AWS_TRACE}" >"${AWS_STUBS}/${cli}"
+    done
+    cat >"${AWS_STUBS}/docker" <<STUB
+#!/usr/bin/env bash
+echo "docker" >>"${AWS_TRACE}"
+for a in "\$@"; do
+    case "\${a}" in CONFIG_CONTENT=*) printf '%s' "\${a#CONFIG_CONTENT=}" | base64 -d >"${AWS_STAGED}" ;; esac
+done
+exit 0
+STUB
+    chmod +x "${AWS_STUBS}/aws" "${AWS_STUBS}/kubectl" "${AWS_STUBS}/docker"
+
+    # aws_reap <config> <dry-run> [gpu-instance-type]: reap aicr-uat-7 with
+    # CLOUD=aws; GPU_INSTANCE_TYPE is unset when the third argument is absent.
+    # Reports through REAP_RC, REAP_DOCKER and REAP_AWS (call counts); reap's
+    # output lands in AWS_LOG and the config docker received in AWS_STAGED.
+    aws_reap() {
+        : >"${AWS_TRACE}"
+        rm -f "${AWS_STAGED}"
+        (
+            PATH="${AWS_STUBS}:${PATH}"
+            export CLOUD=aws DRY_RUN="$2" JANITOR_CONFIG="$1" JANITOR_ACTUATOR_IMAGE=stub
+            export AWS_REGION=us-east-2 AWS_ACCESS_KEY_ID=dummy AWS_SECRET_ACCESS_KEY=dummy AWS_SESSION_TOKEN=dummy
+            if [ "$#" -ge 3 ]; then export GPU_INSTANCE_TYPE="$3"; else unset GPU_INSTANCE_TYPE; fi
+            reap aicr-uat-7 >"${AWS_LOG}" 2>&1
+        )
+        REAP_RC=$?
+        REAP_DOCKER="$(grep -c '^docker$' "${AWS_TRACE}")"
+        REAP_AWS="$(grep -c '^aws ' "${AWS_TRACE}")"
+    }
+    staged() { yq -r "$1" "${AWS_STAGED}" 2>/dev/null; }
+    # committed <config> <expr>: the value as committed, so a config edit does
+    # not read as a staging regression. A missing value prints a sentinel that
+    # no staged value matches, so the check cannot pass on two empties.
+    committed() {
+        local v
+        v="$(yq -r "$2" "$1" 2>/dev/null)"
+        if [ -n "${v}" ] && [ "${v}" != null ]; then echo "${v}"; else echo "<no $2 in $1>"; fi
+    }
+    nonzero() { [ "$1" -ne 0 ] && echo nonzero || echo zero; }
+
+    PLACEHOLDER=gb300-instance-type-from-secret
+    GB300_CFG="${STUB_DIR}/cluster-config-gb300.yaml"
+    GB300_LABELLED="${STUB_DIR}/cluster-config-gb300-labelled.yaml"
+    CT_CFG="${STUB_DIR}/cluster-config-ct.yaml"
+    cp "${REPO_ROOT}/tests/uat/aws/cluster-config-gb300.yaml" "${GB300_CFG}"
+    cp "${REPO_ROOT}/tests/uat/aws/cluster-config-ct.yaml" "${CT_CFG}"
+    cp "${GB300_CFG}" "${GB300_LABELLED}"
+    PLACEHOLDER="${PLACEHOLDER}" yq -i '.compute.eks.nodeGroups.system.labels.note = strenv(PLACEHOLDER)' "${GB300_LABELLED}"
+
+    # Only the fields named here are asserted, so a later staging change leaves
+    # these cases valid.
+    # (a) the placeholder is substituted in every instanceType map, and only there.
+    aws_reap "${GB300_CFG}" false gb300-test.type
+    check "gb300 with the secret: reap succeeds"        "0" "${REAP_RC}"
+    check "gb300 with the secret: one docker call"      "1" "${REAP_DOCKER}"
+    check "gb300 with the secret: gpu-worker instanceType is the secret" "gb300-test.type" \
+        "$(staged '.compute.eks.nodeGroups.workers[] | select(.name == "gpu-worker") | .instanceType')"
+    check "gb300 with the secret: system instanceType unchanged" \
+        "$(committed "${GB300_CFG}" '.compute.eks.nodeGroups.system.instanceType')" \
+        "$(staged '.compute.eks.nodeGroups.system.instanceType')"
+    check "gb300 with the secret: no placeholder staged" "0" "$(grep -c "${PLACEHOLDER}" "${AWS_STAGED}" 2>/dev/null)"
+    check "gb300 with the secret: staged id"            "aicr-uat-7" "$(staged '.deployment.id')"
+    check "gb300 with the secret: staged destroy"       "true" "$(staged '.deployment.destroy')"
+    # Guard (passes before and after by design): reap() does not touch the
+    # backend/provider region split, so it reaches the actuator as committed.
+    check "guard: gb300 location staged unchanged" \
+        "$(committed "${GB300_CFG}" '.deployment.location')" "$(staged '.deployment.location')"
+    check "guard: gb300 stateLocation staged unchanged" \
+        "$(committed "${GB300_CFG}" '.deployment.stateLocation')" "$(staged '.deployment.stateLocation')"
+
+    # (b) without the secret, staging refuses before any LB helper, docker, or aws call.
+    for secret in empty unset; do
+        if [ "${secret}" = empty ]; then aws_reap "${GB300_CFG}" false ""; else aws_reap "${GB300_CFG}" false; fi
+        check "gb300 with the secret ${secret}: reap fails"     "nonzero" "$(nonzero "${REAP_RC}")"
+        check "gb300 with the secret ${secret}: no docker call" "0" "${REAP_DOCKER}"
+        check "gb300 with the secret ${secret}: no aws call"    "0" "${REAP_AWS}"
+        check "gb300 with the secret ${secret}: ::error:: names AWS_GB300_INSTANCE_TYPE" "1" \
+            "$(grep -c '^::error::.*AWS_GB300_INSTANCE_TYPE' "${AWS_LOG}")"
+    done
+
+    # (c) staging, so a dry run fails the same way rather than reporting a reap
+    # that could not run.
+    aws_reap "${GB300_CFG}" true ""
+    check "gb300 dry-run without the secret: reap fails"     "nonzero" "$(nonzero "${REAP_RC}")"
+    check "gb300 dry-run without the secret: no docker call" "0" "${REAP_DOCKER}"
+
+    # (d) a placeholder outside any instanceType survives substitution: refuse.
+    aws_reap "${GB300_LABELLED}" false gb300-test.type
+    check "gb300 placeholder as a label value: reap fails"     "nonzero" "$(nonzero "${REAP_RC}")"
+    check "gb300 placeholder as a label value: no docker call" "0" "${REAP_DOCKER}"
+
+    # Guard (passes before and after by design): a config without the
+    # placeholder stages exactly as before, whatever GPU_INSTANCE_TYPE holds.
+    aws_reap "${CT_CFG}" false ""
+    check "guard: ct without the secret: reap succeeds"   "0" "${REAP_RC}"
+    check "guard: ct without the secret: one docker call" "1" "${REAP_DOCKER}"
+    check "guard: ct gpu-worker instanceType unchanged" \
+        "$(committed "${CT_CFG}" '.compute.eks.nodeGroups.workers[] | select(.name == "gpu-worker") | .instanceType')" \
+        "$(staged '.compute.eks.nodeGroups.workers[] | select(.name == "gpu-worker") | .instanceType')"
+    check "guard: ct system instanceType unchanged" \
+        "$(committed "${CT_CFG}" '.compute.eks.nodeGroups.system.instanceType')" \
+        "$(staged '.compute.eks.nodeGroups.system.instanceType')"
 fi
 
 if [[ "${FAILED}" -eq 0 ]]; then

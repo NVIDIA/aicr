@@ -96,7 +96,8 @@ type Reservation struct {
 	// DaytimeIntent opts this reservation into the daytime human-access
 	// rotation (#1281, DC8) and picks the flavor stood up on it during the
 	// working day: "training" or "inference". Empty means the reservation is
-	// NOT part of the daytime rotation (nightly batch only). This is the
+	// NOT part of the daytime rotation, though the evening teardown
+	// ([Registry.DaytimeTeardownAssignments]) still covers it. This is the
 	// configurable cloud→flavor default — data, not code — so the split
 	// (AWS=training, GCP=inference at launch) can change without a workflow edit.
 	DaytimeIntent string `yaml:"daytime-intent"`
@@ -120,10 +121,9 @@ func (r *Reservation) NightlyIntentsOrDefault() []string {
 	return out
 }
 
-// DaytimeAssignment is one reservation's slot in the daytime human-access
-// rotation: the reservation to lease and the intent (flavor) to stand up on
-// it. The daytime scheduler (uat-daytime.yaml) consumes a JSON array of these
-// as its dispatch matrix.
+// DaytimeAssignment is a reservation and the intent (flavor) to run its
+// daytime lifecycle with, as listed by [Registry.DaytimeAssignments] and
+// [Registry.DaytimeTeardownAssignments].
 type DaytimeAssignment struct {
 	Reservation string `json:"reservation"`
 	Intent      string `json:"intent"`
