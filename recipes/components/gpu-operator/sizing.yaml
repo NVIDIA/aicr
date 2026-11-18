@@ -84,3 +84,25 @@ resources:
             max: 747Mi
             date: 2026-11-06
       - maxNodes: 2000
+        limits: {memory: 3584Mi}
+        measurements:
+          - sets: []
+            kind: windowed
+            window: 7d
+            gpuNodes: 888
+            nodes: 894
+            pods: 35715
+            p90: 703Mi
+            max: 919Mi
+            date: 2026-11-17
+            version: v26.3.0
+          - sets: [limits]
+            kind: windowed
+            window: 7d
+            gpuNodes: 2040
+            nodes: 2146
+            pods: 84426
+            p90: 1767Mi
+            max: 2460Mi
+            date: 2026-11-17
+            version: v26.7.1
