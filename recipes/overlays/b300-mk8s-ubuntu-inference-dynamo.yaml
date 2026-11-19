@@ -129,7 +129,7 @@ spec:
       - check-nvidia-smi
       constraints:
       - name: Deployment.gpu-operator.version
-        value: = v26.7.2
+        value: = v26.7.3
     performance:
       checks:
       - inference-perf

@@ -332,7 +332,7 @@ check "the Service exposes 5555" "1" \
 check "the Service routes only to the caller's node" "Local" \
     "$(dcgm_manifest | yq -r 'select(.kind == "Service") | .spec.internalTrafficPolicy')"
 
-# 5. The host engine image is a 1.9GB download and is not side-loaded, so it
+# 5. The host engine image is a 2.7GB download and is not side-loaded, so it
 #    cannot share the device plugin's 300s rollout budget. A wait that expires
 #    on a cold pull fails the lane for being slow rather than wrong, and the
 #    usual repair is to widen it until it no longer discriminates. Require a
