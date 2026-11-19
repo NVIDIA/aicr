@@ -34,8 +34,8 @@
 # in these namespaces would, once unhealthy for 30m, raise a fatal event blaming
 # the operator. Each policy therefore also requires a label that only that
 # operator's own operands carry. They are not the same label, and neither was
-# guessable -- both were independently verified at the versions this repo
-# pins (live for GPU Operator, source for Network Operator):
+# guessable -- both were independently verified (GPU Operator live through
+# v26.7.2 and source-checked for v26.7.3, Network Operator from source):
 #
 #   gpu-operator v26.7.3      app.kubernetes.io/managed-by = gpu-operator
 #                             Confirmed on a live EKS H100 cluster at v26.7.0 and
