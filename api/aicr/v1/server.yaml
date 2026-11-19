@@ -1111,9 +1111,11 @@ components:
       description: >-
         Repeatable install-time component:path declaration. Rejected with
         HTTP 400 when the component is absent from the generated bundle;
-        no path is exempt. Except with deployer=flux, a declaration on a
-        manifest-only or Kustomize component is also rejected with HTTP 400,
-        because its templates are rendered when the bundle is built. Certain
+        no path is exempt. A declaration on a manifest-only or Kustomize
+        component is also rejected with HTTP 400, because its templates are
+        rendered when the bundle is built; the exception is a manifest-only
+        component with deployer=flux, which Flux renders at reconcile time.
+        Certain
         gate- or contract-owned paths on present
         components are also rejected (driver-ownership paths, GPU
         allocation-policy keys, the DRA eviction paths
