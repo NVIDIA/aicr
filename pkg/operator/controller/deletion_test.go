@@ -236,6 +236,14 @@ func TestDeletionRemovalWaitsForApproval(t *testing.T) {
 	if _, err := r.Reconcile(ctx, request); err == nil || !reflect.DeepEqual(getRuntime(t, ctx).Status.Conditions, waiting.Status.Conditions) {
 		t.Fatalf("a failed engine check: Reconcile() = %v, conditions %+v", err, getRuntime(t, ctx).Status.Conditions)
 	}
+	// An engine outage that names its reason stalls the runtime, and the
+	// removal keeps reporting how long it has waited.
+	engine.capabilities = operrors.New(operrors.ErrCodeUnavailable, "read Argo CD project aicr: not found").WithReason(argocd.ReasonProjectMissing)
+	clk.now = clk.now.Add(time.Hour)
+	reconcileRollout(t, ctx, r)
+	if got, want := runtimeState.approvalWait(clk.now), clk.now.Sub(removal.CreationTimestamp.Time).Seconds(); got != want {
+		t.Fatalf("removal approval wait during the outage: %g, want %g", got, want)
+	}
 	engine.capabilities = nil
 
 	approve(t, ctx, removal.Name, clk.now.Add(time.Hour))

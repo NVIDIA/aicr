@@ -88,7 +88,12 @@ in the `default` namespace; `kubectl describe` shows them.
 ### Metrics
 
 The operator serves Prometheus metrics on port 8080; the chart creates no
-Service, so scrape the pod or port-forward
+Service. With the Prometheus Operator, set `operator.podMonitor.enabled` and
+the `operator.podMonitor.labels` your Prometheus selects; the chart creates the
+`PodMonitor` only while the cluster serves that kind, so on a new cluster run
+`helm upgrade` again once the recipe has installed `prometheus-operator-crds`.
+The stock AICR Prometheus keeps only the series its own consumers query, so
+scrape the operator from your own. Otherwise scrape the pod, or port-forward
 (`kubectl port-forward -n aicr-system deploy/aicr-operator 8080`):
 
 | Metric | Meaning |
@@ -99,9 +104,58 @@ Service, so scrape the pod or port-forward
 | `aicr_operator_job_runs_total{stage,result,class}` | AICR runs when first seen finished, by stage, result and, for failures, retry class (`never`, `bounded`, `transient`, `authorization`) |
 | `aicr_operator_registry_token_expiry_timestamp_seconds`, `aicr_operator_registry_token_refresh_timestamp_seconds` | When the Argo CD registry token expires and when the operator last refreshed it, as Unix times (`aws` provider); `0` until known. Only the leader refreshes the token, so a standby replica stays at `0`: alert on `max()` across operator pods |
 | `aicr_operator_registry_token_mint_failures_total` | Failed ECR token mints since the operator started (`aws` provider), including those it rode out on a still-valid token |
+| `aicr_operator_runtime_stalled{reason}` | `1` while the runtime is `Stalled=True` with this reason, else `0`; the reasons are the [troubleshooting](troubleshooting.md) ones |
+| `aicr_operator_rollout_approval_wait_seconds` | How long the rollout in progress has waited for approval, including while the engine is unavailable; `0` while none waits |
+| `aicr_operator_runtime_resolved_timestamp_seconds` | When the operator last saw the runtime resolved for its current inputs, as a Unix time, checked every 30 seconds. It stops while a resolution runs or retries, including one that keeps an already resolved runtime `Resolved=True`, such as a snapshot refresh; `0` until it has seen one since the operator started |
+| `aicr_operator_registry_failures_total{operation,code}` | Failed runtime registry and chart delivery operations (`resolve`, `pull_bundle`, `push_chart`, `reuse_chart`, `mirror_oci_chart`, `mirror_http_chart`, `push_wrapper`, `sigstore_bundles`, `describe`, `push_statement`, `pull_statement`), by error code. `reuse_chart` with `NOT_FOUND` is a chart the operator mirrors again, not an outage |
 
-Every outcome, result, stage and retry class is exported at zero from
-startup, so a rate reads zero rather than nothing before its first event.
+Every outcome, result, stage, retry class, stall reason, registry operation
+and error code is exported at zero from startup, so a rate reads zero rather
+than nothing before its first event. Only the leader reconciles: the runtime
+gauges of a standby replica stay at `0`, so alert on `max()` across operator
+pods.
+
+### Alerts
+
+Example Prometheus rules; adjust the thresholds, and add the `severity` and
+routing labels your Alertmanager expects. Each rule takes the `max()` across
+the operator's replicas and keeps `namespace`, which names the installation;
+when one Prometheus scrapes several clusters, add the label that names the
+cluster to every `by (...)`, or one cluster's values hide another's:
+
+```yaml
+groups:
+  - name: aicr-operator
+    rules:
+      # Progress needs someone. Approvals have their own alert below.
+      - alert: AICROperatorRuntimeStalled
+        expr: max by (namespace, reason) (aicr_operator_runtime_stalled{reason!~"AwaitingApproval|AwaitingAcknowledgement"}) == 1
+        for: 15m
+        annotations:
+          summary: "The AICR runtime is Stalled ({{ $labels.reason }}); see docs/operator/troubleshooting.md"
+      - alert: AICROperatorApprovalPending
+        expr: max by (namespace) (aicr_operator_rollout_approval_wait_seconds) > 4 * 3600
+        annotations:
+          summary: "An AICR rollout has waited over 4 hours for approval"
+      # A new installation fires this until its first plan resolves, and so
+      # does an operator with no ClusterRuntime: 0 reads as long ago.
+      - alert: AICROperatorNotResolved
+        expr: time() - max by (namespace) (aicr_operator_runtime_resolved_timestamp_seconds) > 3600
+        for: 10m
+        annotations:
+          summary: "The AICR runtime has not been resolved for its current generation in over an hour"
+      # reuse_chart with NOT_FOUND is a chart mirrored again; CANCELED is a
+      # shutdown.
+      - alert: AICROperatorRegistryFailing
+        expr: |
+          sum by (namespace, operation, code) (
+            increase(aicr_operator_registry_failures_total{code!="CANCELED"}[15m])
+              unless on (operation, code) aicr_operator_registry_failures_total{operation="reuse_chart", code="NOT_FOUND"}
+          ) > 0
+        for: 15m
+        annotations:
+          summary: "AICR registry operation {{ $labels.operation }} keeps failing with {{ $labels.code }}"
+```
 
 ## How a change reaches the cluster
 
