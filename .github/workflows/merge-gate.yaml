@@ -553,7 +553,7 @@ jobs:
         # checksum verification (the upstream installer pipes
         # `curl … | tar xvz` directly).
         env:
-          ACTIONLINT_VERSION: '1.7.11'
+          ACTIONLINT_VERSION: '1.7.12'
         run: |
           set -euo pipefail
           BASE="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
