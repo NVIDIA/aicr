@@ -1,0 +1,73 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Knative Serving values, rendered into the KnativeServing resource in
+# manifests/knative-serving.yaml. The knative-operator component turns that
+# resource into Serving, the Kourier ingress and the HPA autoscaler. Opt-in:
+# no stock recipe references this component.
+#
+# No inference domain is set, so Knative serves cluster-local URLs only.
+# External URLs need a domain, a wildcard certificate and a route from the
+# cluster's ingress or Gateway to Kourier; none of that is configured here.
+
+# Serving release the operator installs. Must be one the pinned operator
+# image bundles: knative-operator v1.23.1 bundles 1.20.0 to 1.23.0.
+version: "1.23.0"
+
+# Rendered verbatim as spec.config: one key per Knative ConfigMap, without
+# its config- prefix. A leaf can add keys or whole ConfigMaps here.
+config:
+  features:
+    # Run:ai requires these two before it reports Knative available: its
+    # inference pods name runai-scheduler and carry node affinity.
+    kubernetes.podspec-schedulername: enabled
+    kubernetes.podspec-affinity: enabled
+    # The rest match Run:ai's own installer, so its inference workloads can
+    # use the pod spec fields they set.
+    kubernetes.podspec-init-containers: enabled
+    kubernetes.podspec-persistent-volume-claim: enabled
+    kubernetes.podspec-persistent-volume-write: enabled
+    kubernetes.podspec-securitycontext: enabled
+    kubernetes.podspec-tolerations: enabled
+    kubernetes.podspec-volumes-emptydir: enabled
+    multi-container: enabled
+  autoscaler:
+    enable-scale-to-zero: "true"
+  network:
+    ingress-class: kourier.ingress.networking.knative.dev
+
+# Kourier Service type. ClusterIP: an external route to Kourier is the
+# cluster's ingress or Gateway, not a LoadBalancer per Knative install.
+kourierServiceType: ClusterIP
+
+# Replicas for every Serving control-plane Deployment (spec.high-availability).
+replicas: 1
+
+# Placement for the Deployments below. The bundle writes both paths (registry
+# nodeScheduling): --system-node-selector, and --system-node-toleration or,
+# without that flag, a toleration of every taint, as for every system
+# component.
+nodeSelector: {}
+tolerations: []
+
+# Deployments the operator creates, in knative-serving. nodeSelector and
+# tolerations apply to each of them, through spec.workloads.
+workloads:
+  - activator
+  - autoscaler
+  - autoscaler-hpa
+  - controller
+  - webhook
+  - net-kourier-controller
+  - 3scale-kourier-gateway

@@ -1,0 +1,56 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The KnativeServing resource the knative-operator component reconciles into
+# Knative Serving, the Kourier ingress and the HPA autoscaler, all in this
+# resource's namespace. Every field comes from .Values.knative-serving; see
+# ../values.yaml.
+#
+# The images the operator starts here are not in this file or in any chart
+# render, so the BOM and `aicr mirror list` do not list them (#3659).
+{{- $v := index .Values "knative-serving" }}
+apiVersion: operator.knative.dev/v1beta1
+kind: KnativeServing
+metadata:
+  name: knative-serving
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Ordered after the knative-operator release, which installs this kind's
+    # CRD, by the adopting overlay's dependencyRefs; it must not become a
+    # Helm hook.
+    aicr/skip-hook-validation: "true"
+spec:
+  version: "{{ $v.version }}"
+  config:
+    {{- toYaml $v.config | nindent 4 }}
+  high-availability:
+    replicas: {{ $v.replicas }}
+  ingress:
+    kourier:
+      enabled: true
+      service-type: {{ $v.kourierServiceType }}
+  {{- if or $v.nodeSelector $v.tolerations }}
+  workloads:
+    {{- range $name := $v.workloads }}
+    - name: {{ $name }}
+      {{- with $v.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
+  {{- end }}

@@ -51,6 +51,7 @@ hosts:
   - github-actions                   # GitHub Actions marketplace (uses: refs)
   - helm.ngc.nvidia.com              # NVIDIA NGC Helm (gpu-operator, network-operator, nim, dynamo)
   - jmcgrath207.github.io            # k8s-ephemeral-storage-metrics Helm repo
+  - knative.github.io                # knative-operator Helm repo (opt-in; Run:ai inference)
   - kubernetes-sigs.github.io        # node-feature-discovery, aws-ebs-csi-driver Helm repos
   - mcr.microsoft.com               # Microsoft Dev Container base image (optional Codespaces/local development)
   # Not new egress: CI and `make cluster-create` already pulled through this

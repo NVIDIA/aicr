@@ -1520,6 +1520,58 @@ components:
         tolerationPaths:
           - operator.tolerations
 
+  # Knative Serving is two components because it spans two namespaces: the
+  # operator chart, and the KnativeServing resource the operator turns into
+  # Serving and Kourier. Both are opt-in: no stock overlay or mixin references
+  # them (TestKnativeRegisteredWithoutOverlay). An adopting overlay adds both,
+  # with knative-serving depending on knative-operator.
+  - name: knative-operator
+    displayName: Knative Operator
+    class: ops
+    valueOverrideKeys:
+      - knativeoperator
+    # No nodeScheduling. The chart renders no nodeSelector for either
+    # Deployment, so --system-node-selector could not pin them. Declaring
+    # tolerationPaths alone would give both a toleration of every taint by
+    # default, which lets them land on tainted GPU nodes (seen on a GKE UAT
+    # cluster). Without the paths they carry no tolerations, so taints keep
+    # them off. Tolerations and affinity are set through componentRef
+    # overrides; see "Enabling Knative Serving" in the component catalog.
+    healthCheck:
+      assertFile: checks/knative-operator/health-check.yaml
+    helm:
+      defaultRepository: https://knative.github.io/operator
+      defaultChart: knative-operator
+      # The operator image bundles the Serving and Kourier manifests it
+      # installs, so this pin also caps the Serving versions knative-serving
+      # can request (TestKnativeServingVersionMatchesOperator).
+      # renovate: datasource=helm depName=knative-operator registryUrl=https://knative.github.io/operator
+      defaultVersion: v1.23.1
+      defaultNamespace: knative-operator
+
+  - name: knative-serving
+    displayName: Knative Serving
+    class: ops
+    valueOverrideKeys:
+      - knativeserving
+    healthCheck:
+      assertFile: checks/knative-serving/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      # Not a free choice: Run:ai finds Knative by the controller Deployment
+      # and config-features ConfigMap in this namespace, and the operator
+      # installs Serving into the KnativeServing resource's own namespace.
+      defaultNamespace: knative-serving
+    manifestFiles:
+      - components/knative-serving/manifests/knative-serving.yaml
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations
+
   - name: kueue
     displayName: kueue
     class: ops
