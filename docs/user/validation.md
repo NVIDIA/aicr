@@ -614,8 +614,8 @@ percentage (`>= 50`) can never be satisfied.
 
 The catalog entry each check drives, and the node footprint it runs on, come
 from the qualification record rather than the check: for
-`nccl-cre-all-reduce-bw` on `eks` x `h100`, `communication/nccl-all-reduce` on
-two nodes, and for `cre-training-goodput` on `eks` x `h100`,
+`nccl-cre-all-reduce-bw` on `eks` x `h100`, `eks` x `gb300` and `gke` x `h100`,
+`communication/nccl-all-reduce` on two nodes, and for `cre-training-goodput` on `eks` x `h100`,
 `training/nemotron5-8b` on two nodes. A combination that no entry records as
 qualified skips with an unsupported-target reason.
 
@@ -635,7 +635,11 @@ rather than `nvcr.io/nvidia/pytorch:26.01-py3`, so the NCCL check no longer
 pulls that image. A mirror for a disconnected cluster has to serve the
 images its combination pins at the recorded digests:
 `workload-images.yaml` for `eks` x `h100`, and `workload-images-gb300.yaml`
-for `eks` x `gb300`.
+for `eks` x `gb300`. The `gke` x `h100` entry of `nccl-cre-all-reduce-bw`
+pins no image: CRE picks the workload image from the TCPXO plugin release it
+detects on the cluster (`nvcr.io/nvidia/pytorch:25.06-py3` for plugin v1.0.15
+and v1.0.16, `nvcr.io/nvidia/pytorch:26.01-py3` for v1.0.17), so no closure
+records a digest for it and the run pulls that image by tag.
 
 #### Relation to the TrainJob check
 

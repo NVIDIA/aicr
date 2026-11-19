@@ -389,7 +389,10 @@ override variable, so mirror them at the digests the closure for your
 combination records: `recipes/components/nvcre/workload-images.yaml` for
 `eks` x `h100`, and `recipes/components/nvcre/workload-images-gb300.yaml` for
 `eks` x `gb300` (`gb300-eks-ubuntu-training-kubeflow`); see the CRE section
-of [Validation](validation.md). Their references keep the `public.ecr.aws` and
+of [Validation](validation.md). The `gke` x `h100` entry pins no digest, so
+mirror `nvcr.io/nvidia/pytorch:25.06-py3` (TCPXO plugin v1.0.15 and v1.0.16) or
+`nvcr.io/nvidia/pytorch:26.01-py3` (v1.0.17) by tag, whichever your cluster's
+plugin selects. Their references keep the `public.ecr.aws` and
 `nvcr.io` hosts, so a disconnected cluster also needs its nodes' container
 runtime to redirect both registries to your mirror, for example with a
 containerd registry mirror per host. A digest reference resolves through such a

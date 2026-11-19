@@ -36,7 +36,8 @@ type creCombination struct {
 // accelerator, so qualifying a new combination is an entry here plus a measured
 // threshold in the recipe, never a new code path.
 //
-// nccl-cre-all-reduce-bw is qualified on eks x h100 and eks x gb300. It was
+// nccl-cre-all-reduce-bw is qualified on eks x h100, eks x gb300 and gke x h100.
+// It was
 // re-measured on CRE v0.8.2, the registry pin at the time, on 2026-10-23 against
 // 2x p5.48xlarge on a
 // NodeWright-tuned cluster: 489.70 GB/s bus bandwidth, against 489.33 GB/s
@@ -52,6 +53,18 @@ type creCombination struct {
 // variant. Fabric efa is named so the run selects the EFA variant explicitly
 // instead of depending on CRE's node-label detection
 // (cluster-readiness-engine#576, #591).
+//
+// On gke x h100 it was measured on CRE v0.12.0 on 2026-11-19 against 2x a3-megagpu-8g
+// (16 H100 GPUs, TCPXO): 337.06, 338.02 and 338.09 GB/s peak bus bandwidth
+// over three runs, against 336.98 GB/s from the TrainJob nccl-all-reduce-bw
+// check on the same nodes. The check itself, driven from a validator built at the
+// entry's commit against a fresh cluster on 2026-11-20, measured 337.90 GB/s
+// and passed its transport assertion. The entry sets no Image: on GKE CRE derives the
+// workload image from the TCPXO plugin release it detects on the cluster
+// (pytorch:25.06-py3 for v1.0.15 and v1.0.16, pytorch:26.01-py3 for v1.0.17),
+// and a fixed pin would run the wrong CUDA major on a cluster whose plugin
+// differs from the one measured. The closure tool cannot derive that image, so
+// the run pulls it by tag.
 //
 // nccl-cre-all-reduce-bw-net is qualified on eks x gb300 only. It is the same
 // entry with NVLS and MNNVL disabled through spec.env, so the peak is the EFA
@@ -101,6 +114,11 @@ var creQualifiedEntries = map[string]map[creCombination]creCatalogEntry{
 				"@sha256:d6e0dfcb291f8c931a7c38420a13667ae0d9b83a32e667a91ec768e96dc4a4bb",
 			Fabric:     creFabricEFA,
 			Supersedes: variantNVLS,
+		},
+		{Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100}: {
+			Domain:   creNCCLDomain,
+			Variant:  creNCCLVariant,
+			MaxNodes: 2,
 		},
 	},
 	checkNameCRENCCLAllReduceBWNET: {
