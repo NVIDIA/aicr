@@ -1098,3 +1098,94 @@ func TestReadWorkloadClosureFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+// TestReadWorkloadClosurePerTargetFiles pins that a per-target closure
+// (workload-images-<target>.yaml) is read beside the primary one and held to
+// the same pin: a stale or empty target must not hide behind a current primary.
+func TestReadWorkloadClosurePerTargetFiles(t *testing.T) {
+	t.Parallel()
+
+	const (
+		pinned  = "v0.12.0"
+		primary = "sourceVersion: v0.12.0\nimages:\n  - image: ghcr.io/x/h100\n    digest: sha256:aaa\n"
+	)
+	tests := []struct {
+		name     string
+		targets  map[string]string
+		wantErr  bool
+		wantRefs []string
+	}{
+		{
+			name:     "no per-target file",
+			wantRefs: []string{"ghcr.io/x/h100@sha256:aaa"},
+		},
+		{
+			name: "per-target images are added after the primary's",
+			targets: map[string]string{
+				"workload-images-gb300.yaml": "sourceVersion: v0.12.0\nimages:\n  - image: ghcr.io/x/gb300\n    digest: sha256:bbb\n",
+			},
+			wantRefs: []string{"ghcr.io/x/h100@sha256:aaa", "ghcr.io/x/gb300@sha256:bbb"},
+		},
+		{
+			name: "per-target files are read in name order",
+			targets: map[string]string{
+				"workload-images-b300.yaml":  "sourceVersion: v0.12.0\nimages:\n  - image: ghcr.io/x/b300\n    digest: sha256:ccc\n",
+				"workload-images-gb300.yaml": "sourceVersion: v0.12.0\nimages:\n  - image: ghcr.io/x/gb300\n    digest: sha256:bbb\n",
+			},
+			wantRefs: []string{
+				"ghcr.io/x/h100@sha256:aaa", "ghcr.io/x/b300@sha256:ccc", "ghcr.io/x/gb300@sha256:bbb",
+			},
+		},
+		{
+			name: "stale per-target file fails even though the primary is current",
+			targets: map[string]string{
+				"workload-images-gb300.yaml": "sourceVersion: v0.8.2\nimages:\n  - image: ghcr.io/x/gb300\n    digest: sha256:bbb\n",
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty per-target file fails",
+			targets: map[string]string{
+				"workload-images-gb300.yaml": "sourceVersion: v0.12.0\nimages: []\n",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			dir := filepath.Join(root, "recipes", "components", "nvcre")
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+			files := map[string]string{"workload-images.yaml": primary}
+			for name, body := range tt.targets {
+				files[name] = body
+			}
+			for name, body := range files {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+					t.Fatalf("WriteFile %s: %v", name, err)
+				}
+			}
+
+			refs, err := readWorkloadClosure(root, "nvcre", pinned)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("readWorkloadClosure error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if len(refs) != len(tt.wantRefs) {
+				t.Fatalf("refs = %v, want %v", refs, tt.wantRefs)
+			}
+			for i := range refs {
+				if refs[i] != tt.wantRefs[i] {
+					t.Errorf("refs[%d] = %q, want %q", i, refs[i], tt.wantRefs[i])
+				}
+			}
+		})
+	}
+}

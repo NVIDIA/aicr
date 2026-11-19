@@ -1713,7 +1713,8 @@ components:
   # CRD delta is documentation text plus one embedded PodSpec field NVCRE
   # does not set.
   #
-  # No shipped overlay references this component (TestNVCRERegisteredWithoutOverlay).
+  # Only the overlays in nvcreAdoptingOverlays reference this component
+  # (TestNVCRERegisteredAdoptedOnlyByQualifiedOverlays); ADR-025 admits them.
   - name: nvcre
     displayName: NVIDIA Cluster Readiness Engine
     class: ops
