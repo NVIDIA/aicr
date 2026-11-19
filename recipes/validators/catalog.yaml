@@ -90,9 +90,6 @@ validators:
     phase: deployment
     description: "Verify the cluster meets Snapshot's prerequisites: kernel, runtime, GPU Operator, driver, MIG, checkpoint store, privileged namespace (skipped unless the recipe declares snapshot)"
     image: ghcr.io/nvidia/aicr-validators/deployment:latest
-    # A handful of API reads. The deployment phase's checks share the operator
-    # Job's one-hour deadline (TestDeploymentPhaseEnvelopeFitsOperatorJobDeadline),
-    # so a short timeout leaves the headroom for the next check.
     timeout: 1m
     args: ["snapshot-requirements"]
     env: []

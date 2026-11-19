@@ -1029,7 +1029,7 @@ capability-driven automatic selection.
 
 ## Checking a cluster for Snapshot
 
-The `snapshot-requirements` deployment check verifies that a cluster meets the prerequisites of Snapshot ([ai-dynamo/snapshot](https://github.com/ai-dynamo/snapshot), GPU checkpoint/restore), before you install it or while you troubleshoot an install. It is unrelated to the `aicr snapshot` command, which captures cluster state.
+The `snapshot-requirements` deployment check verifies that a cluster meets the prerequisites of Snapshot ([ai-dynamo/snapshot](https://github.com/ai-dynamo/snapshot), GPU checkpoint/restore). It is unrelated to the `aicr snapshot` command, which captures cluster state.
 
 It runs only for a recipe that declares the `snapshot` component and skips otherwise. List it in the recipe's deployment checks:
 
@@ -1040,22 +1040,22 @@ validation:
       - snapshot-requirements
 ```
 
-The check reads the cluster, evaluates every requirement and reports all that fail, so one run lists everything to fix. If the GPU nodes cannot be listed, `gpu-nodes` reports that failure and the four node requirements (`kernel`, `container-runtime`, `driver`, `mig`) are not evaluated; `gpu-operator`, `checkpoint-store` and `privileged-namespace` still are:
+It evaluates every requirement and reports all that fail. If the GPU nodes cannot be listed, `gpu-nodes` reports that and the four node requirements (`kernel`, `container-runtime`, `driver`, `mig`) are not evaluated.
 
 | Requirement | Passes when |
 |-------------|-------------|
-| `gpu-nodes` | At least one node carries `nvidia.com/gpu.present=true`. Snapshot's agent runs only on GPU nodes |
-| `kernel` | Every GPU node runs Linux 5.13 or newer (only the major and minor version count, so a release such as `6.6.78.1-1.azl3` is read correctly) |
+| `gpu-nodes` | At least one node carries `nvidia.com/gpu.present=true` |
+| `kernel` | Every GPU node runs Linux 5.13 or newer |
 | `container-runtime` | Every GPU node runs containerd or CRI-O |
-| `driver` | Every GPU node reports a CUDA driver major version of 580 or newer (`nvidia.com/cuda.driver-version.major`, or the deprecated `nvidia.com/cuda.driver.major` when the first is absent) |
-| `mig` | No GPU node has MIG enabled: a `nvidia.com/mig.config` other than `all-disabled`, a GPU product that names a MIG slice, or a MIG profile resource with a positive count (for example `nvidia.com/mig-1g.10gb.count=7`, which the mixed strategy labels and which leaves the product name as it is). A bare `nvidia.com/mig.strategy` label is not evidence |
+| `driver` | Every GPU node reports a CUDA driver major version of 580 or newer |
+| `mig` | No GPU node has MIG enabled |
 | `gpu-operator` | The GPU Operator is 26.3 or newer |
-| `checkpoint-store` | The checkpoint claim in the snapshot namespace is bound, is not a raw block claim (`volumeMode: Block` fails, because Snapshot mounts the claim as a filesystem), and is ReadWriteMany. Once the snapshot operator is deployed, the claim is the one it mounts (so a recipe that sets `storage.pvc.name` is checked under its own name) and it must exist; before the install it is the chart's default, `snapshot-pvc`, and a claim that does not exist is reported as not verified, not as a failure. A ReadWriteOnce claim passes only when the agent and the operator can share one node, because both mount the claim and a ReadWriteOnce claim attaches to a single node: the cluster has exactly one GPU node, and the operator runs on it (its pods are there, or its `nodeSelector` pins `kubernetes.io/hostname` to it, or the cluster has no other node). Otherwise pin the operator to the GPU node with `operator.nodeSelector` or use a ReadWriteMany claim. A claim with only ReadOnlyMany or ReadWriteOncePod does not pass, because Snapshot writes checkpoints to it |
-| `privileged-namespace` | The snapshot namespace admits Snapshot's privileged node agent. A namespace labeled `pod-security.kubernetes.io/enforce=privileged` passes on the label alone, with no admission request, so the pass shows Pod Security allows the agent, not that every other admission policy does; one that enforces another level fails. A namespace with no enforce label is not assumed to allow it, because the cluster's Pod Security default applies: the check asks the API server to admit a pod shaped like the node agent there as a dry run (nothing is created). The probe is privileged, uses the host PID, IPC and network namespaces, mounts the same hostPath directories and sets small CPU and memory requests and limits, so the cluster default and any admission policy decide. A namespace that does not exist yet passes |
+| `checkpoint-store` | The checkpoint claim is bound, is a filesystem claim, and is ReadWriteMany. A ReadWriteOnce claim passes only with one GPU node and the operator pinned to it (`operator.nodeSelector` on `kubernetes.io/hostname`) or no other node. Before the install a missing claim is not a failure |
+| `privileged-namespace` | The snapshot namespace admits a privileged pod. `pod-security.kubernetes.io/enforce=privileged` passes on the label alone; another level fails; with no label the API server is asked to admit a pod shaped like the node agent, as a server-side dry run. Admission webhooks that act on pod creation may see that request |
 
-The thresholds are the prerequisites in Snapshot's documentation as of v0.2.0, so the check follows the documentation, not what a given cluster happens to tolerate: a cluster below a documented floor fails even if checkpoint and restore work on it. Re-read the prerequisites when the Snapshot version AICR pins moves. The snapshot namespace is the `namespace` of the recipe's `snapshot` component, or `snapshot`.
+The thresholds are the prerequisites in Snapshot's documentation, so a cluster below a documented floor fails even if checkpoint and restore work on it. The snapshot namespace is the `namespace` of the recipe's `snapshot` component, or `snapshot`.
 
-The check fails closed: a declared component whose prerequisites cannot be read is not a cluster that is ready for it. A read the validator is not permitted to make (for example the nodes, the claim or the namespace) is reported as `UNAUTHORIZED`, so grant the validator the RBAC it needs; a read that times out is reported as a timeout.
+A prerequisite that cannot be read is a failure. A read the validator is not permitted to make is reported as `UNAUTHORIZED`, and a read that times out as a timeout.
 
 ## Running all phases
 

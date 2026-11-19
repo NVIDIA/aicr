@@ -27,9 +27,11 @@ import (
 	"aicr.run/validators"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 const testDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -295,6 +297,23 @@ func TestGetGPUOperatorVersion(t *testing.T) {
 // within it the label wins, then the first gpu-operator image that carries a
 // tag or a digest, then the annotation. A digest-only image decides too, so
 // the search does not fall through to a later deployment or container.
+// TestGetGPUOperatorVersionKeepsADeniedRead: a Forbidden in the first namespace
+// must survive a NotFound in a later one, so a caller can name RBAC as the cause.
+func TestGetGPUOperatorVersionKeepsADeniedRead(t *testing.T) {
+	client := k8sfake.NewClientset()
+	client.PrependReactor("get", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.GetNamespace() == gpuOperatorNamespace {
+			return true, nil, apierrors.NewForbidden(corev1.Resource("deployments"), "gpu-operator", fmt.Errorf("RBAC: access denied"))
+		}
+		return false, nil, nil
+	})
+
+	_, _, err := getGPUOperatorVersion(context.Background(), client)
+	if !apierrors.IsForbidden(err) {
+		t.Fatalf("getGPUOperatorVersion() error = %v, want the Forbidden read to be kept", err)
+	}
+}
+
 func TestGetGPUOperatorVersionSelectionOrder(t *testing.T) {
 	digestOnly := "nvcr.io/nvidia/gpu-operator@sha256:" + testDigest
 	tagged := "nvcr.io/nvidia/gpu-operator:v25.10.1"

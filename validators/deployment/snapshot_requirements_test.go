@@ -654,41 +654,24 @@ func pinnableSnapshotOperator(nodeSelector map[string]string) *appsv1.Deployment
 	}
 }
 
-func snapshotOperatorPod(node string) *corev1.Pod {
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "snapshot-operator-abc", Namespace: "snapshot", Labels: map[string]string{"app": "snapshot-operator"}},
-		Spec:       corev1.PodSpec{NodeName: node},
-	}
-}
-
 // TestCheckSnapshotRequirements_ReadWriteOnceNeedsTheOperatorOnTheGPUNode: the
-// operator Deployment mounts the checkpoint claim as well as the agent, and a
-// ReadWriteOnce claim attaches to one node, so the single-GPU-node exception holds
-// only when the operator runs on that node.
+// operator mounts the claim too, so a ReadWriteOnce claim works only if the
+// operator is pinned to the single GPU node or is the cluster's only node.
 func TestCheckSnapshotRequirements_ReadWriteOnceNeedsTheOperatorOnTheGPUNode(t *testing.T) {
 	t.Parallel()
 
 	cpuNode := snapshotGPUNode("cpu-1", "6.12.115-140.210.amzn2023.x86_64", "containerd://2.3.7", nil)
 	cpuNode.Labels = map[string]string{}
 	tests := []struct {
-		name      string
-		withCPU   bool
-		operator  *appsv1.Deployment
-		pod       *corev1.Pod
-		want      string // "" means the check passes
-		wantCode  errors.ErrorCode
-		listError bool
+		name     string
+		withCPU  bool
+		operator *appsv1.Deployment
+		want     string // "" means the check passes
 	}{
 		{name: "only node, not installed", want: ""},
 		{name: "a second node and no operator yet", withCPU: true, want: "can be scheduled on any of the 2 nodes"},
 		{name: "operator pinned to the GPU node", withCPU: true, operator: pinnableSnapshotOperator(map[string]string{"kubernetes.io/hostname": "gpu-1"})},
-		{name: "operator pinned to another node", withCPU: true, operator: pinnableSnapshotOperator(map[string]string{"kubernetes.io/hostname": "cpu-1"}), want: "pins its pods to kubernetes.io/hostname=cpu-1"},
-		{name: "operator pod runs on the GPU node", withCPU: true, operator: pinnableSnapshotOperator(nil), pod: snapshotOperatorPod("gpu-1")},
-		{name: "operator pod runs on a CPU node", withCPU: true, operator: pinnableSnapshotOperator(nil), pod: snapshotOperatorPod("cpu-1"), want: "operator pod snapshot-operator-abc runs on node cpu-1"},
-		// Rolling update: the old pod is on the GPU node but the template already pins the replacement elsewhere.
-		{name: "old pod on the GPU node, template pinned elsewhere", withCPU: true, operator: pinnableSnapshotOperator(map[string]string{"kubernetes.io/hostname": "cpu-1"}), pod: snapshotOperatorPod("gpu-1"), want: "pins its pods to kubernetes.io/hostname=cpu-1"},
-		{name: "old pod and template both on the GPU node", withCPU: true, operator: pinnableSnapshotOperator(map[string]string{"kubernetes.io/hostname": "gpu-1"}), pod: snapshotOperatorPod("gpu-1")},
-		{name: "operator pods cannot be listed", withCPU: true, operator: pinnableSnapshotOperator(nil), listError: true, want: "could not list the snapshot operator pods", wantCode: errors.ErrCodeUnauthorized},
+		{name: "operator pinned to another node", withCPU: true, operator: pinnableSnapshotOperator(map[string]string{"kubernetes.io/hostname": "cpu-1"}), want: "is pinned to kubernetes.io/hostname=cpu-1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -703,31 +686,12 @@ func TestCheckSnapshotRequirements_ReadWriteOnceNeedsTheOperatorOnTheGPUNode(t *
 			if tt.operator != nil {
 				objs = append(objs, tt.operator)
 			}
-			if tt.pod != nil {
-				objs = append(objs, tt.pod)
-			}
-			ctx := snapshotContext(true, objs)
-			if tt.listError {
-				client, ok := ctx.Clientset.(*k8sfake.Clientset)
-				if !ok {
-					t.Fatalf("clientset is %T, want the fake", ctx.Clientset)
-				}
-				client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
-					return true, nil, apierrors.NewForbidden(corev1.Resource("pods"), "x", stderrors.New("RBAC: access denied"))
-				})
-			}
-
-			err := checkSnapshotRequirements(ctx)
+			err := checkSnapshotRequirements(snapshotContext(true, objs))
 			switch {
 			case tt.want == "" && err != nil:
 				t.Fatalf("checkSnapshotRequirements() = %v, want nil", err)
 			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
 				t.Fatalf("checkSnapshotRequirements() = %v, want an error containing %q", err, tt.want)
-			}
-			if tt.wantCode != "" {
-				if got := errorstest.ReportedCode(err); got != tt.wantCode {
-					t.Errorf("error code = %s, want %s", got, tt.wantCode)
-				}
 			}
 		})
 	}
@@ -795,35 +759,6 @@ func TestCheckSnapshotRequirements_NodeListFailureStillReportsIndependentRequire
 	}
 	if got := errorstest.ReportedCode(err); got != errors.ErrCodeUnauthorized {
 		t.Errorf("error code = %s, want %s", got, errors.ErrCodeUnauthorized)
-	}
-}
-
-// TestCheckSnapshotRequirements_DeniedGPUOperatorReadIsNotHiddenByNotFound: the
-// GPU Operator is searched in several namespaces. A Forbidden in the first must
-// survive a NotFound in a later one, so the failure names RBAC, not INTERNAL.
-func TestCheckSnapshotRequirements_DeniedGPUOperatorReadIsNotHiddenByNotFound(t *testing.T) {
-	t.Parallel()
-
-	c := readySnapshotCluster()
-	c.operator = "" // no operator Deployment anywhere, so every other namespace is NotFound
-	ctx := snapshotContext(true, c.objects())
-	client, ok := ctx.Clientset.(*k8sfake.Clientset)
-	if !ok {
-		t.Fatalf("clientset is %T, want the fake", ctx.Clientset)
-	}
-	client.PrependReactor("get", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		if action.GetNamespace() == "gpu-operator" {
-			return true, nil, apierrors.NewForbidden(corev1.Resource("deployments"), "gpu-operator", stderrors.New("RBAC: access denied"))
-		}
-		return false, nil, nil
-	})
-
-	err := checkSnapshotRequirements(ctx)
-	if err == nil {
-		t.Fatal("checkSnapshotRequirements() = nil, want a failure")
-	}
-	if got := errorstest.ReportedCode(err); got != errors.ErrCodeUnauthorized {
-		t.Errorf("error code = %s, want %s (error: %v)", got, errors.ErrCodeUnauthorized, err)
 	}
 }
 
@@ -1053,7 +988,7 @@ func TestCheckSnapshotRequirements_ReadWriteOnceComparesTheHostnameLabel(t *test
 		want     string
 	}{
 		{name: "selector matches the hostname label", selector: "gpu-1"},
-		{name: "selector names the node, not its label", selector: "gpu-1.example", want: "pins its pods to kubernetes.io/hostname=gpu-1.example"},
+		{name: "selector names the node, not its label", selector: "gpu-1.example", want: "is pinned to kubernetes.io/hostname=gpu-1.example"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1096,12 +1031,9 @@ func TestCheckSnapshotRequirements_AdmissionProbeRunsAsTheAgentServiceAccount(t 
 		name    string
 		objects []runtime.Object
 		wantSA  string
-		wantErr bool
 	}{
 		{name: "agent deployed", objects: []runtime.Object{agent("snapshot-agent-sa")}, wantSA: "snapshot-agent-sa"},
 		{name: "not installed", wantSA: ""},
-		// A policy that admits only the agent's account denies "default".
-		{name: "policy admits only the agent account", objects: []runtime.Object{agent("snapshot-agent-sa")}, wantSA: "snapshot-agent-sa"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1127,5 +1059,36 @@ func TestCheckSnapshotRequirements_AdmissionProbeRunsAsTheAgentServiceAccount(t 
 				t.Errorf("probe service account = %q, want %q", got, tt.wantSA)
 			}
 		})
+	}
+}
+
+// TestCheckSnapshotRequirements_AgentDaemonSetReadFailureIsNotHidden: when the
+// agent's service account cannot be read, the probe must not silently run as
+// "default"; the requirement fails with the read's code.
+func TestCheckSnapshotRequirements_AgentDaemonSetReadFailureIsNotHidden(t *testing.T) {
+	t.Parallel()
+
+	c := readySnapshotCluster()
+	c.namespace = map[string]string{}
+	ctx := snapshotContext(true, c.objects())
+	client, ok := ctx.Clientset.(*k8sfake.Clientset)
+	if !ok {
+		t.Fatalf("clientset is %T, want the fake", ctx.Clientset)
+	}
+	client.PrependReactor("list", "daemonsets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(corev1.Resource("daemonsets"), "x", stderrors.New("RBAC: access denied"))
+	})
+	probe := &admissionProbe{}
+	probe.install(t, ctx, nil)
+
+	err := checkSnapshotRequirements(ctx)
+	if err == nil || !strings.Contains(err.Error(), "could not read the snapshot agent DaemonSet") {
+		t.Fatalf("checkSnapshotRequirements() = %v, want a failure naming the DaemonSet read", err)
+	}
+	if got := errorstest.ReportedCode(err); got != errors.ErrCodeUnauthorized {
+		t.Errorf("error code = %s, want %s", got, errors.ErrCodeUnauthorized)
+	}
+	if len(probe.creates) != 0 {
+		t.Errorf("probe creates = %d, want 0: the probe must not run as an unverified account", len(probe.creates))
 	}
 }
