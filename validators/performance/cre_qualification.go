@@ -36,12 +36,30 @@ type creCombination struct {
 // accelerator, so qualifying a new combination is an entry here plus a measured
 // threshold in the recipe, never a new code path.
 //
-// nccl-cre-all-reduce-bw is qualified on eks x h100. It was re-measured on CRE
-// v0.8.2, the registry pin at the time, on 2026-10-23 against 2x p5.48xlarge
-// on a NodeWright-tuned cluster: 489.70 GB/s bus bandwidth, against 489.33 GB/s
+// nccl-cre-all-reduce-bw is qualified on eks x h100 and eks x gb300. It was
+// re-measured on CRE v0.8.2, the registry pin at the time, on 2026-10-23 against
+// 2x p5.48xlarge on a
+// NodeWright-tuned cluster: 489.70 GB/s bus bandwidth, against 489.33 GB/s
 // from the TrainJob nccl-all-reduce-bw check on the same nodes and 489.80 GB/s
 // at the original 2026-09-02 qualification on v0.1.0. It has not been
 // re-measured on the current pin, v0.12.0.
+//
+// On eks x gb300 it was measured on CRE v0.12.0 on 2026-11-18 against 2x
+// p6e-gb300.36xlarge (8 GPUs, one EFA device per node) with spec.fabric efa:
+// 841 GB/s peak bus bandwidth, the NVLS-class figure the TrainJob
+// nccl-all-reduce-bw-nvls check measures on the same nodes (841.17 GB/s).
+// CRE's single peak is the NVLS path, so that entry supersedes the nvls
+// variant. Fabric efa is named so the run selects the EFA variant explicitly
+// instead of depending on CRE's node-label detection
+// (cluster-readiness-engine#576, #591).
+//
+// nccl-cre-all-reduce-bw-net is qualified on eks x gb300 only. It is the same
+// entry with NVLS and MNNVL disabled through spec.env, so the peak is the EFA
+// path alone, and it supersedes the net variant. On the NCCL 2.31.2 and
+// aws-ofi-nccl 1.21.1 image the catalog selects it measures about 31 GB/s,
+// against about 45 GB/s on the 2.27.7 and 1.16.3 image the TrainJob check uses.
+// The cause is open with the NVCRE team, so the recipe floor sits below the new
+// image's figure rather than at the old one.
 //
 // cre-training-goodput is qualified on eks x h100 with training/nemotron5-8b,
 // measured on the same v0.8.2 run, also not re-measured on v0.12.0: goodput 0.5723, 462.05 TFLOPS per GPU, 0.914
@@ -56,9 +74,10 @@ type creCombination struct {
 // A combination with no entry reports the check unqualified, so it skips rather
 // than failing a healthy cluster.
 //
-// Each Image is the image the catalog selects for that entry on eks x h100,
-// pinned to the digest recipes/components/nvcre/workload-images.yaml records
-// for the CRE version the registry pins. A chart bump re-derives that file, and
+// Each Image is the image the catalog selects for that entry on its
+// combination, pinned to the digest the committed closure for that platform and
+// accelerator (recipes/components/nvcre/workload-images*.yaml) records for the
+// CRE version the registry pins. A chart bump re-derives that file, and
 // TestCREQualifiedImagesMatchWorkloadClosure then fails until the pins follow.
 // The NCCL entry's EFA override already runs its trainer and workers on the
 // nccl-tests image; the pin also moves the launcher's fix-ssh-permissions init
@@ -71,6 +90,28 @@ var creQualifiedEntries = map[string]map[creCombination]creCatalogEntry{
 			MaxNodes: 2,
 			Image: "public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9" +
 				"@sha256:6cabd2c0c37bfa09921912919b747d3b804298966e28e301dbfefc5c7dd3bfe2",
+		},
+		{Service: recipe.CriteriaServiceEKS, Accelerator: recipe.CriteriaAcceleratorGB300}: {
+			Domain:   creNCCLDomain,
+			Variant:  creNCCLVariant,
+			MaxNodes: 2,
+			Image: "public.ecr.aws/hpc-cloud/nccl-tests:cuda13.1.2-efa1.50.0-ofiv1.21.1-ncclv2.31.2-1-testsv2.20.0" +
+				"@sha256:d6e0dfcb291f8c931a7c38420a13667ae0d9b83a32e667a91ec768e96dc4a4bb",
+			Fabric:     creFabricEFA,
+			Supersedes: variantNVLS,
+		},
+	},
+	checkNameCRENCCLAllReduceBWNET: {
+		{Service: recipe.CriteriaServiceEKS, Accelerator: recipe.CriteriaAcceleratorGB300}: {
+			Domain:   creNCCLDomain,
+			Variant:  creNCCLVariant,
+			MaxNodes: 2,
+			Image: "public.ecr.aws/hpc-cloud/nccl-tests:cuda13.1.2-efa1.50.0-ofiv1.21.1-ncclv2.31.2-1-testsv2.20.0" +
+				"@sha256:d6e0dfcb291f8c931a7c38420a13667ae0d9b83a32e667a91ec768e96dc4a4bb",
+			Fabric:     creFabricEFA,
+			Env:        []creEnvVar{{Name: "NCCL_NVLS_ENABLE", Value: "0"}, {Name: "NCCL_MNNVL_ENABLE", Value: "0"}},
+			MaxBytes:   creNetMaxBytes,
+			Supersedes: variantNET,
 		},
 	},
 	checkNameCRETrainingGoodput: {
