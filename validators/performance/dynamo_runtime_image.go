@@ -15,15 +15,10 @@
 package main
 
 import (
-	"fmt"
-	"log/slog"
-	"strings"
-
 	"aicr.run/pkg/defaults"
-	"aicr.run/pkg/errors"
 	"aicr.run/pkg/validator/catalog"
 	"aicr.run/validators"
-	"github.com/Masterminds/semver/v3"
+	"aicr.run/validators/internal/dynamoimage"
 )
 
 const dynamoPlatformComponent = "dynamo-platform"
@@ -34,43 +29,9 @@ const (
 	dynamoFrontendImageName    = "dynamo-frontend"
 )
 
-// resolveDynamoRuntimeTag returns the tag for the Dynamo runtime images. It is
-// the recipe's dynamo-platform chart version, so the runtime matches the
-// deployed operator when an overlay or --data overrides the chart pin, and
-// defaults.DynamoRuntimeImageTag when the recipe's ref carries no version.
+// resolveDynamoRuntimeTag returns the tag for the Dynamo runtime images.
 func resolveDynamoRuntimeTag(ctx *validators.Context) (string, error) {
-	raw, source := recipeDynamoPlatformVersion(ctx), "recipe component "+dynamoPlatformComponent
-	if raw == "" {
-		raw, source = defaults.DynamoRuntimeImageTag, "defaults.DynamoRuntimeImageTag"
-	}
-
-	// The strict parse also keeps arbitrary input out of the image reference.
-	// Build metadata is rejected because "+" is not valid in an image tag.
-	v, err := semver.StrictNewVersion(strings.TrimPrefix(raw, "v"))
-	if err == nil && v.Metadata() != "" {
-		err = errors.New(errors.ErrCodeInvalidRequest, "build metadata is not valid in an image tag")
-	}
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid %s version %q from %s: not usable as a Dynamo runtime image tag",
-				dynamoPlatformComponent, raw, source), err)
-	}
-	slog.Info("Resolved Dynamo runtime image tag", "tag", v.String(), "source", source)
-	return v.String(), nil
-}
-
-// recipeDynamoPlatformVersion returns the recipe's dynamo-platform version, or
-// "" when the recipe has no such ref or the ref carries no version.
-func recipeDynamoPlatformVersion(ctx *validators.Context) string {
-	if ctx == nil || ctx.ValidationInput == nil {
-		return ""
-	}
-	for _, ref := range ctx.ValidationInput.ComponentRefs {
-		if ref.Name == dynamoPlatformComponent {
-			return strings.TrimSpace(ref.Version)
-		}
-	}
-	return ""
+	return dynamoimage.RuntimeTag(ctx)
 }
 
 // dynamoRuntimeImage returns the reference for Dynamo runtime image name at

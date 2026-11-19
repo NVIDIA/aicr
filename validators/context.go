@@ -155,8 +155,6 @@ type checkContext struct {
 	signalCtx context.Context
 }
 
-// signalCtxKey keys the SIGTERM-only context in a check context's values, so it
-// stays reachable from contexts derived from it (a work budget, a poll).
 type signalCtxKey struct{}
 
 // Value exposes the SIGTERM-only context to SignalContext.
@@ -167,12 +165,10 @@ func (c *checkContext) Value(key any) any {
 	return c.Context.Value(key)
 }
 
-// SignalContext returns a context that is canceled only when the container
-// receives SIGTERM (and when the check ends), never by a deadline. ctx may be any
-// context derived from a check's Ctx. A check whose deadline has already passed
-// uses it to tell a later SIGTERM from the timeout, because the timed context's
-// error cannot change after the deadline. A context that does not come from a
-// check is returned unchanged.
+// SignalContext returns a context canceled only by SIGTERM (and when the check
+// ends), never by a deadline. ctx may be any context derived from a check's Ctx;
+// one that is not is returned unchanged. A check uses it to see a SIGTERM that
+// arrives after its deadline, which the timed context's error cannot show.
 func SignalContext(ctx context.Context) context.Context {
 	if sig, ok := ctx.Value(signalCtxKey{}).(context.Context); ok {
 		return sig

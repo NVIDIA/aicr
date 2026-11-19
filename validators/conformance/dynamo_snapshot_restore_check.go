@@ -30,7 +30,7 @@ import (
 	validatorv1 "aicr.run/pkg/validator/v1"
 	"aicr.run/validators"
 	"aicr.run/validators/internal/allocmode"
-	"github.com/Masterminds/semver/v3"
+	"aicr.run/validators/internal/dynamoimage"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -42,20 +42,21 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
+// Components and objects the check addresses. dynamoOperatorName is the
+// Deployment the dynamo-platform release creates, and the DGD name is fixed
+// because the namespace is per run.
 const (
 	dynamoPlatformComponentName = "dynamo-platform"
 	snapshotComponentName       = "snapshot"
-	// snapshotDefaultNamespace is where the snapshot component installs when the
-	// recipe's componentRef names no namespace.
-	snapshotDefaultNamespace = "snapshot"
-	snapshotOperatorName     = "snapshot-operator"
-	snapshotAgentName        = "snapshot-agent"
-	// dynamoOperatorName is the operator Deployment the dynamo-platform release
-	// creates (the release is named after the component).
-	dynamoOperatorName = "dynamo-platform-dynamo-operator-controller-manager"
-	dgdCRDName         = "dynamographdeployments.nvidia.com"
+	snapshotDefaultNamespace    = "snapshot"
+	snapshotOperatorName        = "snapshot-operator"
+	snapshotAgentName           = "snapshot-agent"
+	dynamoOperatorName          = "dynamo-platform-dynamo-operator-controller-manager"
+	dgdCRDName                  = "dynamographdeployments.nvidia.com"
+)
 
-	// The DGD. The name is fixed because the namespace is per run.
+// The DynamoGraphDeployment the check creates.
+const (
 	dgdName            = "aicr-snapshot"
 	dgdFrontend        = "Frontend"
 	dgdWorker          = "VllmDecodeWorker"
@@ -69,85 +70,67 @@ const (
 	dgdGPUMemoryShare  = "0.3"
 	dgdMaxModelLen     = "2048"
 	dgdGroveAnnotation = "nvidia.com/enable-grove"
-	// keyType is the key of a DGD component's type.
-	keyType = "type"
+	keyType            = "type"
+)
 
-	// Labels Dynamo puts on the pods and Snapshot objects of a DGD.
+// Labels, annotations, reasons and condition names of the objects the check
+// reads. The restore reasons are from Snapshot's api/podcontract (v0.3.0).
+const (
 	dgdNameLabel      = "nvidia.com/dynamo-graph-deployment-name"
 	dgdComponentLabel = "nvidia.com/dynamo-component"
 	snapshotJobLabel  = "nvidia.com/snapshot-job"
 
 	snapshotRestoreFromAnnotation = "nvidia.com/restore-from"
 	snapshotRestoredCondition     = "nvidia.com/Restored"
-
-	// Reasons of the nvidia.com/Restored pod condition that end a restore without
-	// success, from Snapshot's api/podcontract (v0.3.0).
 	snapshotRestoreFailedReason   = "RestoreFailed"
 	snapshotRestoreIncompatReason = "RestoreIncompatible"
 	snapshotRestorePartialReason  = "RestorePartiallySucceeded"
 
-	// checkpointDisabledMessage is what Dynamo's admission webhook says when a
-	// DGD asks for a checkpoint and the operator has the feature off.
 	checkpointDisabledMessage = "checkpoint functionality is disabled in the operator configuration"
 
-	// Condition types and states of the objects the check reads.
 	snapshotConditionTrue = "True"
 	snapshotJobFailed     = "Failed"
 	dgdReadyCondition     = "Ready"
 	dgdStateFailed        = "failed"
+)
 
-	// Waits. A capture includes pulling the runtime image on a node that lacks it
-	// (about 10 GB), downloading the model and initializing the engine. They fit
-	// inside dgdWorkBudget with the teardown and the namespace cleanup.
+// Waits, and limits on what the check quotes. A cold capture pulls the runtime
+// image (about 10 GB), downloads the model and starts the engine. dgdWorkBudget
+// is what is left of a 35 minute check after the cleanup reserve and teardown.
+const (
 	dgdCaptureTimeoutDefault  = 15 * time.Minute
 	dgdRestoreTimeoutDefault  = 10 * time.Minute
 	dgdAnswerTimeoutDefault   = 3 * time.Minute
 	dgdTeardownTimeoutDefault = 3 * time.Minute
-
-	// dgdMinWorkBudget is the least a check deadline may leave for the capture and
-	// the restore after the teardown reserve: less cannot finish a cold run.
-	dgdMinWorkBudget = 10 * time.Minute
-
-	// dgdWorkBudget is the fallback work budget for a 35m check (see
-	// driverRuntimeWorkBudget); a live check derives it from its deadline. It is
-	// what is left of 35m after the cleanup reserve (90s) and the DGD teardown (3m).
-	dgdWorkBudget = 30*time.Minute + 30*time.Second
+	dgdMinWorkBudget          = 10 * time.Minute
+	dgdWorkBudget             = 30*time.Minute + 30*time.Second
+	dgdFrontendExecTimeout    = 90 * time.Second
 
 	snapshotLogTailLines = int64(20)
+	noContainerState     = "no container state reported"
+	truncateLimit        = 200
+	unschedulableReason  = "Unschedulable"
 
-	// noContainerState is podContainerStateSummary's answer for a pod none of
-	// whose containers has terminated.
-	noContainerState = "no container state reported"
-
-	// truncateLimit caps the response text quoted in an error.
-	truncateLimit = 200
-
-	// unschedulableReason is the prefix podStuckReason gives a pod the scheduler
-	// has not placed yet.
-	unschedulableReason = "Unschedulable"
+	checkpointCaptureExitCode = 137
+	restoreProxyUsedExitCode  = 112
+	restoreProxyLostExitCode  = 113
 )
 
+// The waits are variables so tests can shorten them. dgdFailedGrace is how long
+// a DGD may report state failed before the check believes it, because Dynamo's
+// operator reports failed on any reconcile error and clears it on the next good
+// one. askFrontend is replaced in tests, since a fake clientset has no exec.
 var (
 	snapshotJobGVR = schema.GroupVersionResource{Group: apiGroupNVIDIA, Version: versionV1alpha1, Resource: "snapshotjobs"}
 
-	// The waits and the poll interval are variables so tests can shorten them.
-	dgdCaptureTimeout  = dgdCaptureTimeoutDefault
-	dgdRestoreTimeout  = dgdRestoreTimeoutDefault
-	dgdAnswerTimeout   = dgdAnswerTimeoutDefault
-	dgdTeardownTimeout = dgdTeardownTimeoutDefault
-	// dgdTeardownOpTimeout bounds the teardown's ownership read and delete, which
-	// neither the check's deadline nor SIGTERM may cancel.
+	dgdCaptureTimeout    = dgdCaptureTimeoutDefault
+	dgdRestoreTimeout    = dgdRestoreTimeoutDefault
+	dgdAnswerTimeout     = dgdAnswerTimeoutDefault
+	dgdTeardownTimeout   = dgdTeardownTimeoutDefault
 	dgdTeardownOpTimeout = 30 * time.Second
 	dgdPollInterval      = defaults.PodPollInterval
-	// dgdFailedGrace is how long a DGD may report state failed before the check
-	// believes it. Dynamo's operator sets failed on any reconcile error, for
-	// example a webhook that is not ready yet or a conflict, and clears it on the
-	// next good reconcile, so a single read of failed proves little.
-	dgdFailedGrace = 30 * time.Second
-
-	// askFrontend asks the frontend pod for a chat completion and returns the raw
-	// response body; tests replace it, since a fake clientset has no exec endpoint.
-	askFrontend = execFrontendCompletion
+	dgdFailedGrace       = 30 * time.Second
+	askFrontend          = execFrontendCompletion
 )
 
 // frontendScript posts one chat completion to the frontend from inside its pod
@@ -168,63 +151,36 @@ except urllib.error.HTTPError as exc:
     sys.exit(1)
 `
 
-// dgdRun carries the names of one run.
+// dgdRun carries the state of one run. runtimeClass is "" when the cluster has
+// no nvidia RuntimeClass, checkpointName is what the DGD reported for the
+// worker, and createAttempted is set just before the DGD Create is sent so a
+// Create whose response was lost is still cleaned up.
 type dgdRun struct {
-	run   *gpuTestRun
-	image string
-	// runtimeClass is "" when the cluster has no nvidia RuntimeClass.
-	runtimeClass string
-	// checkpointName is what the DGD reported for the worker.
-	checkpointName string
-	// dgdSeen is set once the DGD has been read: a DGD that is then gone failed.
-	dgdSeen bool
-	// createAttempted is set just before the DGD Create is sent, so a Create whose
-	// response was lost still gets its DGD cleaned up, and a run that never sent
-	// one deletes nothing.
+	run             *gpuTestRun
+	image           string
+	runtimeClass    string
+	checkpointName  string
+	dgdSeen         bool // a DGD that has been read and is then gone failed
 	createAttempted bool
-	// failedSince is when the DGD's state was first seen as failed in the current
-	// run of polls, or the zero time.
-	failedSince time.Time
+	failedSince     time.Time // start of the current run of polls that saw state failed
 }
 
-// CheckDynamoSnapshotRestore proves that Snapshot (ai-dynamo/snapshot, GPU
-// checkpoint and restore) works through Dynamo, the way a Dynamo recipe uses it.
-// It does not drive Snapshot's own API. It deploys a DynamoGraphDeployment
-// whose worker has checkpointing on, and checks the outcome through Dynamo:
+// CheckDynamoSnapshotRestore proves that Snapshot works through Dynamo. It
+// deploys a DynamoGraphDeployment whose worker has checkpointing on, and passes
+// when Dynamo reports the worker's checkpoint ready, the worker pod is Ready with
+// nvidia.com/Restored=True and restored from that checkpoint, the DGD is Ready,
+// and the frontend answers a chat completion with the capital of France.
+// startupPolicy WaitForCheckpoint keeps the serving worker from starting until
+// the capture is done, so the worker that serves is a restored one.
 //
-//  1. The Dynamo operator takes the checkpoint: the DGD reports
-//     status.checkpoints.<worker>.ready once its SnapshotJob has produced a
-//     PodSnapshot. startupPolicy WaitForCheckpoint keeps the serving worker from
-//     starting until then, so the worker that serves is a restored one.
-//  2. The worker restores from it: the worker pod (the one that is not the
-//     capture pod) is Ready, carries nvidia.com/Restored=True, and its
-//     nvidia.com/restore-from annotation names the checkpoint the DGD reported.
-//  3. The graph serves: the DGD is Ready, and the frontend answers a chat
-//     completion with the capital of France.
+// The worker runs Dynamo's own entrypoint (python3 -m dynamo.vllm) unwrapped,
+// because the operator's restore admission accepts a worker container only when
+// it runs python -m <module> directly. Grove is switched off for the DGD. The
+// request goes from inside the frontend pod, so the validator needs no route to
+// the pod network. The DGD is deleted and waited on before the namespace cleanup,
+// because Dynamo's finalizer tears down the pods and the stored checkpoint.
 //
-// The model is Qwen/Qwen3-0.6B (public, ungated, about 1.2 GB) on the vLLM
-// runtime image of the recipe's dynamo-platform version, the shape AICR's own
-// Dynamo smoke test and inference-perf already use. The worker runs Dynamo's own
-// entrypoint (python3 -m dynamo.vllm) unwrapped: the operator's restore
-// admission accepts a worker container only when it runs python -m <module>
-// directly. Grove is switched off for this DGD (nvidia.com/enable-grove), so the
-// check does not depend on how the cluster's Dynamo orchestrates workers.
-//
-// Placement. The worker, and so the capture pod the operator builds from it, is
-// allocated through the device plugin (nvidia.com/gpu) on a device-plugin node.
-//
-// Asking the frontend. The request is made from inside the frontend pod, to
-// 127.0.0.1:8000, through exec. That needs neither a route from the validator to
-// the pod network nor an extra image; the frontend image ships python3.
-//
-// Cleanup. Every object lives in a per-run namespace whose cleanup is registered
-// before the first Create. The DGD is deleted first and waited on, because its
-// finalizer makes Dynamo and Snapshot tear down the pods, the SnapshotJob, the
-// PodSnapshot and the stored checkpoint (deletionPolicy Delete, the default),
-// which takes minutes and would otherwise hold the GPU after the check returns.
-//
-// It skips unless the recipe declares both snapshot and dynamo-platform, and once
-// they are declared a prerequisite that is missing fails the check.
+// It skips unless the recipe declares both snapshot and dynamo-platform.
 func CheckDynamoSnapshotRestore(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
@@ -271,7 +227,7 @@ func CheckDynamoSnapshotRestore(ctx *validators.Context) error {
 	}
 	validators.EmitExtraOrWarn(validators.GPUAllocationResolvedExtra(false, false))
 
-	tag, err := resolveDynamoRuntimeTag(ctx)
+	tag, err := dynamoimage.RuntimeTag(ctx)
 	if err != nil {
 		return err
 	}
@@ -354,41 +310,9 @@ func verifyDynamoSnapshotInstalled(ctx *validators.Context, dynClient dynamic.In
 	return nil
 }
 
-// resolveDynamoRuntimeTag returns the tag of the Dynamo runtime image: the
-// recipe's dynamo-platform version, so the runtime matches the deployed operator,
-// or defaults.DynamoRuntimeImageTag when the ref carries none. This mirrors
-// validators/performance (dynamo_runtime_image.go), which inference-perf uses;
-// keep the two in sync.
-func resolveDynamoRuntimeTag(ctx *validators.Context) (string, error) {
-	raw, source := "", "defaults.DynamoRuntimeImageTag"
-	if ctx.ValidationInput != nil {
-		for _, ref := range ctx.ValidationInput.ComponentRefs {
-			if ref.Name == dynamoPlatformComponentName && strings.TrimSpace(ref.Version) != "" {
-				raw, source = strings.TrimSpace(ref.Version), "recipe component "+dynamoPlatformComponentName
-			}
-		}
-	}
-	if raw == "" {
-		raw = defaults.DynamoRuntimeImageTag
-	}
-	// The strict parse also keeps arbitrary input out of the image reference.
-	// Build metadata is rejected because "+" is not valid in an image tag.
-	v, err := semver.StrictNewVersion(strings.TrimPrefix(raw, "v"))
-	if err == nil && v.Metadata() != "" {
-		err = errors.New(errors.ErrCodeInvalidRequest, "build metadata is not valid in an image tag")
-	}
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-			"invalid %s version %q from %s: not usable as a Dynamo runtime image tag", dynamoPlatformComponentName, raw, source), err)
-	}
-	slog.Info("Resolved Dynamo runtime image tag", "tag", v.String(), "source", source)
-	return v.String(), nil
-}
-
 // runDynamoSnapshotTest creates the per-run namespace and the DGD, follows the
-// checkpoint and the restore through Dynamo, and asks the frontend. The return is
-// NAMED so the deferred cleanup can fail an otherwise-passing check when cleanup
-// terminally fails; a primary error is never overwritten.
+// checkpoint and the restore through Dynamo, and asks the frontend. err is named
+// so the deferred cleanup can fail an otherwise-passing check.
 func runDynamoSnapshotTest(ctx *validators.Context, dynClient dynamic.Interface, nodes []string, image string) (err error) {
 	run, runErr := newGPUTestRun()
 	if runErr != nil {
@@ -396,8 +320,8 @@ func runDynamoSnapshotTest(ctx *validators.Context, dynClient dynamic.Interface,
 	}
 	r := &dgdRun{run: run, image: image}
 
-	// Register cleanup BEFORE the first Create: an ambiguously created DGD would
-	// otherwise stay bound and hold a GPU (see cleanupGPUTestNamespace).
+	// Registered before the first Create: an ambiguously created DGD would
+	// otherwise hold a GPU.
 	defer func() { //nolint:contextcheck // cleanup runs on its own bounded context
 		teardown := deleteDGDAndWait(ctx, dynClient, r)
 		recordRawTextArtifact(ctx, "Delete DynamoGraphDeployment",
@@ -416,7 +340,6 @@ func runDynamoSnapshotTest(ctx *validators.Context, dynClient dynamic.Interface,
 		return err
 	}
 
-	// --- capture ---
 	start := time.Now()
 	dgd, err := buildDGD(r, ctx.Tolerations, nodes, ctx.NodeSelector)
 	if err != nil {
@@ -442,7 +365,6 @@ func runDynamoSnapshotTest(ctx *validators.Context, dynClient dynamic.Interface,
 		fmt.Sprintf("kubectl get podsnapshot %s -n %s", r.checkpointName, run.namespace),
 		fmt.Sprintf("PodSnapshot: %s/%s\nCapture took: %s (image pull, model download, engine start and the checkpoint)", run.namespace, r.checkpointName, captureTook))
 
-	// --- restore ---
 	restoreStart := time.Now()
 	worker, restoreErr := waitForRestoredWorker(ctx, dynClient, r)
 	restoreTook := time.Since(restoreStart).Round(time.Second)
@@ -453,7 +375,6 @@ func runDynamoSnapshotTest(ctx *validators.Context, dynClient dynamic.Interface,
 		return restoreErr
 	}
 
-	// --- serve ---
 	answer, askErr := waitForAnswer(ctx, r)
 	if askErr != nil {
 		return askErr
@@ -463,11 +384,9 @@ func runDynamoSnapshotTest(ctx *validators.Context, dynClient dynamic.Interface,
 	return nil
 }
 
-// detectNvidiaRuntimeClass returns the nvidia RuntimeClass name (the one the GPU
-// Operator creates) when the cluster has it, else "". Without it the pods use the
-// node's default runtime. Only a RuntimeClass that is absent (NotFound) falls back
-// to the default: a read that was denied or failed says nothing about whether the
-// class exists, so it is an error rather than a silent change of runtime.
+// detectNvidiaRuntimeClass returns the nvidia RuntimeClass name when the cluster
+// has it, else "". Only NotFound falls back to the default runtime; a denied or
+// failed read is an error.
 func detectNvidiaRuntimeClass(ctx *validators.Context) (string, error) {
 	_, err := ctx.Clientset.NodeV1().RuntimeClasses().Get(ctx.Ctx, nvidiaRuntimeClassName, metav1.GetOptions{})
 	switch {
@@ -500,10 +419,8 @@ func runtimeClassPtr(name string) *string {
 }
 
 // buildDGD returns the DynamoGraphDeployment: a frontend and one vLLM worker
-// whose checkpoint Dynamo takes before the worker serves (WaitForCheckpoint). The
-// worker is confined to nodes (the device-plugin GPU nodes) and, when the caller
-// set one (validators.Context.NodeSelector, from AICR_NODE_SELECTOR), also to the
-// nodes that selector matches, so an override that names a node pool is honored.
+// whose checkpoint Dynamo takes before the worker serves. The worker is confined
+// to nodes and to the context's node selector, when set.
 func buildDGD(r *dgdRun, tolerations []corev1.Toleration, nodes []string, nodeSelector map[string]string) (*unstructured.Unstructured, error) {
 	env := []corev1.EnvVar{
 		{Name: "DYN_REQUEST_PLANE", Value: "tcp"},
@@ -604,10 +521,8 @@ func conditionsOf(obj *unstructured.Unstructured) map[string]condition {
 	return out
 }
 
-// sanitizeLine makes text that a controller or a pod supplied safe to quote on one
-// line of the validator's output: every control character, line breaks included,
-// becomes a space, so a message cannot start a line that looks like another
-// artifact section or result (CWE-117).
+// sanitizeLine replaces every control character, line breaks included, with a
+// space, so controller or pod text cannot forge a line of the output (CWE-117).
 func sanitizeLine(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
@@ -695,7 +610,7 @@ func getDGD(c context.Context, dynClient dynamic.Interface, r *dgdRun) (obj *uns
 func dgdPods(c context.Context, ctx *validators.Context, r *dgdRun) ([]corev1.Pod, error) {
 	pods, err := ctx.Clientset.CoreV1().Pods(r.run.namespace).List(c, metav1.ListOptions{LabelSelector: dgdNameLabel + "=" + dgdName})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to list the DynamoGraphDeployment pods", err)
 	}
 	return pods.Items, nil
 }
@@ -734,40 +649,42 @@ func frontendPod(pods []corev1.Pod) *corev1.Pod {
 }
 
 // checkpointKilledCapturePod reports whether the capture pod ended the way a
-// successful checkpoint ends it. Snapshot always terminates the checkpointed
-// process: the container exits 137 with reason Error, seconds before the
-// SnapshotJob completes and Dynamo reports the checkpoint ready. A different exit
-// code, or an OOM kill, is the engine failing.
+// successful checkpoint ends it: Snapshot terminates the checkpointed process, so
+// the container exits 137 with reason Error before Dynamo reports the checkpoint
+// ready. Another exit code, or an OOM kill, is the engine failing.
 func checkpointKilledCapturePod(pod *corev1.Pod) bool {
 	for _, cs := range pod.Status.ContainerStatuses {
-		if t := cs.State.Terminated; t != nil && t.ExitCode == 137 && t.Reason == "Error" {
+		if t := cs.State.Terminated; t != nil && t.ExitCode == checkpointCaptureExitCode && t.Reason == "Error" {
 			return true
 		}
 	}
 	return false
 }
 
-// podLastExit renders each container's previous termination, which is where a
-// crash-looping pod keeps its exit code.
-func podLastExit(pod *corev1.Pod) string {
+// terminatedSummary lists the containers whose state is terminated, as
+// "<name> exited <code> (<reason>): <message>", or "" when none is.
+func terminatedSummary(pod *corev1.Pod, last bool) string {
 	var parts []string
 	for _, cs := range pod.Status.ContainerStatuses {
-		if t := cs.LastTerminationState.Terminated; t != nil {
-			part := fmt.Sprintf("%s exited %d (%s)", cs.Name, t.ExitCode, sanitizeLine(t.Reason))
-			if t.Message != "" {
-				part += ": " + sanitizeLine(t.Message)
-			}
-			parts = append(parts, part)
+		state := cs.State.Terminated
+		if last {
+			state = cs.LastTerminationState.Terminated
 		}
+		if state == nil {
+			continue
+		}
+		part := fmt.Sprintf("%s exited %d (%s)", cs.Name, state.ExitCode, sanitizeLine(state.Reason))
+		if state.Message != "" {
+			part += ": " + sanitizeLine(state.Message)
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, "; ")
 }
 
-// trackFailedState keeps the clock of an unbroken stretch of the DGD's state
-// failed: it starts when the state is first seen as failed and restarts after any
-// other state. It runs on every DGD read (getDGD), whatever the wait is doing with
-// the result, so a recovery seen by one wait is not charged to the next. It
-// reports whether the DGD has now been failed for the whole grace period.
+// trackFailedState times an unbroken stretch of the DGD's state failed, restarting
+// after any other state, and reports whether it has lasted dgdFailedGrace. It runs
+// on every DGD read, so a recovery seen by one wait is not charged to the next.
 func (r *dgdRun) trackFailedState(dgd *unstructured.Unstructured) bool {
 	if state, _, _ := unstructured.NestedString(dgd.Object, "status", "state"); state != dgdStateFailed {
 		r.failedSince = time.Time{}
@@ -779,47 +696,45 @@ func (r *dgdRun) trackFailedState(dgd *unstructured.Unstructured) bool {
 	return time.Since(r.failedSince) >= dgdFailedGrace
 }
 
-// forbiddenError returns an ErrCodeUnauthorized error naming the verb and the
-// resource when err is a Forbidden, else nil: a denied read must be reported as
+// forbiddenListError returns an ErrCodeUnauthorized error naming the resource
+// when a list failed as Forbidden, else nil: a denied list must be reported as
 // the permission it lacks, not retried until a timeout hides it.
-func forbiddenError(err error, verb, resource, namespace string) error {
+func forbiddenListError(err error, resource, namespace string) error {
 	if !k8serrors.IsForbidden(err) {
 		return nil
 	}
 	return errors.Wrap(errors.ErrCodeUnauthorized, fmt.Sprintf(
-		"not permitted to %s %s in namespace %s: grant it to the validator", verb, resource, namespace), err)
+		"not permitted to list %s in namespace %s: grant it to the validator", resource, namespace), err)
 }
 
 // dgdFailure returns why the graph cannot reach the state the check waits for,
 // or "" while it may still: a DGD that stays failed, a failed checkpoint
-// SnapshotJob, or a pod that cannot start or has failed. A capture pod that the
-// checkpoint itself ended is not a failure, and once the checkpoint is ready
-// (checkpointReady) the capture pod no longer matters: it stays Failed until the
-// graph is deleted, and the SnapshotJob's own condition is the authority. A pod
-// the scheduler has not placed yet is not a failure either (a GPU may be freed on
-// the next poll); the wait's own timeout reports it. The error is set when the
-// check lacks the permission to look.
+// SnapshotJob, or a pod that cannot start or has failed. A capture pod the
+// checkpoint ended is not a failure, and once the checkpoint is ready the capture
+// pod is ignored. An unscheduled pod is left to the wait's own timeout. The error
+// is set when the check lacks the permission to look.
 func dgdFailure(c context.Context, ctx *validators.Context, dynClient dynamic.Interface, r *dgdRun, dgd *unstructured.Unstructured, checkpointReady bool) (string, error) {
 	pods, listErr := dgdPods(c, ctx, r)
-	if denied := forbiddenError(listErr, "list", "pods", r.run.namespace); denied != nil {
+	if denied := forbiddenListError(listErr, "pods", r.run.namespace); denied != nil {
 		return "", denied
 	}
 	return dgdFailureOfPods(c, ctx, dynClient, r, dgd, checkpointReady, pods, listErr == nil)
 }
 
-// dgdFailureOfPods is dgdFailure over a pod list the caller already took, so a
-// wait that also picks its verdict from that list judges both from one snapshot.
-// podsListed is false when the list failed for a reason other than a denial; the
-// pods are then not judged.
+// dgdFailureOfPods is dgdFailure over a pod list the caller took, so a wait
+// judges its verdict and the failure scan from one snapshot. podsListed is false
+// when the list failed for a reason other than a denial.
 func dgdFailureOfPods(c context.Context, ctx *validators.Context, dynClient dynamic.Interface, r *dgdRun, dgd *unstructured.Unstructured, checkpointReady bool, pods []corev1.Pod, podsListed bool) (string, error) {
 	if r.trackFailedState(dgd) {
 		return fmt.Sprintf("the DynamoGraphDeployment stayed failed for %s: %s", dgdFailedGrace, describeDGD(dgd)), nil
 	}
 	jobs, err := dynClient.Resource(snapshotJobGVR).Namespace(r.run.namespace).List(c, metav1.ListOptions{LabelSelector: dgdNameLabel + "=" + dgdName})
-	if denied := forbiddenError(err, "list", "snapshotjobs."+apiGroupNVIDIA, r.run.namespace); denied != nil {
+	if denied := forbiddenListError(err, "snapshotjobs."+apiGroupNVIDIA, r.run.namespace); denied != nil {
 		return "", denied
 	}
-	if err == nil {
+	if err != nil {
+		slog.Warn("could not list the checkpoint SnapshotJobs; judging the graph without them", "error", err)
+	} else {
 		for i := range jobs.Items {
 			if f, ok := conditionsOf(&jobs.Items[i])[snapshotJobFailed]; ok && f.Status == snapshotConditionTrue {
 				return fmt.Sprintf("Dynamo's checkpoint SnapshotJob %s failed (%s): %s", jobs.Items[i].GetName(), sanitizeLine(f.Reason), sanitizeLine(f.Message)), nil
@@ -842,7 +757,7 @@ func dgdFailureOfPods(c context.Context, ctx *validators.Context, dynClient dyna
 		}
 		if reason := podStuckReason(&pod); reason != "" && !strings.HasPrefix(reason, unschedulableReason) {
 			detail := ""
-			if last := podLastExit(&pod); last != "" {
+			if last := terminatedSummary(&pod, true); last != "" {
 				detail += "; last exit: " + last
 			}
 			if strings.Contains(reason, waitingReasonCrashLoopBackOff) {
@@ -877,7 +792,7 @@ func waitForCheckpoint(ctx *validators.Context, dynClient dynamic.Interface, r *
 			return true, nil
 		}
 		pods, listErr := dgdPods(c, ctx, r)
-		if denied := forbiddenError(listErr, "list", "pods", r.run.namespace); denied != nil {
+		if denied := forbiddenListError(listErr, "pods", r.run.namespace); denied != nil {
 			return false, denied
 		}
 		failure, failErr := dgdFailureOfPods(c, ctx, dynClient, r, obj, false, pods, listErr == nil)
@@ -922,7 +837,7 @@ func waitForRestoredWorker(ctx *validators.Context, dynClient dynamic.Interface,
 		}
 		lastDGD = obj
 		pods, listErr := dgdPods(c, ctx, r)
-		if denied := forbiddenError(listErr, "list", "pods", r.run.namespace); denied != nil {
+		if denied := forbiddenListError(listErr, "pods", r.run.namespace); denied != nil {
 			return false, denied // a denied list never recovers: name the permission now
 		}
 		if listErr != nil {
@@ -997,7 +912,7 @@ func snapshotRestoreFailure(pod *corev1.Pod) string {
 		}
 	}
 	if pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded {
-		return "the worker pod ended (" + podContainerStateSummary(pod) + "); a restored pod's container ends when the restored process does, and the restore proxy exits 112 when the pod's one restore was already used and 113 when it lost the restored process"
+		return fmt.Sprintf("the worker pod ended (%s); a restored pod's container ends when the restored process does, and the restore proxy exits %d when the pod's one restore was already used and %d when it lost the restored process", podContainerStateSummary(pod), restoreProxyUsedExitCode, restoreProxyLostExitCode)
 	}
 	return ""
 }
@@ -1048,22 +963,12 @@ func podsSummary(ctx *validators.Context, r *dgdRun) string {
 	return "\npods:" + b.String()
 }
 
-// podContainerStateSummary renders each container's terminated state.
+// podContainerStateSummary describes the pod's terminated containers.
 func podContainerStateSummary(pod *corev1.Pod) string {
-	var parts []string
-	for _, cs := range pod.Status.ContainerStatuses {
-		if t := cs.State.Terminated; t != nil {
-			part := fmt.Sprintf("%s exited %d (%s)", cs.Name, t.ExitCode, sanitizeLine(t.Reason))
-			if t.Message != "" {
-				part += ": " + sanitizeLine(t.Message)
-			}
-			parts = append(parts, part)
-		}
+	if summary := terminatedSummary(pod, false); summary != "" {
+		return summary
 	}
-	if len(parts) == 0 {
-		return noContainerState
-	}
-	return strings.Join(parts, "; ")
+	return noContainerState
 }
 
 // podLogs returns the tail of the pod's main container logs (those of the
@@ -1127,7 +1032,7 @@ func waitForAnswer(ctx *validators.Context, r *dgdRun) (string, error) {
 		return "", errors.New(errors.ErrCodeTimeout, fmt.Sprintf(
 			"the frontend gave no answer in %s (last problem: %s)", dgdAnswerTimeout, lastProblem))
 	}
-	return "", err
+	return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed waiting for the frontend's answer")
 }
 
 // normalizeAnswer lowercases a one-word answer and drops the whitespace,
@@ -1166,7 +1071,7 @@ func truncate(s string) string {
 // execFrontendCompletion posts the chat completion from inside the frontend pod
 // and returns the response body.
 func execFrontendCompletion(c context.Context, ctx *validators.Context, r *dgdRun, frontend *corev1.Pod) (string, error) {
-	execCtx, cancel := context.WithTimeout(c, 90*time.Second)
+	execCtx, cancel := context.WithTimeout(c, dgdFrontendExecTimeout)
 	defer cancel()
 	res, err := execPodCommand(execCtx, ctx, r.run.namespace, frontend.Name,
 		[]string{gatewayTrafficInterpreter, "-c", frontendScript, dgdModel, dgdPrompt, fmt.Sprint(dgdFrontendPort)},
@@ -1185,15 +1090,11 @@ func execFrontendCompletion(c context.Context, ctx *validators.Context, r *dgdRu
 	return res.Stdout, nil
 }
 
-// deleteDGDAndWait deletes the DGD this run created and waits, within the teardown
-// timeout, for Dynamo to finish removing it and its pods, which frees the GPU. It
-// returns the text recorded as evidence; a timeout is reported there, and the
-// namespace cleanup that follows removes whatever is left.
-//
-// The delete is bound to this run twice: it happens only if the run attempted to
-// create a DGD, and only for a DGD that carries the run's ownership label, by UID,
-// so a Create whose response was lost still gets cleaned up while a replacement
-// object (or a DGD in a namespace the run never owned) is left alone.
+// deleteDGDAndWait deletes the DGD this run created and waits for Dynamo to remove
+// it and its pods, which frees the GPU. It returns the text recorded as evidence;
+// the namespace cleanup that follows removes whatever is left. It deletes only if
+// the run attempted a Create, and only a DGD with the run's ownership label, by
+// UID.
 func deleteDGDAndWait(ctx *validators.Context, dynClient dynamic.Interface, r *dgdRun) string {
 	if r.run.nsForeign || r.run.nsNeverCreated || !r.createAttempted {
 		return "this run created no DynamoGraphDeployment: nothing to delete"

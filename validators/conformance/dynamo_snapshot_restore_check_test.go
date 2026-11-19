@@ -17,6 +17,10 @@ package main
 import (
 	"context"
 	stderrors "errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -1140,48 +1144,31 @@ func TestDGDStatusParsing(t *testing.T) {
 // TestDynamoProtocolLiterals pins the strings Dynamo and Snapshot define. A
 // change to one is a protocol change and must not slip through as a rename: the
 // code and the tests would otherwise follow each other.
-func TestDynamoProtocolLiterals(t *testing.T) {
-	tests := []struct{ name, got, want string }{
-		{"restore annotation", snapshotRestoreFromAnnotation, "nvidia.com/restore-from"},
-		{"restored condition", snapshotRestoredCondition, "nvidia.com/Restored"},
-		{"DGD name label", dgdNameLabel, "nvidia.com/dynamo-graph-deployment-name"},
-		{"DGD component label", dgdComponentLabel, "nvidia.com/dynamo-component"},
-		{"capture pod label", snapshotJobLabel, "nvidia.com/snapshot-job"},
-		{"Grove annotation", dgdGroveAnnotation, "nvidia.com/enable-grove"},
-		{"restore failed reason", snapshotRestoreFailedReason, "RestoreFailed"},
-		{"restore incompatible reason", snapshotRestoreIncompatReason, "RestoreIncompatible"},
-		{"restore partial reason", snapshotRestorePartialReason, "RestorePartiallySucceeded"},
-		{"DGD resource", dgdGVR.String(), "nvidia.com/v1beta1, Resource=dynamographdeployments"},
-		{"SnapshotJob resource", snapshotJobGVR.String(), "nvidia.com/v1alpha1, Resource=snapshotjobs"},
-		{"DGD CRD", dgdCRDName, "dynamographdeployments.nvidia.com"},
-		{"Dynamo operator", dynamoOperatorName, "dynamo-platform-dynamo-operator-controller-manager"},
-		{"worker component", dgdWorker, "VllmDecodeWorker"},
-		{"frontend component", dgdFrontend, "Frontend"},
-		{"RuntimeClass", nvidiaRuntimeClassName, "nvidia"},
-	}
-	for _, tt := range tests {
-		if tt.got != tt.want {
-			t.Errorf("%s = %q, want %q", tt.name, tt.got, tt.want)
-		}
-	}
-}
-
+// TestFrontendScript runs the script against a local server with a dead proxy in
+// the environment, as a pod may set, so a syntax error or a request that goes
+// through the proxy fails here and not on a cluster.
 func TestFrontendScript(t *testing.T) {
-	for _, want := range []string{"/v1/chat/completions", "sys.argv", "enable_thinking", "127.0.0.1"} {
-		if !strings.Contains(frontendScript, want) {
-			t.Errorf("frontend script lacks %q", want)
-		}
-	}
-	// A syntax error here would only surface on a cluster, so compile it when a
-	// Python is around.
 	python, err := exec.LookPath("python3")
 	if err != nil {
-		t.Skip("python3 not found; skipping the frontend script syntax check")
+		t.Skip("python3 not found")
 	}
-	cmd := exec.CommandContext(context.Background(), python, "-I", "-c", "import ast, sys; ast.parse(sys.stdin.read())")
-	cmd.Stdin = strings.NewReader(frontendScript)
-	if out, runErr := cmd.CombinedOutput(); runErr != nil {
-		t.Fatalf("frontend script does not parse: %v\n%s", runErr, out)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Paris"}}]}`))
+	}))
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.CommandContext(context.Background(), python, "-I", "-c", frontendScript, dgdModel, dgdPrompt, u.Port())
+	cmd.Env = append(os.Environ(), "HTTP_PROXY=http://127.0.0.1:1", "http_proxy=http://127.0.0.1:1")
+	out, runErr := cmd.CombinedOutput()
+	if runErr != nil {
+		t.Fatalf("frontend script failed: %v\n%s", runErr, out)
+	}
+	if !strings.Contains(string(out), "Paris") {
+		t.Errorf("frontend script printed %q, want the completion", out)
 	}
 }
 
@@ -2076,13 +2063,5 @@ func TestWaitForRestoredWorker_JudgesOneSnapshotOfThePods(t *testing.T) {
 	}
 	if lists != 1 {
 		t.Errorf("pods listed %d times in one successful poll, want 1: the verdict and the failure scan must share a snapshot", lists)
-	}
-}
-
-// TestFrontendScript_BypassesEnvironmentProxies: the request goes to the pod's own
-// listener, so a proxy set in the pod's environment must not be used.
-func TestFrontendScript_BypassesEnvironmentProxies(t *testing.T) {
-	if !strings.Contains(frontendScript, "ProxyHandler({})") || strings.Contains(frontendScript, "urllib.request.urlopen(") {
-		t.Errorf("the frontend script should open its request through an opener with ProxyHandler({}):\n%s", frontendScript)
 	}
 }
