@@ -118,7 +118,10 @@ pods.
 ### Alerts
 
 Example Prometheus rules; adjust the thresholds, and add the `severity` and
-routing labels your Alertmanager expects:
+routing labels your Alertmanager expects. Each rule takes the `max()` across
+the operator's replicas and keeps `namespace`, which names the installation;
+when one Prometheus scrapes several clusters, add the label that names the
+cluster to every `by (...)`, or one cluster's values hide another's:
 
 ```yaml
 groups:
@@ -126,24 +129,29 @@ groups:
     rules:
       # Progress needs someone. Approvals have their own alert below.
       - alert: AICROperatorRuntimeStalled
-        expr: max by (reason) (aicr_operator_runtime_stalled{reason!~"AwaitingApproval|AwaitingAcknowledgement"}) == 1
+        expr: max by (namespace, reason) (aicr_operator_runtime_stalled{reason!~"AwaitingApproval|AwaitingAcknowledgement"}) == 1
         for: 15m
         annotations:
           summary: "The AICR runtime is Stalled ({{ $labels.reason }}); see docs/operator/troubleshooting.md"
       - alert: AICROperatorApprovalPending
-        expr: max(aicr_operator_rollout_approval_wait_seconds) > 4 * 3600
+        expr: max by (namespace) (aicr_operator_rollout_approval_wait_seconds) > 4 * 3600
         annotations:
           summary: "An AICR rollout has waited over 4 hours for approval"
       # A new installation fires this until its first plan resolves, and so
       # does an operator with no ClusterRuntime: 0 reads as long ago.
       - alert: AICROperatorNotResolved
-        expr: time() - max(aicr_operator_runtime_resolved_timestamp_seconds) > 3600
+        expr: time() - max by (namespace) (aicr_operator_runtime_resolved_timestamp_seconds) > 3600
         for: 10m
         annotations:
           summary: "The AICR runtime has not been resolved for its current generation in over an hour"
-      # NOT_FOUND includes charts mirrored again; CANCELED is a shutdown.
+      # reuse_chart with NOT_FOUND is a chart mirrored again; CANCELED is a
+      # shutdown.
       - alert: AICROperatorRegistryFailing
-        expr: sum by (operation, code) (increase(aicr_operator_registry_failures_total{code!~"NOT_FOUND|CANCELED"}[15m])) > 0
+        expr: |
+          sum by (namespace, operation, code) (
+            increase(aicr_operator_registry_failures_total{code!="CANCELED"}[15m])
+              unless on (operation, code) aicr_operator_registry_failures_total{operation="reuse_chart", code="NOT_FOUND"}
+          ) > 0
         for: 15m
         annotations:
           summary: "AICR registry operation {{ $labels.operation }} keeps failing with {{ $labels.code }}"
