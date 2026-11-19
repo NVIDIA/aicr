@@ -276,13 +276,23 @@ recipe-evidence bundle out.
   gh workflow run uat-run.yaml -f reservation=gcp-h100 -f lifecycle=daytime-up -f skip_tests=true
   ```
 
+  After the run succeeds, repeat the GCP discovery and `get-credentials` steps
+  from [Reaching the daytime cluster](../docs/contributor/uat.md#reaching-the-daytime-cluster):
+  the check above ran before this cluster existed, so `kubectl` does not point
+  at it yet.
+
   This cluster takes `gcp-h100`'s only daytime slot, so the rotation's
   inference `daytime-up` is refused until it is gone.
 
-  > Tear it down with `-f lifecycle=daytime-down` as soon as the demo is done;
-  > otherwise the 02:00 UTC evening teardown removes it. `daytime-down` removes
-  > whichever daytime cluster holds `gcp-h100`, so run it only on the cluster
-  > you stood up.
+  > Tear it down with `-f lifecycle=daytime-down` as soon as the demo is done,
+  > and in any case before 04:00 UTC: the nightly batch starts then, and its
+  > pre-batch guard refuses both `gcp-h100` nightly runs while a daytime
+  > cluster holds the reservation. The 02:00 UTC evening teardown removes only
+  > a cluster that is up at 02:00. `daytime-down` removes whichever daytime
+  > cluster holds `gcp-h100` and does not compare run IDs, so first repeat the
+  > discovery and confirm the held cluster is `aicr-uat-day-gh1-0-<run_id>`
+  > with your `daytime-up` run's ID. If your cluster is already gone, do not
+  > dispatch it: a cluster holding the reservation now is someone else's.
 
   The cluster has 2× `a3-megagpu-8g` (H100, 8 GPUs/node) GPU nodes labeled
   `nodeGroup=gpu-worker` with taint `dedicated=gpu-workload:NoSchedule`, and
