@@ -106,9 +106,9 @@ func checkNCCLAllReduceBWVariant(ctx *validators.Context, variant ncclVariant) e
 // performance.checks and declare its constraint, and the combination to be
 // qualified for exactly this variant, so a recipe whose CRE check would not run
 // or would only skip keeps its TrainJob coverage, and a variant the CRE
-// measurement does not cover keeps running. A CRE check the
-// caller skipped with --skip-check is not declared in the input the validators
-// read (pkg/validator withholds its constraint), so it supersedes nothing.
+// measurement does not cover keeps running. A CRE check the caller skipped with
+// --skip-check is not declared in the input the validators read (pkg/validator
+// withholds its constraint), so it supersedes nothing.
 func creSupersedesTrainJobNCCL(ctx *validators.Context, variant ncclVariant) bool {
 	if ctx.ValidationInput == nil {
 		return false

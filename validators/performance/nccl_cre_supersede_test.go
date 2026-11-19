@@ -44,6 +44,14 @@ func supersedeCtx(
 	}
 }
 
+// withCheck lists a check without declaring its constraint, the shape
+// --skip-check leaves for a skipped CRE check.
+func withCheck(ctx *validators.Context, name string) *validators.Context {
+	perf := ctx.ValidationInput.Config.Performance
+	perf.Checks = append(perf.Checks, name)
+	return ctx
+}
+
 // withoutChecks drops the named checks from ctx while keeping their constraints.
 func withoutChecks(ctx *validators.Context, names ...string) *validators.Context {
 	perf := ctx.ValidationInput.Config.Performance
@@ -136,6 +144,12 @@ func TestCRESupersedesTrainJobNCCL(t *testing.T) {
 			ctx: withoutChecks(supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorH100, cre),
 				checkNameCRENCCLAllReduceBW),
 			variant: variantDefault,
+			want:    false,
+		},
+		{
+			name:    "gb300 CRE check listed with its constraint withheld keeps the nvls variant on TrainJob",
+			ctx:     withCheck(supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorGB300, nvls), checkNameCRENCCLAllReduceBW),
+			variant: variantNVLS,
 			want:    false,
 		},
 		{
