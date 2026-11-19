@@ -562,7 +562,13 @@ NVLS path, so `nccl-cre-all-reduce-bw` stands in for
 `nccl-all-reduce-bw-nvls`. `nccl-cre-all-reduce-bw-net` is the same run with
 NVLS and MNNVL disabled, so its peak is the EFA path alone, and it stands in for
 `nccl-all-reduce-bw-net`. The inherited TrainJob checks stay in the recipe but
-are reported as skipped (`superseded-by-cre`). The net floor is 30, below the 40
+are reported as skipped (`superseded-by-cre`). A CRE NCCL check supersedes its
+TrainJob check only when the recipe both lists it in `performance.checks` and
+declares its constraint, on a combination qualified for that variant; a
+constraint declared without the check leaves the TrainJob check running. The
+same rule covers `eks` x `h100`: a recipe that opts into
+`nccl-cre-all-reduce-bw` there skips `nccl-all-reduce-bw` as
+`superseded-by-cre`. The net floor is 30, below the 40
 the TrainJob check holds: on the newer `nccl-tests` image CRE selects (NCCL
 2.31.2, aws-ofi-nccl 1.21.1) the EFA-only path measures about 31 GB/s, against
 about 45 on the image the TrainJob check uses, and the NVCRE team is treating
@@ -617,15 +623,23 @@ are the images the catalog selects on `eks` x `h100`, at the digests
 `recipes/components/nvcre/workload-images.yaml` records for the CRE version
 the registry pins, and the checks submit them whatever CRE version the cluster
 runs: the EFA `nccl-tests` image for `nccl-cre-all-reduce-bw`, and
-`nvcr.io/nvidia/pytorch:25.08-py3` for `cre-training-goodput`. With the pin,
+`nvcr.io/nvidia/pytorch:25.08-py3` for `cre-training-goodput`. The `eks` x
+`gb300` entries of both NCCL checks pin a newer `nccl-tests` image (NCCL
+2.31.2) recorded in `recipes/components/nvcre/workload-images-gb300.yaml`
+instead. With the pin,
 the NCCL launcher's SSH-permissions init container also runs `nccl-tests`
 rather than `nvcr.io/nvidia/pytorch:26.01-py3`, so the NCCL check no longer
-pulls that image. A mirror for a disconnected cluster has to serve these two
-images at the recorded digests.
+pulls that image. A mirror for a disconnected cluster has to serve the
+images its combination pins at the recorded digests:
+`workload-images.yaml` for `eks` x `h100`, and `workload-images-gb300.yaml`
+for `eks` x `gb300`.
 
 #### Relation to the TrainJob check
 
-On `eks` x `h100`, `nccl-cre-all-reduce-bw`
+On `eks` x `h100`, a recipe that runs `nccl-cre-all-reduce-bw` skips
+`nccl-all-reduce-bw` as `superseded-by-cre`, so one validation run reports
+only the CRE result. The comparison below predates that supersession; to
+repeat it, run each check in a separate validation. `nccl-cre-all-reduce-bw`
 reads 1.65 GB/s (0.34%) higher than `nccl-all-reduce-bw` on the same two nodes:
 six back-to-back pairs on NVCRE v0.8.2 gave 486.76 to 489.01 GB/s for the
 TrainJob check and 489.63 to 490.03 GB/s for the CRE check, with a per-pair
@@ -1067,7 +1081,8 @@ Three properties make it a scoping tool rather than a way to hide a failure:
 Skipping a CRE NCCL check (`nccl-cre-all-reduce-bw` or
 `nccl-cre-all-reduce-bw-net`) also ends its supersession: the validators no
 longer see that check's constraint, so the TrainJob check it replaces
-(`nccl-all-reduce-bw-nvls` or `nccl-all-reduce-bw-net`) runs instead of skipping
+(`nccl-all-reduce-bw-nvls` or `nccl-all-reduce-bw-net` on `eks` x `gb300`,
+`nccl-all-reduce-bw` on `eks` x `h100`) runs instead of skipping
 as `superseded-by-cre`. A lane without `nvcre` therefore falls back to TrainJob
 coverage rather than measuring nothing.
 
