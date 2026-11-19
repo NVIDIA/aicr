@@ -61,6 +61,10 @@ const (
 	// validators/performance rather than gated here.
 	CRENCCLAllReduceBWCheckName = "nccl-cre-all-reduce-bw"
 
+	// CRENCCLAllReduceBWNetCheckName is the catalog name of the same check run
+	// with NVLS and MNNVL disabled, so it measures the EFA/NET path alone.
+	CRENCCLAllReduceBWNetCheckName = "nccl-cre-all-reduce-bw-net"
+
 	// CRETrainingGoodputCheckName is the catalog name of the CRE-driven
 	// training goodput check (Certification). It opts in and records its
 	// qualified combinations the same way, and the catalog entry it drives

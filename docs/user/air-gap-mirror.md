@@ -371,8 +371,8 @@ rewrite, such as the NCCL runtime image (override it with
 probe image of the `driver-runtime-management` and `workload-sandboxing`
 conformance checks (override it with `AICR_DRIVER_RUNTIME_IMAGE` and
 `AICR_SANDBOX_PROBE_IMAGE`, each a full reference to your copy); see
-[Validation](validation.md). The opt-in CRE checks `nccl-cre-all-reduce-bw`
-and `cre-training-goodput` pull their workload images by digest with no
+[Validation](validation.md). The opt-in CRE checks `nccl-cre-all-reduce-bw`,
+`nccl-cre-all-reduce-bw-net` and `cre-training-goodput` pull their workload images by digest with no
 override variable, so mirror them at the digests
 `recipes/components/nvcre/workload-images.yaml` records; see the CRE section
 of [Validation](validation.md). Their references keep the `public.ecr.aws` and

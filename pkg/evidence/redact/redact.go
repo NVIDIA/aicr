@@ -81,7 +81,8 @@ const (
 	//   - v10 added the resultSchema stamp naming the result contract the
 	//     validator image spoke.
 	//   - v11 added the no-metrics-backend skipReason code.
-	PolicyVersion = "v11"
+	//   - v12 added the superseded-by-cre skipReason code.
+	PolicyVersion = "v12"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -256,6 +257,7 @@ var ctrfSkipReasons = []string{
 	"slurm-managed-gpus",       // GPUs are allocated by Slurm, not the Kubernetes scheduler
 	"simulated-nodes",          // the workload runs on KWOK simulated nodes
 	"no-metrics-backend",       // telemetry goes to a backend the check has no query URL for
+	"superseded-by-cre",        // the recipe's qualified CRE NCCL check measures this bandwidth instead
 }
 
 // ctrfGPUAllocationPolicies holds the pkg/validator/v1 GPUAllocationPolicy*

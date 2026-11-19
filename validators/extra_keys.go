@@ -99,6 +99,7 @@ const (
 	SkipReasonSlurmManagedGPUs      = "slurm-managed-gpus"
 	SkipReasonSimulatedNodes        = "simulated-nodes"
 	SkipReasonNoMetricsBackend      = "no-metrics-backend"
+	SkipReasonSupersededByCRE       = "superseded-by-cre"
 )
 
 // SkipWithReason publishes code as the skip reason and returns Skip(reason).
