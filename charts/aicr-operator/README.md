@@ -95,6 +95,9 @@ context; the schema rejects unknown keys.
 | `operator.nodeSelector` | `{}` | Optional | Node selector for the operator pod |
 | `operator.tolerations` | `[]` | Optional | Tolerations for the operator pod |
 | `operator.affinity` | `{}` | Optional | Affinity for the operator pod |
+| `operator.podMonitor.enabled` | `false` | Optional | Create a Prometheus Operator `PodMonitor` for the metrics port. It is created only while the cluster serves the `PodMonitor` kind, so on a new cluster run `helm upgrade` again after the recipe installs `prometheus-operator-crds`; `NOTES.txt` says when it was skipped |
+| `operator.podMonitor.labels` | `{}` | With `operator.podMonitor.enabled` | Extra labels on the `PodMonitor`, to match your Prometheus's `podMonitorSelector`. The stock AICR Prometheus keeps only the series its consumers need, so point this at your own |
+| `operator.podMonitor.interval` | `""` | Optional | Scrape interval, such as `30s`; empty keeps the Prometheus default |
 | `engine.type` | `ArgoCD` | No | The supported engine; Flux follows |
 | `engine.namespace` | `argocd` | When Argo CD runs elsewhere | Argo CD's control namespace |
 | `engine.project` | `aicr` | Optional | The AppProject the chart creates and every owned Application uses |
@@ -139,6 +142,7 @@ longer writes `argocd-cm`
 | Policies `aicr-operator-state` and `aicr-operator-approval` and their bindings | Kept; plans and rollouts stay protected while no operator runs |
 | Policies `aicr-operator-applications`, `aicr-operator-application-deletes`, `aicr-operator-jobs`, `aicr-operator-rollout-outcome`, `aicr-operator-runtime` | Deleted with the operator they constrain |
 | Deployment, ServiceAccounts, roles and bindings | Deleted |
+| With `operator.podMonitor.enabled`: the `PodMonitor` | Deleted |
 
 With `validation.enabled`, deployment validation also needs
 `aicr.validatorImages`: AICR's validator images for `aicr.version`, each as

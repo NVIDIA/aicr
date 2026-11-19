@@ -56,7 +56,8 @@ const maxReferrerPages = maxReferrers
 // the operator's binding, are not signatures. Each referrer is judged by its
 // own manifest, since registries differ in the artifact type they list, and
 // each bundle is read bounded and verified against its digest.
-func (c *Client) SigstoreBundles(ctx context.Context, r Repository, subject string) ([][]byte, error) {
+func (c *Client) SigstoreBundles(ctx context.Context, r Repository, subject string) (_ [][]byte, err error) {
+	defer observe(opSigstoreBundles, &err)
 	if !digestPattern.MatchString(subject) {
 		return nil, invalid("signature subject %q is not a sha256 digest", subject)
 	}
@@ -114,7 +115,8 @@ func (c *Client) SigstoreBundles(ctx context.Context, r Repository, subject stri
 }
 
 // Describe returns the descriptor of the manifest with digest dgst.
-func (c *Client) Describe(ctx context.Context, r Repository, dgst string) (ocispec.Descriptor, error) {
+func (c *Client) Describe(ctx context.Context, r Repository, dgst string) (_ ocispec.Descriptor, err error) {
+	defer observe(opDescribe, &err)
 	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
 	defer cancel()
 	repo, err := c.repository(r)
@@ -134,8 +136,9 @@ func (c *Client) Describe(ctx context.Context, r Repository, dgst string) (ocisp
 // timestamps: the same statement pushes to the same digest, and an existing
 // tag holding other content is a conflict.
 func (c *Client) PushStatement(ctx context.Context, r Repository, tag, artifactType string, statement []byte,
-	subject ocispec.Descriptor) (string, error) {
+	subject ocispec.Descriptor) (_ string, err error) {
 
+	defer observe(opPushStatement, &err)
 	layer := ocispec.Descriptor{MediaType: StatementMediaType, Digest: digest.FromBytes(statement), Size: int64(len(statement))}
 	manifest, err := json.Marshal(ocispec.Manifest{
 		Versioned:    specs.Versioned{SchemaVersion: 2},
@@ -159,7 +162,8 @@ func (c *Client) PushStatement(ctx context.Context, r Repository, tag, artifactT
 
 // PullStatement reads the statement an artifact pushed by PushStatement
 // carries, verifying it against the manifest's layer digest.
-func (c *Client) PullStatement(ctx context.Context, r Repository, dgst string) ([]byte, ocispec.Manifest, error) {
+func (c *Client) PullStatement(ctx context.Context, r Repository, dgst string) (_ []byte, _ ocispec.Manifest, err error) {
+	defer observe(opPullStatement, &err)
 	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
 	defer cancel()
 	repo, err := c.repository(r)

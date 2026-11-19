@@ -2,6 +2,12 @@ The AICR Operator runs in {{ .Release.Namespace }} with AICR {{ .Values.aicr.ver
 Runtime registry: {{ include "aicr-operator.registry" . }}{{ if eq .Values.registry.mode "inCluster" }} (in-cluster; its login and volume are kept on uninstall){{ end }}
 
 Next: create the ClusterRuntime named "cluster" (docs/operator/api.md).
+{{- if and (.Values.operator.podMonitor | default dict).enabled (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PodMonitor")) }}
+
+operator.podMonitor.enabled is set, but this cluster does not serve the
+PodMonitor kind, so no PodMonitor was created. Run helm upgrade again once
+prometheus-operator-crds is installed.
+{{- end }}
 
 helm uninstall keeps the CRDs, runtime and rollout objects, namespaces, the
 {{ .Values.engine.project }} AppProject, repo-creds and the operator-state policy, so
