@@ -373,8 +373,10 @@ conformance checks (override it with `AICR_DRIVER_RUNTIME_IMAGE` and
 `AICR_SANDBOX_PROBE_IMAGE`, each a full reference to your copy); see
 [Validation](validation.md). The opt-in CRE checks `nccl-cre-all-reduce-bw`,
 `nccl-cre-all-reduce-bw-net` and `cre-training-goodput` pull their workload images by digest with no
-override variable, so mirror them at the digests
-`recipes/components/nvcre/workload-images.yaml` records; see the CRE section
+override variable, so mirror them at the digests the closure for your
+combination records: `recipes/components/nvcre/workload-images.yaml` for
+`eks` x `h100`, and `recipes/components/nvcre/workload-images-gb300.yaml` for
+`eks` x `gb300` (`gb300-eks-ubuntu-training-kubeflow`); see the CRE section
 of [Validation](validation.md). Their references keep the `public.ecr.aws` and
 `nvcr.io` hosts, so a disconnected cluster also needs its nodes' container
 runtime to redirect both registries to your mirror, for example with a
