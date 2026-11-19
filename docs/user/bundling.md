@@ -762,14 +762,18 @@ toggling the component).
 manifest-only or Kustomize component has its templates rendered when the
 bundle is built, so a value supplied at install time through
 `cluster-values.yaml` reaches no template. `aicr bundle` therefore rejects
-`--dynamic` on such a component under the `helm`, `helmfile`, `terraform`
-and `fleet` deployers, as `argocd-helm` already does. For a manifest-only
-component, set the value at bundle time instead, with `--set`,
-`--set-json`, or the node scheduling flags such as `--system-node-selector`
-and `--system-node-toleration`. Component values do not reach a Kustomize
-build, so for a Kustomize component change the setting in its Kustomize
-source. A
-component that installs an upstream chart keeps `--dynamic`, including
+`--dynamic` on a manifest-only component under the `helm`, `helmfile`,
+`terraform` and `fleet` deployers, and on a Kustomize component under
+`helm`, `helmfile` and `fleet`, as `argocd-helm` already does. (`terraform`
+and `flux` reject a Kustomize component whether or not it has `--dynamic`.)
+
+- **Manifest-only component:** set the value at bundle time instead, with
+  `--set`, `--set-json`, or the node scheduling flags such as
+  `--system-node-selector` and `--system-node-toleration`.
+- **Kustomize component:** component values do not reach a Kustomize
+  build, so change the setting in its Kustomize source.
+
+A component that installs an upstream chart keeps `--dynamic`, including
 one that also carries manifests.
 
 A component whose presence a configuration profile owns cannot be removed
