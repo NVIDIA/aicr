@@ -1336,17 +1336,20 @@ func TestWrite_DynamicPathsOnBundleTimeRender(t *testing.T) {
 		component localformat.Component
 		manifests map[string][]byte
 		wantErr   bool
+		wantMsg   string // remedy the error must point to
 	}{
 		{
 			name:      "manifest-only with dynamic paths",
 			component: localformat.Component{Name: "c", Namespace: "ns", DynamicPaths: []string{"systemNodeSelector"}},
 			manifests: manifest,
 			wantErr:   true,
+			wantMsg:   "--set",
 		},
 		{
 			name:      "kustomize with dynamic paths",
 			component: localformat.Component{Name: "c", Namespace: "ns", Path: kustomizePath, DynamicPaths: []string{"image.tag"}},
 			wantErr:   true,
+			wantMsg:   "Kustomize source",
 		},
 		{
 			name:      "manifest-only without dynamic paths",
@@ -1387,6 +1390,9 @@ func TestWrite_DynamicPathsOnBundleTimeRender(t *testing.T) {
 			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 			if !strings.Contains(err.Error(), `component "c"`) || !strings.Contains(err.Error(), tt.component.DynamicPaths[0]) {
 				t.Errorf("error should name the component and path, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error should point to %q, got: %v", tt.wantMsg, err)
 			}
 		})
 	}

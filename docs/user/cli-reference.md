@@ -2869,7 +2869,7 @@ helm upgrade --install gpu-operator ... \
 
 Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
 
-A manifest-only or Kustomize component has its templates rendered when the bundle is built, so `--dynamic` on it is rejected; set its values with `--set` or `--set-json` instead.
+A manifest-only or Kustomize component has its templates rendered when the bundle is built, so `--dynamic` on it is rejected. Set a manifest-only component's values with `--set` or `--set-json` instead; for a Kustomize component, change its Kustomize source, since component values do not reach the build.
 
 **Argo CD deployer behavior:**
 

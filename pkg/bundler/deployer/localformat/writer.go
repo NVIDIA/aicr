@@ -702,9 +702,17 @@ func rejectBundleTimeDynamicPaths(opts Options) error {
 		if classify(c, opts.ComponentPostManifests[c.Name]) != KindLocalHelm {
 			continue
 		}
+		paths := strings.Join(c.DynamicPaths, ", ")
+		if c.Tag != "" || c.Path != "" {
+			// Component values do not reach a kustomize build, so --set is
+			// no remedy here either.
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("--dynamic is not supported for Kustomize component %q (paths: %s): its manifests come from a kustomize build when the bundle is built, which component values do not reach; change the setting in the Kustomize source instead",
+					c.Name, paths))
+		}
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("--dynamic is not supported for component %q (paths: %s): its manifests are rendered when the bundle is built, so an install-time value reaches no template; set the value at bundle time instead, with --set, --set-json, or the node scheduling flags such as --system-node-selector and --system-node-toleration",
-				c.Name, strings.Join(c.DynamicPaths, ", ")))
+				c.Name, paths))
 	}
 	return nil
 }
