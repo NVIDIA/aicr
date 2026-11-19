@@ -16,6 +16,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"aicr.run/pkg/errors"
@@ -101,18 +102,26 @@ func checkNCCLAllReduceBWVariant(ctx *validators.Context, variant ncclVariant) e
 // creSupersedesTrainJobNCCL reports whether the recipe's CRE NCCL check stands
 // in for the given TrainJob variant. An overlay cannot drop a check it
 // inherits, so a recipe that moves to CRE still lists the TrainJob check; this
-// is where it stops running. It requires the recipe to declare the CRE
-// constraint and the combination to be qualified for exactly this variant, so a
-// recipe whose CRE check would only skip keeps its TrainJob coverage, and a
-// variant the CRE measurement does not cover keeps running. A CRE check the
-// caller skipped with --skip-check is not declared in the input the validators
-// read (pkg/validator withholds its constraint), so it supersedes nothing.
+// is where it stops running. It requires the recipe to list the CRE check in
+// performance.checks and declare its constraint, and the combination to be
+// qualified for exactly this variant, so a recipe whose CRE check would not run
+// or would only skip keeps its TrainJob coverage, and a variant the CRE
+// measurement does not cover keeps running. A CRE check the caller skipped with
+// --skip-check is not declared in the input the validators read (pkg/validator
+// withholds its constraint), so it supersedes nothing.
 func creSupersedesTrainJobNCCL(ctx *validators.Context, variant ncclVariant) bool {
 	if ctx.ValidationInput == nil {
 		return false
 	}
 	criteria := ctx.ValidationInput.Criteria
+	var checks []string
+	if perf := ctx.ValidationInput.Config.Performance; perf != nil {
+		checks = perf.Checks
+	}
 	for _, checkName := range creNCCLCheckNames {
+		if !slices.Contains(checks, checkName) {
+			continue
+		}
 		if _, declared := findPerformanceConstraint(ctx, checkName); !declared {
 			continue
 		}

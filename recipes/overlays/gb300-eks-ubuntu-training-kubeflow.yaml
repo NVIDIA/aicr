@@ -79,6 +79,7 @@ spec:
         - name: nccl-cre-all-reduce-bw
           value: ">= 700"
         - name: nccl-cre-all-reduce-bw-net
+          # TODO(#3911): raise back to ">= 40" once the EFA regression is fixed.
           value: ">= 30"
     conformance:
       checks:
