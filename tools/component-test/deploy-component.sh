@@ -282,10 +282,8 @@ fi
 log_info "Recipe:"
 cat "${WORK_DIR}/recipe.yaml"
 
-# Per-component fixture: tools/component-test/fixtures/<component>.sh, when
-# present, is sourced here. It may create test-only cluster resources and append
-# to BUNDLE_EXTRA_ARGS, for a component whose real inputs (such as shared storage)
-# the bare Kind cluster cannot provide. Most components have none.
+# Optional per-component fixture (tools/component-test/fixtures/<component>.sh):
+# may create test-only resources and append to BUNDLE_EXTRA_ARGS.
 component_fixture="${SCRIPT_DIR}/fixtures/${COMPONENT}.sh"
 if [[ -f "$component_fixture" ]]; then
     log_info "Applying component fixture ${component_fixture#"${REPO_ROOT}"/}"

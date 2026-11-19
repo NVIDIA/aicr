@@ -165,9 +165,7 @@ var stockRenderOptIns = []stockRenderOptIn{
 		covers: []string{"nktp"},
 	},
 	{
-		// No stock recipe selects snapshot yet. The opt-in dynamo-snapshot mixin
-		// adds it to a Dynamo leaf, ordered ahead of dynamo-platform, and turns
-		// on the Dynamo operator's checkpoint feature.
+		// No stock recipe selects snapshot; the opt-in mixin adds it.
 		name:    "h100-eks-ubuntu-inference-dynamo+dynamo-snapshot",
 		leaf:    "h100-eks-ubuntu-inference-dynamo",
 		overlay: &overlayAddition{mixins: []string{"dynamo-snapshot"}},

@@ -3562,12 +3562,12 @@ h100-eks-ubuntu-inference-dynamo+dynamo-snapshot:
   022-dynamo-platform/values.yaml: ccb914ecae22c962b833e77657b24e85bdc200b6713e54c0420e43085805f6ce
   README.md: 58737d8e7f52e9e3a19bc0649500453b79c7534c3a19163e6fa3aedd5748283e
   UPGRADING.md: 42359bf3950f153d19930e44edf922dca0b19e84d57013c91e7968e5defc6b93
-  bundle-info.yaml: a7cc5bb8bba75f91ee95b8fcad18948a82d940a742080aaff728316ba8ad6605
-  checksums.txt: 2e583c8f4a98f9aeb2db2d729a5a411e9cc79e2d12e4984753b27f70f3c9f312
+  bundle-info.yaml: 07a0e1f26accba638e60b8148486637f0b27b59f1409463d2f537349869123ea
+  checksums.txt: a93b4c79e876255967d6a6a3c0b95e461694b5a65f9e1854b174ff6afdbedb4d
   data/overlays/stock-render-opt-in.yaml: 0f887f9a0fb121b8c76921417cab1c6a2b1ba08b365106f44ad081dd97e66815
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 97a68a71366d9a7302f793c1b76edc19389b879a4d810b13e2d071a9fcc6d6db
-  recipe.yaml: d08d82e8e66ce6bedba6b380ada74eafeb1488c2138c94f12f25a1a4b44c1d84
+  recipe.yaml: 48832cfdcc9a5be9435cb69e89d9447ed11914edfd1f421e079e4e163086b872
 h100-eks-ubuntu-inference-nim:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f

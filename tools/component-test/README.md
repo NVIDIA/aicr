@@ -132,13 +132,11 @@ make component-cleanup DELETE_CLUSTER=true
 
 ### Per-component fixtures
 
-A component whose real inputs the bare Kind cluster cannot provide can ship a
-fixture at `tools/component-test/fixtures/<component>.sh`. `deploy-component.sh`
-sources it before generating the bundle, so it can create test-only cluster
-resources and append to `BUNDLE_EXTRA_ARGS`. A fixture changes only the test, never
-the component's production requirements. `snapshot.sh` is the example: the chart's
-checkpoint claim is `ReadWriteMany`, which Kind's local-path class cannot bind, so
-the fixture creates a `ReadWriteOnce` claim and points the chart at it.
+A component whose real inputs the bare Kind cluster cannot provide can ship
+`tools/component-test/fixtures/<component>.sh`. `deploy-component.sh` sources it
+before generating the bundle, so it can create test-only resources and append to
+`BUNDLE_EXTRA_ARGS`. `snapshot.sh` is the example: it creates a `ReadWriteOnce`
+claim in place of the chart's `ReadWriteMany` one.
 
 ### Health Check (run-health-check.sh)
 

@@ -12,23 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Opt-in mixin: links Snapshot (GPU checkpoint/restore) to Dynamo the way
-# Dynamo's own chart does. Dynamo's platform chart bundles Snapshot as an
-# optional dependency, off by default, next to Grove and KAI Scheduler; AICR
-# installs each of those as its own component. This mixin installs the snapshot
-# component ahead of dynamo-platform and switches on the Dynamo operator's
-# checkpoint feature, which needs a standalone Snapshot operator and its CRDs.
-# Off by default in every shipped recipe. Opt-in steps and limitations:
+# Opt-in mixin: installs snapshot ahead of dynamo-platform and enables the
+# Dynamo operator's checkpoint feature, which needs the standalone Snapshot
+# operator and its CRDs. Not used by any shipped recipe. Opt-in steps:
 # docs/user/component-catalog.md#snapshot.
 #
-# Enabling it sets no per-cluster input. Snapshot's checkpoint store is a
-# ReadWriteMany claim by default and AICR ships no shared storage, so pass
-# --shared-storage-class <class>, or reuse a claim with
-# --set snapshot:storage.pvc.create=false --set snapshot:storage.pvc.name=<claim>.
-# The node agent is privileged and its namespace must allow that.
-#
-# Pins nothing, on purpose. The snapshot version is the registry default, which
-# follows dynamo-platform's: TestSnapshotPinFollowsDynamoPlatform.
+# The snapshot version is the registry default, which follows dynamo-platform's
+# (TestSnapshotPinFollowsDynamoPlatform).
 
 kind: RecipeMixin
 apiVersion: aicr.run/v1beta1
@@ -39,14 +29,12 @@ spec:
     - name: snapshot
       type: Helm
       valuesFile: components/snapshot/values.yaml
-      # The agent runs under the GPU Operator's nvidia RuntimeClass and needs
-      # its driver on the node.
+      # The agent runs under the GPU Operator's nvidia RuntimeClass.
       dependencyRefs:
         - gpu-operator
 
-    # Ordering and the one allowlisted override
-    # (registry mixinSafeOverridePaths on dynamo-platform): the operator's
-    # checkpoint feature watches the Snapshot CRDs, so Snapshot goes first.
+    # The checkpoint feature watches the Snapshot CRDs, so Snapshot goes first.
+    # The override path is allowlisted in mixinSafeOverridePaths.
     - name: dynamo-platform
       dependencyRefs:
         - snapshot

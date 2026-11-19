@@ -13,17 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# fixtures/snapshot.sh - test-only storage for the snapshot component test.
-#
-# Sourced by deploy-component.sh before the bundle is generated (see "Per-component
-# fixtures" in the harness README). The Snapshot chart's checkpoint claim is
-# ReadWriteMany, which Kind's default local-path class cannot bind, so the
-# operator pod would never start and its crd-installer init container would never
-# run. This fixture gives the operator a claim it can bind and tells the chart to
-# use it instead of creating its own. It is test-only: the production
-# requirement for shared storage is unchanged.
+# Test-only storage for the snapshot component test. The chart's checkpoint claim
+# is ReadWriteMany, which Kind's local-path class cannot bind, so the operator pod
+# would never start. Production storage requirements are unchanged.
 
-# Name of the claim the chart mounts when storage.pvc.name is left at its default.
 snapshot_claim="snapshot-pvc"
 
 kubectl create namespace "${HELM_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f - >/dev/null

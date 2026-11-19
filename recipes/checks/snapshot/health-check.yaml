@@ -14,20 +14,13 @@
 
 # Snapshot Health Check
 #
-# Validates that Snapshot (GPU checkpoint/restore) is running and healthy in the
-# snapshot namespace. Asserts that podsnapshots, podsnapshotcontents and
-# snapshotjobs.nvidia.com are Established=True, that the snapshot-operator
-# Deployment has every replica available, that the snapshot-agent DaemonSet has
-# a ready pod on every node it is scheduled to, and that no pod in the namespace
-# is stuck. The names are those chart 0.2.0 renders for a release called
-# snapshot; re-verify them on a defaultVersion bump.
+# Asserts that the Snapshot CRDs are Established, the snapshot-operator
+# Deployment is available, the snapshot-agent DaemonSet is ready on the nodes it
+# schedules to, and no pod in the namespace is stuck. Read-only: it shows
+# Snapshot is running, not that a checkpoint restores.
 #
-# Read-only: it does not create a PodSnapshot, so it shows that Snapshot is
-# running, not that a checkpoint restores. That proof is a separate validator.
-#
-# The agent targets GPU nodes only. On a cluster with none, the DaemonSet
-# schedules no pods and its assertion passes with none ready; the operator
-# Deployment assertion keeps an empty namespace from passing vacuously.
+# The agent targets GPU nodes only, so with none the DaemonSet assertion passes
+# with no pods; the operator assertion keeps an empty namespace from passing.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -81,17 +74,10 @@ spec:
 
     - name: validate-agent-daemonset-ready
       try:
-        # observedGeneration guards against reading a status the controller has
-        # not yet written for this spec: until then desiredNumberScheduled is
-        # absent, and the comparison below would pass on a cluster that does
-        # have GPU nodes.
-        #
-        # updatedNumberScheduled is omitted from the status while it is zero,
-        # so the fallback literal `0` is compared with an integer field. `==`
-        # between that float literal and the integer fails even for 0 and 0, so
-        # the update check uses `>=`, which compares numbers whatever their
-        # type. Verified on a Kind cluster with no GPU node, where the
-        # DaemonSet has no pods to schedule.
+        # observedGeneration: until the controller writes status, the
+        # comparison below would pass on a cluster that has GPU nodes.
+        # updatedNumberScheduled is omitted while zero, and `==` against the
+        # `0` fallback fails even for 0 and 0, so it uses `>=`.
         - assert:
             resource:
               apiVersion: apps/v1

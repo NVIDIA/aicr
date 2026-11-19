@@ -12,45 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Snapshot Helm values (chart 0.2.0)
-# Kubernetes-native GPU checkpoint/restore (github.com/ai-dynamo/snapshot): an
-# operator plus a privileged node agent on every GPU node. Not the `aicr
-# snapshot` command, which captures cluster state.
-#
-# Opt-in: no stock recipe references this component. The dynamo-snapshot mixin
-# installs it ahead of dynamo-platform and turns on the Dynamo operator's
-# checkpoint feature.
-#
-# Chart defaults stand for everything else, deliberately:
-# - The storage and the agent's sizing are per-cluster inputs, so they are not
-#   set here. The chart creates a ReadWriteMany PVC (storage.pvc, 1Ti, default
-#   storage class), and AICR ships no shared storage: on a cluster whose default
-#   class is block-only (stock EKS, for example) that claim cannot bind. Pass
-#   --shared-storage-class <class> (registry sharedStorageClassPaths writes it to
-#   storage.pvc.storageClass), or --set snapshot:storage.pvc.create=false and
-#   --set snapshot:storage.pvc.name=<claim> to reuse a claim. See
-#   docs/user/component-catalog.md#snapshot.
-# - The agent's default requests are sized for large GPU nodes (the PageBroker
-#   sidecar asks for 8 CPU and 32Gi, the agent for 2 CPU and 1Gi, with a
-#   RAM-backed staging volume), and the PageBroker pins a transfer ring of host
-#   memory (pageBroker.transferBufferCount slots of pageBroker.transferChunkBytes
-#   each) that a lower pageBroker.resources request does not shrink. Override
-#   pageBroker.resources, daemonset.resources, pageBroker.staging.sizeLimit and
-#   the ring on smaller nodes. On RKE2 also set runtime.socketPath and
-#   runtime.storageDir. See docs/user/component-catalog.md#snapshot.
-# - No fullnameOverride or nameOverride. The health check, and the chart's own
-#   guides, look for the Deployment snapshot-operator and the DaemonSet
-#   snapshot-agent.
-# - crdUpgrade.enabled stays true: its init container is what keeps the CRDs
-#   current across a pin bump (see the registry entry).
-# - runtime.type stays containerd. CRI-O and OpenShift need runtime.type=crio and
-#   openshift.enabled=true, which belong to a recipe for those platforms.
+# Snapshot Helm values (chart 0.2.0). Opt-in: installed through the
+# dynamo-snapshot mixin. Chart defaults stand except the operator tolerations.
+# Storage, agent sizing and RKE2 paths are per-cluster inputs; see
+# docs/user/component-catalog.md#snapshot.
 
-# Same convention as kueue and lws for system controllers: tolerate every taint
-# so the operator can land on tainted system pools. Bundle-time
-# --system-node-selector and --system-node-toleration write the same operator
-# paths (registry nodeScheduling). The node agent's own tolerations and GPU node
-# selector are the chart's defaults.
+# Tolerate every taint so the operator can land on tainted system pools, as
+# kueue and lws do.
 operator:
   tolerations:
     - operator: Exists
