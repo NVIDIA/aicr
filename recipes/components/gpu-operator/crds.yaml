@@ -33,5 +33,5 @@ charts:
       - gpuclusters.nvidia.com
       - nvidiadrivers.nvidia.com
     repository: https://helm.ngc.nvidia.com/nvidia
-    sourceVersion: v26.7.2
+    sourceVersion: v26.7.3
 component: gpu-operator
