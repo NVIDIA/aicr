@@ -758,14 +758,16 @@ never honored from `--set-json`/`--set-file` (present or absent — the
 typed path would write a literal `enabled:` chart value instead of
 toggling the component).
 
-**`--dynamic` on a component rendered at bundle time is rejected.** A
-manifest-only or Kustomize component has its templates rendered when the
-bundle is built, so a value supplied at install time through
-`cluster-values.yaml` reaches no template. `aicr bundle` therefore rejects
+**`--dynamic` on a component rendered at bundle time is rejected.** Under
+every deployer except `flux`, a manifest-only or Kustomize component has
+its templates rendered when the bundle is built, so a value supplied at
+install time through `cluster-values.yaml` reaches no template. `aicr bundle` therefore rejects
 `--dynamic` on a manifest-only component under the `helm`, `helmfile`,
 `terraform` and `fleet` deployers, and on a Kustomize component under
-`helm`, `helmfile` and `fleet`, as `argocd-helm` already does. (`terraform`
-and `flux` reject a Kustomize component whether or not it has `--dynamic`.)
+`helm`, `helmfile` and `fleet`, as `argocd-helm` already does. `flux`
+packages a manifest-only component as a chart it renders at reconcile
+time, so `--dynamic` on one works there. (`terraform` and `flux` reject a
+Kustomize component whether or not it has `--dynamic`.)
 
 - **Manifest-only component:** set the value at bundle time instead, with
   `--set`, `--set-json`, or the node scheduling flags such as
@@ -774,7 +776,10 @@ and `flux` reject a Kustomize component whether or not it has `--dynamic`.)
   build, so change the setting in its Kustomize source.
 
 A component that installs an upstream chart keeps `--dynamic`, including
-one that also carries manifests.
+one that also carries manifests. Its chart receives the install-time value,
+but its own manifests (the `-pre` and `-post` releases) are rendered when
+the bundle is built, so a path that only those manifests read does not
+change them; set such a value at bundle time.
 
 A component whose presence a configuration profile owns cannot be removed
 at all — `enabled=false` on it is rejected regardless of the rule above.
