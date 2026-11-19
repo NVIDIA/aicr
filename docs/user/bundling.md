@@ -758,6 +758,17 @@ never honored from `--set-json`/`--set-file` (present or absent — the
 typed path would write a literal `enabled:` chart value instead of
 toggling the component).
 
+**`--dynamic` on a component rendered at bundle time is rejected.** A
+manifest-only or Kustomize component has its templates rendered when the
+bundle is built, so a value supplied at install time through
+`cluster-values.yaml` reaches no template. `aicr bundle` therefore rejects
+`--dynamic` on such a component under the `helm`, `helmfile`, `terraform`
+and `fleet` deployers, as `argocd-helm` already does. Set the value at
+bundle time instead, with `--set`, `--set-json`, or the node scheduling
+flags such as `--system-node-selector` and `--system-node-toleration`. A
+component that installs an upstream chart keeps `--dynamic`, including
+one that also carries manifests.
+
 A component whose presence a configuration profile owns cannot be removed
 at all — `enabled=false` on it is rejected regardless of the rule above.
 NVSentinel is in that position on the AKS family, whose `gpuStack`
