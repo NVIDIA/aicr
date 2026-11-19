@@ -776,10 +776,12 @@ Kustomize component whether or not it has `--dynamic`.)
   build, so change the setting in its Kustomize source.
 
 A component that installs an upstream chart keeps `--dynamic`, including
-one that also carries manifests. Its chart receives the install-time value,
-but its own manifests (the `-pre` and `-post` releases) are rendered when
-the bundle is built, so a path that only those manifests read does not
-change them; set such a value at bundle time.
+one that also carries manifests. Its chart receives the install-time value.
+Under every deployer except `flux`, its own manifests (the `-pre` and
+`-post` releases) are rendered when the bundle is built, so a path that
+only those manifests read does not change them; set such a value at bundle
+time. `flux` renders those manifests at reconcile time, with the dynamic
+values from the component's ConfigMap.
 
 A component whose presence a configuration profile owns cannot be removed
 at all — `enabled=false` on it is rejected regardless of the rule above.
