@@ -306,3 +306,158 @@ transitions:
       - https://github.com/NVIDIA/cluster-readiness-engine/pull/503
       - https://github.com/NVIDIA/cluster-readiness-engine/pull/515
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#enabling-nvcre
+  - from: ">=0.8.2 <0.12.0"
+    to: "0.12.0"
+    verdict: manual
+    verifiedBy: >-
+      CRD schema diff (helm show crds oci://ghcr.io/nvidia/cluster-readiness-engine
+      --version v0.8.2 vs --version v0.12.0): all seven CRDs are present in
+      both charts with a single v1alpha1 version, served and storage, and no
+      conversion block, so no stored object needs conversion. A walk of the
+      schema property paths shows 142 added (2508 to 2650) and none removed.
+      The lines using oldSelf stay at 46, so no transition rule is added or
+      removed. x-kubernetes-validations blocks fall from 65 to 62: the CEL
+      rules that read a resource.Quantity (cpu and memory non-negative, and
+      requests not above limits) are gone, replaced by a pattern on cpu and
+      memory, and the added rules sit on the new networkAttachments and
+      nicResourceName fields (the two are mutually exclusive,
+      networkAttachments cannot combine with rdmaDeviceAccess hostPath,
+      network names are capped at 253 characters, and resourceName and
+      nicResourceName may not use the kubernetes.io or k8s.io domains). The
+      Certification AICR builds sets only categories, gpusPerNode,
+      nodesPerJob, timeoutPerJob, target, and category options.image, none of
+      which those rules touch. Chart values diff (helm show values, same two
+      versions) adds a crds block with enabled and changes the
+      manager.image.pullPolicy default from IfNotPresent to empty; neither is
+      a key AICR sets in recipes/components/nvcre/values.yaml. The chart
+      renders 25 ClusterRoles, 3 ClusterRoleBindings, and 4 LogProfiles with
+      the shipped values, the counts recorded for v0.8.2. Supply chain at the
+      new pin: chart
+      sha256:2ccbc4834af7038df6c7cf00375b8b162b76e40e5d7c4485b2237f7808f6de39
+      and controller index
+      sha256:50eb3e1e022bacdbf103ea4694d2a939a766596b9f13d66005457482c9370eaa
+      each carry a cosign signature and SLSA v1.0 provenance verifying against
+      the release workflow identity at refs/tags/v0.12.0; the chart still
+      publishes no SBOM. The workload closure re-derived at v0.12.0 resolves
+      to the same three images at the same digests and the same Megatron-LM
+      fetch as v0.8.2. Live run, not a UAT lane: on a stock-EKS GB300 cluster
+      (Kubernetes v1.35) a v0.8.2 install was upgraded to v0.12.0 by applying
+      the cluster-readiness-engine-crds chart v0.12.0 with a server-side
+      apply and then running helm upgrade with crds.enabled=false. The
+      controller came up Ready on the digest-pinned image, and a Certification
+      with spec.fabric efa for communication/nccl-all-reduce on two nodes
+      succeeded with resolvedFabric efa and a peak bus bandwidth of 840.85
+      GB/s at 16 GiB. Not exercised: a plain helm upgrade of an install whose
+      CRDs came from the v0.8.2 chart (helm's ownership check on pre-existing
+      CRDs was not tested), every deployer other than that manual helm path,
+      and the EKS H100 combination AICR qualifies, which has not been re-run
+      on v0.12.0. The v0.9 to v0.12 release notes list two breaking changes,
+      both reviewed in the summary. No UAT lane or KWOK run exercises this
+      boundary because NVCRE is on no overlay or mixin.
+    summary: >-
+      Nothing AICR sets breaks at admission, but the new fields only take
+      effect once the CRDs are updated. An apiserver still serving the v0.8.2
+      schema prunes spec.fabric, networkAttachments, and nicResourceName
+      without an error, so a Certification that sets one of them behaves as if
+      it had not, and an explicit spec.fabric is dropped in favor of
+      detection. Because NVCRE is an ownsCRDs
+      component, a deployer that leaves the v0.8.2 CRDs in place finishes the
+      upgrade deployed, Ready, and not actually upgraded. The chart now
+      carries its CRDs in a crds subchart that installs them only on first
+      install and never updates them on upgrade; upstream publishes the same
+      CRDs as the cluster-readiness-engine-crds chart, whose templates helm
+      upgrade does keep current, and says to install it first with
+      crds.enabled=false on the controller chart. Admission itself changes in
+      one place: CEL rules that read a resource.Quantity were removed so the
+      Certification CRD installs on Kubernetes 1.29 through 1.33, so cpu and
+      memory are checked by a pattern at admission and requests above limits
+      is now rejected by the controller before any Workflow is created, not by
+      the apiserver. Upstream lists two breaking changes. The
+      manager.image.pullPolicy default moves from IfNotPresent to empty, which
+      only matters to an upgrade with --reuse-values from v0.8.2 or earlier
+      that stored a value other than the three accepted ones; AICR renders its
+      values from the registry and sets none. And nvcrectl certification run
+      rejects --results-file without --wait, which no AICR path invokes. On
+      AWS GB300 the render now depends on the fabric: with spec.fabric unset
+      the controller detects EFA from vpc.amazonaws.com/efa allocatable and
+      RoCE from ResourceSlices, and falls back to RoCE when the signals
+      conflict or cover only some nodes. An explicit value that does not match
+      the nodes fails the run with FabricValidationFailed instead of
+      switching, and v0.8.2 renders only RoCE there. AICR's own
+      nccl-cre-all-reduce-bw check does not yet pass spec.fabric, and EKS
+      GB300 is not one of the combinations it qualifies. rbac.scope stays
+      cluster in this release and upstream makes namespaced the default in the
+      next minor, so keep the explicit pin that AICR's values carry. NCCL
+      bandwidth measured on v0.8.2, including the EKS H100 qualification
+      figure, is not a baseline for v0.12.0 until it is re-measured.
+    reversible: true
+    reversibleNotes: >-
+      The new fields are optional, so downgrading the controller to v0.8.2
+      leaves the v0.12.0 CRDs in place harmlessly; values already written to
+      them are ignored by the older controller. A downgrade was not run.
+    affectedResources:
+      - group: nvcre.nvidia.com
+        kinds:
+          - Certification
+          - Job
+          - Workflow
+          - WorkloadRun
+          - BandwidthMeasurement
+          - LogProfile
+    stepsByDeployer:
+      - deployers: [helmfile, terraform, fleet]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Before upgrading the release, apply the v0.12.0 CRDs directly
+              using the CRD-apply command under "Upgrading components that own
+              CRDs" in docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/nvidia/cluster-readiness-engine,
+              VERSION=v0.12.0 and MANAGER=helm under helmfile,
+              MANAGER=terraform-provider-helm under terraform, and under fleet
+              the manager that section's managed-fields check reports for the
+              installed CRDs, against every downstream cluster the bundle
+              targets.
+            reason: >-
+              helmfile, terraform and fleet have no automated CRD-update path
+              for ownsCRDs components (Fleet's Helm upgrade skips crds/).
+              Skipping this leaves the v0.8.2 CRDs in place, so the controller
+              advances while the new fields are pruned on write and the
+              upgrade is reported successful.
+          - id: verify-new-fields-landed
+            description: >-
+              Confirm the new schema is present: kubectl get crd
+              certifications.nvcre.nvidia.com -o yaml, and expect
+              gemmFloorTFLOPS in the output. Its absence means an older
+              schema is still installed.
+            reason: >-
+              Neither release status nor controller health distinguishes the
+              two states, and the version and storage flags are identical in
+              every release, so the presence of a v0.12.0-only field is the
+              only signal.
+      - steps:
+          - id: verify-new-fields-landed
+            description: >-
+              After the deployer's own CRD update (flux's spec.upgrade.crds
+              CreateReplace, helm's generated apply-crds.sh, or Argo CD
+              applying the chart's crds/ as ordinary manifests on sync),
+              confirm the new schema landed: kubectl get crd
+              certifications.nvcre.nvidia.com -o yaml, and expect
+              gemmFloorTFLOPS in the output.
+            reason: >-
+              Every deployer here has a CRD path, but each is conditional on
+              configuration that a recipe can switch off, and the failure is
+              silent when it does: the release reports deployed and the
+              controller reports Ready while the apiserver prunes the new
+              fields.
+    references:
+      - https://github.com/NVIDIA/cluster-readiness-engine/releases/tag/v0.12.0
+      - https://github.com/NVIDIA/cluster-readiness-engine/releases/tag/v0.11.0
+      - https://github.com/NVIDIA/cluster-readiness-engine/releases/tag/v0.10.0
+      - https://github.com/NVIDIA/cluster-readiness-engine/releases/tag/v0.9.0
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/591
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/576
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/560
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/533
+      - https://github.com/NVIDIA/cluster-readiness-engine/pull/531
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#enabling-nvcre

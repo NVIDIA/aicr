@@ -233,7 +233,7 @@ func (r *Registry) Validate() error {
 // DaytimeAssignments returns the daytime human-access rotation (#1281, DC8):
 // one entry per reservation that opts in via a non-empty daytime-intent, in
 // registry (document) order. Reservations with an empty daytime-intent are
-// nightly-batch only and omitted.
+// omitted.
 func (r *Registry) DaytimeAssignments() []DaytimeAssignment {
 	out := make([]DaytimeAssignment, 0, len(r.Reservations))
 	for i := range r.Reservations {
@@ -244,6 +244,27 @@ func (r *Registry) DaytimeAssignments() []DaytimeAssignment {
 			Reservation: r.Reservations[i].Name,
 			Intent:      r.Reservations[i].DaytimeIntent,
 		})
+	}
+	return out
+}
+
+// DaytimeTeardownAssignments returns the evening daytime-down set: one entry
+// per non-kind reservation, in registry (document) order, with its
+// daytime-intent, or IntentTraining when it has none. daytime-up can be
+// dispatched against any reservation, so a teardown of only the
+// DaytimeAssignments rotation would leave such a cluster held.
+func (r *Registry) DaytimeTeardownAssignments() []DaytimeAssignment {
+	out := make([]DaytimeAssignment, 0, len(r.Reservations))
+	for i := range r.Reservations {
+		res := &r.Reservations[i]
+		if res.Cloud == CloudKind {
+			continue
+		}
+		intent := res.DaytimeIntent
+		if intent == "" {
+			intent = IntentTraining
+		}
+		out = append(out, DaytimeAssignment{Reservation: res.Name, Intent: intent})
 	}
 	return out
 }
