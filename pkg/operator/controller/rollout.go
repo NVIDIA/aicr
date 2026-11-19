@@ -88,6 +88,9 @@ const (
 	// change an Application's automated sync for spec.suspendEngine, so the
 	// engine is not suspended or resumed as declared.
 	ReasonEngineSuspensionRefused = "EngineSuspensionRefused"
+	// ReasonStepUnknown: a rollout step names a release its target plan
+	// does not have.
+	ReasonStepUnknown = "StepUnknown"
 )
 
 // resyncInterval re-observes a steady runtime: it covers what no watch
@@ -210,6 +213,11 @@ type runtimeView struct {
 	reconcilingReason         string
 	stalled                   bool
 	stalledReason, stalledMsg string
+	// awaitingApprovalSince is when the rollout in progress started waiting
+	// for its approval; zero while none waits. approvalUnknown is set when
+	// the rollouts could not be read to tell.
+	awaitingApprovalSince time.Time
+	approvalUnknown       bool
 	// suspensionRefused names the Applications whose automated sync the API
 	// server refused for good to set as spec.suspendEngine declares.
 	suspensionRefused           string
@@ -235,6 +243,9 @@ func (r *RolloutReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.Reader.Get(ctx, req.NamespacedName, rt); err != nil {
 		if apierrors.IsNotFound(err) {
 			// The runtime is gone: its unfinished rollouts are orphaned.
+			if req.Name == v1alpha1.SingletonName {
+				runtimeState.clear()
+			}
 			return ctrl.Result{}, r.orphan(ctx, req.Name, "")
 		}
 		return ctrl.Result{}, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read ClusterRuntime "+req.Name)
@@ -387,6 +398,21 @@ func (r *RolloutReconciler) reconcile(ctx context.Context, rt *v1alpha1.ClusterR
 	return v, nil
 }
 
+// pendingApproval reports the approval wait of the rollout in progress,
+// removals included, while the engine is unavailable, which stops the
+// reconcile before advance does.
+func (r *RolloutReconciler) pendingApproval(ctx context.Context, rt *v1alpha1.ClusterRuntime, v *runtimeView) {
+	rollouts, err := r.rollouts(ctx, rt)
+	if err != nil {
+		v.approvalUnknown = true
+		log.FromContext(ctx).Info("approval wait not observed", "error", err.Error())
+		return
+	}
+	if _, current, _ := classify(rollouts); current != nil && r.approval(current, r.Now()) == v1alpha1.ApprovalPending {
+		v.awaitingApprovalSince = current.CreationTimestamp.Time
+	}
+}
+
 // unreadableRollouts stops the runtime when any of its rollouts, of any
 // runtime UID, has a schema this operator does not read, as after a
 // downgrade past a newer operator: it reports Stalled with
@@ -446,6 +472,7 @@ func (r *RolloutReconciler) prepare(ctx context.Context, rt *v1alpha1.ClusterRun
 		v.stalled, v.stalledReason, v.stalledMsg = true, v.engineReason, v.engineMessage
 		v.readyReason, v.readyMessage = v.engineReason, v.engineMessage
 		keepObserved(rt, v)
+		r.pendingApproval(ctx, rt, v)
 		return false, nil
 	}
 	if err = r.orphan(ctx, rt.Name, string(rt.UID)); err != nil {
@@ -853,6 +880,9 @@ func (r *RolloutReconciler) advance(ctx context.Context, rt *v1alpha1.ClusterRun
 	if approval == v1alpha1.ApprovalPending {
 		ro.Status.Approval, ro.Status.Phase = approval, v1alpha1.PhaseAwaitingApproval
 		v.stalled, v.stalledReason, v.stalledMsg = true, ReasonAwaitingApproval, "rollout "+ro.Name+" needs approval"
+		// The approval is set once and never required later, so the
+		// rollout has waited since it was created.
+		v.awaitingApprovalSince = ro.CreationTimestamp.Time
 		return r.saveStatus(ctx, ro, "")
 	}
 	ro.Status.Approval = approval
@@ -940,7 +970,7 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 	rel := release(p, step.Release)
 	if rel == nil {
 		ro.Status.Phase = v1alpha1.PhaseStalled
-		v.stalled, v.stalledReason, v.stalledMsg = true, "StepUnknown", "step "+step.Release+" is not in the target plan"
+		v.stalled, v.stalledReason, v.stalledMsg = true, ReasonStepUnknown, "step "+step.Release+" is not in the target plan"
 		return false, r.saveStatus(ctx, ro, v.stalledMsg)
 	}
 	values, err := r.values(ctx, rel)
@@ -1883,6 +1913,7 @@ func (r *RolloutReconciler) applyStatus(ctx context.Context, rt *v1alpha1.Cluste
 	if err := applyRuntimeStatus(ctx, r.Client, rt, status, RolloutFieldManager); err != nil {
 		return err
 	}
+	runtimeState.record(rt, v, r.Now())
 	if v.stalled && r.Events != nil && (before == nil || before.Status != metav1.ConditionTrue || before.Reason != stalledReason) {
 		// Each stall, and each new cause, is a durable record.
 		emit(r.Events, rt, corev1.EventTypeWarning, EventStalled, "Stall", "%s: %s", stalledReason, v.stalledMsg)

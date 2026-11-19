@@ -58,6 +58,16 @@ operator:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # A Prometheus Operator PodMonitor for the operator's metrics port. It
+  # renders only while the cluster serves the PodMonitor kind, so on a new
+  # cluster it appears at the first helm upgrade after the recipe installs
+  # prometheus-operator-crds. labels must match the podMonitorSelector of the
+  # Prometheus that should scrape it.
+  podMonitor:
+    enabled: false
+    labels: {}
+    # Scrape interval, such as 30s; empty keeps the Prometheus default.
+    interval: ""
 
 engine:
   # ArgoCD is the supported engine.

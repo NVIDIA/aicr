@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -502,11 +503,14 @@ func TestResolverSurvivesAFaultAtEveryWrite(t *testing.T) {
 // still stalls after maxStageRuns.
 // A transient error while a resolved runtime re-resolves for changed inputs
 // of the same generation (such as the snapshot refresh) keeps it Resolved
-// with its candidate and discovery, and says what it retries.
+// with its candidate and discovery, and says what it retries. The
+// resolution time stays at the last completed resolution meanwhile.
 func TestResolverTransientErrorKeepsTheResolution(t *testing.T) {
 	ctx := testContext(t)
 	freshRuntime(t, ctx, nil)
 	r, reg := newResolver(t)
+	resolvedAt := time.Unix(10_000, 0)
+	r.Now = func() time.Time { return resolvedAt }
 	candidate := resolveCandidate(t, ctx, r, reg)
 	discovered := &v1alpha1.DiscoveryStatus{AcceleratedNodes: 2, SystemNodes: 1}
 	if err := r.applyStatus(ctx, getRuntime(t, ctx), &resolution{status: metav1.ConditionTrue, reason: ReasonResolved,
@@ -538,6 +542,60 @@ func TestResolverTransientErrorKeepsTheResolution(t *testing.T) {
 	}
 	if got.Status.Discovery == nil || got.Status.Discovery.AcceleratedNodes != 2 {
 		t.Fatalf("status.discovery = %+v; the transient error dropped it", got.Status.Discovery)
+	}
+	// The rollout controller's status writes find Resolved=True every resync.
+	runtimeState.record(got, &runtimeView{}, resolvedAt.Add(2*time.Hour))
+	if at := runtimeState.resolved(); at != float64(resolvedAt.Unix()) {
+		t.Fatalf("resolution time %g while the refresh retries, want %d", at, resolvedAt.Unix())
+	}
+}
+
+// A refresh blocked before it reports, as on a Job create that hangs, already
+// stops the resolution time: the rollout controller's resyncs, which still
+// find Resolved=True, do not advance it.
+func TestResolverBlockedRefreshStopsTheResolutionTime(t *testing.T) {
+	ctx := testContext(t)
+	freshRuntime(t, ctx, nil)
+	r, reg := newResolver(t)
+	resolvedAt := time.Unix(10_000, 0)
+	r.Now = func() time.Time { return resolvedAt }
+	candidate := resolveCandidate(t, ctx, r, reg)
+	if err := r.applyStatus(ctx, getRuntime(t, ctx), &resolution{status: metav1.ConditionTrue, reason: ReasonResolved,
+		message: "plan " + candidate + " resolved", candidate: candidate, inputDigest: getRuntime(t, ctx).Status.InputDigest}); err != nil {
+		t.Fatal(err)
+	}
+
+	r.Config.AICRImage = strings.Replace(r.Config.AICRImage, "@sha256:", "-refreshed@sha256:", 1)
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if _, job := obj.(*batchv1.Job); job {
+				once.Do(func() { close(blocked) })
+				<-release
+				return apierrors.NewServiceUnavailable("apiserver overloaded")
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+	})
+	done := make(chan error, 1)
+	go func() { done <- reconcileResolver(t, ctx, r) }()
+	select {
+	case <-blocked:
+	case <-ctx.Done():
+		t.Fatal("the refresh never created a Job")
+	}
+
+	runtimeState.record(getRuntime(t, ctx), &runtimeView{}, resolvedAt.Add(2*time.Hour))
+	at := runtimeState.resolved()
+	close(release)
+	<-done
+	if at != float64(resolvedAt.Unix()) {
+		t.Fatalf("resolution time %g while the refresh is blocked, want %d", at, resolvedAt.Unix())
 	}
 }
 

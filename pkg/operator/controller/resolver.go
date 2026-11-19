@@ -125,6 +125,9 @@ type resolution struct {
 	inputDigest string
 	discovery   *v1alpha1.DiscoveryStatus
 	requeue     time.Duration
+	// refreshing marks a Resolved=True status kept while the runtime
+	// resolves again for changed inputs.
+	refreshing bool
 }
 
 // Reconcile resolves the runtime named in req.
@@ -142,6 +145,7 @@ func (r *ResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if !rt.DeletionTimestamp.IsZero() || rt.Name != v1alpha1.SingletonName {
 		return ctrl.Result{}, nil
 	}
+	runtimeState.resolutionStarted()
 	res, err := r.resolve(ctx, rt)
 	if err != nil {
 		if !isTerminal(err) {
@@ -358,7 +362,7 @@ func waitingFor(rt *v1alpha1.ClusterRuntime) *resolution {
 	if c := meta.FindStatusCondition(rt.Status.Conditions, v1alpha1.ConditionResolved); c != nil && c.Status == metav1.ConditionTrue &&
 		c.ObservedGeneration == rt.Generation && rt.Status.CandidatePlanDigest != "" {
 
-		w.status, w.reason = metav1.ConditionTrue, ReasonResolved
+		w.status, w.reason, w.refreshing = metav1.ConditionTrue, ReasonResolved, true
 		w.message = "plan " + rt.Status.CandidatePlanDigest + " resolved; resolving again for changed inputs"
 	}
 	return w
@@ -635,7 +639,11 @@ func (r *ResolverReconciler) applyStatus(ctx context.Context, rt *v1alpha1.Clust
 	if res.discovery != nil {
 		status["discovery"] = res.discovery
 	}
-	return applyRuntimeStatus(ctx, r.Client, rt, status, ResolverFieldManager)
+	if err := applyRuntimeStatus(ctx, r.Client, rt, status, ResolverFieldManager); err != nil {
+		return err
+	}
+	runtimeState.resolution(res, r.now())
+	return nil
 }
 
 // runTag is the registry tag a render run pushes to.
