@@ -647,6 +647,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `kube-prometheus-stack` | Prometheus operator and the Prometheus that serves runtime PromQL queries |
 | `kubeflow-trainer` | Kubeflow Training Operator for distributed training |
 | `kueue` | Kubernetes-native job queuing for batch and AI workloads |
+| `lws` | LeaderWorkerSet — leader/worker pod groups for multi-node inference serving (not installed by default) |
 | `mariadb-operator` | Official MariaDB Operator; installed only for AICR-provided Slurm accounting |
 | `mariadb-operator-crds` | Official MariaDB Operator CRDs; installed only for AICR-provided Slurm accounting |
 | `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
