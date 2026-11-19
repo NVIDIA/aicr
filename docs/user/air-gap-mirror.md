@@ -121,7 +121,7 @@ metadata:
   name: aicr-images
 spec:
   images:
-    - name: nvcr.io/nvidia/gpu-operator:v26.7.2
+    - name: nvcr.io/nvidia/gpu-operator:v26.7.3
     - name: registry.k8s.io/nfd/node-feature-discovery:v0.20.1
     # ...
 ---
@@ -133,7 +133,7 @@ spec:
   charts:
     - name: gpu-operator
       repoURL: https://helm.ngc.nvidia.com/nvidia
-      version: v26.7.2
+      version: v26.7.3
     # ...
 ```
 
@@ -193,10 +193,10 @@ components:
         namespace: gpu-operator
         repoName: gpu-operator
         url: https://helm.ngc.nvidia.com/nvidia
-        version: v26.7.2
+        version: v26.7.3
       # ...
     images:
-      - nvcr.io/nvidia/gpu-operator:v26.7.2
+      - nvcr.io/nvidia/gpu-operator:v26.7.3
       - registry.k8s.io/nfd/node-feature-discovery:v0.20.1
       # ...
     name: aicr-images
@@ -371,10 +371,12 @@ rewrite, such as the NCCL runtime image (override it with
 probe image of the `driver-runtime-management` and `workload-sandboxing`
 conformance checks (override it with `AICR_DRIVER_RUNTIME_IMAGE` and
 `AICR_SANDBOX_PROBE_IMAGE`, each a full reference to your copy); see
-[Validation](validation.md). The opt-in CRE checks `nccl-cre-all-reduce-bw`
-and `cre-training-goodput` pull their workload images by digest with no
-override variable, so mirror them at the digests
-`recipes/components/nvcre/workload-images.yaml` records; see the CRE section
+[Validation](validation.md). The opt-in CRE checks `nccl-cre-all-reduce-bw`,
+`nccl-cre-all-reduce-bw-net` and `cre-training-goodput` pull their workload images by digest with no
+override variable, so mirror them at the digests the closure for your
+combination records: `recipes/components/nvcre/workload-images.yaml` for
+`eks` x `h100`, and `recipes/components/nvcre/workload-images-gb300.yaml` for
+`eks` x `gb300` (`gb300-eks-ubuntu-training-kubeflow`); see the CRE section
 of [Validation](validation.md). Their references keep the `public.ecr.aws` and
 `nvcr.io` hosts, so a disconnected cluster also needs its nodes' container
 runtime to redirect both registries to your mirror, for example with a

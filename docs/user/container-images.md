@@ -28,7 +28,7 @@ The catalog lists the driver version that the default chart render carries. Vers
 ## Summary
 
 - Components: **58**
-- Unique images: **140**
+- Unique images: **141**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -53,7 +53,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-gb200-rdma | manifest | — | — | 2 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.7.2 | 15 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.7.3 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.14 | 1 |
@@ -77,7 +77,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
 | nodewright-customizations | manifest | — | — | 6 |
 | nodewright-operator | helm | nodewright | v0.21.0 | 2 |
-| nvcre | helm | cluster-readiness-engine | v0.8.2 | 4 |
+| nvcre | helm | cluster-readiness-engine | v0.12.0 | 5 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
 | nvsentinel | helm | nvsentinel | v1.31.0 | 6 |
@@ -184,21 +184,21 @@ _No images extracted._
 
 ### gpu-operator
 
-- `nvcr.io/nvidia/cloud-native/dcgm:4.6.1-1-ubuntu24.04`
+- `nvcr.io/nvidia/cloud-native/dcgm:4.7.0-ubuntu24.04`
 - `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu24.04`
 - `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu26.04`
-- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.4`
+- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.5`
 - `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.12.1`
-- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.1`
+- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.2`
 - `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4-ubuntu24.04`
-- `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.5`
-- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.1`
+- `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.7`
+- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.2`
 - `nvcr.io/nvidia/driver:580.173.02-ubuntu24.04`
-- `nvcr.io/nvidia/gpu-operator:v26.7.2`
-- `nvcr.io/nvidia/k8s-device-plugin:v0.20.1`
-- `nvcr.io/nvidia/k8s/container-toolkit:v1.20.1`
-- `nvcr.io/nvidia/k8s/dcgm-exporter:4.6.1-4.8.4-distroless`
-- `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.6.0`
+- `nvcr.io/nvidia/gpu-operator:v26.7.3`
+- `nvcr.io/nvidia/k8s-device-plugin:v0.20.2`
+- `nvcr.io/nvidia/k8s/container-toolkit:v1.20.2`
+- `nvcr.io/nvidia/k8s/dcgm-exporter:4.7.0-4.9.0-distroless`
+- `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.6.1`
 
 ### gpu-operator-ocp
 
@@ -341,10 +341,11 @@ _No images extracted._
 
 ### nvcre
 
-- `ghcr.io/nvidia/cluster-readiness-engine/manager:v0.8.2@sha256:c5de16ddb95bd923c6b04d04d7ff9754a7d7b83d18fa400baa33e7ae72fc593d`
+- `ghcr.io/nvidia/cluster-readiness-engine/manager:v0.12.0@sha256:50eb3e1e022bacdbf103ea4694d2a939a766596b9f13d66005457482c9370eaa`
 - `nvcr.io/nvidia/pytorch:25.08-py3@sha256:ace9a848c0ae543317e3c4763b6b4248961c47902625abfe3c77a0fb931c50fb`
 - `nvcr.io/nvidia/pytorch:26.01-py3@sha256:38ed2ecb2c16d10677006d73fb0a150855d6ec81db8fc66e800b5ae92741007e`
 - `public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9@sha256:6cabd2c0c37bfa09921912919b747d3b804298966e28e301dbfefc5c7dd3bfe2`
+- `public.ecr.aws/hpc-cloud/nccl-tests:cuda13.1.2-efa1.50.0-ofiv1.21.1-ncclv2.31.2-1-testsv2.20.0@sha256:d6e0dfcb291f8c931a7c38420a13667ae0d9b83a32e667a91ec768e96dc4a4bb`
 
 ### nvidia-dra-driver-gpu
 
@@ -566,7 +567,7 @@ across every image in a component and prints a summary report.
 ### Is it signed?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.3"  # replace with an image from the inventory above
 cosign tree "${IMAGE}"
 ```
 
@@ -577,7 +578,7 @@ attached — the image is unsigned.
 ### Does it have an SBOM?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.3"  # replace with an image from the inventory above
 cosign tree "${IMAGE}"
 ```
 
@@ -589,7 +590,7 @@ publishers attach SBOMs as registry referrers rather than the legacy
 ### Does it have build provenance?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.3"  # replace with an image from the inventory above
 cosign download attestation "${IMAGE}" \
   | jq -r 'select(.payload != null) | .payload' \
   | base64 -d \

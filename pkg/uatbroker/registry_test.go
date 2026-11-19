@@ -755,6 +755,47 @@ func TestDaytimeAssignmentsNone(t *testing.T) {
 	}
 }
 
+func TestDaytimeTeardownAssignments(t *testing.T) {
+	tests := []struct {
+		name string
+		rows []Reservation
+		// want is never nil: the encoder turns a nil slice into null, which
+		// the scheduler's `matrix != '[]'` guard does not catch.
+		want []DaytimeAssignment
+	}{
+		{
+			name: "every non-kind row in registry order, intent or training",
+			rows: []Reservation{
+				{Name: "aws-a", Cloud: CloudAWS, DaytimeIntent: IntentTraining},
+				{Name: "kind-a", Cloud: CloudKind, DaytimeIntent: IntentTraining},
+				{Name: "gcp-a", Cloud: CloudGCP, DaytimeIntent: IntentInference},
+				{Name: "aws-b", Cloud: CloudAWS},
+				{Name: "azure-a", Cloud: CloudAzure},
+			},
+			want: []DaytimeAssignment{
+				{Reservation: "aws-a", Intent: IntentTraining},
+				{Reservation: "gcp-a", Intent: IntentInference},
+				{Reservation: "aws-b", Intent: IntentTraining},
+				{Reservation: "azure-a", Intent: IntentTraining},
+			},
+		},
+		{
+			name: "kind-only registry",
+			rows: []Reservation{{Name: "kind-a", Cloud: CloudKind}},
+			want: []DaytimeAssignment{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := &Registry{Reservations: tt.rows}
+			got := reg.DaytimeTeardownAssignments()
+			if got == nil || !slices.Equal(got, tt.want) {
+				t.Errorf("DaytimeTeardownAssignments() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestCommittedRegistryValid guards the actual checked-in registry: it must
 // parse, validate, and carry the launch reservations. A bad data edit fails
 // here before it can break the broker workflows.

@@ -27,17 +27,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// creNCCLCheckNames are the CRE-driven NCCL checks. They share one
+// implementation and differ only in the qualification entry each reads.
+var creNCCLCheckNames = []string{checkNameCRENCCLAllReduceBW, checkNameCRENCCLAllReduceBWNET}
+
 func checkCRENCCLAllReduceBW(ctx *validators.Context) error {
-	constraint, found := findPerformanceConstraint(ctx, checkNameCRENCCLAllReduceBW)
+	return checkCRENCCLAllReduce(ctx, checkNameCRENCCLAllReduceBW)
+}
+
+func checkCRENCCLAllReduceBWNET(ctx *validators.Context) error {
+	return checkCRENCCLAllReduce(ctx, checkNameCRENCCLAllReduceBWNET)
+}
+
+func checkCRENCCLAllReduce(ctx *validators.Context, checkName string) error {
+	constraint, found := findPerformanceConstraint(ctx, checkName)
 	if !found {
-		return validators.SkipWithReason(validators.SkipReasonNoConstraint, fmt.Sprintf("no %s constraint in recipe", checkNameCRENCCLAllReduceBW))
+		return validators.SkipWithReason(validators.SkipReasonNoConstraint, fmt.Sprintf("no %s constraint in recipe", checkName))
 	}
-	actual, passed, err := validateCRENcclAllReduceBw(ctx, constraint)
-	return classifyNCCLAllReduceBWResult(checkNameCRENCCLAllReduceBW, constraint, actual, passed, err)
+	actual, passed, err := validateCRENcclAllReduceBw(ctx, checkName, constraint)
+	return classifyNCCLAllReduceBWResult(checkName, constraint, actual, passed, err)
 }
 
 func validateCRENcclAllReduceBw(
 	ctx *validators.Context,
+	checkName string,
 	constraint recipe.Constraint,
 ) (actual string, passed bool, err error) {
 
@@ -49,14 +62,14 @@ func validateCRENcclAllReduceBw(
 	// Before the qualification lookup, so a constraint the check cannot honor
 	// is reported rather than hidden behind a skip on an unqualified
 	// combination. It needs no cluster access, and the docs promise it fails.
-	threshold, err := creThreshold(checkNameCRENCCLAllReduceBW, constraint.Value)
+	threshold, err := creThreshold(checkName, constraint.Value)
 	if err != nil {
 		return "", false, err
 	}
 
-	entry, qualified := lookupCREQualification(checkNameCRENCCLAllReduceBW, service, accelerator)
+	entry, qualified := lookupCREQualification(checkName, service, accelerator)
 	if !qualified {
-		return ncclSkip(fmt.Sprintf("skipped - %s is not qualified on %s × %s", checkNameCRENCCLAllReduceBW, service, accelerator),
+		return ncclSkip(fmt.Sprintf("skipped - %s is not qualified on %s × %s", checkName, service, accelerator),
 			validators.SkipReasonUnsupportedTarget)
 	}
 
@@ -89,7 +102,7 @@ func validateCRENcclAllReduceBw(
 	}
 
 	defer func() {
-		actual, passed, err = creNCCLCleanupResult(actual, passed, err,
+		actual, passed, err = creNCCLCleanupResult(checkName, actual, passed, err,
 			teardownCRECertification(context.Background(), dyn, ctx.Clientset, ctx.Namespace, objName))
 	}()
 
@@ -155,11 +168,11 @@ func emitCREBandwidthExtras(bw, threshold float64) {
 //
 // Split out of the deferred call so a test can reach the case where both the
 // check and its teardown failed.
-func creNCCLCleanupResult(actual string, passed bool, primary, delErr error) (string, bool, error) {
+func creNCCLCleanupResult(checkName, actual string, passed bool, primary, delErr error) (string, bool, error) {
 	if delErr == nil {
 		return actual, passed, primary
 	}
-	return "", false, creCleanupFailure(checkNameCRENCCLAllReduceBW, primary, delErr)
+	return "", false, creCleanupFailure(checkName, primary, delErr)
 }
 
 func creLauncherLogs(ctx *validators.Context, workflowName string, createdAt metav1.Time) (string, error) {

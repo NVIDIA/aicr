@@ -550,11 +550,30 @@ recipe's plain criteria like any other embedded one.
 
 ### Cluster Readiness Engine checks
 
-An opt-in pair of Cluster Readiness Engine (CRE) checks runs against public CRE
+Three Cluster Readiness Engine (CRE) checks run against public CRE
 (`nvcre.nvidia.com`, [cluster-readiness-engine](https://github.com/NVIDIA/cluster-readiness-engine)).
-Neither check branches on service or accelerator; which combinations are
+None of them branches on service or accelerator; which combinations are
 qualified is recorded as data. Shipped overlays keep the TrainJob
-`nccl-all-reduce-bw` path, so nothing below runs unless you ask for it.
+`nccl-all-reduce-bw*` path. The one exception is
+`gb300-eks-ubuntu-training-kubeflow`, which installs `nvcre` and declares
+`nccl-cre-all-reduce-bw` with `>= 700` and `nccl-cre-all-reduce-bw-net` with
+`>= 30`. CRE reports one peak bus bandwidth, which on an NVL72 fabric is the
+NVLS path, so `nccl-cre-all-reduce-bw` stands in for
+`nccl-all-reduce-bw-nvls`. `nccl-cre-all-reduce-bw-net` is the same run with
+NVLS and MNNVL disabled, so its peak is the EFA path alone, and it stands in for
+`nccl-all-reduce-bw-net`. The inherited TrainJob checks stay in the recipe but
+are reported as skipped (`superseded-by-cre`). A CRE NCCL check supersedes its
+TrainJob check only when the recipe both lists it in `performance.checks` and
+declares its constraint, on a combination qualified for that variant; a
+constraint declared without the check leaves the TrainJob check running. The
+same rule covers `eks` x `h100`: a recipe that opts into
+`nccl-cre-all-reduce-bw` there skips `nccl-all-reduce-bw` as
+`superseded-by-cre`. The net floor is 30, below the 40
+the TrainJob check holds: on the newer `nccl-tests` image CRE selects (NCCL
+2.31.2, aws-ofi-nccl 1.21.1) the EFA-only path measures about 31 GB/s, against
+about 45 on the image the TrainJob check uses, and the NVCRE team is treating
+that as a regression to fix. Raise the floor once it is fixed. On every other
+overlay, nothing below runs unless you ask for it.
 
 Enabling a CRE check takes two steps and needs both. Add the `nvcre` component
 as described in
@@ -586,7 +605,8 @@ percentage (`>= 50`) can never be satisfied.
 
 | Check | What it measures | Qualified combinations |
 |---|---|---|
-| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100` |
+| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100`, `eks` x `gb300` |
+| `nccl-cre-all-reduce-bw-net` | The same run with `NCCL_NVLS_ENABLE=0` and `NCCL_MNNVL_ENABLE=0` set through `spec.env`, so the peak is the EFA/NET path | `eks` x `gb300` |
 | `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | `eks` x `h100` |
 
 The catalog entry each check drives, and the node footprint it runs on, come
@@ -603,15 +623,23 @@ are the images the catalog selects on `eks` x `h100`, at the digests
 `recipes/components/nvcre/workload-images.yaml` records for the CRE version
 the registry pins, and the checks submit them whatever CRE version the cluster
 runs: the EFA `nccl-tests` image for `nccl-cre-all-reduce-bw`, and
-`nvcr.io/nvidia/pytorch:25.08-py3` for `cre-training-goodput`. With the pin,
+`nvcr.io/nvidia/pytorch:25.08-py3` for `cre-training-goodput`. The `eks` x
+`gb300` entries of both NCCL checks pin a newer `nccl-tests` image (NCCL
+2.31.2) recorded in `recipes/components/nvcre/workload-images-gb300.yaml`
+instead. With the pin,
 the NCCL launcher's SSH-permissions init container also runs `nccl-tests`
 rather than `nvcr.io/nvidia/pytorch:26.01-py3`, so the NCCL check no longer
-pulls that image. A mirror for a disconnected cluster has to serve these two
-images at the recorded digests.
+pulls that image. A mirror for a disconnected cluster has to serve the
+images its combination pins at the recorded digests:
+`workload-images.yaml` for `eks` x `h100`, and `workload-images-gb300.yaml`
+for `eks` x `gb300`.
 
 #### Relation to the TrainJob check
 
-On `eks` x `h100`, `nccl-cre-all-reduce-bw`
+On `eks` x `h100`, a recipe that runs `nccl-cre-all-reduce-bw` skips
+`nccl-all-reduce-bw` as `superseded-by-cre`, so one validation run reports
+only the CRE result. The comparison below predates that supersession; to
+repeat it, run each check in a separate validation. `nccl-cre-all-reduce-bw`
 reads 1.65 GB/s (0.34%) higher than `nccl-all-reduce-bw` on the same two nodes:
 six back-to-back pairs on NVCRE v0.8.2 gave 486.76 to 489.01 GB/s for the
 TrainJob check and 489.63 to 490.03 GB/s for the CRE check, with a per-pair
@@ -632,9 +660,9 @@ it.
 
 The goodput figure depends on the step count, because startup time counts
 against it. The step count comes from the NVCRE catalog entry, so a figure
-belongs to the CRE version that produced it: 0.5723 on two nodes with the
-pinned v0.8.2 (462.05 TFLOPS per GPU), and 0.5835 on v0.6.0, both measured on a
-NodeWright-tuned cluster. Both are single measurements, so set the constraint
+belongs to the CRE version that produced it: 0.5723 on two nodes with
+v0.8.2, the pin at the time and not re-measured on v0.12.0 (462.05 TFLOPS per
+GPU), and 0.5835 on v0.6.0, both measured on a NodeWright-tuned cluster. Both are single measurements, so set the constraint
 as a floor below the value your cluster reaches, not at it. Run it on nodes
 that completed NodeWright tuning: on a cluster that had not, with the distro
 EFA driver, no hugepages, and an 8 MB memlock limit, a two-node run hung in NCCL
@@ -1049,6 +1077,14 @@ Three properties make it a scoping tool rather than a way to hide a failure:
 - **A check added later is not silenced.** A skip list names what to withhold,
   so a new check in a recipe runs and can fail, which forces a decision rather
   than hiding one.
+
+Skipping a CRE NCCL check (`nccl-cre-all-reduce-bw` or
+`nccl-cre-all-reduce-bw-net`) also ends its supersession: the validators no
+longer see that check's constraint, so the TrainJob check it replaces
+(`nccl-all-reduce-bw-nvls` or `nccl-all-reduce-bw-net` on `eks` x `gb300`,
+`nccl-all-reduce-bw` on `eks` x `h100`) runs instead of skipping
+as `superseded-by-cre`. A lane without `nvcre` therefore falls back to TrainJob
+coverage rather than measuring nothing.
 
 The CNCF conformance evidence path refuses the two flags together for a
 different reason. `pkg/evidence/cncf` renders one markdown file per
