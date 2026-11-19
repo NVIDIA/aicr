@@ -462,14 +462,22 @@ func staticArtifactProvider(ctx context.Context, provider DataProvider, options 
 
 func validateInactiveArtifactBindings(ctx context.Context, provider DataProvider, candidate []byte) error {
 	layers := []DataProvider{provider}
+	var externalLayer DataProvider
+	external := map[string][]byte{}
 	if layered, ok := provider.(*LayeredDataProvider); ok {
 		layers = nil
 		if !layered.externalOnly {
 			layers = append(layers, layered.embedded)
 		}
+		externalLayer = &LayeredDataProvider{externalOnly: true, externalDir: layered.externalDir, maxFileSize: layered.maxFileSize}
 		if candidate == nil {
-			layers = append(layers, &LayeredDataProvider{externalOnly: true, externalDir: layered.externalDir, maxFileSize: layered.maxFileSize})
+			layers = append(layers, externalLayer)
 		}
+		data, readErr := externalLayer.ReadFile(ctx, registryFileName)
+		if readErr != nil && !stderrors.Is(readErr, fs.ErrNotExist) {
+			return errors.PropagateOrWrap(readErr, errors.ErrCodeInvalidRequest, "read external registry")
+		}
+		external[registryFileName] = data
 	}
 	var bindings []*artifact.Bindings
 	for _, layer := range layers {
@@ -484,12 +492,19 @@ func validateInactiveArtifactBindings(ctx context.Context, provider DataProvider
 		if parseErr != nil {
 			return parseErr
 		}
+		if layerErr := validateArtifactCRDLayer(parsed, layer == externalLayer, external); layerErr != nil {
+			return layerErr
+		}
 		bindings = append(bindings, parsed)
 	}
 	if candidate != nil {
 		parsed, parseErr := artifact.ParseBindings(candidate)
 		if parseErr != nil {
 			return parseErr
+		}
+		// A candidate stands in for the external bindings file.
+		if layerErr := validateArtifactCRDLayer(parsed, true, external); layerErr != nil {
+			return layerErr
 		}
 		bindings = append(bindings, parsed)
 	}

@@ -788,6 +788,47 @@ func TestStaticArtifactInactiveDoesNotCaptureCatalog(t *testing.T) {
 	errorstest.WantReportedCode(t, invalidErr, errors.ErrCodeInvalidRequest)
 }
 
+func TestStaticArtifactInactiveEnforcesCRDOwnershipLayer(t *testing.T) {
+	tests := []struct {
+		name, binding string
+		valid         bool
+	}{
+		{"external entry", "runner-chart: {component: runner, crdOwnership: retain}", true},
+		{"embedded-only entry", "runner-chart: {component: nvsentinel, crdOwnership: retain}", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files, _ := artifactCatalogFixture()
+			bindings := []byte(strings.Replace(string(files[artifactBindingsPath]), "runner-chart: {component: runner}", tt.binding, 1))
+			if string(bindings) == string(files[artifactBindingsPath]) {
+				t.Fatal("fixture binding not replaced")
+			}
+			check := func(err error) {
+				t.Helper()
+				if tt.valid {
+					if err != nil {
+						t.Fatal(err)
+					}
+					return
+				}
+				if err == nil || !strings.Contains(err.Error(), "artifact-target-invalid") {
+					t.Fatalf("got %v", err)
+				}
+			}
+			newProvider := func(files map[string][]byte) DataProvider {
+				provider, err := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), LayeredProviderConfig{ExternalDir: writeArtifactCatalog(t, files)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return provider
+			}
+			check(validateStaticArtifactInput(t.Context(), newProvider(files), artifact.Options{}, artifact.BindingsKind, bindings))
+			files[artifactBindingsPath] = bindings
+			check(validateStaticArtifacts(t.Context(), newProvider(files), artifact.Options{}))
+		})
+	}
+}
+
 func TestStaticArtifactCandidateMergesEmbeddedBindings(t *testing.T) {
 	candidate := []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactBindings\ncharts:\n  duplicate-cert-manager: {component: cert-manager}\nimages: {}\n")
 	for _, externalOnly := range []bool{false, true} {
