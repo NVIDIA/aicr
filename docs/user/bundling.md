@@ -782,7 +782,8 @@ Under every deployer except `flux`, its own manifests (the `-pre` and
 `-post` releases) are rendered when the bundle is built, so a path that
 only those manifests read does not change them; set such a value at bundle
 time. `flux` renders those manifests at reconcile time, with the dynamic
-values from the component's ConfigMap.
+values from the ConfigMap that each `-pre` or `-post` HelmRelease
+references.
 
 A component whose presence a configuration profile owns cannot be removed
 at all — `enabled=false` on it is rejected regardless of the rule above.
