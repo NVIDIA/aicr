@@ -130,6 +130,14 @@ make component-cleanup DELETE_CLUSTER=true
 | `HELM_SET` | (none) | Extra `--set` overrides (comma-separated) |
 | `AICR_BIN` | auto-detected from `dist/` | Path to aicr binary |
 
+### Per-component fixtures
+
+A component whose real inputs the bare Kind cluster cannot provide can ship
+`tools/component-test/fixtures/<component>.sh`. `deploy-component.sh` sources it
+before generating the bundle, so it can create test-only resources and append to
+`BUNDLE_EXTRA_ARGS`. `snapshot.sh` is the example: it creates a `ReadWriteOnce`
+claim in place of the chart's `ReadWriteMany` one.
+
 ### Health Check (run-health-check.sh)
 
 | Variable | Default | Purpose |

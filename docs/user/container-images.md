@@ -27,8 +27,8 @@ The catalog lists the driver version that the default chart render carries. Vers
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **58**
-- Unique images: **141**
+- Components: **59**
+- Unique images: **145**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -95,6 +95,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.4 | 0 |
 | slinky-topograph | helm | topograph/topograph | 1.1.0 | 1 |
 | slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.2 | 1 |
+| snapshot | helm | snapshot | 0.2.0 | 4 |
 | sriov-ib-networks | manifest | — | — | 0 |
 | topograph | helm | topograph/topograph | 1.1.0 | 1 |
 
@@ -437,6 +438,13 @@ _No images extracted._
 ### slurm-accounting-mariadb
 
 - `mariadb:11.8.9@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707`
+
+### snapshot
+
+- `busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0`
+- `ghcr.io/ai-dynamo/snapshot/agent:v0.2.0`
+- `ghcr.io/ai-dynamo/snapshot/operator:v0.2.0`
+- `ghcr.io/ai-dynamo/snapshot/pagebroker:v0.2.0`
 
 ### sriov-ib-networks
 

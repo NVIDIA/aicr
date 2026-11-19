@@ -1,0 +1,139 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Snapshot Health Check
+#
+# Asserts that the Snapshot CRDs are Established, the snapshot-operator
+# Deployment is available, the snapshot-agent DaemonSet is ready on the nodes it
+# schedules to, and no pod in the namespace is stuck. Read-only: it shows
+# Snapshot is running, not that a checkpoint restores.
+#
+# The agent targets GPU nodes only, so with none the DaemonSet assertion passes
+# with no pods; the operator assertion keeps an empty namespace from passing.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: snapshot-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-crds-established
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: podsnapshots.nvidia.com
+              status:
+                (conditions[?type == 'Established'] | [0].status): "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: podsnapshotcontents.nvidia.com
+              status:
+                (conditions[?type == 'Established'] | [0].status): "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: snapshotjobs.nvidia.com
+              status:
+                (conditions[?type == 'Established'] | [0].status): "True"
+
+    - name: validate-operator-deployment-ready
+      try:
+        # Asserting the named Deployment guards against a vacuous pass on an
+        # empty namespace, where the pod checks below find nothing.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: snapshot-operator
+                namespace: snapshot
+              ((spec.replicas || `0`) > `0`): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+
+    - name: validate-agent-daemonset-ready
+      try:
+        # observedGeneration: until the controller writes status, the
+        # comparison below would pass on a cluster that has GPU nodes.
+        # updatedNumberScheduled is omitted while zero, and `==` against the
+        # `0` fallback fails even for 0 and 0, so it uses `>=`.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: snapshot-agent
+                namespace: snapshot
+              ((status.observedGeneration || `0`) == metadata.generation): true
+              ((status.desiredNumberScheduled || `0`) == (status.numberReady || `0`)): true
+              ((status.updatedNumberScheduled || `0`) >= (status.desiredNumberScheduled || `0`)): true
+              ((status.numberUnavailable || `0`) == `0`): true
+
+    - name: validate-all-pods-healthy
+      try:
+        # No pod in an unhealthy phase, and none stuck in Running with a
+        # known-bad container-waiting reason: phase-only filtering misses
+        # CrashLoopBackOff, which keeps the pod in Running. JMESPath
+        # projections, not single-element matches, so a pod with sidecars or
+        # init containers (the operator's crd-installer) is covered too.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: snapshot
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: snapshot
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: snapshot
+              status:
+                phase: Unknown
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: snapshot
+              status:
+                ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: snapshot
+              status:
+                ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

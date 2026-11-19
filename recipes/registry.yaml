@@ -1431,6 +1431,11 @@ components:
         tolerationPaths:
           - dynamo-operator.controllerManager.tolerations
           - nats.podTemplate.merge.spec.tolerations
+    # The one path the opt-in dynamo-snapshot mixin sets: it turns on the
+    # operator's checkpoint/restore feature, which needs the snapshot component
+    # installed first. The chart default is false.
+    mixinSafeOverridePaths:
+      - dynamo-operator.checkpoint.enabled
     # What the planner queries at ai-dynamo/dynamo v1.6.2
     # (components/src/dynamo/planner/monitoring/traffic_metrics.py), in
     # frontend and router mode, plus the engines' speculative-decoding
@@ -1449,6 +1454,47 @@ components:
           - vllm:spec_decode_num_(accepted_tokens|drafts)_total
           - sglang:spec_accept_length
           - trtllm_spec_decode_acceptance_length
+
+  # Snapshot (github.com/ai-dynamo/snapshot): GPU checkpoint/restore, not the
+  # `aicr snapshot` command. Opt-in: no stock overlay references it, and the
+  # dynamo-snapshot mixin links it to dynamo-platform.
+  # The pin follows dynamo-platform: Dynamo 1.6.2 declares 0.2.0, and 0.3.0
+  # breaks its restore.
+  # No ownsCRDs: the chart's crd-installer applies the CRDs on every rollout.
+  # No testTier: values.yaml has no GPU reference, so the harness picks deploy.
+  - name: snapshot
+    displayName: Snapshot
+    class: ops
+    valueOverrideKeys:
+      - snapshot
+    healthCheck:
+      assertFile: checks/snapshot/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/ai-dynamo/snapshot
+      defaultChart: snapshot
+      # renovate: datasource=docker depName=ghcr.io/ai-dynamo/snapshot/snapshot
+      defaultVersion: "0.2.0"
+      # The chart's installation guide gives the privileged node agent a
+      # namespace of its own and runs workloads in others.
+      defaultNamespace: snapshot
+    # The checkpoint store is a ReadWriteMany claim by default (the chart's
+    # pvc template hard-codes the access mode), and AICR ships no shared
+    # storage, so the class is a bundle-time input: --shared-storage-class.
+    sharedStorageClassPaths:
+      - storage.pvc.storageClass
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - operator.nodeSelector
+        tolerationPaths:
+          - operator.tolerations
+      # No accelerated nodeSelectorPaths: the agent's chart default
+      # (nvidia.com/gpu.present) already targets GPU nodes, and a path here
+      # would replace it. Tolerations are mapped so the agent can land on
+      # tainted GPU nodes.
+      accelerated:
+        tolerationPaths:
+          - daemonset.tolerations
 
   - name: agentgateway-crds
     displayName: agentgateway-crds

@@ -165,6 +165,13 @@ var stockRenderOptIns = []stockRenderOptIn{
 		covers: []string{"nktp"},
 	},
 	{
+		// No stock recipe selects snapshot; the opt-in mixin adds it.
+		name:    "h100-eks-ubuntu-inference-dynamo+dynamo-snapshot",
+		leaf:    "h100-eks-ubuntu-inference-dynamo",
+		overlay: &overlayAddition{mixins: []string{"dynamo-snapshot"}},
+		covers:  []string{"snapshot"},
+	},
+	{
 		// The gpuStack=dra value (#2517) renders a different advertiser
 		// shape than the gke-default stock pass: the installer DaemonSet
 		// on, both device plugins off, whole-GPU DRA armed. No covers

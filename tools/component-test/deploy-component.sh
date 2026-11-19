@@ -282,6 +282,15 @@ fi
 log_info "Recipe:"
 cat "${WORK_DIR}/recipe.yaml"
 
+# Optional per-component fixture (tools/component-test/fixtures/<component>.sh):
+# may create test-only resources and append to BUNDLE_EXTRA_ARGS.
+component_fixture="${SCRIPT_DIR}/fixtures/${COMPONENT}.sh"
+if [[ -f "$component_fixture" ]]; then
+    log_info "Applying component fixture ${component_fixture#"${REPO_ROOT}"/}"
+    # shellcheck source=/dev/null
+    . "$component_fixture"
+fi
+
 # Optional extra bundle flags, word-split from the caller's environment.
 # Components whose bundle contract needs scheduling, storage, or override
 # inputs (tools/k8s-aibom-test passes --system-node-selector /
