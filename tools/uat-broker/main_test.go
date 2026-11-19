@@ -330,7 +330,7 @@ func TestReservationsSkipDelete(t *testing.T) {
 		{
 			name:     "true on a nightly aws run is refused",
 			extra:    []string{"--name", "aws-h100", "--lifecycle", "nightly", "--skip-delete", "true"},
-			wantCode: errors.ExitInvalidInput, wantInErr: "-f reservation=aws-h100 -f lifecycle=daytime-up",
+			wantCode: errors.ExitInvalidInput, wantInErr: "-f reservation=aws-h100 -f intent=<intent> -f lifecycle=daytime-up",
 		},
 		{
 			name:     "a value other than true or false is refused",

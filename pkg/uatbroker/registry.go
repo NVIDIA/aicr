@@ -245,7 +245,8 @@ func (r *Reservation) CheckSkipDelete(lifecycle string, skipDelete bool) error {
 	return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 		"skip_delete=true is refused for lifecycle=%s on reservation %s (cloud %s): a retained nightly "+
 			"cluster has no reliable teardown (#3670). For a debugging hold, dispatch: "+
-			"gh workflow run uat-run.yaml -f reservation=%s -f lifecycle=daytime-up; lifecycle=daytime-down, "+
+			"gh workflow run uat-run.yaml -f reservation=%s -f intent=<intent> -f lifecycle=daytime-up, "+
+			"with this run's intent; lifecycle=daytime-down, "+
 			"or the 02:00 UTC evening teardown, removes that held cluster",
 		lifecycle, r.Name, r.Cloud, r.Name))
 }

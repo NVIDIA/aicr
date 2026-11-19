@@ -1109,7 +1109,7 @@ func TestCheckSkipDelete(t *testing.T) {
 		{name: "true with daytime-down", cloud: CloudAzure, lifecycle: LifecycleDaytimeDown, skipDelete: true},
 		{
 			name: "true on a nightly aws run", cloud: CloudAWS, lifecycle: LifecycleNightly, skipDelete: true,
-			wantErr: []string{"lifecycle=nightly on reservation r1 (cloud aws)", "-f reservation=r1 -f lifecycle=daytime-up"},
+			wantErr: []string{"lifecycle=nightly on reservation r1 (cloud aws)", "-f reservation=r1 -f intent=<intent> -f lifecycle=daytime-up, with this run's intent"},
 		},
 		{name: "true on a nightly gcp run", cloud: CloudGCP, lifecycle: LifecycleNightly, skipDelete: true, wantErr: []string{"(cloud gcp)"}},
 		{name: "true on a nightly azure run", cloud: CloudAzure, lifecycle: LifecycleNightly, skipDelete: true, wantErr: []string{"(cloud azure)"}},
