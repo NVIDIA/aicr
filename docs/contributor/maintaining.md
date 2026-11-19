@@ -501,6 +501,30 @@ component, gathering values-path, lockstep-family, BOM, CRD/upgrade-record,
 and Kubernetes-compatibility evidence. The skill only recommends — the
 registry edit, `make bom-docs`, and the PR are separate, human-initiated work.
 
+## PR Approval Reminder
+
+The repository requires a maintainer to approve CI for every external
+contributor's pull request. Until someone clicks **Approve and run workflows**,
+the PR's `pull_request` workflows, the Merge Gate included, do not run, and
+each new push needs another approval. A bot PR can wait the same way; pushing
+a signed maintainer commit to its branch also starts its CI.
+
+`PR Approval Reminder` (`.github/workflows/pr-approval-notify.yaml`) runs at
+06:07, 11:07 and 15:07 Pacific time. It posts one Slack message listing the
+open, non-draft PRs whose latest commit is waiting for that approval, bot PRs
+included, oldest wait first. When nothing is waiting, it posts nothing. If the
+lookup fails or hangs, it posts a link to the run instead. A Slack delivery
+failure or a scheduled run that GitHub drops still leaves the channel quiet, so
+check the workflow's run history if reminders stop. A manual `workflow_dispatch`
+run only logs the message unless `notify_slack` is set. The reminder does not
+cover `/ok-to-test` or copy-pr-bot's `/ok to test`, which leave no pending
+state to query.
+
+Approving runs the contributor's code in AICR CI. Read the full diff first,
+looking hardest at `.github/`, the `Makefile`, `.goreleaser.yaml`, `tools/`,
+scripts, `go.mod` and `go.sum`, and tests, including fixtures. The reminder
+never approves anything itself.
+
 ## Reviewing Recipe Contributions
 
 A recipe PR touches `recipes/overlays/`, `recipes/mixins/`,
