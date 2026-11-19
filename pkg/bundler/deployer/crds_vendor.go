@@ -177,28 +177,37 @@ func collectVendoredCRDs(ctx context.Context, data []byte, exclusions []string, 
 	}
 }
 
-// chartRootEntry classifies an archive entry by where Helm reads it: a CRD
-// file under a chart root's crds/ directory, or a packaged subchart under its
+// chartRootEntry classifies an archive entry by where the bundle reads it: a
+// CRD file under a chart root's crds/ directory, or a packaged chart under a
 // charts/ directory. Paths such as templates/crds/ are neither, since Helm
 // renders those as templates. Entries of an excluded subchart are neither.
+//
+// The result covers what Helm installs and what apply-crds.sh applies on
+// upgrade. The script reads more than Helm: it keeps charts/ entries whose
+// names start with "_" or ".", and unpacks every .tgz below a charts/
+// directory wherever that directory sits.
 func chartRootEntry(name string, exclusions []string) (crd, nested bool) {
-	// As Helm does: a name with a backslash is split on backslashes, the raw
-	// first segment is dropped before cleaning, and charts/ entries whose
-	// names start with "_" or "." are ignored.
+	// As Helm does: a name with a backslash is split on backslashes, and the
+	// raw first segment is dropped before cleaning.
 	delimiter := "/"
 	if strings.Contains(name, `\`) {
 		delimiter = `\`
 	}
-	_, name, _ = strings.Cut(name, delimiter)
+	root, name, _ := strings.Cut(name, delimiter)
 	parts := strings.Split(path.Clean(strings.ReplaceAll(name, delimiter, "/")), "/")
+	last := parts[len(parts)-1]
+	packaged := strings.HasSuffix(last, ".tgz") && (root == chartsDir || slices.Contains(parts[:len(parts)-1], chartsDir))
 	for len(parts) >= 2 && parts[0] == chartsDir {
-		if strings.HasPrefix(parts[1], "_") || strings.HasPrefix(parts[1], ".") || excludedSubchart(parts[1], exclusions) {
+		if excludedSubchart(parts[1], exclusions) {
 			return false, false
 		}
 		if len(parts) == 2 {
-			return false, strings.HasSuffix(parts[1], ".tgz")
+			break
 		}
 		parts = parts[2:]
+	}
+	if packaged {
+		return false, !excludedSubchart(last, exclusions)
 	}
 	if len(parts) < 2 || parts[0] != "crds" {
 		return false, false

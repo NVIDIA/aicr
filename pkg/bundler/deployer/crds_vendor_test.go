@@ -94,7 +94,11 @@ func TestVendoredRetainedCRDs(t *testing.T) {
 		{"excluded abbreviated version mongodb", "retained", "abbreviated", true, false},
 		{"backslash separators", "retained", "backslash", true, true},
 		{"dot-rooted archive", "retained", "dotroot", true, true},
-		{"dependency Helm ignores", "retained", "ignored", true, false},
+		{"packaged dependency Helm ignores", "retained", "ignored", true, true},
+		{"unpacked dependency Helm ignores", "retained", "ignoreddir", true, true},
+		{"archive below a nested charts directory", "retained", "strayarchive", true, true},
+		{"excluded archive below a nested charts directory", "retained", "strayexcluded", true, false},
+		{"archive below an excluded unpacked subchart", "retained", "excludedparent", true, false},
 		{"crds subdirectory named as an exclusion", "retained", "crdsdir", true, true},
 		{"nonvendored attestation", "retained", "collision", false, false},
 		{"disabled", "disabled", "collision", true, false},
@@ -130,6 +134,14 @@ func TestVendoredRetainedCRDs(t *testing.T) {
 				ownerFiles = map[string][]byte{"./Chart.yaml": ownerFiles["nvsentinel/Chart.yaml"], "./crds/shared.yaml": shared}
 			case "ignored":
 				ownerFiles["nvsentinel/charts/_disabled-1.0.0.tgz"] = crdArchive(t, map[string][]byte{"disabled/crds/shared.yaml": shared})
+			case "ignoreddir":
+				ownerFiles["nvsentinel/charts/_disabled/crds/shared.yaml"] = shared
+			case "strayarchive":
+				ownerFiles["nvsentinel/files/charts/extra-1.0.0.tgz"] = crdArchive(t, map[string][]byte{"extra/crds/shared.yaml": shared})
+			case "strayexcluded":
+				ownerFiles["nvsentinel/files/charts/mongodb-store-1.0.0.tgz"] = crdArchive(t, map[string][]byte{"mongodb-store/crds/shared.yaml": shared})
+			case "excludedparent":
+				ownerFiles["nvsentinel/charts/mongodb-store/charts/child-1.0.0.tgz"] = crdArchive(t, map[string][]byte{"child/crds/shared.yaml": shared})
 			case "uppercase":
 				ownerFiles["nvsentinel/crds/shared.YAML"] = shared
 			case "list":
