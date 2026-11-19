@@ -1104,7 +1104,7 @@ func (v *Validator) ensureDataConfigMaps(
 	validationInput *v1.ValidationInput,
 ) error {
 
-	return EnsureDataConfigMaps(ctx, clientset, v.Namespace, v.RunID, snap, validationInput)
+	return EnsureDataConfigMaps(ctx, clientset, v.Namespace, v.RunID, snap, v.withoutSkippedCREConstraints(validationInput))
 }
 
 // cleanupDataConfigMaps removes snapshot and validation ConfigMaps for this run.
