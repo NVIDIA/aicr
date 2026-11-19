@@ -24,21 +24,21 @@ function headSha(pull) {
 // commits keep their action_required runs forever. A run's pull_requests list
 // is empty for fork PRs, which is why the lookup starts from the PR, not the run.
 async function waitingSince(github, repo, pull) {
-  const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+  const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
     ...repo,
     head_sha: headSha(pull),
     status: 'action_required',
     per_page: 100,
   });
-  if (!Number.isSafeInteger(data?.total_count) || data.total_count < 0) {
-    throw new Error(`Workflow run lookup for #${pull.number} returned no count`);
+  if (!Array.isArray(runs)) {
+    throw new Error(`Workflow run lookup for #${pull.number} returned no run list`);
   }
-  if (data.total_count === 0) {
+  if (runs.length === 0) {
     return null;
   }
-  const created = (data.workflow_runs ?? []).map(run =>
+  const created = runs.map(run =>
     typeof run?.created_at === 'string' ? Date.parse(run.created_at) : Number.NaN);
-  if (created.length === 0 || created.some(Number.isNaN)) {
+  if (created.some(Number.isNaN)) {
     throw new Error(`Workflow run lookup for #${pull.number} returned no creation time`);
   }
   return Math.min(...created);

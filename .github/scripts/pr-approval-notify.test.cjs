@@ -17,22 +17,22 @@ function fixture({ pulls, waiting = {}, runsResponse }) {
   const logs = [];
   const github = {
     paginate: async (method, params) => {
-      assert.equal(method, github.rest.pulls.list);
-      assert.deepEqual(params, { ...repo, state: 'open', per_page: 100 });
-      return pulls;
+      if (method === github.rest.pulls.list) {
+        assert.deepEqual(params, { ...repo, state: 'open', per_page: 100 });
+        return pulls;
+      }
+      assert.equal(method, github.rest.actions.listWorkflowRunsForRepo);
+      lookups.push(params);
+      if (runsResponse) {
+        return runsResponse(params);
+      }
+      return (waiting[params.head_sha] ?? []).map(created_at => ({ created_at }));
     },
     rest: {
       pulls: { list: () => {} },
       actions: {
-        listWorkflowRunsForRepo: async params => {
-          lookups.push(params);
-          if (runsResponse) {
-            return runsResponse(params);
-          }
-          const created = waiting[params.head_sha] ?? [];
-          return {
-            data: { total_count: created.length, workflow_runs: created.map(created_at => ({ created_at })) },
-          };
+        listWorkflowRunsForRepo: () => {
+          throw new Error('Run lookups must page through github.paginate');
         },
       },
     },
@@ -75,6 +75,20 @@ test('lists ready PRs whose head commit awaits approval, oldest wait first', asy
   }
 });
 
+test('takes the earliest waiting run from every page', async () => {
+  const day = n => `2026-10-${String(n).padStart(2, '0')}T09:00:00Z`;
+  const manyRuns = Array.from({ length: 150 }, (_, i) => (i === 149 ? '2026-09-01T09:00:00Z' : day(1 + (i % 28))));
+  const f = fixture({
+    pulls: [pull(3713), pull(3920)],
+    // #3713 waits longer than any of #3920's first 100 runs but not its 150th.
+    waiting: { [sha(3713)]: ['2026-09-15T09:00:00Z'], [sha(3920)]: manyRuns },
+  });
+
+  await notifyPendingApprovals({ github: f.github, context, core: f.core });
+
+  assert.ok(f.outputs.message.startsWith(`PRs waiting for CI approval: ${link(3920)} ${link(3713)}\n`));
+});
+
 test('outputs an empty message when nothing awaits approval', async () => {
   const f = fixture({
     pulls: [pull(3713), pull(3906, { draft: true })],
@@ -91,12 +105,7 @@ test('fails closed on data it cannot trust', async t => {
   const cases = [
     ['an invalid PR number', { pulls: [{ number: '3713', draft: false, head: { sha: sha(1) } }] }, /invalid number/],
     ['a missing head commit', { pulls: [pull(3713, { head: 'main' })] }, /no valid head commit/],
-    ['a missing run count', { pulls: [pull(3713)], runsResponse: () => ({ data: {} }) }, /no count/],
-    [
-      'a waiting count without runs',
-      { pulls: [pull(3713)], runsResponse: () => ({ data: { total_count: 1, workflow_runs: [] } }) },
-      /no creation time/,
-    ],
+    ['a run lookup that is not a list', { pulls: [pull(3713)], runsResponse: () => ({}) }, /no run list/],
     [
       'a waiting run without a creation time',
       { pulls: [pull(3713)], waiting: { [sha(3713)]: ['2026-11-19T09:00:00Z', undefined] } },
