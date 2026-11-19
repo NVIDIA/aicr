@@ -97,9 +97,10 @@ type Reservation struct {
 	// rotation (#1281, DC8) and picks the flavor stood up on it during the
 	// working day: "training" or "inference". Empty means the reservation is
 	// NOT part of the daytime rotation, though the evening teardown
-	// ([Registry.DaytimeTeardownAssignments]) still covers it. This is the
-	// configurable cloud→flavor default — data, not code — so the split
-	// (AWS=training, GCP=inference at launch) can change without a workflow edit.
+	// ([Registry.DaytimeTeardownAssignments]) still covers it unless it is a
+	// kind row. This is the configurable cloud→flavor default — data, not
+	// code — so the split (AWS=training, GCP=inference at launch) can change
+	// without a workflow edit.
 	DaytimeIntent string `yaml:"daytime-intent"`
 }
 
