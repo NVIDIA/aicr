@@ -723,6 +723,10 @@ components:
       - node-drainer.customDrain.resource
       - node-drainer.customDrain.statusConditionType
       - node-drainer.customDrain.statusConditionStatus
+      # Unread since NVSentinel v1.32.0; still allowed so an external copy of
+      # nvsentinel-slinky-drainer written for v1.31.0, which had to set it,
+      # keeps composing.
+      - node-drainer.customDrain.timeout
       - global.healthEventsAnalyzer.enabled
       - health-events-analyzer.processingStrategy
       - health-events-analyzer.enableMultipleRemediationsRule
