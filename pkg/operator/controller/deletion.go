@@ -158,6 +158,7 @@ func (r *RolloutReconciler) removeRuntime(ctx context.Context, rt *v1alpha1.Clus
 		v.engineOK, v.engineReason, v.engineMessage = false, reasonOf(err), errorMessage(err)
 		v.stalled, v.stalledReason, v.stalledMsg = true, v.engineReason, v.engineMessage
 		keepObserved(rt, v)
+		r.pendingApproval(ctx, rt, v)
 		return v, nil
 	}
 	rollouts, err := r.rollouts(ctx, rt)

@@ -651,7 +651,7 @@ func TestObserveJobDuration(t *testing.T) {
 	if got := testutil.CollectAndCount(jobSeconds); got != before+2 {
 		t.Fatalf("series = %d, want %d", got, before+2)
 	}
-	if len(Collectors()) != 4 {
+	if len(Collectors()) != 7 {
 		t.Fatal("Collectors() misses a metric")
 	}
 }
@@ -679,6 +679,10 @@ func TestCollectorsExposeKnownSeries(t *testing.T) {
 	if got := testutil.CollectAndCount(jobSeconds); got < stages*2 {
 		t.Errorf("Job durations: %d series, want at least %d", got, stages*2)
 	}
+	// Stalled runtimes in other tests add reasons of their own.
+	if got, want := testutil.CollectAndCount(runtimeStalled), len(stallReasons()); got < want {
+		t.Errorf("runtime stalls: %d series, want at least %d", got, want)
+	}
 
 	reg := prometheus.NewPedanticRegistry()
 	reg.MustRegister(collectors...)
@@ -700,7 +704,9 @@ func TestCollectorsExposeKnownSeries(t *testing.T) {
 		}
 	}
 	want := []string{"aicr_operator_job_duration_seconds", "aicr_operator_job_runs_total",
-		"aicr_operator_rollout_outcomes_total", "aicr_operator_validation_runs_total"}
+		"aicr_operator_rollout_approval_wait_seconds", "aicr_operator_rollout_outcomes_total",
+		"aicr_operator_runtime_resolved_timestamp_seconds", "aicr_operator_runtime_stalled",
+		"aicr_operator_validation_runs_total"}
 	if !slices.Equal(names, want) {
 		t.Errorf("metric families %v, want %v", names, want)
 	}

@@ -45,7 +45,16 @@
         "serviceAccountAnnotations": {"$ref": "#/definitions/annotations"},
         "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
         "tolerations": {"type": "array"},
-        "affinity": {"type": "object"}
+        "affinity": {"type": "object"},
+        "podMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "labels": {"type": "object", "additionalProperties": {"type": "string"}},
+            "interval": {"type": "string", "pattern": "^(|([0-9]+(ms|s|m|h))+)$"}
+          }
+        }
       }
     },
     "engine": {
