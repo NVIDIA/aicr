@@ -53,7 +53,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-gb200-rdma | manifest | — | — | 2 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.7.2 | 15 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.7.3 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.14 | 1 |
@@ -184,21 +184,21 @@ _No images extracted._
 
 ### gpu-operator
 
-- `nvcr.io/nvidia/cloud-native/dcgm:4.6.1-1-ubuntu24.04`
+- `nvcr.io/nvidia/cloud-native/dcgm:4.7.0-ubuntu24.04`
 - `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu24.04`
 - `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6-ubuntu26.04`
-- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.4`
+- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.5`
 - `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.12.1`
-- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.1`
+- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.2`
 - `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4-ubuntu24.04`
-- `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.5`
-- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.1`
+- `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.7`
+- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.2`
 - `nvcr.io/nvidia/driver:580.173.02-ubuntu24.04`
-- `nvcr.io/nvidia/gpu-operator:v26.7.2`
-- `nvcr.io/nvidia/k8s-device-plugin:v0.20.1`
-- `nvcr.io/nvidia/k8s/container-toolkit:v1.20.1`
-- `nvcr.io/nvidia/k8s/dcgm-exporter:4.6.1-4.8.4-distroless`
-- `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.6.0`
+- `nvcr.io/nvidia/gpu-operator:v26.7.3`
+- `nvcr.io/nvidia/k8s-device-plugin:v0.20.2`
+- `nvcr.io/nvidia/k8s/container-toolkit:v1.20.2`
+- `nvcr.io/nvidia/k8s/dcgm-exporter:4.7.0-4.9.0-distroless`
+- `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.6.1`
 
 ### gpu-operator-ocp
 
@@ -567,7 +567,7 @@ across every image in a component and prints a summary report.
 ### Is it signed?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.3"  # replace with an image from the inventory above
 cosign tree "${IMAGE}"
 ```
 
@@ -578,7 +578,7 @@ attached — the image is unsigned.
 ### Does it have an SBOM?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.3"  # replace with an image from the inventory above
 cosign tree "${IMAGE}"
 ```
 
@@ -590,7 +590,7 @@ publishers attach SBOMs as registry referrers rather than the legacy
 ### Does it have build provenance?
 
 ```bash
-IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.2"  # replace with an image from the inventory above
+IMAGE="nvcr.io/nvidia/gpu-operator:v26.7.3"  # replace with an image from the inventory above
 cosign download attestation "${IMAGE}" \
   | jq -r 'select(.payload != null) | .payload' \
   | base64 -d \

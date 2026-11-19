@@ -1093,7 +1093,7 @@ cert-manager                   Helm  v1.20.2  cert-manager            prometheus
 kube-prometheus-stack          Helm  84.4.0   monitoring              prometheus-operator-crds
 k8s-ephemeral-storage-metrics  Helm  1.19.2   monitoring              kube-prometheus-stack,prometheus-operator-crds
 nfd                            Helm  0.20.1   node-feature-discovery  prometheus-operator-crds
-gpu-operator                   Helm  v26.7.2  gpu-operator            nfd,cert-manager,prometheus-operator-crds,nodewright-customizations
+gpu-operator                   Helm  v26.7.3  gpu-operator            nfd,cert-manager,prometheus-operator-crds,nodewright-customizations
 dra-node-labeler               Helm  -        gpu-operator            gpu-operator
 kai-scheduler                  Helm  v0.16.9  kai-scheduler           gpu-operator
 nvidia-dra-driver-gpu          Helm  0.5.1    nvidia-dra-driver       gpu-operator,dra-node-labeler
@@ -2755,7 +2755,7 @@ my-bundle/
     install.sh                     # helm upgrade --install <name> ./<dir> ...
   002-gpu-operator/
     Chart.yaml
-    charts/gpu-operator-v26.7.2.tgz
+    charts/gpu-operator-v26.7.3.tgz
     values.yaml
     cluster-values.yaml
     install.sh
@@ -2778,10 +2778,10 @@ kind: BundleProvenance
 vendoredCharts:
   - name: gpu-operator
     chart: gpu-operator
-    version: v26.7.2
+    version: v26.7.3
     repository: https://helm.ngc.nvidia.com/nvidia
     sha256: abc123...
-    tarballName: gpu-operator-v26.7.2.tgz
+    tarballName: gpu-operator-v26.7.3.tgz
     pullerVersion: helm-cli v3.20.2
 ```
 
