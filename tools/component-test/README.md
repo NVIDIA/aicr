@@ -130,6 +130,16 @@ make component-cleanup DELETE_CLUSTER=true
 | `HELM_SET` | (none) | Extra `--set` overrides (comma-separated) |
 | `AICR_BIN` | auto-detected from `dist/` | Path to aicr binary |
 
+### Per-component fixtures
+
+A component whose real inputs the bare Kind cluster cannot provide can ship a
+fixture at `tools/component-test/fixtures/<component>.sh`. `deploy-component.sh`
+sources it before generating the bundle, so it can create test-only cluster
+resources and append to `BUNDLE_EXTRA_ARGS`. A fixture changes only the test, never
+the component's production requirements. `snapshot.sh` is the example: the chart's
+checkpoint claim is `ReadWriteMany`, which Kind's local-path class cannot bind, so
+the fixture creates a `ReadWriteOnce` claim and points the chart at it.
+
 ### Health Check (run-health-check.sh)
 
 | Variable | Default | Purpose |

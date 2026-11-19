@@ -1481,10 +1481,10 @@ components:
   # Kind test deploys the operator and CRDs and the agent DaemonSet has no GPU
   # node. The chart's checkpoint claim is ReadWriteMany, which Kind's default
   # local-path class cannot bind, so the operator pod needs a claim of its own to
-  # start: the operator ran on Kind with storage.pvc.create=false and a
-  # ReadWriteOnce claim named snapshot-pvc created by hand (for example
-  # BUNDLE_EXTRA_ARGS="--set snapshot:storage.pvc.create=false"). The harness does
-  # not provide one. tools/component-test/detect-tier.sh picks deploy by itself while
+  # start. tools/component-test/fixtures/snapshot.sh provides one for the test
+  # only: a ReadWriteOnce claim named snapshot-pvc, with storage.pvc.create=false
+  # passed to the bundle. The production shared-storage requirement is unchanged.
+  # tools/component-test/detect-tier.sh picks deploy by itself while
   # components/snapshot/values.yaml carries no GPU reference, so keep GPU
   # wording out of that file. testTier is not used here: the registry header
   # documents it, but the Go registry type has no such field and static

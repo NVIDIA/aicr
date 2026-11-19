@@ -282,6 +282,17 @@ fi
 log_info "Recipe:"
 cat "${WORK_DIR}/recipe.yaml"
 
+# Per-component fixture: tools/component-test/fixtures/<component>.sh, when
+# present, is sourced here. It may create test-only cluster resources and append
+# to BUNDLE_EXTRA_ARGS, for a component whose real inputs (such as shared storage)
+# the bare Kind cluster cannot provide. Most components have none.
+component_fixture="${SCRIPT_DIR}/fixtures/${COMPONENT}.sh"
+if [[ -f "$component_fixture" ]]; then
+    log_info "Applying component fixture ${component_fixture#"${REPO_ROOT}"/}"
+    # shellcheck source=/dev/null
+    . "$component_fixture"
+fi
+
 # Optional extra bundle flags, word-split from the caller's environment.
 # Components whose bundle contract needs scheduling, storage, or override
 # inputs (tools/k8s-aibom-test passes --system-node-selector /
