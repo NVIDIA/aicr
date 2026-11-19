@@ -758,10 +758,11 @@ never honored from `--set-json`/`--set-file` (present or absent — the
 typed path would write a literal `enabled:` chart value instead of
 toggling the component).
 
-**`--dynamic` on a component rendered at bundle time is rejected.** Under
-every deployer except `flux`, a manifest-only or Kustomize component has
-its templates rendered when the bundle is built, so a value supplied at
-install time through `cluster-values.yaml` reaches no template. `aicr bundle` therefore rejects
+**`--dynamic` on a component rendered at bundle time is rejected.** Every
+deployer that accepts a manifest-only or Kustomize component, except
+`flux`, renders its templates when the bundle is built, so a value
+supplied at install time through `cluster-values.yaml` reaches no
+template. `aicr bundle` therefore rejects
 `--dynamic` on a manifest-only component under the `helm`, `helmfile`,
 `terraform` and `fleet` deployers, and on a Kustomize component under
 `helm`, `helmfile` and `fleet`, as `argocd-helm` already does. `flux`
