@@ -645,7 +645,8 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `k8s-nim-operator-ocp` | NIM Operator variant for OpenShift (OCP) |
 | `kai-scheduler` | DRA-aware gang scheduler with topology-aware placement |
 | `kube-prometheus-stack` | Prometheus operator and the Prometheus that serves runtime PromQL queries |
-| `kubeflow-trainer` | Kubeflow Training Operator for distributed training |
+| `kubeflow-trainer` | Kubeflow Trainer v2 for distributed training |
+| `kubeflow-training-operator` | Kubeflow Training Operator v1 (`kubeflow.org/v1` jobs) for the Run:ai leaves |
 | `kueue` | Kubernetes-native job queuing for batch and AI workloads |
 | `mariadb-operator` | Official MariaDB Operator; installed only for AICR-provided Slurm accounting |
 | `mariadb-operator-crds` | Official MariaDB Operator CRDs; installed only for AICR-provided Slurm accounting |

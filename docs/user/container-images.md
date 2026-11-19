@@ -27,8 +27,8 @@ The catalog lists the driver version that the default chart render carries. Vers
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **58**
-- Unique images: **141**
+- Components: **59**
+- Unique images: **142**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -64,6 +64,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kai-scheduler | helm | kai-scheduler | v0.18.8 | 12 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.5.0 | 2 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.1 | 4 |
+| kubeflow-training-operator | manifest | — | — | 1 |
 | kueue | helm | kueue | 0.19.13 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.2 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.2 | 0 |
@@ -254,6 +255,10 @@ _No images extracted._
 - `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be`
 - `registry.k8s.io/jobset/jobset:v0.11.0`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21@sha256:8d9e10fd589a34ab8a0aa64f7e70ad075c8f1c69bea176350f8d211367697e3d`
+
+### kubeflow-training-operator
+
+- `ghcr.io/kubeflow/training-v1/training-operator:v1-93c5489@sha256:45aa299d92c21a1abc0e9731694f01be637ab5c6c9681a687aedf142b0468d45`
 
 ### kueue
 
@@ -525,6 +530,8 @@ Every step also adds the `psmdb-operator` and `nvsentinel-mongodb` components, N
 The `nvsentinel-remediation` mixin pins the reboot Job image through `janitor-provider.csp.generic.rebootImage`, replacing the chart's `public.ecr.aws/docker/library/busybox:1.37.0` with the busybox already in the scan. `aicr mirror` cannot discover it, because janitor-provider passes it as the `GENERIC_REBOOT_IMAGE` environment variable rather than an `image:` field; mirror it yourself unless another component in the recipe already pulls it.
 
 The opt-in `nvsentinel-slinky-drainer` mixin (see [Slurm Drain Through Slinky](component-catalog.md#slurm-drain-through-slinky)) adds the image-less `slinky-drainer-crds` component and the `slinky-drainer` component, whose one image, `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.31.0`, is digest-pinned in its vendored manifest, so the BOM above lists it. Only recipes that compose the mixin deploy it. It is in the weekly image scan and the mirror lane, and `TestSlinkyDrainerImagePinnedEverywhere` keeps its tag at `nvsentinel`'s chart version.
+
+**An image an operator injects at run time is a fifth gap.** The `kubeflow-training-operator` row above lists one image, the operator itself. The operator also adds an `init-pytorch` init container to the worker pods of every PyTorchJob that has a Master replica, and that container runs `alpine:3.10`, which the container runtime resolves to `docker.io/library/alpine:3.10`. The reference is a default compiled into the operator (its `--pytorch-init-container-image` flag, which the vendored Deployment does not set), not an `image:` field in any manifest, so neither this BOM nor `aicr mirror` can discover it, and `aicr mirror list` on a Run:ai recipe returns only the operator image, with no warning. On a cluster that cannot pull from Docker Hub the operator installs and passes its health check, and PyTorch workers then wait in `Init:ImagePullBackOff`. Mirror `docker.io/library/alpine:3.10` yourself. AICR has no value that rewrites the reference, so the nodes' container runtime must redirect `docker.io` to your registry, for example with a containerd registry mirror for that host; keep the `library/alpine` path and the `3.10` tag in the mirror. The tag is upstream's default, not an AICR pin. Only the Run:ai leaves deploy this component. Declaring such images so the BOM and `aicr mirror` include them is tracked in [#3659](https://github.com/NVIDIA/aicr/issues/3659).
 
 ### Registries spanned
 
