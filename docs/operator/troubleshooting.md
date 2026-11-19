@@ -23,6 +23,7 @@ reason and message.
 | `EngineMissing`, `ProjectMissing`; `Unauthorized` on `EngineAvailable` | [Argo CD not available](#argo-cd-not-available) |
 | `AwaitingApproval`, `AwaitingAcknowledgement` | [Waiting for approval](#waiting-for-approval) |
 | `TransitionBlocked` | [Transition blocked](#transition-blocked) |
+| `ForeignObject` | [Application name taken](#application-name-taken) |
 | `InventoryDrift`, `StepUnknown`, `MovedReleaseMissing`, `EngineSuspensionRefused` | [Rollout stalled](#rollout-stalled) |
 | `RolloutFailed`, `RolloutExpired`, `RolloutRevoked`; `ForeignObject` on `Ready` | [Rollout failed, expired or revoked](#rollout-failed-expired-or-revoked) |
 | `ValidationUnavailable` | [Validation](#validation) |
@@ -255,6 +256,32 @@ or a release would change namespace or chart name. No rollout is created. Return
 [pin](operations.md#rolling-back-by-pinning) the active plan); a supported
 migration is a separate procedure, outside the operator.
 
+## Application name taken
+
+Before it creates a rollout, the operator checks the name of every release the
+target plan would install, that is, every release of the plan that the runtime
+does not already own. If an Application with one of those names exists
+without the operator's labels and this runtime's UID annotation, the runtime
+stalls with `ForeignObject` and names it. No rollout is created, so nothing
+of the target plan is applied; the active plan's releases stay in place and
+are still repaired. The operator never writes or deletes an Application it
+does not own.
+
+Remove the Application, or recreate it under another name. Deleting an
+Application that carries Argo CD's `resources-finalizer.argocd.argoproj.io`
+finalizer also deletes the resources it manages; to keep them, remove that
+finalizer first or delete with `argocd app delete <name> --cascade=false`.
+
+The stall clears at the next reconcile, with no retry, and the rollout is
+then created as any other is: after the stabilization window, and not while
+the runtime is paused. An Application an earlier runtime left carries that
+runtime's UID and stalls with
+[`OrphanedObjectsPresent`](#orphaned-objects-and-re-adoption) instead.
+
+An Application that takes a release's name after the rollout was created is
+not caught here. It fails the rollout at that release's step
+([Rollout failed, expired or revoked](#rollout-failed-expired-or-revoked)).
+
 ## Rollout stalled
 
 `kubectl aicr describe <rollout>` shows the message and the step in flight.
@@ -330,7 +357,7 @@ even when an Application's last operation still shows the failed sync
 | Message | Cause | Next |
 | --- | --- | --- |
 | `release <id>: SyncFailed` or `SyncError` | Argo CD's sync failed. The message continues with Argo CD's own error, folded to one line and cut to 240 characters (`release <id>: SyncFailed: <error>`) | Read the error in the message; `kubectl -n argocd get application <id> -o yaml` (`status.operationState`, `status.conditions`) has the full text. Fix, then retry. For a failed hook, see the note below this table |
-| `[CONFLICT] Application argocd/<name> exists without this runtime's ownership` | An Application with the release's name exists without the operator's labels and this runtime's UID annotation (`ForeignObject`); the operator never writes or deletes it | Remove or rename it, then retry. If an earlier runtime left it, [adopt](#orphaned-objects-and-re-adoption) instead. On an active-plan release it shows as `Ready=False` with `ForeignObject` |
+| `[CONFLICT] Application argocd/<name> exists without this runtime's ownership` | An Application took the release's name after the rollout was created, without the operator's labels and this runtime's UID annotation (`ForeignObject`); the operator never writes or deletes it. One that exists earlier [stalls the runtime](#application-name-taken) before a rollout is created | Remove or rename it, then retry. If an earlier runtime left it, [adopt](#orphaned-objects-and-re-adoption) instead. On an active-plan release it shows as `Ready=False` with `ForeignObject` |
 | `release <id> not ready within 30m0s (<reason>)` | The release did not become ready at its current revision within `actionTimeout`; the reason is the last observation, such as `HealthProgressing`, `HealthDegraded`, or `SpecDrifted` when its Application was edited while the step ran | Inspect the component's workloads in its namespace; fix, then retry. Raise `spec.rollout.actionTimeout` if the component is slow but healthy |
 | `release <id> not removed within …` | Argo CD did not finish deleting the release's resources | See [Argo CD Application](#argo-cd-application) |
 | `the approval expired` | The approval expired before every step ran | Retry, and approve with a longer `--expires` |

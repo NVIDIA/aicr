@@ -153,6 +153,13 @@ const (
 	RolloutDeadline = 6 * time.Hour
 )
 
+// Engine reads.
+const (
+	// EngineReadConcurrency bounds the engine objects read at once when a
+	// check reads one per release.
+	EngineReadConcurrency = 8
+)
+
 // Retention of the operator's own objects (api.md).
 const (
 	// RetainedPlans is how many plans beyond the active, candidate, pinned

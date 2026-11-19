@@ -599,6 +599,55 @@ func TestInventoryReadsWhatAnApplicationFollows(t *testing.T) {
 	}
 }
 
+// Unowned names the Applications that exist without this runtime's
+// ownership, however they lack it, and neither its own nor missing ones; a
+// read that fails is an error, never an empty answer.
+func TestUnownedNamesApplicationsOfOthers(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p, r := testPlan()
+	own, err := Application(target, p, r, values)
+	if err != nil {
+		t.Fatalf("Application() = %v", err)
+	}
+	app := func(name string, labels, annotations map[string]string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(ApplicationGVK)
+		u.SetNamespace(target.Namespace)
+		u.SetName(name)
+		u.SetLabels(labels)
+		u.SetAnnotations(annotations)
+		return u
+	}
+	managed := map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByValue, v1alpha1.LabelRuntime: target.RuntimeName}
+	a := fakeAdapter(t, own,
+		app("unlabeled", nil, nil),
+		app("label-only", managed, nil),
+		app("uid-only", nil, map[string]string{v1alpha1.AnnotationRuntimeUID: uid}),
+		app("another-runtime", managed, map[string]string{v1alpha1.AnnotationRuntimeUID: "someone-else"}),
+	)
+	names := []string{"unlabeled", "cert-manager", "absent", "uid-only", "label-only", "another-runtime"}
+	got, err := a.Unowned(ctx, uid, names)
+	if want := []string{"another-runtime", "label-only", "uid-only", "unlabeled"}; err != nil || !slices.Equal(got, want) {
+		t.Fatalf("Unowned() = %v, %v, want %v", got, err, want)
+	}
+	if got, err = a.Unowned(ctx, uid, nil); err != nil || len(got) != 0 {
+		t.Fatalf("Unowned(no names) = %v, %v", got, err)
+	}
+
+	a.Reader = interceptor.NewClient(a.Reader.(client.WithWatch), interceptor.Funcs{
+		Get: func(_ context.Context, _ client.WithWatch, key client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+			if key.Name == "absent" {
+				return apierrors.NewTimeoutError("injected", 1)
+			}
+			return apierrors.NewNotFound(schema.GroupResource{Resource: "applications"}, key.Name)
+		},
+	})
+	if got, err = a.Unowned(ctx, uid, names); operrors.CodeOf(err) != operrors.ErrCodeUnavailable || got != nil {
+		t.Fatalf("Unowned(failed read) = %v, %v, want UNAVAILABLE", got, err)
+	}
+}
+
 func TestEnsureWritesOwnedAndRefusesForeign(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
