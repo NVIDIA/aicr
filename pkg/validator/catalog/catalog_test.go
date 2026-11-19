@@ -1426,6 +1426,22 @@ func TestEmbeddedCatalog_CRENCCLAllReduceBWEntryExists(t *testing.T) {
 	t.Fatalf("no embedded catalog entry named %q", v1.CRENCCLAllReduceBWCheckName)
 }
 
+func TestEmbeddedCatalog_CRENCCLAllReduceBWNetEntryExists(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for _, v := range cat.Validators {
+		if v.Name == v1.CRENCCLAllReduceBWNetCheckName {
+			if v.Phase != "performance" {
+				t.Errorf("%q phase = %q, want performance", v1.CRENCCLAllReduceBWNetCheckName, v.Phase)
+			}
+			return
+		}
+	}
+	t.Fatalf("no embedded catalog entry named %q", v1.CRENCCLAllReduceBWNetCheckName)
+}
+
 func TestEmbeddedCatalog_CRETrainingGoodputEntryExists(t *testing.T) {
 	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
 	if err != nil {
@@ -1461,7 +1477,9 @@ func TestCRECatalogTimeoutCoversTeardown(t *testing.T) {
 
 	seen := 0
 	for _, v := range catalog.Validators {
-		if v.Name != v1.CRENCCLAllReduceBWCheckName && v.Name != v1.CRETrainingGoodputCheckName {
+		if v.Name != v1.CRENCCLAllReduceBWCheckName && v.Name != v1.CRENCCLAllReduceBWNetCheckName &&
+			v.Name != v1.CRETrainingGoodputCheckName {
+
 			continue
 		}
 		seen++
@@ -1470,8 +1488,8 @@ func TestCRECatalogTimeoutCoversTeardown(t *testing.T) {
 				v.Name, v.Timeout, required)
 		}
 	}
-	if seen != 2 {
-		t.Fatalf("found %d CRE catalog entries, want 2", seen)
+	if seen != 3 {
+		t.Fatalf("found %d CRE catalog entries, want 3", seen)
 	}
 }
 
