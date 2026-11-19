@@ -2555,17 +2555,17 @@ func TestGenerate_RejectsDynamicOnManifestOnly(t *testing.T) {
 			APIVersion: "aicr.run/v1",
 			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
 			ComponentRefs: []recipe.ComponentRef{
-				{Name: "skyhook-customizations", Namespace: "skyhook"},
+				{Name: "nodewright-customizations", Namespace: "nodewright"},
 			},
-			DeploymentOrder: []string{"skyhook-customizations"},
+			DeploymentOrder: []string{"nodewright-customizations"},
 		},
-		ComponentValues: map[string]map[string]any{"skyhook-customizations": {}},
+		ComponentValues: map[string]map[string]any{"nodewright-customizations": {}},
 		ComponentPostManifests: map[string]map[string][]byte{
-			"skyhook-customizations": {
-				"components/skyhook-customizations/manifests/customization.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: customization\n"),
+			"nodewright-customizations": {
+				"components/nodewright-customizations/manifests/customization.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: customization\n"),
 			},
 		},
-		DynamicValues: map[string][]string{"skyhook-customizations": {"systemNodeSelector"}},
+		DynamicValues: map[string][]string{"nodewright-customizations": {"acceleratedTolerations"}},
 		Version:       "v1.0.0",
 	}
 	_, err := g.Generate(context.Background(), t.TempDir())
@@ -2573,4 +2573,7 @@ func TestGenerate_RejectsDynamicOnManifestOnly(t *testing.T) {
 		t.Fatal("want error rejecting --dynamic on a manifest-only component, got nil")
 	}
 	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if !strings.Contains(err.Error(), `component "nodewright-customizations"`) || !strings.Contains(err.Error(), "acceleratedTolerations") {
+		t.Errorf("error should name the component and path, got: %v", err)
+	}
 }
