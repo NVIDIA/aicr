@@ -313,6 +313,18 @@ generate the deployment-specific manifest for a specific deployment.
 > `scalingPodImage` descriptor are the exception: `mirror list` exits nonzero
 > instead of emitting a known-incomplete image set.
 
+> **Run:ai recipes need one image mirrored by hand:** a run with no warnings
+> is still incomplete for a `--platform runai` recipe. The Kubeflow Training
+> Operator adds an `init-pytorch` init container running
+> `docker.io/library/alpine:3.10` to the workers of every PyTorchJob that has a
+> Master replica. The reference is compiled into the operator, not rendered
+> from a chart or manifest, so `mirror list` neither lists it nor warns about
+> it. Mirror `docker.io/library/alpine:3.10` yourself and have the nodes'
+> container runtime redirect `docker.io` to your registry, keeping the
+> `library/alpine` path and the `3.10` tag; otherwise PyTorch workers wait in
+> `Init:ImagePullBackOff`. See
+> [Explicit vs. implicit images](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md#explicit-vs-implicit-images).
+
 > **Runtime validation image:** `slinky-slurm-health` launches
 > `docker.io/library/alpine:3.23.3` dynamically through `srun` on GPU-backed
 > NodeSets. This image is already covered by `aicr mirror list`: it is the same
