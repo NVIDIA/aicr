@@ -15,6 +15,7 @@
 package main
 
 import (
+	"slices"
 	"testing"
 
 	"aicr.run/pkg/recipe"
@@ -22,20 +23,32 @@ import (
 	"aicr.run/validators"
 )
 
+// supersedeCtx lists a check for every constraint, as a shipped recipe does.
 func supersedeCtx(
 	service recipe.CriteriaServiceType,
 	accelerator recipe.CriteriaAcceleratorType,
 	constraints ...recipe.Constraint,
 ) *validators.Context {
 
+	checks := make([]string, 0, len(constraints))
+	for _, c := range constraints {
+		checks = append(checks, c.Name)
+	}
 	return &validators.Context{
 		ValidationInput: &v1.ValidationInput{
 			Criteria: recipe.Criteria{Service: service, Accelerator: accelerator},
 			Config: v1.ValidationConfig{
-				Performance: &v1.ValidationPhase{Constraints: constraints},
+				Performance: &v1.ValidationPhase{Constraints: constraints, Checks: checks},
 			},
 		},
 	}
+}
+
+// withoutChecks drops the named checks from ctx while keeping their constraints.
+func withoutChecks(ctx *validators.Context, names ...string) *validators.Context {
+	perf := ctx.ValidationInput.Config.Performance
+	perf.Checks = slices.DeleteFunc(perf.Checks, func(c string) bool { return slices.Contains(names, c) })
+	return ctx
 }
 
 func TestCRESupersedesTrainJobNCCL(t *testing.T) {
@@ -103,6 +116,33 @@ func TestCRESupersedesTrainJobNCCL(t *testing.T) {
 			ctx:     supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorH100, cre),
 			variant: variantDefault,
 			want:    true,
+		},
+		{
+			name: "gb300 CRE constraint without its check keeps the nvls variant on TrainJob",
+			ctx: withoutChecks(supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorGB300, nvls, cre),
+				checkNameCRENCCLAllReduceBW),
+			variant: variantNVLS,
+			want:    false,
+		},
+		{
+			name: "gb300 CRE net constraint without its check keeps the net variant on TrainJob",
+			ctx: withoutChecks(supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorGB300, net, creNet),
+				checkNameCRENCCLAllReduceBWNET),
+			variant: variantNET,
+			want:    false,
+		},
+		{
+			name: "eks h100 CRE constraint without its check keeps the default variant on TrainJob",
+			ctx: withoutChecks(supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorH100, cre),
+				checkNameCRENCCLAllReduceBW),
+			variant: variantDefault,
+			want:    false,
+		},
+		{
+			name:    "no performance phase",
+			ctx:     &validators.Context{ValidationInput: &v1.ValidationInput{}},
+			variant: variantNVLS,
+			want:    false,
 		},
 		{
 			name:    "no validation input",
