@@ -174,6 +174,9 @@ type RolloutReconciler struct {
 	// Operator reports the operator's own image and the digest it runs as,
 	// for the evidence; nil records none.
 	Operator func(context.Context) (evidence.Image, error)
+	// Liveness tracks each reconcile and serves the rollout-reconcile health
+	// check; nil does neither.
+	Liveness *Liveness
 
 	// steps holds the step Events of transitions not yet stored.
 	steps pendingEvents

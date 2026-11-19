@@ -157,6 +157,18 @@ groups:
           summary: "AICR registry operation {{ $labels.operation }} keeps failing with {{ $labels.code }}"
 ```
 
+### Liveness
+
+The liveness probe (`/healthz` on port 8081) fails while a rollout reconcile
+has run longer than 32 minutes: its 30-minute timeout plus 2 minutes to
+return once canceled. The chart leaves the probe at the Kubernetes defaults,
+so the kubelet restarts the operator container after three failed probes,
+10 seconds apart; a standby replica, or the restarted operator, then takes
+the lease. Reconciles that fail and retry, as through a registry outage, end
+each time and never fail the probe. With leader election, the default, only
+the leader reconciles, so a standby passes. The resolver has no reconcile
+timeout and is not checked.
+
 ## How a change reaches the cluster
 
 1. **An input changes.** The runtime's `spec` (intent, platform, profile,

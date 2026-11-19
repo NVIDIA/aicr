@@ -123,12 +123,19 @@ func (r *ResolverReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // a missing engine CRD never stops the manager, and the controller re-observes
 // on a resync until the watch exists.
 func (r *RolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	var rec reconcile.Reconciler = r
+	if r.Liveness != nil {
+		rec = r.Liveness.Track(r)
+		if err := mgr.AddHealthzCheck("rollout-reconcile", r.Liveness.Check); err != nil {
+			return operrors.Wrap(operrors.ErrCodeInternal, "register the rollout liveness check", err)
+		}
+	}
 	c, err := ctrl.NewControllerManagedBy(mgr).
 		Named("rollout").
 		WithOptions(rolloutControllerOptions()).
 		For(&v1alpha1.ClusterRuntime{}).
 		Watches(&v1alpha1.RuntimeRollout{}, handler.EnqueueRequestsFromMapFunc(toRuntime)).
-		Build(r)
+		Build(rec)
 	if err != nil {
 		return operrors.Wrap(operrors.ErrCodeInternal, "register the rollout controller", err)
 	}
