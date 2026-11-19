@@ -230,6 +230,26 @@ func (r *Registry) Validate() error {
 	return nil
 }
 
+// CheckSkipDelete returns an error unless a uat-run.yaml dispatch with
+// lifecycle may skip its teardown on r: always when skipDelete is false, on
+// the kind lane, and with LifecycleDaytimeUp or LifecycleDaytimeDown. Any
+// other lifecycle on a cloud reservation is refused (#3670).
+func (r *Reservation) CheckSkipDelete(lifecycle string, skipDelete bool) error {
+	if !skipDelete || r.Cloud == CloudKind {
+		return nil
+	}
+	switch lifecycle {
+	case LifecycleDaytimeUp, LifecycleDaytimeDown:
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+		"skip_delete=true is refused for lifecycle=%s on reservation %s (cloud %s): a retained nightly "+
+			"cluster has no reliable teardown (#3670). For a debugging hold, dispatch: "+
+			"gh workflow run uat-run.yaml -f reservation=%s -f lifecycle=daytime-up; lifecycle=daytime-down, "+
+			"or the 02:00 UTC evening teardown, removes that held cluster",
+		lifecycle, r.Name, r.Cloud, r.Name))
+}
+
 // DaytimeAssignments returns the daytime human-access rotation (#1281, DC8):
 // one entry per reservation that opts in via a non-empty daytime-intent, in
 // registry (document) order. Reservations with an empty daytime-intent are
