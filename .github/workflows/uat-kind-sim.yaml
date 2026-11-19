@@ -122,9 +122,9 @@ jobs:
       github.repository == 'nvidia/aicr' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    # Covers the sum of the sequential step budgets (tools 10 + bootstrap 65 +
+    # Covers the sum of the sequential step budgets (tools 10 + bootstrap 70 +
     # binary 20 + images 25 + prep 20 + install 90 + readiness 5 + topology 10 +
-    # gpu health 15 + conformance 45 + verify 5 + debug 8 = 318) plus headroom,
+    # gpu health 15 + conformance 45 + verify 5 + debug 8 = 323) plus headroom,
     # and stays under the 360-minute cap GitHub imposes on hosted runners: a
     # job-level value above that cap is silently clamped and the budget written
     # here would be fiction.
@@ -215,16 +215,16 @@ jobs:
       # GPU-free.
       - name: Bootstrap simulated four-worker cluster
         id: bootstrap
-        # The waits inside bootstrap-cluster.sh total 3450s (57.5 minutes) at
+        # The waits inside bootstrap-cluster.sh total 3750s (62.5 minutes) at
         # worst: kind --wait 300s, node Ready 300s, nvml-mock helm --wait 300s,
-        # device plugin rollout 300s, DCGM rollout 900s, GPU health monitor
+        # device plugin rollout 300s, DCGM rollout 1200s, GPU health monitor
         # pre-pull 1200s, capacity poll 150s. The step must outlive them to
         # report which one ran out. The other 7.5 minutes cover what no wait
         # bounds: kind's node image pull and kubeadm bring-up before its wait
         # starts, the chart pull, and the one-shot kubectl calls.
         # bootstrap-cluster_test.sh derives the sum from the scripts and fails
         # if this drops below it.
-        timeout-minutes: 65
+        timeout-minutes: 70
         run: ./tests/uat/kind/bootstrap-cluster.sh "${KIND_CLUSTER_NAME}"
 
       - name: Footprint - after cluster and GPU simulation

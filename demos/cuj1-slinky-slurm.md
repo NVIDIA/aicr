@@ -257,7 +257,7 @@ The Kind leaf runs Topograph with the `dra` provider, which builds Slurm blocks 
 # Four workers with simulated H100s (mocked NVML, the NVIDIA device plugin, and
 # a real DCGM host engine reading the mock) in two nvidia.com/gpu.clique cliques
 # of two; the control plane stays GPU-free. Expect large pulls: the host engine
-# image is 1.9GB (up to 900s to roll out), and the script also pre-pulls
+# image is 2.7GB (up to 1200s to roll out), and the script also pre-pulls
 # NVSentinel's 2.5GB GPU health monitor image (up to 1200s), so that the
 # helmfile apply below does not hit nvsentinel's 600s wait.
 # Needs kind, kubectl, helm 4, and yq (.settings.yaml pins the lane's versions).
