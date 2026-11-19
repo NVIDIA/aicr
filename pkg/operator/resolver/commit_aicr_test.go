@@ -104,12 +104,11 @@ var (
 	commitBundleOptional = map[string]string{
 		"build.settings.components": "the operator renders every component",
 	}
-	// A report's detail beyond the verdict depends on which verdicts the
-	// transitions between the fixture release and the commit draw. The
-	// lowered-pin report makes one version change certain, so from, to,
-	// verdict, reason and explanation are required.
+	// A report's remediation detail depends on which verdicts the transitions
+	// between the fixture release and the commit draw. AICR fills notes on
+	// every row, and the lowered-pin report makes one version change certain,
+	// so notes, from, to, verdict, reason and explanation are required.
 	commitUpgradeOptional = map[string]string{
-		"components[].notes":               "depends on the verdicts",
 		"components[].stoppedAt":           "depends on the verdicts",
 		"components[].summary":             "depends on the verdicts",
 		"components[].precondition":        "depends on the verdicts",
