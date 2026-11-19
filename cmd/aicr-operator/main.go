@@ -142,6 +142,7 @@ func setupControllers(ctx context.Context, mgr ctrlmanager.Manager, cfg *config.
 		metrics.Registry.MustRegister(refresher.Collectors()...)
 	}
 	metrics.Registry.MustRegister(controller.Collectors()...)
+	metrics.Registry.MustRegister(registry.Collectors()...)
 	return rolloutController.SetupWithManager(mgr)
 }
 

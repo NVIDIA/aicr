@@ -147,7 +147,8 @@ func chartManifest(m *ChartMeta, archive []byte) (config, layer ocispec.Descript
 // PushChart pushes a chart archive to r, tagged with its version, and returns
 // the manifest digest. An existing tag is reused when it points at the same
 // manifest; a tag that points elsewhere is a conflict, never overwritten.
-func (c *Client) PushChart(ctx context.Context, r Repository, archive []byte) (string, error) {
+func (c *Client) PushChart(ctx context.Context, r Repository, archive []byte) (_ string, err error) {
+	defer observe(opPushChart, &err)
 	meta, err := ReadChartMeta(archive)
 	if err != nil {
 		return "", err
@@ -172,7 +173,8 @@ func (c *Client) pushChart(ctx context.Context, r Repository, archive []byte, me
 // ReuseChart returns the chart tagged version in r, without an upstream
 // request, when the tag holds digest. A missing tag, or one holding another
 // digest, is NOT_FOUND.
-func (c *Client) ReuseChart(ctx context.Context, r Repository, version, digest string) (*MirroredChart, error) {
+func (c *Client) ReuseChart(ctx context.Context, r Repository, version, digest string) (_ *MirroredChart, err error) {
+	defer observe(opReuseChart, &err)
 	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
 	defer cancel()
 	repo, err := c.repository(r)

@@ -82,7 +82,7 @@ func Collectors() []prometheus.Collector {
 			aicrJobRuns.WithLabelValues(string(stage), "failed", class)
 		}
 	}
-	return []prometheus.Collector{rolloutOutcomes, jobSeconds, validationRuns, aicrJobRuns}
+	return append([]prometheus.Collector{rolloutOutcomes, jobSeconds, validationRuns, aicrJobRuns}, runtimeCollectors()...)
 }
 
 // orphan ends the unfinished rollouts of a runtime name that do not belong
