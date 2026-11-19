@@ -91,9 +91,9 @@
 #                       human-access rotation (#1281, DC8) and picks the
 #                       flavor stood up during the working day: training |
 #                       inference. Empty/absent = out of the rotation, though
-#                       the evening daytime-down still covers the row. This is
-#                       the configurable cloud→flavor split — a data choice,
-#                       not hardcoded in a workflow — defaulting to
+#                       the evening daytime-down still covers a non-kind row.
+#                       This is the configurable cloud→flavor split — a data
+#                       choice, not hardcoded in a workflow — defaulting to
 #                       AWS=training, GCP=inference. Only ONE reservation per
 #                       cloud may carry a daytime-intent today: a single
 #                       reservation cannot hold both a long-lived daytime
