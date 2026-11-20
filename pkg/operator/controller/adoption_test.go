@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
 	"aicr.run/pkg/operator/engine/argocd"
 	operrors "aicr.run/pkg/operator/errors"
 	"aicr.run/pkg/operator/plan"
@@ -115,6 +116,43 @@ func TestForeignApplicationStallsBeforeARolloutIsCreated(t *testing.T) {
 	}
 	if c = cond(getRuntime(t, ctx), v1alpha1.ConditionStalled); c.Reason == argocd.ReasonForeignObject {
 		t.Fatalf("still Stalled %+v", c)
+	}
+}
+
+// The check for taken names comes before the assessment: an upgrade whose
+// recipe changed, and so would be assessed, stalls on a taken name with no
+// rollout and no assessment Job.
+func TestForeignApplicationStallsBeforeTheAssessment(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	active := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "1"},
+		testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":1}`))
+	target := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "2"},
+		testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":2}`), testRelease("nfd", plan.PhasePrimary, "", `{}`))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", Name: "gpu-operator", UID: "u-g", PlanDigest: active}}
+	engine.unowned = map[string]bool{"nfd": true}
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r)
+	reconcileRollout(t, ctx, r)
+	c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled)
+	if c.Reason != argocd.ReasonForeignObject || !strings.Contains(c.Message, ": nfd;") {
+		t.Fatalf("Stalled %+v, want %s naming nfd", c, argocd.ReasonForeignObject)
+	}
+	if n, jobs := len(rolloutsTo(t, ctx, target)), len(liveJobs(t, ctx, string(aicrjob.StageAssessment))); n != 0 || jobs != 0 || len(engine.order) != 0 {
+		t.Fatalf("%d rollouts to the target, %d assessment Jobs, writes %v; want none", n, jobs, engine.order)
+	}
+
+	// The same transition is assessed once the name is free.
+	delete(engine.unowned, "nfd")
+	reconcileRollout(t, ctx, r)
+	if jobs := len(liveJobs(t, ctx, string(aicrjob.StageAssessment))); jobs != 1 {
+		t.Fatalf("%d assessment Jobs once the name is free, want 1", jobs)
 	}
 }
 

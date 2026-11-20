@@ -19,7 +19,9 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/defaults"
 	operrors "aicr.run/pkg/operator/errors"
 	"aicr.run/pkg/operator/plan"
 )
@@ -645,6 +648,39 @@ func TestUnownedNamesApplicationsOfOthers(t *testing.T) {
 	})
 	if got, err = a.Unowned(ctx, uid, names); operrors.CodeOf(err) != operrors.ErrCodeUnavailable || got != nil {
 		t.Fatalf("Unowned(failed read) = %v, %v, want UNAVAILABLE", got, err)
+	}
+}
+
+// Unowned never has more than defaults.EngineReadConcurrency reads in
+// flight, however many names it is given.
+func TestUnownedBoundsItsReads(t *testing.T) {
+	t.Parallel()
+	a := fakeAdapter(t)
+	var inFlight, peak atomic.Int32
+	a.Reader = interceptor.NewClient(a.Reader.(client.WithWatch), interceptor.Funcs{
+		Get: func(_ context.Context, _ client.WithWatch, key client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+			now := inFlight.Add(1)
+			defer inFlight.Add(-1)
+			for {
+				seen := peak.Load()
+				if now <= seen || peak.CompareAndSwap(seen, now) {
+					break
+				}
+			}
+			// Held long enough for every other read allowed to start.
+			time.Sleep(20 * time.Millisecond)
+			return apierrors.NewNotFound(schema.GroupResource{Resource: "applications"}, key.Name)
+		},
+	})
+	names := make([]string, 4*defaults.EngineReadConcurrency)
+	for i := range names {
+		names[i] = "release-" + strconv.Itoa(i)
+	}
+	if got, err := a.Unowned(context.Background(), uid, names); err != nil || len(got) != 0 {
+		t.Fatalf("Unowned() = %v, %v", got, err)
+	}
+	if got := int(peak.Load()); got != defaults.EngineReadConcurrency {
+		t.Errorf("peak reads in flight = %d, want the bound %d", got, defaults.EngineReadConcurrency)
 	}
 }
 

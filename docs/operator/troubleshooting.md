@@ -267,14 +267,31 @@ of the target plan is applied; the active plan's releases stay in place and
 are still repaired. The operator never writes or deletes an Application it
 does not own.
 
-Remove the Application, or recreate it under another name. Deleting an
-Application that carries Argo CD's `resources-finalizer.argocd.argoproj.io`
-finalizer also deletes the resources it manages; to keep them, remove that
-finalizer first or delete with `argocd app delete <name> --cascade=false`.
+How to clear it depends on what the Application deploys:
+
+- **Something else.** Recreate it under another name, or remove it.
+- **This component**, as a child Application written by
+  `aicr bundle --deployer argocd` does by default, under the release's name.
+  Release it from its parent first: the parent's automated sync recreates a
+  child that is only deleted, and the stall never clears. Then remove it. Do
+  not rename it, which leaves two Applications writing the same resources
+  ([what to leave alone](argocd.md#what-to-leave-alone)).
+
+Deleting an Application that carries a
+`resources-finalizer.argocd.argoproj.io` finalizer, with or without its
+`/foreground` or `/background` suffix, also deletes the resources it manages.
+Removing the finalizer first, or deleting with
+`argocd app delete <name> --cascade=false`, leaves them in the cluster, still
+tracked under the Application's name. Once the stall clears, the release's
+Application has that name, takes them over, and prunes those its release does
+not render. To keep such a resource, first remove its
+`argocd.argoproj.io/tracking-id` annotation or annotate it
+`argocd.argoproj.io/sync-options: Prune=false`.
 
 The stall clears at the next reconcile, with no retry, and the rollout is
 then created as any other is: after the stabilization window, and not while
-the runtime is paused. An Application an earlier runtime left carries that
+the runtime is paused or the engine suspended. An Application an earlier
+runtime left carries that
 runtime's UID and stalls with
 [`OrphanedObjectsPresent`](#orphaned-objects-and-re-adoption) instead.
 
