@@ -253,13 +253,16 @@ that meet it.
   workload.
 - Each stock platform's system pool must fit NKTP's central workloads, and
   qualification shows that it does.
-- AICR overrides only collector CPU requests and HPA CPU targets (#3849).
-  NKTP's defaults reserved more CPU than a small system pool has. Each
-  autoscaled collector's `targetCPUUtilization` keeps NKTP's absolute scale-out
-  threshold, counting the native `otc-sidecar` request, so these values must be
-  re-derived from the chart's default requests, targets, and sidecar requests
-  on every NKTP chart bump. Memory requests, limits, the memory limiter, and
-  queues stay NKTP's.
+- AICR overrides CPU requests and HPA CPU targets (#3849): the collectors'
+  CPU requests, the target allocators' CPU requests, and kube-state-metrics'
+  CPU requests, both its per-node DaemonSet and its shard Deployments. NKTP's
+  defaults reserved more CPU than a small system pool has. Each autoscaled
+  collector's `targetCPUUtilization` keeps NKTP's absolute scale-out
+  threshold, counting the native `otc-sidecar` request, so these values must
+  be re-derived from the chart's default requests, targets, and sidecar
+  requests on every NKTP chart bump. Memory requests, limits, and the memory limiter stay NKTP's.
+  AICR's existing queue overrides, which disable persistent sending queues and
+  set the watchdog's in-memory queue to 8 MiB, are unchanged.
 
 **Security and data.**
 

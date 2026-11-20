@@ -733,3 +733,134 @@ transitions:
       - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.30.0
       - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.31.0
       - https://github.com/NVIDIA/NVSentinel/blob/v1.31.0/docs/deprecations/gpu-health-monitor-dcgm-3-support-removal.md
+  - from: ">=1.31.0 <1.32.0"
+    to: "1.32.0"
+    verdict: manual
+    verifiedBy: >-
+      Upstream v1.32.0 release notes and source compare; helm template of the
+      v1.31.0 and v1.32.0 charts with AICR's hydrated values for the base
+      chain, each nvsentinel mixin alone, and the remediation, quarantine and
+      Slurm compositions (CRDs byte-identical, image set unchanged apart from
+      the tag); and, on 2026-11-17 and 2026-11-18, every nvsentinel Kind e2e
+      lane, KWOK for every recipe with a profile, the labeler A/B test on
+      Kubernetes 1.33 and the simulated-GPU UAT lane through
+      verify-gpu-health-monitors.sh. AWS termination and the rollback were
+      read from source, not exercised.
+    summary: >-
+      With the remediation step and janitor-provider.csp.provider: aws, a
+      REPLACE_VM repair now terminates the node's EC2 instance wherever the
+      IAM role allows ec2:TerminateInstances; v1.31.0 failed it and left the
+      node cordoned. The generic provider AICR pins is unaffected.
+    precondition: >-
+      Where the remediation step runs with janitor-provider.csp.provider: aws,
+      you accept that REPLACE_VM terminates the node's EC2 instance, or the
+      janitor-provider IAM role explicitly denies ec2:TerminateInstances.
+    reversible: true
+    reversibleNotes: >-
+      helm rollback, or re-applying the bundle the previous AICR release
+      generated, restores v1.31.0; the CRDs are identical. Do not instead pin
+      v1.31.0 in a bundle this AICR generates with nvsentinel-slinky-drainer:
+      it omits customDrain.timeout, and v1.31.0's node-drainer fails at
+      startup on its own "30m" default. A terminated EC2 instance stays
+      terminated.
+    stepsByDeployer:
+      - deployers: [helmfile, fleet]
+        steps:
+          - id: check-aws-replace-vm
+            description: >-
+              Where nvsentinel-remediation is composed with
+              janitor-provider.csp.provider: aws, decide whether to allow
+              termination. To keep v1.31.0's behavior, add to the
+              janitor-provider IAM role a statement with Effect Deny,
+              Action ec2:TerminateInstances, Resource "*" and no Condition,
+              then run aws iam simulate-principal-policy --policy-source-arn
+              <role ARN> --action-names ec2:TerminateInstances --resource-arns
+              arn:aws:ec2:<region>:<account ID>:instance/<instance ID from a GPU
+              node's spec.providerID>: the EvalDecision must be explicitDeny,
+              since implicitDeny can hide an allow that depends on a
+              condition. To accept termination, grant ec2:TerminateInstances
+              and make sure the node group replaces terminated instances.
+            reason: >-
+              AWS REPLACE_VM now destroys the instance and its local storage.
+          - id: apply-new-crds
+            description: >-
+              Apply the v1.32.0 CRDs with the CRD-apply command under
+              "Upgrading components that own CRDs" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/nvidia/nvsentinel, VERSION=v1.32.0 and
+              EXCLUDE_SUBCHARTS=mongodb-store, leaving the Percona CRDs to
+              psmdb-operator.
+            reason: >-
+              helmfile and fleet never update CRDs for ownsCRDs components;
+              without v1.31.0's or later CRDs the API server drops the
+              drainDecision and remediationDecision fields v1.32.0 writes.
+          - id: apply
+            description: >-
+              Run helmfile apply from a bundle generated at the new pin
+              (helmfile), or push the regenerated bundle (fleet GitRepo mode)
+              or apply the regenerated helmops.yaml (fleet HelmOp mode) and
+              let Fleet reconcile it.
+            reason: >-
+              Rolls the DaemonSets and Deployments to v1.32.0.
+      - deployers: [terraform]
+        steps:
+          - id: check-aws-replace-vm
+            description: >-
+              Where nvsentinel-remediation is composed with
+              janitor-provider.csp.provider: aws, decide whether to allow
+              termination. To keep v1.31.0's behavior, add to the
+              janitor-provider IAM role a statement with Effect Deny,
+              Action ec2:TerminateInstances, Resource "*" and no Condition,
+              then run aws iam simulate-principal-policy --policy-source-arn
+              <role ARN> --action-names ec2:TerminateInstances --resource-arns
+              arn:aws:ec2:<region>:<account ID>:instance/<instance ID from a GPU
+              node's spec.providerID>: the EvalDecision must be explicitDeny,
+              since implicitDeny can hide an allow that depends on a
+              condition. To accept termination, grant ec2:TerminateInstances
+              and make sure the node group replaces terminated instances.
+            reason: >-
+              AWS REPLACE_VM now destroys the instance and its local storage.
+          - id: apply-new-crds
+            description: >-
+              Apply the v1.32.0 CRDs with the CRD-apply command under
+              "Upgrading components that own CRDs" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/nvidia/nvsentinel, VERSION=v1.32.0,
+              MANAGER=terraform-provider-helm and
+              EXCLUDE_SUBCHARTS=mongodb-store, leaving the Percona CRDs to
+              psmdb-operator.
+            reason: >-
+              terraform never updates CRDs for ownsCRDs components; without
+              v1.31.0's or later CRDs the API server drops the drainDecision
+              and remediationDecision fields v1.32.0 writes.
+          - id: apply
+            description: >-
+              Regenerate the bundle at the new pin and run terraform apply.
+            reason: >-
+              Rolls the DaemonSets and Deployments to v1.32.0.
+      - steps:
+          - id: check-aws-replace-vm
+            description: >-
+              Where nvsentinel-remediation is composed with
+              janitor-provider.csp.provider: aws, decide whether to allow
+              termination. To keep v1.31.0's behavior, add to the
+              janitor-provider IAM role a statement with Effect Deny,
+              Action ec2:TerminateInstances, Resource "*" and no Condition,
+              then run aws iam simulate-principal-policy --policy-source-arn
+              <role ARN> --action-names ec2:TerminateInstances --resource-arns
+              arn:aws:ec2:<region>:<account ID>:instance/<instance ID from a GPU
+              node's spec.providerID>: the EvalDecision must be explicitDeny,
+              since implicitDeny can hide an allow that depends on a
+              condition. To accept termination, grant ec2:TerminateInstances
+              and make sure the node group replaces terminated instances.
+            reason: >-
+              AWS REPLACE_VM now destroys the instance and its local storage.
+          - id: apply
+            description: >-
+              Re-run install.sh (helm), or commit the regenerated bundle and
+              reconcile or sync it (flux, argocd, argocd-helm).
+            reason: >-
+              Rolls the DaemonSets and Deployments to v1.32.0.
+    references:
+      - https://github.com/NVIDIA/NVSentinel/releases/tag/v1.32.0
+      - https://github.com/NVIDIA/NVSentinel/blob/v1.32.0/docs/configuration/janitor-provider.md

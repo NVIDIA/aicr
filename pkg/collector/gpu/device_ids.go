@@ -33,6 +33,7 @@ const (
 	skuB100       = "b100"
 	skuB200       = "b200"
 	skuB300       = "b300"
+	skuGB10       = "gb10"
 	skuGB200      = "gb200"
 	skuGB300      = "gb300"
 	skuGH200      = "gh200"
@@ -149,6 +150,7 @@ var gpuDeviceIDToSKU = map[string]string{
 	"2909": skuB200,  // HGX B200 168GB
 	"2920": skuB100,  // TS4 / B100
 	"29bc": skuB100,  // B100
+	"2e12": skuGB10,  // DGX Spark
 	"2941": skuGB200, // HGX GB200
 	"3182": skuB300,  // B300 SXM6 AC
 	"31a1": skuGB300, // GB300 MaxQ
