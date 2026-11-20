@@ -458,10 +458,18 @@ Deleting the runtime runs its `operator.aicr.run/cleanup` finalizer.
   `Application` CRD is served; on this path a failure to list Applications is
   reported only in the operator's log. `PlanUnreadable` also blocks it.
 - **`deletionPolicy: Delete`** creates a removal rollout that deletes every
-  release in reverse order. It always needs approval (`AwaitingApproval`). It
-  does not start while the runtime is paused or the engine suspended. If it
-  fails or expires, the runtime is `Stalled` with `RemovalFailed` and keeps the
-  finalizer until a [retry](operations.md#retrying).
+  release, dependents first. The order is the reverse of an install order:
+  the active plan's releases in plan order, then any others, each placed
+  after every release its Application's `depends-on` and `readiness-for`
+  annotations name. It comes from the live Applications, so it holds when the
+  active plan cannot be read. A dependency that is missing from the
+  annotations is not enforced, and releases in a dependency cycle cannot all
+  go before what they follow. The removal runs either way, and its steps are
+  listed on the rollout before approval. It always needs approval
+  (`AwaitingApproval`). It does not start while the runtime is paused or the
+  engine suspended. If it fails or expires, the runtime is `Stalled` with
+  `RemovalFailed` and keeps the finalizer until a
+  [retry](operations.md#retrying).
 
 Removing the finalizer by hand is safe for the stack: nothing has an owner
 reference, so nothing cascades, and Argo CD keeps reconciling. The Applications
