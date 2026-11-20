@@ -358,6 +358,13 @@ validators:
     timeout: 5m
     args: ["platform-health"]
     env: []
+  - name: dynamo-snapshot-restore
+    phase: conformance
+    description: "Verify Snapshot through Dynamo: a checkpointing DynamoGraphDeployment is captured, restored and answers (skipped unless snapshot and dynamo-platform are declared)"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 35m
+    args: ["dynamo-snapshot-restore"]
+    env: []
   - name: nccl-all-reduce-bw-net
     phase: performance
     description: "Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS)"
