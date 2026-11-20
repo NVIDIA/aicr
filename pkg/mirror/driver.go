@@ -82,7 +82,8 @@ func appendNonEmpty(notes []string, note string) []string {
 // amd64. It returns "" for any or an unrecognized accelerator.
 func architectureForAccelerator(a recipe.CriteriaAcceleratorType) string {
 	switch a {
-	case recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300, recipe.CriteriaAcceleratorVR200:
+	case recipe.CriteriaAcceleratorGB10, recipe.CriteriaAcceleratorGB200,
+		recipe.CriteriaAcceleratorGB300, recipe.CriteriaAcceleratorVR200:
 		return bom.ArchARM64
 	case recipe.CriteriaAcceleratorH100, recipe.CriteriaAcceleratorH200,
 		recipe.CriteriaAcceleratorB200, recipe.CriteriaAcceleratorB300,
