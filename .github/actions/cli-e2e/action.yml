@@ -50,7 +50,7 @@ runs:
         COSIGN_VERSION: ${{ inputs.cosign_version }}
       run: '[ -n "$COSIGN_VERSION" ] || { echo "cosign_version input is required (>= v3.1.0 for Rekor v2)" >&2; exit 1; }'
     - name: Setup Go
-      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
       with:
         # Caching is done explicitly below, for the reasons in go-lint.
         cache: false
