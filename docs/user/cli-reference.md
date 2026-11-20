@@ -516,7 +516,7 @@ Generate recipes using direct system parameters:
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s, mk8s, nvke, cks. `mk8s` identifies Nebius Managed Service for Kubernetes and `nvke` identifies NVIDIA Kubernetes Engine (Forge/NICo bare metal); presence in this list does not imply recipe qualification. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes. `generic` is never detected from a snapshot (the fingerprint reports the provisioner it sees, such as `metal3` or `rke2`), so `generic` recipes require this flag as an explicit opt-in, also alongside `--snapshot`; recipe evidence records the service dimension as `not-inferable` with the observed provider, which does not disqualify the evidence |
-| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200. `b300` identifies B300 SXM and is distinct from Grace Blackwell `gb300` |
+| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb10, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200. `b300` identifies B300 SXM and is distinct from Grace Blackwell `gb300` |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos, sles, rocky |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, kueue, nim, runai, slurm |
@@ -549,7 +549,7 @@ node shape the resolved recipe targets. See
 
 > **`--service cks` is Preview**, covering H100 and RTX PRO 6000 on Ubuntu for training. Pass the service explicitly, including with a snapshot; CKS auto-detection is not implemented. See [CoreWeave H100 Setup](../integrator/cks-h100-setup.md) and [CoreWeave RTX PRO 6000 Setup](../integrator/cks-rtx-pro-6000-setup.md) for provider ownership and qualification gaps.
 
-> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training`, `nvke / gb200 / ubuntu / training / kubeflow`, `nvke / gb200 / ubuntu / inference`, `nvke / gb200 / ubuntu / inference / dynamo`, `nvke / vr200 / ubuntu / training`, `nvke / vr200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / inference`, `nvke / vr200 / ubuntu / inference / dynamo`, `nvke / gb300 / ubuntu / training`, `nvke / gb300 / ubuntu / training / kubeflow`, `nvke / gb300 / ubuntu / inference` and `nvke / gb300 / ubuntu / inference / dynamo` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md), [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md) and [NVKE GB300 Setup](../integrator/nvke-gb300-setup.md) for their prerequisites and known gaps. The VR200 coordinates require an `nvidia-bos-64k` kernel, which the recipe's constraints cannot express — check it before deploying.
+> **`--service nvke` is Preview**, covering the `nvke / gb200 / ubuntu / training`, `nvke / gb200 / ubuntu / training / kubeflow`, `nvke / gb200 / ubuntu / inference`, `nvke / gb200 / ubuntu / inference / dynamo`, `nvke / vr200 / ubuntu / training`, `nvke / vr200 / ubuntu / training / kubeflow`, `nvke / vr200 / ubuntu / inference`, `nvke / vr200 / ubuntu / inference / dynamo`, `nvke / gb300 / ubuntu / training`, `nvke / gb300 / ubuntu / training / kubeflow`, `nvke / gb300 / ubuntu / inference`, `nvke / gb300 / ubuntu / inference / dynamo`, `nvke / gb10 / ubuntu / training` and `nvke / gb10 / ubuntu / training / kubeflow` coordinates. See [NVKE GB200 Setup](../integrator/nvke-gb200-setup.md), [NVKE VR200 Setup](../integrator/nvke-vr200-setup.md) and [NVKE GB300 Setup](../integrator/nvke-gb300-setup.md) for their prerequisites and known gaps. The VR200 coordinates require an `nvidia-bos-64k` kernel, which the recipe's constraints cannot express — check it before deploying. The GB10 coordinates target a single DGX Spark; DGX OS ships a containerd config that disables CRI, so replace it with a CRI-enabled one before deploying.
 
 > **`--platform runai` is Preview**, covering the `eks / h100 / ubuntu / training / runai` and `gke / h100 / cos / training / runai` coordinates. See [Run:ai cluster](component-catalog.md#runai-cluster) for its per-cluster inputs and known gaps.
 
@@ -1097,7 +1097,7 @@ gpu-operator                   Helm  v26.7.3  gpu-operator            nfd,cert-m
 dra-node-labeler               Helm  -        gpu-operator            gpu-operator
 kai-scheduler                  Helm  v0.16.9  kai-scheduler           gpu-operator
 nvidia-dra-driver-gpu          Helm  0.5.1    nvidia-dra-driver       gpu-operator,dra-node-labeler
-nvsentinel                     Helm  v1.31.0  nvsentinel              cert-manager,gpu-operator,prometheus-operator-crds
+nvsentinel                     Helm  v1.32.0  nvsentinel              cert-manager,gpu-operator,prometheus-operator-crds
 prometheus-adapter             Helm  5.3.0    monitoring              kube-prometheus-stack
 
 VALIDATION
