@@ -57,8 +57,8 @@ Today every committed pointer is `community`, published from a contributor fork 
 {/* BEGIN AICR-HEALTH */}
 ## Summary
 
-- Recipes: **81**
-- Pass: **81** · Warn: **0** · Fail: **0** · Unknown: **0**
+- Recipes: **83**
+- Pass: **83** · Warn: **0** · Fail: **0** · Unknown: **0**
 
 ## Recipes
 
@@ -91,9 +91,9 @@ Today every committed pointer is `community`, published from a contributor fork 
 | gb200-eks-ubuntu-training-slurm | eks | gb200 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:13 | pending | — |
 | gb300-eks-amazonlinux-inference | eks | gb300 | amazonlinux | inference | — | pass | R:0 D:4 P:0 C:5 | pending | — |
 | gb300-eks-ubuntu-inference-dynamo | eks | gb300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:12 | [eks/gb300-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb300-ubuntu/inference-dynamo) | community |
-| gb300-eks-ubuntu-training-kubeflow | eks | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:11 | [eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) | community |
+| gb300-eks-ubuntu-training-kubeflow | eks | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:4 C:11 | [eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) | community |
 | gb300-eks-ubuntu-training-slurm | eks | gb300 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:13 | pending | — |
-| h100-eks-amazonlinux-inference | eks | h100 | amazonlinux | inference | — | pass | R:0 D:4 P:0 C:5 | pending | — |
+| h100-eks-amazonlinux-inference-dynamo | eks | h100 | amazonlinux | inference | dynamo | pass | R:0 D:4 P:1 C:12 | pending | — |
 | h100-eks-ubuntu-inference-dynamo | eks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:12 | [eks/h100-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/h100-ubuntu/inference-dynamo) | — |
 | h100-eks-ubuntu-inference-nim | eks | h100 | ubuntu | inference | nim | pass | R:0 D:4 P:0 C:12 | pending | — |
 | h100-eks-ubuntu-training-kubeflow | eks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:11 | [eks/h100-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/h100-ubuntu/training-kubeflow) | — |
@@ -128,11 +128,13 @@ Today every committed pointer is `community`, published from a contributor fork 
 | rtx-pro-6000-lke-ubuntu-inference | lke | rtx-pro-6000 | ubuntu | inference | — | pass | R:0 D:4 P:0 C:10 | pending | — |
 | rtx-pro-6000-lke-ubuntu-training-kubeflow | lke | rtx-pro-6000 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:11 | pending | — |
 | b300-mk8s-ubuntu-inference-dynamo | mk8s | b300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:3 | pending | community |
+| gb10-nvke-ubuntu-training-kubeflow | nvke | gb10 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:5 | pending | — |
+| gb200-nvke-ubuntu-inference-dynamo | nvke | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending | community |
 | gb200-nvke-ubuntu-training-kubeflow | nvke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:6 | pending | community |
 | gb300-nvke-ubuntu-inference-dynamo | nvke | gb300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending | community |
 | gb300-nvke-ubuntu-training-kubeflow | nvke | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:6 | pending | community |
-| vr200-nvke-ubuntu-inference-dynamo | nvke | vr200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:10 | pending | community |
-| vr200-nvke-ubuntu-training-kubeflow | nvke | vr200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:5 | pending | community |
+| vr200-nvke-ubuntu-inference-dynamo | nvke | vr200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:10 | [nvke/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/nvke/vr200-ubuntu/inference-dynamo) | community |
+| vr200-nvke-ubuntu-training-kubeflow | nvke | vr200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:5 | [nvke/vr200-ubuntu/training-kubeflow](https://validation.aicr.run/#/nvke/vr200-ubuntu/training-kubeflow) | community |
 | ocp-inference-nim | ocp | — | — | inference | nim | pass | R:0 D:3 P:0 C:12 | pending | — |
 | ocp-training | ocp | — | — | training | — | pass | R:0 D:3 P:0 C:1 | pending | — |
 | a100-oke-ubuntu-training-kubeflow | oke | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:11 | pending | — |
