@@ -296,13 +296,28 @@ an unaudited composition.
 
 At provider composition, compare every active chart binding with its
 pre-binding repository, effective chart name, verbatim version and archive
-digest. If any differs, or the old archive digest is absent, clear `ownsCRDs`
-on **all** entries in the cloned effective registry and omit their CRD
-ownership exclusions. Emit a diagnostic naming the changed identities and the
-disabled owners. An unchanged owner's audit cannot establish exclusivity when
-a different chart may have acquired the same CRD, including a chart that does
-not declare `ownsCRDs`. Clearing only the changed component is insufficient.
-If every bound identity matches exactly, preserve the existing ownership policy.
+digest. A difference, or an absent old archive digest, counts as changed.
+
+- No changed bindings: preserve ownership (`unchanged`).
+- Every changed binding sets `crdOwnership: retain`: preserve `ownsCRDs` and
+  `ownsCRDsExcludeSubcharts` on every entry (`retained`).
+- Any changed binding lacks `retain`: clear ownership and exclusions on all
+  entries (`disabled`), and log the changed components and disabled owners.
+
+An unchanged owner's audit cannot establish exclusivity when another chart
+may acquire its CRD. `retain` is the catalog author's attestation that charts
+published under the binding never ship CRDs in another owner's effective set.
+For an owner, its effective set is its `crds/` content minus excluded
+subcharts; no other catalog component may ship those CRDs, including through
+`templates/`, and none may use webhook conversion. The binding does not grant
+ownership: the registry entry still decides it.
+
+Accept `retain` only from external bindings and only for an entry defined in
+external `registry.yaml`, otherwise fail with `artifact-target-invalid`.
+Check this even for inactive bindings; inactive bindings have no policy effect.
+The external entry replaces the embedded entry wholesale. Retention is not
+conditioned on repository equality, so relocating the inventory keeps ownership.
+The identity-change test and saved-recipe input-digest guards remain unchanged.
 
 For example, in the [embedded registry at `2ba9496d`][crd-example-registry],
 binding any chart clears ownership for all six owners: `nvsentinel`,
@@ -315,13 +330,27 @@ upgrade opt-ins until the base catalog is reviewed and pinned as described
 below. This example assumes the embedded entries have not been replaced by
 an external catalog.
 
-This conservative rule requires no registry fetch or producer attestation.
-It can disable CRD upgrades even for unaffected owners; it does not prove a
-new composition safe. Restoring the policy requires a reviewed base catalog
-that pins the incoming identities and revalidates ownership against the full
-chart set. Health checks and upgrade guidance remain the catalog author's
-responsibility. This controls deployers that consult `ownsCRDs`; Argo CD
-applies CRDs as ordinary manifests and is not gated by this flag.
+Without `retain`, restoring ownership requires reviewed, exact base pins.
+Health checks and upgrade guidance remain the catalog author's responsibility.
+Argo CD applies CRDs as ordinary manifests and is not gated by this flag.
+
+When `helm` or `flux` vendors a recipe with policy `retained`, inspect the
+verified archives' `crds/` YAML, including packaged and unpacked subcharts.
+Owners use their effective sets, respecting `ownsCRDsExcludeSubcharts`; other
+components use all their CRDs. Fail with `ErrCodeConflict` and reason
+`crd-ownership-conflict`, naming the CRD and components, if an owner's CRD
+appears in another selected component or declares
+`spec.conversion.strategy: Webhook`. The nvsentinel/psmdb-operator combination
+passes because nvsentinel excludes `mongodb-store`. Bound archive expansion,
+nesting and YAML reads with the existing limits. Share the check between
+Helm (after local chart writing) and Flux (after vendoring, before the root
+kustomization). Other deployers are unchanged; the embedded ownership audit
+continues to cover embedded pins only.
+
+Vendoring remains optional. Without it, the catalog attestation stands alone,
+as it does for exact-pinned external entries. The check does not inspect
+`templates/`, manifests or Kustomize components, and does not verify the bytes
+pulled at install time by a non-vendored bundle.
 
 ## Proposal
 
@@ -431,7 +460,8 @@ or unaccounted inventory artifact fails. A misspelling on either side of an
 intended match leaves the inventory entry unaccounted, preserving typo safety
 without requiring per-release binding files.
 
-The target requirements below apply only to active bindings. Inactive entries
+Except for the external-layer and registry-entry requirements of
+`crdOwnership`, target requirements below apply only to active bindings. Inactive entries
 must have valid schema and field shapes, but do not require target existence,
 values-file participation, JSON Pointer existence or a platform match. The
 merged set still obeys disjointness and one-chart-per-component rules.
@@ -441,6 +471,7 @@ targets of selected components.
 | Field | Contract |
 |---|---|
 | `charts.<artifact>.component` | Existing Helm component. Artifact must be a chart. At most one chart per component and one component per chart binding. |
+| `charts.<artifact>.crdOwnership` | Optional string, only `retain`. External bindings and an externally defined registry entry are required. Included in `bindingsDigest` and `applied[].chart`. |
 | `images.<artifact>.targets` | Nonempty list of targets for an image artifact. Duplicate or overlapping writes fail. |
 | `targets[].component` | Existing Helm component; does not enable it. |
 | `targets[].valuesFile` | Catalog-relative `.yaml`, `.yml` or `.json` regular file. For selected components, it must participate in the resolved ref's values composition. Reject absolute paths, `..`, symlinks and catalog escapes. |
@@ -539,6 +570,23 @@ provider pointer.
 | `baseCatalogDigest` | SHA-256 of the canonical external base file list and embedded catalog content digest, before binding. Independent of the binary version. |
 | `allowCatalogPins` | Sorted effective exception set from the user config. |
 | `verification` | `metadata-only` at composition time. |
+| `crdOwnership.policy` | Required: `unchanged`, `retained` or `disabled`. |
+| `crdOwnership.changed` | Required sorted, unique component names of changed active chart bindings; empty exactly for `unchanged`. |
+| `crdOwnership.owners` | Required sorted, unique registry owners before composition clears ownership; under `disabled`, the owners cleared. |
+
+Provenance validation requires every changed name to have an applied chart.
+Under `retained`, all changed charts must carry `crdOwnership: retain`; under
+`disabled`, at least one must lack it. Saved artifact-bearing recipes from
+older binaries lack this record. Readers that need no execution inputs
+(namespace-only inheritance, evidence verification) accept them. Execution
+requires re-resolution: the full provenance digest differs
+(`artifact-inputs-mismatch`).
+
+Every recipe resolved with an inventory carries `crdOwnership`, whether or not
+a binding sets `retain`. Older binaries decode v1beta2 strictly and reject
+both that record and bindings with the `crdOwnership` field. Consumers of
+those recipes, and catalogs adopting the binding field, must require a binary
+that supports `crdOwnership`, in addition to ADR-031's minimum version.
 
 Use [RFC 8785 JSON Canonicalization Scheme (JCS)][jcs] for all JSON hashed by
 `bindingsDigest` and `baseCatalogDigest`, including the embedded file-list

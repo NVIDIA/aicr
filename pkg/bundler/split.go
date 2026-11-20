@@ -425,6 +425,7 @@ func (r *bundleRun) makeSplit(
 	// (upgrade-check, recipe --inherit-from) work on a set like on a bundle.
 	infoOut := &deployer.Output{}
 	var steps, notes []string
+	var vendored []localformat.VendorRecord
 	for _, plan := range partition.classes {
 		subset := *enabled
 		subset.ComponentRefs = plan.refs
@@ -451,6 +452,7 @@ func (r *bundleRun) makeSplit(
 				fmt.Sprintf("--split rendered an unexpected deployer %T; only the helm deployer is supported", d))
 		}
 		gen.Split = splitContextFor(partition, plan)
+		gen.Puller = r.chartPuller
 
 		classDir := filepath.Join(stage, string(plan.class))
 		classOut, genErr := gen.Generate(ctx, classDir)
@@ -458,6 +460,7 @@ func (r *bundleRun) makeSplit(
 			return nil, errors.PropagateOrWrap(genErr, errors.ErrCodeInternal,
 				fmt.Sprintf("failed to generate the %s class", plan.class))
 		}
+		vendored = append(vendored, gen.VendorRecords()...)
 		output.Files = append(output.Files, classOut.Files...)
 		output.TotalSize += classOut.TotalSize
 		if infoOut.Entrypoint == "" {
@@ -477,6 +480,12 @@ func (r *bundleRun) makeSplit(
 		for _, note := range classOut.DeploymentNotes {
 			notes = append(notes, fmt.Sprintf("%s: %s", plan.class, note))
 		}
+	}
+
+	// Each class checked only its own charts; an owner's CRD may also ship in
+	// another class.
+	if crdErr := deployer.CheckVendoredCRDOwnership(ctx, enabled, localformat.VendoredArchives(vendored)); crdErr != nil {
+		return nil, crdErr
 	}
 
 	if len(upgradeNotes) > 0 {

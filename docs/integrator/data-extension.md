@@ -608,6 +608,13 @@ Typical organization patterns:
   on demand; `aicr` itself doesn't care about source, only that the path
   contains a `registry.yaml` and the expected sub-tree.
 
+External catalogs that fill chart slots through an artifact inventory may use
+[`crdOwnership: retain`](../user/artifact-inventory.md#crd-ownership-under-bindings)
+in external bindings for entries defined in their own `registry.yaml`. Every
+changed binding must opt in to keep ownership across the catalog. Helm and
+Flux check retained ownership against CRDs in vendored archives; vendoring is
+optional, and the catalog author remains responsible for CRDs in templates.
+
 ## Related
 
 - [Recipe Development](recipe-development.md) — overlay schema, criteria fields, mixins, base recipe
