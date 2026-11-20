@@ -275,8 +275,9 @@ func failedSyncRecovers(ctx context.Context, t *testing.T, active string) {
 }
 
 // foreignConflict creates an Application without the operator's ownership
-// under a plan release's name: the install conflicts, the rollout fails,
-// and the foreign object is never written.
+// under a plan release's name: the runtime stalls naming it before a rollout
+// to the plan that installs the release exists, and the foreign object is
+// never written.
 func foreignConflict(ctx context.Context, t *testing.T, active string) {
 	t.Helper()
 	foreign := &unstructured.Unstructured{Object: map[string]any{
@@ -296,12 +297,16 @@ func foreignConflict(ctx context.Context, t *testing.T, active string) {
 	setOverrideFor(ctx, t, crdsRelease, "enabled", "true")
 	waitFor(t, resolveTimeout+rolloutTimeout, "the runtime did not stall on the foreign Application", func() bool {
 		c := meta.FindStatusCondition(getRuntime(ctx, t).Status.Conditions, v1alpha1.ConditionStalled)
-		if c != nil && c.Status == metav1.ConditionTrue && c.Reason == "RolloutFailed" && strings.Contains(c.Message, "ownership") {
+		if c != nil && c.Status == metav1.ConditionTrue && c.Reason == argocd.ReasonForeignObject && strings.Contains(c.Message, crdsRelease) {
 			t.Logf("stalled: %s: %s", c.Reason, c.Message)
 			return true
 		}
 		return false
 	})
+	rt := getRuntime(ctx, t)
+	if blocked := rt.Status.CandidatePlanDigest; blocked == "" || blocked == active || len(rolloutsTo(ctx, t, blocked)) != 0 {
+		t.Errorf("candidate %s (active %s) has %d rollouts, want a new candidate with none", blocked, active, len(rolloutsTo(ctx, t, blocked)))
+	}
 	if err := k8s.Get(ctx, client.ObjectKeyFromObject(foreign), foreign); err != nil {
 		t.Fatal(err)
 	}

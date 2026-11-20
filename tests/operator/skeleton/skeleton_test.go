@@ -201,7 +201,7 @@ func TestSkeleton(t *testing.T) {
 	t.Run("an approved Remove step cascades and observes retirement", func(t *testing.T) {
 		removeCascades(ctx, t, first)
 	})
-	t.Run("a foreign Application with a release's name conflicts with no write", func(t *testing.T) {
+	t.Run("a foreign Application with a release's name stalls the runtime before a rollout, with no write", func(t *testing.T) {
 		foreignConflict(ctx, t, first)
 	})
 	t.Run("a missing AppProject sets EngineAvailable=False with zero writes", func(t *testing.T) {

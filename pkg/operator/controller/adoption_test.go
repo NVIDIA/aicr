@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
 	"aicr.run/pkg/operator/engine/argocd"
 	operrors "aicr.run/pkg/operator/errors"
 	"aicr.run/pkg/operator/plan"
@@ -78,6 +79,122 @@ func TestOrphanedObjectsStallANewRuntime(t *testing.T) {
 	c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled)
 	if c.Reason != ReasonOrphanedObjectsPresent || !strings.Contains(c.Message, earlierUID) || len(rollouts(t, ctx)) != 0 || len(engine.order) != 0 {
 		t.Fatalf("Stalled %+v, %d rollouts, writes %v", c, len(rollouts(t, ctx)), engine.order)
+	}
+}
+
+// An Application this runtime does not own, with the name of a release the
+// target plan would install, stalls the runtime before a rollout exists and
+// is named; once it is gone the rollout is created. Releases the runtime
+// already owns are not asked about.
+func TestForeignApplicationStallsBeforeARolloutIsCreated(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	target := twoReleases(t, ctx, rt)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "cert-manager", Name: "cert-manager", UID: "u-c", PlanDigest: target}}
+	engine.unowned = map[string]bool{"nfd": true, "cert-manager": true}
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r)
+	reconcileRollout(t, ctx, r)
+	c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled)
+	if c.Reason != argocd.ReasonForeignObject || !strings.Contains(c.Message, ": nfd;") || !strings.Contains(c.Message, target) {
+		t.Fatalf("Stalled %+v, want %s naming nfd and plan %s", c, argocd.ReasonForeignObject, target)
+	}
+	if len(rollouts(t, ctx)) != 0 || len(engine.order) != 0 {
+		t.Fatalf("%d rollouts, writes %v, want none", len(rollouts(t, ctx)), engine.order)
+	}
+	if len(engine.asked) == 0 || !slices.Equal(engine.asked[0], []string{"nfd"}) {
+		t.Fatalf("names asked about = %v, want only nfd, which the runtime does not own", engine.asked)
+	}
+
+	delete(engine.unowned, "nfd")
+	reconcileRollout(t, ctx, r)
+	if ro := onlyRollout(t, ctx, target); len(ro.Spec.Steps) != 2 {
+		t.Fatalf("rollout after the Application was removed = %+v", ro.Spec)
+	}
+	if c = cond(getRuntime(t, ctx), v1alpha1.ConditionStalled); c.Reason == argocd.ReasonForeignObject {
+		t.Fatalf("still Stalled %+v", c)
+	}
+}
+
+// The check for taken names comes before the assessment: an upgrade whose
+// recipe changed, and so would be assessed, stalls on a taken name with no
+// rollout and no assessment Job.
+func TestForeignApplicationStallsBeforeTheAssessment(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	active := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "1"},
+		testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":1}`))
+	target := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "2"},
+		testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":2}`), testRelease("nfd", plan.PhasePrimary, "", `{}`))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", Name: "gpu-operator", UID: "u-g", PlanDigest: active}}
+	engine.unowned = map[string]bool{"nfd": true}
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r)
+	reconcileRollout(t, ctx, r)
+	c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled)
+	if c.Reason != argocd.ReasonForeignObject || !strings.Contains(c.Message, ": nfd;") {
+		t.Fatalf("Stalled %+v, want %s naming nfd", c, argocd.ReasonForeignObject)
+	}
+	if n, jobs := len(rolloutsTo(t, ctx, target)), len(liveJobs(t, ctx, string(aicrjob.StageAssessment))); n != 0 || jobs != 0 || len(engine.order) != 0 {
+		t.Fatalf("%d rollouts to the target, %d assessment Jobs, writes %v; want none", n, jobs, engine.order)
+	}
+
+	// The same transition is assessed once the name is free.
+	delete(engine.unowned, "nfd")
+	reconcileRollout(t, ctx, r)
+	if jobs := len(liveJobs(t, ctx, string(aicrjob.StageAssessment))); jobs != 1 {
+		t.Fatalf("%d assessment Jobs once the name is free, want 1", jobs)
+	}
+}
+
+// The check for taken names fails closed and asks only when it must: a
+// failed read creates no rollout, and a runtime that owns every release of
+// the target plan reads nothing.
+func TestForeignApplicationCheck(t *testing.T) {
+	tests := []struct {
+		name      string
+		owned     []string
+		err       error
+		wantErr   bool
+		wantAsked int
+		wantSteps int
+	}{
+		{name: "a failed read creates no rollout", err: operrors.New(operrors.ErrCodeUnavailable, "injected"), wantErr: true, wantAsked: 1},
+		{name: "every release owned reads nothing", owned: []string{"cert-manager", "nfd"}, wantSteps: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testContext(t)
+			rt := freshRuntime(t, ctx, stabilized)
+			target := twoReleases(t, ctx, rt)
+			resolved(t, ctx, target)
+			engine := newEngine()
+			engine.unownedErr = tt.err
+			for _, id := range tt.owned {
+				engine.inventory = append(engine.inventory, argocd.InventoryItem{ReleaseID: id, Name: id, UID: "u-" + id, PlanDigest: "sha256:other"})
+			}
+			r, clk := newRollout(t, engine, true)
+			clk.now = time.Now().Add(2 * time.Second)
+			if _, err := r.Reconcile(ctx, request); (err != nil) != tt.wantErr {
+				t.Fatalf("Reconcile() = %v, wantErr %t", err, tt.wantErr)
+			}
+			steps := 0
+			if ros := rolloutsTo(t, ctx, target); len(ros) == 1 {
+				steps = len(ros[0].Spec.Steps)
+			}
+			if steps != tt.wantSteps || len(engine.asked) != tt.wantAsked {
+				t.Fatalf("rollout steps = %d, want %d; reads = %v, want %d", steps, tt.wantSteps, engine.asked, tt.wantAsked)
+			}
+		})
 	}
 }
 

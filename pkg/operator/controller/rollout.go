@@ -146,6 +146,9 @@ type Engine interface {
 	Suspend(ctx context.Context, runtimeUID string, suspended bool) ([]string, error)
 	Orphan(ctx context.Context, runtimeUID string) ([]string, error)
 	Foreign(ctx context.Context, runtimeUID string) (map[string][]string, error)
+	// Unowned returns those of names that are engine objects without this
+	// runtime's ownership.
+	Unowned(ctx context.Context, runtimeUID string, names []string) ([]string, error)
 	Adopt(ctx context.Context, fromUID, toUID, name, uid string) error
 }
 
@@ -708,6 +711,9 @@ func (r *RolloutReconciler) create(ctx context.Context, rt *v1alpha1.ClusterRunt
 	if err != nil {
 		return err
 	}
+	if taken, takenErr := r.namesTaken(ctx, rt, p, inventory, v); takenErr != nil || taken {
+		return takenErr
+	}
 	var from *plan.Document
 	if active != "" {
 		if from, err = readPlan(ctx, r.Reader, r.Config.OperatorNamespace, active); err != nil {
@@ -780,6 +786,36 @@ func (r *RolloutReconciler) create(ctx context.Context, rt *v1alpha1.ClusterRunt
 	}
 	v.rollout, v.inProgress, v.reconciling, v.reconcilingReason, v.requeue = ro.Name, ro, true, ReasonRollingOut, time.Second
 	return nil
+}
+
+// namesTaken stalls the runtime when an engine object it does not own has
+// the name of a release p would install: the rollout would fail at that
+// release's step, after its approval and the steps before it. It reports
+// whether it stalled. An object that takes a name later still fails the step.
+func (r *RolloutReconciler) namesTaken(ctx context.Context, rt *v1alpha1.ClusterRuntime, p *plan.Document,
+	inventory []argocd.InventoryItem, v *runtimeView) (bool, error) {
+
+	owned := make(map[string]bool, len(inventory))
+	for _, i := range inventory {
+		owned[i.Name] = true
+	}
+	var names []string
+	for i := range p.Releases {
+		if id := p.Releases[i].ID; !owned[id] {
+			names = append(names, id)
+		}
+	}
+	if len(names) == 0 {
+		return false, nil
+	}
+	taken, err := r.Engine.Unowned(ctx, string(rt.UID), names)
+	if err != nil || len(taken) == 0 {
+		return false, err
+	}
+	v.stalled, v.stalledReason = true, argocd.ReasonForeignObject
+	v.stalledMsg = fmt.Sprintf("engine objects not owned by this runtime have the names of releases in plan %s: %s; remove or rename them",
+		p.DesiredStateDigest, strings.Join(taken, ", "))
+	return true, nil
 }
 
 // steps orders a transition: in the target plan's order, installs

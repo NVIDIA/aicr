@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -75,6 +76,10 @@ type fakeEngine struct {
 	suspendErr    error                             // Suspend fails with it
 	foreign       map[string][]argocd.InventoryItem // runtime UID -> objects it owns
 	rebuildErr    error
+	unowned       map[string]bool // name -> an object this runtime does not own has it
+	unownedErr    error           // Unowned fails with it
+	askedMu       sync.Mutex      // guards asked: concurrent creators share an engine
+	asked         [][]string      // the names each Unowned call asked about
 }
 
 func newEngine() *fakeEngine {
@@ -237,6 +242,24 @@ func (f *fakeEngine) Foreign(context.Context, string) (map[string][]string, erro
 	for owner, items := range f.foreign {
 		for _, i := range items {
 			out[owner] = append(out[owner], i.ReleaseID)
+		}
+	}
+	return out, nil
+}
+
+// Unowned records the names asked about and returns those the test says
+// are taken.
+func (f *fakeEngine) Unowned(_ context.Context, _ string, names []string) ([]string, error) {
+	f.askedMu.Lock()
+	f.asked = append(f.asked, slices.Clone(names))
+	f.askedMu.Unlock()
+	if f.unownedErr != nil {
+		return nil, f.unownedErr
+	}
+	var out []string
+	for _, name := range names {
+		if f.unowned[name] {
+			out = append(out, name)
 		}
 	}
 	return out, nil
