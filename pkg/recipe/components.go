@@ -143,6 +143,9 @@ type ComponentConfig struct {
 	// Upgrades references this component's transition records (ADR-021).
 	Upgrades UpgradesConfig `yaml:"upgrades,omitempty"`
 
+	// Sizing references this component's node-count sizing tiers (ADR-030).
+	Sizing SizingConfig `yaml:"sizing,omitempty"`
+
 	// ManifestFiles lists manifest files (relative to the recipes data
 	// root, e.g. "components/kueue/manifests/cluster-queue.yaml") bundled
 	// with the component whenever a recipe references it and the
@@ -1066,7 +1069,7 @@ func (r *ComponentRegistry) validateTelemetry() []error {
 		}
 		owned := server.OwnedPaths()
 		for i, path := range owned {
-			if !isWellFormedValuePath(path) {
+			if !IsWellFormedValuePath(path) {
 				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 					"component %q: telemetry.promqlServer path %q is not a well-formed dotted path", comp.Name, path)))
 				continue
@@ -1123,7 +1126,9 @@ func ValidateRuntimeMetrics(series, namespaces []string) error {
 	return nil
 }
 
-func isWellFormedValuePath(path string) bool {
+// IsWellFormedValuePath reports whether path is a non-empty dotted values
+// path with no empty segment.
+func IsWellFormedValuePath(path string) bool {
 	return path != "" && !strings.HasPrefix(path, ".") && !strings.HasSuffix(path, ".") && !strings.Contains(path, "..")
 }
 
@@ -1289,4 +1294,11 @@ func validateValuePathList(component, field string, paths []string) []error {
 		seen[path] = struct{}{}
 	}
 	return errs
+}
+
+// SizingConfig references a component's sizing file (pkg/recipe/sizing).
+type SizingConfig struct {
+	// File is relative to the data directory. Empty means the component is
+	// never sized.
+	File string `yaml:"file,omitempty"`
 }

@@ -52,7 +52,7 @@ a100-aks-ubuntu-training-kubeflow:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: 8320474f55afaab762e8383dd0a918d7f62252e0451e552f687bb2eeafbbce01
+  010-gpu-operator/values.yaml: ad1efb4a1a5fe18da63f7ddea212f2e61a4ac861bac86a9fbd3c14c2e16b3ccd
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -87,7 +87,7 @@ a100-aks-ubuntu-training-kubeflow:
   README.md: 1dfd62689f732cd45cfa337ac4d3405bb1b2cb9cdd437365c8c95f90a90425f0
   UPGRADING.md: 19642fd3a28471b99925ef3e96eabdabf00e18faca3b4240d7d0ae25ed3a1927
   bundle-info.yaml: b11cd6a9066b562210f7a6d3dc01452ed139c8fd56558a039ceb77d13e731b99
-  checksums.txt: 32228038399567db3c53430e256cfe9589aff377d7dc9476735c341dfafc1843
+  checksums.txt: 7b80a79cca51222bce02722cb856853ba32590ffc94c3b51d477d642cd508aca
   deploy.sh: a08378569eb287d2d8829c69890233ea42b9ea4b6ae80766a697388fcbc7c2b8
   recipe.yaml: bbf14fd1e98dba1c6c6f6fba367b480e1fb4200485959cd875a3e0e11adff324
 a100-any:
@@ -118,7 +118,7 @@ a100-any:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  007-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -144,7 +144,7 @@ a100-any:
   README.md: 0e562afc88e2338197097078e4de89aebbb291e1aad1dd0b7408421d0fb394f0
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 938c99d7a639f1e1f1ed558c2263999acecca1d458e015abf929eb92264668d9
-  checksums.txt: 205b489d7ff47f8882fb592cea0270e443b27d27bedf424373499f886563313b
+  checksums.txt: 6ea14da6b64bd90c9ff0f795abf0fd6448543cb23101520321dc7e81c681cdde
   deploy.sh: 89f3f76a7b045285f1cc4032bba8e528b1c1ce86e523d1c07163b3879b0b15db
   recipe.yaml: 424b8595853bf27fa9e6443b9ac3ef31afa4b11af07fa2ec669ea92ac5fa5df3
 a100-eks-ubuntu-training-kubeflow:
@@ -188,7 +188,7 @@ a100-eks-ubuntu-training-kubeflow:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  010-gpu-operator/values.yaml: ec8a4d858fba5e10bf520301d8a75d2ef5d503e0ccf14bbc1dea7f2e0d114789
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -223,7 +223,7 @@ a100-eks-ubuntu-training-kubeflow:
   README.md: 5fd1e2ea686893a8919b367b79a144a152ed47e3ba5a415984a5fed9f72d4f9e
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: a3ab635e43736888c38d137cc62fa04f8f56f5e2f46a6f3052ee3772f6d262d5
-  checksums.txt: 5eca153d9c27c8b9bc1d4def3fdd1dd981ce598d3f83c8af79cd40d8b8f29c74
+  checksums.txt: d42e8703c66cbc7b768a477aa1ca003f2f18b127641a0a9090331d542a1e737c
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
   recipe.yaml: 97dcc07c678ac91f9f94af34f5f7f85dce393e8834abfdf128a1cc8eef01030d
 a100-gke-cos-training-kubeflow:
@@ -264,11 +264,11 @@ a100-gke-cos-training-kubeflow:
   009-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   009-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  009-gpu-operator-pre/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  009-gpu-operator-pre/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  010-gpu-operator/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -303,7 +303,7 @@ a100-gke-cos-training-kubeflow:
   README.md: f578d9923685733287270cd5a69c8d79dc1d508f3950f56411d42b2d9b804ea2
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 53b66f87bb3f65333ac7685f3f0392f28ca590b66de1ea870c59402fff359d33
-  checksums.txt: b660b3265874f7118b1648e69aed93c3524a7a5dfe8f13af8b1a5b1b6611b37d
+  checksums.txt: b99a73426e0394ac8e669bf8b78e53e6f4d7fda71e85afce83069f6d0ccc0be0
   deploy.sh: 511155dc137c29bbe9b1c483d38d32b9fea07535102e90b9dea0568ca801e3c8
   recipe.yaml: e2d6b0af7f1f7d09e01064617c3e2f831cb3bd0ed6a3d7f8f512f03629e422d4
 a100-oke-ubuntu-training-kubeflow:
@@ -339,7 +339,7 @@ a100-oke-ubuntu-training-kubeflow:
   008-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   008-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  008-gpu-operator/values.yaml: 4e313fe7f84d10f4ba143d8fcac3e491704dfde63c67261f2fa604a2343b9b9d
+  008-gpu-operator/values.yaml: d8399704848f5c6a47c5fd1cf7e650cb786e828ed633833526b83455daf730e0
   009-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   009-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -374,7 +374,7 @@ a100-oke-ubuntu-training-kubeflow:
   README.md: 92df0dd2abf61fe018aa313b27914cbe7777d04bfeace40b6b601c4b5411bcee
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 192cf2494a5dd7479292a933c4ffe5267b454b2945b59369259affe19002005b
-  checksums.txt: 26a9fb5e337328c0315ef82c0cfbf4e04da7b715fc526554826b76a8a6fb64f7
+  checksums.txt: 824d70ec0d43795f19223b2dafb01352fb708bdcb591959b4211e7680f265c97
   deploy.sh: f3af4ac7c2904d929b8d86b615bf0145e36ee32323875cba8e46892d79c4cc69
   recipe.yaml: 95af2c488aef4bfd31426efca027634f4ebceabea56644d571bf718944c9c0ac
 aks-ubuntu:
@@ -421,7 +421,7 @@ aks-ubuntu:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: c4dbd40910d706ec1beee4616f2c01638660fdfbb38e9114519309453cf3be62
+  010-gpu-operator/values.yaml: 0863919e61064d8338c6bdb0eead1ae40907d21b36adfd502008c563404cb841
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -447,7 +447,7 @@ aks-ubuntu:
   README.md: c3ce32c2d836da032278cdc8c6041f00faf4a291261fead9963d67baff9e75f1
   UPGRADING.md: 19642fd3a28471b99925ef3e96eabdabf00e18faca3b4240d7d0ae25ed3a1927
   bundle-info.yaml: e9325a55d2c867fe52f2bb2adf706f642393b65d3b6fe92a2e1b4ec09c2b1a00
-  checksums.txt: 25b0fb7a6f58600a33142a339cbda5597ae49a09ecf20cc8a7f24599e2687bb5
+  checksums.txt: a4a43e63e4f4991b4b0775e9ce580161c2a53a99210d9dba3b49b2692b08beab
   deploy.sh: fb23b3585b257aae326c6c84c3d55acd9b9b7112a69e3e24f2f9e2f580962c12
   recipe.yaml: 30481500497c29db13a0b7fb7ed900cede29aa2847a693bad2cc25e3bbe5155b
 b200-any:
@@ -478,7 +478,7 @@ b200-any:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  007-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -504,7 +504,7 @@ b200-any:
   README.md: aee806b91cff78c27c8e1d2531f17612e36dda0cd7fc65143d04fbbda215609a
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 9beb80b7e2a3d9ddf39f7e80680173f65d3189c7a743ee3943f74f5147f1eea7
-  checksums.txt: d3b69a0ccd24cb2e5fa126fcc70e2e7e04b30fe353e308e94490d883fb9b24aa
+  checksums.txt: a2feda736dc893925e3e74b098df1fdc1e0caf0a75be776f74f2ef5d993c1753
   deploy.sh: 89f3f76a7b045285f1cc4032bba8e528b1c1ce86e523d1c07163b3879b0b15db
   recipe.yaml: d5a436f5df4eb61763b06ccb5a69a55718f29a212ccd8ecb3acc0e7ce8e74306
 b200-gke-cos-inference-dynamo:
@@ -568,11 +568,11 @@ b200-gke-cos-inference-dynamo:
   014-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   014-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  014-gpu-operator-pre/values.yaml: 3a49a05d5babb1a72097ef2c25d8ff33242d1e12f59f63fcd7fcec07d9470f1a
+  014-gpu-operator-pre/values.yaml: ebca11c6e3d66b56ccd7fb0fc8a5923c2a53000eadf2f3a6233a3bc00b0b3c83
   015-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   015-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  015-gpu-operator/values.yaml: 3a49a05d5babb1a72097ef2c25d8ff33242d1e12f59f63fcd7fcec07d9470f1a
+  015-gpu-operator/values.yaml: ebca11c6e3d66b56ccd7fb0fc8a5923c2a53000eadf2f3a6233a3bc00b0b3c83
   016-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   016-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -602,7 +602,7 @@ b200-gke-cos-inference-dynamo:
   README.md: 802f1c6457e115828c962021b00b43ea0f70d47bc65acab2e185b52baed165af
   UPGRADING.md: 6dc466c4bd99eddaa2faf86c600600ecdd2b708d54b2480cc20a7e2438bb6663
   bundle-info.yaml: 102c1ddc704c97c2163c73b0e919ddcf0feac9548ed2e5f554a22ca0e4d93c2a
-  checksums.txt: 80645a192b81d60f8d4c9ced3b610d0aa05ae6e6155f0e90817ea2bab870930e
+  checksums.txt: 81bfdb439d4d8bf4e5fd252cc4d758b9f0b7613343f41fb87a9c2eb595194b7d
   deploy.sh: 95627830799a5308708bcaed8ca8eea53f98c380fb8f0e66542771e4517747d8
   recipe.yaml: b0ecf1961604c8841c2ae6d6d4e3ac1836a5df9880a3e2dbd17386fa3873eec3
 b200-gke-cos-training-kubeflow:
@@ -643,11 +643,11 @@ b200-gke-cos-training-kubeflow:
   009-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   009-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  009-gpu-operator-pre/values.yaml: 3a49a05d5babb1a72097ef2c25d8ff33242d1e12f59f63fcd7fcec07d9470f1a
+  009-gpu-operator-pre/values.yaml: ebca11c6e3d66b56ccd7fb0fc8a5923c2a53000eadf2f3a6233a3bc00b0b3c83
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: 3a49a05d5babb1a72097ef2c25d8ff33242d1e12f59f63fcd7fcec07d9470f1a
+  010-gpu-operator/values.yaml: ebca11c6e3d66b56ccd7fb0fc8a5923c2a53000eadf2f3a6233a3bc00b0b3c83
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -682,7 +682,7 @@ b200-gke-cos-training-kubeflow:
   README.md: aa9cc1fb6301ef7e714a937b856a4205dc2b5215ef1e9101b5a8fd2563e78e6e
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: abb63aed5c560c8b633240036e888f562682efef72448fd17c5d26588b2d93f1
-  checksums.txt: 1c867c5331a1f51048d8b214597bcfb73ecff20373bae5a5b3a86b5f2154927d
+  checksums.txt: 735f15f69d4bc8f52549c68ceff705efb4fe06bc1c0c47c119b448d3103c441e
   deploy.sh: 511155dc137c29bbe9b1c483d38d32b9fea07535102e90b9dea0568ca801e3c8
   recipe.yaml: 46c405acb157a905656b3d11be718ec08096cfadd20733470f3ac13e31d70188
 b300-mk8s-ubuntu-inference-dynamo:
@@ -706,7 +706,7 @@ b300-mk8s-ubuntu-inference-dynamo:
   005-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   005-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  005-gpu-operator/values.yaml: 01a052e3d4ce02f4908d95bfcfe3035fbc10e752931e4c8c2d5972724a5b9ffe
+  005-gpu-operator/values.yaml: 404be5326fbc6680d0b4aea01b81a3b79668656b3f5e846c7b5430d2cd7f2703
   006-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-nvidia-dra-driver-gpu/install.sh: 6d3aa21c099c4d498707247ec21fb53f18a82dcef3408e0f977d3e0be4c36331
   006-nvidia-dra-driver-gpu/upstream.env: fc1019a4630e9d067748cfa7cc1ac5fbb62e7374485dbdd87a69c2db3dd0dc5e
@@ -722,7 +722,7 @@ b300-mk8s-ubuntu-inference-dynamo:
   README.md: a8bc4372ef7fdd036bd99c0b9a95ca372368187ff877538d59b8e981166ae22f
   UPGRADING.md: af008a125d1b38f99fb642c46000dca99ee9d2b7f1fa27c92f534c2b65b02015
   bundle-info.yaml: 42fcf4c925f251216a3b345a9e4f29ae60a4e1d79d7c6ebfceabcc60d3ac5286
-  checksums.txt: 6db941e01061eed8366457f8858d718b30fa179ee5fce533189a0ba89538801f
+  checksums.txt: c974a12111eaa415847d4c2dbd82e1061bf449f9c4df11070889258c4b94bce3
   deploy.sh: 69c5a1de4d4464652bed7673ef13020c0317f19f1e196ea663be5d9c4dc79d14
   recipe.yaml: cad942ac72687ec5dd593419911ef5adb03e6ac05abc083747b86b253dffb8f9
 bcm-inference:
@@ -777,7 +777,7 @@ bcm-inference:
   012-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   012-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  012-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  012-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   013-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   013-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -803,7 +803,7 @@ bcm-inference:
   README.md: 096b19072feb3b23b87562d70f969455699287af34e9e58768088019fcbe42d9
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: a70e0101549e9a570b402266872457ac96624f378f0879bef9884e3c862e08c3
-  checksums.txt: dfa868c56c02b5fe83bd5fdc92d7704f11e180941e0f155a90ef4fa05f4552d5
+  checksums.txt: da2b239c0af85f3c69e63b3864c4dc8cebe0fba3d3486ed796b45637fee8f4f8
   deploy.sh: e7ca5eb5c2fc33d17ea4d96546694b414b85cd4260b8014e9ae1af61747f61c0
   recipe.yaml: 3bb06c028008886dcf770f703b5247a96b710a3f50d1ad25f150c334205e5988
 eks-ubuntu:
@@ -842,7 +842,7 @@ eks-ubuntu:
   009-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   009-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  009-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  009-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   010-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   010-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -868,7 +868,7 @@ eks-ubuntu:
   README.md: e246caf3d4571cb7000756bb0e6f04181f79d916a17ae1078af48f984036cb3a
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: 3479c767f9e39c650e6f0948aec66672ee6caee5d3b5567b5a768b6c5e9691be
-  checksums.txt: e92ca2bd6aa943cea3d7065a277087efd3fb2365d464b3ae4dcb880c243605a7
+  checksums.txt: a39dacf2622f4d0d2b7563bdbfc63e0a14c8990e0b2f7814e71edf3bef339c67
   deploy.sh: 3bdbe1984d42bb9094016f5f41e636ed95c85b649c3682abe135c94827ac9dc8
   recipe.yaml: c8d8c70b74ef575aa6fd1f62ba00483a4eca0450973f6a4ec26722b72af09a09
 gb200-any:
@@ -899,7 +899,7 @@ gb200-any:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  007-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -925,7 +925,7 @@ gb200-any:
   README.md: 55b8174979005fabef98a1d0fa0756d1d646f49a76be5fd20be34473a9d7841a
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 2d49e0bdadec5ca803133fa546287b4a806fe7f12d1ce032a62597a8c3d2a53f
-  checksums.txt: 6e4431867ae562b515f4bac80ba646914af9f97c925b6693ae4ba5c1a8dd9eb2
+  checksums.txt: 9ddddc7257b68fb044154d9f73dedcf0be5520a7696931267be6415ae76263bf
   deploy.sh: 89f3f76a7b045285f1cc4032bba8e528b1c1ce86e523d1c07163b3879b0b15db
   recipe.yaml: a2b656c7140739e7c762175862dfeb3bcf20a8bed358dfb815027f4a11aa7fc9
 gb200-eks-amazonlinux-inference:
@@ -984,11 +984,11 @@ gb200-eks-amazonlinux-inference:
   013-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   013-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  013-gpu-operator-pre/values.yaml: c333cbef0dd1b670b87d8ae48699e202658801291abd446f5dcbe21d4d135c95
+  013-gpu-operator-pre/values.yaml: 02acbe4771fa6e54d9a233cdacce7af7f3823442a8912c2401156bfa4d7f8e0e
   014-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   014-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  014-gpu-operator/values.yaml: c333cbef0dd1b670b87d8ae48699e202658801291abd446f5dcbe21d4d135c95
+  014-gpu-operator/values.yaml: 02acbe4771fa6e54d9a233cdacce7af7f3823442a8912c2401156bfa4d7f8e0e
   015-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   015-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1014,7 +1014,7 @@ gb200-eks-amazonlinux-inference:
   README.md: 8d44a35454d95dbc8d7c5433f99f417871fc498457ac1952af232574df284132
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: fcc596d1a5c59b33640890a6a45ea4b0ba6a3416def7fbd9756b66b929ed7e1b
-  checksums.txt: c0ec6009e1d04d0d431f759831da49676bc61652fd27f2bf2fe9a7ef3816b543
+  checksums.txt: 721fa3e95e5527e30f4c8d243b55e38201ae12e3043a97f6213f5d6db8fc05e0
   deploy.sh: 3d1a3a9604bfaadf9bd91c90752314a594391ad654d671403d8da82b36868def
   recipe.yaml: 845eb0e04f81e6ea4586df0a416dd894d1e9f75d2a70b3c2dada4359e0dfce9b
 gb200-eks-ubuntu-inference-dynamo:
@@ -1082,11 +1082,11 @@ gb200-eks-ubuntu-inference-dynamo:
   015-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   015-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  015-gpu-operator-pre/values.yaml: d24c8eb6946ff472ce9ddfb5a1a0e548c8df1a5a861e13f60c121bac11ea521b
+  015-gpu-operator-pre/values.yaml: 9cf72d88edcdcb8e264cdce121d427931cf1378d42a540cb60326cfb9004a8eb
   016-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   016-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  016-gpu-operator/values.yaml: d24c8eb6946ff472ce9ddfb5a1a0e548c8df1a5a861e13f60c121bac11ea521b
+  016-gpu-operator/values.yaml: 9cf72d88edcdcb8e264cdce121d427931cf1378d42a540cb60326cfb9004a8eb
   017-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   017-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1116,7 +1116,7 @@ gb200-eks-ubuntu-inference-dynamo:
   README.md: ca44d854913c75a7ddea3b3fa86da13b98e450b66f7cf89c1bfcff0fe68c94a9
   UPGRADING.md: 91f212a9991d60ed22c5a82ce74e59b69e2317277a9369e5984d9aff2cf6abe4
   bundle-info.yaml: 958fe07ec72156840692902ffea309e1e5980bab290c26569943f43dc0f9621d
-  checksums.txt: 611c950193300015b1b9e56e57b7b11a1501497deb3595570cece53a61442cff
+  checksums.txt: b645602f782c897e6fa7e33d893f689ca635d04e599f9dbd17d657938641648f
   deploy.sh: 5cb6189767626d1ade33ebc2726965dd3bf85d5eb4a796df973716a11f77f705
   recipe.yaml: 9a2263c290de4860afa2c3086580d7a4832b363e4c41229e54c9c58a5b7d6a5a
 gb200-eks-ubuntu-training-kubeflow:
@@ -1161,11 +1161,11 @@ gb200-eks-ubuntu-training-kubeflow:
   010-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   010-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  010-gpu-operator-pre/values.yaml: 56eddfde293e293f4ef7572f9106ad6d12a78a140b9a47ea79a4ca1a0467294c
+  010-gpu-operator-pre/values.yaml: 661ba699f1ded5861a672d4e00403bc776f9aac0618f1a389436a6c8a733e911
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: 56eddfde293e293f4ef7572f9106ad6d12a78a140b9a47ea79a4ca1a0467294c
+  011-gpu-operator/values.yaml: 661ba699f1ded5861a672d4e00403bc776f9aac0618f1a389436a6c8a733e911
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   012-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1200,7 +1200,7 @@ gb200-eks-ubuntu-training-kubeflow:
   README.md: 8bfdd9a15fb12024b57c43cf41b250503ceb1a2ceadfe0da3620d24ccd53e619
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: f16daea06db97f6f2e98b882edfff66f26a70416f951ba105974ff2cb9f78686
-  checksums.txt: 81720a833d07b2174be3962b7deed19b2b9a5a95a3441192551c67c03c95ebe0
+  checksums.txt: 9ad16cf5fd5e85cb96b62aed5d7c39d3a73f344b3379ea728f9e33c14289603f
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
   recipe.yaml: 8af38c2851a2241ffd4f28802eeff5583a64666747c398b85ed0bb8e0e9d465f
 gb200-eks-ubuntu-training-slurm:
@@ -1245,11 +1245,11 @@ gb200-eks-ubuntu-training-slurm:
   010-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   010-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  010-gpu-operator-pre/values.yaml: 56eddfde293e293f4ef7572f9106ad6d12a78a140b9a47ea79a4ca1a0467294c
+  010-gpu-operator-pre/values.yaml: 661ba699f1ded5861a672d4e00403bc776f9aac0618f1a389436a6c8a733e911
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: 56eddfde293e293f4ef7572f9106ad6d12a78a140b9a47ea79a4ca1a0467294c
+  011-gpu-operator/values.yaml: 661ba699f1ded5861a672d4e00403bc776f9aac0618f1a389436a6c8a733e911
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   012-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1293,7 +1293,7 @@ gb200-eks-ubuntu-training-slurm:
   README.md: cef0af6370491f091158a690fbfa67f586c14624837723668cc4b97c8e0d61dd
   UPGRADING.md: c4be14e0d7ce1dbf3537e2815ab4628e56c12c444ee25f96021086dba89739bb
   bundle-info.yaml: cf06f16627a38e91c86e11f0c1f57d6879e6e866718daf1908d31cee86a835dd
-  checksums.txt: fa6c40f3f6af5f59f366b558a6059ea3bfa07fd34e6d6295d6cb12ab9bf5c2e3
+  checksums.txt: 5eb2311767174ef7439cbc4614ec4e81a4742d2de4f04ca7dfbcd68dc4070980
   deploy.sh: a48728ddb64a4f2b0506394abc5a3ec777445e5efe57bbbb1f98d1c8a43ee303
   recipe.yaml: 117fc1aef7785ff14aac044b426b3e056b459f9763bec7718ef87fb1cd5e94b8
 gb200-gke-cos-inference-dynamo:
@@ -1363,11 +1363,11 @@ gb200-gke-cos-inference-dynamo:
   015-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   015-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
   015-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  015-gpu-operator-pre/values.yaml: c5b57d3cc3ab7c8e5110f173df59f2fd992b010759346feaade06c555a974fe6
+  015-gpu-operator-pre/values.yaml: 09e4f439b28696b42d7efdcbffc6f3f8e7a576ec209e0007f8d4fe640533cd1b
   016-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   016-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  016-gpu-operator/values.yaml: c5b57d3cc3ab7c8e5110f173df59f2fd992b010759346feaade06c555a974fe6
+  016-gpu-operator/values.yaml: 09e4f439b28696b42d7efdcbffc6f3f8e7a576ec209e0007f8d4fe640533cd1b
   017-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   017-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1402,7 +1402,7 @@ gb200-gke-cos-inference-dynamo:
   README.md: c9d1b1f0592743fd6e09a846885a40f1d59b7e400713f30e12c5dfc2ac933711
   UPGRADING.md: 6dc466c4bd99eddaa2faf86c600600ecdd2b708d54b2480cc20a7e2438bb6663
   bundle-info.yaml: 999607f848282abe4a15e051ce7adee9623710276988dafc9af3a1f0580210c5
-  checksums.txt: 55cbea55711f16cc4161e97f267595106f99820cbaa6cb4faf47a7bf2094de83
+  checksums.txt: df308bdea14a522c677bc0ba645a36cf6a786542c0678c742f892ea86b8da11b
   deploy.sh: 42499182df8884077c5aa8932901541b6815d901380476908a76979f41a1faed
   recipe.yaml: 2debbd547255747e10dc0024f2d684ec105a277092ddad63711b540d4e1acf14
 gb200-gke-cos-training-kubeflow:
@@ -1449,11 +1449,11 @@ gb200-gke-cos-training-kubeflow:
   010-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   010-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
   010-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  010-gpu-operator-pre/values.yaml: c5b57d3cc3ab7c8e5110f173df59f2fd992b010759346feaade06c555a974fe6
+  010-gpu-operator-pre/values.yaml: 09e4f439b28696b42d7efdcbffc6f3f8e7a576ec209e0007f8d4fe640533cd1b
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: c5b57d3cc3ab7c8e5110f173df59f2fd992b010759346feaade06c555a974fe6
+  011-gpu-operator/values.yaml: 09e4f439b28696b42d7efdcbffc6f3f8e7a576ec209e0007f8d4fe640533cd1b
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   012-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1489,7 +1489,7 @@ gb200-gke-cos-training-kubeflow:
   README.md: 4b1fa15dab9c093c4bb5e962d0004d551ad626ffe9624d47a26de3aef7bacbd0
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: b4d1c365efdae9c21c76f779c93f89e9f0af6b54fa7441e51a78f458902e13cd
-  checksums.txt: 1c3b4729d5e44ef1a44276af42d1135105b03925cdb561d7bf936e958ba37bac
+  checksums.txt: 1d5251650e4049924a398cc60f551b90a59ee1a9a5af3be50b3b8dafc54f32b2
   deploy.sh: d6fc95d3864fbb9f05d4228583d6a2e370112aaafdf3e7b5c6557de0af043a0d
   recipe.yaml: 7d0b9821bdd0c8827069d0da973ca42346e959171bf67c60905d86e8ed66d2e9
 gb200-gke-cos-training-slurm:
@@ -1536,11 +1536,11 @@ gb200-gke-cos-training-slurm:
   010-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   010-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
   010-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  010-gpu-operator-pre/values.yaml: c5b57d3cc3ab7c8e5110f173df59f2fd992b010759346feaade06c555a974fe6
+  010-gpu-operator-pre/values.yaml: 09e4f439b28696b42d7efdcbffc6f3f8e7a576ec209e0007f8d4fe640533cd1b
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: c5b57d3cc3ab7c8e5110f173df59f2fd992b010759346feaade06c555a974fe6
+  011-gpu-operator/values.yaml: 09e4f439b28696b42d7efdcbffc6f3f8e7a576ec209e0007f8d4fe640533cd1b
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   012-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1584,7 +1584,7 @@ gb200-gke-cos-training-slurm:
   README.md: 632065a14661ead694d2f81535bd5507966f46b259e7b62edd8798308f99239a
   UPGRADING.md: 6d77d1323e5823e40b9ff0ebbe90c130e751bf8f6445e5981eb1d9894028b374
   bundle-info.yaml: 6a3a38f385f99a954b8714c31371567291ad6dbfb2f0c13413c8ec897789e1c2
-  checksums.txt: 7c503f8c4861122d06583a84579ad1de855576264e28afba7371612290b4cfc5
+  checksums.txt: 552b5f197407c9b66bfe3b94c9d9b232fadb3076bc0552da4ea00fb7cd1efe82
   deploy.sh: c593723c64080c3ace0bda8087b4deb90dcb99d66e5800b157ea661ba22c5d73
   recipe.yaml: a854df91e05e2033399a087657313db42f7e2ffea4c8649cf277c75b01daa351
 gb200-nvke-ubuntu-inference-dynamo:
@@ -1638,7 +1638,7 @@ gb200-nvke-ubuntu-inference-dynamo:
   012-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   012-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  012-gpu-operator/values.yaml: 87eac91a4e5785440f02d5e216d876c069735840e118a123ad8640d4608b8d17
+  012-gpu-operator/values.yaml: 2fcf4aeee7bf04dd2f9aa7ea94e1e421e463e97d3dec02708ad6a9fc63c40df6
   013-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   013-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1668,7 +1668,7 @@ gb200-nvke-ubuntu-inference-dynamo:
   README.md: 147d512423ed1120ede1a5bcb52453925baf3e7e2cdda50bd277b083e41aff7d
   UPGRADING.md: 6dc466c4bd99eddaa2faf86c600600ecdd2b708d54b2480cc20a7e2438bb6663
   bundle-info.yaml: 63b0b8047b8fdd19f1b1aac01237b80058bdd8203885931dfc9fcf2a14c7818a
-  checksums.txt: 53353f18b29cbdbecddcf177c3e0190e6efbc03e2a59a54ff8fbbd345b5350d7
+  checksums.txt: 4dd0d59895938e5dbe97bbcaed055be40ebb2978a819f3a0e300ea9a657c723c
   deploy.sh: 79f0b62328c48695b094e32f4afe4e77e9df91a2bcfc9d76c56ed9fe9bad97c1
   recipe.yaml: 43c0191476e64d35503e68dd025f7a3156dcbc5000cd56114bb00fc1670ffb78
 gb200-nvke-ubuntu-training-kubeflow:
@@ -1714,11 +1714,11 @@ gb200-nvke-ubuntu-training-kubeflow:
   010-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   010-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  010-gpu-operator-pre/values.yaml: d505e85f86c4ca9bad0c5323fff31d0b03ef1e5619ea2776d771f3268703083b
+  010-gpu-operator-pre/values.yaml: cc2cec17a105d0df4354d71b72b8707c955739180c8cec2af17266232cdf4d67
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: d505e85f86c4ca9bad0c5323fff31d0b03ef1e5619ea2776d771f3268703083b
+  011-gpu-operator/values.yaml: cc2cec17a105d0df4354d71b72b8707c955739180c8cec2af17266232cdf4d67
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   012-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1758,7 +1758,7 @@ gb200-nvke-ubuntu-training-kubeflow:
   README.md: 150ee513ec8576af00cd825dec5f40cfd4556889278eb712a140c9ea43d4419e
   UPGRADING.md: 66178e91964e127254f1a9ebb07688b4dc3722b3bc340d1f4fd368d4f68c9076
   bundle-info.yaml: 38c18723f86e5f611ae883e662f0030aebd650c15dae36632ace73c9b5215196
-  checksums.txt: 8ad1de5b44c3c46d231f196aa5499a26a211098e49a874ddb0a98f26fedfc1c4
+  checksums.txt: 9061c753bff7d4783bea39cdcfc8eb3a77514b832253440eca171648f5f88977
   deploy.sh: e48351a7c2155b2a845f278ae0d193e6fb71e387a965457777092c3bdc52e0a5
   recipe.yaml: c81991881b0145a3a9f1b79707087e591399dc884165399b260a21803f24646b
 gb200-oke-ubuntu-inference-dynamo:
@@ -1817,7 +1817,7 @@ gb200-oke-ubuntu-inference-dynamo:
   013-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   013-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  013-gpu-operator/values.yaml: 4e313fe7f84d10f4ba143d8fcac3e491704dfde63c67261f2fa604a2343b9b9d
+  013-gpu-operator/values.yaml: d8399704848f5c6a47c5fd1cf7e650cb786e828ed633833526b83455daf730e0
   014-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   014-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1847,7 +1847,7 @@ gb200-oke-ubuntu-inference-dynamo:
   README.md: ce831bad2de422f47c75c113e5f8e702a4b51d33f4d26a006638bf0e9876cd35
   UPGRADING.md: 6dc466c4bd99eddaa2faf86c600600ecdd2b708d54b2480cc20a7e2438bb6663
   bundle-info.yaml: e4d7b933dbbf071794847c7d5a36de011797c05ace52706886f0f8b01e7823e5
-  checksums.txt: 7333783db0e524c594ce289d7747ca3726f83f44a74621216aa32e08b098fb78
+  checksums.txt: 4fd17fe629edd5fa7a6ff25d54f2cc1c23bcee3d784f48b7accf81e189ac03c9
   deploy.sh: 20b446e7653837a53c55a322b4d28e649c8ba3d40cf407c2e5be5efaf85c4625
   recipe.yaml: 99d6065b59239b9ac8cc40e2a9a9c63cbed16da0f0021d714562cbf7862454f4
 gb200-oke-ubuntu-training-kubeflow:
@@ -1884,11 +1884,11 @@ gb200-oke-ubuntu-training-kubeflow:
   008-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   008-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  008-gpu-operator-pre/values.yaml: 030b458c92ca88dc51c680f9b6d466064cfda45c86aa5d75f57c2cba513f8710
+  008-gpu-operator-pre/values.yaml: 252c17f9315bbedc18a48737fd347eb8c1e366df7028dd4bd20480c84d218cdd
   009-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   009-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  009-gpu-operator/values.yaml: 030b458c92ca88dc51c680f9b6d466064cfda45c86aa5d75f57c2cba513f8710
+  009-gpu-operator/values.yaml: 252c17f9315bbedc18a48737fd347eb8c1e366df7028dd4bd20480c84d218cdd
   010-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   010-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1932,7 +1932,7 @@ gb200-oke-ubuntu-training-kubeflow:
   README.md: 7e5ac8f96e1f584cb4d7cb73eca0748703d6ae1c9d450d34c1e5e5fcbe6b4986
   UPGRADING.md: 3566a84b47fbd67a25aa87cfc3fcf3e1afb84365e4e61402742fe5af0493fb79
   bundle-info.yaml: dbff6b84df9faf628d843c8261c28eca776a9f4ad3592198e09ef628a32ce459
-  checksums.txt: 381bf44eda2b46f79ede176c876b48a9438ccdaf38dc3d31ab9d410663cb5e5e
+  checksums.txt: 6be737a4733d153141b799e530b774d21cb25143ad2137b61c938cb8b62dc51b
   deploy.sh: f9a4377a6d7c21c93d164f6dbda94aa689f71c9eb975cc0799ca11128731ff32
   recipe.yaml: 080b9a2c9c6f732f3b2c58cc46c42b6c04bed9329d875a7b18e4831dd24b9b6e
 gb300-any:
@@ -1963,7 +1963,7 @@ gb300-any:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  007-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -1989,7 +1989,7 @@ gb300-any:
   README.md: 6f02ca94d0461c63272c0f0acb144cca63fa7f1e4de4ed99b962cd8821f142d1
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 1d4a64f570ae56e3a760ef914318c5ee683aa16d21a0ad16dcd21a3d43f11385
-  checksums.txt: ec251be4808882b09790ab9057195d21c16b32ba4e5abcec35cd0e4ec94cfb46
+  checksums.txt: c1186dc3ff1650548db158895fdd62f6c6d0e159ca25eb31dff6ee0b938a00bf
   deploy.sh: 89f3f76a7b045285f1cc4032bba8e528b1c1ce86e523d1c07163b3879b0b15db
   recipe.yaml: f14d0a08e9b8b9d7ab4c15cdf2ff30f9dbaa28c659171b3503a7402594e2da55
 gb300-eks-amazonlinux-inference:
@@ -2048,11 +2048,11 @@ gb300-eks-amazonlinux-inference:
   013-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   013-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  013-gpu-operator-pre/values.yaml: c333cbef0dd1b670b87d8ae48699e202658801291abd446f5dcbe21d4d135c95
+  013-gpu-operator-pre/values.yaml: 02acbe4771fa6e54d9a233cdacce7af7f3823442a8912c2401156bfa4d7f8e0e
   014-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   014-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  014-gpu-operator/values.yaml: c333cbef0dd1b670b87d8ae48699e202658801291abd446f5dcbe21d4d135c95
+  014-gpu-operator/values.yaml: 02acbe4771fa6e54d9a233cdacce7af7f3823442a8912c2401156bfa4d7f8e0e
   015-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   015-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -2078,7 +2078,7 @@ gb300-eks-amazonlinux-inference:
   README.md: d7275297aaf8fb992e196c124507bc6bdf0dc781e046a63e1065ac4fa69d205a
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: 3ec73f43595f33e253b350fecee131f1eea686abb8bbda5a6bb93e0fd33ba2e0
-  checksums.txt: 851323d947d7827c655cf91811a5a037755a3a407ef5cc9678597b007244f522
+  checksums.txt: a5084136525dd9d7c62c278194083ddb16b53ee1ef3003e406f084c8f0ac856a
   deploy.sh: 3d1a3a9604bfaadf9bd91c90752314a594391ad654d671403d8da82b36868def
   recipe.yaml: e7507649b18075f9abb2b87338fc73b48fb68dc0290a374f283230487416f548
 gb300-eks-ubuntu-inference-dynamo:
@@ -2146,11 +2146,11 @@ gb300-eks-ubuntu-inference-dynamo:
   015-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   015-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  015-gpu-operator-pre/values.yaml: d24c8eb6946ff472ce9ddfb5a1a0e548c8df1a5a861e13f60c121bac11ea521b
+  015-gpu-operator-pre/values.yaml: 9cf72d88edcdcb8e264cdce121d427931cf1378d42a540cb60326cfb9004a8eb
   016-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   016-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  016-gpu-operator/values.yaml: d24c8eb6946ff472ce9ddfb5a1a0e548c8df1a5a861e13f60c121bac11ea521b
+  016-gpu-operator/values.yaml: 9cf72d88edcdcb8e264cdce121d427931cf1378d42a540cb60326cfb9004a8eb
   017-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   017-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -2180,7 +2180,7 @@ gb300-eks-ubuntu-inference-dynamo:
   README.md: 4ebe4994c522c79bd4de5f3b78321d59a1d99075a2563786f16748ea8b669846
   UPGRADING.md: 91f212a9991d60ed22c5a82ce74e59b69e2317277a9369e5984d9aff2cf6abe4
   bundle-info.yaml: 2cfa7d842c22db0d59fee43594a174a266ef1661441afdf1914f7b7f89d17f6f
-  checksums.txt: d920746e9a7cc2682a715b22c5890e71d1030be24e9f771f7fec8c4fb8e64ac1
+  checksums.txt: 5f88e6e2fedebb119c19871adaed48561b38e664056bd257b0e8dfe853eb4809
   deploy.sh: 5cb6189767626d1ade33ebc2726965dd3bf85d5eb4a796df973716a11f77f705
   recipe.yaml: 4fec4ee403bb8e9c9571ba4820b4c4d15c74bef1157604c3dc469c42244ed3b3
 gb300-eks-ubuntu-training-kubeflow:
@@ -2225,11 +2225,11 @@ gb300-eks-ubuntu-training-kubeflow:
   010-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   010-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  010-gpu-operator-pre/values.yaml: 56eddfde293e293f4ef7572f9106ad6d12a78a140b9a47ea79a4ca1a0467294c
+  010-gpu-operator-pre/values.yaml: 661ba699f1ded5861a672d4e00403bc776f9aac0618f1a389436a6c8a733e911
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: 56eddfde293e293f4ef7572f9106ad6d12a78a140b9a47ea79a4ca1a0467294c
+  011-gpu-operator/values.yaml: 661ba699f1ded5861a672d4e00403bc776f9aac0618f1a389436a6c8a733e911
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   012-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -2269,7 +2269,7 @@ gb300-eks-ubuntu-training-kubeflow:
   README.md: 2e590e42000b2713a9aacee4198e0d522c2ee046f69f611045753c2245b40d63
   UPGRADING.md: 0561d87b3783116dd7cba43b8ed33e19c7573fb60a9b5eae495975e454144e2e
   bundle-info.yaml: 137c093a7b01a5576bcd5b140cc34719207cdb618fbd428fdc7d696423cf6f91
-  checksums.txt: 5603e8a38c94a445d2af300a44cf9aa94048b300813666648cb20661315a3cbb
+  checksums.txt: c79ab6f137fb2801b8518796b62f755d083eb8e6dcec846fded2f51616f87666
   deploy.sh: 1d982da17f3b35665dd67f1369fa74add6b246e945ca33d874b39f25ff7b6fa6
   recipe.yaml: 0cbffad790016c7e9ec675aec97eb8ea33be7799b28e78086538c767b8f5e614
 gb300-eks-ubuntu-training-slurm:
@@ -2314,11 +2314,11 @@ gb300-eks-ubuntu-training-slurm:
   010-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   010-gpu-operator-pre/templates/kernel-module-params.yaml: 9388844f3e8010902aece92a17e2a9cbba2e04b26d38e1a98a5c476c23c6cab4
-  010-gpu-operator-pre/values.yaml: 56eddfde293e293f4ef7572f9106ad6d12a78a140b9a47ea79a4ca1a0467294c
+  010-gpu-operator-pre/values.yaml: 661ba699f1ded5861a672d4e00403bc776f9aac0618f1a389436a6c8a733e911
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: 56eddfde293e293f4ef7572f9106ad6d12a78a140b9a47ea79a4ca1a0467294c
+  011-gpu-operator/values.yaml: 661ba699f1ded5861a672d4e00403bc776f9aac0618f1a389436a6c8a733e911
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   012-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -2362,7 +2362,7 @@ gb300-eks-ubuntu-training-slurm:
   README.md: 926c5757932ded65aecae5af66f3e1b6f832db2a6164eb32a26a67c7c9d89097
   UPGRADING.md: c4be14e0d7ce1dbf3537e2815ab4628e56c12c444ee25f96021086dba89739bb
   bundle-info.yaml: 4e6b0f893771831a3161b8e5ae84a6d4af2d615bb357e18fe159da1fb2b6777e
-  checksums.txt: 1731e09207b6598552709166ce9aee6394c6f855759e898bcf37d75676e1d812
+  checksums.txt: 65658717f06260db87f563a58244f7ba1181d9f61fd32eba787cfc1c9fd08949
   deploy.sh: a48728ddb64a4f2b0506394abc5a3ec777445e5efe57bbbb1f98d1c8a43ee303
   recipe.yaml: a605704418ee26ebc792830f60916187b6efbef7d4f68acead73792a6d77c682
 gb300-generic-ubuntu-training:
@@ -2398,7 +2398,7 @@ gb300-generic-ubuntu-training:
   008-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   008-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  008-gpu-operator/values.yaml: ada801d9646a8f276dc67d277a86708543106ab105010f292fc8f4aec373580e
+  008-gpu-operator/values.yaml: 7a3f9662ce25cec852691f611bbbacb3b7e997ffb7b7b36461c8a7431edf0a29
   009-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   009-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -2433,7 +2433,7 @@ gb300-generic-ubuntu-training:
   README.md: 4b187af387f362c5941dda893a3892e4bf45da446c32bfd202883281dd9da5cd
   UPGRADING.md: 3566a84b47fbd67a25aa87cfc3fcf3e1afb84365e4e61402742fe5af0493fb79
   bundle-info.yaml: 63d2bc142abf4835d4068c1036df4800f024f029e2eba62c8e2e06bec2781ed5
-  checksums.txt: fee6fae39e35f0b63574572a11384fb92c44c72e35c64ef98cd66f1c2e02645c
+  checksums.txt: 44db51d58377635d43df792829911aaf80d7d8beeb5c60e96ab1e22770012807
   deploy.sh: cdb2976448c025a56309667c662b1725a86306b6d406e33f781b833710f79891
   recipe.yaml: a76028c5c5fa9dccb8282133179d0a62a21d6f4d74b3ac49dc52815efb800476
 gb300-gke-cos-inference-dynamo:
@@ -2497,11 +2497,11 @@ gb300-gke-cos-inference-dynamo:
   014-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   014-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  014-gpu-operator-pre/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  014-gpu-operator-pre/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   015-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   015-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  015-gpu-operator/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  015-gpu-operator/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   016-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   016-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -2531,7 +2531,7 @@ gb300-gke-cos-inference-dynamo:
   README.md: 6ed63cdda98db8f515cdccaf3972b96f58749fee8d8d9cb207aab0dce6e878f2
   UPGRADING.md: 6dc466c4bd99eddaa2faf86c600600ecdd2b708d54b2480cc20a7e2438bb6663
   bundle-info.yaml: b89e57b4ade23e8aa187920c10b72a4fad23a83b27b49fd22651e757018ad19f
-  checksums.txt: d765b0ed6f91456b85bd9bc228fe1e6c86939b6e0c37adcdbdb432a7e9c36d4b
+  checksums.txt: 327db976cbdfabc0ee1e9b7d203a70ed181a6b5ed416b059d50185a150fa3362
   deploy.sh: 95627830799a5308708bcaed8ca8eea53f98c380fb8f0e66542771e4517747d8
   recipe.yaml: f15188b28ccbcfd94656824debad9628fdd4416d66f24b2c41180677cab2f48f
 gb300-gke-cos-training-kubeflow:
@@ -2572,11 +2572,11 @@ gb300-gke-cos-training-kubeflow:
   009-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   009-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  009-gpu-operator-pre/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  009-gpu-operator-pre/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  010-gpu-operator/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -2611,7 +2611,7 @@ gb300-gke-cos-training-kubeflow:
   README.md: 20b4017073c6074aad46a49dc837edd8170fe7b3da49c387816ade9cef1fa773
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: b7883e4ad761bee1c0c41b3b2f6bd754298a279d0e352995c7078f79f2d746b8
-  checksums.txt: 00a68d34a7eb952081b1c4c874b267eea555845bd7831f077643fe8afecbc27a
+  checksums.txt: 2a47f85ebe7fcccc304531d41bdca47c33730c6224bfcaab7b983c7ae8c8ad27
   deploy.sh: 511155dc137c29bbe9b1c483d38d32b9fea07535102e90b9dea0568ca801e3c8
   recipe.yaml: 93d09afe24dfcd8ede4fb35ace13a7ca106ca57b71aa757c750ea4e47c5ba1a3
 gb300-nvke-ubuntu-inference-dynamo:
@@ -2665,7 +2665,7 @@ gb300-nvke-ubuntu-inference-dynamo:
   012-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   012-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  012-gpu-operator/values.yaml: bb6d0b50ddc8e65dab64aeb6e24e44e94ffe84b26bb39ab2beaa41757e9048c5
+  012-gpu-operator/values.yaml: ae9755809fbeba1624abfd61e99d5adf7845d1c3e43586924aa126cd419cc30f
   013-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   013-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -2695,7 +2695,7 @@ gb300-nvke-ubuntu-inference-dynamo:
   README.md: a47b63c702da22c404ed570b5ef30a8d317f440feb4d867048bc168734403c32
   UPGRADING.md: 6dc466c4bd99eddaa2faf86c600600ecdd2b708d54b2480cc20a7e2438bb6663
   bundle-info.yaml: 3a06f476d3833b1832f5c216e4f0b0d379ab66895e1afc4bb1870f165b9b5a75
-  checksums.txt: 6d08077eea5080a88601f2e1f9049562a5a787aaa21111e4a5b2792e2f5ec459
+  checksums.txt: e7016ac954d8860ccfac54b5d62542f8bda7edca767997d29639e9a3014ec279
   deploy.sh: 79f0b62328c48695b094e32f4afe4e77e9df91a2bcfc9d76c56ed9fe9bad97c1
   recipe.yaml: abd15fabceffb44051c4733e338d9f47ed88d7bbb4e3df8ca8b466519d24124a
 gb300-nvke-ubuntu-training-kubeflow:
@@ -2726,7 +2726,7 @@ gb300-nvke-ubuntu-training-kubeflow:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: bb6d0b50ddc8e65dab64aeb6e24e44e94ffe84b26bb39ab2beaa41757e9048c5
+  007-gpu-operator/values.yaml: ae9755809fbeba1624abfd61e99d5adf7845d1c3e43586924aa126cd419cc30f
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -2761,7 +2761,7 @@ gb300-nvke-ubuntu-training-kubeflow:
   README.md: 422a7e93dee57db7f43a29b33619d41aefb273f7a36757e9bec5da2430ef7a11
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 118ae5dd3d7cb53beec5d8425e791c521364b6607cbc30fa5df30058e8ff4007
-  checksums.txt: 7086a953b1e8e0d689b629c386032fe2245d70bcdc36e34f9ca668866b618a88
+  checksums.txt: 7356b29b61f8ce754f53c7ecd0534737f81ea0ee656d8068d5770aaec1997a75
   deploy.sh: e2fa5886df14ab1b4f5acbb99740057af37cf8d70db740fcfa7b8cd0e8ff871e
   recipe.yaml: 6cd481d3de0a87eccfc92d95f3e3286cabbd1de0065c85c6bcdce6463ff7e091
 gb300-oke-ubuntu-training:
@@ -2813,7 +2813,7 @@ gb300-oke-ubuntu-training:
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: 89f0c7cefbab633c0d9de4ee076afef087be7e5258b9b35a23bb441e98c434f9
+  011-gpu-operator/values.yaml: a33ef62764e8050eef256c3704d7572301f41daa1dc566e57f4bbb6c67e322dd
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   012-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -2834,7 +2834,7 @@ gb300-oke-ubuntu-training:
   README.md: cc14add76e45c480d0c2e3c5d37b96dddaf7d9ed54e36fb0ee7cd33ba6e942e8
   UPGRADING.md: a3f5e3c58d5bee18453ae45b6f364746e2c4c3741ec87366feb05db23ce7206c
   bundle-info.yaml: 6c28307fffae3e6568983349012bf32a090184743cc0dea7d485751da0bb7919
-  checksums.txt: b69610d12620df9632917f6e14e4a3849700e7fea59f8a1159ba5af9449a4e69
+  checksums.txt: 59e7da250ff7bc9cf130557b69d5efad4a06c862e495af1112f221b1314a6c34
   deploy.sh: 827ac9c82cc3dd930af6ca8b2612cf36139184072e576dfb92d93c27b90b8675
   recipe.yaml: d9b2c0f036ad79a7eb30df533a9be7355331bde3ee1cd4dd72e51542c34a93a2
 h100-aks-ubuntu-inference-dynamo:
@@ -2905,7 +2905,7 @@ h100-aks-ubuntu-inference-dynamo:
   015-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   015-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  015-gpu-operator/values.yaml: c4dbd40910d706ec1beee4616f2c01638660fdfbb38e9114519309453cf3be62
+  015-gpu-operator/values.yaml: 0863919e61064d8338c6bdb0eead1ae40907d21b36adfd502008c563404cb841
   016-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   016-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -2935,7 +2935,7 @@ h100-aks-ubuntu-inference-dynamo:
   README.md: 80946e66ecb585388958e7b035d704a80422f93c77459ce8370a9c0126697938
   UPGRADING.md: 09e304932072314cc792afb7946cdc883cb2400c217c095c34653c859a2a772e
   bundle-info.yaml: 2a0471fc72f5774c628c55befaf4fe8da4de453a10ee183857653be926204858
-  checksums.txt: 6dd44c834f35ed1e0a79dc597263463cb9c2733779794e4043155db4e4c15bba
+  checksums.txt: ffdf883f38a20a515858fe1bf17af5fec434bf361ca74e7671523742012382ad
   deploy.sh: 8e8728d2e5a5c6a771ebcecc0ccb62b17fe73feaae8b79d32bbf690abc846c47
   recipe.yaml: e5ed3b03250bf47d0214949de02dbf2d945148e630ab97c21d83d38c755ada7d
 h100-aks-ubuntu-training-kubeflow:
@@ -2983,7 +2983,7 @@ h100-aks-ubuntu-training-kubeflow:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: 8320474f55afaab762e8383dd0a918d7f62252e0451e552f687bb2eeafbbce01
+  010-gpu-operator/values.yaml: ad1efb4a1a5fe18da63f7ddea212f2e61a4ac861bac86a9fbd3c14c2e16b3ccd
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -3018,7 +3018,7 @@ h100-aks-ubuntu-training-kubeflow:
   README.md: 5a59aadcfca77a450805e69968ec6e8ead782e7c4fcdd698815830991134b050
   UPGRADING.md: 19642fd3a28471b99925ef3e96eabdabf00e18faca3b4240d7d0ae25ed3a1927
   bundle-info.yaml: 209614bf8da8c71ea89e76c957d96feb13f115df013b3f585f378ada18194eb1
-  checksums.txt: 8db75698d2022517425bab65f3e6309c55dd3cf1a2f30052b3c6a8b262023b52
+  checksums.txt: 05ca14a7dd2c1d86d1ea2082b38fefb04af1414c9367c19243265fd82f692238
   deploy.sh: a08378569eb287d2d8829c69890233ea42b9ea4b6ae80766a697388fcbc7c2b8
   recipe.yaml: 56fff008ac961b5ebec5f2dea3252ea2f4d9ae60d5c298d10347299067722eaa
 h100-aks-ubuntu-training-slurm:
@@ -3066,7 +3066,7 @@ h100-aks-ubuntu-training-slurm:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: 8320474f55afaab762e8383dd0a918d7f62252e0451e552f687bb2eeafbbce01
+  010-gpu-operator/values.yaml: ad1efb4a1a5fe18da63f7ddea212f2e61a4ac861bac86a9fbd3c14c2e16b3ccd
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -3109,7 +3109,7 @@ h100-aks-ubuntu-training-slurm:
   README.md: 3721f0ff6b029fa0040456aa426bea17a15315a30f81a741a36bb7e3457267a9
   UPGRADING.md: 9a8a4f97f0122a1b7dd25a2cb002ea0aa916a936f0174590e09bb8c03bf7a5c9
   bundle-info.yaml: 53e7adc0fc18b4d3de9349880670501412c17ca5f943687fb168db8159e21021
-  checksums.txt: 630126cdf0a2693df0feca3e396f920cadae6facab39fcdfe0a23e9c821ed35a
+  checksums.txt: 8cc829f1c2b3dbbf3bd1838a4dc5027ae8990e9d6d4b93481e225fa7a76b4c19
   deploy.sh: 0709d83dd04e8b3fc8c54ae391e350f9795a70e46540fcfcb0d26fbddf1c92f0
   recipe.yaml: 80d597df1dd96a4ae6980dee04bf47f0f02a1864bb5f77a7c3471f9f62ddebf1
 h100-any:
@@ -3140,7 +3140,7 @@ h100-any:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  007-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -3166,7 +3166,7 @@ h100-any:
   README.md: 146a2e52bbcecb02d68970d173ace040a9c7c194723a14f4dd4865108386e4f9
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 2229fc2e5f9db0a2d68ec83eb12c930ecace48627f69e908dbfa8ca7b378c937
-  checksums.txt: 8d9959447c60d9842d6606a7efce0a62c421f9c4b05e1bb1b99b890999368146
+  checksums.txt: f59e3e3a5be9e60f8a8dae498b3460ad5c246eb2399069178d718fffba1490e9
   deploy.sh: 89f3f76a7b045285f1cc4032bba8e528b1c1ce86e523d1c07163b3879b0b15db
   recipe.yaml: c8096801be60551c9df58a194e2d7d861106e6615fd26005243db5b0a046c5d5
 h100-bcm-ubuntu-training-kubeflow:
@@ -3202,7 +3202,7 @@ h100-bcm-ubuntu-training-kubeflow:
   008-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   008-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  008-gpu-operator/values.yaml: bf030affe53a116e7a0df1beb101c924c77d064f68333a82f1aa08d78daa2b60
+  008-gpu-operator/values.yaml: 88c4157ddc383861cc114579b00d144d01f293788450f6ee5e0361dedefefbc8
   009-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   009-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -3237,7 +3237,7 @@ h100-bcm-ubuntu-training-kubeflow:
   README.md: ed72d95d8f513379b7a79b3b79f96a95938d78d39e64f21c49689963ff4bb777
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: a9939307ae2c19f92313993a699d5c18db35023300d408eddd7a49255de7df8e
-  checksums.txt: 4f352bdce7e1f712d31d3256a41981f2d74db7cafe9c719e276192b21b909fa0
+  checksums.txt: 45052e7b5055125fad9ed40c8afa674046dfc0abcc352bc7f97fd5054838ead1
   deploy.sh: d971f64a5be2e8128135c49f74f33bac35118c4cec374c6378579b40d73a90c2
   recipe.yaml: df7c89d1a96302563c6ee0f92c8802ba8bd3c26caf9231ee77b9584f45e287ce
 h100-cks-ubuntu-training:
@@ -3335,7 +3335,7 @@ h100-eks-amazonlinux-inference-dynamo:
   014-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   014-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  014-gpu-operator/values.yaml: e33866bb91952f581aae1d07328f060a4bc06f4bd0916a788d1f7734767e6804
+  014-gpu-operator/values.yaml: e222557d6ef62bf0945bccb85884304b1d2b1b4a24f96bc02a8c1ab6e9efa9f3
   015-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   015-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -3365,7 +3365,7 @@ h100-eks-amazonlinux-inference-dynamo:
   README.md: 80819c368eb100be159a809bd6cb86794d2c4a682b0e4e532dde248829538780
   UPGRADING.md: 91f212a9991d60ed22c5a82ce74e59b69e2317277a9369e5984d9aff2cf6abe4
   bundle-info.yaml: 745254c07554ca5d3b04b94ac7feeb16cee870346053bbfa8e9f24bffebdce14
-  checksums.txt: ef6c88fd0537cfc19dace262f3b8e80d9877533041e047c2d57efc8591c6781e
+  checksums.txt: 9988eff25d06d664174574dcae909ace18e72598e582dd2671387c061e8e29f1
   deploy.sh: 0065f39a32eee146d6a2c94b87ab7eb0fe324a47d35696de0e5e61917df0a54c
   recipe.yaml: 35f6c5519e44c9d0e9d4d54e8f63cdeb16e51eb22daa69609a6605f10339031b
 h100-eks-ubuntu-inference-dynamo:
@@ -3432,7 +3432,7 @@ h100-eks-ubuntu-inference-dynamo:
   015-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   015-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  015-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  015-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   016-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   016-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -3462,7 +3462,7 @@ h100-eks-ubuntu-inference-dynamo:
   README.md: 7a8d025f989be9e5320010a88776e73e4467a9b46c9d84adcbc5eb8cf30aa867
   UPGRADING.md: 91f212a9991d60ed22c5a82ce74e59b69e2317277a9369e5984d9aff2cf6abe4
   bundle-info.yaml: 46ac010b7b6dd9d5e8e527d2f61e1126e313a88c0cee82c61055c54f47acce99
-  checksums.txt: 88350dc1073692c8b4e83dbb6ed737d4e8c6cee6a70accc67041f5029c1b6321
+  checksums.txt: 4401344ccde18ea261c5a539f2ad7360f5c06e57d59768721cd80ba404a4c2eb
   deploy.sh: 5cb6189767626d1ade33ebc2726965dd3bf85d5eb4a796df973716a11f77f705
   recipe.yaml: aaa5ae5737035fd93d91419526b5010a6ffca9004709f3fa7277291fe88eb1c3
 h100-eks-ubuntu-inference-nim:
@@ -3525,7 +3525,7 @@ h100-eks-ubuntu-inference-nim:
   014-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   014-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  014-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  014-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   015-k8s-nim-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-k8s-nim-operator/install.sh: d669fb79bdf385d0df565265df3aedf0570581bfe2dfef538f26291f6c19e0ca
   015-k8s-nim-operator/upstream.env: a150597d228603c4ddc024dae47918e30dede96b1f89483930887e46d8f7b68a
@@ -3555,7 +3555,7 @@ h100-eks-ubuntu-inference-nim:
   README.md: 0ba95a4eb4726f9dfbd9a7ce0f5363bec2413f6b8783a6b7a6e86eccbb18ced6
   UPGRADING.md: 876448e414e9e46c6c8e4323681218f363049391489047566440f102569ad200
   bundle-info.yaml: 531bf0e5723b7af7cdcefcbde0d90bfd970c7e80702a7a7cdb44ef1bcc3fedfb
-  checksums.txt: e5c8ef1474f47404087d36faf119496188590fdadf7d618bc56af8e85aee9044
+  checksums.txt: 006559453677c1f6d6865c7159ed7998b582c9e9b5016166578ac1a9bf0aa334
   deploy.sh: a81b07fb31958892348737540f086f83c5371d9de09134b9a9cb85c49a3bf48c
   recipe.yaml: a8e3daa1aa2b2dc93b4a13daf13aa6683170ea61a3d911e3ef5f96c530cb80a7
 h100-eks-ubuntu-training-kubeflow:
@@ -3599,7 +3599,7 @@ h100-eks-ubuntu-training-kubeflow:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  010-gpu-operator/values.yaml: ec8a4d858fba5e10bf520301d8a75d2ef5d503e0ccf14bbc1dea7f2e0d114789
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -3634,7 +3634,7 @@ h100-eks-ubuntu-training-kubeflow:
   README.md: ecc941ccef1316442ad1c6c9ecacfc7b708a66d88c51ecaed1e0d505a9c21048
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: 3849c4764ec4aca08605cc545eab0d17758dacdc0415cfe9a3127b7b3c9a143a
-  checksums.txt: 2e0012728645fa00fefd18cceaba16e1fd01323b2789df55212fded0a9d97ac1
+  checksums.txt: f8fcd608941f9c8b3683164509341631e305d13fd10b38e0a9bcf0b7b30a0676
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
   recipe.yaml: 5535cf53f14f615785d621428f367228686ea24ca9383418fc275e5f1b445851
 h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
@@ -3678,7 +3678,7 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: 3bff3c3dd08a371c9768a79b516c5aad9a80e6382e62a15a9e1b2eae7d6228fc
+  010-gpu-operator/values.yaml: 3c4282e6958a399efff7a477dfbfc1eab2e0f4e083d66745e7c9abce261ab549
   011-dra-node-labeler/Chart.yaml: 58bb63cbcd76f8077189545c72d0bbad4503ea392e67cd533d5f91435635dc50
   011-dra-node-labeler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-dra-node-labeler/install.sh: 4acbd445011c41fbcdda9381a33c61b1711b1ac9a14902d865a67a0b650233e2
@@ -3718,7 +3718,7 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   README.md: aff78800e04820435d335df401f6ff3875f6ad5066e8cd4c1346a8d6c1153c52
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: e63d70d59c69404d43d69e6ac28544564216c48e5695663c8a6d79605e9c81ba
-  checksums.txt: 35b34e54eacdfd97569296595bb400edab55ce93a63bfc2f01dfa2195f69d4d5
+  checksums.txt: 86e2cadda56ab0ec961f954a5b1322ff492292062d09795074f57f670e2724e1
   deploy.sh: 2808edb0dd40f6022b6a2edb79c620cdd2cd908a0f8f700a3142796f6fccead9
   recipe.yaml: 1585ffc2e7a60abf637d7043efc2bb8e16791cddc38c44759d775adf90c026b8
 h100-eks-ubuntu-training-kubeflow+nktp:
@@ -3762,7 +3762,7 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  010-gpu-operator/values.yaml: ec8a4d858fba5e10bf520301d8a75d2ef5d503e0ccf14bbc1dea7f2e0d114789
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -3797,7 +3797,7 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   README.md: ecc941ccef1316442ad1c6c9ecacfc7b708a66d88c51ecaed1e0d505a9c21048
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: 1f65dd7a06453dfe9b1443dbed88e4d3193693c0993d21c9ff56d75f7fffdf35
-  checksums.txt: 228460f8b928422aeea17997cfcfb40f7356193a2128e580f97a6a43b8011509
+  checksums.txt: fc99d247475ea7bab4e6925881b1f77bbb9e964e33bf922d361dd5dd44926229
   data/overlays/stock-render-opt-in.yaml: 28518490ca46ac3ecf1b7cb220cfc55c3c4d3e3f595446b6aab9894f15f80557
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
@@ -3848,7 +3848,7 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  011-gpu-operator/values.yaml: ec8a4d858fba5e10bf520301d8a75d2ef5d503e0ccf14bbc1dea7f2e0d114789
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   012-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -3892,7 +3892,7 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   README.md: d3777bb8be599b05ef33bb048bc569027e2a6b9013086e6ec1f8c1b528138e41
   UPGRADING.md: 0561d87b3783116dd7cba43b8ed33e19c7573fb60a9b5eae495975e454144e2e
   bundle-info.yaml: 24281aed4179c03ef73ee14719da4f9e2d93006d74c54eda3c292195f1d4e959
-  checksums.txt: 46344d9dbac9ee0490b8dc2ed2fa0e01781dd27eec7e7614e8986bccedb9a9c3
+  checksums.txt: 81bd2f15c12bf1210988a03067400a6bfb07f130021eafc310e61158be69b2ee
   data/overlays/stock-render-opt-in.yaml: 100a230e36a3fe11b9678bb4ad0dcd59fe8ae0a51534814dace25056bb9a2ba3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: f3cf689c1ca70b4765d472d7e4286a7aad6663c47ca5912c2c2c81ee760248ae
@@ -3938,7 +3938,7 @@ h100-eks-ubuntu-training-kueue:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  010-gpu-operator/values.yaml: ec8a4d858fba5e10bf520301d8a75d2ef5d503e0ccf14bbc1dea7f2e0d114789
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -3980,7 +3980,7 @@ h100-eks-ubuntu-training-kueue:
   README.md: edca5fca46c90fef9ac958e0a4d588ae51f6041984e3bcd832bcb1c8cd528106
   UPGRADING.md: 330c34406dc494f91875eb4d3ad5a8af457d3c96354973d4ae6be06bf1b5be4d
   bundle-info.yaml: 9c11e83badd29b9edcbd2554c0610b22c6b4ffac6c3f16f5384a8660135db952
-  checksums.txt: 9fe6d6bbf1d429ce5446f67ae693440d38b207575771c0898443d35bd0e67d17
+  checksums.txt: a14dc9fd4abe6672b28ffc35b93994349d52e249c36e231f5d687368c25807a7
   deploy.sh: 8f3f1ab323c15679382a0d4f01844880618a56c0ceefa2f3fd813eea627f47ac
   recipe.yaml: ef65eef0a9ce7abf88ec7735e6bc4cd1a46175344fcfa22b2bf6e0270eebfd6a
 h100-eks-ubuntu-training-runai:
@@ -4034,7 +4034,7 @@ h100-eks-ubuntu-training-runai:
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  011-gpu-operator/values.yaml: ec8a4d858fba5e10bf520301d8a75d2ef5d503e0ccf14bbc1dea7f2e0d114789
   012-nktp/apply-crds.sh: 0402e6f84d86d16247ad8882956ad657900872f629df633c69845d3c8b165e02
   012-nktp/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-nktp/install.sh: 570d5b380ddca07072ad63c5d4e0f95a193a2e65f061e63acadb63ef2281d92c
@@ -4060,7 +4060,7 @@ h100-eks-ubuntu-training-runai:
   README.md: 76cbe3e460b36184c843a8f301f8150632fddc0412e9d64193b8f05d779eb820
   UPGRADING.md: 1c454b8fd7f9c45f515bee752f5bfe7306c10b8af1d27bbdeb314715e17da2c1
   bundle-info.yaml: cf5f997e3f8fc6e031d256071aa34b95979ed1c54187d26dd79593d83256ad71
-  checksums.txt: 5d35281b981cfde137287adcdf22da5d05129d9cbf011f95866bf6f9a0141788
+  checksums.txt: eff9a3c9b553e6bbb38b536a8328ba4ac2d588284a680d07cdb85af136b05671
   deploy.sh: ee8e2226b690e9e737583bfd804212fca9681676e1da3a009cac26bbdee1a79e
   recipe.yaml: 0cf790cbed0c4196547f96460d7e1efa0ebe57283c712d65100cf52814f332df
 h100-eks-ubuntu-training-slurm:
@@ -4104,7 +4104,7 @@ h100-eks-ubuntu-training-slurm:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  010-gpu-operator/values.yaml: ec8a4d858fba5e10bf520301d8a75d2ef5d503e0ccf14bbc1dea7f2e0d114789
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -4147,7 +4147,7 @@ h100-eks-ubuntu-training-slurm:
   README.md: 3f43c024a44696e9e7e1d7e2760dbb62db1127ee72b0ac1181fddb2467245993
   UPGRADING.md: c4be14e0d7ce1dbf3537e2815ab4628e56c12c444ee25f96021086dba89739bb
   bundle-info.yaml: 1e688b879b99c68f4c6262820ac063754200c187d1d28a0378b8f05333afd5e6
-  checksums.txt: 65939971d504b6fb84fb112faf6cc33f8d6f6a7520682a769b67b860cef11523
+  checksums.txt: f6dddda8c725c33f985ece50a8509d89e7ee4abf6483331fe4581699795eeeec
   deploy.sh: a48728ddb64a4f2b0506394abc5a3ec777445e5efe57bbbb1f98d1c8a43ee303
   recipe.yaml: 7e079218a8236d365a388bdb3ee69bfafb7fe93b769f3b7cad1d472cc99fbd0c
 h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
@@ -4191,7 +4191,7 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  010-gpu-operator/values.yaml: ec8a4d858fba5e10bf520301d8a75d2ef5d503e0ccf14bbc1dea7f2e0d114789
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -4260,7 +4260,7 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   README.md: 4523fd0f9bdb14acb7792325aaa53f69e2a2062491a45c9f6a67b9a3cada7a71
   UPGRADING.md: 7f18f0849bbeef802dfa2a6f3e700036ca23806a3ef4aefc1559b7d57d9cfa96
   bundle-info.yaml: d369e6fc963b7a84bbc5838fb1730f0102a22fe878403df9898da3bf7b79c84e
-  checksums.txt: b6cfbe34c5ece318485ea3aa422f78073e1cebd00480c185ff18d5fccb8a21cd
+  checksums.txt: c8ebc78b788c26b73e9c57311a348b11e91389fdd4dd321fe75ac82b2583812e
   data/overlays/stock-render-opt-in.yaml: 328e7217055d4c00c950d690a1579830a95456e9953214a1ec0803416edaaaf3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: a1caa602f37efd2f1d9109d1de28f7642b5bcfbfff3396fdc6e274a14f224411
@@ -4314,7 +4314,7 @@ h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   012-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   012-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  012-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  012-gpu-operator/values.yaml: ec8a4d858fba5e10bf520301d8a75d2ef5d503e0ccf14bbc1dea7f2e0d114789
   013-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   013-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -4361,7 +4361,7 @@ h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   README.md: 98fa738bbc98a450406d46c2068571e74b90624caf2dbba4511bee04b8ac5f85
   UPGRADING.md: 76b42061405046c7ea29d20e0d7af64e42c9a68d0f1147057d5699c7f39a34e3
   bundle-info.yaml: 7e4c726c95fdeaf322b37f2449470329103364bd8625e49fd213f873642c3c4c
-  checksums.txt: 76f36ec35d965a1177fa28045f12c14c7070f998dac948b32a5f937fd257b078
+  checksums.txt: e3d051d1392ca52eca91b7a1d6fbaf963c3a564f96d31f76bf5ae54a034b6b02
   deploy.sh: c90e6e6449061f0f382d6289cbf87107044de4a4311576989095198506648f22
   recipe.yaml: 6e3344cd3c553b32d88d546666ab9a120a7dcc5e7799ce0f13b1e7edd19a14dc
 h100-gke-cos-inference-dynamo:
@@ -4425,11 +4425,11 @@ h100-gke-cos-inference-dynamo:
   014-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   014-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  014-gpu-operator-pre/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  014-gpu-operator-pre/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   015-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   015-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  015-gpu-operator/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  015-gpu-operator/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   016-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   016-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -4464,7 +4464,7 @@ h100-gke-cos-inference-dynamo:
   README.md: 02dcfdfdb460a7b54d54b9be7295653dbee010c46d4600a689b175325f9c80d6
   UPGRADING.md: 49613df4f3f59cd641a5ca210336342df6b5caf14b610c31444941e1091b78f6
   bundle-info.yaml: 66fc7538f5b6b628281a57ced6c52bcc9c1211c73ce6dcec87374508817736f3
-  checksums.txt: d31b3991dfdbfaaaebb6e93731ed799053563867c726f074c7935ef483ae1f6b
+  checksums.txt: a045d8155cee410ae3a154e311f4e80ef46332087a6ca37444f4ebe628e1769e
   deploy.sh: a1a8a7fc261b6110d357f49b212d831cf50278cff94fb7599bf2febb866ad636
   recipe.yaml: da61528a870f182c8fbc6c547c940fefdd7e079f80560283763fc6b3b4aa8bf4
 h100-gke-cos-training-kubeflow:
@@ -4505,11 +4505,11 @@ h100-gke-cos-training-kubeflow:
   009-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   009-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  009-gpu-operator-pre/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  009-gpu-operator-pre/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  010-gpu-operator/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   011-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   011-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
@@ -4551,7 +4551,7 @@ h100-gke-cos-training-kubeflow:
   README.md: 450720635e1ff574a6bdb4e7a6ae6db3be103e74cc7db879ca2a0606e8977bdb
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 769ad1f9b53129159ded15f788390614a1181e93e1acd283698ffd3f97829b5c
-  checksums.txt: 298736923c51a9df2fd0fe7a7b84512bf5d9ffc2af37519dd4adf3d66db78fdc
+  checksums.txt: b4ad2ff0c4ee14c1f7e940826827bdb16d16c52baf1323054fb067563e8d387c
   deploy.sh: e0addb21427e8630423a5d6e747023380194462c80140b444c2c7b26ec3b09b7
   recipe.yaml: 6806e18f37cc88c608f45fde62adfe0f550da49b9d169fca7983a62d96244143
 h100-gke-cos-training-kubeflow+gpustack-dra:
@@ -4593,11 +4593,11 @@ h100-gke-cos-training-kubeflow+gpustack-dra:
   009-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   009-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  009-gpu-operator-pre/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  009-gpu-operator-pre/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  010-gpu-operator/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   011-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   011-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
@@ -4639,7 +4639,7 @@ h100-gke-cos-training-kubeflow+gpustack-dra:
   README.md: b5a84b4a0c369cccb06f59bf98424c317fa900ce537928a7e9c219ad004c48c8
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 15f99db16f531947ef7f03df77f6716c282e27282f1f291950994a1644ef8cf9
-  checksums.txt: 4c47a918b67efdaa4c8a8b13aab7fd53e3d281936b8e7c678f35bff686c9b101
+  checksums.txt: 11b71fa87800ff86beb155d450f2f34943a40b33d0a845c4bccafa651474180c
   deploy.sh: e0addb21427e8630423a5d6e747023380194462c80140b444c2c7b26ec3b09b7
   recipe.yaml: d195f42ee1a04ad05f127016b7af529fe72614aa77a6fb4d9a479eb56485cf17
 h100-gke-cos-training-kueue:
@@ -4680,11 +4680,11 @@ h100-gke-cos-training-kueue:
   009-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   009-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  009-gpu-operator-pre/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  009-gpu-operator-pre/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  010-gpu-operator/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   011-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   011-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
@@ -4732,7 +4732,7 @@ h100-gke-cos-training-kueue:
   README.md: ab10036dd60a12e13ee63b8b1bd2cd59c9e5ec85fe9722d28d57ff2987e950a9
   UPGRADING.md: 666f75a4f202b9cd3bc5e6ef3c832a29c0b5461d6bc8ed8c779499ddad2fb217
   bundle-info.yaml: 3b9c2e61173cc1592d8fb134b3c9380a8dd66e3c33083bc85f39909d434e31e6
-  checksums.txt: 18456b60dd347bc526ac42f9cd89976c6b2c702232529da7eb4f5a8d23785ba9
+  checksums.txt: 142efde03de5c7a8bda5a07c2430b5bab1c4a5bb3ffadc6513992023e8f92288
   deploy.sh: a199506ed9336c352e1dd15c457c2741de854f65e5a84fbdae7e595594f47aca
   recipe.yaml: 04b3b1e7185ec85b7bd46022c6e801d777cf3457734a49d7c4ff419fe2999661
 h100-gke-cos-training-runai:
@@ -4783,11 +4783,11 @@ h100-gke-cos-training-runai:
   010-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   010-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  010-gpu-operator-pre/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  010-gpu-operator-pre/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  011-gpu-operator/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   012-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   012-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
@@ -4819,7 +4819,7 @@ h100-gke-cos-training-runai:
   README.md: 8111968871b63040219afa443c1243121c689b8ae2bc7f53f30fefd90fdc7d57
   UPGRADING.md: 86642c8ead7cf5e5fbfc979c9ff7049b99d90deee92d60793de5b880a4f9dbdd
   bundle-info.yaml: 50506b5a59687716e7ff5f169224a13ec39c72818d1f4cc693d82b56d9da67b2
-  checksums.txt: 1e713e8fa22596212e4e532954126508853a07603edb95f37895ba0ec0c008ab
+  checksums.txt: 71b844f04deb2c08e5bf370590c3cab02cb5677de065aabc97c98bbacc346a6e
   deploy.sh: 89825532b6955d852db8700172db2275185a5784208c4e5e86cc87a14d09a24d
   recipe.yaml: c3b5825a0100bd044ed6fbcb207ac34330da94a8562867791348f92e094ab544
 h100-gke-cos-training-slurm:
@@ -4860,11 +4860,11 @@ h100-gke-cos-training-slurm:
   009-gpu-operator-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator-pre/install.sh: 2d5622c9226209c3e6e88fa0156cd6adb2f6043f532ab85503b3fe1641337ead
   009-gpu-operator-pre/templates/gke-critical-pods-quota.yaml: 56d3c6cc356e0cef396bd21a048af53ce1dc97988fecd47152f5244d2305be7a
-  009-gpu-operator-pre/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  009-gpu-operator-pre/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: b9b7c7bcf9b1400e02812ee3e399985eae7d62a963b8fdea2e74720db24b9f45
+  010-gpu-operator/values.yaml: 6835453f323baf0da51e6ddad6c12858beb0c30362b80dc901ca03d55bc81140
   011-gke-nccl-tcpxo/Chart.yaml: e25a9f6fc8e192d7427cbf100d13efa1ae3670e1bdc5c67238b7a1dcf508bd98
   011-gke-nccl-tcpxo/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gke-nccl-tcpxo/install.sh: d15b387b2ff18c783039f64a3c83ef7c83594a8c749cb6fcb470e90038538626
@@ -4917,7 +4917,7 @@ h100-gke-cos-training-slurm:
   README.md: 3b1686a9556717cc85fa96d1550360bcd959f8a545c470fd3ca30fd50361c00c
   UPGRADING.md: 6d77d1323e5823e40b9ff0ebbe90c130e751bf8f6445e5981eb1d9894028b374
   bundle-info.yaml: bf40a9ed5b79dadbd34172f6e290df925cb3ae2ed987e0a0bc63ab90972e380b
-  checksums.txt: 5d3e1bc6215be96618a26c804971eb600e5791f06266ae1460d2ce1ee68ebf68
+  checksums.txt: 96e597a04a77c7c4c7d9cfd399bf72642617db7cf8e678a8abfc713f35489bab
   deploy.sh: 281f3569dd02fdb1db2f439d4bf25bdb80bb12aa911ad18c1d8e4f4363f09033
   recipe.yaml: ef44f1339c9aa0368daae3e479663f91f29f3ace7ab7d966e50c41f85b02d82f
 h100-kind-inference-dynamo:
@@ -5265,7 +5265,7 @@ h200-any:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  007-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -5291,7 +5291,7 @@ h200-any:
   README.md: 0e31472e91ff1f69149515ce80b7e51c32ca6ea1bb177541fcb85834ec835f71
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 680f2f4a141e5915d36035ecfcb2b3f257b8d68a32cbd84653e96f0fadc6ba3e
-  checksums.txt: 0d0da51431e6339bc884454376c554281c287f373e550870d2fc32b81d7e1876
+  checksums.txt: dfb71a1187bb2b47a18e830c73842a76aa4f6db364f48bd00e67accc113f1230
   deploy.sh: 89f3f76a7b045285f1cc4032bba8e528b1c1ce86e523d1c07163b3879b0b15db
   recipe.yaml: 955d6c571a645f18b6c42a035b0e60cf3c60244b09745b8dd0a9bd5ee0ad8597
 h200-eks-inference:
@@ -5354,7 +5354,7 @@ h200-eks-inference:
   014-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   014-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  014-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  014-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   015-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   015-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -5380,7 +5380,7 @@ h200-eks-inference:
   README.md: 6d81879e27e9c22ae580d260e73aca4fdc0f9c900e7c9b84e76fb86ec1360337
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: ef6dedfb61ba1b6ab6ee6857841dbbb44e3acf33c27a18d24bbb75182afa054b
-  checksums.txt: 120257daa902196498804edbc57ab5892352db8364ae385311cf8ead59d78e51
+  checksums.txt: 1390064d35cd5ad1bfbe5912c2080329399d7a41c24015fec2a1dd587e9a08bc
   deploy.sh: 020ffcfce89c3a3b7548a1ea0cbad4967f3de16d60f3b4f878bd8bfc339772a3
   recipe.yaml: a59bea6fb9e997e94390b316e9fd08941c4f9af0b5a15f790f27f5a663476666
 h200-eks-training-kubeflow:
@@ -5424,7 +5424,7 @@ h200-eks-training-kubeflow:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  010-gpu-operator/values.yaml: ec8a4d858fba5e10bf520301d8a75d2ef5d503e0ccf14bbc1dea7f2e0d114789
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -5459,7 +5459,7 @@ h200-eks-training-kubeflow:
   README.md: 42d203608737b9108e044d76be094419cb8480159756ed32ced3fba86abbb4e3
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: 56096806d80a67f9c5769ef6bb33de02f882ef0d6cc7d05468d49467c07f304b
-  checksums.txt: 6c48983e54d695d28fcce4ba6b461ec042453c5a098bf14d9b070c6609630142
+  checksums.txt: 855a63a6228e311c51395822c0aa137836db86de32561c0fcc0887e3b2e90510
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
   recipe.yaml: 9da6ef266a35653a9531ad485b069edbea7d2fa4a1289fd6662d4f7d9985ddb7
 h200-k0s-ubuntu-training:
@@ -5490,7 +5490,7 @@ h200-k0s-ubuntu-training:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 42f9be887180dca0316f4c1c231116db0fca72eb86bb1061d43a97e55319cc13
+  007-gpu-operator/values.yaml: 4a4d7063031b5a98c3ade6487399be0a50d1feea435f7c12109a7cb6aaa29ee8
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -5516,7 +5516,7 @@ h200-k0s-ubuntu-training:
   README.md: 76932f5dd6ff6775ae2898906d02baf1fe8b498caf07b8f86fd142fdbb6771b5
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: eae28af2f74c2078463a5cb923cc84e2e03315dc891f9968207505955b139aad
-  checksums.txt: 0c9eb4871f04534d740d3ef2aba93c3eab3dcd242216496290ebb337d00941f8
+  checksums.txt: 109791ae379610af1ce7bd9de4f59a105e5819b23e5917a082abba76e001903f
   deploy.sh: 72d2ec52b9013ea3c005074a16c9d0c132cfec78c394b8bf8f3b78eb199f8a33
   recipe.yaml: 72234496ae9380fab90fc37824ece1abb8f5c8524845b1f23033aa51fa028ea6
 l40-any:
@@ -5547,7 +5547,7 @@ l40-any:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  007-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -5573,7 +5573,7 @@ l40-any:
   README.md: 3c008d7a47a4fa5e7fb1588321af7b1f1c1f7b4cc6a9989516685f3551045f00
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: f36c1d6e51e63bb9323ceba84ac31d19e6020fdbd777bad1da3687c4541da5a6
-  checksums.txt: 06ad6e16f1e0a789d74bd0e7456e120dc61201dad08857daebe525ccbd84ddca
+  checksums.txt: 443664409a28052781fda8419a5c812f30ac8dc283722a57107bf5efef5b3db2
   deploy.sh: 89f3f76a7b045285f1cc4032bba8e528b1c1ce86e523d1c07163b3879b0b15db
   recipe.yaml: f61acd3427c95836dd2ba5a66245ed5ca4c83e73403e5f4c7cf87f58ad726db0
 l40s-any:
@@ -5604,7 +5604,7 @@ l40s-any:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  007-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -5630,7 +5630,7 @@ l40s-any:
   README.md: e9bda53f6b1b78ed26e88b6581e245921b3e9c56a30647a9467eaf6e6a0d57f0
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: c9519355a4937d0bae600279345ea29a376090ddf238273e675e0635d421fccd
-  checksums.txt: 1235929eb7bb30dfaf2b899a8963058412f4b6b2e13a451201e6ea268b8cd19e
+  checksums.txt: 12107f3365b18d0a6c4bb13a1e3718ca6c683fcf004fb3df4c71445396cf93b7
   deploy.sh: 89f3f76a7b045285f1cc4032bba8e528b1c1ce86e523d1c07163b3879b0b15db
   recipe.yaml: a28792d24ef32f42918573c571d0a773912a21daf70212de3cf7269e81a63b59
 l40s-oke-inference:
@@ -5685,7 +5685,7 @@ l40s-oke-inference:
   012-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   012-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  012-gpu-operator/values.yaml: 4e313fe7f84d10f4ba143d8fcac3e491704dfde63c67261f2fa604a2343b9b9d
+  012-gpu-operator/values.yaml: d8399704848f5c6a47c5fd1cf7e650cb786e828ed633833526b83455daf730e0
   013-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   013-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -5711,7 +5711,7 @@ l40s-oke-inference:
   README.md: 05005c14327e429cc76881dfb082c416c8352b1bae7f242500ea2b30d85a2880
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 8b7c96bed97dfe021d894e37f2276595fbc02cce5f1386c578e123da85c2b3ec
-  checksums.txt: ebd8cea9f9c1db5bfbef090d7250731599cafaa36f7d6520b32114d1ae33ccf7
+  checksums.txt: bdbf8221e3969118529d265c634b4096a24de62dab7ab27018e5fda6c482cd86
   deploy.sh: 47212d6e110fd93ad0baafb74481b6a74ef4a0fa5788e310610e927df61a0212
   recipe.yaml: 30395f8a54cc30b725f0a23374baa6a01319bdef773569a9563f4ae018aacd64
 l40s-oke-training-kubeflow:
@@ -5747,7 +5747,7 @@ l40s-oke-training-kubeflow:
   008-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   008-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  008-gpu-operator/values.yaml: 4e313fe7f84d10f4ba143d8fcac3e491704dfde63c67261f2fa604a2343b9b9d
+  008-gpu-operator/values.yaml: d8399704848f5c6a47c5fd1cf7e650cb786e828ed633833526b83455daf730e0
   009-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   009-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -5791,7 +5791,7 @@ l40s-oke-training-kubeflow:
   README.md: 64a977a3b6df7531203cdc3caa96bce3aa2d8fc3194846eaaf440f82e6e3cc80
   UPGRADING.md: 3566a84b47fbd67a25aa87cfc3fcf3e1afb84365e4e61402742fe5af0493fb79
   bundle-info.yaml: f46bd9bae76b5c0866fdbe80d75fd8e82996a7b98a1d6f93053c1ff718223dd0
-  checksums.txt: 0fb22cba1be15aed9f93fb0a20f1b9b39536362e945fdf7079cb92719cf10f2f
+  checksums.txt: 51badb5405f7ba66fe56b1fe4b044b105369739f303c5757a768f158db71d0de
   deploy.sh: f9a4377a6d7c21c93d164f6dbda94aa689f71c9eb975cc0799ca11128731ff32
   recipe.yaml: aceeb61c4bda9d9e6acdf9a24034b03cf202b245b06f3a32d174e092f66a1414
 monitoring-hpa:
@@ -5822,7 +5822,7 @@ monitoring-hpa:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  007-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -5848,7 +5848,7 @@ monitoring-hpa:
   README.md: e1220c905e8f94173e917bbbeccb9f068a8724728c055898f7a75205de766ece
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 717637bd0e0e7a1f27d4ea9fc1d24614e835fbded0f2e0945385ac71e2214f15
-  checksums.txt: 7218887b195c6bc74df47a7b3f668e32595f0a6921614d3f6f7bee6fe93e5586
+  checksums.txt: 9db10744a6214f6d326313014a8bd7675b9c504ded8440258b6d8daa765329b6
   deploy.sh: 89f3f76a7b045285f1cc4032bba8e528b1c1ce86e523d1c07163b3879b0b15db
   recipe.yaml: d93c5dbdf19b2f3cf8fb1b01f391b31fecba82dc98074860b2f9b2dab09340a0
 ocp-inference-nim:
@@ -6044,7 +6044,7 @@ rke2-sles:
   008-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   008-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  008-gpu-operator/values.yaml: 0cc0050834dfecdcc2923dd6a51c9de52f0ba6533e51c6943bb0019a7c962ea8
+  008-gpu-operator/values.yaml: 0fa0e2fb9af6f85649f9e28f3a22a8fe5b766b460d2acd9aff701017d7a4711a
   009-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   009-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -6070,7 +6070,7 @@ rke2-sles:
   README.md: f63c080c217bc586f1904665fa0d32c9f86b60df1aa11683d592309e9c95852d
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 6dbe0e6598c619344b443a379beb064219fe8e7ad5a33db7b1a5295c5c5a04f8
-  checksums.txt: a9182448d951627a9466737260e534b75c21e6b9f77c07789ab632c7ced3e1c4
+  checksums.txt: 4131fd6013f4f5e787616b6ad384ce08b90874d4b704f687f1c19270a7a28dee
   deploy.sh: 44ad10025426560f8c6bd0a205f8ce4148915481181509ecf79910ae4446e17b
   recipe.yaml: 2edf395d9ae09a2faeedfc2a0aa2e3b99013a93360020f462a3bb46141480a4f
 rtx-pro-6000-any:
@@ -6101,7 +6101,7 @@ rtx-pro-6000-any:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  007-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -6127,7 +6127,7 @@ rtx-pro-6000-any:
   README.md: 2351538276e2eb33e6a4aee15208a39fe034dc15c1fead808e3a6b6ed268fbec
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 842686be2ef39f1bcb3ee890369c2f8e8372e889326a9bc78313f6f594227ea6
-  checksums.txt: 46995db0d5d2263b42db2c5c414f1d269b71fdad0ad5d92bcbfa981c9c1f6569
+  checksums.txt: 8750a17c600dd3af56e42fe98f79f14f2f18629bc188b36f68b7a89650d426a8
   deploy.sh: 89f3f76a7b045285f1cc4032bba8e528b1c1ce86e523d1c07163b3879b0b15db
   recipe.yaml: f23a119a26c0c08051e88127ed23c3ef8adf07db605ee32f05418c6a1c7e5d2c
 rtx-pro-6000-cks-ubuntu-training:
@@ -6221,7 +6221,7 @@ rtx-pro-6000-eks-amazonlinux-inference:
   013-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   013-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  013-gpu-operator/values.yaml: e33866bb91952f581aae1d07328f060a4bc06f4bd0916a788d1f7734767e6804
+  013-gpu-operator/values.yaml: e222557d6ef62bf0945bccb85884304b1d2b1b4a24f96bc02a8c1ab6e9efa9f3
   014-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   014-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -6247,7 +6247,7 @@ rtx-pro-6000-eks-amazonlinux-inference:
   README.md: bfc08e0cf6a5cf1f631be7e549f4a095d345e05a0df69d292f16a2422dfede6e
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: 40c5101211bc7083d54a21dbe8ff55bd15664152b88a883f99b90376f41b2fc5
-  checksums.txt: b5c2fb40438e2534b87352c312ddf0291bb21105685b8066eec478922b382a78
+  checksums.txt: 1a3373ab82fbfd7a2a8945e7a99437f94cc24004cd8d8c1df72eaa2a43428df3
   deploy.sh: 3d1a3a9604bfaadf9bd91c90752314a594391ad654d671403d8da82b36868def
   recipe.yaml: 407c8d740c048c290cd06b675f0db05f9429c17d38b1f928bf94a9a36fbbd79b
 rtx-pro-6000-eks-ubuntu-inference-dynamo:
@@ -6314,7 +6314,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   015-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   015-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  015-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  015-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   016-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   016-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -6344,7 +6344,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   README.md: 11438ed65f04edcf72420286454623106ee7b54d625f27efd466d3c22433514f
   UPGRADING.md: 91f212a9991d60ed22c5a82ce74e59b69e2317277a9369e5984d9aff2cf6abe4
   bundle-info.yaml: a2b470dbb6dd5f6b84553057f28b7c04595a05e46e73b38df9f570e3c4ccec66
-  checksums.txt: 0d694aa6ded7a6831c356caaaad1a6d4a1c53a5d59290024eefe328431bf392c
+  checksums.txt: 29adf44aa1c54f660b20efcfc4d7b625715b071895ba6bbdcdf1b00b2fe3a182
   deploy.sh: 5cb6189767626d1ade33ebc2726965dd3bf85d5eb4a796df973716a11f77f705
   recipe.yaml: 2cc2ad4a2400ddbe795d781be34dabd74f981ce01a80fd38d62b8ff3a76c4c45
 rtx-pro-6000-eks-ubuntu-inference-nim:
@@ -6407,7 +6407,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   014-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   014-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  014-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  014-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   015-k8s-nim-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-k8s-nim-operator/install.sh: d669fb79bdf385d0df565265df3aedf0570581bfe2dfef538f26291f6c19e0ca
   015-k8s-nim-operator/upstream.env: a150597d228603c4ddc024dae47918e30dede96b1f89483930887e46d8f7b68a
@@ -6437,7 +6437,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   README.md: 328921c8ddd02cc5d0b40ad067e49a6f3b1bddfcd2f5338ec0d4710e43f341f0
   UPGRADING.md: 876448e414e9e46c6c8e4323681218f363049391489047566440f102569ad200
   bundle-info.yaml: e14d460bbfc15661b59817f014762e6aca7de700f3f1ea24281fa67b7723648b
-  checksums.txt: faec2cc6463b49b24b7b677cb947826af34d26d749c74220230064c55dab3ec1
+  checksums.txt: 22bcd99101a36e47f7822184c8186ce6505ca55cd23f1391cdc130f34c6d18eb
   deploy.sh: a81b07fb31958892348737540f086f83c5371d9de09134b9a9cb85c49a3bf48c
   recipe.yaml: 0d9b00c85a7a5b40e3f67490c9ed4e9ed589e5ffc39b12732719f6f31aaed98c
 rtx-pro-6000-eks-ubuntu-training-kubeflow:
@@ -6481,7 +6481,7 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   010-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   010-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  010-gpu-operator/values.yaml: f9bc767123bc057c5d8b89b1d3ecfb3ea2177bbb0400cc222ea4e54873563688
+  010-gpu-operator/values.yaml: ec8a4d858fba5e10bf520301d8a75d2ef5d503e0ccf14bbc1dea7f2e0d114789
   011-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   011-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -6516,7 +6516,7 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   README.md: 7d3baa2d0fae10560162acc04212f4966fb9b6a6a554c6c225001a21d2654bbe
   UPGRADING.md: 4869362968438eb352e3e87bea0269d73297850a19e26eceda1c1e944039ae8b
   bundle-info.yaml: 0cd12edd8037af5a52901ce6ff4d4650ca36027076892ab9073d47c25a58e7b5
-  checksums.txt: 9fe3c3dc23144eb00fd406843be095dd8358c4f54d3ef096d16546682035b888
+  checksums.txt: 2721ac24626bd9c3ff7520723357cd78baa69f91eb4466ae7a0c0f59f9bf4c37
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
   recipe.yaml: 3f8ef0c2bea705330d5fa882bf39d52794eb1472d130129bfb0095601ab32431
 rtx-pro-6000-lke-ubuntu-inference:
@@ -6566,7 +6566,7 @@ rtx-pro-6000-lke-ubuntu-inference:
   011-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   011-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  011-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  011-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   012-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -6592,7 +6592,7 @@ rtx-pro-6000-lke-ubuntu-inference:
   README.md: 287d3b919fb8f772a147d1506b71ad521336833d52b598391073ace68be240f2
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 02b7c0dc7de962e8e4dd87c9959080ae8e60226ad0d9460b41bc48abc0d87a0f
-  checksums.txt: 7b2a882b3f1aa3013e16a885e076d7fdc7671155b8b2cf186162da2ec94f4702
+  checksums.txt: e84466a681c36ed87e7fffd0bbf27a3b3c78a8f3a483d824edbb8f631a578126
   deploy.sh: fb4def6952c4dd9f79abc39e6ee7ec7dbce09ed04302ea528107e46af2cb8853
   recipe.yaml: b1f6bf3439ddf95e44177fd74ab0bcaa6cf0cb430ff7e81718f279f2457ee3e5
 rtx-pro-6000-lke-ubuntu-training-kubeflow:
@@ -6623,7 +6623,7 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 6cf4f34fd9e0ffd2e540519a7500780ffcb2fe54b0294e5271e5f518aa6c78bf
+  007-gpu-operator/values.yaml: 25b1963e8a0d6f97a606459ac84471077cb9c0836b7677941dac26dd8fca2628
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -6658,7 +6658,7 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   README.md: 8d64de94f1977a364b13b4e30c31b2a443208f8b06e442c72e2248fff0b61a5e
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: e3aec792d1294f14146ba5998a5fdecdf0773170cb0bf293be0d6fa7d456fe37
-  checksums.txt: 54bfef6a8fdac811ec9bad2d02c7c9294635437bfa5539da4a6cd6210fadee2e
+  checksums.txt: 1b8317b3f3b40005dbd3747a732fdd65a94ab4c3bb562c705694bc850a6200c3
   deploy.sh: e2fa5886df14ab1b4f5acbb99740057af37cf8d70db740fcfa7b8cd0e8ff871e
   recipe.yaml: 91f1a60c0b71991dde7734f8a89cf75eccd6bff62e49e58731fb4ea095f1bd7f
 vr200-nvke-ubuntu-inference-dynamo:
@@ -6712,7 +6712,7 @@ vr200-nvke-ubuntu-inference-dynamo:
   012-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   012-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  012-gpu-operator/values.yaml: 784a31a312b95aef8130becdafb59403354470bee775d92f5b9b2c8fc4e8172e
+  012-gpu-operator/values.yaml: 9b0d0df6beb7cc98a3e9741aae39d518e7ead4d3f34271972ad1bcb4601c21c7
   013-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   013-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -6742,7 +6742,7 @@ vr200-nvke-ubuntu-inference-dynamo:
   README.md: 0bc9af019c2c9a3a94ff8ff47953071f9c288d9b892dc3020baa443cdc1bc247
   UPGRADING.md: 6dc466c4bd99eddaa2faf86c600600ecdd2b708d54b2480cc20a7e2438bb6663
   bundle-info.yaml: 27b94ff5b1249200150905af3b32a66980213ba043624f76882bb96f480f54e8
-  checksums.txt: 2cc99ff0bb6cda367ae9e3b3cf2b0f105600f14ed7172b5ea631c614eef13f55
+  checksums.txt: 9721ac33171e3e60b430dc3e5a63fbde778f764673423a11fefdaa9c59aa91ae
   deploy.sh: 79f0b62328c48695b094e32f4afe4e77e9df91a2bcfc9d76c56ed9fe9bad97c1
   recipe.yaml: 3947d9b8f560ade085ddc8e1aabe1ae36240ad1ea8c49ab3490527e7308a5023
 vr200-nvke-ubuntu-training-kubeflow:
@@ -6773,7 +6773,7 @@ vr200-nvke-ubuntu-training-kubeflow:
   007-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   007-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  007-gpu-operator/values.yaml: 784a31a312b95aef8130becdafb59403354470bee775d92f5b9b2c8fc4e8172e
+  007-gpu-operator/values.yaml: 9b0d0df6beb7cc98a3e9741aae39d518e7ead4d3f34271972ad1bcb4601c21c7
   008-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   008-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -6822,7 +6822,7 @@ vr200-nvke-ubuntu-training-kubeflow:
   README.md: 561cf0dbe6ff05e63e54580acaf6fe2af48a9578c66e60ebfc9a58c70653bb9c
   UPGRADING.md: 3566a84b47fbd67a25aa87cfc3fcf3e1afb84365e4e61402742fe5af0493fb79
   bundle-info.yaml: bc6914cf33bbc1b41e004d2bc168608b477e286ed419f0b98009eea009593f85
-  checksums.txt: 168d695e1fcb548a056ef76e1c92b7509454445fc53b96e367ef34a664cbf184
+  checksums.txt: c1d3e00ba2fe586c155e09e45842dd34212845f8f1f347be28be478372be08aa
   deploy.sh: f9f65eddc05ea45b69327deeec27e66301258d3a36b79038604b7c1c30203b5b
   recipe.yaml: d4be0ab084010be48a5e17c4f533fc2fd05449280237ec309134e44876e3282e
 vr200-rke2-ubuntu-inference-dynamo:
@@ -6887,7 +6887,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   014-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   014-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  014-gpu-operator/values.yaml: d33e49fe022425dbff4e6f2c2e4163219c2054dc697d161121bdc9854c3e1c15
+  014-gpu-operator/values.yaml: 0440bd3204ff60b4a1b2c1ffe74d6c4d3544d41650b5c14995a58bf9e3f7bd3c
   015-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   015-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -6917,7 +6917,7 @@ vr200-rke2-ubuntu-inference-dynamo:
   README.md: 33b988ec1cf0a8d9eb43fa6943a8ae9c7dbf9e78940dd22ae46f09dfab6d33f1
   UPGRADING.md: 6dc466c4bd99eddaa2faf86c600600ecdd2b708d54b2480cc20a7e2438bb6663
   bundle-info.yaml: f320109dc3905c3ca93ed9ff3d0984678c0d1b6e3566352c37147ef8db644658
-  checksums.txt: 7558744568b4cc6d5a40b53b3ac4af66a95456baeec18f27bb72c52b05179f7a
+  checksums.txt: c99138338ebb575b600812ffd0ab4a59649fc6a05103339b25c4999a1b0fad6f
   deploy.sh: 95627830799a5308708bcaed8ca8eea53f98c380fb8f0e66542771e4517747d8
   recipe.yaml: 2dd6dceb58a26343ccc7d5cb198eb7e720b0bea998f166929fc384f600f4c99f
 vr200-rke2-ubuntu-training-kubeflow:
@@ -6958,7 +6958,7 @@ vr200-rke2-ubuntu-training-kubeflow:
   009-gpu-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-gpu-operator/install.sh: d915425e3e50879e33e4600ef0386c39137aa1fe88c2a40428593f278dfbf986
   009-gpu-operator/upstream.env: 8f416c0219ea7b7cb5cfa43c49405745eca2fb94d9f2175cf782b5b71334532d
-  009-gpu-operator/values.yaml: d33e49fe022425dbff4e6f2c2e4163219c2054dc697d161121bdc9854c3e1c15
+  009-gpu-operator/values.yaml: 0440bd3204ff60b4a1b2c1ffe74d6c4d3544d41650b5c14995a58bf9e3f7bd3c
   010-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
   010-kai-scheduler/upstream.env: 36f56a0bb461a34a99d6c21ed0cd22ff4ea331b203a53f2fe0a4955546184ed4
@@ -6993,6 +6993,6 @@ vr200-rke2-ubuntu-training-kubeflow:
   README.md: f1f7abb83977bb37fad40174d7b6d9cc80198ffe1c9178456c9237f602066d0e
   UPGRADING.md: 1207d398a8eaa5252dc77223bc8c5d9a9924b93fc197f8dd095df229d1077d6c
   bundle-info.yaml: 9a4b3a135b813eb1551672cfacea185f7168c0fe4ddd6beefb4f05dcf8ba0b2d
-  checksums.txt: b75affc528426bcdd44556df6fc783d953d6ca1a1bac4b9ed083e02c6bdb916d
+  checksums.txt: b5832f8dda0bffc3de674249f9a43994f490a01fd2399dd90029d15f988da30d
   deploy.sh: 511155dc137c29bbe9b1c483d38d32b9fea07535102e90b9dea0568ca801e3c8
   recipe.yaml: 40ad7a8aed91012c16da0f5ef76fe49dfffd936dbbbbdb85bf5662b4fce56879

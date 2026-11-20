@@ -1336,6 +1336,10 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 				"failed to collect component readiness gates")
 		}
+		sizingRows, err := b.installSizing(ctx, recipeResult, componentValues)
+		if err != nil {
+			return nil, err
+		}
 		return &argocdhelm.Generator{
 			RecipeResult:           recipeResult,
 			ComponentValues:        componentValues,
@@ -1348,6 +1352,8 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentPreManifests:  componentPreManifests,
 			ComponentPostManifests: componentPostManifests,
 			ComponentReadiness:     componentReadiness,
+			SizingRows:             sizingRows,
+			SizingNodeCount:        b.Config.EstimatedNodeCount(),
 			VendorCharts:           b.Config.VendorCharts(),
 			UpgradeNotice:          upgradeNotice,
 			Serial:                 b.Config.Serial(),
@@ -1859,6 +1865,11 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 				fmt.Sprintf("failed to resolve values for component %q", ref.Name))
 		}
 
+		plan, err := b.planSizing(ctx, recipeResult, &ref, values)
+		if err != nil {
+			return nil, err
+		}
+
 		// Apply user value overrides from --set flags.
 		// Strip "enabled" key — it controls component inclusion, not Helm chart values.
 		setOverrides := b.getValueOverridesForComponent(ref.Name, provider)
@@ -1978,6 +1989,10 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 					applyErr,
 					map[string]any{errCtxKeyComponent: ref.Name})
 			}
+		}
+
+		if err := b.finishSizing(plan, &ref, values, provider); err != nil {
+			return nil, err
 		}
 
 		// Requires every override, including --set-json/--set-file, to have
