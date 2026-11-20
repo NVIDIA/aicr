@@ -304,6 +304,8 @@ Author `safe` only with a `verifiedBy` naming a UAT lane, KWOK run, or upstream 
 
 **After adding a versioned artifact kind** (a new wire `kind` with an `aicr.run/...` `apiVersion`): ADR-022 (`docs/design/022-artifact-maturity-and-deprecation.md`) requires a row for it in the §2 maturity map and an entry in the read gate in the same change. §7 sets the version a new kind starts at. §8 requires a loader of external data to validate the raw `kind` and `apiVersion` before hydration and to reject an empty, retired, unknown or wrong-kind value with `ErrCodeInvalidRequest`.
 
+**When a change departs from a merged ADR** (`docs/design/`): leave the ADR as written. It records what was decided at the time. Say in the PR description what the ADR decided, what changed and why, and fix code comments that cite the superseded text as current. The exception is a table an ADR tells later changes to extend, such as the ADR-022 §2 maturity map above.
+
 **Using mixins for shared OS/platform content:**
 ```yaml
 # Leaf overlay referencing mixins instead of duplicating content
