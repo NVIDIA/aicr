@@ -1027,6 +1027,36 @@ mechanism is a validation failure by design, never a silent fallback to the
 other mechanism. Only recipe-less standalone runs (`unspecified`) keep the
 capability-driven automatic selection.
 
+## Checking a cluster for Snapshot
+
+The `snapshot-requirements` deployment check verifies that a cluster meets the prerequisites of Snapshot ([ai-dynamo/snapshot](https://github.com/ai-dynamo/snapshot), GPU checkpoint/restore). It is unrelated to the `aicr snapshot` command, which captures cluster state.
+
+It runs only for a recipe that declares the `snapshot` component and skips otherwise. List it in the recipe's deployment checks:
+
+```yaml
+validation:
+  deployment:
+    checks:
+      - snapshot-requirements
+```
+
+It evaluates every requirement and reports all that fail. If the GPU nodes cannot be listed, `gpu-nodes` reports that and the four node requirements (`kernel`, `container-runtime`, `driver`, `mig`) are not evaluated.
+
+| Requirement | Passes when |
+|-------------|-------------|
+| `gpu-nodes` | At least one node carries `nvidia.com/gpu.present=true` |
+| `kernel` | Every GPU node runs Linux 5.13 or newer |
+| `container-runtime` | Every GPU node runs containerd or CRI-O |
+| `driver` | Every GPU node reports a CUDA driver major version of 580 or newer |
+| `mig` | No GPU node has MIG enabled |
+| `gpu-operator` | The GPU Operator is 26.3 or newer |
+| `checkpoint-store` | The checkpoint claim is bound, is a filesystem claim, and is ReadWriteMany. A ReadWriteOnce claim passes only with one GPU node and the operator pinned to it (`operator.nodeSelector` on `kubernetes.io/hostname`) or no other node. Before the install a missing claim is not a failure |
+| `privileged-namespace` | The snapshot namespace admits a privileged pod. `pod-security.kubernetes.io/enforce=privileged` passes on the label alone; another level fails; with no label the API server is asked to admit a pod shaped like the node agent, as a server-side dry run. Admission webhooks that act on pod creation may see that request |
+
+The thresholds are the prerequisites in Snapshot's documentation, so a cluster below a documented floor fails even if checkpoint and restore work on it. The snapshot namespace is the `namespace` of the recipe's `snapshot` component, or `snapshot`.
+
+A prerequisite that cannot be read is a failure. A read the validator is not permitted to make is reported as `UNAUTHORIZED`, and a read that times out as a timeout.
+
 ## Running all phases
 
 ```bash
