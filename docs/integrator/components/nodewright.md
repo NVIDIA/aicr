@@ -98,6 +98,7 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 | gke     | gb200        | -       | -                   | nvidia-tuning-gke 0.1.2 |
 | gke     | gb300        | gb200   | -                   | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                   | nvidia-tuning-gke 0.1.2 |
+| mistral | gb300        | -       | -                   | nvidia-tuned 0.11.0     |
 | oke     | a100         | -       | nvidia-setup 0.10.0 | -                       |
 | oke     | gb200        | -       | nvidia-setup 0.10.0 | -                       |
 | oke     | gb300        | -       | -                   | nvidia-tuned 0.11.2     |

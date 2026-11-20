@@ -93,6 +93,7 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 	if topo != nil {
 		reconcileAccelerator(fp, topo)
 		reconcileManagedService(fp, topo)
+		reconcileMistralService(fp, topo)
 	}
 	if gpu != nil {
 		populatePCIDiscovery(fp, gpu)
@@ -114,6 +115,25 @@ func reconcileManagedService(fp *Fingerprint, topo *measurement.Measurement) {
 	for _, value := range distinctLabelValues(st, label) {
 		if strings.HasPrefix(value, "mk8snodegroup-") && len(value) > len("mk8snodegroup-") {
 			fp.Service = Dimension{Value: string(recipe.CriteriaServiceMK8s), Source: "nodeTopology.label." + label}
+			return
+		}
+	}
+}
+
+// reconcileMistralService requires a Mistral node-pool label as well as the
+// Metal3 provider: Metal3 alone identifies only the bare-metal provisioner.
+func reconcileMistralService(fp *Fingerprint, topo *measurement.Measurement) {
+	if fp.Service.Value != string(recipe.CriteriaServiceMetal3) && !strings.HasPrefix(fp.Service.Value, "metal3://") {
+		return
+	}
+	const label = "mistralcompute.ai/node-pool"
+	st := topo.GetSubtype(subtypeTopologyLabel)
+	if st == nil {
+		return
+	}
+	for _, value := range distinctLabelValues(st, label) {
+		if value != "" {
+			fp.Service = Dimension{Value: string(recipe.CriteriaServiceMistral), Source: "nodeTopology.label." + label}
 			return
 		}
 	}

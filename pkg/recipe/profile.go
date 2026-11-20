@@ -43,6 +43,7 @@ const RecipeProfileAPIVersion = header.ProfileGroupVersion
 
 const (
 	profileComponentEnabledPath = "enabled"
+	profileComponentInstallPath = componentInstallOverrideKey
 	profileJSONSafeIntegerMax   = 1<<53 - 1
 )
 
@@ -289,10 +290,8 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 			}
 			seenComponents[ref.Name] = struct{}{}
 
-			if _, assignsEnabled := ref.Overrides[profileComponentEnabledPath]; assignsEnabled {
-				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("profile %q value %q component %q may not assign overrides.enabled",
-						decl.Name, valueName, ref.Name))
+			if err := validateProfileDeploymentGates(decl.Name, valueName, ref); err != nil {
+				return nil, err
 			}
 			paths, err := flattenProfileOverrides(ref.Overrides)
 			if err != nil {
@@ -338,6 +337,44 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 		owned[component] = slices.Sorted(maps.Keys(paths))
 	}
 	return owned, nil
+}
+
+// validateProfileDeploymentGates rejects a root enabled key and accepts a root
+// install key only as a bool on a reference that owns presence.
+func validateProfileDeploymentGates(profile, value string, ref ProfileComponentRef) error {
+	if _, assignsEnabled := ref.Overrides[profileComponentEnabledPath]; assignsEnabled {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("profile %q value %q component %q may not assign overrides.enabled",
+				profile, value, ref.Name))
+	}
+	install, assigned := ref.Overrides[profileComponentInstallPath]
+	if !assigned {
+		return nil
+	}
+	if _, ok := install.(bool); !ok {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("profile %q value %q component %q overrides.install must be a bool",
+				profile, value, ref.Name))
+	}
+	if ref.Optional {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("profile %q value %q optional component %q may not assign overrides.install",
+				profile, value, ref.Name))
+	}
+	return nil
+}
+
+// profileInstallGatedOff reports whether a component is disabled solely by a
+// profile-owned install gate set to false by the selected value.
+func profileInstallGatedOff(ref *ComponentRef, ownedPaths []string) bool {
+	if ref == nil || !slices.Contains(ownedPaths, profileComponentInstallPath) {
+		return false
+	}
+	if enabled, set := ref.Overrides[profileComponentEnabledPath].(bool); set && !enabled {
+		return false
+	}
+	install, ok := ref.Overrides[profileComponentInstallPath].(bool)
+	return ok && !install
 }
 
 // validateProfileRefOptionality enforces the optional-reference rules: every
@@ -875,6 +912,9 @@ func (r *RecipeResult) validateProfileValuesWithContext(
 			if !slices.Contains(paths, profileComponentEnabledPath) {
 				continue
 			}
+			if profileInstallGatedOff(ref, declared[component]) {
+				continue
+			}
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile-owned component %q is missing or disabled", component))
 		}
@@ -1260,6 +1300,13 @@ func (r *RecipeResult) ValidateProfileLock(
 		if baselineRef == nil {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile-owned component %q is absent from the recipe", component))
+		}
+		if profileInstallGatedOff(baselineRef, r.Metadata.SelectedProfile.OwnedPaths[component]) {
+			if candidateEnabled[component] {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("profile-owned component presence diverged for %q", component))
+			}
+			continue
 		}
 		if !candidateEnabled[component] {
 			return errors.New(errors.ErrCodeInvalidRequest,

@@ -530,6 +530,7 @@ land later; none is implied by Preview alone.
 | `nvke / vr200 / ubuntu / training / kubeflow` | [NVKE VR200 Setup](nvke-vr200-setup.md) | pending: adds Kubeflow Trainer to the training leaf; no evidence collected yet |
 | `nvke / vr200 / ubuntu / inference` | [NVKE VR200 Setup](nvke-vr200-setup.md) | pending: evidence in [#3695](https://github.com/NVIDIA/aicr/pull/3695), being recollected; no external LoadBalancer, so the gateway is in-cluster only |
 | `nvke / vr200 / ubuntu / inference / dynamo` | [NVKE VR200 Setup](nvke-vr200-setup.md) | pending: validated on hardware from this leaf's own bundle in [#3711](https://github.com/NVIDIA/aicr/pull/3711); signed evidence to follow |
+| `mistral / gb300 / ubuntu / training` | [Mistral GB300 Setup](mistral-gb300-setup.md) | pending: snapshot detection and both `gpuStack` values resolved on a Mistral GB300 cluster; no signed evidence yet |
 | `nvke / gb300 / ubuntu / training` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: MNNVL measured across two trays with this pairing's runtime; no east-west NIC path |
 | `nvke / gb300 / ubuntu / training / kubeflow` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: adds Kubeflow Trainer to the training leaf; no evidence collected yet |
 | `nvke / gb300 / ubuntu / inference` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: the Dynamo leaf's run covers its components; no external LoadBalancer, so the gateway is in-cluster only |
