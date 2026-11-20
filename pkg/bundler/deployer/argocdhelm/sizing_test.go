@@ -339,3 +339,30 @@ components:
 	g := &Generator{RecipeResult: rr}
 	errorstest.WantReportedCode(t, g.validateSizing(), errors.ErrCodeInvalidRequest)
 }
+
+// TestGenerateRemovesStaleSizingRows fails when a regeneration into the same
+// directory keeps a sizing file the new run did not write.
+func TestGenerateRemovesStaleSizingRows(t *testing.T) {
+	outputDir := t.TempDir()
+	if _, err := sizingFixtureGenerator(0).Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("first Generate() error = %v", err)
+	}
+	stale := filepath.Join(outputDir, "static", "gpu-operator"+sizingFileSuffix+".yaml")
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("first run did not write %s: %v", stale, err)
+	}
+	g := sizingFixtureGenerator(0)
+	g.SizingRows = nil
+	out, err := g.Generate(context.Background(), outputDir)
+	if err != nil {
+		t.Fatalf("second Generate() error = %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("%s still present after a run with no sizing rows (stat error = %v)", stale, err)
+	}
+	for _, f := range out.Files {
+		if f == stale {
+			t.Errorf("output lists %s", stale)
+		}
+	}
+}

@@ -150,7 +150,7 @@ max by (pod) (max_over_time(container_memory_working_set_bytes{namespace="gpu-op
 For a DaemonSet, take the median across pods of each pod's p90:
 
 ```promql
-quantile(0.5, max by (pod) (quantile_over_time(0.9, container_memory_working_set_bytes{container="<container>"}[24h])))
+quantile(0.5, max by (pod) (quantile_over_time(0.9, container_memory_working_set_bytes{namespace="<namespace>", container="<container>"}[24h])))
 ```
 
 Run them against the fleet Prometheus where the cluster ships cadvisor, or
@@ -171,7 +171,7 @@ reading is one `kubectl top pod` sample; it is a floor, not a peak.
    already records, and replace the tier's values.
 3. Update `measurements`: add the new readings, set `sets` on the ones that
    now decide each field, and drop readings nothing uses any more.
-4. Run `go test ./pkg/recipe/ -run Sizing` and bundle the recipe at a count
+4. Run `go test ./pkg/recipe/sizing/` and bundle the recipe at a count
    inside the tier to see the new values.
 
 When a chart bump changes what a controller caches, re-measure every tier of

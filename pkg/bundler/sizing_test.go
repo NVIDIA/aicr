@@ -61,6 +61,11 @@ resources:
 
 func sizingFixtureProvider(t *testing.T) recipe.DataProvider {
 	t.Helper()
+	return sizingFixtureProviderWithValues(t, sizingFixtureValuesDoc)
+}
+
+func sizingFixtureProviderWithValues(t *testing.T, valuesDoc string) recipe.DataProvider {
+	t.Helper()
 	registryYAML := []byte(`apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
@@ -73,7 +78,7 @@ components:
 	tmpData := providertest.WriteDir(t, map[string][]byte{
 		recipe.RegistryFileName: registryYAML,
 		sizingFixtureFile:       []byte(sizingFixtureDoc),
-		sizingFixtureValues:     []byte(sizingFixtureValuesDoc),
+		sizingFixtureValues:     []byte(valuesDoc),
 	})
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
@@ -243,6 +248,40 @@ func TestExtractComponentValuesSizing(t *testing.T) {
 				t.Errorf("cpu request = %v, want it untouched", cpu)
 			}
 		})
+	}
+}
+
+// TestExtractComponentValuesSizingSkipsSetPaths fails when generation-time
+// sizing parses a value that a --set replaces anyway.
+func TestExtractComponentValuesSizingSkipsSetPaths(t *testing.T) {
+	provider := sizingFixtureProviderWithValues(t, `operator:
+  resources:
+    requests: {memory: 300Mi}
+    limits: {memory: unbounded}
+`)
+	cfg := config.NewConfig(
+		config.WithEstimatedNodeCount(200),
+		config.WithValueOverrides(map[string]map[string]string{
+			sizingFixtureComponent: {"operator.resources.limits.memory": "2Gi"},
+		}),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
+		{Name: sizingFixtureComponent, Type: "helm", ValuesFile: sizingFixtureValues},
+	}}
+	rr.BindDataProvider(provider)
+	values, err := b.extractComponentValues(context.Background(), rr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := values[sizingFixtureComponent]
+	gotReq, _ := component.GetValueByPath(v, "operator.resources.requests.memory")
+	gotLim, _ := component.GetValueByPath(v, "operator.resources.limits.memory")
+	if gotReq != "256Mi" || gotLim != "2Gi" {
+		t.Errorf("got %v/%v, want 256Mi/2Gi", gotReq, gotLim)
 	}
 }
 

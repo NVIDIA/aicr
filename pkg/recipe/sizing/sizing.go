@@ -252,9 +252,13 @@ func (t *Tier) validate(path, where string) error {
 		if f.q == nil {
 			continue
 		}
-		if _, err := resource.ParseQuantity(f.q.Memory); err != nil {
+		q, err := resource.ParseQuantity(f.q.Memory)
+		if err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("%s %s: %s memory %q is not a quantity", path, where, f.name, f.q.Memory), err)
+		}
+		if q.Sign() <= 0 {
+			return fileErr(path, "%s: %s memory %s must be positive", where, f.name, f.q.Memory)
 		}
 	}
 	qs := t.quantities()
