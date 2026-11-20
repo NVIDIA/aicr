@@ -743,14 +743,17 @@ func timeOf(v any) time.Time {
 
 // InventoryItem is one owned Application as the rollout sees it. SpecDigest
 // is omitted when empty, so an inventory recorded without it digests as it
-// did.
+// did. Follows names the releases the Application's annotations place
+// before it, its dependencies and a readiness release's parent, and is not
+// part of the recorded inventory.
 type InventoryItem struct {
-	ReleaseID  string `json:"releaseID"`
-	Name       string `json:"name"`
-	UID        string `json:"uid"`
-	PlanDigest string `json:"planDigest"`
-	Revision   string `json:"revision"`
-	SpecDigest string `json:"specDigest,omitempty"`
+	ReleaseID  string   `json:"releaseID"`
+	Name       string   `json:"name"`
+	UID        string   `json:"uid"`
+	PlanDigest string   `json:"planDigest"`
+	Revision   string   `json:"revision"`
+	SpecDigest string   `json:"specDigest,omitempty"`
+	Follows    []string `json:"-"`
 }
 
 // Suspend turns automated sync off, or back on, for every Application of
@@ -950,8 +953,23 @@ func (a *Adapter) Inventory(ctx context.Context, runtimeUID string) ([]Inventory
 			PlanDigest: app.GetAnnotations()[v1alpha1.AnnotationPlanDigest],
 			Revision:   revision,
 			SpecDigest: SpecDigest(app),
+			Follows:    follows(app.GetAnnotations()),
 		})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ReleaseID < items[j].ReleaseID })
 	return items, nil
+}
+
+// follows reads the releases an Application's annotations place before it.
+func follows(annotations map[string]string) []string {
+	var out []string
+	for _, id := range strings.Split(annotations[v1alpha1.AnnotationDependsOn], ",") {
+		if id != "" {
+			out = append(out, id)
+		}
+	}
+	if parent := annotations[v1alpha1.AnnotationReadinessFor]; parent != "" {
+		out = append(out, parent)
+	}
+	return out
 }

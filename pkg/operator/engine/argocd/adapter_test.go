@@ -567,6 +567,38 @@ func fakeAdapter(t *testing.T, objs ...client.Object) *Adapter {
 	return &Adapter{Writer: c, Reader: c, Mapper: mapper, Target: target}
 }
 
+// The inventory reads what each Application follows from the annotations
+// the operator wrote: its dependencies and a readiness release's parent.
+func TestInventoryReadsWhatAnApplicationFollows(t *testing.T) {
+	t.Parallel()
+	p, r := testPlan()
+	readiness := *r
+	readiness.ID, readiness.Phase, readiness.ReadinessFor, readiness.DependsOn = "cert-manager-readiness", plan.PhaseReadiness, "cert-manager", nil
+	alone := *r
+	alone.ID, alone.DependsOn = "nfd", nil
+	releases := []*plan.Release{r, &readiness, &alone}
+	apps := make([]client.Object, 0, len(releases))
+	for _, rel := range releases {
+		app, err := Application(target, p, rel, values)
+		if err != nil {
+			t.Fatalf("Application(%s) = %v", rel.ID, err)
+		}
+		apps = append(apps, app)
+	}
+	inv, err := fakeAdapter(t, apps...).Inventory(context.Background(), uid)
+	if err != nil {
+		t.Fatalf("Inventory() = %v", err)
+	}
+	want := map[string][]string{"cert-manager": {"a", "b"}, "cert-manager-readiness": {"cert-manager"}, "nfd": nil}
+	got := map[string][]string{}
+	for _, it := range inv {
+		got[it.ReleaseID] = it.Follows
+	}
+	if !maps.EqualFunc(got, want, slices.Equal[[]string]) {
+		t.Errorf("Inventory() follows %v, want %v", got, want)
+	}
+}
+
 func TestEnsureWritesOwnedAndRefusesForeign(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

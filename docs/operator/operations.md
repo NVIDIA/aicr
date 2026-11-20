@@ -184,10 +184,11 @@ groups:
 6. **It waits for approval** when any step needs it (below).
 7. **Steps run one at a time** in dependency order, each with one write to
    Argo CD, and each must be ready at its current revision within
-   `spec.rollout.actionTimeout` (default 30 minutes). Removals run last, in
-   reverse order. A `manual` release with recorded steps after the apply stops
-   the rollout in `AwaitingAcknowledgement` until those steps are done and an
-   approver runs `kubectl aicr acknowledge`.
+   `spec.rollout.actionTimeout` (default 30 minutes). Removals run last,
+   dependents first as the Applications' `depends-on` and `readiness-for`
+   annotations record them. A `manual` release with recorded steps after the
+   apply stops the rollout in `AwaitingAcknowledgement` until those steps are
+   done and an approver runs `kubectl aicr acknowledge`.
 8. **Deployment validation** runs once when `spec.validation.deployment` is
    `Required`, against a new snapshot taken after every step is ready.
 9. **The rollout succeeds** and its target becomes the active plan. The whole
