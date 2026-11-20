@@ -1204,6 +1204,9 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 			}
 			files = append(files, sizingPath)
 			totalSize += sizingSize
+		} else if rmErr := os.Remove(filepath.Join(staticDir, ref.Name+sizingFileSuffix+".yaml")); rmErr != nil && !os.IsNotExist(rmErr) {
+			return nil, 0, nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to remove stale sizing rows for %s", ref.Name), rmErr)
 		}
 	}
 

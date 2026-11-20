@@ -93,6 +93,8 @@ func TestParse(t *testing.T) {
 		{name: "maxNodes not ascending", old: "maxNodes: 300", new: "maxNodes: 200", wantErr: "ascend strictly"},
 		{name: "unparseable quantity", old: "requests: {memory: 100Mi}\n        limits: {memory: 200Mi}", new: "requests: {memory: lots}\n        limits: {memory: 200Mi}", wantErr: "not a quantity"},
 		{name: "limit below request", old: "limits: {memory: 200Mi}", new: "limits: {memory: 50Mi}", wantErr: "below requests"},
+		{name: "negative request", old: "requests: {memory: 100Mi}\n        limits: {memory: 200Mi}", new: "requests: {memory: -100Mi}\n        limits: {memory: 200Mi}", wantErr: "must be positive"},
+		{name: "zero request", old: "requests: {memory: 100Mi}\n        limits: {memory: 200Mi}", new: "requests: {memory: \"0\"}\n        limits: {memory: 200Mi}", wantErr: "must be positive"},
 		{name: "tier above the next higher tier", old: "limits: {memory: 200Mi}", new: "limits: {memory: 500Mi}", wantErr: "above the next higher tier"},
 		{name: "field set above a tier that leaves it out", old: "requests: {memory: 100Mi}\n        limits: {memory: 200Mi}\n        measurements:\n          - sets: [requests, limits]\n            kind: windowed\n            window: 24h", new: "limits: {memory: 200Mi}\n        measurements:\n          - sets: [limits]\n            kind: windowed\n            window: 24h", wantErr: "below it leaves out"},
 		{name: "field set with no measurement", old: "          - sets: [requests, limits]\n            kind: windowed\n            window: 7d", new: "          - sets: [limits]\n            kind: windowed\n            window: 7d", wantErr: "no measurement naming it"},

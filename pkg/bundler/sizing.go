@@ -82,7 +82,12 @@ func (b *DefaultBundler) planSizing(ctx context.Context, rr *recipe.RecipeResult
 	}
 	p := sizingPlan{file: sz, atInstall: atInstall, recipeSets: recipeSetsPath(rr, ref)}
 	if !atInstall {
-		if err := sizeComponent(ref, values, p.recipeSets, sz, n); err != nil {
+		sets := b.getValueOverridesForComponent(ref.Name, rr.DataProvider())
+		typed := b.getTypedValueOverridesForComponent(ref.Name, rr.DataProvider())
+		skip := func(path string) bool {
+			return p.recipeSets(path) || overrideReaches(sets, path) || overrideReaches(typed, path)
+		}
+		if err := sizeComponent(ref, values, skip, sz, n); err != nil {
 			return sizingPlan{}, err
 		}
 	}
