@@ -284,9 +284,11 @@ Removing the finalizer first, or deleting with
 `argocd app delete <name> --cascade=false`, leaves them in the cluster, still
 tracked under the Application's name. Once the stall clears, the release's
 Application has that name, takes them over, and prunes those its release does
-not render. To keep such a resource, first remove its
-`argocd.argoproj.io/tracking-id` annotation or annotate it
-`argocd.argoproj.io/sync-options: Prune=false`.
+not render. To keep such a resource, first annotate it
+`argocd.argoproj.io/sync-options: Prune=false`, which holds under any
+tracking method, or remove what Argo CD tracks it by: the
+`argocd.argoproj.io/tracking-id` annotation, or under label tracking the
+instance label (`app.kubernetes.io/instance` unless configured otherwise).
 
 The stall clears at the next reconcile, with no retry, and the rollout is
 then created as any other is: after the stabilization window, and not while

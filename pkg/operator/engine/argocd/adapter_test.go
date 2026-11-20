@@ -652,11 +652,17 @@ func TestUnownedNamesApplicationsOfOthers(t *testing.T) {
 }
 
 // Unowned never has more than defaults.EngineReadConcurrency reads in
-// flight, however many names it is given.
+// flight, however many names it is given. Every read is held until that
+// many have started, so the bound is observed, not inferred from timing.
 func TestUnownedBoundsItsReads(t *testing.T) {
 	t.Parallel()
 	a := fakeAdapter(t)
+	names := make([]string, 4*defaults.EngineReadConcurrency)
+	for i := range names {
+		names[i] = "release-" + strconv.Itoa(i)
+	}
 	var inFlight, peak atomic.Int32
+	started, release := make(chan struct{}, len(names)), make(chan struct{})
 	a.Reader = interceptor.NewClient(a.Reader.(client.WithWatch), interceptor.Funcs{
 		Get: func(_ context.Context, _ client.WithWatch, key client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
 			now := inFlight.Add(1)
@@ -667,17 +673,37 @@ func TestUnownedBoundsItsReads(t *testing.T) {
 					break
 				}
 			}
-			// Held long enough for every other read allowed to start.
-			time.Sleep(20 * time.Millisecond)
+			started <- struct{}{}
+			<-release
 			return apierrors.NewNotFound(schema.GroupResource{Resource: "applications"}, key.Name)
 		},
 	})
-	names := make([]string, 4*defaults.EngineReadConcurrency)
-	for i := range names {
-		names[i] = "release-" + strconv.Itoa(i)
+	type result struct {
+		names []string
+		err   error
 	}
-	if got, err := a.Unowned(context.Background(), uid, names); err != nil || len(got) != 0 {
-		t.Fatalf("Unowned() = %v, %v", got, err)
+	done := make(chan result, 1)
+	go func() {
+		got, err := a.Unowned(context.Background(), uid, names)
+		done <- result{got, err}
+	}()
+	for n := range defaults.EngineReadConcurrency {
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			close(release)
+			t.Fatalf("only %d reads started, want %d at once", n, defaults.EngineReadConcurrency)
+		}
+	}
+	// With the bound reached and every read held, one more must not start.
+	select {
+	case <-started:
+		t.Errorf("more than %d reads in flight", defaults.EngineReadConcurrency)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	if r := <-done; r.err != nil || len(r.names) != 0 {
+		t.Fatalf("Unowned() = %v, %v", r.names, r.err)
 	}
 	if got := int(peak.Load()); got != defaults.EngineReadConcurrency {
 		t.Errorf("peak reads in flight = %d, want the bound %d", got, defaults.EngineReadConcurrency)
