@@ -415,7 +415,7 @@ spec:                                 # immutable, except the set-once approval 
     crdChange: false
     postApplySteps: [reset-breaker, verify]   # a manual record's steps after the apply; acknowledged before the plan is active
   - release: nvsentinel
-    operation: Remove                 # after installs and upgrades, in reverse active-plan order
+    operation: Remove                 # after installs and upgrades, dependents first
     assessment: NotApplicable
     uid: 3f2b…                        # the engine object to delete; set exactly on Remove steps
   approval:                           # written by an approver, never by the operator
@@ -568,8 +568,8 @@ operator-owned ConfigMap or Job, carries:
 | `operator.aicr.run/schema-version` | label | Plan document schema version (plan ConfigMaps) |
 | `operator.aicr.run/orphaned-from` | annotation | Runtime UID, set only by Orphan deletion |
 
-Engine objects also carry the plan graph, so a plan can be rebuilt from live
-state:
+Engine objects also carry the plan graph. A plan can be rebuilt from it, and
+it orders removals:
 
 | Key | Kind | Value |
 | --- | --- | --- |
