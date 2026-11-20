@@ -28,7 +28,6 @@ const (
 	mariaDBOperatorCRDsComponentName    = "mariadb-operator-crds"
 	mariaDBOperatorComponentName        = "mariadb-operator"
 	slurmAccountingMariaDBComponentName = "slurm-accounting-mariadb"
-	accountingEnabledOverrideKey        = "enabled"
 	componentEnabledOverrideKey         = "enabled"
 	componentInstallOverrideKey         = "install"
 )
@@ -280,7 +279,7 @@ func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
 	mariaDBInstall := mode == AccountingModeAICRProvided
 
 	if err := setComponentOverride(result, slinkySlurmComponentName,
-		map[string]any{"accounting": map[string]any{accountingEnabledOverrideKey: accountingEnabled}}); err != nil {
+		map[string]any{"accounting": map[string]any{componentEnabledOverrideKey: accountingEnabled}}); err != nil {
 		return err
 	}
 	if accountingEnabled {
@@ -475,7 +474,6 @@ func requireAccountingComponentEnabled(
 	component string,
 	mode AccountingMode,
 ) error {
-
 	ref := result.GetComponentRef(component)
 	if ref == nil {
 		return errors.New(errors.ErrCodeInvalidRequest,
