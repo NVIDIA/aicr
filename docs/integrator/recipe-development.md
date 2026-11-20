@@ -502,6 +502,8 @@ land later; none is implied by Preview alone.
 | `nvke / gb300 / ubuntu / training / kubeflow` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: adds Kubeflow Trainer to the training leaf; no evidence collected yet |
 | `nvke / gb300 / ubuntu / inference` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: the Dynamo leaf's run covers its components; no external LoadBalancer, so the gateway is in-cluster only |
 | `nvke / gb300 / ubuntu / inference / dynamo` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: validated on hardware from this leaf's own bundle; signed evidence to follow |
+| `nvke / gb10 / ubuntu / training` | none yet | pending: deployment and conformance validated on one DGX Spark; no performance phase until two Sparks are linked over ConnectX-7 |
+| `nvke / gb10 / ubuntu / training / kubeflow` | none yet | pending: adds Kubeflow Trainer to the training leaf; validated in the same run |
 | `eks / h100 / ubuntu / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 | `gke / h100 / cos / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 

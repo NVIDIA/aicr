@@ -979,7 +979,7 @@ components:
       description: GPU/accelerator type.
       schema:
         type: string
-        enum: [h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
+        enum: [h100, h200, gb10, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
         default: any
     GPUAlias:
       name: gpu
@@ -988,7 +988,7 @@ components:
       description: Backward-compatible alias for accelerator.
       schema:
         type: string
-        enum: [h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
+        enum: [h100, h200, gb10, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
         default: any
     Intent:
       name: intent
@@ -1452,7 +1452,7 @@ components:
         accelerator:
           type: string
           description: GPU/accelerator type
-          enum: [h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
+          enum: [h100, h200, gb10, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
           example: h100
         intent:
           type: string

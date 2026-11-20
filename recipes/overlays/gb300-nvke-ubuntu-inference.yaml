@@ -40,6 +40,10 @@ spec:
     os: ubuntu
     intent: inference
 
+  mixins:
+    # NVKE trays expose ConnectX-7 rails.
+    - nvsentinel-nic-health-monitor
+
   # No os-ubuntu mixin: it pins VERSION_ID 24.04 / kernel >= 6.8, while GB300
   # on NVKE runs Ubuntu 26.04 on a 7.0.0-*-nvidia-64k arm64 kernel. Restated
   # from nvke for K8s: snapshot resolution checks a leaf's own constraints, and
