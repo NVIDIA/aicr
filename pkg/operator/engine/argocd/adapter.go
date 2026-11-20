@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -35,6 +36,7 @@ import (
 	"sigs.k8s.io/structured-merge-diff/v6/typed"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/defaults"
 	operrors "aicr.run/pkg/operator/errors"
 	"aicr.run/pkg/operator/plan"
 )
@@ -872,6 +874,39 @@ func (a *Adapter) Foreign(ctx context.Context, runtimeUID string) (map[string][]
 		sort.Strings(names)
 	}
 	return foreign, nil
+}
+
+// Unowned returns, sorted, those of names that are Applications without this
+// runtime's ownership, which Ensure never writes. It reads each one through
+// the uncached reader; a name with no Application is not listed.
+func (a *Adapter) Unowned(ctx context.Context, runtimeUID string, names []string) ([]string, error) {
+	unowned := make([]bool, len(names))
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(defaults.EngineReadConcurrency)
+	for k, name := range names {
+		g.Go(func() error {
+			live, err := a.get(ctx, name)
+			switch {
+			case apierrors.IsNotFound(err):
+				return nil
+			case err != nil:
+				return err
+			}
+			unowned[k] = !a.owned(live, runtimeUID)
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	var out []string
+	for k, name := range names {
+		if unowned[k] {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // Adopt moves one Application from runtime fromUID to toUID: it rewrites
