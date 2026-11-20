@@ -714,8 +714,7 @@ func (r *RolloutReconciler) create(ctx context.Context, rt *v1alpha1.ClusterRunt
 			if !operrors.IsPermanent(err) {
 				return err
 			}
-			// Without the active plan nothing is verified and removals
-			// follow the inventory.
+			// Without the active plan nothing is verified.
 			from = nil
 		}
 	}
@@ -787,7 +786,7 @@ func (r *RolloutReconciler) create(ctx context.Context, rt *v1alpha1.ClusterRunt
 // for releases the inventory lacks and upgrades for the others, where a
 // readiness release that is unchanged while its parent changes is a Verify
 // that re-runs its gate; then removals of releases the target plan lacks,
-// in reverse order of the active plan, each bound to the object's UID.
+// in removalOrder, each bound to the object's UID.
 func steps(p, from *plan.Document, inventory []argocd.InventoryItem) []v1alpha1.RolloutStep {
 	live := map[string]bool{}
 	for _, i := range inventory {
@@ -813,30 +812,63 @@ func steps(p, from *plan.Document, inventory []argocd.InventoryItem) []v1alpha1.
 		}
 		out = append(out, step)
 	}
-	var removed []argocd.InventoryItem
-	for _, i := range inventory {
+	for _, i := range removalOrder(from, inventory) {
 		if release(p, i.ReleaseID) == nil {
-			removed = append(removed, i)
+			out = append(out, v1alpha1.RolloutStep{Release: i.ReleaseID, Operation: v1alpha1.OperationRemove,
+				Assessment: v1alpha1.AssessmentNotApplicable, UID: i.UID})
 		}
 	}
-	// Reverse active-plan order; releases the active plan lacks go first,
-	// in reverse inventory order.
-	position := func(id string) int {
-		if from != nil {
-			for k := range from.Releases {
-				if from.Releases[k].ID == id {
-					return k
-				}
+	return out
+}
+
+// removalOrder is the order the inventory's objects would be removed in:
+// each before every object its Application follows, directly or through
+// others. It is the reverse of an install order that takes the active
+// plan's releases in its order, then the rest in inventory order, and
+// places each object after those it follows. It never fails: a followed
+// release the inventory lacks orders nothing, and a cycle is cut where it
+// closes.
+func removalOrder(from *plan.Document, inventory []argocd.InventoryItem) []argocd.InventoryItem {
+	position := map[string]int{}
+	if from != nil {
+		for k := range from.Releases {
+			position[from.Releases[k].ID] = k
+		}
+	}
+	order := make([]int, len(inventory))
+	byRelease := make(map[string][]int, len(inventory))
+	for k := range inventory {
+		order[k] = k
+		byRelease[inventory[k].ReleaseID] = append(byRelease[inventory[k].ReleaseID], k)
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, listedA := position[inventory[order[i]].ReleaseID]
+		b, listedB := position[inventory[order[j]].ReleaseID]
+		if listedA && listedB {
+			return a < b
+		}
+		return listedA && !listedB
+	})
+	out := make([]argocd.InventoryItem, 0, len(inventory))
+	placed, visiting := make([]bool, len(inventory)), make([]bool, len(inventory))
+	var place func(k int)
+	place = func(k int) {
+		if placed[k] || visiting[k] {
+			return
+		}
+		visiting[k] = true
+		for _, id := range inventory[k].Follows {
+			for _, dep := range byRelease[id] {
+				place(dep)
 			}
 		}
-		return len(inventory)
+		visiting[k], placed[k] = false, true
+		out = append(out, inventory[k])
 	}
-	slices.Reverse(removed)
-	sort.SliceStable(removed, func(i, j int) bool { return position(removed[i].ReleaseID) > position(removed[j].ReleaseID) })
-	for _, i := range removed {
-		out = append(out, v1alpha1.RolloutStep{Release: i.ReleaseID, Operation: v1alpha1.OperationRemove,
-			Assessment: v1alpha1.AssessmentNotApplicable, UID: i.UID})
+	for _, k := range order {
+		place(k)
 	}
+	slices.Reverse(out)
 	return out
 }
 

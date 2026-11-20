@@ -373,6 +373,10 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 	}
 	opts.ComponentPreManifests = filteredPreManifests
 
+	if err := rejectBundleTimeDynamicPaths(opts); err != nil {
+		return WriteResult{}, err
+	}
+
 	// Fail fast if the layout's three-digit prefix can't accommodate the
 	// number of NNN-* folders this bundle will actually emit; a worst-case
 	// 3x bound would reject valid 500-component bundles whose components
@@ -683,6 +687,34 @@ func splitDynamicPaths(values map[string]any, dynamicPaths []string) valueSplit 
 		component.SetValueByPath(dynamic, path, val)
 	}
 	return valueSplit{static: static, dynamic: dynamic}
+}
+
+// rejectBundleTimeDynamicPaths fails when a component whose primary folder is
+// a local chart (manifest-only or kustomize) declares dynamic paths. Its
+// templates are rendered when the bundle is built, so a value supplied through
+// cluster-values.yaml at install time reaches no template and is silently
+// dropped (#3881). The argocd-helm deployer rejects the same shape (#1949).
+func rejectBundleTimeDynamicPaths(opts Options) error {
+	for _, c := range opts.Components {
+		if len(c.DynamicPaths) == 0 {
+			continue
+		}
+		if classify(c, opts.ComponentPostManifests[c.Name]) != KindLocalHelm {
+			continue
+		}
+		paths := strings.Join(c.DynamicPaths, ", ")
+		if c.Tag != "" || c.Path != "" {
+			// Component values do not reach a kustomize build, so --set is
+			// no remedy here either.
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("--dynamic is not supported for Kustomize component %q (paths: %s): its manifests come from a kustomize build when the bundle is built, which component values do not reach; change the setting in the Kustomize source instead",
+					c.Name, paths))
+		}
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("--dynamic is not supported for component %q (paths: %s): its manifests are rendered when the bundle is built, so an install-time value reaches no template; set the value at bundle time instead, with --set, --set-json, or the node scheduling flags such as --system-node-selector and --system-node-toleration",
+				c.Name, paths))
+	}
+	return nil
 }
 
 // classify determines the primary folder kind for a component.
