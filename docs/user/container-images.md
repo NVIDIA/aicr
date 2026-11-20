@@ -28,7 +28,7 @@ The catalog lists the driver version that the default chart render carries. Vers
 ## Summary
 
 - Components: **59**
-- Unique images: **142**
+- Unique images: **143**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -76,7 +76,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nfd-ocp-olm | manifest | — | — | 0 |
 | nktp | helm | nktp | 0.2.0 | 8 |
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
-| nodewright-customizations | manifest | — | — | 6 |
+| nodewright-customizations | manifest | — | — | 7 |
 | nodewright-operator | helm | nodewright | v0.21.0 | 2 |
 | nvcre | helm | cluster-readiness-engine | v0.12.0 | 5 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
@@ -318,10 +318,10 @@ _No images extracted._
 ### nktp
 
 - `busybox:latest`
+- `docker.io/grafana/otel-lgtm:0.38.0`
+- `docker.io/otel/opentelemetry-collector-k8s:0.164.0`
 - `ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator:0.161.0`
 - `ghcr.io/open-telemetry/opentelemetry-operator/target-allocator:0.161.0`
-- `grafana/otel-lgtm:0.38.0`
-- `otel/opentelemetry-collector-k8s:0.164.0`
 - `quay.io/prometheus/node-exporter:v1.12.1`
 - `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0`
 - `registry.k8s.io/kubectl:v1.35.10`
@@ -336,6 +336,7 @@ _No images extracted._
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.3.0@sha256:f17c951d60b519d097c20a3d9f49668f043a996adb31b9bb4db24a112a8f60a2`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.11.0@sha256:38e56b645a6e3234904e813c81b80dd79db3ba87721609eb6b6f452672b8a40a`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.11.1@sha256:d70ce00c80181d8fdeab29941a8370aced758aa6a9db9afdc5c095b6a142032a`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.11.2@sha256:7f4e0fa73dd935f391d404b6cdb48fec50c21853a5c2bb09fe89fc8e55f89083`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1@sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf`
 
