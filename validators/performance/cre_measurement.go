@@ -309,16 +309,34 @@ func certificationWorkflowName(obj *unstructured.Unstructured, domain, variant s
 		fmt.Sprintf("Certification %s/%s category status not found", domain, variant))
 }
 
-func listMaxBusBandwidth(ctx context.Context, client dynamic.Interface, namespace, workflowName string, createdAt metav1.Time) (float64, error) {
+// creBandwidthReading is what a run's finalized BandwidthMeasurements recorded.
+// Transports is CRE's own record of the NCCL "Using network <name>" banners it
+// parsed from the launcher log while the run was live, sorted and distinct.
+type creBandwidthReading struct {
+	MaxBusGBps float64
+	Transports []string
+}
+
+func readCREBandwidth(
+	ctx context.Context,
+	client dynamic.Interface,
+	namespace, workflowName string,
+	createdAt metav1.Time,
+) (creBandwidthReading, error) {
+
 	measurements, err := waitForFinalMeasurements(
 		ctx, client, bandwidthMeasurementGVR, namespace, workflowName, "BandwidthMeasurement", createdAt,
 	)
 	if err != nil {
-		return 0, err
+		return creBandwidthReading{}, err
 	}
 	var maxBW float64
 	var found bool
+	transports := make(map[string]struct{})
 	for _, obj := range measurements {
+		for _, name := range measurementTransports(obj) {
+			transports[name] = struct{}{}
+		}
 		results, _, _ := unstructured.NestedSlice(obj.Object, "status", "results")
 		bw, err := maxBusBandwidthGBps(results)
 		if err != nil {
@@ -333,7 +351,7 @@ func listMaxBusBandwidth(ctx context.Context, client dynamic.Interface, namespac
 				slog.Debug("skipping BandwidthMeasurement without results", "name", obj.GetName(), "error", err)
 				continue
 			}
-			return 0, aicrErrors.WrapWithContext(creErrorCode(err),
+			return creBandwidthReading{}, aicrErrors.WrapWithContext(creErrorCode(err),
 				"BandwidthMeasurement "+obj.GetName()+" carries an unusable busBW", err,
 				map[string]any{"measurement": obj.GetName()})
 		}
@@ -343,9 +361,31 @@ func listMaxBusBandwidth(ctx context.Context, client dynamic.Interface, namespac
 		}
 	}
 	if !found {
-		return 0, aicrErrors.New(aicrErrors.ErrCodeNotFound, "no BandwidthMeasurement with busBW results")
+		return creBandwidthReading{}, aicrErrors.New(aicrErrors.ErrCodeNotFound, "no BandwidthMeasurement with busBW results")
 	}
-	return maxBW, nil
+	names := make([]string, 0, len(transports))
+	for name := range transports {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return creBandwidthReading{MaxBusGBps: maxBW, Transports: names}, nil
+}
+
+// measurementTransports returns the NCCL network names CRE recorded on a
+// measurement's status.transport. A missing or malformed field reads as empty,
+// which the transport assertion treats as no evidence rather than as a pass.
+func measurementTransports(obj *unstructured.Unstructured) []string {
+	raw, found, err := unstructured.NestedSlice(obj.Object, "status", "transport")
+	if err != nil || !found {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if name, ok := item.(string); ok && name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func measurementBelongsToRun(obj *unstructured.Unstructured, runName string, createdAt metav1.Time) bool {
