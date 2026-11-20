@@ -1,0 +1,193 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Reusable workflow that runs the release checks on each platform of the seven
+# AICR release images: vulnerabilities, malware and secrets
+# (.github/actions/image-checks). Each candidate is pulled by its index digest
+# from the digest map resolve-candidates produced, so the bytes checked are
+# the bytes promoted. Grype reads the same digest from the registry, as the
+# weekly scan does, because OpenVEX statements name the product by its
+# registry repository. check-operator.yaml does the same for the operator's
+# two images, from the candidate's local layouts.
+#
+# A reusable workflow, like attest-images.yaml, so the checks run under one
+# workflow identity that callers cannot change.
+#
+# One job downloads the ClamAV signature database and every check reads that
+# copy, so all fourteen scans record the same database revision and the
+# signature mirror sees one download rather than fourteen.
+
+name: Check Images (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      digest_map:
+        description: 'Canonical seven-image candidate digest map'
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  validate-inputs:
+    name: Validate Check Inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      digest_map: ${{ steps.validate.outputs.digest_map }}
+    steps:
+      - name: Validate inputs
+        id: validate
+        env:
+          INPUT_DIGEST_MAP: ${{ inputs.digest_map }}
+        run: |
+          set -euo pipefail
+          canonical="$(jq -cS -e '
+            if (
+              type == "object" and
+              keys == ["aicr", "aicrd", "aiperf-bench", "conformance", "deployment", "gate", "performance"] and
+              all(.[]; type == "string" and length == 71 and test("^sha256:[0-9a-f]{64}$"))
+            ) then .
+            else error("invalid digest map")
+            end
+          ' <<<"${INPUT_DIGEST_MAP}")" || {
+            echo "::error::digest_map must contain exactly the seven fixed digests"
+            exit 1
+          }
+          if [[ "${INPUT_DIGEST_MAP}" != "${canonical}" ]]; then
+            echo "::error::digest_map must be compact canonical JSON"
+            exit 1
+          fi
+          echo "digest_map=${canonical}" >> "$GITHUB_OUTPUT"
+
+  clamav-database:
+    name: ClamAV Signature Database
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      artifact: ${{ steps.name.outputs.artifact }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the signature database
+        uses: ./.github/actions/clamav-database
+        with:
+          directory: ${{ runner.temp }}/clamav-db
+
+      # The name carries the attempt that produced it and reaches the checks as
+      # a job output, so a rerun of failed checks reads this copy.
+      - name: Name the database artifact
+        id: name
+        run: echo "artifact=clamav-db-images-attempt-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the signature database
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: ${{ steps.name.outputs.artifact }}
+          path: ${{ runner.temp }}/clamav-db
+          if-no-files-found: error
+          # A failed check can be rerun for 30 days.
+          retention-days: 30
+
+  check:
+    name: Check ${{ matrix.image.key }}/${{ matrix.platform.arch }}
+    runs-on: ubuntu-24.04
+    needs: [validate-inputs, clamav-database]
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - key: aicr
+            ref: ghcr.io/nvidia/aicr
+          - key: aicrd
+            ref: ghcr.io/nvidia/aicrd
+          - key: deployment
+            ref: ghcr.io/nvidia/aicr-validators/deployment
+          - key: performance
+            ref: ghcr.io/nvidia/aicr-validators/performance
+          - key: conformance
+            ref: ghcr.io/nvidia/aicr-validators/conformance
+          - key: aiperf-bench
+            ref: ghcr.io/nvidia/aicr-validators/aiperf-bench
+          - key: gate
+            ref: ghcr.io/nvidia/aicr-gate
+        platform:
+          - name: linux/amd64
+            arch: amd64
+          - name: linux/arm64
+            arch: arm64
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Setup crane
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_crane: 'true'
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      # Pulled by digest, so the registry cannot substitute other bytes; the
+      # unpack step checks the layout against the same digest.
+      - name: Pull the candidate
+        env:
+          IMAGE: ${{ matrix.image.ref }}
+          DIGEST: ${{ fromJSON(needs.validate-inputs.outputs.digest_map)[matrix.image.key] }}
+          LAYOUT: ${{ runner.temp }}/layout
+        run: |
+          set -euo pipefail
+          timeout --foreground 600s crane pull --format=oci "${IMAGE}@${DIGEST}" "${LAYOUT}"
+          root="$(jq -cr '[.manifests[].digest]' "${LAYOUT}/index.json")"
+          if [[ "${root}" != "[\"${DIGEST}\"]" ]]; then
+            echo "::error::pulled layout holds ${root}, want [${DIGEST}]"
+            exit 1
+          fi
+
+      - name: Download the signature database
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: ${{ needs.clamav-database.outputs.artifact }}
+          path: ${{ runner.temp }}/clamav-db
+
+      - name: Check ${{ matrix.image.key }} ${{ matrix.platform.name }}
+        uses: ./.github/actions/image-checks
+        with:
+          key: ${{ matrix.image.key }}
+          image: ${{ matrix.image.ref }}
+          layout: ${{ runner.temp }}/layout
+          index: ${{ fromJSON(needs.validate-inputs.outputs.digest_map)[matrix.image.key] }}
+          platform: ${{ matrix.platform.name }}
+          clamav_database: ${{ runner.temp }}/clamav-db
+          grype_source: registry
