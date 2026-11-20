@@ -127,8 +127,12 @@ single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`,
 `tuning-gb300.yaml`) it suppresses the whole tuning CR, since the tuning
 package is that CR's only content. On `tuning-rke2.yaml` it does the same
 unless the RDMA package below is enabled. On `tuning-oke-gb300.yaml` it drops
-`nvidia-tuned` and keeps the CR with the CRI-O package described below. No recipe sets it outside AKS today, so default renderings are unchanged
-elsewhere.
+`nvidia-tuned` and keeps the CR with the CRI-O package described below. That
+also drops the RDMA VF gate, and nothing else on OKE GB300 holds kubelet for
+the VFs: with tuning off, the host image must provide that hold, or the SR-IOV
+device plugin can scan before the VFs settle and advertise fewer
+`nvidia.com/mlnxnics` than the node has. No recipe sets it outside AKS today,
+so default renderings are unchanged elsewhere.
 
 `tuning-rke2.yaml` also carries an optional `rdma-netns-exclusive` package,
 gated by `rdmaNetnsExclusive` (default `false`; only an explicit `true`
