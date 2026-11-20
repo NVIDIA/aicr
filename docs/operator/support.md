@@ -76,8 +76,9 @@ published evidence.
 ### Evidence on a running cluster
 
 With `spec.validation.deployment: Required`, each rollout runs AICR's
-deployment validation once and, when it passes, records the evidence reference
-on the rollout:
+deployment validation and, when it passes, records the evidence reference on
+the rollout. A run AICR could not finish is run again; only the last run's
+evidence is recorded:
 
 ```shell
 kubectl get runtimerollouts -l operator.aicr.run/outcome=Succeeded \

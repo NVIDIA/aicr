@@ -374,7 +374,7 @@ func waitingFor(rt *v1alpha1.ClusterRuntime) *resolution {
 func (w *resolution) retrying(st *stages) *resolution {
 	switch {
 	case st.retrying != "":
-		w.message = "retrying after a transient failure: " + st.retrying
+		w.message = retryingNote + st.retrying
 	case st.waiting != "":
 		// A pod that cannot start is named, not reported as running.
 		w.message += "; " + st.waiting

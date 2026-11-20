@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,10 +68,11 @@ const (
 	approvalBypassed    = "Bypassed"
 )
 
-// validationRuns counts finished validation runs by result.
+// validationRuns counts the rollouts whose validation finished, by result;
+// a run that is retried counts in aicrJobRuns only.
 var validationRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Name: "aicr_operator_validation_runs_total",
-	Help: "Finished deployment validation runs, by result.",
+	Help: "Rollouts whose deployment validation finished, by result; runs that were retried are not counted.",
 }, []string{labelResult})
 
 // EvidenceRegistry is what deployment validation needs from the runtime
@@ -138,9 +140,11 @@ func (r *RolloutReconciler) validate(ctx context.Context, rt *v1alpha1.ClusterRu
 	repo := r.Config.Registry().Child("evidence/" + rt.Name)
 	run := &stageRun{
 		stage: aicrjob.StageValidation, input: input, serviceAccount: r.Config.ValidationServiceAccount,
-		// A failed run fails the rollout; a retry is a new rollout.
-		maxRuns:  1,
-		deadline: ro.Spec.Deadline.Sub(r.Now()),
+		// A transient exit is AICR failing to finish the run, evidence
+		// included, not a verdict on the cluster, so it is run again; any
+		// other failed run fails the rollout, and a retry is a new rollout.
+		transientOnly: true,
+		deadline:      ro.Spec.Deadline.Sub(r.Now()),
 		args: func(req *aicrjob.Request) ([]string, error) {
 			return aicrjob.ValidationArgs(req, &aicrjob.Validation{
 				AICRVersion: r.Config.AICRVersion, Evidence: repo.URI() + ":" + runTag(req.RunID),
@@ -165,27 +169,36 @@ func (r *RolloutReconciler) validate(ctx context.Context, rt *v1alpha1.ClusterRu
 	if err != nil {
 		return err
 	}
-	if len(jobs) == 0 {
-		if runErr != nil {
-			// The run could not be created: nothing ran, nothing was pushed.
-			ro.Status.Validation = &v1alpha1.ValidationStatus{Result: resultFailed}
-			return r.failValidation(ctx, ro, "", "deployment validation could not run: "+errorMessage(runErr))
-		}
-		v.requeue = pollInterval
-		return r.saveStatus(ctx, ro, "")
+	if runErr != nil && (len(jobs) == 0 || st.notStarted) {
+		// A run could not be started: it pushed nothing, and an earlier
+		// run's evidence is not this failure's.
+		ro.Status.Validation = &v1alpha1.ValidationStatus{Result: resultFailed}
+		return r.failValidation(ctx, ro, "", "deployment validation could not run: "+errorMessage(runErr))
 	}
-	newest := &jobs[0]
+	// A run that succeeded is the one recorded and bound, even if it has
+	// since left the listing, where an earlier run that was retried may now
+	// come first.
+	newest := job
+	if newest == nil {
+		if len(jobs) == 0 {
+			v.requeue = pollInterval
+			return r.saveStatus(ctx, ro, "")
+		}
+		newest = &jobs[0]
+	}
 	ro.Status.Validation = &v1alpha1.ValidationStatus{Job: newest.Name, RunID: newest.Labels[v1alpha1.LabelRunID], Result: resultPending}
 	if job == nil && runErr == nil {
+		var message string
+		message, v.reconcilingMessage = validationProgress(st, newest)
 		v.requeue = wait
-		return r.saveStatus(ctx, ro, "deployment validation run "+ro.Status.Validation.RunID+" in progress"+detail(st.waiting))
+		return r.saveStatus(ctx, ro, message)
 	}
 	b := &binding{rt: rt, ro: ro, plan: p, recipeName: recipe.EvidenceName(), repo: repo, job: newest,
 		runID: ro.Status.Validation.RunID, snapshot: snapshot.Digest}
 	if runErr != nil {
 		// A failed run still pushes the evidence of what did not pass.
 		ref, _, bindErr := r.bind(ctx, b)
-		message := "deployment validation failed: " + errorMessage(runErr)
+		message := validationFailure(newest, runErr)
 		switch {
 		case bindErr == nil:
 		case operrors.CodeOf(bindErr) == operrors.ErrCodeNotFound:
@@ -207,6 +220,28 @@ func (r *RolloutReconciler) validate(ctx context.Context, rt *v1alpha1.ClusterRu
 	}
 	ro.Status.Validation.Result, ro.Status.Validation.Evidence = resultPassed, ref
 	return r.finishWith(ctx, ro, v1alpha1.PhaseSucceeded, "", map[string]string{v1alpha1.AnnotationEvidence: ref})
+}
+
+// validationProgress is the rollout's message while its newest validation
+// run has no result, and what that run waits on: the next run, when it
+// failed and waits out its backoff, or its pod.
+func validationProgress(st *stages, newest *batchv1.Job) (message, waitingOn string) {
+	run := "deployment validation run " + newest.Labels[v1alpha1.LabelRunID]
+	// The newest run is the failed one until its backoff passes and the next
+	// starts.
+	if st.retrying != "" && !failedAt(newest).IsZero() {
+		return run + " failed; " + st.waitingOn(), st.waitingOn()
+	}
+	return run + " in progress" + detail(st.waiting), st.waiting
+}
+
+// validationFailure is the rollout's message for the failed run that ends
+// it, with the number of runs when earlier ones were retried.
+func validationFailure(newest *batchv1.Job, runErr error) string {
+	if runs := attempt(newest); runs > 1 {
+		return "deployment validation failed after " + strconv.Itoa(runs) + " runs: " + errorMessage(runErr)
+	}
+	return "deployment validation failed: " + errorMessage(runErr)
 }
 
 // failValidation ends the rollout Failed, recording the evidence a failed
@@ -519,7 +554,8 @@ func (r *RolloutReconciler) awaitSnapshot(ctx context.Context, rt *v1alpha1.Clus
 		return nil, err
 	case snapshot == nil:
 		v.requeue = wait
-		return nil, r.saveStatus(ctx, ro, "taking the deployment snapshot"+detail(st.waiting))
+		v.reconcilingMessage = st.waitingOn()
+		return nil, r.saveStatus(ctx, ro, "taking the deployment snapshot"+detail(st.waitingOn()))
 	}
 	return snapshot, nil
 }

@@ -374,7 +374,11 @@ func TestRolloutAssessmentFailures(t *testing.T) {
 		got := getRuntime(t, ctx)
 		reason := cond(got, v1alpha1.ConditionStalled).Reason
 		if want == ReasonAssessing {
-			reason = cond(got, v1alpha1.ConditionReconciling).Reason
+			reconciling := cond(got, v1alpha1.ConditionReconciling)
+			reason = reconciling.Reason
+			if !strings.Contains(reconciling.Message, "retrying after a transient failure") {
+				t.Errorf("assessment exiting %d: Reconciling message %q does not report the retry", exit, reconciling.Message)
+			}
 		}
 		if reason != want || len(engine.order) != 0 {
 			t.Fatalf("assessment exiting %d: reason %q, engine writes %v", exit, reason, engine.order)

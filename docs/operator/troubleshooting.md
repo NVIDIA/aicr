@@ -90,6 +90,10 @@ kubectl logs -n aicr-jobs "job/<job>"
 | none (deadline, a pod that never started) | `AICRTimeout` | Three runs for the same input, then stalled. A pod evicted by a drain or node repair is replaced within the run and spends nothing. The message keeps the last reason the pod was not running (`last: Job <name> is not scheduled: …`) |
 | none (`InvalidImageName`, `CreateContainerConfigError`) | `AICRInvalidRequest` | Not retried: the cluster can never start the container as configured. Fix the AICR image reference or the missing configuration, then request a snapshot |
 
+Deployment validation is stricter: it is run at most three times, and only
+after exits 5, 6, 7 or 9. Any other failed run ends the rollout
+([Validation](#validation)).
+
 While a run waits, the runtime's message names its Job and why its pod is
 not running, instead of `AICR Jobs are running`:
 `Job <name> is not scheduled: 0/9 nodes are available: …` (taints, node
@@ -406,7 +410,23 @@ rollout is in `Validating`:
 | --- | --- |
 | `deployment validation is not installed (validation.enabled)` | Install the validation identities (`validation.enabled: true` with `aicr.validatorImages`) or set `spec.validation.deployment: Disabled`. The runtime stalls before any step; a rollout created while validation was installed stalls in `Validating` |
 | `plan <digest> records no recipe to validate against` | The rollout targets a plan rebuilt from Applications and was created by an operator that predates `PlanWithoutRecipe`; set `Disabled` for this rollout, or roll to a resolved plan. Current operators refuse such a rollout before any step |
-| `taking the deployment snapshot` (rollout message, not a stall) | Validation waits for the snapshot the rollout takes after its last step; it runs in `aicr-discovery` like discovery's. If it fails, the rollout ends `Failed` with `the deployment snapshot failed: <cause>`: fix the cause as for a discovery snapshot, then retry |
+| `taking the deployment snapshot` (rollout message, not a stall) | Validation waits for the snapshot the rollout takes after its last step; it runs in `aicr-discovery` like discovery's. The message continues with `; retrying after a transient failure: <cause>` while a failed run waits for its next one. If it fails, the rollout ends `Failed` with `the deployment snapshot failed: <cause>`: fix the cause as for a discovery snapshot, then retry |
+
+**Validation is retried.** A transient exit (5, 6, 7 or 9: timeout,
+unavailable, rate limited, canceled) means AICR could not finish the run, not
+that the cluster failed it. That includes a run whose checks finished, pass
+or fail, but whose evidence could not be pushed or signed. The rollout runs
+validation again after a backoff of 10 or 20 seconds, without a new approval.
+It stays `Validating`, and its message reads
+`deployment validation run <id> failed; retrying after a transient failure: <cause>`.
+The runtime's `Reconciling` message carries the same cause.
+Validation is run at most three times: a third transient exit ends the
+rollout `Failed` with `deployment validation failed after 3 runs`, and any
+other failed run ends it on that run. An earlier run's Job is deleted as later
+runs start, and all of them when the rollout ends; each failed run stays as an
+`AICRRunFailed` Event on the runtime. Retries lengthen `Validating`, never
+past `spec.rollout.deadline`: each run is bounded by the hour a validation
+Job is allowed and by the time the rollout has left.
 
 **Validation failed.** The rollout ends `Failed`. AICR exits 8 when checks
 fail, after pushing their evidence, and 2 when it refuses the recipe or its

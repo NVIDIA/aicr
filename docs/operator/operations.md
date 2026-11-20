@@ -22,7 +22,7 @@ kubectl get configmaps -n aicr-system -l operator.aicr.run/role=plan
 | --- | --- | --- |
 | `Ready` | The target plan is rolled out, every release is ready at its current revision, and the rollout passed deployment validation when required | `RolledOut`; `ValidationDisabled` when `spec.validation.deployment` is `Disabled`. Not ready: `RollingOut`, `NotReady`, `NoActivePlan`, `Paused`, `EngineSuspended`, `EngineSuspensionRefused`, an engine reason, `PlanUnreadable`, `Deleting`. During a rollout, `RollingOut` names it and its progress: `rollout <name>: step 9/18 gpu-operator (Upgrade)`, `rollout <name> awaiting approval`, `rollout <name>: deployment validation run <id>` or `rollout <name> stalled: <message>`; before it exists, `the target plan is not rolled out yet`, with `; its stabilization window has not passed` while it stabilizes |
 | `Available` | Every release of the active plan is ready | `Healthy`; not: `NotReady`, `NoActivePlan`. The message names the release that is not ready and why, as `release <id>: <reason>`. During a rollout, a release it already moved is checked at the rollout's target plan, one it is removing no longer counts, and the step in flight counts only once it fails. While the engine is suspended, `Available` reports `NotReady` whatever the stack's health |
-| `Reconciling` | Work is in progress | `Resolving`, `Stabilizing`, `Assessing`, `RollingOut`, `Validating`. `False` with `RolledOut` only means nothing is in progress: it is also reported while paused or stalled |
+| `Reconciling` | Work is in progress | `Resolving`, `Stabilizing`, `Assessing`, `RollingOut`, `Validating`. While `Assessing` or `Validating`, the message is set when an AICR Job waits: why its pod is not running, or `retrying after a transient failure: <cause>`. `False` with `RolledOut` only means nothing is in progress: it is also reported while paused or stalled |
 | `Stalled` | Progress needs you; the reason says why ([troubleshooting](troubleshooting.md)) | `Progressing` when not stalled |
 | `Resolved` | A plan exists for the current inputs | `Resolved`; `Resolving` while AICR Jobs run or a transient failure is retried; otherwise a terminal reason |
 | `EngineAvailable` | Argo CD's CRDs and the project are present and, with the `aws` registry provider, the registry token is fresh | `EngineMissing`, `ProjectMissing`, `RegistryCredentialsStale`. When minting a new ECR token fails while `True`, the message names the failure and whether the operator still holds a token it can use |
@@ -100,7 +100,7 @@ scrape the operator from your own. Otherwise scrape the pod, or port-forward
 | --- | --- |
 | `aicr_operator_rollout_outcomes_total{outcome}` | Rollouts ended, by outcome |
 | `aicr_operator_job_duration_seconds{stage,result}` | AICR Job durations by stage and result |
-| `aicr_operator_validation_runs_total{result}` | Deployment validation runs by result |
+| `aicr_operator_validation_runs_total{result}` | Rollouts whose deployment validation finished, by result. A run that is retried is not counted here; it is in `aicr_operator_job_runs_total` with class `transient` |
 | `aicr_operator_job_runs_total{stage,result,class}` | AICR runs when first seen finished, by stage, result and, for failures, retry class (`never`, `bounded`, `transient`, `authorization`) |
 | `aicr_operator_registry_token_expiry_timestamp_seconds`, `aicr_operator_registry_token_refresh_timestamp_seconds` | When the Argo CD registry token expires and when the operator last refreshed it, as Unix times (`aws` provider); `0` until known. Only the leader refreshes the token, so a standby replica stays at `0`: alert on `max()` across operator pods |
 | `aicr_operator_registry_token_mint_failures_total` | Failed ECR token mints since the operator started (`aws` provider), including those it rode out on a still-valid token |
@@ -189,8 +189,10 @@ groups:
    annotations record them. A `manual` release with recorded steps after the
    apply stops the rollout in `AwaitingAcknowledgement` until those steps are
    done and an approver runs `kubectl aicr acknowledge`.
-8. **Deployment validation** runs once when `spec.validation.deployment` is
-   `Required`, against a new snapshot taken after every step is ready.
+8. **Deployment validation** runs when `spec.validation.deployment` is
+   `Required`, against a new snapshot taken after every step is ready. It is
+   run again, at most three times in all, only when AICR could not finish a
+   run ([troubleshooting](troubleshooting.md#validation)).
 9. **The rollout succeeds** and its target becomes the active plan. The whole
    rollout must finish within `spec.rollout.deadline` (default 6 hours) of its
    creation.
