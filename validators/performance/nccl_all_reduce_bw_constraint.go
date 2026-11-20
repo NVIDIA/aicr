@@ -331,6 +331,7 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		// mpirun path) — see testdata/vr200/rke2/runtime-nvls.yaml.
 		recipe.CriteriaServiceRKE2:    {recipe.CriteriaAcceleratorVR200},
 		recipe.CriteriaServiceGeneric: {recipe.CriteriaAcceleratorGB300},
+		recipe.CriteriaServiceMistral: {recipe.CriteriaAcceleratorGB300},
 	},
 }
 
@@ -2011,7 +2012,7 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 			{Operator: v1.TolerationOpExists},
 			{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
 		}, nil
-	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS, recipe.CriteriaServiceGeneric, recipe.CriteriaServiceNVKE:
+	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS, recipe.CriteriaServiceGeneric, recipe.CriteriaServiceNVKE, recipe.CriteriaServiceMistral:
 		// These services share one shape: tainted GPU pools whose nodes carry
 		// GFD labels. Tolerate the pool taint and pin workers to the
 		// gpu.product label that resolveTargetGPUNodes → narrowByAccelerator

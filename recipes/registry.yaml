@@ -569,6 +569,7 @@ components:
         conditions:
           service:
             - generic
+            - mistral
             - oke
           accelerator:
             - gb300

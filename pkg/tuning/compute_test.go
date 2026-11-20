@@ -61,6 +61,7 @@ func TestCompute_Structure(t *testing.T) {
 		{"gke", "gb200", "-", "", "nvidia-tuning-gke"},
 		{"gke", "gb300", "gb200", "", "nvidia-tuning-gke"},
 		{"gke", "h100", "-", "", "nvidia-tuning-gke"},
+		{"mistral", "gb300", "-", "", "nvidia-tuned"},
 		// OKE leaves without a tuning manifest run only the OKE root's
 		// toolkit hardening (nvidia-setup oci-any). GB300 adds its own
 		// manifest, which carries nvidia-tuned and no nvidia-setup: the
