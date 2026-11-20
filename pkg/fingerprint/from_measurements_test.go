@@ -699,6 +699,42 @@ func TestDistinctLabelValuesDedupes(t *testing.T) {
 	}
 }
 
+func TestFromMeasurements_Mistral(t *testing.T) {
+	tests := []struct {
+		name, provider, labelKey, labelValue, wantService string
+	}{
+		{"mistral", "metal3", "mistralcompute.ai/node-pool", "gpu-pool1", "mistral"},
+		{"raw provider", "metal3://c834d919-ede8-49da-b6a2-19fd754d262d", "mistralcompute.ai/node-pool", "gpu-pool1", "mistral"},
+		{"plain metal3", "metal3", "topology.kubernetes.io/zone", "z1", "metal3"},
+		{"prefix collision", "metal3", "mistralcompute.ai/node-pool-extra", "gpu-pool1", "metal3"},
+		{"wrong provider", "eks", "mistralcompute.ai/node-pool", "gpu-pool1", "eks"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, topo := range []*measurement.Measurement{
+				topologyMeasurement(1, map[string]string{tt.labelKey: tt.labelValue + "|node1"}),
+				topologyItemsMeasurement(1, map[string][]string{tt.labelKey: {tt.labelValue}}, nil),
+			} {
+				for _, ms := range [][]*measurement.Measurement{
+					{k8sMeasurement("", tt.provider), topo}, {topo, k8sMeasurement("", tt.provider)},
+				} {
+					got := FromMeasurements(ms)
+					want := tt.wantService
+					if want == "metal3" && strings.HasPrefix(tt.provider, "metal3://") {
+						want = tt.provider
+					}
+					if got.Service.Value != want {
+						t.Errorf("fingerprint service = %+v, want %s", got.Service, want)
+					}
+					if tt.wantService == "mistral" && got.ToCriteria(nil).Service != "mistral" {
+						t.Errorf("criteria service = %s, want mistral", got.ToCriteria(nil).Service)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestFromMeasurements_MK8sB300(t *testing.T) {
 	tests := []struct {
 		name, provider, labelKey, labelValue, wantService string

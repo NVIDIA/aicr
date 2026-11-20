@@ -7,7 +7,8 @@
 GKE-second rollout; amended 2026-09-08 (#2512) to intersect, rather than
 reject, a profile constraint that tightens a composed version range;
 amended 2026-11-09 (#2517) to distribute that intersection over a composed
-expression's `||` alternatives.
+expression's `||` alternatives; amended 2026-11 (#3934) to let a value gate
+installation of a composed component through its root `install` key.
 
 Originated from an internal GKE device-plugin ownership discussion
 (2026-07-14) and
@@ -318,7 +319,11 @@ A profile fragment may reference only components **enabled in the
 pre-profile resolved composition** — checked at resolution time, when
 the surviving composition is known (catalog load cannot see snapshot
 exclusions). A profile changes how existing components are configured,
-never the component set — in either direction.
+never the component set — in either direction. A value may still decide
+whether a composed component is installed, through its root `install`
+key (see the
+[install-gated components](#amendment-install-gated-components-2026-11)
+amendment); the component stays in the set either way.
 
 A value-bearing fragment may reference only a **Helm** component.
 Kustomize deployment consumes source, path, and tag rather than Helm
@@ -349,6 +354,11 @@ values from smuggling the installation in. Packaging details
 (chart gating, ordering, installer idempotence, zero-render health
 semantics) are in
 [#1761](https://github.com/NVIDIA/aicr/issues/1761).
+
+When the component itself has no values gate (a chart that always renders
+its controller), the gate is the component's root `install` key, per the
+[install-gated components](#amendment-install-gated-components-2026-11)
+amendment.
 
 True component-*set* mutation (a fragment adding or removing registry
 components) remains a **future amendment**: no consumer requires it
@@ -1088,6 +1098,54 @@ The artifact gate now requires each `ownedPaths` entry to be non-empty
 instead of requiring `enabled`. Older binaries reject an artifact that uses
 the marker, which fails closed. The AKS profile keeps NVSentinel's presence
 locked ([#2181](https://github.com/NVIDIA/aicr/issues/2181)).
+
+### Amendment: install-gated components (2026-11)
+
+[#3934](https://github.com/NVIDIA/aicr/issues/3934) needs a value in which
+the provider installs a component the recipe otherwise installs. On Mistral
+Compute the provider's GPU Operator is a cluster-creation option: the
+default value expects it, and an opt-in value installs the recipe's own.
+The values-gated pattern above does not reach this case, because the GPU
+Operator chart always renders its controller, RBAC and CRDs, and two
+operators would reconcile the same `ClusterPolicy`.
+
+A fragment's `componentRefs` entry may assign the component's root
+`install` key, the deployment gate `ComponentRef.IsEnabled` already
+honours:
+
+- `install` is an ordinary owned path. Union totality applies, so every
+  value assigns it, and the synthetic `enabled` path stays owned.
+- The component must still be enabled in the surviving composition
+  (resolution step 4). A value can suppress a composed component, never
+  add one, so no addition or ordering semantics enter the fragment schema.
+- The presence lock follows the selected value. The hydrated recipe
+  records the component as not installed, and a bundle-time
+  `<component>:install=…` that diverges from it fails closed in both
+  directions.
+- `install` must be a bool and cannot be combined with `optional: true`:
+  an optional reference does not own presence.
+- Root `enabled` stays rejected in fragments.
+- A gated-off component contributes nothing to the #1327 closure, so a
+  value that gates off the operator advertiser declares
+  `advertiser: external`, as the existing exactly-one-advertiser rule
+  already requires.
+
+```yaml
+# recipes/overlays/gb300-mistral-ubuntu-training.yaml (excerpt)
+profile:
+  name: gpuStack
+  default: mistral-managed
+  values:
+    mistral-managed:          # provider installs the GPU Operator
+      advertiser: external
+      componentRefs:
+        - name: gpu-operator
+          overrides: {install: false}
+    operator-managed:         # the recipe installs it
+      componentRefs:
+        - name: gpu-operator
+          overrides: {install: true}
+```
 
 ### Artifact compatibility gate
 
