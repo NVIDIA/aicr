@@ -918,6 +918,121 @@ func TestSteps(t *testing.T) {
 	}
 }
 
+// Removals run dependents first, by what the live Applications follow, with
+// or without an active plan; the release IDs sort the other way.
+func TestStepsOrderRemovalsByLiveDependencies(t *testing.T) {
+	t.Parallel()
+	item := func(id string, follows ...string) argocd.InventoryItem {
+		return argocd.InventoryItem{ReleaseID: id, UID: "u-" + id, Follows: follows}
+	}
+	releases := func(ids ...string) *plan.Document {
+		doc := &plan.Document{}
+		for _, id := range ids {
+			doc.Releases = append(doc.Releases, plan.Release{ID: id})
+		}
+		return doc
+	}
+	tests := []struct {
+		name      string
+		to, from  *plan.Document
+		inventory []argocd.InventoryItem
+		want      []string
+	}{
+		{
+			name: "no active plan",
+			to:   releases(),
+			inventory: []argocd.InventoryItem{
+				item("cert-manager"), item("gpu-operator", "nfd", "cert-manager"), item("gpu-operator-readiness", "gpu-operator"),
+				item("kai-scheduler", "gpu-operator"), item("nfd"),
+			},
+			want: []string{"u-kai-scheduler", "u-gpu-operator-readiness", "u-gpu-operator", "u-nfd", "u-cert-manager"},
+		},
+		{
+			name:      "a release that stays still orders the removals around it",
+			to:        releases("kai-scheduler"),
+			inventory: []argocd.InventoryItem{item("dynamo", "kai-scheduler"), item("kai-scheduler", "nfd"), item("nfd")},
+			want:      []string{"u-dynamo", "u-nfd"},
+		},
+		{
+			name:      "the active plan orders its own releases, after the others",
+			to:        releases(),
+			from:      releases("cert-manager", "nfd"),
+			inventory: []argocd.InventoryItem{item("cert-manager"), item("dynamo", "kai-scheduler"), item("kai-scheduler"), item("nfd")},
+			want:      []string{"u-dynamo", "u-kai-scheduler", "u-nfd", "u-cert-manager"},
+		},
+		{
+			name:      "a release the inventory lacks orders nothing",
+			to:        releases(),
+			inventory: []argocd.InventoryItem{item("gpu-operator", "gone"), item("nfd")},
+			want:      []string{"u-nfd", "u-gpu-operator"},
+		},
+		{
+			name:      "a cycle is cut and every release still removed",
+			to:        releases(),
+			inventory: []argocd.InventoryItem{item("dynamo", "kai-scheduler"), item("kai-scheduler", "dynamo"), item("nfd")},
+			want:      []string{"u-nfd", "u-dynamo", "u-kai-scheduler"},
+		},
+		{
+			name:      "a baseline that lists a dependent before the release it follows",
+			to:        releases("cert-manager"),
+			from:      releases("cert-manager", "dynamo", "kai-scheduler"),
+			inventory: []argocd.InventoryItem{item("cert-manager"), item("dynamo", "kai-scheduler"), item("kai-scheduler")},
+			want:      []string{"u-dynamo", "u-kai-scheduler"},
+		},
+		{
+			name: "live dependencies that agree with the active plan leave its reverse order",
+			to:   releases(),
+			from: releases("nfd", "cert-manager", "gpu-operator", "dynamo"),
+			inventory: []argocd.InventoryItem{
+				item("cert-manager"), item("dynamo", "gpu-operator"), item("gpu-operator", "nfd", "cert-manager"), item("nfd"),
+			},
+			want: []string{"u-dynamo", "u-gpu-operator", "u-cert-manager", "u-nfd"},
+		},
+		{
+			name:      "a release the active plan lacks goes first, however long the plan",
+			to:        releases(),
+			from:      releases("cert-manager", "gpu-operator", "nfd", "kai-scheduler", "dynamo"),
+			inventory: []argocd.InventoryItem{item("dynamo"), item("stray")},
+			want:      []string{"u-stray", "u-dynamo"},
+		},
+		{
+			name:      "a release that follows itself",
+			to:        releases(),
+			inventory: []argocd.InventoryItem{item("gpu-operator", "gpu-operator", "nfd"), item("nfd")},
+			want:      []string{"u-gpu-operator", "u-nfd"},
+		},
+		{
+			name:      "a release of the active plan that now follows one it lacks",
+			to:        releases(),
+			from:      releases("gpu-operator"),
+			inventory: []argocd.InventoryItem{item("gpu-operator", "nfd"), item("nfd")},
+			want:      []string{"u-gpu-operator", "u-nfd"},
+		},
+		{
+			name: "objects sharing a release ID are all removed after their dependent",
+			to:   releases(),
+			inventory: []argocd.InventoryItem{
+				{ReleaseID: "dynamo", UID: "u-3", Follows: []string{"nfd"}}, {ReleaseID: "nfd", UID: "u-1"}, {ReleaseID: "nfd", UID: "u-2"},
+			},
+			want: []string{"u-3", "u-2", "u-1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var got []string
+			for _, step := range steps(tt.to, tt.from, tt.inventory) {
+				if step.Operation == v1alpha1.OperationRemove {
+					got = append(got, step.UID)
+				}
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("removals = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // succeedTo records a succeeded rollout to digest, making it the active plan.
 func succeedTo(t *testing.T, ctx context.Context, rt *v1alpha1.ClusterRuntime, digest string) {
 	t.Helper()
