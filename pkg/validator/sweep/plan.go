@@ -498,10 +498,18 @@ func planRunAIResidue(ctx context.Context, kube kubernetes.Interface, dyn dynami
 	if err != nil {
 		return nil, classifyListError(ctx, "pods", err)
 	}
+	var liveTokens map[string]bool
+	if o.OlderThan < defaults.ValidationSweepMinAge {
+		// Below the floor a residue object may belong to a gang check still
+		// running. At or above it no check is live, and gang members the
+		// scheduler holds Pending never go terminal, so the guard would keep
+		// them forever.
+		liveTokens = liveGangTokens(pods.Items)
+	}
 	for i := range pods.Items {
 		pod := &pods.Items[i]
 		obj := Object{Kind: kindPod, Namespace: pod.Namespace, Name: pod.Name, UID: pod.UID, Age: ageOf(pod.CreationTimestamp)}
-		out = append(out, residueGate(obj, pod.Labels, pod.DeletionTimestamp, pod.CreationTimestamp, o, accepted))
+		out = append(out, residueGate(obj, pod.Labels, pod.DeletionTimestamp, pod.CreationTimestamp, o, accepted, liveTokens))
 	}
 
 	callCtx, cancel = apiCallCtx(ctx)
@@ -519,16 +527,33 @@ func planRunAIResidue(ctx context.Context, kube kubernetes.Interface, dyn dynami
 	for i := range groups.Items {
 		pg := &groups.Items[i]
 		obj := Object{Kind: kindPodGroup, Namespace: pg.GetNamespace(), Name: pg.GetName(), UID: pg.GetUID(), Age: ageOf(pg.GetCreationTimestamp())}
-		out = append(out, residueGate(obj, pg.GetLabels(), pg.GetDeletionTimestamp(), pg.GetCreationTimestamp(), o, accepted))
+		out = append(out, residueGate(obj, pg.GetLabels(), pg.GetDeletionTimestamp(), pg.GetCreationTimestamp(), o, accepted, liveTokens))
 	}
 	return out, nil
+}
+
+// liveGangTokens returns the run tokens that still have a gang pod which is
+// neither terminal nor being deleted.
+func liveGangTokens(pods []corev1.Pod) map[string]bool {
+	live := make(map[string]bool)
+	for i := range pods {
+		p := &pods[i]
+		if p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		if token := p.Labels[labels.GPUTestRun]; residueOwnsName(kindPod, p.Name, token) {
+			live[token] = true
+		}
+	}
+	return live
 }
 
 // residueGate applies the Run:ai residue guards: already terminating, a valid
 // run token (the gang suffix is 128 bits of hex), a name that reconstructs
 // from that token exactly as the gang-scheduling check writes it, not inside
-// a validator test namespace, and the age floor.
-func residueGate(obj Object, objLabels map[string]string, deletionTimestamp *metav1.Time, created metav1.Time, o Options, accepted map[string]bool) Object {
+// a validator test namespace, the age floor, and no non-terminal gang pod for
+// the token in liveTokens (nil at or above defaults.ValidationSweepMinAge).
+func residueGate(obj Object, objLabels map[string]string, deletionTimestamp *metav1.Time, created metav1.Time, o Options, accepted, liveTokens map[string]bool) Object {
 	if deletionTimestamp != nil {
 		obj.Status = StatusTerminating
 		obj.Reason = reasonTerminating
@@ -554,6 +579,11 @@ func residueGate(obj Object, objLabels map[string]string, deletionTimestamp *met
 		return obj
 	}
 	if ageGate(&obj, created, o.OlderThan) {
+		return obj
+	}
+	if liveTokens[token] {
+		obj.Status = StatusSkipped
+		obj.Reason = "run still has a non-terminal gang pod"
 		return obj
 	}
 	obj.Status = StatusWouldDelete

@@ -17,8 +17,10 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -245,6 +247,52 @@ func TestSweepCmd_OutputCheckKeepsExistingReport(t *testing.T) {
 	}
 	if string(data) != previous {
 		t.Errorf("existing report = %q, want it untouched: %q", data, previous)
+	}
+}
+
+// TestSweepCmd_UnwrittenNewOutputIsRemoved: the file the pre-flight output
+// check creates on a new path does not outlive a run that writes no report.
+func TestSweepCmd_UnwrittenNewOutputIsRemoved(t *testing.T) {
+	forbidden := func(method, path string) (int, string) {
+		if method == http.MethodGet && path == "/api/v1/namespaces" {
+			return http.StatusForbidden, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Forbidden","code":403}`
+		}
+		return http.StatusOK, `{"items":[]}`
+	}
+	tests := []struct {
+		name     string
+		cluster  func(method, path string) (int, string)
+		reader   func(t *testing.T) io.Reader
+		args     []string
+		wantCode errors.ErrorCode
+	}{
+		{
+			name:     "declined prompt",
+			cluster:  sweepCluster(true),
+			reader:   func(*testing.T) io.Reader { return strings.NewReader("n\n") },
+			wantCode: errors.ErrCodeCanceled,
+		},
+		{
+			name:     "forbidden plan",
+			cluster:  forbidden,
+			reader:   func(t *testing.T) io.Reader { return nonTerminalReader(t) },
+			args:     []string{"--yes"},
+			wantCode: errors.ErrCodeUnauthorized,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := newScriptedAPIServer(t, tt.cluster)
+			kubeconfig := rec.writeKubeconfig(t, t.TempDir())
+			outPath := filepath.Join(t.TempDir(), "report.json")
+
+			args := append([]string{"--kubeconfig", kubeconfig, "--format", "json", "--output", outPath}, tt.args...)
+			_, err := runSweep(t, tt.reader(t), args...)
+			errorstest.WantReportedCode(t, err, tt.wantCode)
+			if _, statErr := os.Stat(outPath); !stderrors.Is(statErr, fs.ErrNotExist) {
+				t.Errorf("output file left behind by a run that wrote no report: stat error = %v", statErr)
+			}
+		})
 	}
 }
 
