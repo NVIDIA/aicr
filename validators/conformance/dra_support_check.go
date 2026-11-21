@@ -46,19 +46,21 @@ var draProbeTimeout = defaults.CollectorK8sTimeout
 // falls back to the device plugin.
 //
 // Scoping comes from the resolved recipe, not from live cluster resources:
-// the check is skipped ONLY when the recipe's componentRefs exclude or
-// disable the nvidia-dra-driver-gpu component (e.g. OCP). When the recipe
-// enables the driver, its absence is an installation FAILURE, not a skip.
-// When no componentRefs are available at all (standalone runs against a bare
-// validation input), the check falls back to live-driver detection for
-// backward compatibility.
+// the check is skipped ONLY when the recipe's componentRefs omit or set
+// overrides.enabled: false on the nvidia-dra-driver-gpu component (e.g. OCP).
+// overrides.install: false keeps the ref in inventory so an externally
+// managed driver still scopes probes (including a pinned Namespace). When the
+// recipe leaves the driver in scope, its absence is an installation FAILURE,
+// not a skip. When no componentRefs are available at all (standalone runs
+// against a bare validation input), the check falls back to live-driver
+// detection for backward compatibility.
 func CheckDRASupport(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
 	// The namespace every driver probe (pods, controller Deployment, kubelet
-	// plugin DaemonSet) targets: the enabled componentRef's resolved namespace
+	// plugin DaemonSet) targets: an enabled componentRef's resolved namespace
 	// when the recipe provides one, the default otherwise.
 	driverNamespace, namespaceSource := resolveDRADriverNamespace(ctx)
 
@@ -77,7 +79,7 @@ func CheckDRASupport(ctx *validators.Context) error {
 			return probeErr
 		}
 		probedPods = pods
-	} else if !recipeHasComponent(ctx, draDriverComponentName) {
+	} else if !recipeScopesDRADriver(ctx) {
 		return validators.SkipWithReason(validators.SkipReasonComponentNotInRecipe, fmt.Sprintf(
 			"recipe excludes or disables the %s component — DRA is out of scope for this recipe",
 			draDriverComponentName))
@@ -379,17 +381,33 @@ type sliceValidation struct {
 	eligible map[string]*corev1.Node
 }
 
+// recipeScopesDRADriver reports whether the resolved recipe keeps the NVIDIA
+// DRA driver in probe scope. Unlike recipeHasComponent (IsDeployable), this
+// uses IsEnabled only: overrides.install: false keeps the ref in inventory for
+// externally managed installs, while overrides.enabled: false means the
+// component is not enabled and is out of scope.
+func recipeScopesDRADriver(ctx *validators.Context) bool {
+	if ctx.ValidationInput == nil {
+		return false
+	}
+	for _, ref := range ctx.ValidationInput.ComponentRefs {
+		if ref.Name == draDriverComponentName && ref.IsEnabled() {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveDRADriverNamespace returns the namespace the DRA driver probes
 // (pods, controller Deployment, kubelet plugin DaemonSet) must target, plus a
 // human-readable source for the evidence artifact. When the resolved recipe
-// carries an ENABLED nvidia-dra-driver-gpu componentRef with a non-empty
-// resolved Namespace — recipe resolution hydrates ComponentRef.Namespace from
+// carries an enabled (IsEnabled) nvidia-dra-driver-gpu componentRef with a
+// non-empty resolved Namespace — including install: false inventory refs —
+// that namespace wins. Recipe resolution hydrates ComponentRef.Namespace from
 // the registry/overlay/mixin, e.g. recipes/mixins/os-talos.yaml overrides it
-// to privileged-nvidia-dra-driver-gpu — that namespace wins, matching how
-// pkg/validator/v1 BuildOrchestratorAffinity resolves component namespaces
-// from componentRefs. The default draDriverNamespace applies when the ref's
-// namespace is empty or when no componentRefs are available at all
-// (standalone runs; GetComponentRefs is nil-safe).
+// to privileged-nvidia-dra-driver-gpu. The default draDriverNamespace applies
+// when the ref's namespace is empty or when no componentRefs are available at
+// all (standalone runs; GetComponentRefs is nil-safe).
 func resolveDRADriverNamespace(ctx *validators.Context) (namespace, source string) {
 	for _, ref := range ctx.ValidationInput.GetComponentRefs() {
 		if ref.Name == draDriverComponentName && ref.IsEnabled() && ref.Namespace != "" {
