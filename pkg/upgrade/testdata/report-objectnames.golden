@@ -16,8 +16,8 @@ iota-operator 0.17.2 -> 0.18.1  (manual)
 
   recorded manual: the record covering 0.18.0 describes the move from 0.17.2
   to 0.18.1. Follow the steps below in order. The apply step is where the
-  bundle is applied; without one, each step's own instructions say when to
-  apply
+  bundle is applied; a record without one does not mark when to apply, so
+  check the component's own upgrade guidance
 
   This hop also carries a rename: fullnameOverride legacy-iota -> (unset). No
   record assesses it, and the steps below neither perform it nor account for
