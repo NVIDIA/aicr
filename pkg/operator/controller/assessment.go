@@ -53,8 +53,8 @@ var deployers = map[plan.Engine]string{plan.EngineArgoCD: "argocd", plan.EngineF
 // assess runs, or reuses, AICR's upgrade-check between the active and the
 // target plan's recipes. The report is kept in the operator
 // namespace, labeled with the transition, and its run removed. It returns a
-// nil report while the Job runs.
-func (r *RolloutReconciler) assess(ctx context.Context, rt *v1alpha1.ClusterRuntime, from, to *plan.Document) (
+// nil report while the Job runs or waits to be retried, and tells v why.
+func (r *RolloutReconciler) assess(ctx context.Context, rt *v1alpha1.ClusterRuntime, from, to *plan.Document, v *runtimeView) (
 	*aicrjob.UpgradeReport, *v1alpha1.DigestedConfigMapRef, time.Duration, error) {
 
 	deployer := deployers[r.Config.Engine]
@@ -88,6 +88,7 @@ func (r *RolloutReconciler) assess(ctx context.Context, rt *v1alpha1.ClusterRunt
 		},
 	})
 	if err != nil || job == nil {
+		v.reconcilingMessage = st.waitingOn()
 		return nil, nil, wait, err
 	}
 	data, err := st.output(ctx, job)
