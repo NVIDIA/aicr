@@ -45,9 +45,10 @@ import (
 	"strings"
 	"time"
 
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	helmutil "aicr.run/pkg/helm"
 	"github.com/Masterminds/semver/v3"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
 	"sigs.k8s.io/yaml"
 )
 
@@ -112,6 +113,18 @@ type VendorRecord struct {
 	// this record (e.g. "helm-cli v3.20.2"). Audit-only; not used by
 	// downstream code.
 	PullerVersion string `json:"pullerVersion,omitempty"`
+	// Archive is the .tgz bytes written under charts/, kept in memory for
+	// bundle-time checks. It is never serialized.
+	Archive []byte `json:"-" yaml:"-"`
+}
+
+// VendoredArchives maps each record's component name to its archive bytes.
+func VendoredArchives(records []VendorRecord) map[string][]byte {
+	archives := make(map[string][]byte, len(records))
+	for _, record := range records {
+		archives[record.Name] = record.Archive
+	}
+	return archives
 }
 
 // ArchiveSHA256 returns the hex SHA-256 of a chart archive, the value a
@@ -249,21 +262,7 @@ func (p *CLIChartPuller) Pull(ctx context.Context, c Component) ([]byte, VendorR
 	}
 	defer os.RemoveAll(tmpDir)
 
-	chartName := c.ChartName
-	if chartName == "" {
-		chartName = c.Name
-	}
-
-	// Build argv. `helm pull` accepts:
-	//   helm pull <chart> --repo <url> --version <ver> --destination <dir>     (HTTP(S))
-	//   helm pull oci://<host>/<path>/<chart> --version <ver> --destination .. (OCI)
-	args := []string{"pull"}
-	if c.IsOCI {
-		args = append(args, strings.TrimRight(c.Repository, "/")+"/"+chartName)
-	} else {
-		args = append(args, chartName, "--repo", c.Repository)
-	}
-	args = append(args, "--version", c.Version, "--destination", tmpDir)
+	args := chartPullArgs(c, tmpDir)
 
 	stderr := &bytes.Buffer{}
 	cmd := exec.CommandContext(ctx, p.helmBinary(), args...) //nolint:gosec // helm binary path is config-controlled; chart args are validated upstream and passed as exec args (no shell expansion).
@@ -286,6 +285,11 @@ func (p *CLIChartPuller) Pull(ctx context.Context, c Component) ([]byte, VendorR
 
 	sum := sha256.Sum256(tgz)
 	tarball := filepath.Base(saved)
+
+	chartName := c.ChartName
+	if chartName == "" {
+		chartName = c.Name
+	}
 
 	return tgz, VendorRecord{
 		Name:          c.Name,
@@ -1309,4 +1313,24 @@ func shouldVendor(c Component) bool {
 		return false
 	}
 	return true
+}
+
+func chartPullArgs(c Component, tmpDir string) []string {
+	chartName := c.ChartName
+	if chartName == "" {
+		chartName = c.Name
+	}
+
+	// Build argv. `helm pull` accepts:
+	//   helm pull <chart> --repo <url> --version <ver> --destination <dir>     (HTTP(S))
+	//   helm pull oci://<host>/<path>/<chart> --version <ver> --destination .. (OCI)
+	args := []string{"pull"}
+	if c.IsOCI {
+		args = append(args, strings.TrimRight(c.Repository, "/")+"/"+chartName)
+	} else {
+		args = append(args, chartName, "--repo", c.Repository)
+	}
+	args = append(args, "--version", helmutil.ChartVersion(c.Repository, c.Version), "--destination", tmpDir)
+
+	return args
 }

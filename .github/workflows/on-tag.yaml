@@ -127,7 +127,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           # This download is the release's proxy-coverage measurement. Restoring
@@ -208,7 +208,7 @@ jobs:
           echo "OK: application dependency graph resolved through Artifactory"
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532  # v4.1.3
         with:
           # Pin from .settings.yaml (>= v3.1.0) so cosign logs DSSE attestations
           # to Rekor v2 as hashedrekord/PAE. The installer default (v3.0.6) writes
@@ -419,7 +419,7 @@ jobs:
 
       - name: Setup Go
         if: matrix.phase != 'aiperf-bench'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           # A restored public-proxy module cache would put this release image
@@ -532,7 +532,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           # Compilation itself is the proxy-coverage measurement for this image.
@@ -821,7 +821,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security
         if: hashFiles('results.sarif') != '' || steps.scan.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26  # v4.39.2
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
           category: 'anchore-image-${{ matrix.image.key }}-${{ matrix.platform.arch }}'
@@ -863,7 +863,7 @@ jobs:
 
   # =============================================================================
   # AICR integrity: require resolution, scan, and attestation to all succeed
-  # before the immutable version aliases are published
+  # before any immutable version alias is published
   # =============================================================================
 
   aicr-check:
@@ -894,12 +894,16 @@ jobs:
           echo "AICR integrity check passed."
 
   # The operator qualifies against this tag's AICR, which resolves its
-  # validator and gate images by the release tag at run time, so the immutable
-  # version aliases exist before the operator gate. :latest and the GitHub
-  # release still wait for it (promote-images, publish). A failed operator
-  # gate leaves version aliases without a release; a fix needs a new tag.
+  # validator and gate images by the release tag at run time, so those four
+  # version aliases exist before the operator gate (release-images.sh
+  # OPERATOR_GATE_KEYS). The operator runs the aicr image by digest, so the
+  # aicr, aicrd and aiperf-bench version aliases wait for release-check with
+  # :latest and the GitHub release (promote-images, publish), and a release
+  # the operator gate stops publishes no user-facing version tag (#3859). A
+  # failed operator gate still leaves the validator and gate version aliases
+  # without a release; a fix needs a new tag.
   promote-versions:
-    name: Promote Version Aliases
+    name: Promote Operator Gate Version Aliases
     runs-on: ubuntu-24.04
     needs: [detect, resolve-candidates, aicr-check]
     timeout-minutes: 15
@@ -944,7 +948,7 @@ jobs:
           .github/scripts/release-images.sh preflight \
             candidate-digests.json validated-digests.json
 
-      - name: Promote version aliases
+      - name: Promote the operator gate's version aliases
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           IS_PRERELEASE: ${{ needs.detect.outputs.is_prerelease }}
@@ -952,11 +956,12 @@ jobs:
           AICR_NETWORK_TIMEOUT_SECONDS: '120'
         run: |
           set -euo pipefail
-          .github/scripts/release-images.sh promote validated-digests.json versions
+          .github/scripts/release-images.sh promote validated-digests.json operator-versions
 
   # =============================================================================
-  # Integrity: require the AICR gates, the version aliases and every operator
-  # check to succeed before :latest, the operator and the GitHub release
+  # Integrity: require the AICR gates, the operator gate's version aliases and
+  # every operator check to succeed before the remaining version aliases,
+  # :latest, the operator and the GitHub release
   # =============================================================================
 
   release-check:
@@ -992,7 +997,7 @@ jobs:
             "${OPERATOR_LIFECYCLE_RESULT}" != "success" || \
             "${OPERATOR_VALIDATION_RESULT}" != "success" ]]; then
             echo "::error::Release security gates did not all succeed for ${TAG}."
-            echo "::error::latest, the operator and the GitHub release stay unpublished; repair the failure and rerun this tag."
+            echo "::error::The aicr, aicrd and aiperf-bench version aliases, latest, the operator and the GitHub release stay unpublished; repair the failure and rerun this tag."
             exit 1
           fi
 
@@ -1003,11 +1008,12 @@ jobs:
   # as OCI layouts, the deterministically packaged chart and the
   # kubectl-aicr binaries (tools/operator-candidate). Its chart defaults to
   # this tag's AICR images, by the digests resolve-candidates pinned; once
-  # promote-versions has published their version aliases, the lifecycle check
-  # runs the operator with them and the validation check runs the validator
-  # images. It is scanned like every release image; release-check fails closed
-  # on its build, scan, reproducibility, lifecycle and validation checks, so
-  # they gate :latest too. It is published and attested only after
+  # promote-versions has published the validator and gate version aliases, the
+  # lifecycle check runs the operator with them and the validation check runs
+  # the validator images. It is scanned like every release image; release-check
+  # fails closed on its build, scan, reproducibility, lifecycle and validation
+  # checks, so they gate the remaining version aliases and :latest too. It is
+  # published and attested only after
   # promote-images, and publish waits for it, so a failing operator blocks the
   # release.
   # =============================================================================
@@ -1034,13 +1040,13 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
 
-      # The candidate build runs ko and the operator through `go run`, so its
-      # modules come through Artifactory like the rest of the release.
+      # The candidate build's modules come through Artifactory like the rest
+      # of the release, all of them in the warm step.
       - name: Configure the DGXC Go proxy
         uses: ./.github/actions/setup-dgxc-goproxy
         with:
@@ -1057,10 +1063,6 @@ jobs:
           [ "$(go env GOSUMDB)" != off ] \
             || { echo "::error::GOSUMDB=off; modules would not be verified against the transparency log"; exit 1; }
 
-      - name: Warm the module cache through the proxy
-        shell: bash
-        run: go mod download
-
       - name: Install Helm and yq
         uses: ./.github/actions/setup-build-tools
         with:
@@ -1069,8 +1071,34 @@ jobs:
           install_yq: 'true'
           yq_version: ${{ steps.versions.outputs.yq }}
 
+      - name: Warm the module cache through the proxy
+        shell: bash
+        run: go mod download
+
+      # A fresh token for ko's modules, so a slow proxy does not hold both
+      # fetches to one ~15-minute credential (see build-ko).
+      - name: Refresh the proxy credential
+        uses: ./.github/actions/setup-dgxc-goproxy
+        with:
+          mode: enforced
+
+      # ko resolves outside the main module, so `go mod download` fetches none
+      # of its modules; this builds it from its pinned source (#3860).
+      - name: Install ko through the proxy
+        shell: bash
+        run: make operator-candidate-deps
+
+      # setup-dgxc-goproxy left a live Artifactory token in $RUNNER_TEMP
+      # (see build-ko). Nothing after this contacts the proxy.
+      - name: Remove the proxy credential
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/dgxc-goauth"
+
       # Also checks the candidate for credential material and that its
-      # linux/amd64 operator refuses development settings.
+      # linux/amd64 operator refuses development settings. GOPROXY=off fails a
+      # build that needs a module the steps above did not fetch, so no fetch
+      # can outlive the proxy token.
       - name: Build the operator candidate
         env:
           CANDIDATE_VERSION: ${{ github.ref_name }}
@@ -1079,7 +1107,7 @@ jobs:
           CANDIDATE_AICR_VERSION: ${{ github.ref_name }}
           CANDIDATE_AICR_IMAGE: ${{ needs.resolve-candidates.outputs.aicr_image }}
           CANDIDATE_AICR_VALIDATOR_IMAGES: ${{ needs.resolve-candidates.outputs.aicr_validator_images }}
-        run: make operator-candidate
+        run: GOPROXY=off make operator-candidate
 
       # Before release-check, so a finding stops promotion and every push.
       - name: Malware scan the kubectl-aicr binaries
@@ -1101,13 +1129,6 @@ jobs:
           path: dist/candidate
           retention-days: 30
           if-no-files-found: error
-
-      # setup-dgxc-goproxy left a live Artifactory token in $RUNNER_TEMP
-      # (see build-ko).
-      - name: Remove the proxy credential
-        if: always()
-        shell: bash
-        run: rm -f "${RUNNER_TEMP}/dgxc-goauth"
 
   # The tagged source builds the operator candidate byte for byte twice, the
   # second time with an empty Go build cache (tools/operator-candidate verify).
@@ -1131,7 +1152,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
@@ -1152,10 +1173,6 @@ jobs:
           [ "$(go env GOSUMDB)" != off ] \
             || { echo "::error::GOSUMDB=off; modules would not be verified against the transparency log"; exit 1; }
 
-      - name: Warm the module cache through the proxy
-        shell: bash
-        run: go mod download
-
       - name: Install Helm and yq
         uses: ./.github/actions/setup-build-tools
         with:
@@ -1163,6 +1180,24 @@ jobs:
           helm_version: ${{ steps.versions.outputs.helm }}
           install_yq: 'true'
           yq_version: ${{ steps.versions.outputs.yq }}
+
+      - name: Warm the module cache through the proxy
+        shell: bash
+        run: go mod download
+
+      - name: Refresh the proxy credential
+        uses: ./.github/actions/setup-dgxc-goproxy
+        with:
+          mode: enforced
+
+      - name: Install ko through the proxy
+        shell: bash
+        run: make operator-candidate-deps
+
+      - name: Remove the proxy credential
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/dgxc-goauth"
 
       - name: Build the candidate twice and compare
         env:
@@ -1172,23 +1207,20 @@ jobs:
           CANDIDATE_AICR_VERSION: ${{ github.ref_name }}
           CANDIDATE_AICR_IMAGE: ${{ needs.resolve-candidates.outputs.aicr_image }}
           CANDIDATE_AICR_VALIDATOR_IMAGES: ${{ needs.resolve-candidates.outputs.aicr_validator_images }}
-        run: make operator-candidate-verify
-
-      - name: Remove the proxy credential
-        if: always()
-        shell: bash
-        run: rm -f "${RUNNER_TEMP}/dgxc-goauth"
+        run: GOPROXY=off make operator-candidate-verify
 
   # The lifecycle scenarios from the newest published release older than this
   # tag, attestations verified, upgraded to this candidate, run through a
   # rollout with deployment validation required, rolled back and uninstalled
-  # in the documented order (make operator-qualify-published). A failure
-  # blocks :latest and publishing, as ADR-027 requires of an operator gate;
-  # the version aliases it runs against are already promoted. It runs
-  # third-party images on privileged kind nodes, so it holds neither the
-  # release's OIDC identity nor the Go proxy's
-  # credential; its modules come from the default proxy, as the PR lanes'
-  # do, and it publishes nothing.
+  # in the documented order (make operator-qualify-published). The published
+  # operator runs its own AICR and the candidate this tag's, so the upgrade
+  # moves AICR as the chart defaults do. A failure blocks the remaining
+  # version aliases, :latest and publishing, as ADR-027 requires of an
+  # operator gate; the validator and gate version aliases are already
+  # promoted. It runs third-party images on privileged kind nodes, so it
+  # holds neither the release's OIDC identity nor the Go proxy's credential;
+  # its modules come from the default proxy, as the PR lanes' do, and it
+  # publishes nothing.
   operator-lifecycle:
     name: Operator Lifecycle from the Published Release
     runs-on: ubuntu-24.04
@@ -1318,7 +1350,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security
         if: hashFiles('results.sarif') != '' || steps.scan.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26  # v4.39.2
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
           category: 'anchore-image-aicr-operator-${{ matrix.platform.arch }}'
@@ -1343,7 +1375,7 @@ jobs:
 
       - name: Upload the registry SARIF to GitHub Security
         if: steps.registry-scan.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26  # v4.39.2
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
         with:
           sarif_file: ${{ steps.registry-scan.outputs.sarif }}
           category: 'anchore-image-aicr-registry-${{ matrix.platform.arch }}'
@@ -1383,7 +1415,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
@@ -1494,7 +1526,8 @@ jobs:
   # =============================================================================
   # Promote: after the operator gate, preflight all public aliases again, then
   # converge them to exact digests. promote-versions already published the
-  # version aliases, so this converges :latest for a stable release.
+  # operator gate's version aliases, so this publishes the aicr, aicrd and
+  # aiperf-bench version aliases, then converges :latest for a stable release.
   # =============================================================================
 
   promote-images:
@@ -1751,7 +1784,7 @@ jobs:
           oras_sha256: ${{ steps.versions.outputs.oras_sha256_linux_amd64 }}
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532  # v4.1.3
         with:
           cosign-release: ${{ steps.versions.outputs.cosign }}
 
@@ -1966,9 +1999,9 @@ jobs:
             echo "| Vulnerability Scan | ${VULN_SCAN} |"
             echo "| Attestation | ${ATTEST} |"
             echo "| AICR Check | ${AICR_CHECK} |"
-            echo "| Version Alias Promotion | ${PROMOTE_VERSIONS} |"
+            echo "| Operator Gate Version Aliases | ${PROMOTE_VERSIONS} |"
             echo "| Release Check | ${RELEASE_CHECK} |"
-            echo "| latest Promotion | ${PROMOTE} |"
+            echo "| Remaining Version Aliases and latest | ${PROMOTE} |"
             echo "| Operator Candidate | ${OPERATOR_CANDIDATE} |"
             echo "| Operator Vulnerability Scan | ${OPERATOR_SCAN} |"
             echo "| Operator Reproducibility | ${OPERATOR_REPRODUCIBLE} |"

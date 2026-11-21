@@ -20,11 +20,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -120,7 +120,8 @@ func TestEnforceAccountingOwnership(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
-			err = b.enforceAccountingOwnership(accountingBundlerTestResult(tt.mode))
+			r := &bundleRun{DefaultBundler: b}
+			err = r.enforceAccountingOwnership(accountingBundlerTestResult(tt.mode))
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("enforceAccountingOwnership() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -167,13 +168,14 @@ func TestEnforceAccountingOwnershipWarnsForLegacyOverride(t *testing.T) {
 			result.APIVersion = recipe.RecipeResultAPIVersion
 			result.Configuration = nil
 
-			if err := b.enforceAccountingOwnership(result); err != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if err := r.enforceAccountingOwnership(result); err != nil {
 				t.Fatalf("enforceAccountingOwnership() error = %v", err)
 			}
-			if len(b.warnings) != 1 ||
-				!strings.Contains(b.warnings[0], "--slurm-accounting-mode customer-managed") {
+			if len(r.warnings) != 1 ||
+				!strings.Contains(r.warnings[0], "--slurm-accounting-mode customer-managed") {
 
-				t.Fatalf("warnings = %v, want legacy accounting deprecation", b.warnings)
+				t.Fatalf("warnings = %v, want legacy accounting deprecation", r.warnings)
 			}
 		})
 	}

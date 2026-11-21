@@ -110,7 +110,7 @@ Adjust both pairs to your cluster's actual labels and taints.
 
 > Selector / toleration flags accept comma-separated values. See the [bundle](../docs/user/cli-reference.md#aicr-bundle) section for the full flag set.
 >
-> Set `--storage-class` to the name of a StorageClass that exists on the target cluster (check with `kubectl get storageclass`). The cloud overlay configures `kube-prometheus-stack` with a `volumeClaimTemplate` but no `storageClassName`, so without this flag the PVC falls to the cluster's default StorageClass — and if no default is configured, the deploy hangs on a Pending PVC.
+> Set `--storage-class` to the name of a StorageClass that exists on the target cluster (check with `kubectl get storageclass`). It is written to every component that renders a PVC; without it a PVC falls to the cluster's default StorageClass — and if no default is configured, the deploy hangs on a Pending PVC.
 
 **EKS**
 
@@ -260,22 +260,50 @@ recipe-evidence bundle out.
   [`.github/workflows/uat-gcp.yaml`](../.github/workflows/uat-gcp.yaml)
   pipeline. It is now invoked through the shared dispatch surface
   [`uat-run.yaml`](../.github/workflows/uat-run.yaml) keyed by reservation
-  (#1274); to bring the cluster up without running the UAT suite or tearing it
-  down:
+  (#1274). `gcp-h100` can host only one cluster, and its single daytime slot
+  is shared with the GCP daytime rotation (`daytime-intent: inference`),
+  which stands up the shared human-access cluster. First check whether a
+  daytime cluster holds `gcp-h100` (an `aicr-uat-day-gh1-0-<run_id>` cluster,
+  or one with the legacy `aicr-uat-day-gcp-h100-` prefix), as described in
+  [Reaching the daytime cluster](../docs/contributor/uat.md#reaching-the-daytime-cluster).
+  If one is held, do not use it, do not tear it down, and do not dispatch
+  `daytime-up` (the pre-batch guard refuses it): run the demo once the
+  reservation is free, after the 02:00 UTC evening teardown or by arrangement
+  with whoever holds it. Only if none is held, bring the cluster up and hold
+  it without running the UAT suite:
 
   ```shell
-  gh workflow run uat-run.yaml -f reservation=gcp-h100 -f skip_delete=true -f skip_tests=true
+  gh workflow run uat-run.yaml -f reservation=gcp-h100 -f lifecycle=daytime-up -f skip_tests=true
   ```
 
-  > Make sure to cleanup after yourself
+  After the run succeeds, repeat the GCP discovery from
+  [Reaching the daytime cluster](../docs/contributor/uat.md#reaching-the-daytime-cluster):
+  the check above ran before this cluster existed. Before `get-credentials`,
+  confirm the discovered name is `aicr-uat-day-gh1-0-<run_id>` with your
+  `daytime-up` run's ID. If it is not, stop: the cluster is someone else's.
+
+  This cluster takes `gcp-h100`'s only daytime slot, so the rotation's
+  inference `daytime-up` is refused until it is gone.
+
+  > Tear it down with `-f lifecycle=daytime-down` as soon as the demo is done,
+  > and in any case before 04:00 UTC: the nightly batch starts then, and its
+  > pre-batch guard refuses every `gcp-h100` nightly cell while a daytime
+  > cluster holds the reservation. The 02:00 UTC evening teardown removes a
+  > cluster that is up at 02:00, and also one still coming up then: it queues
+  > behind the `daytime-up` run on the reservation's lease. A cluster started
+  > after that teardown has run stays up. `daytime-down` removes whichever daytime
+  > cluster holds `gcp-h100` and does not compare run IDs, so first repeat the
+  > discovery and confirm the held cluster is still the one with your
+  > `daytime-up` run's ID. If your cluster is already gone, do not dispatch it:
+  > a cluster holding the reservation now is someone else's.
 
   The cluster has 2× `a3-megagpu-8g` (H100, 8 GPUs/node) GPU nodes labeled
   `nodeGroup=gpu-worker` with taint `dedicated=gpu-workload:NoSchedule`, and
   system nodes labeled `nodeGroup=system-worker` (no custom taints — GKE
   managed pods don't tolerate them). Its GPU NIC networks are named
-  `<deployment-id>-gpu-nic-0` through `-7`, where the deployment ID of a
-  `uat-run.yaml` cluster is `aicr-uat-<run_id>`; set `DEPLOYMENT_ID` in the
-  [Config](#config) block to that value.
+  `<deployment-id>-gpu-nic-0` through `-7`, where the deployment ID of this
+  `daytime-up` cluster is its name, `aicr-uat-day-gh1-0-<run_id>`; set
+  `DEPLOYMENT_ID` in the [Config](#config) block to that value.
 * GKE nodes run Container-Optimized OS (COS) with GPU drivers pre-installed.
 * `aicr trust update` has been run once on this machine to bootstrap the
   Sigstore TUF root (prerequisite for `evidence verify`).
@@ -290,7 +318,7 @@ and the evidence emit path. Set the two variables, then drop this into
 `aicr-config.yaml` once and reuse it across the workflow:
 
 ```shell
-DEPLOYMENT_ID=aicr-uat-1234567890   # aicr-uat- plus the uat-run.yaml run ID
+DEPLOYMENT_ID=aicr-uat-day-gh1-0-1234567890   # aicr-uat-day-gh1-0- plus the uat-run.yaml run ID
 GHCR_OWNER=my-github-org            # a ghcr.io owner you can push to
 
 cat > aicr-config.yaml <<EOF

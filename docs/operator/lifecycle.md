@@ -45,6 +45,13 @@ helm upgrade aicr-operator oci://ghcr.io/nvidia/charts/aicr-operator \
 
 - The CRDs are chart templates, not `crds/` files, so `helm upgrade` updates
   them. Their schema reaches existing objects at once.
+- `--reuse-values` is not supported. Helm then renders the new chart with the
+  previous chart's defaults, so every image your values do not set, such as
+  the operator's, stays at the previous release's. The chart still renders an
+  operator that starts. A key the previous chart did not have is left unset,
+  and the operator uses its own default. To carry the previous release's
+  values forward, use `--reset-then-reuse-values`, which applies them over the
+  new chart's defaults.
 - With `aicr.version` v1.0.x, add `--force-conflicts`: AICR v1.0.x relabels
   the discovery and validation namespaces, and Helm 4 then reports a
   server-side apply conflict on their `app.kubernetes.io/managed-by` label

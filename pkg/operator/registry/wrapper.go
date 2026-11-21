@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // Chart content a wrapper archive carries. AICR's install script and
@@ -116,7 +116,8 @@ func wrapperContent(name string) bool {
 // PushWrapper packages a release's local chart and pushes it to target. The
 // tag carries the archive's own digest, so different content never shares a
 // tag and an existing tag is reused only when its content matches.
-func (c *Client) PushWrapper(ctx context.Context, target Repository, files map[string][]byte) (*MirroredChart, error) {
+func (c *Client) PushWrapper(ctx context.Context, target Repository, files map[string][]byte) (_ *MirroredChart, err error) {
+	defer observe(opPushWrapper, &err)
 	archive, meta, err := PackageWrapper(files)
 	if err != nil {
 		return nil, err

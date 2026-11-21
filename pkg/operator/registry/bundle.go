@@ -28,7 +28,7 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/content"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
+	"aicr.run/pkg/operator/defaults"
 )
 
 // BundleArtifactType is the artifactType of an AICR bundle at v1.0.0: one
@@ -67,7 +67,8 @@ func (b *Bundle) Paths() []string {
 // PullBundle fetches the bundle a render Job pushed, by manifest digest, and
 // unpacks it in memory. The manifest, the layer and the archive are all
 // bounded; links, devices and paths that leave the bundle are rejected.
-func (c *Client) PullBundle(ctx context.Context, r Repository, digest string) (*Bundle, error) {
+func (c *Client) PullBundle(ctx context.Context, r Repository, digest string) (_ *Bundle, err error) {
+	defer observe(opPullBundle, &err)
 	if !digestPattern.MatchString(digest) {
 		return nil, invalid("bundle digest %q is not a sha256 digest", digest)
 	}

@@ -24,11 +24,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/helper"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/validator/labels"
+	validatorv1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
+	"aicr.run/validators/helper"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -41,23 +42,6 @@ import (
 )
 
 const (
-	// gpuTestNamespacePrefix names the PER-RUN test namespace. A fresh
-	// namespace per run makes cleanup a single bounded operation — delete the
-	// namespace and wait — and closes the ambiguous-create leak window: once
-	// the namespace is Terminating, the NamespaceLifecycle admission plugin
-	// rejects subsequent Creates in it, and the namespace deletion controller
-	// durably garbage-collects any content that still lands (e.g. an
-	// already-admitted in-flight Create committing late) before finalizing.
-	gpuTestNamespacePrefix = "aicr-gpu-test-"
-	// gpuTestRunLabel is the ownership label stamped on the per-run test
-	// namespace; its value is the run's 128-bit random token. Cleanup uses it
-	// to verify that a namespace found at the expected name really belongs to
-	// this run before deleting anything, and an external label-based sweeper
-	// can use it to find leaked test namespaces — the residual paths no
-	// in-process budget can cover (SIGKILL, or scheduling/image-pull skew
-	// beyond the margin the work budgets reserve; see gpuCheckWorkBudget in
-	// consts.go).
-	gpuTestRunLabel = "aicr.run/gpu-test-run"
 	// gpuTestPodPrefix names the GPU allocation test pod. Mechanism-neutral:
 	// the same pod shape is used in DRA mode (ResourceClaim) and device
 	// plugin mode (nvidia.com/gpu limits).
@@ -171,7 +155,7 @@ const (
 // device plugin mode). The name suffix is a 128-bit random token (32 hex
 // chars) so a same-name collision with a namespace this run did not create is
 // practically impossible; the token doubles as the value of the
-// gpuTestRunLabel ownership label on the namespace.
+// labels.GPUTestRun ownership label on the namespace.
 //
 // nsObserved/nsUID/nsForeign/nsNeverCreated carry namespace-ownership state
 // from createGPUTestNamespace to the deferred cleanupGPUTestNamespace:
@@ -218,6 +202,28 @@ type gpuTestRun struct {
 	nsUID          types.UID
 	nsForeign      bool
 	nsNeverCreated bool
+
+	// imagePullSecrets are the --image-pull-secret names the orchestrator
+	// forwarded (validators.ImagePullSecretsEnv). createGPUTestNamespace
+	// copies each from validatorNamespace into the per-run namespace, where
+	// the probe pods reference them (imagePullSecretRefs); the copies die
+	// with the namespace.
+	imagePullSecrets   []string
+	validatorNamespace string
+}
+
+// imagePullSecretRefs returns the pod-spec references to the run's copied
+// image pull Secrets; nil when the orchestrator forwarded none (or for a nil
+// run, so a builder test with no run reads as "none").
+func (run *gpuTestRun) imagePullSecretRefs() []corev1.LocalObjectReference {
+	if run == nil || len(run.imagePullSecrets) == 0 {
+		return nil
+	}
+	refs := make([]corev1.LocalObjectReference, 0, len(run.imagePullSecrets))
+	for _, name := range run.imagePullSecrets {
+		refs = append(refs, corev1.LocalObjectReference{Name: name})
+	}
+	return refs
 }
 
 type draPatternReport struct {
@@ -257,7 +263,7 @@ func newGPUTestRun() (*gpuTestRun, error) {
 	token := hex.EncodeToString(b)
 	return &gpuTestRun{
 		token:          token,
-		namespace:      gpuTestNamespacePrefix + token,
+		namespace:      defaults.GPUTestNamespacePrefix + token,
 		podName:        gpuTestPodPrefix + token,
 		claimName:      gpuClaimPrefix + token,
 		noAllocPodName: noAllocProbePrefix + token,
@@ -271,11 +277,14 @@ func newGPUTestRun() (*gpuTestRun, error) {
 
 		sandboxProbePodName:   sandboxProbePodPrefix + token,
 		sandboxControlPodName: sandboxControlPodPrefix + token,
+
+		imagePullSecrets:   validators.ImagePullSecretNames(),
+		validatorNamespace: validators.ValidatorNamespace(),
 	}, nil
 }
 
 // createGPUTestNamespace creates the per-run test namespace stamped with the
-// run's ownership label (gpuTestRunLabel=token) and records the created UID
+// run's ownership label (labels.GPUTestRun=token) and records the created UID
 // so cleanup can delete with a metav1.Preconditions{UID} guard.
 //
 // On AlreadyExists it verifies ownership before adopting: with a 128-bit
@@ -283,10 +292,22 @@ func newGPUTestRun() (*gpuTestRun, error) {
 // own ambiguously committed create (response lost, object persisted) — adopt
 // it and capture its UID. Anything else is a FOREIGN namespace: fail the
 // check with ErrCodeConflict and mark the run so cleanup never deletes it.
+//
+// Once the namespace is owned, the run's image pull Secrets are copied into
+// it (copyImagePullSecrets), so the Secret is there before the first probe
+// pod is created and gone with the namespace.
 func createGPUTestNamespace(ctx context.Context, clientset kubernetes.Interface, run *gpuTestRun) error {
-	nsLabels := map[string]string{gpuTestRunLabel: run.token}
+	if err := ensureGPUTestNamespace(ctx, clientset, run); err != nil {
+		return err
+	}
+	return copyImagePullSecrets(ctx, clientset, run)
+}
+
+// ensureGPUTestNamespace is the namespace half of createGPUTestNamespace.
+func ensureGPUTestNamespace(ctx context.Context, clientset kubernetes.Interface, run *gpuTestRun) error {
+	nsLabels := map[string]string{labels.GPUTestRun: run.token}
 	for k, v := range run.namespaceLabels {
-		if k != gpuTestRunLabel {
+		if k != labels.GPUTestRun {
 			nsLabels[k] = v
 		}
 	}
@@ -323,11 +344,11 @@ func createGPUTestNamespace(ctx context.Context, clientset kubernetes.Interface,
 		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
 			"test namespace %s already exists and its ownership could not be verified", run.namespace), getErr)
 	}
-	if existing.Labels[gpuTestRunLabel] != run.token {
+	if existing.Labels[labels.GPUTestRun] != run.token {
 		run.nsForeign = true
 		return errors.New(errors.ErrCodeConflict, fmt.Sprintf(
 			"test namespace %s already exists without this run's %s ownership label — refusing to reuse or delete a foreign namespace",
-			run.namespace, gpuTestRunLabel))
+			run.namespace, labels.GPUTestRun))
 	}
 	run.nsObserved = true
 	run.nsUID = existing.UID
@@ -350,6 +371,79 @@ func createDefinitelyRejected(err error) bool {
 		k8serrors.IsNotAcceptable(err) ||
 		k8serrors.IsUnsupportedMediaType(err) ||
 		k8serrors.IsRequestEntityTooLargeError(err)
+}
+
+// copyImagePullSecrets copies each of run.imagePullSecrets from the validator
+// namespace into the per-run namespace: a pod resolves imagePullSecrets only
+// in its own namespace, so without the copy a probe on a private-mirror
+// cluster fails on image pull with the credentials sitting one namespace
+// away. The copies carry the run's ownership label and are deleted with the
+// namespace. It fails closed, since a probe that pulls without the Secret
+// fails later with a worse message:
+//
+// Errors:
+//   - ErrCodeNotFound when a named Secret does not exist in the validator
+//     namespace (the --image-pull-secret value is wrong).
+//   - ErrCodeUnauthorized when a read or write is Forbidden.
+//   - ErrCodeTimeout when a call did not land within
+//     defaults.ImagePullSecretCopyTimeout.
+//   - ErrCodeInternal for any other API failure.
+func copyImagePullSecrets(ctx context.Context, clientset kubernetes.Interface, run *gpuTestRun) error {
+	for _, name := range run.imagePullSecrets {
+		if err := copyImagePullSecret(ctx, clientset, run, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyImagePullSecret(ctx context.Context, clientset kubernetes.Interface, run *gpuTestRun, name string) error {
+	opCtx, cancel := context.WithTimeout(ctx, defaults.ImagePullSecretCopyTimeout)
+	defer cancel()
+
+	source, err := clientset.CoreV1().Secrets(run.validatorNamespace).Get(opCtx, name, metav1.GetOptions{})
+	if err != nil {
+		return classifySecretCopyError(err, fmt.Sprintf(
+			"read image pull secret %q in the validator namespace %s", name, run.validatorNamespace),
+			fmt.Sprintf("image pull secret %q named by --image-pull-secret does not exist in the validator namespace %s",
+				name, run.validatorNamespace))
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: run.namespace,
+			Labels:    map[string]string{labels.GPUTestRun: run.token},
+		},
+		Type: source.Type,
+		Data: source.Data,
+	}
+	dst := clientset.CoreV1().Secrets(run.namespace)
+	_, err = dst.Create(opCtx, secret, metav1.CreateOptions{})
+	if k8serrors.IsAlreadyExists(err) {
+		// Our own earlier copy, in a namespace adopted after an ambiguous
+		// create; refresh it rather than keep a stale credential.
+		_, err = dst.Update(opCtx, secret, metav1.UpdateOptions{})
+	}
+	if err != nil {
+		return classifySecretCopyError(err, fmt.Sprintf(
+			"copy image pull secret %q into test namespace %s", name, run.namespace), "")
+	}
+	return nil
+}
+
+// classifySecretCopyError wraps a Secret read or write failure with the code
+// matching its cause; notFoundMsg, when set, is the message of a NotFound.
+func classifySecretCopyError(err error, op, notFoundMsg string) error {
+	switch {
+	case k8serrors.IsNotFound(err) && notFoundMsg != "":
+		return errors.Wrap(errors.ErrCodeNotFound, notFoundMsg, err)
+	case k8serrors.IsForbidden(err), k8serrors.IsUnauthorized(err):
+		return errors.Wrap(errors.ErrCodeUnauthorized, "not permitted to "+op, err)
+	case isK8sTimeoutErr(err):
+		return errors.Wrap(errors.ErrCodeTimeout, "timed out trying to "+op, err)
+	default:
+		return errors.Wrap(errors.ErrCodeInternal, "failed to "+op, err)
+	}
 }
 
 // CheckSecureAcceleratorAccess validates CNCF requirement #3: Secure Accelerator Access.
@@ -694,9 +788,10 @@ func buildDevicePluginTestPod(run *gpuTestRun, tolerations []corev1.Toleration, 
 			Namespace: run.namespace,
 		},
 		Spec: corev1.PodSpec{
-			Affinity:      nodeNameAffinity(nodeNames),
-			RestartPolicy: corev1.RestartPolicyNever,
-			Tolerations:   tolerations,
+			Affinity:         nodeNameAffinity(nodeNames),
+			RestartPolicy:    corev1.RestartPolicyNever,
+			Tolerations:      tolerations,
+			ImagePullSecrets: run.imagePullSecretRefs(),
 			Containers: []corev1.Container{
 				{
 					Name:    containerNameGPUTest,
@@ -913,13 +1008,17 @@ func waitForTerminalPodWithin(ctx context.Context, clientset kubernetes.Interfac
 			"%s did not complete in time (last phase=%s, status=%s)",
 			what, lastPhase, lastContainerStatus), cause)
 	}
+	// lastPod is the pod as last observed; the sandbox-event judge consults
+	// it so a stale FailedCreatePodSandBox event (a handler configured after
+	// the first failure) cannot fail a pod that has since started.
+	var lastPod *corev1.Pod
 	evalPod := func(pod *corev1.Pod) (*corev1.Pod, bool, error) {
+		lastPod = pod
 		lastPhase = pod.Status.Phase
 		lastContainerStatus = podWaitingStatus(pod)
 		// Fail fast if pod is stuck in a non-recoverable state (e.g. ImagePullBackOff).
 		if reason := podStuckReason(pod); reason != "" {
-			return nil, true, errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("%s stuck: %s", what, reason))
+			return nil, true, podStuckErr(what, reason)
 		}
 		switch pod.Status.Phase { //nolint:exhaustive // only terminal states matter
 		case corev1.PodSucceeded, corev1.PodFailed:
@@ -928,6 +1027,7 @@ func waitForTerminalPodWithin(ctx context.Context, clientset kubernetes.Interfac
 			return nil, false, nil
 		}
 	}
+	evalEvent := sandboxEventEvaluator(name, what, func() bool { return podAwaitingSandbox(lastPod) })
 
 	// Backoff between watch-restart iterations: an apiserver (or LB) that
 	// accepts watches and closes them immediately must not turn the restart
@@ -962,6 +1062,11 @@ func waitForTerminalPodWithin(ctx context.Context, clientset kubernetes.Interfac
 		}
 		if p, done, err := evalPod(pod); done {
 			return p, err
+		}
+		// Events emitted before the event watch below is established (or
+		// while it was down) are only visible to a List.
+		if err := listedSandboxFailure(waitCtx, clientset, namespace, name, evalEvent); err != nil {
+			return nil, err
 		}
 
 		// Watch from the pod's object resourceVersion unless a prior 410
@@ -1003,7 +1108,8 @@ func waitForTerminalPodWithin(ctx context.Context, clientset kubernetes.Interfac
 			}
 			continue
 		}
-		res, done, received, evErr := consumeWatchEvents(watcher, evalPod, what)
+		eventWatcher := watchSandboxEvents(waitCtx, clientset, namespace, name, what)
+		res, done, received, evErr := consumeWatchEvents(watcher, eventWatcher, evalPod, evalEvent, what)
 		if done {
 			return res, evErr
 		}
@@ -1028,29 +1134,137 @@ func waitForTerminalPodWithin(ctx context.Context, clientset kubernetes.Interfac
 	}
 }
 
-// consumeWatchEvents drains an established watch until a terminal verdict
-// (done=true: result/err are final), a deletion (done=true with error), or
-// the channel closes (done=false — the caller's restart loop takes over).
-// received reports whether at least one event arrived (backoff-reset signal).
-// Non-Pod objects (e.g. *metav1.Status bookmark/error events) are skipped —
-// the caller's re-Get recovers.
-func consumeWatchEvents(watcher watch.Interface, evalPod func(*corev1.Pod) (*corev1.Pod, bool, error), what string) (result *corev1.Pod, done, received bool, err error) {
-	defer watcher.Stop()
-	for event := range watcher.ResultChan() {
-		received = true
-		if event.Type == watch.Deleted {
-			return nil, true, received, errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("%s was deleted while waiting for completion", what))
+// sandboxEventEvaluator returns the judge of the pod's FailedCreatePodSandBox
+// events for waitForTerminalPodWithin: a missing RuntimeClass handler never
+// changes the pod's status, so the pod watch alone would wait out the whole
+// timeout and the kubelet's event is the signal (#3703). what names the pod
+// in the stuck error. awaitingSandbox reports whether the pod,
+// as last observed, is still blocked before sandbox creation: an event the
+// per-iteration List re-reads after the handler was configured and the pod
+// started is history, not a verdict, so it is ignored once the pod has
+// progressed.
+func sandboxEventEvaluator(name, what string, awaitingSandbox func() bool) func(*corev1.Event) error {
+	return func(ev *corev1.Event) error {
+		// The field selector already scopes the List and Watch to this pod;
+		// checking again costs nothing and keeps a sibling's failure out.
+		if ev == nil || ev.InvolvedObject.Name != name || !awaitingSandbox() {
+			return nil
 		}
-		p, ok := event.Object.(*corev1.Pod)
-		if !ok {
-			continue
+		if reason := sandboxCreateFailure(ev); reason != "" {
+			return podStuckErr(what, reason)
 		}
-		if res, terminal, evalErr := evalPod(p); terminal {
-			return res, true, received, evalErr
+		return nil
+	}
+}
+
+// podStuckErr is the wait's verdict for a pod in a state no retry repairs.
+func podStuckErr(what, reason string) error {
+	return errors.New(errors.ErrCodeInternal, fmt.Sprintf("%s stuck: %s", what, reason))
+}
+
+// podAwaitingSandbox reports whether pod has not progressed past sandbox
+// creation: it is Pending (or not yet observed) and no container has started
+// or finished. A pod with a Running or Terminated container got its sandbox,
+// whatever the events say.
+func podAwaitingSandbox(pod *corev1.Pod) bool {
+	if pod == nil {
+		return true
+	}
+	if pod.Status.Phase != corev1.PodPending && pod.Status.Phase != "" {
+		return false
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Running != nil || cs.State.Terminated != nil {
+			return false
 		}
 	}
-	return nil, false, received, nil
+	for _, cs := range pod.Status.InitContainerStatuses {
+		if cs.State.Running != nil || cs.State.Terminated != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// listedSandboxFailure lists the pod's FailedCreatePodSandBox events and
+// returns evalEvent's verdict on the first terminal one. A List that fails is
+// logged and ignored: the fast failure is an acceleration of the pod wait,
+// not its verdict, and the timeout still decides.
+func listedSandboxFailure(ctx context.Context, clientset kubernetes.Interface, namespace, name string, evalEvent func(*corev1.Event) error) error {
+	events, err := clientset.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{FieldSelector: podSandboxEventSelector(name)})
+	if err != nil {
+		slog.Debug("failed to list pod sandbox events; relying on the pod watch", "pod", name, "error", err)
+		return nil
+	}
+	for i := range events.Items {
+		if err := evalEvent(&events.Items[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// watchSandboxEvents opens a watch on the pod's FailedCreatePodSandBox
+// events, returning nil when it cannot: the pod watch and the per-iteration
+// List then carry the wait, as before the event watch existed.
+func watchSandboxEvents(ctx context.Context, clientset kubernetes.Interface, namespace, name, what string) watch.Interface {
+	eventWatcher, err := clientset.CoreV1().Events(namespace).Watch(ctx, metav1.ListOptions{FieldSelector: podSandboxEventSelector(name)})
+	if err != nil {
+		slog.Debug("failed to watch pod sandbox events; relying on the pod watch", "target", what, "error", err)
+		return nil
+	}
+	return eventWatcher
+}
+
+// consumeWatchEvents drains an established pod watch, and the pod's sandbox
+// event watch when one was established (events may be nil), until a terminal
+// verdict (done=true: result/err are final), a deletion (done=true with
+// error), a terminal sandbox failure (done=true with error), or the pod watch
+// channel closes (done=false — the caller's restart loop takes over). The
+// event channel closing on its own only stops the event side. received
+// reports whether at least one pod event arrived (backoff-reset signal).
+// Non-Pod objects (e.g. *metav1.Status bookmark/error events) are skipped —
+// the caller's re-Get recovers.
+func consumeWatchEvents(watcher, events watch.Interface, evalPod func(*corev1.Pod) (*corev1.Pod, bool, error),
+	evalEvent func(*corev1.Event) error, what string) (result *corev1.Pod, done, received bool, err error) {
+
+	defer watcher.Stop()
+	var eventCh <-chan watch.Event
+	if events != nil {
+		defer events.Stop()
+		eventCh = events.ResultChan()
+	}
+	podCh := watcher.ResultChan()
+	for {
+		select {
+		case event, ok := <-podCh:
+			if !ok {
+				return nil, false, received, nil
+			}
+			received = true
+			if event.Type == watch.Deleted {
+				return nil, true, received, errors.New(errors.ErrCodeInternal,
+					fmt.Sprintf("%s was deleted while waiting for completion", what))
+			}
+			p, ok := event.Object.(*corev1.Pod)
+			if !ok {
+				continue
+			}
+			if res, terminal, evalErr := evalPod(p); terminal {
+				return res, true, received, evalErr
+			}
+		case event, ok := <-eventCh:
+			if !ok {
+				eventCh = nil // a nil channel never selects; the pod watch carries on
+				continue
+			}
+			if ev, isEvent := event.Object.(*corev1.Event); isEvent {
+				if evalErr := evalEvent(ev); evalErr != nil {
+					return nil, true, received, evalErr
+				}
+			}
+		}
+	}
 }
 
 // refreshExpiredWatchRV returns a fresh COLLECTION resourceVersion for the
@@ -1456,6 +1670,7 @@ func buildRuntimeClassBypassProbePod(run *gpuTestRun, runtimeClass, gpuNodeName 
 			RuntimeClassName: &runtimeClass,
 			RestartPolicy:    corev1.RestartPolicyNever,
 			Tolerations:      tolerations,
+			ImagePullSecrets: run.imagePullSecretRefs(),
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsNonRoot: helper.BoolPtr(true),
 				RunAsUser:    &runAsUser,
@@ -1582,7 +1797,7 @@ var cleanupTimeout = defaults.K8sCleanupTimeout
 //     error returned, object possibly committed), a first NotFound is NOT
 //     confirmed absence — cleanup keeps re-Getting within the budget, adopts
 //     the namespace if it surfaces with our ownership token, and otherwise
-//     reports that it may surface later carrying gpuTestRunLabel for
+//     reports that it may surface later carrying labels.GPUTestRun for
 //     external sweeping.
 //
 // Deleting the namespace reconciles every test resource inside it (GPU test
@@ -1613,7 +1828,7 @@ func cleanupGPUTestNamespace(clientset kubernetes.Interface, run *gpuTestRun) (s
 	if run.nsForeign {
 		return fmt.Sprintf(
 			"namespace %s is owned by another party (missing %s=%s ownership label) — deliberately left untouched, nothing was created in it",
-			run.namespace, gpuTestRunLabel, run.token), nil
+			run.namespace, labels.GPUTestRun, run.token), nil
 	}
 	if run.nsNeverCreated {
 		return fmt.Sprintf(
@@ -1641,10 +1856,10 @@ func cleanupGPUTestNamespace(clientset kubernetes.Interface, run *gpuTestRun) (s
 			existing, getErr := clientset.CoreV1().Namespaces().Get(ctx, run.namespace, metav1.GetOptions{})
 			switch {
 			case getErr == nil:
-				if existing.Labels[gpuTestRunLabel] != run.token {
+				if existing.Labels[labels.GPUTestRun] != run.token {
 					return fmt.Sprintf(
 						"namespace %s exists but is owned by another party (missing %s=%s ownership label) — deliberately left untouched, nothing was created in it",
-						run.namespace, gpuTestRunLabel, run.token), nil
+						run.namespace, labels.GPUTestRun, run.token), nil
 				}
 				run.nsObserved = true
 				run.nsUID = existing.UID
@@ -1727,7 +1942,7 @@ func cleanupDeadlineStatus(run *gpuTestRun, deleteAccepted, observedTerminating 
 	case !run.nsObserved:
 		msg := fmt.Sprintf(
 			"WARNING: namespace %s was never observed within the %s cleanup budget after an ambiguous create — it may still surface later; if it does, it carries the ownership label %s=%s for external sweeping",
-			run.namespace, cleanupTimeout, gpuTestRunLabel, run.token)
+			run.namespace, cleanupTimeout, labels.GPUTestRun, run.token)
 		if lastErr != nil {
 			msg += fmt.Sprintf(" (last error: %v)", lastErr)
 		}
@@ -1759,8 +1974,9 @@ func buildDRATestPod(run *gpuTestRun, tolerations []corev1.Toleration) *corev1.P
 			Namespace: run.namespace,
 		},
 		Spec: corev1.PodSpec{
-			RestartPolicy: corev1.RestartPolicyNever,
-			Tolerations:   tolerations,
+			RestartPolicy:    corev1.RestartPolicyNever,
+			Tolerations:      tolerations,
+			ImagePullSecrets: run.imagePullSecretRefs(),
 			ResourceClaims: []corev1.PodResourceClaim{
 				{
 					Name:              gpuClaimName,
@@ -1898,8 +2114,9 @@ func buildNoAllocationProbePod(run *gpuTestRun, gpuNodeName string) *corev1.Pod 
 			Namespace: run.namespace,
 		},
 		Spec: corev1.PodSpec{
-			NodeName:      gpuNodeName,
-			RestartPolicy: corev1.RestartPolicyNever,
+			NodeName:         gpuNodeName,
+			RestartPolicy:    corev1.RestartPolicyNever,
+			ImagePullSecrets: run.imagePullSecretRefs(),
 			Tolerations: []corev1.Toleration{
 				{Operator: corev1.TolerationOpExists},
 			},

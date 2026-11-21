@@ -21,7 +21,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 // The AKS family is the first embedded adopter of an ADR-015 configuration
@@ -311,11 +311,27 @@ func TestAKSDefaultKeepsPreProfileEffectiveValues(t *testing.T) {
 			t.Fatalf("legacy values for %s: %v", name, err)
 		}
 		if name == "nvsentinel" {
+			// The base values also set labeler (expectedDeviceCounts), so the
+			// profile's contribution is compared as a delta against it.
+			wantLabeler, _ := want["labeler"].(map[string]any)
+			if _, preexisting := wantLabeler["assumeDriverInstalled"]; preexisting {
+				t.Fatal("pre-profile catalog already sets nvsentinel labeler.assumeDriverInstalled; " +
+					"fold the value back into the component values file instead of the profile")
+			}
+			profiledLabeler := map[string]any{"assumeDriverInstalled": true}
+			for k, v := range wantLabeler {
+				profiledLabeler[k] = v
+			}
+			if !reflect.DeepEqual(got["labeler"], profiledLabeler) {
+				t.Fatalf("nvsentinel labeler = %#v, want the base labeler plus exactly assumeDriverInstalled=true",
+					got["labeler"])
+			}
+			delete(got, "labeler")
+			delete(want, "labeler")
 			// Compare each whole subtree, not just the leaf: deleting the
 			// maps below would otherwise let a future fragment smuggle
 			// sibling keys past the DeepEqual that follows.
 			for key, wantSubtree := range map[string]map[string]any{
-				"labeler":            {"assumeDriverInstalled": true},
 				"metadata-collector": {"runtimeClassName": "nvidia-container-runtime"},
 				"janitor": {"config": map[string]any{"controllers": map[string]any{"gpuReset": map[string]any{
 					"resetJob": map[string]any{"runtimeClassName": "nvidia-container-runtime", "hostDriverRootPath": "/"},

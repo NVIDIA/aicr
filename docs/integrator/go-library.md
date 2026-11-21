@@ -6,12 +6,12 @@ state can import AICR directly. This page is for those consumers.
 
 ## Which package to import
 
-**Import the `github.com/NVIDIA/aicr/pkg/client/v1` package.** This is the
+**Import the `aicr.run/pkg/client/v1` package.** This is the
 compatibility-reviewed facade and the surface AICR intends to stabilize at
 v1.0.
 
 ```go
-import aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+import aicr "aicr.run/pkg/client/v1"
 ```
 
 The facade provides a single `Client` type with constructors for the
@@ -25,7 +25,7 @@ surface](./public-api.md) for the details.
 ## Runnable examples
 
 Each facade entry point below has a compiled counterpart in
-[`pkg/client/v1`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#pkg-examples).
+[`pkg/client/v1`](https://pkg.go.dev/aicr.run/pkg/client/v1#pkg-examples).
 They are ordinary Go example functions, so `go test` builds them on every
 change — a facade change that breaks one of these fails in AICR's tree rather
 than in yours.
@@ -67,14 +67,17 @@ copying from the examples, which are complete and known to build.
 ## Installing
 
 ```bash
-go get github.com/NVIDIA/aicr@latest
+go get aicr.run@latest
 ```
 
 For reproducibility in downstream projects, pin a specific tag:
 
 ```bash
-go get github.com/NVIDIA/aicr@v1.0.0
+go get aicr.run@vX.Y.Z
 ```
+
+Releases up to v1.2.0 were published as `github.com/NVIDIA/aicr`. {/* module-rename:keep */}
+To upgrade past them, change your imports to `aicr.run` and run `go mod tidy`.
 
 ## Quick start
 
@@ -86,7 +89,7 @@ import (
 	"log"
 	"time"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicr "aicr.run/pkg/client/v1"
 )
 
 func main() {
@@ -253,8 +256,8 @@ reported as no drift.
 // role from a
 // `gcloud container node-pools list --cluster <cluster> --format=json`
 // dump, merged as the K8s.gke-gpu-pools.gpu-driver-installation reading.
-// It's required only when resolving the GKE `bundle-installer` gpuStack
-// value from a snapshot. The default `gke-default` value needs no pool
+// It's required only when resolving the GKE `bundle-installer` or `dra`
+// gpuStack value from a snapshot. The default `gke-default` value needs no pool
 // dump.
 // Give the Job-backed snapshot its own deadline: contexts cap the
 // configured timeouts from the parent side, so reusing the 30-second
@@ -287,7 +290,7 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Cleanup:         true,
 	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
 	OKEAddonsPath:   "/path/to/oke-addons.json",    // OKE only
-	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer only
+	GKEGPUPoolsPath: "/path/to/gke-gpu-pools.json", // GKE bundle-installer and dra only
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
@@ -336,6 +339,31 @@ if err != nil {
 }
 for _, r := range results {
 	log.Printf("phase=%s status=%s duration=%s", r.Phase, r.Status, r.Duration)
+}
+```
+
+**Results and error together.** `ValidateState` can return non-nil
+`results` **together with** a non-nil error, so an `err != nil` check alone
+discards them. When the run is interrupted (`ErrCodeCanceled` for a canceled
+`ctx`, `ErrCodeTimeout` for a deadline), the results hold every completed phase
+plus the partial current phase. Unstarted checks in it are `skipped`, and the
+phase reports a blocking status (`other` unless already `failed`). If
+privileged RBAC revocation also fails after a cancellation, the error is
+`ErrCodeInternal`, wrapping both causes and warning that the cluster-admin
+binding may be orphaned. Other errors, such as a later phase's pre-flight
+rejection, can also arrive alongside the phases completed before it. Partial
+results never mean the run succeeded: inspect both return values, and treat a
+non-nil error as a failed run even when the results look complete.
+
+```go
+results, err := client.ValidateState(valCtx, aksResult, snap,
+	aicr.WithValidationKubeconfig("/path/to/target-kubeconfig"),
+	aicr.WithValidationTimeout(0))
+for _, r := range results { // may be non-empty even when err != nil
+	log.Printf("phase=%s status=%s", r.Phase, r.Status)
+}
+if err != nil {
+	log.Fatalf("validate state: %v", err) // the run did not complete
 }
 ```
 
@@ -655,7 +683,16 @@ return res.Aggregate.Outcome(report, true)
   writes the evidence pages under `opts.Dir` against the checklist of the
   cluster's Kubernetes minor, or, when `opts.Vendor` is set,
   `WriteCNCFSubmission` writes the complete submission directory there
-  instead (`opts.Documented` applies either way). Each stage keeps its own bound (the snapshot its 5-minute
+  instead (`opts.Documented` applies either way). With a vendor, the
+  snapshot's Kubernetes version is checked against the carried checklists
+  (`ValidateCNCFSubmissionOptions`) between the snapshot and the validator
+  run: a submission certifies the cluster's exact minor, so a minor no
+  carried checklist matches (1.34 or 1.38 alike) is refused with
+  `ErrCodeInvalidRequest` before any validator Job unless
+  `opts.ConformanceVersion` names a checklist (`"v1.37"`), which is then
+  carried into the write and recorded in the README as selected explicitly;
+  the write repeats the check as the backstop. The pages render keeps its
+  nearest-checklist fallback. Each stage keeps its own bound (the snapshot its 5-minute
   budget plus grace, the run the 75-minute `ValidateState` default), and
   `opts.Kubeconfig` and `opts.Namespace` (default `aicr-validation`, as
   `aicr validate --namespace`) apply to both the agent and the validator
@@ -683,8 +720,9 @@ return res.Aggregate.Outcome(report, true)
 
 ```go
 err := client.CollectCNCFEvidence(ctx, rec, aicr.CNCFCollectOptions{
-	Dir:           "./cncf-evidence",
-	NotApplicable: map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"},
+	Dir:                "./cncf-evidence",
+	NotApplicable:      map[string]string{"cluster_autoscaling": "fixed-size cluster with no node autoscaler"},
+	ConformanceVersion: "", // empty: the cluster's exact minor must be a carried checklist
 })
 ```
 
@@ -696,8 +734,9 @@ or earlier either; `RenderCNCFEvidenceWithResult`,
 `WriteCNCFSubmission`, `ValidateCNCFSubmissionOptions`, `CNCFSubmissionOptions`,
 `CNCFSubmissionResult`, `CNCFVendor`, `CNCFDocumentation`,
 `RenderCNCFEvidenceOptions.Documented`, `CNCFEvidenceOptions.Vendor`,
-`CNCFEvidenceOptions.Documented`, `CNCFCollectOptions.Vendor` and
-`CNCFCollectOptions.Documented` are not in v1.2.0 or earlier.
+`CNCFEvidenceOptions.Documented`, `CNCFCollectOptions.Vendor`,
+`CNCFCollectOptions.Documented`, `CNCFCollectOptions.ConformanceVersion` and
+`ValidateCNCFRecipeCoverage` are not in v1.2.0 or earlier.
 
 ## Recipe sources
 
@@ -755,7 +794,7 @@ import (
 	"context"
 	"errors"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicr "aicr.run/pkg/client/v1"
 )
 
 func useOCIRecipes(ctx context.Context, repository, manifestDigest, tempDir string) (retErr error) {
@@ -978,6 +1017,67 @@ data, not errors: `WriteUpgradeReportTable` renders the table the CLI prints,
 and `FailsRun` makes the CLI's `--fail-on-error` decision. A record that cannot
 be read or is malformed fails the call rather than reporting `unknown`.
 
+### Sweeping stale validation resources
+
+`PlanValidationSweep` and `ApplyValidationSweep` are the SDK form of
+[`aicr sweep`](../user/cli-reference.md#aicr-sweep): they find and delete the
+per-run resources an interrupted or `--no-cleanup` validation run leaves
+behind. The split exists so the caller confirms the exact list that is
+deleted:
+
+```go
+plan, err := client.PlanValidationSweep(ctx, aicr.SweepOptions{
+	Kubeconfig: "", // empty follows the standard chain: flag, KUBECONFIG, ~/.kube/config, in-cluster
+	Namespace:  "aicr-validation",
+	OlderThan:  2 * time.Hour,
+})
+if err != nil {
+	log.Fatalf("sweep plan: %v", err)
+}
+for _, o := range plan.Objects {
+	fmt.Printf("%s %s/%s: %s (%s)\n", o.Kind, o.Namespace, o.Name, o.Status, o.Reason)
+}
+// plan.Candidates() is the exact set the apply step attempts. Confirm with
+// the operator first — ClusterContext and Server name the cluster — then:
+result, err := client.ApplyValidationSweep(ctx, plan)
+```
+
+- `PlanValidationSweep` is read-only. `ApplyValidationSweep` re-plans
+  against the cluster's current state with the plan's namespace and age
+  floor, then deletes only the intersection — candidates a fresh plan still
+  marks would-delete — with UID-pinned deletes, so an object recreated
+  between plan and apply is left alone and a re-run is idempotent. Before
+  deleting run-scoped objects it also lists the run-labeled Jobs and
+  watches from the list's ResourceVersion for the
+  `defaults.ValidationSweepSettleWindow` (~2m30s — a conservative margin
+  over the usual between-checks gap, not a proven bound) for a validator
+  Job to appear, because a live run with cleanup on shows no Job between
+  its checks; the wait sits between the re-plan's reads and the deletes, so
+  a second re-plan re-applies every guard after it. The observation fails
+  closed: a watch the apiserver ends before the window elapses aborts the
+  apply with `ErrCodeUnavailable` and nothing is deleted. A partial failure
+  still returns the report, with the failed objects marked `SweepFailed`,
+  alongside an `ErrCodeInternal` naming them.
+- `SweepOptions.OlderThan` defaults to `defaults.ValidationSweepMinAge` (2h)
+  when zero; negative is rejected. The floor outlasts the facade's whole-run
+  cap and the largest embedded single-check envelope (which bounds a test
+  namespace's life), not a whole uncapped CLI run; a `--data` catalog that
+  raises a check's `timeout` needs `OlderThan` above that timeout plus 4m5s; the liveness guards
+  (below the default floor, no non-terminal pods in a test namespace — at
+  or above the floor an aged namespace cannot belong to a live check and
+  leaked workloads never go terminal, so it is deleted with its pods; no
+  validator Job carrying the
+  run's `aicr.run/run-id` label in any namespace) plus the settle
+  observation cover run-scoped objects.
+- `SweepReport` and `SweepObject` are facade-owned (not aliases of
+  `pkg/validator/sweep`), with the JSON/YAML shape the CLI's `--format`
+  output publishes.
+- `ApplyValidationSweep` accepts only a report `PlanValidationSweep`
+  produced: the marker and the sweep target are unexported fields, so a
+  hand-built `SweepReport` — or a plan that round-tripped through JSON,
+  which drops unexported fields — is rejected with `ErrCodeInvalidRequest`.
+  Re-plan instead of reusing a serialized report.
+
 ### Criteria relaxation on the snapshot path
 
 A snapshot resolve is strict by default — every criteria dimension you state
@@ -1125,6 +1225,13 @@ caller can shape a response without reimplementing hydrate-then-select:
 wrap chain and would match an `ErrCodeNotFound` cause nested inside a
 hydration failure.
 
+`SummarizeRecipe(rec)` returns the overview `aicr query --summary` prints, as
+an `*aicr.RecipeSummary` (a transparent alias of `pkg/recipe.Summary`):
+identity, criteria, applied overlays, constraints, enabled components in
+deployment order, and the validation checks per phase. It performs no I/O and
+does not hydrate component values. A `nil` `*RecipeResult`, or one without
+internal recipe state, returns `ErrCodeInvalidRequest`.
+
 ### Delivering a collected snapshot
 
 `snapshotter.DeliverSnapshot(ctx, raw, snapshotter.SnapshotDelivery{...})`
@@ -1184,7 +1291,7 @@ import (
 	"context"
 	"errors"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	aicr "aicr.run/pkg/client/v1"
 )
 
 func resolveCommittedConfig(ctx context.Context) (retErr error) {
@@ -1264,7 +1371,7 @@ derive step rather than the load step.
 | Method | Reads |
 |---|---|
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
-| `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
+| `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.runtimeMetrics` + `spec.bundle.attestation` |
 | `BundleInputOptions()` | `spec.bundle.input` + `.output` + `.registry` |
 | `ValidateSettings()` | `spec.validate.agent` + `.execution` |
 | `ValidateInputOptions()` | `spec.validate.input` + `.execution.failOnError` |
@@ -1283,7 +1390,8 @@ derive step rather than the load step.
 
 `IsRequireEvidence()` is a read, like `IsCriteriaStrict()`. It does not change
 resolution. After `ResolveRecipe`, call `PublishedEvidenceRequired` to combine
-that field with a flag and `AICR_REQUIRE_EVIDENCE`, then
+that field with a flag and `AICR_REQUIRE_EVIDENCE` (named by
+`aicr.RequireEvidenceEnvVar`), then
 `Client.RequirePublishedEvidence` when it reports true. That call rejects a
 Client whose recipe source is not `EmbeddedSource()`, including
 `FilesystemSource` from `--data` or `spec.recipe.data`, before it checks the
@@ -1303,9 +1411,9 @@ guarantee.
 
 ### What `BundleOptions()` does and does not carry
 
-`BundleOptions()` returns 19 bundler settings (those `spec.bundle.deployment`
-and `spec.bundle.scheduling` configure, plus the two attestation flags the
-bundler itself reads) as plain fields — not a built `Config` — so you read and
+`BundleOptions()` returns 20 bundler settings (those `spec.bundle.deployment`,
+`spec.bundle.scheduling` and `spec.bundle.runtimeMetrics` configure, plus the
+two attestation flags the bundler itself reads) as plain fields — not a built `Config` — so you read and
 override individual settings directly, the same as `ValidateSettings()`. It
 also returns `OIDCResolve` (the four signing settings that reach the attester
 rather than the bundler):
@@ -1321,7 +1429,7 @@ opts.Nodes = 32 // caller wins, visibly
 `Config` is still on the struct, as an escape hatch: when you already have a
 fully built `*BundleConfig` from something the flat fields cannot express (a
 CLI-flag-only setting such as `Version` or `Serial`, or a config object you
-mutate in place), set it and it wins outright over the 19 bundler-config flat
+mutate in place), set it and it wins outright over the 20 bundler-config flat
 fields (`Deployer` through `ArgoCD`) and over `Split`, which follows them
 and is caller-set only: no config file setting derives it. `BundleOptions()`
 leaves `Config` and `Split` unset. `Config` does NOT override `Attester`, `OIDCResolve`,
@@ -1329,6 +1437,31 @@ leaves `Config` and `Split` unset. `Config` does NOT override `Attester`, `OIDCR
 caller-supplied regardless of `Config`, which is why the REST `/v1/bundle`
 handler can set `Config` and `OutputDir`/`Timeout` in the same struct
 literal and have all three take effect.
+
+`MakeBundle` renders into a private `.aicr-stage-*` directory, inside
+`OutputDir` when it exists and beside it when it does not, and moves the
+bundle into `OutputDir` only once it is complete. A call that fails while
+rendering removes the stage and leaves `OutputDir` as it found it. A call
+that is killed leaves the stage behind. A stage inside an existing
+`OutputDir` fails a later call with checksums on until you delete it. A stage
+beside a missing `OutputDir` is not detected, so delete it by hand. An
+`OutputDir` that holds an earlier bundle is replaced when that bundle's
+`checksums.txt` lists a matching `bundle-info.yaml`. An earlier bundle made with
+`config.WithIncludeChecksums(false)` is not recognized, so a later call with
+checksums on fails on any of its files the new bundle does not write.
+Every top-level folder named like a component folder, such as
+`001-notes/`, is removed whatever it holds, even when the new bundle does not
+write it, and so are the other leftover entries
+[Output directory](../user/bundling.md#output-directory) lists. Other content
+that is neither part of the earlier bundle nor named like the new bundle's
+output fails the call. With `config.WithIncludeChecksums(false)`, nothing
+else is checked. A top-level entry the new bundle also writes is replaced
+whole, so a directory such as `data/` loses every file the new bundle does
+not write, and other top-level entries are kept. A recognized earlier
+bundle's `checksums.txt` and attestation files are removed, because they
+describe content the new bundle replaced and it carries none of its own. A
+`checksums.txt` that does not list a matching `bundle-info.yaml` is kept.
+Copy out any file you need before reusing `OutputDir`.
 
 To generate a class-partitioned bundle set ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)),
 set `Split` and give `OutputDir` a path that does not exist yet; the set is
@@ -2050,8 +2183,8 @@ with the same code, so this works through wrap chains:
 ```go
 import (
 	stderrors "errors"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicr "aicr.run/pkg/client/v1"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 _, err := client.ResolveRecipe(ctx, req)
@@ -2063,7 +2196,7 @@ case stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeNotFound, "")):
 }
 ```
 
-Runnable version: [`Example_errorCodes`](https://pkg.go.dev/github.com/NVIDIA/aicr/pkg/client/v1#example-package-ErrorCodes).
+Runnable version: [`Example_errorCodes`](https://pkg.go.dev/aicr.run/pkg/client/v1#example-package-ErrorCodes).
 
 Reach for `errors.As` only when you need the error's *payload* rather than
 its class — `se.Context`, which carries structured detail such as a coverage

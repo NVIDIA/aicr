@@ -77,11 +77,17 @@ func TestTimeoutConstants(t *testing.T) {
 		{"TrainerControllerReadyTimeout", TrainerControllerReadyTimeout, 1 * time.Minute, 5 * time.Minute},
 
 		// Validator timeouts
-		{"ValidatorWaitBuffer", ValidatorWaitBuffer, 1 * time.Minute, 5 * time.Minute},
+		{"ValidatorStartupGrace", ValidatorStartupGrace, 1 * time.Minute, 5 * time.Minute},
+		{"ValidatorCleanupGrace", ValidatorCleanupGrace, 10 * time.Second, 60 * time.Second},
+		{"ValidatorResultFlushMargin", ValidatorResultFlushMargin, 10 * time.Second, 60 * time.Second},
+		{"ValidationCancellationBudget", ValidationCancellationBudget, 1 * time.Minute, 5 * time.Minute},
 		{"ValidatorJobDeadlineHeadroom", ValidatorJobDeadlineHeadroom, 1 * time.Minute, 10 * time.Minute},
 		{"ValidatorDefaultTimeout", ValidatorDefaultTimeout, 1 * time.Minute, 15 * time.Minute},
 		{"ValidatorTerminationGracePeriod", ValidatorTerminationGracePeriod, 10 * time.Second, 60 * time.Second},
+		{"ValidatorTerminationWaitMargin", ValidatorTerminationWaitMargin, 1 * time.Second, 15 * time.Second},
 		{"ValidatorMinCompletionWait", ValidatorMinCompletionWait, 10 * time.Second, 60 * time.Second},
+		{"ValidationSweepMinAge", ValidationSweepMinAge, 90 * time.Minute, 4 * time.Hour},
+		{"ValidationSweepSettleWindow", ValidationSweepSettleWindow, 2 * time.Minute, 5 * time.Minute},
 
 		// ConfigMap read/write budgets — held as distinct constants so the
 		// read path (serializer resolving cm:// URIs) and the write path
@@ -120,11 +126,12 @@ func TestJobEnvelopeMarginInvariant(t *testing.T) {
 }
 
 // TestSigstoreRetryBudgetInvariant guards the contract that the retry
-// budget fits inside the outer SigstoreSignTimeout ceiling: worst-case
-// wall-clock is SigstoreRetryBudget * SigstoreAttemptTimeout plus the
-// sum of backoffs between attempts, and that total must not exceed
-// SigstoreSignTimeout — otherwise the inner retry loop would race the
-// outer deadline. See issue #1249.
+// budget fits inside the outer SigstoreSignTimeout ceiling. One retry
+// loop's worst-case wall-clock is SigstoreRetryBudget *
+// SigstoreAttemptTimeout plus the sum of backoffs between attempts. Keyless
+// signing runs one loop for the Fulcio certificate and one for the bundle,
+// and both must fit inside SigstoreSignTimeout, otherwise the bundle loop
+// would race the outer deadline.
 //
 // Caveat: the Rekor v2 signing path (attestation.transparencyForOptions) may
 // prepend a cold-cache TUF signing-config fetch that draws from the same caller
@@ -145,6 +152,9 @@ func TestSigstoreRetryBudgetInvariant(t *testing.T) {
 		t.Fatalf("SigstoreRetryBackoffFactor must be >= 1; got %d", SigstoreRetryBackoffFactor)
 	}
 
+	// The Fulcio certificate request and the bundle signing.
+	const signSteps = 2
+
 	// Compute worst-case: every attempt hits the per-attempt timeout,
 	// every backoff between attempts is taken in full.
 	totalAttempts := SigstoreRetryBudget * SigstoreAttemptTimeout
@@ -154,12 +164,13 @@ func TestSigstoreRetryBudgetInvariant(t *testing.T) {
 		totalBackoffs += backoff
 		backoff *= time.Duration(SigstoreRetryBackoffFactor)
 	}
-	worstCase := totalAttempts + totalBackoffs
+	perStep := totalAttempts + totalBackoffs
+	worstCase := signSteps * perStep
 	if worstCase > SigstoreSignTimeout {
 		t.Errorf("worst-case retry budget %v exceeds SigstoreSignTimeout %v "+
-			"(attempts: %d × %v = %v, backoffs: %v) — raise SigstoreSignTimeout "+
+			"(%d steps × (attempts: %d × %v = %v, backoffs: %v)). Raise SigstoreSignTimeout "+
 			"or tighten the per-attempt / backoff knobs in lockstep",
-			worstCase, SigstoreSignTimeout, SigstoreRetryBudget,
+			worstCase, SigstoreSignTimeout, signSteps, SigstoreRetryBudget,
 			SigstoreAttemptTimeout, totalAttempts, totalBackoffs)
 	}
 }
@@ -271,47 +282,65 @@ func TestCollectorTimeoutLessThanK8s(t *testing.T) {
 	}
 }
 
+// TestValidatorHeadroomDecomposition pins the exact grace arithmetic so a
+// dropped term fails: the Job deadline headroom is startup + cleanup + flush,
+// and the SIGTERM window is cleanup + flush (issue #1632).
+func TestValidatorHeadroomDecomposition(t *testing.T) {
+	if want := ValidatorStartupGrace + ValidatorCleanupGrace + ValidatorResultFlushMargin; ValidatorJobDeadlineHeadroom != want {
+		t.Errorf("ValidatorJobDeadlineHeadroom = %v, want startup+cleanup+flush = %v", ValidatorJobDeadlineHeadroom, want)
+	}
+	if want := ValidatorCleanupGrace + ValidatorResultFlushMargin; ValidatorTerminationGracePeriod != want {
+		t.Errorf("ValidatorTerminationGracePeriod = %v, want cleanup+flush = %v", ValidatorTerminationGracePeriod, want)
+	}
+	if want := 2*K8sCleanupTimeout + ValidatorTerminationGracePeriod + ValidatorTerminationWaitMargin; ValidationCancellationBudget != want {
+		t.Errorf("ValidationCancellationBudget = %v, want %v", ValidationCancellationBudget, want)
+	}
+}
+
 func TestValidatorTimeoutRelationships(t *testing.T) {
-	// Grace period must fit within the wait buffer so the orchestrator
-	// outlives the container's SIGTERM window.
-	if ValidatorTerminationGracePeriod > ValidatorWaitBuffer {
-		t.Errorf("ValidatorTerminationGracePeriod (%v) should not exceed ValidatorWaitBuffer (%v)",
-			ValidatorTerminationGracePeriod, ValidatorWaitBuffer)
+	// The startup grace covers pod readiness (scheduling + image pull), which
+	// consumes the Job deadline before the check's own clock starts.
+	if ValidatorStartupGrace < K8sPodReadyTimeout {
+		t.Errorf("ValidatorStartupGrace (%v) must be at least K8sPodReadyTimeout (%v)",
+			ValidatorStartupGrace, K8sPodReadyTimeout)
 	}
-	// The orchestrator must outlive the pod's own clean exit, so the wait
-	// buffer has to cover pod-start latency (scheduling + image pull).
-	if ValidatorWaitBuffer < K8sPodReadyTimeout {
-		t.Errorf("ValidatorWaitBuffer (%v) must be at least K8sPodReadyTimeout (%v)",
-			ValidatorWaitBuffer, K8sPodReadyTimeout)
+	// Deferred cleanup runs under a bound no larger than the cleanup grace.
+	for name, bound := range map[string]time.Duration{
+		"K8sCleanupTimeout":       K8sCleanupTimeout,
+		"PreflightCleanupTimeout": PreflightCleanupTimeout,
+	} {
+		if bound > ValidatorCleanupGrace {
+			t.Errorf("%s (%v) exceeds the cleanup grace (%v)", name, bound, ValidatorCleanupGrace)
+		}
 	}
-	// The two checks above do not backstop a dropped summand: if
-	// ValidatorTerminationGracePeriod were dropped from ValidatorWaitBuffer's
-	// definition, the result (2m) would still pass both the bounds-range table
-	// test and the >= K8sPodReadyTimeout check above. Assert the sum of the two
-	// independently named constants directly so a dropped summand fails here.
-	if ValidatorWaitBuffer < K8sPodReadyTimeout+ValidatorTerminationGracePeriod {
-		t.Errorf("ValidatorWaitBuffer (%v) must be at least K8sPodReadyTimeout + ValidatorTerminationGracePeriod (%v)",
-			ValidatorWaitBuffer, K8sPodReadyTimeout+ValidatorTerminationGracePeriod)
+	// The SIGTERM window must be strictly above the cleanup budget so the
+	// check can flush its result after cleanup, before SIGKILL.
+	if ValidatorTerminationGracePeriod <= ValidatorCleanupGrace {
+		t.Errorf("ValidatorTerminationGracePeriod (%v) must exceed the cleanup grace (%v)",
+			ValidatorTerminationGracePeriod, ValidatorCleanupGrace)
 	}
-	// Kubernetes must be the LOOSEST clock. If the Job deadline is not
-	// strictly beyond the orchestrator's wait, the Job controller can kill and
-	// delete the pod before the orchestrator reads its logs — issue #2473.
-	if ValidatorJobDeadlineHeadroom <= ValidatorWaitBuffer {
-		t.Errorf("ValidatorJobDeadlineHeadroom (%v) must exceed ValidatorWaitBuffer (%v)",
-			ValidatorJobDeadlineHeadroom, ValidatorWaitBuffer)
+	if ValidatorTerminationGracePeriod < ValidatorCleanupGrace+ValidatorResultFlushMargin {
+		t.Errorf("ValidatorTerminationGracePeriod (%v) must cover cleanup + flush (%v)",
+			ValidatorTerminationGracePeriod, ValidatorCleanupGrace+ValidatorResultFlushMargin)
+	}
+	// The interrupted-run termination wait covers the pod's full SIGTERM grace
+	// from Job deletion plus a delivery margin. The margin is not a work budget,
+	// and the normal post-deletion wait must cover the same window so both
+	// paths keep RBAC alive for the whole grace.
+	if ValidatorTerminationWaitMargin <= 0 || ValidatorTerminationWaitMargin >= ValidatorTerminationGracePeriod {
+		t.Errorf("ValidatorTerminationWaitMargin (%v) must be positive and below termination grace (%v)",
+			ValidatorTerminationWaitMargin, ValidatorTerminationGracePeriod)
+	}
+	if K8sPodTerminationWaitTimeout < ValidatorTerminationGracePeriod+ValidatorTerminationWaitMargin {
+		t.Errorf("K8sPodTerminationWaitTimeout (%v) must cover termination grace + margin (%v)",
+			K8sPodTerminationWaitTimeout, ValidatorTerminationGracePeriod+ValidatorTerminationWaitMargin)
 	}
 	// The floor on a start-time-rebased wait has to leave room for a Job past
 	// its deadline to stamp a terminal condition, which takes at least the
-	// pod's SIGTERM-to-SIGKILL window; and it must stay under the wait buffer,
-	// or a floor larger than the budget it clamps would extend every wait
-	// instead of bounding the clamped ones.
+	// pod's SIGTERM-to-SIGKILL window.
 	if ValidatorMinCompletionWait < ValidatorTerminationGracePeriod {
 		t.Errorf("ValidatorMinCompletionWait (%v) must be at least ValidatorTerminationGracePeriod (%v)",
 			ValidatorMinCompletionWait, ValidatorTerminationGracePeriod)
-	}
-	if ValidatorMinCompletionWait > ValidatorWaitBuffer {
-		t.Errorf("ValidatorMinCompletionWait (%v) must not exceed ValidatorWaitBuffer (%v)",
-			ValidatorMinCompletionWait, ValidatorWaitBuffer)
 	}
 	// Default timeout must be positive and reasonable.
 	if ValidatorDefaultTimeout < 1*time.Minute {
@@ -320,6 +349,33 @@ func TestValidatorTimeoutRelationships(t *testing.T) {
 	// Max stdout lines must be positive.
 	if ValidatorMaxStdoutLines <= 0 {
 		t.Errorf("ValidatorMaxStdoutLines (%d) should be positive", ValidatorMaxStdoutLines)
+	}
+}
+
+// TestValidationSweepMinAgeInvariant guards the `aicr sweep` age floor: an
+// object younger than ValidationSweepMinAge may still belong to a live
+// validation run, so the floor must exceed ValidationOperationTimeout — the
+// facade-level cap on one whole Client.ValidateState, which itself covers the
+// largest per-check wait envelope. The per-check envelope half of that
+// invariant (against the shipped catalog) lives in
+// pkg/validator/catalog/catalog_test.go, which may import both packages.
+func TestValidationSweepMinAgeInvariant(t *testing.T) {
+	if ValidationSweepMinAge <= ValidationOperationTimeout {
+		t.Errorf("ValidationSweepMinAge (%v) must exceed ValidationOperationTimeout (%v)",
+			ValidationSweepMinAge, ValidationOperationTimeout)
+	}
+}
+
+// TestValidationSweepSettleWindowInvariant pins the floor of the `aicr
+// sweep` settle observation — at least one pod-termination wait plus one
+// bounded API call. The real
+// between-checks gap adds unbudgeted work (the phase-boundary result write,
+// the dependency-affinity scan, the Job apply), so the window is a
+// conservative margin and this test pins a floor, not a derivation.
+func TestValidationSweepSettleWindowInvariant(t *testing.T) {
+	if min := K8sPodTerminationWaitTimeout + K8sCleanupTimeout; ValidationSweepSettleWindow < min {
+		t.Errorf("ValidationSweepSettleWindow (%v) must be at least one pod-termination wait plus a bounded API call (%v)",
+			ValidationSweepSettleWindow, min)
 	}
 }
 

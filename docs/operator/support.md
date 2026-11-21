@@ -25,7 +25,7 @@ digests it qualified, with the AICR image digest they were qualified against.
 
 | Component | Supported | Tested in CI |
 | --- | --- | --- |
-| AICR | `>=1.0.0, <2.0.0`, enforced by the chart and checked against the version AICR records in its snapshot, recipe, bundle and evidence | v1.0.0 and v1.1.2 |
+| AICR | `>=1.0.0, <2.0.0`, enforced by the chart and checked against the version AICR records in its snapshot, recipe, bundle and evidence | v1.0.0 and v1.2.0 |
 | Kubernetes | 1.34 or later (the chart's `kubeVersion`) | The newest 1.34 patch and 1.37 |
 | Argo CD | v3.4.2 (Argo Helm chart 9.5.14), the release AICR's own CI pins | v3.4.2 |
 | Deployment engine | Argo CD; a Flux adapter follows | — |

@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // Artifact file names the upstream validator parses by name

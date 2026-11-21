@@ -20,10 +20,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/allocpolicy"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/allocpolicy"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // gpuAllocationPolicyPaths maps component name → the value paths that select
@@ -68,12 +68,12 @@ func buildGPUAllocationPolicyPaths() map[string][]string {
 // A path matches a key when it equals the key, is a parent of it (an object
 // override that can contain the key), or is a child of it (an override that
 // would reshape the key's boolean value).
-func (b *DefaultBundler) enforceAllocationPolicyOverrides(provider recipe.DataProvider) error {
-	if b.Config == nil {
+func (r *bundleRun) enforceAllocationPolicyOverrides(provider recipe.DataProvider) error {
+	if r.Config == nil {
 		return nil
 	}
 
-	dynamicValues, err := b.buildDynamicValuesMap(provider)
+	dynamicValues, err := r.buildDynamicValuesMap(provider)
 	if err != nil {
 		return err
 	}
@@ -97,12 +97,12 @@ func (b *DefaultBundler) enforceAllocationPolicyOverrides(provider recipe.DataPr
 		}
 
 		var staticPaths []string
-		for path := range b.getValueOverridesForComponent(component, provider) {
+		for path := range r.getValueOverridesForComponent(component, provider) {
 			if matchingPolicyKey(path, keys) != "" {
 				staticPaths = append(staticPaths, path)
 			}
 		}
-		for path := range b.getTypedValueOverridesForComponent(component, provider) {
+		for path := range r.getTypedValueOverridesForComponent(component, provider) {
 			if matchingPolicyKey(path, keys) != "" {
 				staticPaths = append(staticPaths, path)
 			}
@@ -113,7 +113,7 @@ func (b *DefaultBundler) enforceAllocationPolicyOverrides(provider recipe.DataPr
 				"deprecated: bundle-time override of GPU allocation-policy key(s) %s on component %q — the allocation policy validators verify is resolved from the recipe, so a bundle-time change will be reported as recipe/cluster drift; move the allocation mode to a recipe overlay (issue #1327)",
 				strings.Join(staticPaths, ", "), component)
 			slog.Warn(warning)
-			b.warnings = append(b.warnings, warning)
+			r.appendWarning(warning)
 		}
 	}
 	return nil

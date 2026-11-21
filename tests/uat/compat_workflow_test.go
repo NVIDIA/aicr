@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/uatbroker"
+	"aicr.run/pkg/uatbroker"
 )
 
 const (

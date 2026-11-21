@@ -32,9 +32,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/defaults"
+	"aicr.run/pkg/operator/engine/argocd"
 )
 
 // release is the one release the suite rolls out.
@@ -82,6 +82,36 @@ func patchRuntime(ctx context.Context, t *testing.T, mutate func(*v1alpha1.Clust
 	if err := k8s.Patch(ctx, rt, patch); err != nil {
 		t.Fatalf("patch runtime: %v", err)
 	}
+}
+
+// releaseValues are the overrides other than component toggles: the
+// release's values, which name no other component.
+func releaseValues(overrides []v1alpha1.Override) []v1alpha1.Override {
+	var out []v1alpha1.Override
+	for _, o := range overrides {
+		if o.Path != "enabled" {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// onlyRelease disables every component of a recipe but the release,
+// replacing the runtime's toggles and keeping the release's values.
+func onlyRelease(rt *v1alpha1.ClusterRuntime, components []string) {
+	overrides := make([]v1alpha1.Override, 0, len(components)+len(rt.Spec.Overrides))
+	for _, c := range components {
+		if c != release {
+			overrides = append(overrides, v1alpha1.Override{Component: c, Path: "enabled", Value: apiextensionsv1.JSON{Raw: []byte("false")}})
+		}
+	}
+	overrides = append(overrides, releaseValues(rt.Spec.Overrides)...)
+	rt.Spec.Overrides = overrides
+}
+
+// pin holds the runtime's target on a plan, whatever it resolves.
+func pin(rt *v1alpha1.ClusterRuntime, digest string) {
+	rt.Spec.Selection = v1alpha1.Selection{Policy: v1alpha1.SelectionPinned, PinnedPlanDigest: digest}
 }
 
 // setCPU sets the release's CPU request; each value is a new plan.
@@ -182,6 +212,28 @@ func waitReadyOn(ctx context.Context, t *testing.T, digest string) {
 		rt := getRuntime(ctx, t)
 		return cond(rt, v1alpha1.ConditionReady).Status == metav1.ConditionTrue && rt.Status.ActivePlanDigest == digest
 	})
+}
+
+// rollOutTo approves the rollout to digest once it waits for an approval and
+// waits until the runtime is Ready on digest. A transition AICR assesses as
+// needing no approval, or no transition at all, has nothing to approve.
+func rollOutTo(ctx context.Context, t *testing.T, digest string) {
+	t.Helper()
+	var waiting *v1alpha1.RuntimeRollout
+	waitFor(t, rolloutTimeout, "a rollout to "+digest+" awaiting approval, or Ready on it", func() bool {
+		for _, r := range rolloutsTo(ctx, t, digest) {
+			if r.Status.Phase == v1alpha1.PhaseAwaitingApproval {
+				waiting = &r
+				return true
+			}
+		}
+		rt := getRuntime(ctx, t)
+		return cond(rt, v1alpha1.ConditionReady).Status == metav1.ConditionTrue && rt.Status.ActivePlanDigest == digest
+	})
+	if waiting != nil {
+		approve(ctx, t, waiting.Name)
+	}
+	waitReadyOn(ctx, t, digest)
 }
 
 // rolledOut checks a transition ended with one Succeeded rollout.

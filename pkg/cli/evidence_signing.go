@@ -21,10 +21,10 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/urfave/cli/v3"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/config"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/errors"
 )
 
 // evidenceSigningFlags returns the KMS and private-Sigstore signing flags of

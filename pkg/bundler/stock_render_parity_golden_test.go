@@ -32,11 +32,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
+	"aicr.run/pkg/serializer"
 )
 
 const (
@@ -75,10 +75,13 @@ type renderGolden map[string]map[string]string
 type stockRenderOptIn struct {
 	name string
 	leaf string
-	// overlay and build re-resolve the leaf with these additions. Nil for both
-	// reuses the leaf's stock resolution.
+	// overlay, build, and profile re-resolve the leaf with these additions.
+	// All unset reuses the leaf's stock resolution.
 	overlay *overlayAddition
 	build   []recipe.BuildOption
+	// profile selects a non-default ADR-015 profile value in name=value
+	// form; empty keeps the leaf's declaration default.
+	profile string
 	opts    []config.Option
 	// covers names the opt-in components this fixture exists for. The fixture
 	// fails unless each of them renders, so a catalog change that drops a
@@ -160,6 +163,18 @@ var stockRenderOptIns = []stockRenderOptIn{
 			}},
 		},
 		covers: []string{"nktp"},
+	},
+	{
+		// The gpuStack=dra value (#2517) renders a different advertiser
+		// shape than the gke-default stock pass: the installer DaemonSet
+		// on, both device plugins off, whole-GPU DRA armed. No covers
+		// entry — every component here also renders a directory under
+		// the stock pass; the guard is the golden itself, whose digests
+		// for this fixture differ from the leaf's default-path rows and
+		// snap back to them if the selection ever stops applying.
+		name:    "h100-gke-cos-training-kubeflow+gpustack-dra",
+		leaf:    "h100-gke-cos-training-kubeflow",
+		profile: "gpuStack=dra",
 	},
 	{
 		name: "h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer",
@@ -249,7 +264,7 @@ func TestStockRenderParityGolden(t *testing.T) {
 			continue
 		}
 		rr := leaf.Result
-		if fx.overlay != nil || fx.build != nil {
+		if fx.overlay != nil || fx.build != nil || fx.profile != "" {
 			var resolveErr error
 			rr, resolveErr = resolveOptInLeaf(ctx, t, leaf.Entry, fx)
 			if resolveErr != nil {
@@ -459,6 +474,11 @@ func resolveOptInLeaf(ctx context.Context, t *testing.T, entry recipe.CatalogEnt
 			return fx.build
 		}
 	}
+	if fx.profile != "" {
+		opts.ProfileForCriteria = func(*recipe.Criteria) string {
+			return fx.profile
+		}
+	}
 	name := entry.Name
 	if fx.overlay != nil {
 		opts.Provider = fx.overlay.dataProvider(t, entry)
@@ -505,15 +525,7 @@ func (a *overlayAddition) dataProvider(t *testing.T, leaf recipe.CatalogEntry) r
 		recipe.RegistryFileName:                  []byte(providertest.EmptyRegistryYAML),
 		"overlays/" + optInOverlayName + ".yaml": overlayYAML,
 	})
-	provider, err := recipe.NewLayeredDataProvider(
-		recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ""),
-		recipe.LayeredProviderConfig{ExternalDir: dir},
-	)
-	if err != nil {
-		t.Fatalf("layer opt-in overlay: %v", err)
-	}
-	t.Cleanup(func() { recipe.EvictCachedRegistry(provider) })
-	return provider
+	return dataDirProvider(t, dir)
 }
 
 // unrenderedRegistryComponents returns the registry components that render in

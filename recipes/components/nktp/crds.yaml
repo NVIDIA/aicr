@@ -31,6 +31,6 @@ charts:
       - opampbridges.opentelemetry.io
       - opentelemetrycollectors.opentelemetry.io
       - targetallocators.opentelemetry.io
-    repository: oci://ghcr.io/dsx-ai-factory/nvke/charts
-    sourceVersion: 0.1.1-rc.3
+    repository: https://helm.ngc.nvidia.com/nvidia
+    sourceVersion: 0.2.0
 component: nktp

@@ -20,8 +20,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 const testEntries = "testdata/entries"
@@ -53,6 +53,50 @@ func TestSelectorMatches(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.sel.matches(tt.platform, tt.arch); got != tt.want {
 				t.Errorf("matches(%q, %q) = %v, want %v", tt.platform, tt.arch, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSplitBlocks(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		entry string
+		want  []string
+	}{
+		{
+			name:  "no overrides key",
+			entry: "dependencies:\n- image: a\n",
+			want:  []string{"dependencies:\n- image: a\n"},
+		},
+		{
+			name:  "overrides key with no items",
+			entry: "dependencies:\n- image: a\noverrides:\n",
+			want:  []string{"dependencies:\n- image: a"},
+		},
+		{
+			name:  "single trailing override",
+			entry: "base: 1\noverrides:\n- when: {}\n  image: b\n",
+			want:  []string{"base: 1", "- when: {}\n  image: b\n"},
+		},
+		{
+			name:  "lines before the first item are dropped and later ones stay with the preceding item",
+			entry: "base: 1\noverrides:\n# lead\n- when: {}\n  image: b\n# next\n- when: {}\n  image: c",
+			want:  []string{"base: 1", "- when: {}\n  image: b\n# next", "- when: {}\n  image: c"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var got []string
+			for _, b := range splitBlocks(tt.entry) {
+				got = append(got, b.body)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("splitBlocks(%q) bodies = %q, want %q", tt.entry, got, tt.want)
 			}
 		})
 	}

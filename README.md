@@ -51,6 +51,10 @@ aicr query --service eks --accelerator h100 --os ubuntu \
 
 The contents of the `bundles/` directory depend on the chosen `--deployer`: Argo CD `Application` manifests for `argocd`, a Helm chart app-of-apps for `argocd-helm`, `HelmRelease` and `Kustomization` manifests for `flux`, `helmfile.yaml` release graph for `helmfile`, a Terraform module with one call per component for `terraform`, Fleet `fleet.yaml` bundles and a `GitRepo` (or `HelmOp`s) for `fleet`, or simple Helm commands for `helm`.
 
+To use a catalog you own entirely, add `--data ./catalog --external-only` to
+the catalog-consuming commands. See [fully external catalogs](docs/integrator/data-extension.md#use-a-fully-external-catalog)
+for required files and configuration.
+
 See the [Installation Guide](docs/user/installation.md) for manual installation, building from source, and container images.
 
 ## Features
@@ -59,7 +63,7 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 |---------|-------------|
 | **`aicr` CLI** | Single binary for the full workflow: snapshot, recipe, bundle, validate, verify, diff, and trust management. |
 | **API Server (`aicrd`)** | REST API exposing the same capabilities as the CLI. Run in-cluster for CI/CD integration or air-gapped environments. |
-| **Go Library (`github.com/NVIDIA/aicr/pkg/client/v1`)** | Stable Go SDK facade for in-process consumers — same workflow (resolve, bundle, snapshot, validate) callable from any Go program without a subprocess or REST hop. Per-Client isolation supports multi-tenant use. |
+| **Go Library (`aicr.run/pkg/client/v1`)** | Stable Go SDK facade for in-process consumers — same workflow (resolve, bundle, snapshot, validate) callable from any Go program without a subprocess or REST hop. Per-Client isolation supports multi-tenant use. |
 | **Snapshot Agent** | Kubernetes Job that captures live cluster state (GPU hardware, drivers, kernel, OS, operators, K8s config) into a ConfigMap for validation against recipes. |
 | **Multi-Deployer Bundles** | Render the same recipe into Helm, Argo CD (App of Apps or Helm chart variant), Flux, Helmfile, Terraform, or Rancher Fleet artifacts — pick whichever fits your GitOps pipeline. |
 | **Multi-Phase Validation** | Deployment, performance (training and inference), and conformance phases — run all or one at a time. |
@@ -86,7 +90,7 @@ See the full [Component Catalog](docs/user/component-catalog.md) for every compo
 | Dimension | Values |
 |-----------|--------|
 | **Services** | AKS, BCM, CKS (Preview), EKS, generic, GKE, k0s, Kind, LKE, Metal3, MK8s, NVKE, OCP, OKE, RKE2 |
-| **Accelerators** | A100, B200, B300, GB200, GB300, H100, H200, L40, L40S, RTX PRO 6000, VR200 (Preview) |
+| **Accelerators** | A100, B200, B300, GB10 (Preview), GB200, GB300, H100, H200, L40, L40S, RTX PRO 6000, VR200 (Preview) |
 | **Operating systems** | Amazon Linux, COS, Oracle Linux, RHEL, Rocky Linux, SLES, Talos, Ubuntu |
 | **Workload intents** | Inference, Training |
 | **Platforms** | Dynamo, Kubeflow, Kueue, NIM, Run:ai, Slurm (Slinky) |

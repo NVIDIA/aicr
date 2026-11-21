@@ -23,13 +23,13 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/validation"
 
-	"github.com/NVIDIA/aicr/pkg/collector/topology"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/collector/topology"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
 )
 
 // GPUNodesLabelConstraintName names the node-set constraint form, which the

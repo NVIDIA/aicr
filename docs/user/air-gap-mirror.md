@@ -121,7 +121,7 @@ metadata:
   name: aicr-images
 spec:
   images:
-    - name: nvcr.io/nvidia/gpu-operator:v26.7.2
+    - name: nvcr.io/nvidia/gpu-operator:v26.7.3
     - name: registry.k8s.io/nfd/node-feature-discovery:v0.20.1
     # ...
 ---
@@ -133,7 +133,7 @@ spec:
   charts:
     - name: gpu-operator
       repoURL: https://helm.ngc.nvidia.com/nvidia
-      version: v26.7.2
+      version: v26.7.3
     # ...
 ```
 
@@ -193,10 +193,10 @@ components:
         namespace: gpu-operator
         repoName: gpu-operator
         url: https://helm.ngc.nvidia.com/nvidia
-        version: v26.7.2
+        version: v26.7.3
       # ...
     images:
-      - nvcr.io/nvidia/gpu-operator:v26.7.2
+      - nvcr.io/nvidia/gpu-operator:v26.7.3
       - registry.k8s.io/nfd/node-feature-discovery:v0.20.1
       # ...
     name: aicr-images
@@ -261,6 +261,27 @@ aicr mirror list --recipe recipe.yaml \
   --set gpuoperator:driver.version=570.86.16
 ```
 
+The GPU driver, GDRCopy, GDS, vGPU Manager and DOCA driver images are listed
+with the tag the operator pulls on a node: `<version>-<os><os-version>` for the
+GPU driver, GDRCopy (`gdrdrv`), GDS (`nvidia-fs`) and vGPU Manager
+(`vgpuManager`, when enabled) (for example `570.86.16-ubuntu24.04` and
+`v2.6-ubuntu24.04`) and `<version>-<os><os-version>-<arch>` for the DOCA
+driver. `mirror list` reads the OS from the recipe's `OS.release.ID` and
+`OS.release.VERSION_ID` constraints (`ubuntu` and `rhel` are supported; for
+`rhel` the GPU Operator tags use only the major version, for example
+`580.173.02-rhel9`) and the DOCA architecture from the accelerator (`gb200`, `gb300`, and `vr200` are
+`arm64`; other accelerators are `amd64`). A driver whose tag cannot be resolved
+for the recipe is not listed. This happens when the recipe does not pin one OS,
+the OS has no known tag pattern, the accelerator is `any` (DOCA driver only),
+or the driver is precompiled (its tags also name the node kernel). That driver is named in the
+component's `warnings` instead, so mirror the tag for your nodes yourself. The
+Hauler and Zarf formats carry no warnings, so there the driver is simply absent
+while the command still exits 0 (the warning is also logged to stderr). Run the
+YAML or JSON format first to see which driver tags you must add. A
+driver switched off with `driver.enabled=false` is not listed, and neither are
+its GDRCopy and GDS containers. GDRCopy and GDS also follow their own `enabled`
+flag.
+
 The override key format is `component:path.to.field=value`, where the component
 name matches either the component name in the recipe or its `valueOverrideKeys`
 alias from the registry (e.g., `gpuoperator` for `gpu-operator`).
@@ -281,15 +302,28 @@ generate the deployment-specific manifest for a specific deployment.
 
 > **Completeness caveat:** discovery is best-effort, not all-or-nothing. A
 > per-component failure to load values, render the chart (`helm template`), or
-> extract images from a manifest is **non-fatal** — the component's images are
-> omitted and the failure is recorded as a warning, but the command still
-> exits 0. The YAML and JSON outputs carry these warnings in a `warnings`
-> field; the Hauler and Zarf outputs **omit them entirely**. Treat a
+> extract images from a manifest, or a driver tag the recipe does not determine
+> (see above), is **non-fatal** — the component's images (for an undetermined
+> driver tag, only that driver image) are omitted and the failure is recorded
+> as a warning, but the command still exits 0. The YAML and JSON outputs carry
+> these warnings in a `warnings` field; the Hauler and Zarf outputs **omit them entirely**. Treat a
 > tool-specific manifest as authoritative only after confirming the YAML/JSON
 > run reported no warnings — otherwise the mirrored set may be silently
 > incomplete. Invalid members in a recognized mapping-valued `image` or
 > `scalingPodImage` descriptor are the exception: `mirror list` exits nonzero
 > instead of emitting a known-incomplete image set.
+
+> **Run:ai recipes need one image mirrored by hand:** a run with no warnings
+> is still incomplete for a `--platform runai` recipe. The Kubeflow Training
+> Operator adds an `init-pytorch` init container running
+> `docker.io/library/alpine:3.10` to the workers of every PyTorchJob that has a
+> Master replica. The reference is compiled into the operator, not rendered
+> from a chart or manifest, so `mirror list` neither lists it nor warns about
+> it. Mirror `docker.io/library/alpine:3.10` yourself and have the nodes'
+> container runtime redirect `docker.io` to your registry, keeping the
+> `library/alpine` path and the `3.10` tag; otherwise PyTorch workers wait in
+> `Init:ImagePullBackOff`. See
+> [Explicit vs. implicit images](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md#explicit-vs-implicit-images).
 
 > **Runtime validation image:** `slinky-slurm-health` launches
 > `docker.io/library/alpine:3.23.3` dynamically through `srun` on GPU-backed
@@ -341,13 +375,25 @@ segment, so `ghcr.io/nvidia/aicr-validators/conformance` resolves to
 `${REGISTRY}/aicr-validators/conformance`. If your mirroring tool keeps the
 source path (`${REGISTRY}/nvidia/aicr-validators/...`), set the variable to
 `${REGISTRY}/nvidia` instead. Add `--image-pull-secret` when the registry needs
-credentials. Some benchmark checks pin workload images the variable does not
+credentials; the conformance checks that create a per-run namespace copy the
+named Secrets into it for their probe pods, and the copies are deleted with the
+namespace. Some benchmark checks pin workload images the variable does not
 rewrite, such as the NCCL runtime image (override it with
 `AICR_NCCL_RUNTIME_IMAGE`) and the vanilla `docker.io/library/ubuntu:22.04`
 probe image of the `driver-runtime-management` and `workload-sandboxing`
 conformance checks (override it with `AICR_DRIVER_RUNTIME_IMAGE` and
 `AICR_SANDBOX_PROBE_IMAGE`, each a full reference to your copy); see
-[Validation](validation.md).
+[Validation](validation.md). The opt-in CRE checks `nccl-cre-all-reduce-bw`,
+`nccl-cre-all-reduce-bw-net` and `cre-training-goodput` pull their workload images by digest with no
+override variable, so mirror them at the digests the closure for your
+combination records: `recipes/components/nvcre/workload-images.yaml` for
+`eks` x `h100`, and `recipes/components/nvcre/workload-images-gb300.yaml` for
+`eks` x `gb300` (`gb300-eks-ubuntu-training-kubeflow`); see the CRE section
+of [Validation](validation.md). Their references keep the `public.ecr.aws` and
+`nvcr.io` hosts, so a disconnected cluster also needs its nodes' container
+runtime to redirect both registries to your mirror, for example with a
+containerd registry mirror per host. A digest reference resolves through such a
+mirror unchanged.
 
 The inference performance check also runs the Dynamo runtime images
 `nvcr.io/nvidia/ai-dynamo/vllm-runtime` and

@@ -175,7 +175,7 @@ jobs:
 
       - name: Setup Go
         if: inputs.aicr_version == '' && inputs.skip_tests != true
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
@@ -255,7 +255,7 @@ jobs:
           set -euo pipefail
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           go build \
-            -ldflags "-X github.com/NVIDIA/aicr/pkg/cli.version=main -X github.com/NVIDIA/aicr/pkg/cli.commit=${COMMIT_SHA} -X github.com/NVIDIA/aicr/pkg/cli.date=${BUILD_DATE}" \
+            -ldflags "-X aicr.run/pkg/cli.version=main -X aicr.run/pkg/cli.commit=${COMMIT_SHA} -X aicr.run/pkg/cli.date=${BUILD_DATE}" \
             -o ./aicr ./cmd/aicr
           VER_OUT="$(./aicr --version)"
           echo "${VER_OUT}"

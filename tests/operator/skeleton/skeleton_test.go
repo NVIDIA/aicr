@@ -42,9 +42,9 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
+	"aicr.run/pkg/operator/engine/argocd"
 )
 
 const (
@@ -201,7 +201,7 @@ func TestSkeleton(t *testing.T) {
 	t.Run("an approved Remove step cascades and observes retirement", func(t *testing.T) {
 		removeCascades(ctx, t, first)
 	})
-	t.Run("a foreign Application with a release's name conflicts with no write", func(t *testing.T) {
+	t.Run("a foreign Application with a release's name stalls the runtime before a rollout, with no write", func(t *testing.T) {
 		foreignConflict(ctx, t, first)
 	})
 	t.Run("a missing AppProject sets EngineAvailable=False with zero writes", func(t *testing.T) {
@@ -305,6 +305,10 @@ func createRuntimeWith(ctx context.Context, t *testing.T, mutate func(*v1alpha1.
 			overrides = append(overrides, v1alpha1.Override{Component: c, Path: "enabled", Value: apiextensionsv1.JSON{Raw: []byte("false")}})
 		}
 	}
+	// From AICR v1.2.0, cert-manager renders a ServiceMonitor, whose CRD comes
+	// from prometheus-operator-crds, disabled above. Earlier releases already
+	// default it to false.
+	overrides = append(overrides, v1alpha1.Override{Component: release, Path: "prometheus.servicemonitor.enabled", Value: apiextensionsv1.JSON{Raw: []byte("false")}})
 	rt := &v1alpha1.ClusterRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.SingletonName},
 		Spec: v1alpha1.ClusterRuntimeSpec{

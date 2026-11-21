@@ -26,9 +26,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/snapshotter"
 )
 
 // ChangeKind describes the type of difference detected.

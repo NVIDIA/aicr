@@ -28,9 +28,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // Stage is one AICR command the operator runs as a Job.
@@ -220,6 +220,12 @@ func Build(r *Request) (*batchv1.Job, error) {
 		labels[v1alpha1.LabelInput] = r.Input
 	}
 	scratchLimit := resource.MustParse(defaults.JobScratchSizeLimit)
+	// Only validation runs cleanup on SIGTERM that outlasts the Kubernetes
+	// default grace; the other stages keep it.
+	var terminationGrace *int64
+	if r.Stage == StageValidation {
+		terminationGrace = ptr.To(int64(defaults.ValidationJobTerminationGrace.Seconds()))
+	}
 
 	container := corev1.Container{
 		Name:  "aicr",
@@ -297,10 +303,11 @@ func Build(r *Request) (*batchv1.Job, error) {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					RestartPolicy:      corev1.RestartPolicyNever,
-					ServiceAccountName: r.ServiceAccount,
-					NodeSelector:       r.NodeSelector,
-					Tolerations:        r.Tolerations,
+					RestartPolicy:                 corev1.RestartPolicyNever,
+					TerminationGracePeriodSeconds: terminationGrace,
+					ServiceAccountName:            r.ServiceAccount,
+					NodeSelector:                  r.NodeSelector,
+					Tolerations:                   r.Tolerations,
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot:   ptr.To(true),
 						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},

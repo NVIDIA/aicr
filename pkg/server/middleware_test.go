@@ -24,8 +24,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/deprecation"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/deprecation"
 	"github.com/google/uuid"
 	"golang.org/x/time/rate"
 )

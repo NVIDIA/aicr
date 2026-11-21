@@ -28,7 +28,8 @@ The first command checks the named file with `recipes` as its reference
 catalog. The second checks only the working-tree catalog and emits JSON
 diagnostics for CI, without filling missing files or registry entries from the
 embedded catalog. Omit `--external-only` when validating an extension layered
-on the embedded catalog. Current checks emit error diagnostics; errors cause
+on the embedded catalog. The flag also works with a positional file to check
+its references against only the external catalog. Current checks emit error diagnostics; errors cause
 a non-zero exit status.
 
 For pre-commit, install a local hook such as:
@@ -134,6 +135,7 @@ components:
 | `upgrades.file` | string | no | Path to a `ComponentUpgrades` transition record (relative to data dir, e.g. `components/nodewright-operator/upgrades.yaml`), ADR-021. Empty means the component has no transition records. See [Transition records](#transition-records) below. |
 | `mixinSafeOverridePaths` | []string | no | Exact dotted value paths a `RecipeMixin` may set on this component via `Overrides` (see [Mixin Composition](#mixin-composition)). Empty (the default) means the component hasn't opted in: a mixin introducing it fresh keeps unrestricted `valuesFile`/`overrides`, but once it's already in the chain every mixin `Overrides` path is rejected. Entries must be exact leaf paths — an ancestor/descendant pair is rejected at registry load |
 | `telemetry` | `TelemetryConfig` | no | Runtime metrics contract (ADR-026): a consumer declares `promql.monitorsFrom` and `promql.series`; the runtime Prometheus server declares `promqlServer` value paths the bundler fills. See [Runtime metrics declarations](../integrator/recipe-development.md#runtime-metrics-declarations) |
+| `argocd.syncRetry` | `ArgoCDSyncRetryConfig` | no | Default `spec.syncPolicy.retry` for the component's primary Application under the `argocd` and `argocd-helm` deployers, applied only when the recipe includes every component in `whenComponents`. A sync retry set for the bundle (`--argocd-sync-retry-*` or the config file) replaces it. The limit must be at least `1`, and `whenComponents` must name other registry components |
 | `gkeCriticalPriority` | bool | no | Synthesize ResourceQuota on GKE so `system-*-critical` pods admit |
 | `hasSelfRefCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` (chart ships CRD + CR in same release) |
 | `manifestsUseChartCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` on the release carrying the attached manifests — the injected `-post` wrapper under both vendored and non-vendored layouts (manifests create CRs of CRDs the chart installs) |
@@ -229,7 +231,7 @@ Criteria fields (see `pkg/recipe/criteria.go` `type Criteria`):
 | Field | Type | Wildcard | Static OSS values |
 |---|---|---|---|
 | `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s`, `mk8s`, `nvke`, `cks` |
-| `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `gb300`, `b200`, `b300`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200` |
+| `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb10`, `gb200`, `gb300`, `b200`, `b300`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200` |
 | `intent` | `CriteriaIntentType` | `any` or empty | `training`, `inference` |
 | `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `sles`, `rocky` |
 | `platform` | `CriteriaPlatformType` | `any` or empty | `dynamo`, `kubeflow`, `kueue`, `nim`, `runai`, `slurm` |
@@ -390,10 +392,11 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`, `os-amazonlinux`, `o
 `platform-inference`, `platform-kubeflow`, `gpu-operator-nvidia-driver-cr`,
 `nvsentinel-observability`,
 `nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
-`nvsentinel-preflight`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
+`nvsentinel-preflight`, `nvsentinel-preflight-runai`, `nvsentinel-slurm-drain-monitor`, `nvsentinel-observe`,
 `nvsentinel-quarantine`, `nvsentinel-remediation`, `nvsentinel-slinky-drainer`,
 `nvsentinel-health-events-analyzer`, `nvsentinel-event-exporter`, `nvsentinel-datastore-eks`, `nvsentinel-log-collector`,
-`nvsentinel-node-validation`, `nvsentinel-external-remediation`, `nvsentinel-maintenance-request`, `npd`.
+`nvsentinel-node-validation`, `nvsentinel-external-remediation`, `nvsentinel-maintenance-request`,
+`nvsentinel-csp-health-monitor-aws`, `nvsentinel-csp-health-monitor-gcp`, `npd`.
 
 The OS-scoped mixins (`os-ubuntu`, `os-talos`, `os-amazonlinux`, `os-sles`) are
 mutually exclusive:

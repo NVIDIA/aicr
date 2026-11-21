@@ -31,13 +31,13 @@ import (
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry/remote"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
-	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/operator/registry"
+	"aicr.run/pkg/operator/registry/registrytest"
 )
 
 func TestLatestStable(t *testing.T) {

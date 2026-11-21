@@ -52,7 +52,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/allocpolicy"
+	"aicr.run/pkg/allocpolicy"
 )
 
 const strictEnvVar = "AICR_VALIDATION_FLOOR_STRICT"

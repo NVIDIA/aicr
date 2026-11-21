@@ -22,10 +22,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // ComponentRegistryKind is the wire kind for component registry documents.
@@ -200,7 +201,7 @@ type ComponentConfig struct {
 	// never touches it again, and Flux's helm-controller inherits that via
 	// its `spec.upgrade.crds: Skip` default, so a chart bump whose CRDs
 	// changed otherwise runs a new controller against the previous schema.
-	// Flux, helm, and helmfile consume this through
+	// Flux and helm consume this through
 	// deployer.ResolveCRDOwners. Argo CD does not: it applies a chart's CRDs
 	// on every sync regardless, so it needs no opt-in and honors none.
 	//
@@ -266,6 +267,39 @@ type ComponentConfig struct {
 	MixinSafeOverridePaths []string `yaml:"mixinSafeOverridePaths,omitempty"`
 
 	Telemetry TelemetryConfig `yaml:"telemetry,omitempty"`
+
+	// ArgoCD holds what the argocd and argocd-helm deployers apply to this
+	// component's child Application. The other deployers ignore it.
+	ArgoCD ArgoCDComponentConfig `yaml:"argocd,omitempty"`
+}
+
+// ArgoCDComponentConfig is a component's Argo CD child Application settings.
+type ArgoCDComponentConfig struct {
+	// SyncRetry is the default spec.syncPolicy.retry for the component's
+	// primary child Application. A sync retry configured for the bundle
+	// (--argocd-sync-retry-*, or syncRetry in a config file) replaces it.
+	SyncRetry *ArgoCDSyncRetryConfig `yaml:"syncRetry,omitempty"`
+}
+
+// ArgoCDSyncRetryConfig is a registry-declared Argo CD sync retry. Limit and
+// Backoff use the shape of the config file's syncRetry; the argocd deployer
+// validates them when it renders the Application. An empty Backoff field
+// keeps Argo CD's default for that field.
+type ArgoCDSyncRetryConfig struct {
+	// WhenComponents limits the retry to recipes that include every named
+	// component. Empty applies it whenever the component is in the recipe.
+	WhenComponents []string `yaml:"whenComponents,omitempty"`
+
+	Limit   int64                        `yaml:"limit"`
+	Backoff ArgoCDSyncRetryBackoffConfig `yaml:"backoff,omitempty"`
+}
+
+// ArgoCDSyncRetryBackoffConfig is the retry backoff. Durations use Go
+// duration syntax (30s, 3m).
+type ArgoCDSyncRetryBackoffConfig struct {
+	Duration    string `yaml:"duration,omitempty"`
+	Factor      int64  `yaml:"factor,omitempty"`
+	MaxDuration string `yaml:"maxDuration,omitempty"`
 }
 
 // TelemetryConfig is a component's part in the runtime metrics contract
@@ -638,9 +672,17 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 		if err := validateComponentClass(comp); err != nil {
 			return nil, err
 		}
+		if err := validateArgoCDSyncRetry(comp); err != nil {
+			return nil, err
+		}
 	}
 
 	if errs := registry.validateTelemetry(); len(errs) > 0 {
+		return nil, errs[0]
+	}
+	// whenComponents names other components, so it is checked once the whole
+	// registry is loaded rather than in the per-component loop above.
+	if errs := registry.validateArgoCDWhenComponents(); len(errs) > 0 {
 		return nil, errs[0]
 	}
 
@@ -924,8 +966,58 @@ func (r *ComponentRegistry) Validate() []error {
 	}
 
 	errs = append(errs, r.validateTelemetry()...)
+	errs = append(errs, r.validateArgoCD()...)
 
 	return errs
+}
+
+// validateArgoCD checks the registry's argocd.syncRetry declarations. The
+// argocd deployer validates the backoff values it renders. A bundle-wide sync
+// retry is configured elsewhere and may set a limit of 0 to disable retries.
+func (r *ComponentRegistry) validateArgoCD() []error {
+	var errs []error
+	for i := range r.Components {
+		if err := validateArgoCDSyncRetry(&r.Components[i]); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return append(errs, r.validateArgoCDWhenComponents()...)
+}
+
+// validateArgoCDWhenComponents rejects an argocd.syncRetry.whenComponents
+// entry that is not another registry component, which would otherwise leave
+// the retry silently unapplied.
+func (r *ComponentRegistry) validateArgoCDWhenComponents() []error {
+	known := make(map[string]bool, len(r.Components))
+	for _, comp := range r.Components {
+		known[comp.Name] = true
+	}
+	var errs []error
+	for _, comp := range r.Components {
+		if comp.ArgoCD.SyncRetry == nil {
+			continue
+		}
+		for _, name := range comp.ArgoCD.SyncRetry.WhenComponents {
+			if name == comp.Name || !known[name] {
+				errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"component %q: argocd.syncRetry.whenComponents names %q, which is not another registry component",
+					comp.Name, name)))
+			}
+		}
+	}
+	return errs
+}
+
+// validateArgoCDSyncRetry rejects a registry argocd.syncRetry that would not
+// retry: a component default exists to add retries, so its limit must be at
+// least 1.
+func validateArgoCDSyncRetry(comp *ComponentConfig) error {
+	retry := comp.ArgoCD.SyncRetry
+	if retry == nil || retry.Limit >= 1 {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+		"component %q: argocd.syncRetry.limit must be at least 1, got %d", comp.Name, retry.Limit))
 }
 
 // validateTelemetry leaves to the bundler what depends on the recipe: whether
@@ -1008,6 +1100,24 @@ func ValidatePromQLSeriesPattern(pattern string) error {
 		if _, err := regexp.Compile(form); err != nil {
 			return errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("series pattern %q is not valid RE2", pattern), err)
+		}
+	}
+	return nil
+}
+
+// ValidateRuntimeMetrics checks a bundle's runtimeMetrics input (ADR-026):
+// each series as a telemetry.promql.series entry, and each namespace as a
+// namespace name.
+func ValidateRuntimeMetrics(series, namespaces []string) error {
+	for _, pattern := range series {
+		if err := ValidatePromQLSeriesPattern(pattern); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid runtimeMetrics.series entry", err)
+		}
+	}
+	for _, namespace := range namespaces {
+		if problems := validation.IsDNS1123Label(namespace); len(problems) > 0 {
+			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"invalid runtimeMetrics.namespaces entry %q: %s", namespace, strings.Join(problems, "; ")))
 		}
 	}
 	return nil

@@ -21,10 +21,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
+	"aicr.run/pkg/upgrade"
 )
 
 // upgradeNotesFixtureComponent is a synthetic registry component whose
@@ -140,14 +140,7 @@ components:
 		"components/" + upgradeNotesFixtureComponent + "/upgrades.yaml": []byte(record),
 	})
 
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
-	if err != nil {
-		t.Fatalf("NewLayeredDataProvider: %v", err)
-	}
-	recipe.EvictCachedRegistry(layered)
-	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
-	return layered
+	return dataDirProvider(t, tmpData)
 }
 
 // upgradeNotesFixtureRecipe returns a one-component recipe pinning the Helm
@@ -381,7 +374,8 @@ func TestSelectUpgradeNotes_KustomizeTag(t *testing.T) {
 	}
 	rr.BindDataProvider(upgradeNotesFixtureProvider(t, upgradeNotesKustomizeSource, upgradeNotesKustomizeRecord))
 
-	notes, notice, err := b.selectUpgradeNotes(t.Context(), rr)
+	r := &bundleRun{DefaultBundler: b}
+	notes, notice, err := r.selectUpgradeNotes(t.Context(), rr)
 	if err != nil {
 		t.Fatalf("selectUpgradeNotes: %v", err)
 	}

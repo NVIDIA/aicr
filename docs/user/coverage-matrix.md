@@ -22,7 +22,7 @@ This is a **different axis** from the per-recipe **Coverage** column in the reci
 | Item | Exercised by | Hardware | Cadence | Status | Notes |
 |------|--------------|----------|---------|--------|-------|
 | `bundle` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
-| `diff` | chainsaw | simulated / none | per-PR | covered | — |
+| `diff` | chainsaw, demo | simulated / none | per-PR | covered | — |
 | `evidence digest` | — | — | — | not-yet-covered | — |
 | `evidence publish` | chainsaw, demo | simulated / none | per-PR | covered | — |
 | `evidence sign` | — | — | — | not-yet-covered | — |
@@ -35,7 +35,8 @@ This is a **different axis** from the per-recipe **Coverage** column in the reci
 | `recipe verify-catalog` | — | — | — | not-yet-covered | — |
 | `skill` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
 | `snapshot` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
+| `sweep` | — | — | — | not-yet-covered | — |
 | `trust update` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
-| `upgrade-check` | chainsaw | simulated / none | per-PR | covered | — |
+| `upgrade-check` | chainsaw, demo | simulated / none | per-PR | covered | — |
 | `validate` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `verify` | chainsaw, demo | simulated / none | per-PR | covered | — |

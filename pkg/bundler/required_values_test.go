@@ -18,11 +18,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 // Two synthetic registry components, merged in through a
@@ -53,14 +53,7 @@ components:
       - auth.password
 `)
 	tmpData := providertest.WriteDir(t, map[string][]byte{recipe.RegistryFileName: registryYAML})
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
-	if err != nil {
-		t.Fatalf("NewLayeredDataProvider: %v", err)
-	}
-	recipe.EvictCachedRegistry(layered)
-	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
-	return layered
+	return dataDirProvider(t, tmpData)
 }
 
 func TestValidateRequiredAndSecretValues(t *testing.T) {

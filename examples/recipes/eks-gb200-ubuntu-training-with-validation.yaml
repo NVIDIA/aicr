@@ -12,8 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Example recipe demonstrating multi-phase validation configuration
-# This shows how to configure validation checks for different deployment phases
+# Hand-curated illustration of RecipeResult structure; intentionally incomplete.
+# Components, metadata, and validation differ from actual generated output.
+# Generate a current recipe with `aicr recipe` before bundling or validation.
+# Shows authored severity/remediation examples and selected deployment and
+# performance checks; conformance and parts of the component graph are omitted.
 
 kind: RecipeResult
 apiVersion: aicr.run/v1
@@ -54,16 +57,16 @@ constraints:
 # Multi-phase validation configuration
 validation:
   # Readiness phase: Constraint-only gate (evaluated inline from snapshot, no Jobs)
-  # Constraints are defined at the top level (spec.constraints) and evaluated
+  # Constraints are defined at the top level (constraints) and evaluated
   # during readiness. No checks or Jobs needed.
 
   # Deployment phase: Validate component deployment
   deployment:
     constraints:
       - name: gpu-operator.version
-        value: "== v26.7.2"
+        value: "== v26.7.3"
         severity: warning
-        remediation: "Update GPU Operator to v26.7.2"
+        remediation: "Update GPU Operator to v26.7.3"
     checks:
       - expected-resources
 
@@ -100,7 +103,7 @@ componentRefs:
     chart: gpu-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
-    version: v26.7.2
+    version: v26.7.3
     valuesFile: components/gpu-operator/values-eks-training.yaml
     expectedResources:
       - kind: Deployment

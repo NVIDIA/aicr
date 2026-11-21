@@ -25,11 +25,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
+	"aicr.run/pkg/operator/engine/argocd"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/plan"
 )
 
 // Each step's class decides approval; blocked verdicts and
@@ -145,6 +145,33 @@ func TestAssessSteps(t *testing.T) {
 	_, err = assessSteps([]v1alpha1.RolloutStep{upgrade("nfd")}, from, moved, report)
 	if operrors.ReasonOf(err) != ReasonTransitionBlocked || !strings.Contains(err.Error(), "nfd moves from nfd/node-feature-discovery to other/node-feature-discovery") {
 		t.Errorf("namespace change: %v", err)
+	}
+}
+
+// AICR v1.2.0's nfd record (0.19.0 to 0.20.1) names its deployer step
+// sync-nfd, not apply, so the operator finds no steps after the apply: the
+// upgrade needs approval but does not wait for narrow-nrt-rbac to be
+// acknowledged. This pins that behavior until the record marks its apply step.
+func TestAssessStepsV120NFDRecord(t *testing.T) {
+	t.Parallel()
+	nfd := func(chart string) *plan.Document {
+		return &plan.Document{Releases: []plan.Release{{ID: "nfd", Component: "nfd", TargetNamespace: "node-feature-discovery",
+			Chart:  plan.Chart{Repository: "oci://r/charts/node-feature-discovery", Digest: plan.DigestOf([]byte(chart))},
+			Values: plan.DigestedRef{Digest: plan.DigestOf([]byte("v1"))}}}}
+	}
+	for _, lane := range []string{"eks", "gke"} {
+		t.Run(lane, func(t *testing.T) {
+			t.Parallel()
+			report, err := aicrjob.ParseUpgradeReport(fixture(t, "..", "aicrjob", "testdata", "v1.2.0", "upgrade-check-v1.1.2-to-v1.2.0-"+lane+".json"), "argocd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			steps := []v1alpha1.RolloutStep{{Release: "nfd", Operation: v1alpha1.OperationUpgrade}}
+			approval, err := assessSteps(steps, nfd("0.19.0"), nfd("0.20.1"), report)
+			if err != nil || !approval || steps[0].Assessment != v1alpha1.AssessmentManual || steps[0].PostApplySteps != nil {
+				t.Fatalf("assessSteps() = %v, %v; step %+v", approval, err, steps[0])
+			}
+		})
 	}
 }
 

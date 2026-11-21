@@ -26,14 +26,20 @@
 # cordoned node, and fault-quarantine cordons), then for its jobs to finish,
 # then deletes the slurmd pods and marks the request DrainComplete.
 #
-# Values verified against NVSentinel chart v1.28.0
+# Values verified against NVSentinel chart v1.32.0
 # (charts/node-drainer/values.yaml customDrain, pkg/config/config.go):
 #   - with an empty customDrain.nodeSelector every node goes through the
 #     plugin, and node-drainer refuses to start unless userNamespaces and
 #     podDrainPolicies are both empty; the chart defaults userNamespaces to
 #     [{name: "*", mode: AllowCompletion}].
-#   - timeout must be whole seconds: the chart default "30m" fails node-drainer's
-#     config load. Neither side enforces it.
+#   - no drain time limit: neither side enforces one, and v1.32.0 removed the
+#     unused customDrain.timeout.
+#   - node-drainer records the drain method once per health event, so
+#     composing or removing this mixin during a drain leaves that drain
+#     waiting until an operator ends its quarantine (and, after removing it,
+#     deletes the node's DrainRequest and the plugin's
+#     nodeset.slinky.slurm.net/node-cordon-reason annotation, which Slinky
+#     would otherwise reuse as the reason for the node's next drain).
 #   - the DrainRequest CRD comes from slinky-drainer-crds and the template
 #     ConfigMap from slinky-drainer; node-drainer exits at startup without
 #     them, hence the dependencyRefs. The CRD is its own release so the
@@ -73,7 +79,6 @@ spec:
             resource: drainrequests
             statusConditionType: DrainComplete
             statusConditionStatus: "True"
-            timeout: "1800"
     - name: slinky-drainer-crds
       type: Helm
     - name: slinky-drainer

@@ -19,10 +19,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/validations"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/validations"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/recipe"
 	"k8s.io/apimachinery/pkg/labels"
 )
 
@@ -173,7 +173,7 @@ func placementSentinel() recipe.ComponentRef {
 				"templateMountPath": "/etc/drain-template", "templateFileName": "drain-template.yaml",
 				"namespace": "nvsentinel", "apiGroup": "nvsentinel.nvidia.com", "version": "v1alpha1",
 				"kind": "DrainRequest", "resource": "drainrequests", "statusConditionType": "DrainComplete",
-				"statusConditionStatus": "True", "timeout": "1800"}},
+				"statusConditionStatus": "True"}},
 		}}
 }
 

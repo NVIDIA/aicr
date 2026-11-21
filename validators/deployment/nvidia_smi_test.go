@@ -20,13 +20,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/helper"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator/ctrf"
+	validatorv1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
+	"aicr.run/validators/helper"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -84,20 +84,6 @@ func TestGpuNodeCoverage_CoverageExtra(t *testing.T) {
 			var got map[string]string
 			if err := json.Unmarshal([]byte(payload), &got); err != nil {
 				t.Fatalf("emitted payload is not valid JSON: %v", err)
-			}
-		})
-	}
-}
-
-func TestNvidiaSMISkipExtra(t *testing.T) {
-	for _, reason := range []string{skipReasonNoGPUNodes, skipReasonNoSchedulableGPUNodes, skipReasonNodesBusy} {
-		t.Run(reason, func(t *testing.T) {
-			extra := nvidiaSMISkipExtra(reason)
-			if extra["skipReason"] != reason {
-				t.Errorf("skipReason = %q, want %q", extra["skipReason"], reason)
-			}
-			if len(extra) != 1 {
-				t.Errorf("skip extra must carry exactly skipReason, got %v", extra)
 			}
 		})
 	}

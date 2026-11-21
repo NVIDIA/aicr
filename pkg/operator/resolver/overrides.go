@@ -25,11 +25,11 @@ import (
 	"sort"
 	"strings"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/registry"
 )
 
 // ReasonOverridePathUnknown marks an override whose path neither the base

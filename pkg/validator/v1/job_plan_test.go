@@ -16,14 +16,15 @@ package v1
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1360,115 +1361,52 @@ func TestBuildResources_NilOrEmptyUsesDefaults(t *testing.T) {
 	}
 }
 
-// TestOrchestratorWaitForRebasesOntoJobStart is the regression test for the
-// clock-origin half of issue #2473. Kubernetes measures activeDeadlineSeconds
-// from the Job's start time, but the orchestrator can only start waiting once
-// the create/apply response reaches it. Anchoring the wait to the observed
-// start time is what keeps the orchestrator the tighter clock when that
-// response is slow; without it the effective margin between the two deadlines
-// is only defaults.JobEnvelopeMargin, and a slower response lets the Job
-// controller fire first and delete the still-active pod holding the verdict.
-//
-// Each case asserts the property that matters — the wait must end strictly
-// before observedStart + JobDeadlineFor(checkTimeout), i.e. the whole
-// orchestrator wait fits inside the Job's own deadline measured from the same
-// origin. That now holds for the floored cases too, which is what the
-// deadline bound in OrchestratorWaitFor added; the sole exception is a
-// deadline already gone by the time the wait begins, where no wait can keep
-// the pod alive.
+// TestWaitEnvelopeFor pins the envelope arithmetic: the Job deadline plus the
+// pod's SIGTERM window plus the delivery margin (issue #1632).
+func TestWaitEnvelopeFor(t *testing.T) {
+	t.Parallel()
+
+	const checkTimeout = 5 * time.Minute
+	want := checkTimeout + defaults.ValidatorJobDeadlineHeadroom +
+		defaults.ValidatorTerminationGracePeriod + defaults.ValidatorTerminationWaitMargin
+	if got := WaitEnvelopeFor(checkTimeout); got != want {
+		t.Errorf("WaitEnvelopeFor(%v) = %v, want %v", checkTimeout, got, want)
+	}
+	if got, deadline := WaitEnvelopeFor(checkTimeout), JobDeadlineFor(checkTimeout); got < deadline+defaults.ValidatorTerminationGracePeriod {
+		t.Errorf("WaitEnvelopeFor = %v must cover the Job deadline %v plus the SIGTERM window %v",
+			got, deadline, defaults.ValidatorTerminationGracePeriod)
+	}
+}
+
+// TestOrchestratorWaitForRebasesOntoJobStart pins the clock-origin contract.
+// Kubernetes measures activeDeadlineSeconds from the Job's start time, but the
+// orchestrator can only start waiting once the create/apply response reaches
+// it. Anchoring the wait to the observed start time keeps both clocks on one
+// origin, so the wait ends WaitEnvelopeFor(checkTimeout) after the Job start no
+// matter how slow the response was: the orchestrator outlives the Job deadline
+// plus the SIGTERM window instead of classifying the run while the pod is
+// still finishing (issue #1632).
 func TestOrchestratorWaitForRebasesOntoJobStart(t *testing.T) {
 	t.Parallel()
 
 	const checkTimeout = 5 * time.Minute
-	budget := checkTimeout + defaults.ValidatorWaitBuffer // 5m + 2m30s = 7m30s
-	jobDeadline := JobDeadlineFor(checkTimeout)           // 5m + 3m30s = 8m30s
-	floor := defaults.ValidatorMinCompletionWait          // 30s
-	margin := defaults.ValidatorPreDeadlineMargin         // 1s
+	envelope := WaitEnvelopeFor(checkTimeout)
+	jobDeadline := JobDeadlineFor(checkTimeout)
+	floor := defaults.ValidatorMinCompletionWait
 	start := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 
 	tests := []struct {
 		name       string
 		applyDelay time.Duration // how long the apply response took to arrive
 		want       time.Duration
-		// deadlineGone marks the cases where the Job deadline has already
-		// elapsed, or sits within margin of firing, by the time the wait
-		// begins. The fit-inside-the-deadline assertion is not meaningful
-		// there — the pod is gone either way — so those cases assert instead
-		// that the wait is still positive, which is what lets
-		// WaitForJobTerminal's fast-path Get read the terminal Job.
-		deadlineGone bool
 	}{
-		{
-			name:       "instant apply response leaves the full budget",
-			applyDelay: 0,
-			want:       budget,
-		},
-		{
-			name:       "delay inside JobEnvelopeMargin still shortens the wait",
-			applyDelay: 30 * time.Second,
-			want:       budget - 30*time.Second, // 7m
-		},
-		{
-			// The pre-fix failure mode: a 90s apply response is 30s past
-			// JobEnvelopeMargin, so an unrebased wait would have ended at
-			// 90s+7m30s = 9m after job start — 30s AFTER the 8m30s Job
-			// deadline. Rebased, it ends at 7m30s after job start, 1m early.
-			name:       "delay beyond JobEnvelopeMargin no longer outlives the Job deadline",
-			applyDelay: 90 * time.Second,
-			want:       budget - 90*time.Second, // 6m
-		},
-		{
-			// 7m59s: the remainder is already negative so the floor engages,
-			// and the floored 30s is the longest wait that still ends margin
-			// short of the 8m30s deadline. The boundary case for the bound.
-			name:       "floor fits inside the Job deadline by exactly the margin",
-			applyDelay: jobDeadline - floor - margin, // 7m59s
-			want:       floor,
-		},
-		{
-			// One second later the floor no longer fits, so the deadline —
-			// not the floor — sets the wait.
-			name:       "deadline one second nearer than the floor caps the wait",
-			applyDelay: jobDeadline - floor, // 8m
-			want:       floor - margin,      // 29s
-		},
-		{
-			// The case that motivated the bound: 8m15s leaves 15s until the
-			// 8m30s deadline, and the pre-fix floor returned 30s — a wait the
-			// function could compute would outlive the deadline it exists to
-			// beat, handing the still-active pod (and its verdict) to the Job
-			// controller's deleteActivePods.
-			name:       "floor would outlive the Job deadline, so the wait is capped short of it",
-			applyDelay: 8*time.Minute + 15*time.Second, // 495s, inside [8m, 8m30s)
-			want:       15*time.Second - margin,        // 14s
-		},
-		{
-			// Inside the margin: no positive wait both fits and is worth
-			// issuing, so the floor comes back to serve the fast-path Get.
-			name:         "deadline within the pre-deadline margin returns the floor",
-			applyDelay:   jobDeadline - margin, // 8m29s
-			want:         floor,
-			deadlineGone: true,
-		},
-		{
-			name:         "deadline exactly elapsed returns the floor",
-			applyDelay:   jobDeadline, // 8m30s
-			want:         floor,
-			deadlineGone: true,
-		},
-		{
-			name:         "pathological delay is floored, not driven negative",
-			applyDelay:   budget + time.Hour,
-			want:         floor,
-			deadlineGone: true,
-		},
-		{
-			// Apiserver clock skew can place the observed start in the
-			// caller's future; the wait must not exceed the nominal budget.
-			name:       "start time in the caller's future is capped at the budget",
-			applyDelay: -time.Hour,
-			want:       budget,
-		},
+		{"instant apply response leaves the full envelope", 0, envelope},
+		{"delay shortens the wait by the same amount", 90 * time.Second, envelope - 90*time.Second},
+		{"delay past the Job deadline still waits out the SIGTERM window", jobDeadline + time.Second, envelope - jobDeadline - time.Second},
+		{"remainder exactly at the floor", envelope - floor, floor},
+		{"remainder below the floor is floored", envelope - floor + time.Second, floor},
+		{"pathological delay is floored, not driven negative", envelope + time.Hour, floor},
+		{"start time in the caller's future is capped at the envelope", -time.Hour, envelope},
 	}
 
 	for _, tt := range tests {
@@ -1480,24 +1418,16 @@ func TestOrchestratorWaitForRebasesOntoJobStart(t *testing.T) {
 				t.Errorf("OrchestratorWaitFor(start, start+%v, %v) = %v, want %v",
 					tt.applyDelay, checkTimeout, got, tt.want)
 			}
-			if tt.deadlineGone {
-				// A zero or negative wait would expire the context before
-				// WaitForJobTerminal's initial Get could observe the
-				// already-terminal Job, turning its verdict into an
-				// infrastructure error.
-				if got <= 0 {
-					t.Errorf("wait past the Job deadline = %v, want a positive wait for the terminal Get", got)
-				}
-				return
+			if got < floor {
+				t.Errorf("wait %v below floor %v", got, floor)
 			}
-			// The invariant the fix exists to hold: the orchestrator's wait,
-			// measured from the same origin Kubernetes uses, ends before the
-			// Job's activeDeadlineSeconds does.
-			orchestratorEnd := now.Add(got)
-			jobEnd := start.Add(jobDeadline)
-			if !orchestratorEnd.Before(jobEnd) {
-				t.Errorf("orchestrator wait ends at %v, want strictly before the Job deadline at %v",
-					orchestratorEnd, jobEnd)
+			// A wait that begins before the Job deadline plus the SIGTERM
+			// window has elapsed must end no earlier than that point.
+			if tt.applyDelay >= 0 && tt.applyDelay < envelope-floor {
+				if end := now.Add(got); end.Before(start.Add(jobDeadline + defaults.ValidatorTerminationGracePeriod)) {
+					t.Errorf("orchestrator wait ends at %v, before the Job deadline %v plus the SIGTERM window",
+						end, start.Add(jobDeadline))
+				}
 			}
 		})
 	}
@@ -1574,16 +1504,212 @@ func TestBuildJobPlan_ForwardsWorkloadSandboxingEnv(t *testing.T) {
 }
 
 // TestOrchestratorWaitForUnobservedStart pins the zero-time contract: a caller
-// that never saw a start time gets the unrebased budget, which is the
-// pre-#2473 behavior and still strictly under the Job deadline as long as the
-// apply response itself was not the thing that was slow.
+// that never saw a start time gets the unrebased envelope.
 func TestOrchestratorWaitForUnobservedStart(t *testing.T) {
 	t.Parallel()
 
 	const checkTimeout = 5 * time.Minute
-	want := checkTimeout + defaults.ValidatorWaitBuffer
+	want := WaitEnvelopeFor(checkTimeout)
 	if got := OrchestratorWaitFor(time.Time{}, time.Now(), checkTimeout); got != want {
 		t.Errorf("OrchestratorWaitFor(zero, now, %v) = %v, want %v", checkTimeout, got, want)
+	}
+}
+
+// TestBuildJobPlan_ForwardsRunaiProjectNamespaceEnv verifies the Run:ai
+// Project namespace reaches only the gang-scheduling Job, from the CLI process
+// environment and never from a catalog-pinned value: on a Run:ai recipe the
+// check runs its test pods there, and a catalog could otherwise point every
+// run at one namespace.
+func TestBuildJobPlan_ForwardsRunaiProjectNamespaceEnv(t *testing.T) {
+	values := func(entry ValidatorEntry) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == defaults.EnvRunaiProjectNamespace {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+	const project = "runai-aicr-gang"
+	entry := ValidatorEntry{Name: GangSchedulingCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+
+	tests := []struct {
+		name  string
+		env   string
+		entry ValidatorEntry
+		want  []string
+	}{
+		{name: "forwarded verbatim", env: project, entry: entry, want: []string{project}},
+		{name: "surrounding whitespace trimmed", env: "  " + project + "\n", entry: entry, want: []string{project}},
+		{name: "unset omitted", env: "", entry: entry, want: nil},
+		{name: "blank omitted", env: "   ", entry: entry, want: nil},
+		{
+			name: "not forwarded to other validators",
+			env:  project,
+			entry: ValidatorEntry{
+				Name: "dra-support", Phase: "conformance", Image: "img:v1", Timeout: time.Minute,
+			},
+			want: nil,
+		},
+		{
+			name: "catalog value cannot select the namespace",
+			env:  "",
+			entry: ValidatorEntry{
+				Name: GangSchedulingCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute,
+				Env: []EnvVar{{Name: defaults.EnvRunaiProjectNamespace, Value: project}},
+			},
+			want: nil,
+		},
+		{
+			name: "catalog value cannot override the forwarded namespace",
+			env:  project,
+			entry: ValidatorEntry{
+				Name: GangSchedulingCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute,
+				Env: []EnvVar{{Name: defaults.EnvRunaiProjectNamespace, Value: "runai-from-catalog"}},
+			},
+			want: []string{project},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(defaults.EnvRunaiProjectNamespace, tt.env)
+			got := values(tt.entry)
+			if len(got) != len(tt.want) {
+				t.Fatalf("%s env = %v, want %v", defaults.EnvRunaiProjectNamespace, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("%s env = %v, want %v", defaults.EnvRunaiProjectNamespace, got, tt.want)
+				}
+			}
+		})
+	}
+	t.Run("env-name literal locked", func(t *testing.T) {
+		if defaults.EnvRunaiProjectNamespace != "AICR_RUNAI_PROJECT_NAMESPACE" {
+			t.Errorf("EnvRunaiProjectNamespace = %q, want AICR_RUNAI_PROJECT_NAMESPACE (documented in docs/contributor/validator.md)", defaults.EnvRunaiProjectNamespace)
+		}
+	})
+}
+
+// TestBuildJobPlan_ForwardsServiceMetricsQueryURLEnv verifies the owner's
+// Prometheus query URL reaches only the ai-service-metrics Job, from the CLI
+// process environment and never from a catalog-pinned value, which could
+// otherwise point every run's evidence at one backend.
+func TestBuildJobPlan_ForwardsServiceMetricsQueryURLEnv(t *testing.T) {
+	values := func(entry ValidatorEntry) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == defaults.EnvServiceMetricsQueryURL {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+	const queryURL = "https://mimir.example.com/prometheus"
+	entry := ValidatorEntry{Name: AIServiceMetricsCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+	catalogEntry := entry
+	catalogEntry.Env = []EnvVar{{Name: defaults.EnvServiceMetricsQueryURL, Value: "http://from-catalog:9090"}}
+
+	tests := []struct {
+		name  string
+		env   string
+		entry ValidatorEntry
+		want  []string
+	}{
+		{name: "forwarded", env: queryURL, entry: entry, want: []string{queryURL}},
+		{name: "surrounding whitespace trimmed", env: "  " + queryURL + "\n", entry: entry, want: []string{queryURL}},
+		{name: "unset omitted", env: "", entry: entry, want: nil},
+		{
+			name:  "not forwarded to other validators",
+			env:   queryURL,
+			entry: ValidatorEntry{Name: "pod-autoscaling", Phase: "conformance", Image: "img:v1", Timeout: time.Minute},
+			want:  nil,
+		},
+		{name: "catalog value cannot name the backend", env: "", entry: catalogEntry, want: nil},
+		{name: "catalog value cannot override the forwarded URL", env: queryURL, entry: catalogEntry, want: []string{queryURL}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(defaults.EnvServiceMetricsQueryURL, tt.env)
+			if got := values(tt.entry); !slices.Equal(got, tt.want) {
+				t.Errorf("%s env = %v, want %v", defaults.EnvServiceMetricsQueryURL, got, tt.want)
+			}
+		})
+	}
+	t.Run("env-name literal locked", func(t *testing.T) {
+		if defaults.EnvServiceMetricsQueryURL != "AICR_SERVICE_METRICS_QUERY_URL" {
+			t.Errorf("EnvServiceMetricsQueryURL = %q, want AICR_SERVICE_METRICS_QUERY_URL (documented in docs/contributor/validator.md)",
+				defaults.EnvServiceMetricsQueryURL)
+		}
+	})
+}
+
+func TestParseServiceMetricsQueryURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		raw     string
+		want    string
+		wantErr string
+	}{
+		{raw: "http://thanos-query.observability.svc:9090", want: "http://thanos-query.observability.svc:9090"},
+		{raw: "https://mimir.example.com/prometheus/", want: "https://mimir.example.com/prometheus"},
+		{raw: "https://user:secret@mimir.example.com", wantErr: "must not carry credentials"},
+		{raw: "mimir.example.com:9090", wantErr: "scheme must be http or https"},
+		{raw: "ftp://mimir.example.com", wantErr: "scheme must be http or https"},
+		{raw: "http://", wantErr: "has no host"},
+		{raw: "http://mimir.example.com/api/v1/query?query=up", wantErr: "must be a base URL"},
+		{raw: "http://user:sec ret@mimir.example.com", wantErr: "does not parse as a URL"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			t.Parallel()
+			got, err := ParseServiceMetricsQueryURL(tt.raw)
+			if tt.wantErr == "" {
+				if err != nil || got != tt.want {
+					t.Fatalf("ParseServiceMetricsQueryURL(%q) = %q, %v; want %q", tt.raw, got, err, tt.want)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ParseServiceMetricsQueryURL(%q) error = %v, want one containing %q", tt.raw, err, tt.wantErr)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "sec ret") {
+				t.Errorf("error %q repeats the URL's credentials", err)
+			}
+		})
+	}
+}
+
+// TestBuildJobPlan_RejectsUnusableServiceMetricsQueryURL pins that a query URL
+// carrying credentials fails the plan, so it never reaches a Job spec, and
+// that the error does not repeat it. Other checks ignore the variable.
+func TestBuildJobPlan_RejectsUnusableServiceMetricsQueryURL(t *testing.T) {
+	t.Setenv(defaults.EnvServiceMetricsQueryURL, "https://user:secret@mimir.example.com")
+	build := func(name string) (JobPlan, error) {
+		entry := ValidatorEntry{Name: name, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+		return BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+	}
+
+	plan, err := build(AIServiceMetricsCheckName)
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if strings.Contains(err.Error(), "secret") {
+		t.Errorf("error %q repeats the URL's credentials", err)
+	}
+	if len(plan.Env) != 0 {
+		t.Errorf("plan.Env = %v, want no environment on a rejected plan", plan.Env)
+	}
+
+	if _, err := build("pod-autoscaling"); err != nil {
+		t.Errorf("BuildJobPlan for another check = %v, want nil", err)
 	}
 }
 
@@ -1637,6 +1763,61 @@ func TestBuildJobPlan_ForwardsDriverRuntimeImageEnv(t *testing.T) {
 	t.Run("env-name literal locked", func(t *testing.T) {
 		if driverRuntimeImageEnv != "AICR_DRIVER_RUNTIME_IMAGE" {
 			t.Errorf("driverRuntimeImageEnv = %q, want AICR_DRIVER_RUNTIME_IMAGE (keep in sync with the pod-side const)", driverRuntimeImageEnv)
+		}
+	})
+}
+
+// TestBuildJobPlan_ForwardsImagePullSecretNames verifies the
+// --image-pull-secret names reach every validator pod as one env var, so a
+// check that creates a per-run namespace can copy the Secrets there, and that
+// a catalog-pinned value cannot supply them.
+func TestBuildJobPlan_ForwardsImagePullSecretNames(t *testing.T) {
+	values := func(entry ValidatorEntry, secrets []string) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", secrets, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == ImagePullSecretsEnv {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+	conformance := ValidatorEntry{Name: DriverRuntimeManagementCheckName, Phase: "conformance", Image: "img:v1", Timeout: time.Minute}
+	deployment := ValidatorEntry{Name: "gpu-operator-health", Phase: "deployment", Image: "img:v1", Timeout: time.Minute}
+
+	tests := []struct {
+		name    string
+		entry   ValidatorEntry
+		secrets []string
+		want    []string
+	}{
+		{"one name forwarded", conformance, []string{"regcred"}, []string{"regcred"}},
+		{"several names joined in order", conformance, []string{"regcred", "mirror-cred"}, []string{"regcred,mirror-cred"}},
+		{"blank entries dropped", conformance, []string{" regcred ", "", "  "}, []string{"regcred"}},
+		{"none omitted", conformance, nil, nil},
+		{"only blank omitted", conformance, []string{""}, nil},
+		{"forwarded to every phase, the names are not a credential", deployment, []string{"regcred"}, []string{"regcred"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := values(tt.entry, tt.secrets); !slices.Equal(got, tt.want) {
+				t.Errorf("%s env = %v, want %v", ImagePullSecretsEnv, got, tt.want)
+			}
+		})
+	}
+	t.Run("catalog value cannot name the Secrets", func(t *testing.T) {
+		pinned := conformance
+		pinned.Env = []EnvVar{{Name: ImagePullSecretsEnv, Value: "regcred"}}
+		if got := values(pinned, nil); len(got) != 0 {
+			t.Errorf("%s env = %v, want none (the catalog must not name pull Secrets)", ImagePullSecretsEnv, got)
+		}
+	})
+	t.Run("env-name literal locked", func(t *testing.T) {
+		if ImagePullSecretsEnv != "AICR_IMAGE_PULL_SECRETS" {
+			t.Errorf("ImagePullSecretsEnv = %q, want AICR_IMAGE_PULL_SECRETS (keep in sync with validators.ImagePullSecretsEnv)", ImagePullSecretsEnv)
 		}
 	})
 }

@@ -34,11 +34,11 @@ import (
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/controller"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/controller"
+	"aicr.run/pkg/operator/engine/argocd"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/registry"
 )
 
 const (
@@ -173,8 +173,10 @@ func removeCascades(ctx context.Context, t *testing.T, active string) {
 	t.Helper()
 	base := getRuntime(ctx, t).Spec.Overrides
 	// The topology updater needs kubelet pod resources, which kind does not
-	// serve; it is not what this test is about.
-	setOverrides(ctx, t, base, override(nfdRelease, "enabled", "true"), override(nfdRelease, "topologyUpdater.enable", "false"))
+	// serve; it is not what this test is about. From AICR v1.2.0, NFD renders a
+	// PodMonitor, whose CRD comes from prometheus-operator-crds, disabled here.
+	setOverrides(ctx, t, base, override(nfdRelease, "enabled", "true"), override(nfdRelease, "topologyUpdater.enable", "false"),
+		override(nfdRelease, "prometheus.enable", "false"))
 	added := waitRolledOut(ctx, t, active)
 	if deployments(ctx, t, nfdNamespace) == 0 || crdGone(ctx, t, nfdCRD) {
 		t.Fatal("node-feature-discovery rolled out without its Deployments or CRDs")
@@ -273,8 +275,9 @@ func failedSyncRecovers(ctx context.Context, t *testing.T, active string) {
 }
 
 // foreignConflict creates an Application without the operator's ownership
-// under a plan release's name: the install conflicts, the rollout fails,
-// and the foreign object is never written.
+// under a plan release's name: the runtime stalls naming it before a rollout
+// to the plan that installs the release exists, and the foreign object is
+// never written.
 func foreignConflict(ctx context.Context, t *testing.T, active string) {
 	t.Helper()
 	foreign := &unstructured.Unstructured{Object: map[string]any{
@@ -294,12 +297,16 @@ func foreignConflict(ctx context.Context, t *testing.T, active string) {
 	setOverrideFor(ctx, t, crdsRelease, "enabled", "true")
 	waitFor(t, resolveTimeout+rolloutTimeout, "the runtime did not stall on the foreign Application", func() bool {
 		c := meta.FindStatusCondition(getRuntime(ctx, t).Status.Conditions, v1alpha1.ConditionStalled)
-		if c != nil && c.Status == metav1.ConditionTrue && c.Reason == "RolloutFailed" && strings.Contains(c.Message, "ownership") {
+		if c != nil && c.Status == metav1.ConditionTrue && c.Reason == argocd.ReasonForeignObject && strings.Contains(c.Message, crdsRelease) {
 			t.Logf("stalled: %s: %s", c.Reason, c.Message)
 			return true
 		}
 		return false
 	})
+	rt := getRuntime(ctx, t)
+	if blocked := rt.Status.CandidatePlanDigest; blocked == "" || blocked == active || len(rolloutsTo(ctx, t, blocked)) != 0 {
+		t.Errorf("candidate %s (active %s) has %d rollouts, want a new candidate with none", blocked, active, len(rolloutsTo(ctx, t, blocked)))
+	}
 	if err := k8s.Get(ctx, client.ObjectKeyFromObject(foreign), foreign); err != nil {
 		t.Fatal(err)
 	}

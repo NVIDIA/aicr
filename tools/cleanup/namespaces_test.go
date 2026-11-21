@@ -20,7 +20,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/recipe"
 )
 
 // catalogNamespaces maps every namespace the embedded catalog deploys into,

@@ -45,8 +45,9 @@ validators:
     # work (helper.VerifyResource iteration) can't starve the chainsaw
     # budget. 8m provides 60s for cleanup plus another 60s for
     # pre-chainsaw work. The Job's activeDeadlineSeconds adds
-    # defaults.ValidatorJobDeadlineHeadroom (3m30s) on top of this value
-    # as a separate, later backstop. The invariant is verified by
+    # defaults.ValidatorJobDeadlineHeadroom (3m: 2m startup + 30s
+    # cleanup + 30s result flush) on top of this value as a separate, later
+    # backstop; the orchestrator then waits out the 60s SIGTERM window. The invariant is verified by
     # TestExpectedResourcesCatalogEnvelope in
     # pkg/validator/catalog — raising ChainsawAssertTimeout without
     # raising this in tandem will fail the test. See issue #1220 and
@@ -136,9 +137,9 @@ validators:
     # = 50m. The 65m timeout = that 50m sum + 15m headroom for inter-phase
     # overhead (slow registries, K8s API round-trips) and deferred cleanup /
     # CTRF-tail work. The Job's activeDeadlineSeconds adds
-    # defaults.ValidatorJobDeadlineHeadroom (3m30s) on top of this value, so
-    # it kills the pod only after the ctx has already surfaced a clean
-    # timeout. Raising the model (or disabling the cache) shifts this
+    # defaults.ValidatorJobDeadlineHeadroom (3m) on top of this value, so
+    # it signals the pod only after the ctx has already surfaced a clean
+    # timeout and the check's deferred cleanup has had its grace. Raising the model (or disabling the cache) shifts this
     # budget — see the knobs below.
     timeout: 65m
     args: ["inference-perf"]
@@ -215,7 +216,7 @@ validators:
     env: []
   - name: ai-service-metrics
     phase: conformance
-    description: "Verify Prometheus discovers a ServiceMonitor-selected CPU stub workload and collects exactly the requests sent to it"
+    description: "Verify the monitoring system discovers a ServiceMonitor-selected CPU stub workload and collects exactly the requests sent to it"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     # 8m30s shared work budget enforced by the check's workCtx, plus 30s
     # cleanup and 60s margin; the per-wait caps (stub Ready 3m, monitor load
@@ -224,16 +225,17 @@ validators:
     timeout: 10m
     args: ["ai-service-metrics"]
     env: []
-    # Best-effort co-location: prefer the same node as Prometheus so the dial
-    # is loopback / same-node and avoids cross-Security-Group ingress filtering.
-    # Uses requirement: preferred — schedule still falls back to any node if
-    # Prometheus is unschedulable. Motivated by multi-SG clusters (e.g., DGXC
-    # EKS with separate customer/system ENI subnets) where pod-to-pod
-    # reachability is asymmetric. See https://github.com/NVIDIA/aicr/issues/933.
+    # Best-effort co-location: prefer the same node as NKTP's otel-lgtm, which
+    # the check queries, so the dial is loopback / same-node and avoids
+    # cross-Security-Group ingress filtering. Uses requirement: preferred —
+    # schedule still falls back to any node if otel-lgtm is unschedulable.
+    # Motivated by multi-SG clusters (e.g., DGXC EKS with separate
+    # customer/system ENI subnets) where pod-to-pod reachability is asymmetric.
+    # See https://github.com/NVIDIA/aicr/issues/933.
     dependencyAffinity:
-      - componentRef: kube-prometheus-stack
+      - componentRef: nktp
         podLabelSelector:
-          app.kubernetes.io/name: prometheus
+          app: lgtm
         requirement: preferred
   - name: inference-gateway
     phase: conformance
@@ -267,8 +269,8 @@ validators:
     args: ["pod-autoscaling"]
     env: []
     # The check dials Prometheus for the PodMonitor load wait when the recipe
-    # declares kube-prometheus-stack, so it takes the same best-effort
-    # co-location as ai-service-metrics (see that entry and #933).
+    # declares kube-prometheus-stack, so it prefers Prometheus's node, for the
+    # reason ai-service-metrics prefers otel-lgtm's (see that entry and #933).
     dependencyAffinity:
       - componentRef: kube-prometheus-stack
         podLabelSelector:
@@ -370,17 +372,21 @@ validators:
     timeout: 30m
     args: ["nccl-all-reduce-bw-nvls"]
     env: []
-  # CRE-driven NCCL check. Opt-in only: no embedded overlay references this
-  # check, and shipped EKS H100 training keeps TrainJob nccl-all-reduce-bw.
+  # CRE-driven NCCL check. Only gb300-eks-ubuntu-training-kubeflow declares it,
+  # in place of the TrainJob nccl-all-reduce-bw-nvls it inherits (that check
+  # skips as superseded-by-cre); every other shipped recipe keeps TrainJob.
   # The check itself is provider-independent; creQualifiedEntries records the
-  # qualified combinations. Qualified on EKS H100 — re-measured on the pinned
-  # CRE v0.8.2, live UAT 2026-10-23 (2× p5.48xlarge): 489.70 GB/s vs >= 300,
-  # against 489.80 GB/s at the original 2026-09-02 run on v0.1.0.
+  # qualified combinations. Qualified on EKS H100 — re-measured on CRE
+  # v0.8.2 (the pin at the time), live UAT 2026-10-23 (2× p5.48xlarge):
+  # 489.70 GB/s vs >= 300, against 489.80 GB/s at the original 2026-09-02 run
+  # on v0.1.0 — and on EKS GB300, measured on CRE v0.12.0 on 2026-11-18
+  # (2× p6e-gb300.36xlarge, spec.fabric efa): 840.83 GB/s vs >= 700.
   #
   # The timeout covers the Certification wait, the measurement-finalize wait,
-  # and the teardown in series, because the Job's activeDeadlineSeconds is this
-  # value plus only ValidatorJobDeadlineHeadroom — a shorter budget kills the
-  # pod partway through teardown and leaves the TrainJobs holding GPUs.
+  # and the teardown in series, because the check's own context expires at this
+  # value and only ValidatorJobDeadlineHeadroom (a bounded cleanup grace, not a
+  # work budget) follows — a shorter budget cuts the check off partway through
+  # teardown and leaves the TrainJobs holding GPUs.
   # TestCRECatalogTimeoutCoversTeardown pins the relation.
   - name: nccl-cre-all-reduce-bw
     phase: performance
@@ -389,8 +395,24 @@ validators:
     timeout: 50m
     args: ["nccl-cre-all-reduce-bw"]
     env: []
-  # Qualified on EKS H100 — measured on the pinned CRE v0.8.2, live UAT
-  # 2026-10-23 (2× p5.48xlarge): goodput 0.5723 vs >= 0.5. The entry is per
+  # The same check with NVLS and MNNVL disabled through spec.env, so the peak is
+  # the EFA path alone. Qualified on EKS GB300 only, where it stands in for the
+  # inherited TrainJob nccl-all-reduce-bw-net (that check skips as
+  # superseded-by-cre). Measured on CRE v0.12.0 on 2026-11-18 (2×
+  # p6e-gb300.36xlarge, spec.fabric efa): about 31 GB/s on NCCL 2.31.2 and
+  # aws-ofi-nccl 1.21.1, against about 45 GB/s on the 2.27.7 and 1.16.3 image
+  # the TrainJob check uses. The recipe floor is set below the new image's
+  # figure while the regression is open with the NVCRE team.
+  - name: nccl-cre-all-reduce-bw-net
+    phase: performance
+    description: "Verify NCCL All Reduce Bus Bandwidth on the EFA/NET path via a Cluster Readiness Engine Certification with NVLS disabled"
+    image: ghcr.io/nvidia/aicr-validators/performance:latest
+    timeout: 50m
+    args: ["nccl-cre-all-reduce-bw-net"]
+    env: []
+  # Qualified on EKS H100 — measured on CRE v0.8.2 (the pin at the time), live
+  # UAT 2026-10-23 (2× p5.48xlarge): goodput 0.5723 vs >= 0.5; not re-measured
+  # on v0.12.0. The entry is per
   # combination because training/nemotron5-56b needs minGPUs=32 and fails on
   # this SKU.
   - name: cre-training-goodput

@@ -89,6 +89,14 @@ if [[ "$1" == "version" && "$2" == "-m" ]]; then
             ;;
     esac
 fi
+if [[ "$1" == "run" && "$2" == "./tools/module-rename" ]]; then
+    printf 'module-rename %s\n' "${*:3}" >>"${GIT_LOG}"
+    if [[ "${MODULE_RENAME_SCENARIO:-correct}" == "failure" ]]; then
+        echo "mock module-rename failure" >&2
+        exit 42
+    fi
+    exit 0
+fi
 if [[ "$1" == "run" && "$2" == "./tools/api-diff-closure" ]]; then
     alias_mode=false
     closure_dir=""
@@ -107,7 +115,7 @@ if [[ "$1" == "run" && "$2" == "./tools/api-diff-closure" ]]; then
             exit 42
         fi
         if [[ "${ALIAS_MAPPING_SCENARIO:-correct}" == "concrete-generic" ]]; then
-            echo "api-diff-closure: inspect exported alias github.com/NVIDIA/aicr/pkg/client/v1.BundleConfig: generic target alias instantiated as github.com/NVIDIA/aicr/pkg/bundler/config.Config[int] cannot be scoped safely; generic target aliases must forward every type parameter unchanged with identical constraints (concrete, transformed, and narrowed instantiations are unsupported)" >&2
+            echo "api-diff-closure: inspect exported alias aicr.run/pkg/client/v1.BundleConfig: generic target alias instantiated as aicr.run/pkg/bundler/config.Config[int] cannot be scoped safely; generic target aliases must forward every type parameter unchanged with identical constraints (concrete, transformed, and narrowed instantiations are unsupported)" >&2
             exit 42
         fi
         # api-diff compares this output against an LC_ALL=C-sorted contract
@@ -115,23 +123,25 @@ if [[ "$1" == "run" && "$2" == "./tools/api-diff-closure" ]]; then
         # Keep every line below in sorted order or the contract check fails for
         # the wrong reason.
         cat <<'ALIASES'
-BundleArtifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output
-BundleAttester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester
+ArtifactOptions|aicr.run/pkg/artifact|Options
+BundleArtifact|aicr.run/pkg/bundler/result|Output
+BundleAttester|aicr.run/pkg/bundler/attestation|Attester
 ALIASES
         if [[ "${ALIAS_MAPPING_SCENARIO:-correct}" == "retarget" ]]; then
-            echo 'BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/result|Output'
+            echo 'BundleConfig|aicr.run/pkg/bundler/result|Output'
         else
-            echo 'BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config'
+            echo 'BundleConfig|aicr.run/pkg/bundler/config|Config'
         fi
-        echo 'BundleVerifyReport|github.com/NVIDIA/aicr/pkg/bundler/verifier|VerifyResult'
-        echo 'CNCFRequirementAggregate|github.com/NVIDIA/aicr/pkg/evidence/cncf|Aggregate'
-        echo 'CriteriaRegistry|github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry'
-        echo 'EvidenceVerification|github.com/NVIDIA/aicr/pkg/evidence/verifier|VerifyResult'
+        echo 'BundleVerifyReport|aicr.run/pkg/bundler/verifier|VerifyResult'
+        echo 'CNCFRequirementAggregate|aicr.run/pkg/evidence/cncf|Aggregate'
+        echo 'CriteriaRegistry|aicr.run/pkg/recipe|CriteriaRegistry'
+        echo 'EvidenceVerification|aicr.run/pkg/evidence/verifier|VerifyResult'
         if [[ "${ALIAS_MAPPING_SCENARIO:-correct}" == "extra-generic" ]]; then
-            echo 'GenericAlias|github.com/NVIDIA/aicr/pkg/bundler/result|Result'
+            echo 'GenericAlias|aicr.run/pkg/bundler/result|Result'
         fi
-        echo 'OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions'
-        echo 'UpgradeReport|github.com/NVIDIA/aicr/pkg/upgrade|Report'
+        echo 'OIDCResolveOptions|aicr.run/pkg/bundler/attestation|ResolveOptions'
+        echo 'RecipeSummary|aicr.run/pkg/recipe|Summary'
+        echo 'UpgradeReport|aicr.run/pkg/upgrade|Report'
         exit 0
     fi
     if [[ "${ALIAS_CLOSURE_SCENARIO:-correct}" == "failure" ]]; then
@@ -139,39 +149,40 @@ ALIASES
         exit 42
     fi
     cat <<'CLOSURE'
-github.com/NVIDIA/aicr/pkg/bundler/attestation|AttestSubject
-github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester
-github.com/NVIDIA/aicr/pkg/bundler/attestation|Dependency
-github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions
-github.com/NVIDIA/aicr/pkg/bundler/attestation|StatementMetadata
-github.com/NVIDIA/aicr/pkg/bundler/config|Config
-github.com/NVIDIA/aicr/pkg/bundler/config|DeployerType
-github.com/NVIDIA/aicr/pkg/bundler/result|Output
-github.com/NVIDIA/aicr/pkg/bundler/result|Result
-github.com/NVIDIA/aicr/pkg/bundler/types|BundleType
-github.com/NVIDIA/aicr/pkg/recipe|CriteriaAcceleratorType
-github.com/NVIDIA/aicr/pkg/recipe|CriteriaField
-github.com/NVIDIA/aicr/pkg/recipe|CriteriaIntentType
-github.com/NVIDIA/aicr/pkg/recipe|CriteriaOSType
-github.com/NVIDIA/aicr/pkg/recipe|CriteriaOrigin
-github.com/NVIDIA/aicr/pkg/recipe|CriteriaPlatformType
-github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry
-github.com/NVIDIA/aicr/pkg/recipe|CriteriaServiceType
+aicr.run/pkg/artifact|Options
+aicr.run/pkg/bundler/attestation|AttestSubject
+aicr.run/pkg/bundler/attestation|Attester
+aicr.run/pkg/bundler/attestation|Dependency
+aicr.run/pkg/bundler/attestation|ResolveOptions
+aicr.run/pkg/bundler/attestation|StatementMetadata
+aicr.run/pkg/bundler/config|Config
+aicr.run/pkg/bundler/config|DeployerType
+aicr.run/pkg/bundler/result|Output
+aicr.run/pkg/bundler/result|Result
+aicr.run/pkg/bundler/types|BundleType
+aicr.run/pkg/recipe|CriteriaAcceleratorType
+aicr.run/pkg/recipe|CriteriaField
+aicr.run/pkg/recipe|CriteriaIntentType
+aicr.run/pkg/recipe|CriteriaOSType
+aicr.run/pkg/recipe|CriteriaOrigin
+aicr.run/pkg/recipe|CriteriaPlatformType
+aicr.run/pkg/recipe|CriteriaRegistry
+aicr.run/pkg/recipe|CriteriaServiceType
 CLOSURE
     if [[ "${ALIAS_CLOSURE_SCENARIO:-correct}" == "different-membership" ]]; then
         if [[ "${closure_dir}" == "${API_DIFF_TEST_REPO_ROOT}" ]]; then
-            echo 'github.com/NVIDIA/aicr/pkg/bundler/result|DeploymentInfo'
+            echo 'aicr.run/pkg/bundler/result|DeploymentInfo'
         else
-            echo 'github.com/NVIDIA/aicr/pkg/bundler/result|BundleError'
+            echo 'aicr.run/pkg/bundler/result|BundleError'
         fi
     else
         cat <<'CLOSURE'
-github.com/NVIDIA/aicr/pkg/bundler/result|BundleError
-github.com/NVIDIA/aicr/pkg/bundler/result|DeploymentInfo
+aicr.run/pkg/bundler/result|BundleError
+aicr.run/pkg/bundler/result|DeploymentInfo
 CLOSURE
     fi
     if [[ "${ALIAS_CLOSURE_SCENARIO:-correct}" == "generic-argument" ]]; then
-        echo 'github.com/NVIDIA/aicr/pkg/payload|Contract'
+        echo 'aicr.run/pkg/payload|Contract'
     fi
     exit 0
 fi
@@ -202,6 +213,7 @@ fi
 if [[ "$1" == "worktree" && "$2" == "add" ]]; then
     printf 'baseline=%s\n' "$5" >>"${GIT_LOG}"
     mkdir -p "$4"
+    printf 'module %s\n' "${BASELINE_MODULE:-$(awk '$1 == "module" { print $2; exit }' "${API_DIFF_TEST_REPO_ROOT}/go.mod")}" >"$4/go.mod"
     exit 0
 fi
 if [[ "$1" == "worktree" && "$2" == "prune" ]]; then
@@ -459,18 +471,20 @@ check_occurrences() {
 expected_apidiff_log() {
     local cwd=$1
 
-    printf 'mode=export package=github.com/NVIDIA/aicr/pkg/client/v1 allow_internal=false\n'
-    printf 'mode=export package=github.com/NVIDIA/aicr/pkg/bundler/attestation allow_internal=true\n'
-    printf 'mode=export package=github.com/NVIDIA/aicr/pkg/bundler/config allow_internal=true\n'
-    printf 'mode=export package=github.com/NVIDIA/aicr/pkg/bundler/result allow_internal=true\n'
-    printf 'mode=export package=github.com/NVIDIA/aicr/pkg/bundler/types allow_internal=true\n'
-    printf 'mode=export package=github.com/NVIDIA/aicr/pkg/recipe allow_internal=true\n'
-    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/client/v1 allow_internal=false cwd=%s\n' "${cwd}"
-    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/bundler/attestation allow_internal=true cwd=%s\n' "${cwd}"
-    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/bundler/config allow_internal=true cwd=%s\n' "${cwd}"
-    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/bundler/result allow_internal=true cwd=%s\n' "${cwd}"
-    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/bundler/types allow_internal=true cwd=%s\n' "${cwd}"
-    printf 'mode=report package=github.com/NVIDIA/aicr/pkg/recipe allow_internal=true cwd=%s' "${cwd}"
+    printf 'mode=export package=aicr.run/pkg/client/v1 allow_internal=false\n'
+    printf 'mode=export package=aicr.run/pkg/artifact allow_internal=true\n'
+    printf 'mode=export package=aicr.run/pkg/bundler/attestation allow_internal=true\n'
+    printf 'mode=export package=aicr.run/pkg/bundler/config allow_internal=true\n'
+    printf 'mode=export package=aicr.run/pkg/bundler/result allow_internal=true\n'
+    printf 'mode=export package=aicr.run/pkg/bundler/types allow_internal=true\n'
+    printf 'mode=export package=aicr.run/pkg/recipe allow_internal=true\n'
+    printf 'mode=report package=aicr.run/pkg/client/v1 allow_internal=false cwd=%s\n' "${cwd}"
+    printf 'mode=report package=aicr.run/pkg/artifact allow_internal=true cwd=%s\n' "${cwd}"
+    printf 'mode=report package=aicr.run/pkg/bundler/attestation allow_internal=true cwd=%s\n' "${cwd}"
+    printf 'mode=report package=aicr.run/pkg/bundler/config allow_internal=true cwd=%s\n' "${cwd}"
+    printf 'mode=report package=aicr.run/pkg/bundler/result allow_internal=true cwd=%s\n' "${cwd}"
+    printf 'mode=report package=aicr.run/pkg/bundler/types allow_internal=true cwd=%s\n' "${cwd}"
+    printf 'mode=report package=aicr.run/pkg/recipe allow_internal=true cwd=%s' "${cwd}"
 }
 
 run failure v9.8.7 "" "${EMPTY_EXCEPTIONS}" correct "${SCRIPT_DIR}" failure
@@ -504,7 +518,7 @@ run alias-contract-concrete-generic v9.8.7
 unset ALIAS_MAPPING_SCENARIO
 check_rc "concrete-generic-transparent-alias-fails-closed" 18
 check_contains "concrete-generic-transparent-alias-is-diagnostic" \
-    "generic target alias instantiated as github.com/NVIDIA/aicr/pkg/bundler/config.Config[int] cannot be scoped safely"
+    "generic target alias instantiated as aicr.run/pkg/bundler/config.Config[int] cannot be scoped safely"
 check_contains "concrete-generic-transparent-alias-explains-supported-form" \
     "generic target aliases must forward every type parameter unchanged with identical constraints"
 check_log_absent "concrete-generic-transparent-alias-stops-before-git" "prune"
@@ -515,8 +529,8 @@ run alias-contract-retargeted v9.8.7
 unset ALIAS_MAPPING_SCENARIO
 check_rc "retargeted-transparent-alias-fails" 18
 check_contains "retargeted-transparent-alias-is-diagnostic" "Transparent alias contract is out of sync"
-check_contains "retargeted-transparent-alias-reports-actual-target" "BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/result|Output"
-check_contains "retargeted-transparent-alias-reports-scoped-target" "BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config"
+check_contains "retargeted-transparent-alias-reports-actual-target" "BundleConfig|aicr.run/pkg/bundler/result|Output"
+check_contains "retargeted-transparent-alias-reports-scoped-target" "BundleConfig|aicr.run/pkg/bundler/config|Config"
 check_log_absent "retargeted-transparent-alias-stops-before-git" "prune"
 
 ALIAS_MAPPING_SCENARIO=failure
@@ -585,18 +599,34 @@ unset APIDIFF_REPORT
 check_rc "compatible-only-report-succeeds" 0
 check_contains "compatible-only-change-is-reported" "Client.New: added"
 check_contains "compatible-only-report-is-clean" "No incompatible"
+check_absent "same-module-baseline-is-not-aligned" "Aligning baseline module path"
+check_log_absent "same-module-baseline-is-not-renamed" "module-rename"
 check_apidiff_log_equals "compatible-only-report-loads-facade-and-alias-targets-once" \
     "$(expected_apidiff_log "${REPO_ROOT}")"
 
+CURRENT_MODULE="$(awk '$1 == "module" { print $2; exit }' "${REPO_ROOT}/go.mod")"
+export BASELINE_MODULE=example.com/legacy
+run decision v9.8.7 "" "${EMPTY_EXCEPTIONS}"
+check_rc "cross-module-baseline-succeeds" 0
+check_contains "cross-module-baseline-is-aligned" "Aligning baseline module path example.com/legacy to ${CURRENT_MODULE}"
+check_log_contains "cross-module-baseline-renames-in-go-only-mode" "-from example.com/legacy -to ${CURRENT_MODULE} -go-only"
+check_contains "cross-module-baseline-is-clean" "No incompatible"
+export MODULE_RENAME_SCENARIO=failure
+run decision v9.8.7 "" "${EMPTY_EXCEPTIONS}"
+unset MODULE_RENAME_SCENARIO BASELINE_MODULE
+check_rc "cross-module-align-failure" 19
+check_contains "cross-module-align-failure-is-explained" "Could not align baseline v9.8.7"
+
 alias_target_cases=(
-    'bundle-config|github.com/NVIDIA/aicr/pkg/bundler/config|(*Config).Deployer: removed'
-    'bundle-attester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester.Identity: removed'
-    'oidc-resolve-options|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions.Attest: removed'
-    'bundle-artifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output.OutputDir: removed'
-    'bundle-artifact-nested-result|github.com/NVIDIA/aicr/pkg/bundler/result|Result.Checksum: removed'
-    'bundle-artifact-cross-package-type|github.com/NVIDIA/aicr/pkg/bundler/types|BundleType.String: removed'
-    'criteria-registry|github.com/NVIDIA/aicr/pkg/recipe|(*CriteriaRegistry).Values: removed'
-    'criteria-registry-signature-type|github.com/NVIDIA/aicr/pkg/recipe|CriteriaField: changed from string to int'
+    'artifact-options|aicr.run/pkg/artifact|Options.Inventory: removed'
+    'bundle-config|aicr.run/pkg/bundler/config|(*Config).Deployer: removed'
+    'bundle-attester|aicr.run/pkg/bundler/attestation|Attester.Identity: removed'
+    'oidc-resolve-options|aicr.run/pkg/bundler/attestation|ResolveOptions.Attest: removed'
+    'bundle-artifact|aicr.run/pkg/bundler/result|Output.OutputDir: removed'
+    'bundle-artifact-nested-result|aicr.run/pkg/bundler/result|Result.Checksum: removed'
+    'bundle-artifact-cross-package-type|aicr.run/pkg/bundler/types|BundleType.String: removed'
+    'criteria-registry|aicr.run/pkg/recipe|(*CriteriaRegistry).Values: removed'
+    'criteria-registry-signature-type|aicr.run/pkg/recipe|CriteriaField: changed from string to int'
 )
 for case_spec in "${alias_target_cases[@]}"; do
     IFS='|' read -r case_name target_package target_change <<< "${case_spec}"
@@ -613,7 +643,7 @@ done
 # generic Target[P] with changed pointer and removed value methods. ConfigExtra
 # deliberately shares Config's prefix so the scope check cannot pass by merely
 # accepting any subject that starts with the target type name.
-APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/bundler/config'
+APIDIFF_TARGET_REPORT_PACKAGE='aicr.run/pkg/bundler/config'
 APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- (*Config[P]).Deployer: changed from func(P) P to func([]P) P\n- Config[P].Validate: removed\n- ConfigExtra[P].Validate: removed\n'
 run alias-generic-receivers v9.8.7 "" "${EMPTY_EXCEPTIONS}"
 unset APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
@@ -622,7 +652,7 @@ check_contains "generic-pointer-receiver-break-is-reported" "(*Config[P]).Deploy
 check_contains "generic-value-receiver-break-is-reported" "Config[P].Validate: removed"
 check_absent "similarly-named-generic-type-remains-excluded" "ConfigExtra[P].Validate: removed"
 
-APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/bundler/attestation'
+APIDIFF_TARGET_REPORT_PACKAGE='aicr.run/pkg/bundler/attestation'
 APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- VerificationIdentity.Issuer: removed\n'
 run alias-unrelated-only v9.8.7 "" "${EMPTY_EXCEPTIONS}"
 unset APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
@@ -631,7 +661,7 @@ check_absent "unrelated-target-package-break-is-not-reported" "VerificationIdent
 check_contains "unrelated-target-package-break-keeps-gate-clean" "No incompatible SDK facade or transparent-alias target changes"
 
 ALIAS_CLOSURE_SCENARIO=generic-argument
-APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/payload'
+APIDIFF_TARGET_REPORT_PACKAGE='aicr.run/pkg/payload'
 APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- Contract.Legacy: removed\n- Unrelated.Legacy: removed\n'
 run alias-generic-argument v9.8.7 "" "${EMPTY_EXCEPTIONS}"
 unset ALIAS_CLOSURE_SCENARIO APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
@@ -640,7 +670,7 @@ check_contains "generic-alias-argument-break-is-reported" "Contract.Legacy: remo
 check_absent "generic-alias-argument-does-not-freeze-unrelated-export" "Unrelated.Legacy: removed"
 
 ALIAS_CLOSURE_SCENARIO=different-membership
-APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/bundler/result'
+APIDIFF_TARGET_REPORT_PACKAGE='aicr.run/pkg/bundler/result'
 APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- DeploymentInfo.Legacy: removed\n'
 run alias-current-only-reachable-type v9.8.7 "" "${EMPTY_EXCEPTIONS}"
 unset APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
@@ -648,23 +678,23 @@ check_rc "current-only-reachable-type-break-succeeds" 0
 check_absent "current-only-reachable-type-break-is-not-reported" "DeploymentInfo.Legacy: removed"
 check_contains "current-only-reachable-type-break-keeps-gate-clean" "No incompatible SDK facade or transparent-alias target changes"
 
-APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/bundler/result'
+APIDIFF_TARGET_REPORT_PACKAGE='aicr.run/pkg/bundler/result'
 APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- BundleError.Legacy: removed\n'
 run alias-baseline-only-reachable-type v9.8.7 "" "${EMPTY_EXCEPTIONS}"
 unset APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
 check_rc "baseline-only-reachable-type-break-fails" 16
 check_contains "baseline-only-reachable-type-break-is-reported" "BundleError.Legacy: removed"
 
-APIDIFF_FAILURE_PACKAGE='github.com/NVIDIA/aicr/pkg/bundler/config'
+APIDIFF_FAILURE_PACKAGE='aicr.run/pkg/bundler/config'
 run alias-existing-target-load-failure v9.8.7 "" "${EMPTY_EXCEPTIONS}"
 unset APIDIFF_FAILURE_PACKAGE
 check_rc "existing-target-load-failure-is-not-treated-as-removal" 42
 check_contains "existing-target-load-failure-remains-diagnostic" \
-    "mock current package load failure for github.com/NVIDIA/aicr/pkg/bundler/config"
+    "mock current package load failure for aicr.run/pkg/bundler/config"
 check_absent "existing-target-load-failure-does-not-invent-package-removal" \
-    "package github.com/NVIDIA/aicr/pkg/bundler/config: removed"
+    "package aicr.run/pkg/bundler/config: removed"
 
-APIDIFF_TARGET_REPORT_PACKAGE='github.com/NVIDIA/aicr/pkg/bundler/result'
+APIDIFF_TARGET_REPORT_PACKAGE='aicr.run/pkg/bundler/result'
 APIDIFF_TARGET_REPORT=$'Incompatible changes:\n- Output.Result: changed from Result to DeploymentInfo\n- DeploymentInfo.Legacy: removed\n'
 run alias-current-only-type-parent-break v9.8.7 "" "${EMPTY_EXCEPTIONS}"
 unset ALIAS_CLOSURE_SCENARIO APIDIFF_TARGET_REPORT_PACKAGE APIDIFF_TARGET_REPORT
@@ -736,6 +766,7 @@ else
         mkdir -p \
             "${internal_fixture}/tools/api-diff-closure" \
             "${internal_fixture}/pkg/client/v1" \
+            "${internal_fixture}/pkg/artifact" \
             "${internal_fixture}/pkg/bundler/attestation" \
             "${internal_fixture}/pkg/bundler/config" \
             "${internal_fixture}/pkg/bundler/result" \
@@ -750,7 +781,7 @@ else
         cp "${SCRIPT_DIR}/api-diff-closure/main.go" "${internal_fixture}/tools/api-diff-closure/main.go"
 
         cat >"${internal_fixture}/go.mod" <<EOF
-module github.com/NVIDIA/aicr
+module aicr.run
 
 go 1.26
 
@@ -763,16 +794,18 @@ EOF
 package v1
 
 import (
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
-	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/result"
+	bundlerverifier "aicr.run/pkg/bundler/verifier"
+	"aicr.run/pkg/evidence/cncf"
+	evidenceverifier "aicr.run/pkg/evidence/verifier"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/upgrade"
 )
 
+type ArtifactOptions = artifact.Options
 type BundleConfig = config.Config
 type BundleAttester = attestation.Attester
 type OIDCResolveOptions = attestation.ResolveOptions
@@ -782,6 +815,15 @@ type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
 type UpgradeReport = upgrade.Report
 type CNCFRequirementAggregate = cncf.Aggregate
+type RecipeSummary = recipe.Summary
+EOF
+        cat >"${internal_fixture}/pkg/artifact/options.go" <<'EOF'
+package artifact
+
+type Options struct {
+	Inventory        string
+	AllowCatalogPins []string
+}
 EOF
         cat >"${internal_fixture}/pkg/upgrade/upgrade.go" <<'EOF'
 package upgrade
@@ -812,7 +854,7 @@ EOF
         cat >"${internal_fixture}/pkg/bundler/config/config.go" <<'EOF'
 package config
 
-import "github.com/NVIDIA/aicr/internal/sdkcontract"
+import "aicr.run/internal/sdkcontract"
 
 type Config struct {
 	Contract sdkcontract.Contract
@@ -827,6 +869,7 @@ EOF
 package recipe
 
 type CriteriaRegistry struct{}
+type Summary struct{}
 EOF
         cat >"${internal_fixture}/internal/sdkcontract/contract.go" <<'EOF'
 package sdkcontract
@@ -858,11 +901,11 @@ EOF
         RC=$?
         check_rc "reachable-internal-target-incompatibility-fails-closed" 16
         check_contains "reachable-internal-target-incompatibility-is-scoped" \
-            "Transparent alias reachable-type changes: github.com/NVIDIA/aicr/internal/sdkcontract (Contract)"
+            "Transparent alias reachable-type changes: aicr.run/internal/sdkcontract (Contract)"
         check_contains "reachable-internal-target-incompatibility-is-reported" \
             "Contract.Legacy: changed from string to int"
         check_absent "reachable-internal-target-is-not-silently-ignored" \
-            "Ignoring internal package github.com/NVIDIA/aicr/internal/sdkcontract"
+            "Ignoring internal package aicr.run/internal/sdkcontract"
     fi
 fi
 
@@ -885,6 +928,7 @@ else
         mkdir -p \
             "${deleted_target_fixture}/tools/api-diff-closure" \
             "${deleted_target_fixture}/pkg/client/v1" \
+            "${deleted_target_fixture}/pkg/artifact" \
             "${deleted_target_fixture}/pkg/bundler/attestation" \
             "${deleted_target_fixture}/pkg/bundler/config" \
             "${deleted_target_fixture}/pkg/bundler/result" \
@@ -900,7 +944,7 @@ else
             "${deleted_target_fixture}/tools/api-diff-closure/main.go"
 
         cat >"${deleted_target_fixture}/go.mod" <<EOF
-module github.com/NVIDIA/aicr
+module aicr.run
 
 go 1.26
 
@@ -913,16 +957,18 @@ EOF
 package v1
 
 import (
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
-	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
-	"github.com/NVIDIA/aicr/pkg/legacyconfig"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/result"
+	bundlerverifier "aicr.run/pkg/bundler/verifier"
+	"aicr.run/pkg/evidence/cncf"
+	evidenceverifier "aicr.run/pkg/evidence/verifier"
+	"aicr.run/pkg/legacyconfig"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/upgrade"
 )
 
+type ArtifactOptions = artifact.Options
 type BundleConfig = legacyconfig.Config
 type BundleAttester = attestation.Attester
 type OIDCResolveOptions = attestation.ResolveOptions
@@ -932,6 +978,15 @@ type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
 type UpgradeReport = upgrade.Report
 type CNCFRequirementAggregate = cncf.Aggregate
+type RecipeSummary = recipe.Summary
+EOF
+        cat >"${deleted_target_fixture}/pkg/artifact/options.go" <<'EOF'
+package artifact
+
+type Options struct {
+	Inventory        string
+	AllowCatalogPins []string
+}
 EOF
         cat >"${deleted_target_fixture}/pkg/upgrade/upgrade.go" <<'EOF'
 package upgrade
@@ -981,6 +1036,7 @@ EOF
 package recipe
 
 type CriteriaRegistry struct{}
+type Summary struct{}
 EOF
 
         git -C "${deleted_target_fixture}" init -q -b main
@@ -994,16 +1050,18 @@ EOF
 package v1
 
 import (
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
-	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/result"
+	bundlerverifier "aicr.run/pkg/bundler/verifier"
+	"aicr.run/pkg/evidence/cncf"
+	evidenceverifier "aicr.run/pkg/evidence/verifier"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/upgrade"
 )
 
+type ArtifactOptions = artifact.Options
 type BundleConfig = config.Config
 type BundleAttester = attestation.Attester
 type OIDCResolveOptions = attestation.ResolveOptions
@@ -1013,6 +1071,7 @@ type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
 type UpgradeReport = upgrade.Report
 type CNCFRequirementAggregate = cncf.Aggregate
+type RecipeSummary = recipe.Summary
 EOF
         rm "${deleted_target_fixture}/pkg/legacyconfig/config.go"
     ); then
@@ -1022,13 +1081,13 @@ EOF
         RC=$?
         check_rc "deleted-alias-target-unacknowledged-break-fails" 16
         check_contains "deleted-alias-target-retarget-is-reported" \
-            "BundleConfig: changed from github.com/NVIDIA/aicr/pkg/legacyconfig.Config to github.com/NVIDIA/aicr/pkg/bundler/config.Config"
+            "BundleConfig: changed from aicr.run/pkg/legacyconfig.Config to aicr.run/pkg/bundler/config.Config"
         check_contains "deleted-alias-target-package-removal-is-scoped" \
-            "Transparent alias reachable-type changes: github.com/NVIDIA/aicr/pkg/legacyconfig (Config)"
+            "Transparent alias reachable-type changes: aicr.run/pkg/legacyconfig (Config)"
         check_contains "deleted-alias-target-package-removal-is-reported" \
-            "package github.com/NVIDIA/aicr/pkg/legacyconfig: removed"
+            "package aicr.run/pkg/legacyconfig: removed"
         check_absent "deleted-alias-target-does-not-abort-during-package-load" \
-            "loading github.com/NVIDIA/aicr/pkg/legacyconfig"
+            "loading aicr.run/pkg/legacyconfig"
 
         cat >"${deleted_target_fixture}/pkg/client/v1/api-diff-exceptions.yaml" <<'EOF'
 acknowledgements:
@@ -1037,8 +1096,8 @@ acknowledgements:
     summary: Retarget the bundle configuration alias.
     rationale: The old package was intentionally retired with its facade alias target.
     incompatible_changes:
-      - 'BundleConfig: changed from github.com/NVIDIA/aicr/pkg/legacyconfig.Config to github.com/NVIDIA/aicr/pkg/bundler/config.Config'
-      - 'package github.com/NVIDIA/aicr/pkg/legacyconfig: removed'
+      - 'BundleConfig: changed from aicr.run/pkg/legacyconfig.Config to aicr.run/pkg/bundler/config.Config'
+      - 'package aicr.run/pkg/legacyconfig: removed'
 EOF
         OUT="$(cd "${deleted_target_fixture}" && PATH="${REAL_PATH}" API_DIFF_BASELINE=HEAD ./tools/api-diff 2>&1)"
         RC=$?

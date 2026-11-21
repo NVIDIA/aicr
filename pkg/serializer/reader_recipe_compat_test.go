@@ -18,8 +18,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 )
 
 func writeLegacyRecipeFile(t *testing.T, pattern, content string) string {

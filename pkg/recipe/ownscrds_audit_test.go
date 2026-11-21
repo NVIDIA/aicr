@@ -40,11 +40,11 @@ import "testing"
 //
 // See https://github.com/NVIDIA/aicr/issues/2264.
 var auditedOwnsCRDs = map[string]string{
-	"gatekeeper":     "3.22.2",
+	"gatekeeper":     "3.23.1",
 	"k8s-aibom":      "1.6.2",
-	"nktp":           "0.1.1-rc.3",
-	"nvcre":          "v0.8.2",
-	"nvsentinel":     "v1.28.0",
+	"nktp":           "0.2.0",
+	"nvcre":          "v0.12.0",
+	"nvsentinel":     "v1.32.0",
 	"psmdb-operator": "1.23.2",
 }
 

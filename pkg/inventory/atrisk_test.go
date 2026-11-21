@@ -39,12 +39,12 @@ import (
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
-	"github.com/NVIDIA/aicr/pkg/k8s/labels"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	k8sclient "aicr.run/pkg/k8s/client"
+	"aicr.run/pkg/k8s/labels"
+	"aicr.run/pkg/upgrade"
 )
 
 // TestResourceKindMatchesUpgrade fails when the two declarations drift apart.

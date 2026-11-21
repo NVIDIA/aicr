@@ -27,10 +27,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/cncf/upstreamvalidator"
-	"github.com/NVIDIA/aicr/pkg/evidence/redact"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/cncf/upstreamvalidator"
+	"aicr.run/pkg/evidence/redact"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // SubmissionInput is everything WriteSubmission renders from: the run's
@@ -42,6 +42,13 @@ type SubmissionInput struct {
 
 	// Version is the checklist version; zero means LatestVersion.
 	Version Version
+
+	// VersionExplicit records that Version was named by the caller
+	// (spec.validate.evidence.cncf.conformanceVersion) rather than derived
+	// from the cluster's Kubernetes minor; README.md says so beside the
+	// checklist, since a submission filed against a chosen checklist must
+	// show the choice.
+	VersionExplicit bool
 
 	// Options carry notApplicable and documented from the validate config.
 	Options AggregateOptions

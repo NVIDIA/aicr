@@ -23,6 +23,7 @@ reason and message.
 | `EngineMissing`, `ProjectMissing`; `Unauthorized` on `EngineAvailable` | [Argo CD not available](#argo-cd-not-available) |
 | `AwaitingApproval`, `AwaitingAcknowledgement` | [Waiting for approval](#waiting-for-approval) |
 | `TransitionBlocked` | [Transition blocked](#transition-blocked) |
+| `ForeignObject` | [Application name taken](#application-name-taken) |
 | `InventoryDrift`, `StepUnknown`, `MovedReleaseMissing`, `EngineSuspensionRefused` | [Rollout stalled](#rollout-stalled) |
 | `RolloutFailed`, `RolloutExpired`, `RolloutRevoked`; `ForeignObject` on `Ready` | [Rollout failed, expired or revoked](#rollout-failed-expired-or-revoked) |
 | `ValidationUnavailable` | [Validation](#validation) |
@@ -207,8 +208,12 @@ expiry this turns into `RegistryCredentialsStale`.
 
 | Reason | Cause | Fix |
 | --- | --- | --- |
-| `AICRVersionMismatch` | `aicr.version` is outside `>=1.0.0, <2.0.0`, or a prerelease without `aicr.allowPrerelease`, or the AICR image reports a different version than `aicr.version` | Set `aicr.version` and `aicr.image` to the same release in one `helm upgrade`. To run a prerelease, also set `aicr.allowPrerelease: true` |
+| `AICRVersionMismatch` | `aicr.version` is outside `>=1.0.0, <2.0.0`, or the AICR image reports a different version than `aicr.version` | Set `aicr.version` and `aicr.image` to the same release in one `helm upgrade`. To run a prerelease, also set `aicr.allowPrerelease: true` |
 | `AICRArtifactUnsupported` | AICR produced output the operator cannot parse: an unknown `apiVersion` or a missing required field | Use a supported AICR release ([support policy](support.md)); report it if it is one |
+
+Some `aicr.version` values set no condition. The chart fails to render with
+them, and an operator given one directly exits at startup.
+[Installation values](api.md#installation-values) lists them.
 
 ## Argo CD not available
 
@@ -250,6 +255,51 @@ migration the operator does not perform: AICR assessed a component `blocked`,
 or a release would change namespace or chart name. No rollout is created. Return to a plan without that change (revert the input, or
 [pin](operations.md#rolling-back-by-pinning) the active plan); a supported
 migration is a separate procedure, outside the operator.
+
+## Application name taken
+
+Before it creates a rollout, the operator checks the name of every release the
+target plan would install, that is, every release of the plan that the runtime
+does not already own. If an Application with one of those names exists
+without the operator's labels and this runtime's UID annotation, the runtime
+stalls with `ForeignObject` and names it. No rollout is created, so nothing
+of the target plan is applied; the active plan's releases stay in place and
+are still repaired. The operator never writes or deletes an Application it
+does not own.
+
+How to clear it depends on what the Application deploys:
+
+- **Something else.** Recreate it under another name, or remove it.
+- **This component**, as a child Application written by
+  `aicr bundle --deployer argocd` does by default, under the release's name.
+  Release it from its parent first: the parent's automated sync recreates a
+  child that is only deleted, and the stall never clears. Then remove it. Do
+  not rename it, which leaves two Applications writing the same resources
+  ([what to leave alone](argocd.md#what-to-leave-alone)).
+
+Deleting an Application that carries a
+`resources-finalizer.argocd.argoproj.io` finalizer, with or without its
+`/foreground` or `/background` suffix, also deletes the resources it manages.
+Removing the finalizer first, or deleting with
+`argocd app delete <name> --cascade=false`, leaves them in the cluster, still
+tracked under the Application's name. Once the stall clears, the release's
+Application has that name, takes them over, and prunes those its release does
+not render. To keep such a resource, first annotate it
+`argocd.argoproj.io/sync-options: Prune=false`, which holds under any
+tracking method, or remove what Argo CD tracks it by: the
+`argocd.argoproj.io/tracking-id` annotation, or under label tracking the
+instance label (`app.kubernetes.io/instance` unless configured otherwise).
+
+The stall clears at the next reconcile, with no retry, and the rollout is
+then created as any other is: after the stabilization window, and not while
+the runtime is paused or the engine suspended. An Application an earlier
+runtime left carries that
+runtime's UID and stalls with
+[`OrphanedObjectsPresent`](#orphaned-objects-and-re-adoption) instead.
+
+An Application that takes a release's name after the rollout was created is
+not caught here. It fails the rollout at that release's step
+([Rollout failed, expired or revoked](#rollout-failed-expired-or-revoked)).
 
 ## Rollout stalled
 
@@ -326,7 +376,7 @@ even when an Application's last operation still shows the failed sync
 | Message | Cause | Next |
 | --- | --- | --- |
 | `release <id>: SyncFailed` or `SyncError` | Argo CD's sync failed. The message continues with Argo CD's own error, folded to one line and cut to 240 characters (`release <id>: SyncFailed: <error>`) | Read the error in the message; `kubectl -n argocd get application <id> -o yaml` (`status.operationState`, `status.conditions`) has the full text. Fix, then retry. For a failed hook, see the note below this table |
-| `[CONFLICT] Application argocd/<name> exists without this runtime's ownership` | An Application with the release's name exists without the operator's labels and this runtime's UID annotation (`ForeignObject`); the operator never writes or deletes it | Remove or rename it, then retry. If an earlier runtime left it, [adopt](#orphaned-objects-and-re-adoption) instead. On an active-plan release it shows as `Ready=False` with `ForeignObject` |
+| `[CONFLICT] Application argocd/<name> exists without this runtime's ownership` | An Application took the release's name after the rollout was created, without the operator's labels and this runtime's UID annotation (`ForeignObject`); the operator never writes or deletes it. One that exists earlier [stalls the runtime](#application-name-taken) before a rollout is created | Remove or rename it, then retry. If an earlier runtime left it, [adopt](#orphaned-objects-and-re-adoption) instead. On an active-plan release it shows as `Ready=False` with `ForeignObject` |
 | `release <id> not ready within 30m0s (<reason>)` | The release did not become ready at its current revision within `actionTimeout`; the reason is the last observation, such as `HealthProgressing`, `HealthDegraded`, or `SpecDrifted` when its Application was edited while the step ran | Inspect the component's workloads in its namespace; fix, then retry. Raise `spec.rollout.actionTimeout` if the component is slow but healthy |
 | `release <id> not removed within …` | Argo CD did not finish deleting the release's resources | See [Argo CD Application](#argo-cd-application) |
 | `the approval expired` | The approval expired before every step ran | Retry, and approve with a longer `--expires` |
@@ -367,7 +417,9 @@ checks the components the bundle deploys: it runs against the recipe the
 bundle records, so a component an override turns off is not required.
 
 A validator image that is not pinned in `aicr.validatorImages` at the tag AICR
-names, or a pinned tag that resolves to another digest, also fails the run.
+names, or a pinned tag that resolves to another digest, also fails the run. So
+does a recorded digest that is neither the pinned digest nor a manifest its
+image index lists.
 
 **Running AICR's other phases yourself.** Rollouts run only the deployment
 phase. To run conformance or performance against the cluster with the AICR CLI,
@@ -452,10 +504,18 @@ Deleting the runtime runs its `operator.aicr.run/cleanup` finalizer.
   `Application` CRD is served; on this path a failure to list Applications is
   reported only in the operator's log. `PlanUnreadable` also blocks it.
 - **`deletionPolicy: Delete`** creates a removal rollout that deletes every
-  release in reverse order. It always needs approval (`AwaitingApproval`). It
-  does not start while the runtime is paused or the engine suspended. If it
-  fails or expires, the runtime is `Stalled` with `RemovalFailed` and keeps the
-  finalizer until a [retry](operations.md#retrying).
+  release, dependents first. The order is the reverse of an install order:
+  the active plan's releases in plan order, then any others, each placed
+  after every release its Application's `depends-on` and `readiness-for`
+  annotations name. It comes from the live Applications, so it holds when the
+  active plan cannot be read. A dependency that is missing from the
+  annotations is not enforced, and releases in a dependency cycle cannot all
+  go before what they follow. The removal runs either way, and its steps are
+  listed on the rollout before approval. It always needs approval
+  (`AwaitingApproval`). It does not start while the runtime is paused or the
+  engine suspended. If it fails or expires, the runtime is `Stalled` with
+  `RemovalFailed` and keeps the finalizer until a
+  [retry](operations.md#retrying).
 
 Removing the finalizer by hand is safe for the stack: nothing has an owner
 reference, so nothing cascades, and Argo CD keeps reconciling. The Applications

@@ -26,15 +26,15 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/oci"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/result"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/oci"
+	"aicr.run/pkg/serializer"
 	"github.com/urfave/cli/v3"
 )
 
@@ -57,6 +57,7 @@ type bundleCmdOptions struct {
 	estimatedNodeCount         int
 	storageClass               string
 	sharedStorageClass         string
+	runtimeMetrics             config.RuntimeMetrics
 	targetRevision             string
 
 	// dynamicValues declares value paths provided at install time.
@@ -271,8 +272,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 	// Resolve recipe path to absolute and validate it exists early.
 	// This prevents confusing "file not found" errors when the working
 	// directory context differs from where the recipe was created.
-	if opts.recipeFilePath != "" &&
-		!strings.HasPrefix(opts.recipeFilePath, "http://") &&
+	if !strings.HasPrefix(opts.recipeFilePath, "http://") &&
 		!strings.HasPrefix(opts.recipeFilePath, "https://") &&
 		!strings.HasPrefix(opts.recipeFilePath, serializer.ConfigMapURIScheme) {
 
@@ -574,6 +574,8 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		}
 		opts.sharedStorageClass = sc
 	}
+
+	opts.runtimeMetrics = resolveRuntimeMetrics(cmd, bundleOpts.RuntimeMetrics)
 
 	// Validate any private Sigstore endpoints up front so a malformed
 	// --fulcio-url / --rekor-url fails before bundling instead of at sign
@@ -1096,6 +1098,16 @@ Write the same artifact as an OCI image layout without pushing, then publish it:
 				Category: catDeployment,
 			},
 			&cli.StringSliceFlag{
+				Name:     flagRuntimeMetricsSeries,
+				Usage:    "Metric name pattern (RE2, matched against the whole name) the runtime Prometheus server keeps, on top of the series AICR's own components declare; can be repeated. For a workload series an HPA scales on.",
+				Category: catDeployment,
+			},
+			&cli.StringSliceFlag{
+				Name:     flagRuntimeMetricsNamespace,
+				Usage:    "Namespace whose ServiceMonitors and PodMonitors the runtime Prometheus server loads, on top of AICR's own; can be repeated. A monitor in the server's own namespace needs no flag.",
+				Category: catDeployment,
+			},
+			&cli.StringSliceFlag{
 				Name: "dynamic",
 				Usage: `Declare value paths as install-time parameters
 	(format: component:path.to.field, e.g.,
@@ -1329,7 +1341,9 @@ Write the same artifact as an OCI image layout without pushing, then publish it:
 				Name: flagArgoCDSyncRetryLimit,
 				Usage: "Set spec.syncPolicy.retry.limit on every child Application: how many times Argo CD " +
 					"retries a failed sync (--deployer argocd or argocd-helm only). Unset leaves retry to " +
-					"Argo CD's auto-sync default; 0 disables retries. " +
+					"Argo CD's auto-sync default, except where a component declares its own default " +
+					"(dynamo-platform when the recipe includes grove); set, it replaces those defaults. " +
+					"0 disables retries. " +
 					"May also be supplied via spec.bundle.deployment.argocd.syncRetry.limit in --config.",
 				// Unset and 0 differ (see Usage), so the rendered "(default: 0)" misleads.
 				HideDefault: true,
@@ -1419,6 +1433,7 @@ Write the same artifact as an OCI image layout without pushing, then publish it:
 			assumeYesFlag(catDeployment),
 			kubeconfigFlag(),
 			dataFlag(),
+			externalOnlyFlag(),
 			// OCI registry connection flags (used when --output is oci://...)
 			&cli.BoolFlag{
 				Name:     flagInsecureTLS,
@@ -1674,6 +1689,7 @@ func runBundleCmdWithDependencies(
 		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
 		config.WithStorageClass(opts.storageClass),
 		config.WithSharedStorageClass(opts.sharedStorageClass),
+		config.WithRuntimeMetrics(opts.runtimeMetrics),
 		config.WithVendorCharts(opts.vendorCharts),
 		config.WithReadinessHooks(opts.readinessHooks),
 		config.WithSerial(opts.serial),

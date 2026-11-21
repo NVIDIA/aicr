@@ -286,20 +286,22 @@ func TestRunReportsCurrentAliasMappings(t *testing.T) {
 	var stdout bytes.Buffer
 	err = run([]string{
 		"-dir", repositoryRoot,
-		"-aliases", "github.com/NVIDIA/aicr/pkg/client/v1",
+		"-aliases", "aicr.run/pkg/client/v1",
 	}, &stdout)
 	if err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
-	const want = "BundleArtifact|github.com/NVIDIA/aicr/pkg/bundler/result|Output\n" +
-		"BundleAttester|github.com/NVIDIA/aicr/pkg/bundler/attestation|Attester\n" +
-		"BundleConfig|github.com/NVIDIA/aicr/pkg/bundler/config|Config\n" +
-		"BundleVerifyReport|github.com/NVIDIA/aicr/pkg/bundler/verifier|VerifyResult\n" +
-		"CNCFRequirementAggregate|github.com/NVIDIA/aicr/pkg/evidence/cncf|Aggregate\n" +
-		"CriteriaRegistry|github.com/NVIDIA/aicr/pkg/recipe|CriteriaRegistry\n" +
-		"EvidenceVerification|github.com/NVIDIA/aicr/pkg/evidence/verifier|VerifyResult\n" +
-		"OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions\n" +
-		"UpgradeReport|github.com/NVIDIA/aicr/pkg/upgrade|Report\n"
+	const want = "ArtifactOptions|aicr.run/pkg/artifact|Options\n" +
+		"BundleArtifact|aicr.run/pkg/bundler/result|Output\n" +
+		"BundleAttester|aicr.run/pkg/bundler/attestation|Attester\n" +
+		"BundleConfig|aicr.run/pkg/bundler/config|Config\n" +
+		"BundleVerifyReport|aicr.run/pkg/bundler/verifier|VerifyResult\n" +
+		"CNCFRequirementAggregate|aicr.run/pkg/evidence/cncf|Aggregate\n" +
+		"CriteriaRegistry|aicr.run/pkg/recipe|CriteriaRegistry\n" +
+		"EvidenceVerification|aicr.run/pkg/evidence/verifier|VerifyResult\n" +
+		"OIDCResolveOptions|aicr.run/pkg/bundler/attestation|ResolveOptions\n" +
+		"RecipeSummary|aicr.run/pkg/recipe|Summary\n" +
+		"UpgradeReport|aicr.run/pkg/upgrade|Report\n"
 	if stdout.String() != want {
 		t.Fatalf("run() output = %q, want %q", stdout.String(), want)
 	}

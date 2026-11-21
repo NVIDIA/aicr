@@ -29,8 +29,8 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/tuf"
 	tlog "github.com/transparency-dev/formats/log"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/trust"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/trust"
 )
 
 // monitorChecks is the behavior observe() needs from a monitor. *monitor

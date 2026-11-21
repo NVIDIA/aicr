@@ -20,14 +20,14 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/redact"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/evidence/redact"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator/ctrf"
+	validatorv1 "aicr.run/pkg/validator/v1"
 )
 
 // fullSnapshot builds a snapshot exercising every collector measurement type
@@ -446,6 +446,19 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 		{
 			name: "observation-only marker with free text is dropped",
 			in:   map[string]string{"observationOnly": "yes, on aks-prod-cluster"},
+			want: nil,
+		},
+		{
+			// #3703: the stamp that lets the aggregation tell an image that
+			// never marked observations from one that chose not to must
+			// reach the signed bundle, and only as a known version.
+			name: "result schema stamp survives",
+			in:   map[string]string{"resultSchema": "1"},
+			want: map[string]string{"resultSchema": "1"},
+		},
+		{
+			name: "result schema stamp of an unknown version is dropped",
+			in:   map[string]string{"resultSchema": "2-dev on aks-prod-cluster"},
 			want: nil,
 		},
 		{

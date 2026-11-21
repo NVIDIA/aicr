@@ -49,9 +49,26 @@ spec:
           image: {{ .Values.operator.image }}
           imagePullPolicy: {{ .Values.operator.imagePullPolicy }}
           args:
+            {{- $inCluster := eq .Values.registry.mode "inCluster" }}
+            {{- /* An unset value, as under helm upgrade --reuse-values from a
+              chart without its key, omits the flag, and the operator keeps its
+              default. It rejects an empty boolean or log level. */}}
+            {{- $optional := dict
+              "allow-prerelease-aicr" .Values.aicr.allowPrerelease
+              "registry-plain-http" (or $inCluster .Values.registry.plainHTTP)
+              "development-bypass-approvals" .Values.development.bypassApprovals
+              "development-skip-discovery" .Values.development.skipDiscovery
+              "validation-enabled" .Values.validation.enabled
+              "validation-transparency-log" .Values.validation.transparencyLog
+              "log-level" .Values.operator.logLevel
+            }}
+            {{- range $flag, $value := $optional }}
+              {{- if not (kindIs "invalid" $value) }}
+            - --{{ $flag }}={{ $value }}
+              {{- end }}
+            {{- end }}
             - --aicr-version={{ .Values.aicr.version }}
             - --aicr-image={{ .Values.aicr.image }}
-            - --allow-prerelease-aicr={{ .Values.aicr.allowPrerelease }}
             - --operator-namespace={{ .Release.Namespace }}
             - --jobs-namespace={{ .Values.namespaces.jobs }}
             - --discovery-namespace={{ .Values.namespaces.discovery }}
@@ -59,23 +76,16 @@ spec:
             - --engine={{ .Values.engine.type }}
             - --engine-namespace={{ .Values.engine.namespace }}
             - --engine-project={{ .Values.engine.project }}
-            {{- $inCluster := eq .Values.registry.mode "inCluster" }}
             - --registry-repository={{ include "aicr-operator.registry" . }}
-            - --registry-plain-http={{ or $inCluster .Values.registry.plainHTTP }}
             - --registry-auth-provider={{ ternary "static" .Values.registry.auth.provider $inCluster }}
             - --registry-credentials-secret={{ include "aicr-operator.credentialsSecret" . }}
             - --engine-repo-creds-secret={{ .Values.registry.auth.repoCredsSecret }}
             - --snapshot-agent-requests={{ .Values.discovery.agentRequests }}
             - --job-node-selector={{ .Values.aicr.jobs.nodeSelector | default dict | toJson }}
             - --job-tolerations={{ .Values.aicr.jobs.tolerations | default list | toJson }}
-            - --development-bypass-approvals={{ .Values.development.bypassApprovals }}
-            - --development-skip-discovery={{ .Values.development.skipDiscovery }}
             - --component-namespaces={{ include "aicr-operator.componentNames" . }}
-            - --validation-enabled={{ .Values.validation.enabled }}
             - --validator-images={{ join "," .Values.aicr.validatorImages }}
             - --validation-signing-key={{ .Values.validation.signingKey }}
-            - --validation-transparency-log={{ .Values.validation.transparencyLog }}
-            - --log-level={{ .Values.operator.logLevel }}
           env:
             # Evidence binds the digest the operator runs as, read from its
             # own pod.

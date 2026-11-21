@@ -1,3 +1,17 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Minimal NicClusterPolicy for NVKE VR200: nicConfigurationOperator ONLY.
 #
 # Its one job is to stand up the nic-configuration-daemon, without which
@@ -50,37 +64,42 @@ spec:
   # platforms never hit it because flint works there.
   nicConfigurationOperator:
     logLevel: info
-    # Tagged, not digest-pinned, which is the one place this file diverges from
-    # its neighbours. A crd-digest annotation carries `tag=network-operator-vX`
-    # and TestNetworkOperatorTagAnnotationsFollowChartPin requires that X equal
-    # registry.yaml's network-operator defaultVersion. This leaf deliberately
-    # pins the chart one patch ahead of that default, so a digest annotation
-    # here could only name a tag the guard rejects. The images stay on tags
-    # with an entry in imageDigestExemptions instead, which keeps the
-    # divergence inside this leaf rather than moving the whole fleet.
     operator:
       image: nic-configuration-operator
       repository: nvcr.io/nvidia/mellanox
-      version: network-operator-v26.7.1
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nic-configuration-operator tag=network-operator-v26.7.1
+      version: sha256:3f2d82afbe9e850ff0ace3d1ebff43cef70f83256a6c9632640c7c2f7e7840a8
     configurationDaemon:
       image: nic-configuration-operator-daemon
       repository: nvcr.io/nvidia/mellanox
-      version: network-operator-v26.7.1
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon tag=network-operator-v26.7.1
+      version: sha256:908d278e140b1276b978acf26c3f8d4a1bbc22c7085cc86bda94644987d3d74b
       imagePullSecrets: []
+      # Unset by default, so the operator applies its own default
+      # (manifests/state-nic-configuration-operator/070-config-daemon.yaml).
+      # Each daemon caches every NicDevice in the cluster; 2Gi is OOM-killed
+      # at 2000 GPU nodes (#3698). The operator fills in no field of a partial
+      # override, so one must set both memory values.
+      {{- with (index .Values "network-operator").nicConfigurationOperator }}
+      {{- with .configurationDaemon }}
+      {{- with .resources }}
+      {{- if not (and .requests .requests.memory .limits .limits.memory) }}
+      {{- fail "nicConfigurationOperator.configurationDaemon.resources must set both requests.memory and limits.memory: the Network Operator applies no per-field default once resources are set" }}
+      {{- end }}
       containerResources:
         - name: nic-configuration-daemon
-          limits:
-            memory: 2Gi
-          requests:
-            cpu: 100m
-            memory: 256Mi
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
   # Addressing for the RoCE rails' IPPools. Added with
   # manifests/nvke-vr200.yaml in sriov-ib-networks; without it the SriovNetwork
   # ipam block names a pool nothing serves.
   nvIpam:
     image: nvidia-k8s-ipam
     repository: nvcr.io/nvidia/mellanox
-    version: network-operator-v26.7.1
+    # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nvidia-k8s-ipam tag=network-operator-v26.7.1
+    version: sha256:f4012b9c5ee18603def8e842c58861b2524c8da5a946ec9c3e5957de7395a22c
     enableWebhook: false
   # Required for the rails: a SriovNetwork renders a NetworkAttachmentDefinition
   # and multus is what attaches it to a pod.
@@ -96,11 +115,13 @@ spec:
     cniPlugins:
       image: plugins
       repository: nvcr.io/nvidia/mellanox
-      version: network-operator-v26.7.1
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/plugins tag=network-operator-v26.7.1
+      version: sha256:9758670f426e238805aba61a1c83a96ae10506dd973845b60477230672c06163
     multus:
       image: multus-cni
       repository: nvcr.io/nvidia/mellanox
-      version: network-operator-v26.7.1
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/multus-cni tag=network-operator-v26.7.1
+      version: sha256:19279347b71a1077eaed8479f8fff491fd9a578bc0ff8efcf13ea08270574fd0
   tolerations:
     - key: dedicated
       operator: Exists

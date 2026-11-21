@@ -26,10 +26,10 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/bundle"
 	"github.com/sigstore/sigstore-go/pkg/sign"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/evidence/attestation"
 )
 
 // localKeyIdentity signs with an in-memory key and no certificate, the same

@@ -16,6 +16,8 @@ package bundler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	stderrors "errors"
 	"fmt"
 	"io"
@@ -23,6 +25,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -30,32 +33,33 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/fleet"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/flux"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helmfile"
-	tfdeployer "github.com/NVIDIA/aicr/pkg/bundler/deployer/terraform"
-	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	"github.com/NVIDIA/aicr/pkg/bundler/types"
-	"github.com/NVIDIA/aicr/pkg/bundler/validations"
-	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/deprecation"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/netutil"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/bundleinfo"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/bundler/deployer/argocd"
+	"aicr.run/pkg/bundler/deployer/argocdhelm"
+	"aicr.run/pkg/bundler/deployer/fleet"
+	"aicr.run/pkg/bundler/deployer/flux"
+	"aicr.run/pkg/bundler/deployer/helm"
+	"aicr.run/pkg/bundler/deployer/helmfile"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	tfdeployer "aicr.run/pkg/bundler/deployer/terraform"
+	"aicr.run/pkg/bundler/drainscope"
+	"aicr.run/pkg/bundler/result"
+	"aicr.run/pkg/bundler/types"
+	"aicr.run/pkg/bundler/validations"
+	"aicr.run/pkg/bundler/verifier"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/deprecation"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/netutil"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/upgrade"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -107,7 +111,9 @@ const errCtxKeyComponent = "component"
 //	chmod +x deploy.sh
 //	./deploy.sh
 //
-// Thread-safety: DefaultBundler is safe for concurrent use.
+// DefaultBundler is safe for concurrent use by Make calls whose output
+// directories do not overlap and that do not share an Attester. Neither
+// directory may be the other or lie inside it.
 type DefaultBundler struct {
 	// Config provides bundler-specific configuration including value overrides.
 	Config *config.Config
@@ -127,6 +133,15 @@ type DefaultBundler struct {
 	// directly instead of re-finding/re-verifying/re-reading. Empty (the CLI
 	// default) preserves the discover-and-verify-per-run path exactly.
 	verifiedBinaryAttestation []byte
+
+	// chartPuller replaces the default chart puller of a split set; tests
+	// set it to vendor charts without a registry.
+	chartPuller localformat.ChartPuller
+}
+
+// bundleRun holds the state of one Make call.
+type bundleRun struct {
+	*DefaultBundler
 
 	// warnings stores warning messages to be added to deployment notes.
 	warnings []string
@@ -258,9 +273,7 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 //nolint:funlen // linear gate sequence; every check must precede the first filesystem write.
 func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeResult, dir string) (*result.Output, error) {
 	start := time.Now()
-
-	// Reset warnings so they dont accumulate between multiple bundle generations
-	b.warnings = nil
+	r := &bundleRun{DefaultBundler: b}
 
 	// Validate input
 	if recipeResult == nil {
@@ -275,18 +288,15 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// New initializes Config for every supported construction path. Fail
 	// closed when a caller bypasses it with a zero-value or struct-literal
 	// bundler instead of panicking on the first configuration lookup.
-	if b.Config == nil {
+	if r.Config == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"bundler config is required; construct the bundler with New")
 	}
-	if err := b.Config.Validate(); err != nil {
+	if err := r.Config.Validate(); err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
 			"invalid bundler configuration")
 	}
-	// Before any output exists: os.CopyFS will not overwrite the data files a
-	// rejected attempt leaves behind, so a corrected rerun into the same
-	// directory would fail.
-	if err := b.validateDeployerConfig(); err != nil {
+	if err := r.validateDeployerConfig(); err != nil {
 		return nil, err
 	}
 
@@ -306,22 +316,22 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	recipeResult = &validated
 	profileBaseline := recipeResult
 
-	if err := b.enforceConfigurationOwnership(recipeResult); err != nil {
+	if err := r.enforceConfigurationOwnership(recipeResult); err != nil {
 		return nil, err
 	}
 
 	// The PromQL scrape scope spans the platform, not the bundlers subset.
-	recipeResult, platformRefs, err := b.filterAndValidateRecipe(ctx, recipeResult)
+	recipeResult, platformRefs, err := r.filterAndValidateRecipe(ctx, recipeResult)
 	if err != nil {
 		return nil, err
 	}
-	if ownershipErr := b.enforcePromQLServerOwnership(recipeResult, platformRefs); ownershipErr != nil {
+	if ownershipErr := r.enforcePromQLServerOwnership(recipeResult, platformRefs); ownershipErr != nil {
 		return nil, ownershipErr
 	}
 	// Before values are extracted, so an operator on the wrong deployer
 	// hears that first rather than a required-value hint to declare the
 	// secret --dynamic, which that deployer would then refuse.
-	if secretErr := b.rejectInstallTimeSecretsOutsideHelm(recipeResult.ComponentRefs, recipeResult.DataProvider()); secretErr != nil {
+	if secretErr := r.rejectInstallTimeSecretsOutsideHelm(recipeResult.ComponentRefs, recipeResult.DataProvider()); secretErr != nil {
 		return nil, secretErr
 	}
 
@@ -329,13 +339,13 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// reject --dynamic declarations, warn on static overrides. Runs after
 	// alias resolution against the recipe-bound registry, before values are
 	// extracted, so REST/SDK callers get the same enforcement as the CLI.
-	if policyErr := b.enforceAllocationPolicyOverrides(recipeResult.DataProvider()); policyErr != nil {
+	if policyErr := r.enforceAllocationPolicyOverrides(recipeResult.DataProvider()); policyErr != nil {
 		return nil, policyErr
 	}
 
 	// The declared union lets the NVSentinel drain scope cover components this
 	// bundle filters out.
-	componentValues, err := b.extractComponentValues(ctx,
+	componentValues, err := r.extractComponentValues(ctx,
 		recipeResult.WithDeclaredComponents(profileBaseline.ComponentRefs))
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
@@ -347,11 +357,11 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if validationErr := ValidateAccountingValues(recipeResult, componentValues); validationErr != nil {
 		return nil, validationErr
 	}
-	dynamicValues, err := b.buildDynamicValuesMap(recipeResult.DataProvider())
+	dynamicValues, err := r.buildDynamicValuesMap(recipeResult.DataProvider())
 	if err != nil {
 		return nil, err
 	}
-	if dynamicErr := rejectDRAEvictionDynamicPaths(recipeResult, dynamicValues, b.Config.DRAEvictionNodeLabel()); dynamicErr != nil {
+	if dynamicErr := rejectDRAEvictionDynamicPaths(recipeResult, dynamicValues, r.Config.DRAEvictionNodeLabel()); dynamicErr != nil {
 		return nil, dynamicErr
 	}
 
@@ -359,29 +369,32 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// recipe state are applied AFTER extractComponentValues so global
 	// scheduling and user overrides cannot make either cross-chart contract
 	// drift. Every deployer sees the same final map.
-	b.injectDRAChartVersionAnnotation(componentValues, recipeResult)
-	if evictionErr := b.injectDRAEvictionLabel(componentValues, recipeResult); evictionErr != nil {
+	r.injectDRAChartVersionAnnotation(componentValues, recipeResult)
+	if evictionErr := r.injectDRAEvictionLabel(componentValues, recipeResult); evictionErr != nil {
 		return nil, evictionErr
 	}
-	if scopeErr := b.injectPromQLScrapeScope(recipeResult, platformRefs, componentValues); scopeErr != nil {
+	if scopeErr := r.injectPromQLScrapeScope(recipeResult, platformRefs, componentValues); scopeErr != nil {
 		return nil, scopeErr
 	}
-	if warningErr := b.warnPeermemReadinessDisabled(ctx, recipeResult, componentValues); warningErr != nil {
+	if warningErr := r.warnPeermemReadinessDisabled(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
 	}
-	if nicErr := b.checkNFDNICLabelMismatch(componentValues, dynamicValues); nicErr != nil {
+	if nicErr := r.checkNFDNICLabelMismatch(componentValues, dynamicValues); nicErr != nil {
 		return nil, nicErr
 	}
-	b.warnNRIManagementAllowlist(recipeResult, componentValues)
+	r.warnNRIManagementAllowlist(recipeResult, componentValues)
 
-	if warningErr := b.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
+	if warningErr := r.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr
 	}
 
-	if exposureErr := b.resolveAgentgatewayExposure(componentValues); exposureErr != nil {
+	if exposureErr := r.resolveAgentgatewayExposure(componentValues); exposureErr != nil {
 		return nil, exposureErr
 	}
 
+	if artifactErr := profileBaseline.ValidateArtifactLock(ctx, recipeResult.ComponentRefs, componentValues, dynamicValues); artifactErr != nil {
+		return nil, artifactErr
+	}
 	if lockErr := profileBaseline.ValidateProfileLock(
 		ctx, recipeResult.ComponentRefs, componentValues, dynamicValues,
 	); lockErr != nil {
@@ -402,13 +415,13 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// bundlers=nvsentinel) must not skip the NVSentinel gates just
 	// because the gpu-operator ref they key on was filtered out of the
 	// OUTPUT — the declaration still describes the platform.
-	if validationErr := b.runComponentValidations(ctx,
+	if validationErr := r.runComponentValidations(ctx,
 		recipeResult.WithResolvedValues(componentValues).
 			WithDeclaredComponents(profileBaseline.ComponentRefs)); validationErr != nil {
 		return nil, componentValidationError(validationErr)
 	}
 
-	upgradeNotes, upgradeNotice, err := b.selectUpgradeNotes(ctx, recipeResult)
+	upgradeNotes, upgradeNotice, err := r.selectUpgradeNotes(ctx, recipeResult)
 	if err != nil {
 		return nil, err
 	}
@@ -416,8 +429,8 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// A class-partitioned set (ADR-018) branches here: every gate above ran
 	// once on the complete component set, and the partition is rendered
 	// into private staging and published atomically.
-	if b.Config.Split() {
-		return b.makeSplit(ctx, profileBaseline.ComponentRefs, recipeResult, componentValues, dir, upgradeNotes, start)
+	if r.Config.Split() {
+		return r.makeSplit(ctx, profileBaseline.ComponentRefs, recipeResult, componentValues, dir, upgradeNotes, start)
 	}
 
 	// No filesystem output is created until the final candidate has passed the
@@ -425,20 +438,28 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if dir == "" {
 		dir = "."
 	}
-	if dir != "." {
-		if mkdirErr := os.MkdirAll(dir, 0755); mkdirErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to create output directory", mkdirErr)
+	// The result reports dir as written, as its OutputDir and in deployment steps.
+	dir = filepath.Clean(dir)
+	// After component validations, so a bundle that ships gpu-operator hears
+	// CheckDriverOwnershipCoherence's dynamic-path verdict first. Checked
+	// against dir, because Generate sees only the fresh stage.
+	if r.Config.Deployer() == config.DeployerArgoCDHelm {
+		if ownershipErr := argocdhelm.ValidateDriverOwnership(
+			ctx, recipeResult, dynamicValues, r.Config.VendorCharts(), dir,
+		); ownershipErr != nil {
+			return nil, ownershipErr
 		}
 	}
-	if rootErr := checksum.ValidateOutputRoot(ctx, dir); rootErr != nil {
-		return nil, rootErr
+	stage, err := stageBundle(ctx, dir)
+	if err != nil {
+		return nil, err
 	}
+	defer stage.discard()
 
 	// Copy external data files before deployer construction so the file list
 	// is available for both the deployer (checksum tracking) and post-generation
 	// attestation. This is a no-op when --data is not set.
-	dataFiles, err := b.copyDataFiles(dir, recipeResult.DataProvider())
+	dataFiles, err := r.copyDataFiles(ctx, stage.path, recipeResult.DataProvider())
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 			return nil, err
@@ -448,11 +469,462 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	}
 
 	// Build the deployer and run it
-	d, err := b.buildDeployer(ctx, recipeResult, componentValues, dataFiles, upgradeNotice)
+	d, err := r.buildDeployer(ctx, recipeResult, componentValues, dataFiles, upgradeNotice)
 	if err != nil {
 		return nil, err
 	}
-	return b.runDeployer(ctx, d, recipeResult, dir, dataFiles, upgradeNotes, start)
+	out, inventory, err := r.runDeployer(ctx, d, recipeResult, stage, dataFiles, upgradeNotes, start)
+	if err != nil {
+		return nil, err
+	}
+	if pubErr := stage.publish(ctx, inventory); pubErr != nil {
+		return nil, pubErr
+	}
+	return out, nil
+}
+
+// bundleStagePrefix names the private directory a single bundle is built in.
+const bundleStagePrefix = ".aicr-stage-"
+
+// staleOutputFiles are top-level files of an earlier bundle that publishing
+// removes even when the new bundle does not write them.
+var staleOutputFiles = []string{localformat.ProvenanceFileName, "undeploy.sh"}
+
+// staleOutputDirs are top-level directories of an earlier bundle that
+// publishing removes when they are empty.
+var staleOutputDirs = []string{"static", "sources"}
+
+// bundleStage is the private directory a single bundle is built in. When dir
+// is absent the stage sits beside it and one rename publishes it. When dir
+// exists the stage sits inside it, so publishing renames within one
+// filesystem and dir itself, which may be the working directory, stays put.
+type bundleStage struct {
+	dir     string
+	path    string
+	inPlace bool
+}
+
+// stageBundle creates the private directory a bundle for dir is built in.
+func stageBundle(ctx context.Context, dir string) (*bundleStage, error) {
+	s := &bundleStage{dir: dir}
+	parent := filepath.Join(dir, "..")
+	info, err := os.Lstat(dir)
+	switch {
+	case stderrors.Is(err, os.ErrNotExist):
+		if mkErr := os.MkdirAll(parent, 0755); mkErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create output parent directory", mkErr)
+		}
+	case err != nil:
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("failed to inspect output directory %s", dir), err)
+	case info.Mode()&os.ModeSymlink != 0 || !info.IsDir() && !info.Mode().IsRegular():
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("output path %s is a symlink or special object, not a directory", dir))
+	case !info.IsDir():
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("output path %s is not a directory", dir))
+	default:
+		if rootErr := checksum.ValidateOutputRoot(ctx, dir); rootErr != nil {
+			return nil, rootErr
+		}
+		s.inPlace = true
+		parent = dir
+	}
+
+	// os.Mkdir applies the umask, which os.MkdirTemp's fixed 0700 does not, and
+	// the stage becomes the bundle root when dir is absent.
+	stage := filepath.Join(parent, bundleStagePrefix+rand.Text())
+	if err := os.Mkdir(stage, 0755); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create bundle staging directory", err)
+	}
+	s.path = stage
+	return s, nil
+}
+
+// publish puts the staged bundle at dir. A non-nil inventory, the stage's
+// verified checksum inventory, requires an existing dir to hold only an
+// earlier bundle, so the published tree is exactly what checksums.txt lists.
+func (s *bundleStage) publish(ctx context.Context, inventory *checksum.Inventory) error {
+	if s.inPlace {
+		return s.publishInPlace(ctx, inventory)
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "bundle publish canceled")
+	}
+	if err := renameNoReplace(s.path, s.dir); err != nil {
+		code := errors.ErrCodeInternal
+		if destinationTaken(err) {
+			code = errors.ErrCodeConflict
+		}
+		return errors.Wrap(code, fmt.Sprintf("failed to publish bundle to %s", s.dir), err)
+	}
+	s.path = ""
+	return nil
+}
+
+// publishInPlace replaces the earlier bundle in dir with the staged one. It
+// removes each entry of dir that the stage also holds or that is stale
+// output, then moves the stage's entries in. Any other entry survives, unless
+// inventory is set. Then an entry made up only of earlierBundle files is
+// removed too, and any other entry fails publishing before dir changes.
+// Without inventory, it also removes the checksums.txt and attestation files
+// of an earlier bundle that earlierBundle recognizes, which would vouch for
+// content the new bundle replaced.
+func (s *bundleStage) publishInPlace(ctx context.Context, inventory *checksum.Inventory) error {
+	staged, err := os.ReadDir(s.path)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to read bundle staging directory", err)
+	}
+	names := make([]string, len(staged))
+	for i, e := range staged {
+		names[i] = e.Name()
+	}
+	var earlier, signing bundlePaths
+	if inventory != nil {
+		var checkErr error
+		if earlier, checkErr = s.requireReplaceable(ctx, inventory.RelativeFiles()); checkErr != nil {
+			return checkErr
+		}
+	} else {
+		// Read before the removals below, which can take bundle-info.yaml.
+		var signErr error
+		if signing, signErr = earlierBundle(ctx, s.dir); signErr != nil {
+			return signErr
+		}
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read output directory %s", s.dir), err)
+	}
+
+	stageName := filepath.Base(s.path)
+	var replaced []string
+	for _, e := range entries {
+		name := e.Name()
+		if name == stageName {
+			continue
+		}
+		stale, staleErr := isStaleOutput(s.dir, e)
+		if staleErr != nil {
+			return staleErr
+		}
+		if stale || slices.Contains(names, name) || earlier.has(name, e.IsDir()) {
+			replaced = append(replaced, name)
+		}
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "bundle publish canceled")
+	}
+	for _, name := range replaced {
+		if rmErr := os.RemoveAll(filepath.Join(s.dir, name)); rmErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
+				"failed to remove %s from %s, leaving the bundle in %s", name, s.dir, s.keep()), rmErr)
+		}
+	}
+	if inventory == nil {
+		if rmErr := removeSigningFiles(s.dir, signing); rmErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
+				"failed to remove the earlier bundle's checksums and attestation from %s, leaving the bundle in %s",
+				s.dir, s.keep()), rmErr)
+		}
+	}
+	for _, name := range names {
+		if mvErr := renameNoReplace(filepath.Join(s.path, name), filepath.Join(s.dir, name)); mvErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
+				"failed to move %s into %s, leaving the rest of the bundle in %s", name, s.dir, s.keep()), mvErr)
+		}
+	}
+	return nil
+}
+
+// requireReplaceable returns ErrCodeInvalidRequest unless publishing may
+// replace every entry of the existing dir, because it is stale output, part
+// of the earlier bundle in dir, or one of files, the slash-separated files the
+// new bundle writes. It returns the earlier bundle's files.
+func (s *bundleStage) requireReplaceable(ctx context.Context, files []string) (bundlePaths, error) {
+	earlier, err := earlierBundle(ctx, s.dir)
+	if err != nil {
+		return bundlePaths{}, err
+	}
+	owned := newBundlePaths()
+	for _, rel := range files {
+		owned.add(rel)
+	}
+	for rel := range earlier.files {
+		owned.add(rel)
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return bundlePaths{}, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read output directory %s", s.dir), err)
+	}
+	skipped := []string{filepath.Base(s.path)}
+	for _, e := range entries {
+		stale, staleErr := isStaleOutput(s.dir, e)
+		if staleErr != nil {
+			return bundlePaths{}, staleErr
+		}
+		if stale {
+			skipped = append(skipped, e.Name())
+		}
+	}
+	if err := requireBundleOutput(ctx, s.dir, owned, skipped); err != nil {
+		return bundlePaths{}, err
+	}
+	return earlier, nil
+}
+
+// removeSigningFiles removes the regular files among dir's checksums.txt and
+// attestation files that earlier, from earlierBundle, holds. When earlier
+// holds attestation files, it then removes the attestation directory if that
+// leaves it empty. Other files in the attestation directory are kept.
+func removeSigningFiles(dir string, earlier bundlePaths) error {
+	for _, rel := range append([]string{checksum.ChecksumFileName}, attestation.BundleMetadataPaths()...) {
+		if !earlier.files[rel] {
+			continue
+		}
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		info, err := os.Lstat(p)
+		if stderrors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to inspect %s", p), err)
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		if err := os.Remove(p); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to remove %s", p), err)
+		}
+	}
+	if !earlier.dirs[attestation.AttestationDir] {
+		return nil
+	}
+	attestDir := filepath.Join(dir, attestation.AttestationDir)
+	info, err := os.Lstat(attestDir)
+	switch {
+	case stderrors.Is(err, os.ErrNotExist):
+		return nil
+	case err != nil:
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to inspect %s", attestDir), err)
+	case !info.IsDir():
+		return nil
+	}
+	sub, err := os.ReadDir(attestDir)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read %s", attestDir), err)
+	}
+	if len(sub) > 0 {
+		return nil
+	}
+	if err := os.Remove(attestDir); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to remove %s", attestDir), err)
+	}
+	return nil
+}
+
+// keep stops discard from removing the stage and returns its path.
+func (s *bundleStage) keep() string {
+	kept := s.path
+	s.path = ""
+	return kept
+}
+
+// isStaleOutput reports whether e, a top-level entry of dir, is output an
+// earlier bundle left that publishing removes even when the new bundle has
+// no entry of that name.
+func isStaleOutput(dir string, e fs.DirEntry) (bool, error) {
+	name := e.Name()
+	switch {
+	case e.Type().IsRegular():
+		return slices.Contains(staleOutputFiles, name), nil
+	case !e.IsDir():
+		return false, nil
+	case localformat.IsFolderName(name):
+		return true, nil
+	case slices.Contains(staleOutputDirs, name):
+		sub, err := os.ReadDir(filepath.Join(dir, name))
+		if err != nil {
+			return false, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read %s", filepath.Join(dir, name)), err)
+		}
+		return len(sub) == 0, nil
+	default:
+		return false, nil
+	}
+}
+
+// bundlePaths is a set of slash-separated bundle files and the directories
+// above them.
+type bundlePaths struct {
+	files map[string]bool
+	dirs  map[string]bool
+}
+
+func newBundlePaths() bundlePaths {
+	return bundlePaths{files: make(map[string]bool), dirs: make(map[string]bool)}
+}
+
+func (p bundlePaths) add(rel string) {
+	p.files[rel] = true
+	for d := path.Dir(rel); d != "."; d = path.Dir(d) {
+		p.dirs[d] = true
+	}
+}
+
+func (p bundlePaths) has(rel string, isDir bool) bool {
+	if isDir {
+		return p.dirs[rel]
+	}
+	return p.files[rel]
+}
+
+// earlierBundle returns the files in dir that the bundle described by its
+// checksums.txt wrote and that still match their digests, along with
+// checksums.txt and that bundle's attestation files. It is empty unless dir
+// holds a regular checksums.txt that parses and lists a matching
+// bundle-info.yaml, because sha256sum writes a manifest in the same format.
+func earlierBundle(ctx context.Context, dir string) (bundlePaths, error) {
+	p := newBundlePaths()
+	manifestPath := filepath.Join(dir, checksum.ChecksumFileName)
+	info, err := os.Lstat(manifestPath)
+	if stderrors.Is(err, os.ErrNotExist) {
+		return p, nil
+	}
+	if err != nil {
+		return p, errors.Wrap(errors.ErrCodeInternal, "failed to inspect the earlier bundle's checksums", err)
+	}
+	if !info.Mode().IsRegular() {
+		return p, nil
+	}
+	f, err := os.Open(manifestPath)
+	if err != nil {
+		return p, errors.Wrap(errors.ErrCodeInternal, "failed to open the earlier bundle's checksums", err)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxChecksumFileBytes+1))
+	_ = f.Close()
+	if err != nil {
+		return p, errors.Wrap(errors.ErrCodeInternal, "failed to read the earlier bundle's checksums", err)
+	}
+	if int64(len(data)) > defaults.MaxChecksumFileBytes {
+		return p, nil
+	}
+	opts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
+	manifest, err := checksum.ParseManifest(ctx, data, opts)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return p, errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "bundle publish canceled")
+	}
+	if err != nil {
+		return p, nil
+	}
+	for _, entry := range manifest.Entries() {
+		file := filepath.Join(dir, filepath.FromSlash(entry.Path))
+		if info, statErr := os.Lstat(file); statErr != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		digest, digestErr := checksum.SHA256RawContext(ctx, file)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return p, errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "bundle publish canceled")
+		}
+		if digestErr == nil && hex.EncodeToString(digest) == entry.Digest {
+			p.add(entry.Path)
+		}
+	}
+	if !p.files[bundleinfo.FileName] {
+		return newBundlePaths(), nil
+	}
+	p.add(checksum.ChecksumFileName)
+	for _, rel := range opts.AllowedMetadataPaths {
+		if info, statErr := os.Lstat(filepath.Join(dir, filepath.FromSlash(rel))); statErr == nil && info.Mode().IsRegular() {
+			p.add(rel)
+		}
+	}
+	return p, nil
+}
+
+// requireBundleOutput returns ErrCodeInvalidRequest unless every entry of
+// dir, other than the skipped top-level names, is a file or directory of
+// owned.
+func requireBundleOutput(ctx context.Context, dir string, owned bundlePaths, skipped []string) error {
+	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to inspect output directory entry", walkErr)
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "bundle publish canceled")
+		}
+		if p == dir {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to resolve output directory entry path", err)
+		}
+		rel = filepath.ToSlash(rel)
+		if slices.Contains(skipped, rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if owned.has(rel, d.IsDir()) {
+			return nil
+		}
+		return unexpectedOutput(dir, rel, d.IsDir())
+	})
+}
+
+// unexpectedOutput returns the ErrCodeInvalidRequest error for rel, an entry
+// of dir that is not part of the bundle.
+func unexpectedOutput(dir, rel string, isDir bool) error {
+	kind := "file"
+	if isDir {
+		kind = "directory"
+	}
+	return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+		"output directory %s holds an unexpected %s that is not part of the bundle: %q, "+
+			"remove it or bundle into another directory", dir, kind, rel))
+}
+
+// discard removes the stage, unless publishing renamed it to dir.
+func (s *bundleStage) discard() {
+	if s.path == "" {
+		return
+	}
+	if err := os.RemoveAll(s.path); err != nil {
+		slog.Warn("failed to remove bundle staging directory", "path", s.path, "error", err)
+	}
+}
+
+// publishedPath maps a path under stage to the same path under dir, keeping
+// it absolute when it was absolute. Paths outside stage are returned as is.
+func publishedPath(stage, dir, p string) string {
+	base, target := stage, dir
+	if filepath.IsAbs(p) {
+		absStage, err := filepath.Abs(stage)
+		if err != nil {
+			return p
+		}
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			return p
+		}
+		base, target = absStage, absDir
+	}
+	rel, err := filepath.Rel(base, p)
+	if err != nil || !filepath.IsLocal(rel) && rel != "." {
+		return p
+	}
+	return filepath.Join(target, rel)
+}
+
+// publishedText rewrites stage to dir in deployer-reported steps and notes.
+func publishedText(stage, dir string, lines []string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = strings.ReplaceAll(l, stage, dir)
+	}
+	return out
 }
 
 // ValidateAccountingValues verifies that resolved component values preserve
@@ -605,31 +1077,31 @@ func accountingValuesEqual(actual, expected any) bool {
 
 // enforceConfigurationOwnership checks typed ownership before filtering, so
 // removing a component cannot hide a protected path.
-func (b *DefaultBundler) enforceConfigurationOwnership(result *recipe.RecipeResult) error {
-	if err := b.enforceAccountingOwnership(result); err != nil {
+func (r *bundleRun) enforceConfigurationOwnership(result *recipe.RecipeResult) error {
+	if err := r.enforceAccountingOwnership(result); err != nil {
 		return err
 	}
-	return b.enforceGKETCPXOOwnership(result)
+	return r.enforceGKETCPXOOwnership(result)
 }
 
 // enforceAccountingOwnership prevents bundle-time inputs from becoming a
 // second representation of the typed ownership mode recorded in the recipe.
 // It runs before component filtering so a required component cannot disappear
 // before the check observes it.
-func (b *DefaultBundler) enforceAccountingOwnership(result *recipe.RecipeResult) error {
+func (r *bundleRun) enforceAccountingOwnership(result *recipe.RecipeResult) error {
 	mode, present := result.AccountingMode()
-	if b.Config == nil {
+	if r.Config == nil {
 		return nil
 	}
 	if !present {
-		return b.warnLegacyAccountingOverride(result.DataProvider())
+		return r.warnLegacyAccountingOverride(result.DataProvider())
 	}
 
-	if err := b.enforceOwnedPaths(result, recipe.AccountingOwnership(mode)); err != nil {
+	if err := r.enforceOwnedPaths(result, recipe.AccountingOwnership(mode)); err != nil {
 		return err
 	}
 
-	if requested := b.Config.Bundlers(); len(requested) > 0 {
+	if requested := r.Config.Bundlers(); len(requested) > 0 {
 		if mode == recipe.AccountingModeDisabled {
 			return nil
 		}
@@ -754,13 +1226,13 @@ func (b *DefaultBundler) enforceGKETCPXOOwnership(result *recipe.RecipeResult) e
 	return b.enforceOwnedPaths(result, recipe.GKETCPXOOwnership())
 }
 
-func (b *DefaultBundler) warnLegacyAccountingOverride(provider recipe.DataProvider) error {
+func (r *bundleRun) warnLegacyAccountingOverride(provider recipe.DataProvider) error {
 	const accountingEnabledPath = "accounting.enabled"
-	_, scalarPresent := b.getValueOverridesForComponent(
+	_, scalarPresent := r.getValueOverridesForComponent(
 		"slinky-slurm", provider)[accountingEnabledPath]
-	_, typedPresent := b.getTypedValueOverridesForComponent(
+	_, typedPresent := r.getTypedValueOverridesForComponent(
 		"slinky-slurm", provider)[accountingEnabledPath]
-	dynamicValues, err := b.buildDynamicValuesMap(provider)
+	dynamicValues, err := r.buildDynamicValuesMap(provider)
 	if err != nil {
 		return err
 	}
@@ -770,7 +1242,7 @@ func (b *DefaultBundler) warnLegacyAccountingOverride(provider recipe.DataProvid
 			"selects only customer-managed accounting and is not recorded in recipe evidence; " +
 			"regenerate the Slurm recipe with --slurm-accounting-mode customer-managed"
 		slog.Warn(warning)
-		b.appendWarning(warning)
+		r.appendWarning(warning)
 	}
 	return nil
 }
@@ -784,7 +1256,7 @@ func (b *DefaultBundler) warnLegacyAccountingOverride(provider recipe.DataProvid
 // record's coverage is the user's deliberate choice. A record that cannot be
 // read drops all guidance with a warning; one that loads but is ill-formed
 // renders what it can, since BundleNotes leaves unparseable ranges inert.
-func (b *DefaultBundler) selectUpgradeNotes(ctx context.Context, rr *recipe.RecipeResult) ([]upgrade.BundleNote, string, error) {
+func (r *bundleRun) selectUpgradeNotes(ctx context.Context, rr *recipe.RecipeResult) ([]upgrade.BundleNote, string, error) {
 	set, _, err := recipe.LoadUpgradeRecords(ctx, rr.DataProvider())
 	if err != nil {
 		// Cancellation is the caller stopping the bundle, not a record fault.
@@ -794,7 +1266,7 @@ func (b *DefaultBundler) selectUpgradeNotes(ctx context.Context, rr *recipe.Reci
 		warning := fmt.Sprintf("upgrade guidance was not added to this bundle; run aicr upgrade-check "+
 			"to review upgrade steps. A transition record could not be read: %v", err)
 		slog.Warn(warning)
-		b.appendWarning(warning)
+		r.appendWarning(warning)
 		return nil, "", nil
 	}
 	refs := deployer.SortComponentRefsByDeploymentOrder(rr.ComponentRefs, rr.DeploymentOrder)
@@ -811,7 +1283,7 @@ func (b *DefaultBundler) selectUpgradeNotes(ctx context.Context, rr *recipe.Reci
 		return nil, "", nil
 	}
 	var sb strings.Builder
-	if err := upgrade.WriteNotice(&sb, notes, string(b.Config.Deployer())); err != nil {
+	if err := upgrade.WriteNotice(&sb, notes, string(r.Config.Deployer())); err != nil {
 		return nil, "", err
 	}
 	return notes, sb.String(), nil
@@ -1159,69 +1631,88 @@ func (b *DefaultBundler) resolveArgoDeployerOptions() (*config.ArgoDeployerOptio
 // notice despite the process-wide once-per-subject deduplication.
 var warnDeprecated = deprecation.Warn
 
-// runDeployer executes a deployer and builds the result output.
+// runDeployer executes a deployer into the stage and builds the result output
+// as it reads once the stage is published. It also returns the verified
+// checksum inventory of the stage, nil when checksums are disabled.
 // dataFiles is the list of external data file paths already copied by Make().
-func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir string, dataFiles []string, upgradeNotes []upgrade.BundleNote, start time.Time) (*result.Output, error) {
+func (r *bundleRun) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, stage *bundleStage, dataFiles []string, upgradeNotes []upgrade.BundleNote, start time.Time) (*result.Output, *checksum.Inventory, error) {
+	dir, publishedDir := stage.path, stage.dir
 	output, err := d.Generate(ctx, dir)
 	if err != nil {
 		if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
-			return nil, err
+			return nil, nil, err
 		}
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate bundle", err)
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate bundle", err)
 	}
 	if len(upgradeNotes) > 0 {
-		guidePath, guideSize, guideErr := b.writeUpgradeGuide(dir, upgradeNotes)
+		guidePath, guideSize, guideErr := r.writeUpgradeGuide(dir, upgradeNotes)
 		if guideErr != nil {
-			return nil, guideErr
+			return nil, nil, guideErr
 		}
 		output.Files = append(output.Files, guidePath)
 		output.TotalSize += guideSize
 	}
-	recipeSize, writeErr := b.writeRecipeFile(recipeResult, dir)
+	recipeSize, writeErr := r.writeRecipeFile(recipeResult, dir)
 	if writeErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
 	}
 	output.Files = append(output.Files, filepath.Join(dir, RecipeFileName))
 	output.TotalSize += recipeSize
 
 	recipePath, joinErr := deployer.SafeJoin(dir, RecipeFileName)
 	if joinErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe recipe file path", joinErr)
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "unsafe recipe file path", joinErr)
 	}
 	// SHA256RawContext returns raw bytes; %x is how this repo renders them
 	// (checksum.go:156).
 	rawDigest, digestErr := checksum.SHA256RawContext(ctx, recipePath)
 	if digestErr != nil {
-		return nil, errors.PropagateOrWrap(digestErr, errors.ErrCodeInternal,
+		return nil, nil, errors.PropagateOrWrap(digestErr, errors.ErrCodeInternal,
 			"failed to digest recipe for bundle info")
 	}
 	recipeDigest := fmt.Sprintf("sha256:%x", rawDigest)
 
-	info := b.buildBundleInfo(recipeResult, output, recipeDigest)
+	info := r.buildBundleInfo(recipeResult, output, recipeDigest)
 	infoSize, infoErr := bundleinfo.Write(ctx, dir, info)
 	if infoErr != nil {
-		return nil, errors.PropagateOrWrap(infoErr, errors.ErrCodeInternal, "failed to write bundle info")
+		return nil, nil, errors.PropagateOrWrap(infoErr, errors.ErrCodeInternal, "failed to write bundle info")
 	}
 	output.Files = append(output.Files, filepath.Join(dir, bundleinfo.FileName))
 	output.TotalSize += infoSize
 
-	if b.Config.IncludeChecksums() {
+	verifyOpts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
+	if r.Config.IncludeChecksums() {
 		if checksumErr := checksum.WriteChecksums(ctx, dir, output); checksumErr != nil {
-			return nil, errors.PropagateOrWrap(
+			return nil, nil, errors.PropagateOrWrap(
 				checksumErr, errors.ErrCodeInternal, "failed to finalize bundle checksums")
+		}
+		// Publishing checks again. Checking before signing keeps a run that
+		// cannot publish from signing a bundle it discards.
+		if stage.inPlace {
+			_, staged, _, verifyErr := checksum.ReadAndVerifyBundle(ctx, dir, verifyOpts)
+			if verifyErr != nil {
+				return nil, nil, errors.PropagateOrWrap(
+					verifyErr, errors.ErrCodeInternal, "failed bundle inventory verification")
+			}
+			// attestBundleAt writes the attestation files after this check.
+			files := append(staged.RelativeFiles(), attestation.BundleMetadataPaths()...)
+			if _, checkErr := stage.requireReplaceable(ctx, files); checkErr != nil {
+				return nil, nil, checkErr
+			}
 		}
 	}
 
 	// Attest bundle (skips internally when not configured)
-	attestFiles, err := b.attestBundle(ctx, dir, dataFiles, recipeResult)
+	attestFiles, err := r.attestBundleAt(ctx, dir, publishedDir, dataFiles, recipeResult)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if b.Config.IncludeChecksums() {
-		verifyOpts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
-		_, inventory, _, verifyErr := checksum.ReadAndVerifyBundle(ctx, dir, verifyOpts)
+	var inventory *checksum.Inventory
+	if r.Config.IncludeChecksums() {
+		var verifyErr error
+		_, inventory, _, verifyErr = checksum.ReadAndVerifyBundle(ctx, dir, verifyOpts)
 		if verifyErr != nil {
-			return nil, errors.PropagateOrWrap(
+			return nil, nil, errors.PropagateOrWrap(
 				verifyErr, errors.ErrCodeInternal, "failed final bundle inventory verification")
 		}
 		output.Files = inventory.AbsoluteFiles()
@@ -1232,8 +1723,12 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 		}
 	}
 
+	for i, f := range output.Files {
+		output.Files[i] = publishedPath(dir, publishedDir, f)
+	}
+
 	// Map deployer type to result and deployment names
-	resultType, deploymentType := deployerResultNames(b.Config.Deployer(), b.Config.TerraformChildModule())
+	resultType, deploymentType := deployerResultNames(r.Config.Deployer(), r.Config.TerraformChildModule())
 
 	// Build result
 	resultOutput := &result.Output{
@@ -1242,7 +1737,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 		TotalDuration: time.Since(start),
 		TotalSize:     output.TotalSize,
 		TotalFiles:    len(output.Files),
-		OutputDir:     dir,
+		OutputDir:     publishedDir,
 	}
 
 	bundleResult := &result.Result{
@@ -1257,25 +1752,25 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	// Deployment info
 	notes := upgrade.NoteLines(upgradeNotes)
 	if len(output.DeploymentNotes) > 0 {
-		notes = append(notes, output.DeploymentNotes...)
+		notes = append(notes, publishedText(dir, publishedDir, output.DeploymentNotes)...)
 	}
-	if len(b.warnings) > 0 {
-		notes = append(notes, b.warnings...)
+	if len(r.warnings) > 0 {
+		notes = append(notes, r.warnings...)
 	}
 	resultOutput.Deployment = &result.DeploymentInfo{
 		Type:  deploymentType,
-		Steps: output.DeploymentSteps,
+		Steps: publishedText(dir, publishedDir, output.DeploymentSteps),
 		Notes: notes,
 	}
 
 	slog.Debug("bundle generation complete",
-		"deployer", b.Config.Deployer(),
+		"deployer", r.Config.Deployer(),
 		"files", len(output.Files),
 		"size_bytes", output.TotalSize,
 		"duration", output.Duration,
 	)
 
-	return resultOutput, nil
+	return resultOutput, inventory, nil
 }
 
 // terraformDeployer builds the terraform Generator, the one deployer that
@@ -1607,8 +2102,8 @@ func (b *DefaultBundler) getTypedValueOverridesForComponent(componentName string
 
 // filterAndValidateRecipe also returns the platform's refs, before the
 // bundlers filter.
-func (b *DefaultBundler) filterAndValidateRecipe(ctx context.Context, recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, []recipe.ComponentRef, error) {
-	selection, filterErr := b.filterEnabledComponents(ctx, recipeResult)
+func (r *bundleRun) filterAndValidateRecipe(ctx context.Context, recipeResult *recipe.RecipeResult) (*recipe.RecipeResult, []recipe.ComponentRef, error) {
+	selection, filterErr := r.filterEnabledComponents(ctx, recipeResult)
 	if filterErr != nil {
 		return nil, nil, filterErr
 	}
@@ -1617,7 +2112,7 @@ func (b *DefaultBundler) filterAndValidateRecipe(ctx context.Context, recipeResu
 	// the generated bundle cannot take effect. Reject it rather than drop
 	// it on the floor. Runs immediately after filtering, so the "present"
 	// set is exactly what will be rendered.
-	if overrideErr := b.rejectOverridesForAbsentComponents(recipeResult, selection.emitted, selection.excluded); overrideErr != nil {
+	if overrideErr := r.rejectOverridesForAbsentComponents(recipeResult, selection.emitted, selection.excluded); overrideErr != nil {
 		return nil, nil, overrideErr
 	}
 
@@ -1644,7 +2139,7 @@ type componentSelection struct {
 
 // filterEnabledComponents narrows platformEnabledComponents by the bundlers
 // filter (config.WithBundlers, #1531).
-func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResult *recipe.RecipeResult) (componentSelection, error) {
+func (r *bundleRun) filterEnabledComponents(ctx context.Context, recipeResult *recipe.RecipeResult) (componentSelection, error) {
 	// declaredSet is every component the recipe names, regardless of enabled
 	// state. It distinguishes a declared-but-disabled dependency (prune the
 	// edge — satisfied externally) from an undeclared one (keep it so topology
@@ -1654,7 +2149,7 @@ func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResu
 		declaredSet[ref.Name] = struct{}{}
 	}
 
-	platformRefs, excludedReasons, platformErr := b.platformEnabledComponents(ctx, recipeResult)
+	platformRefs, excludedReasons, platformErr := r.platformEnabledComponents(ctx, recipeResult)
 	if platformErr != nil {
 		return componentSelection{}, platformErr
 	}
@@ -1672,8 +2167,8 @@ func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResu
 	// components outside the requested set are skipped exactly like
 	// disabled ones, so the dependency-edge pruning below treats them as
 	// satisfied externally. See #1531.
-	if b.Config != nil {
-		if requested := b.Config.Bundlers(); len(requested) > 0 {
+	if r.Config != nil {
+		if requested := r.Config.Bundlers(); len(requested) > 0 {
 			requestedSet := make(map[string]struct{}, len(requested))
 			for _, name := range requested {
 				if _, declared := declaredSet[name]; !declared {
@@ -1696,8 +2191,8 @@ func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResu
 				if _, ok := requestedSet[ref.Name]; !ok {
 					slog.Info("skipping component excluded by bundlers filter", "component", ref.Name)
 					excludedReasons[ref.Name] = "the bundlers filter excludes it"
-					b.warnExcludedDriverInstaller(recipeResult, ref.Name, "excluded by the bundlers filter")
-					b.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "excluded by the bundlers filter")
+					r.warnExcludedDriverInstaller(recipeResult, ref.Name, "excluded by the bundlers filter")
+					r.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "excluded by the bundlers filter")
 					delete(enabledSet, ref.Name)
 					continue
 				}
@@ -1709,7 +2204,7 @@ func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResu
 
 	// After the positive filter, so a `bundlers` selection that keeps the
 	// labeler but drops either half of the contract it serves still removes it.
-	enabledRefs, labelerErr := b.dropUnservedDRANodeLabeler(enabledRefs, enabledSet, excludedReasons)
+	enabledRefs, labelerErr := r.dropUnservedDRANodeLabeler(enabledRefs, enabledSet, excludedReasons)
 	if labelerErr != nil {
 		return componentSelection{}, labelerErr
 	}
@@ -1773,13 +2268,13 @@ func (b *DefaultBundler) filterEnabledComponents(ctx context.Context, recipeResu
 // already provides it (e.g. a CSP-managed cert-manager on OKE), so re-enabling
 // would install a conflicting second copy and there is no authored deployment
 // order for it. Such an attempt is rejected with ErrCodeInvalidRequest.
-func (b *DefaultBundler) platformEnabledComponents(ctx context.Context, recipeResult *recipe.RecipeResult) ([]recipe.ComponentRef, map[string]string, error) {
+func (r *bundleRun) platformEnabledComponents(ctx context.Context, recipeResult *recipe.RecipeResult) ([]recipe.ComponentRef, map[string]string, error) {
 	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
 	// excludedReasons records, per dropped component, the reason phrase
 	// rejectOverridesForAbsentComponents quotes back to the operator.
 	excludedReasons := make(map[string]string)
 	for _, ref := range recipeResult.ComponentRefs {
-		setEnabled, ok, overrideErr := b.getSetEnabledOverride(ref.Name, recipeResult.DataProvider())
+		setEnabled, ok, overrideErr := r.getSetEnabledOverride(ref.Name, recipeResult.DataProvider())
 		if overrideErr != nil {
 			return nil, nil, overrideErr
 		}
@@ -1801,16 +2296,16 @@ func (b *DefaultBundler) platformEnabledComponents(ctx context.Context, recipeRe
 				} else {
 					excludedReasons[ref.Name] = "the recipe disables it"
 				}
-				b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled via --set")
-				b.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "disabled via --set")
+				r.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled via --set")
+				r.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "disabled via --set")
 				continue
 			}
 			// setEnabled && recipeEnabled: explicit --set enabled=true is a no-op.
 		} else if !recipeEnabled {
 			slog.Info("skipping disabled component", "component", ref.Name)
 			excludedReasons[ref.Name] = "the recipe disables it"
-			b.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled by the recipe")
-			b.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "disabled by the recipe")
+			r.warnExcludedDriverInstaller(recipeResult, ref.Name, "disabled by the recipe")
+			r.warnExcludedToolkitHardening(ctx, recipeResult, ref.Name, "disabled by the recipe")
 			continue
 		}
 		enabledRefs = append(enabledRefs, ref)
@@ -2015,7 +2510,7 @@ func overridePathsByComponent[V any](overrides map[string]map[string]V) map[stri
 // either, so an exclusion made by mistake (or to dodge a Rule 1
 // rejection) turns into late, opaque scheduling failures on driverless
 // GPU nodes. Warn at the point of exclusion instead.
-func (b *DefaultBundler) warnExcludedDriverInstaller(recipeResult *recipe.RecipeResult, componentName, how string) {
+func (r *bundleRun) warnExcludedDriverInstaller(recipeResult *recipe.RecipeResult, componentName, how string) {
 	if !isGPUOperatorComponent(componentName) {
 		return
 	}
@@ -2029,29 +2524,38 @@ func (b *DefaultBundler) warnExcludedDriverInstaller(recipeResult *recipe.Recipe
 			"This is expected only when the driver stack is provided out-of-band or by a "+
 			"separate bundle that includes %s.", componentName, how, componentName)
 	slog.Warn(warning, "component", componentName)
-	b.appendWarning(warning)
+	r.appendWarning(warning)
 }
 
-// aksToolkitHardeningManifest is the nodewright-customizations manifest that
-// sets the NVIDIA container toolkit device-isolation keys on AKS GPU nodes.
-const aksToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml"
+// aksToolkitHardeningManifest and okeToolkitHardeningManifest are the
+// nodewright-customizations manifests that set the NVIDIA container toolkit
+// device-isolation keys on AKS and OKE GPU nodes.
+const (
+	aksToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-aks.yaml"
+	okeToolkitHardeningManifest = "components/nodewright-customizations/manifests/toolkit-hardening-oke.yaml"
+)
 
-// warnExcludedToolkitHardening warns when a component carrying the AKS toolkit
-// hardening is left out of the bundle while gpu-operator's effective values
-// leave the node-image toolkit in place (toolkit.enabled=false, the
-// azure-managed profile). The hardening ships in nvidia-setup through
-// nodewright-customizations, so leaving that component out is an explicit
-// opt-out of it; this warns rather than blocks, but nothing else in the bundle
-// sets those keys. When gpu-operator's values cannot be resolved it warns too.
-func (b *DefaultBundler) warnExcludedToolkitHardening(ctx context.Context, recipeResult *recipe.RecipeResult, componentName, how string) {
+// warnExcludedToolkitHardening warns when a component carrying the AKS or OKE
+// toolkit hardening is left out of the bundle while gpu-operator's effective
+// values leave the node-image toolkit in place (toolkit.enabled=false: the
+// azure-managed and oci-managed profiles). The hardening ships in nvidia-setup
+// through nodewright-customizations, so leaving that component out is an
+// explicit opt-out of it; this warns rather than blocks, but nothing else in
+// the bundle sets those keys. When gpu-operator's values cannot be resolved it
+// warns too.
+func (r *bundleRun) warnExcludedToolkitHardening(ctx context.Context, recipeResult *recipe.RecipeResult, componentName, how string) {
 	ref := recipeResult.GetComponentRef(componentName)
-	if ref == nil || !slices.Contains(ref.ManifestFiles, aksToolkitHardeningManifest) {
+	if ref == nil {
+		return
+	}
+	aks := slices.Contains(ref.ManifestFiles, aksToolkitHardeningManifest)
+	if !aks && !slices.Contains(ref.ManifestFiles, okeToolkitHardeningManifest) {
 		return
 	}
 	if recipeResult.GetComponentRef(gpuOperatorComponentName) == nil {
 		return
 	}
-	toolkitEnabled, err := b.effectiveGPUOperatorToolkitEnabled(ctx, recipeResult)
+	toolkitEnabled, err := r.effectiveGPUOperatorToolkitEnabled(ctx, recipeResult)
 	if err == nil && toolkitEnabled != "false" {
 		return
 	}
@@ -2059,14 +2563,17 @@ func (b *DefaultBundler) warnExcludedToolkitHardening(ctx context.Context, recip
 		"%s is excluded from this bundle (%s), which removes the NVIDIA container toolkit "+
 			"device-isolation hardening it delivers through nvidia-setup: any unprivileged pod "+
 			"that sets NVIDIA_VISIBLE_DEVICES gets every GPU on the node, and "+
-			"secure-accelerator-access fails. To skip only the InfiniBand/RDMA host prep, keep "+
-			"the component and set nodewrightcustomizations:accelerator=generic instead.",
+			"secure-accelerator-access fails.",
 		componentName, how)
+	if aks {
+		warning += " To skip only the InfiniBand/RDMA host prep, keep the component and set " +
+			"nodewrightcustomizations:accelerator=generic instead."
+	}
 	if err != nil {
 		warning += fmt.Sprintf(" (gpu-operator toolkit.enabled could not be resolved: %v)", err)
 	}
 	slog.Warn(warning, "component", componentName)
-	b.appendWarning(warning)
+	r.appendWarning(warning)
 }
 
 // effectiveGPUOperatorToolkitEnabled returns gpu-operator's toolkit.enabled as
@@ -2682,8 +3189,8 @@ func intersectingPaths(paths []string, set map[string]struct{}) []string {
 	return out
 }
 
-func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) error {
-	if b.Config == nil {
+func (r *bundleRun) warnMissingStorageClassForPVCs(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) error {
+	if r.Config == nil {
 		return nil
 	}
 
@@ -2721,7 +3228,7 @@ func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, rec
 				ref.Name,
 				path,
 			)
-			b.appendWarning(msg)
+			r.appendWarning(msg)
 			slog.Warn("component PVC storageClassName is unset",
 				"component", ref.Name,
 				"path", path,
@@ -2737,7 +3244,14 @@ func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, rec
 const (
 	agentgatewayComponentName    = "agentgateway"
 	agentgatewaySourceRangesPath = "allowedSourceRanges"
+	agentgatewayServiceTypePath  = "serviceType"
+	agentgatewayServiceTypeLB    = "LoadBalancer"
 )
+
+// agentgatewayServiceTypes are the Service types the inference-gateway
+// manifest accepts in serviceType; the comparison is case-sensitive, as the
+// apiserver's is.
+var agentgatewayServiceTypes = []string{agentgatewayServiceTypeLB, "ClusterIP", "NodePort"}
 
 // agentgatewayDefaultSourceRanges is the private-by-default scope applied to the
 // inference-gateway LoadBalancer when the operator supplies no allowedSourceRanges
@@ -2789,10 +3303,18 @@ const (
 // --set-json agentgateway:allowedSourceRanges='["<cidr>"]'; an explicit
 // any-source opt-in is still permitted but logged loudly; an invalid value is
 // rejected. It mutates componentValues only in the unset case. See #1373.
-func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]map[string]any) error {
+func (r *bundleRun) resolveAgentgatewayExposure(componentValues map[string]map[string]any) error {
 	values := componentValues[agentgatewayComponentName]
 	if values == nil {
 		return nil
+	}
+
+	serviceType, err := agentgatewayServiceType(values)
+	if err != nil {
+		return err
+	}
+	if serviceType != "" && serviceType != agentgatewayServiceTypeLB {
+		return r.noteAgentgatewayNonLBService(values, serviceType)
 	}
 
 	state, detail := classifyAgentgatewaySourceRanges(values, agentgatewaySourceRangesPath)
@@ -2809,7 +3331,7 @@ func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]
 				"scope it to trusted networks unless public exposure is intended.",
 			agentgatewayComponentName, agentgatewaySourceRangesPath,
 		)
-		b.appendWarning(msg)
+		r.appendWarning(msg)
 		slog.Warn("agentgateway inference-gateway is explicitly opened via an any-source CIDR (deliberate public opt-in)",
 			"component", agentgatewayComponentName,
 			"path", agentgatewaySourceRangesPath,
@@ -2832,7 +3354,7 @@ func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]
 			ranges[i] = r
 		}
 		values[agentgatewaySourceRangesPath] = ranges
-		b.appendWarning(fmt.Sprintf(
+		r.appendWarning(fmt.Sprintf(
 			"%s: %s was not set; defaulting the inference-gateway to private ranges (%s) so it is "+
 				"not exposed to the public internet. To allow specific public clients (e.g. a corporate VPN), "+
 				"set --set-json %s:%s='[\"<cidr>\"]'; to expose it publicly, use [\"0.0.0.0/0\"]. "+
@@ -2852,6 +3374,80 @@ func (b *DefaultBundler) resolveAgentgatewayExposure(componentValues map[string]
 		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
 			"unhandled agentgateway exposure state %d", state))
 	}
+}
+
+// agentgatewayServiceType returns the validated serviceType value, or "" when
+// it is unset or empty. Anything but a string naming one of
+// agentgatewayServiceTypes is rejected, so a typo such as "clusterip" fails
+// bundle generation instead of rendering a Service the apiserver refuses.
+func agentgatewayServiceType(values map[string]any) (string, error) {
+	v, ok := component.GetValueByPath(values, agentgatewayServiceTypePath)
+	if !ok || v == nil {
+		return "", nil
+	}
+	s, isString := v.(string)
+	if !isString {
+		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: %s must be a string, got %T", agentgatewayComponentName, agentgatewayServiceTypePath, v))
+	}
+	if s == "" {
+		return "", nil
+	}
+	if !slices.Contains(agentgatewayServiceTypes, s) {
+		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: %s %q is not one of %s (case-sensitive)",
+			agentgatewayComponentName, agentgatewayServiceTypePath, s, strings.Join(agentgatewayServiceTypes, ", ")))
+	}
+	return s, nil
+}
+
+// agentgatewayNonLBReach describes who can reach the inference-gateway for a
+// non-LoadBalancer Service type, since no source-range filter applies there.
+func agentgatewayNonLBReach(serviceType string) string {
+	if serviceType == "NodePort" {
+		return "A NodePort is reachable by every client that can reach a node, so restrict access " +
+			"with network policy or a firewall."
+	}
+	return "The gateway is reachable only from inside the cluster."
+}
+
+// noteAgentgatewayNonLBService records that allowedSourceRanges does not apply
+// when serviceType is not LoadBalancer: loadBalancerSourceRanges is a
+// LoadBalancer-only Service field, so the manifest renders no ranges and the
+// private-by-default injection is skipped. Ranges the operator passed
+// explicitly are reported as a warning because they will not take effect.
+func (r *bundleRun) noteAgentgatewayNonLBService(values map[string]any, serviceType string) error {
+	state, detail := classifyAgentgatewaySourceRanges(values, agentgatewaySourceRangesPath)
+	switch state {
+	case exposureInvalid:
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: %s must be a list of CIDR strings (%s)",
+			agentgatewayComponentName, agentgatewaySourceRangesPath, detail))
+	case exposureScoped, exposureOpen:
+		r.appendWarning(fmt.Sprintf(
+			"%s: %s is set but %s is %s; loadBalancerSourceRanges applies only to a LoadBalancer "+
+				"Service, so the inference-gateway renders without them. %s",
+			agentgatewayComponentName, agentgatewaySourceRangesPath, agentgatewayServiceTypePath, serviceType,
+			agentgatewayNonLBReach(serviceType)))
+		slog.Warn("agentgateway allowedSourceRanges ignored for a non-LoadBalancer inference-gateway Service",
+			"component", agentgatewayComponentName,
+			"serviceType", serviceType,
+		)
+	case exposureUnset:
+		r.appendWarning(fmt.Sprintf(
+			"%s: %s is %s, so the inference-gateway Service is not a LoadBalancer and %s does not apply; "+
+				"the private-by-default source ranges are not injected. %s",
+			agentgatewayComponentName, agentgatewayServiceTypePath, serviceType, agentgatewaySourceRangesPath,
+			agentgatewayNonLBReach(serviceType)))
+		slog.Info("agentgateway inference-gateway Service is not a LoadBalancer; skipping source-range default",
+			"component", agentgatewayComponentName,
+			"serviceType", serviceType,
+		)
+	default:
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+			"unhandled agentgateway exposure state %d", state))
+	}
+	return nil
 }
 
 // classifyAgentgatewaySourceRanges inspects the value at path and reports how it
@@ -2933,28 +3529,28 @@ func hasConfiguredStorageClass(values map[string]any, path string) bool {
 	return true
 }
 
-func (b *DefaultBundler) appendWarning(warning string) {
+func (r *bundleRun) appendWarning(warning string) {
 	if !strings.HasPrefix(warning, "Warning: ") {
 		warning = "Warning: " + warning
 	}
-	b.warnings = append(b.warnings, warning)
+	r.warnings = append(r.warnings, warning)
 }
 
 // runComponentValidations executes all component-specific validations registered in the registry.
 // Collects warnings and errors based on validation severity. The iteration
 // itself lives in validations.RunComponentValidations so the SDK bundle path
 // (Client.BundleComponents) runs the identical preflight.
-func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResult *recipe.RecipeResult) error {
-	if b.Config == nil {
+func (r *bundleRun) runComponentValidations(ctx context.Context, recipeResult *recipe.RecipeResult) error {
+	if r.Config == nil {
 		return nil
 	}
 
-	warnings, err := validations.RunComponentValidations(ctx, recipeResult, b.Config)
+	warnings, err := validations.RunComponentValidations(ctx, recipeResult, r.Config)
 
 	// Collect warnings (prepend "Warning: " if not already present) —
 	// including any gathered before a blocking error.
 	for _, warning := range warnings {
-		b.appendWarning(warning)
+		r.appendWarning(warning)
 	}
 
 	return err
@@ -2975,7 +3571,33 @@ func componentValidationError(err error) error {
 // The provider argument supplies the LayeredDataProvider whose external directory is
 // the source of truth; a nil provider falls back to the package-global provider so
 // pre-WithDataProvider callers (legacy CLI path) still emit the same bundles.
-func (b *DefaultBundler) copyDataFiles(dir string, provider recipe.DataProvider) ([]string, error) {
+// Only tracked files are copied, so a directory under --data with no files never
+// reaches the bundle. A copied file keeps its execute bits.
+func (r *bundleRun) copyDataFiles(ctx context.Context, dir string, provider recipe.DataProvider) ([]string, error) {
+	if captured, ok := provider.(*recipe.ArtifactProvider); ok {
+		inputs := captured.ArtifactInputs()
+		copied := make([]string, 0, len(inputs))
+		for name, data := range inputs {
+			if err := ctx.Err(); err != nil {
+				return nil, errors.WrapCtxErr(err, errors.ErrCodeTimeout, "copy captured artifact inputs")
+			}
+			relative := filepath.Join("data", name)
+			destination, err := deployer.SafeJoin(dir, relative)
+			if err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "unsafe captured artifact input path", err)
+			}
+			if err := os.MkdirAll(filepath.Dir(destination), 0o750); err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInternal, "create captured artifact input directory", err)
+			}
+			if err := writeCapturedInput(destination, data); err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInternal, "write captured artifact input", err)
+			}
+			copied = append(copied, relative)
+		}
+		slices.Sort(copied)
+		return copied, nil
+	}
+
 	// Check if the bound provider is a LayeredDataProvider with external
 	// files. A nil-interface receiver returns (nil, false) from the type
 	// assertion without panicking — equivalent to no external data.
@@ -2989,21 +3611,30 @@ func (b *DefaultBundler) copyDataFiles(dir string, provider recipe.DataProvider)
 		return nil, nil
 	}
 
-	// Copy the entire external directory into bundle/data/ using os.CopyFS
 	dataDir, joinErr := deployer.SafeJoin(dir, "data")
 	if joinErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe data directory path", joinErr)
 	}
-	externalFS := os.DirFS(layered.ExternalDir())
-	if err := os.CopyFS(dataDir, externalFS); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to copy external data files", err)
-	}
 
-	// Build the list of copied files (relative to bundle dir)
 	copiedFiles := make([]string, 0, len(externalFiles))
 	for _, relPath := range externalFiles {
-		if _, pathErr := deployer.SafeJoin(dataDir, relPath); pathErr != nil {
+		dst, pathErr := deployer.SafeJoin(dataDir, relPath)
+		if pathErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "unsafe external data path", pathErr)
+		}
+		data, readErr := layered.ReadExternalFile(ctx, relPath)
+		if readErr != nil {
+			return nil, errors.PropagateOrWrap(readErr, errors.ErrCodeInternal, "failed to read external data file")
+		}
+		info, statErr := os.Stat(filepath.Join(layered.ExternalDir(), filepath.FromSlash(relPath)))
+		if statErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to inspect external data file %s", relPath), statErr)
+		}
+		if mkErr := os.MkdirAll(filepath.Dir(dst), 0755); mkErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create data directory", mkErr)
+		}
+		if writeErr := os.WriteFile(dst, data, 0666|info.Mode().Perm()&0111); writeErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to copy external data file %s", relPath), writeErr)
 		}
 		copiedFiles = append(copiedFiles, filepath.Join("data", relPath))
 	}
@@ -3012,17 +3643,31 @@ func (b *DefaultBundler) copyDataFiles(dir string, provider recipe.DataProvider)
 	return copiedFiles, nil
 }
 
-// attestBundle signs the bundle checksums and copies the binary attestation into the bundle.
-// dataFiles is the list of external data file paths (relative to bundle dir) to include
-// in resolvedDependencies. Returns the list of attestation files added, or nil if skipped.
-func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles []string, recipeResult *recipe.RecipeResult) ([]string, error) {
-	return b.attestBundleAt(ctx, dir, dir, dataFiles, recipeResult)
+// writeCapturedInput creates destination with data. It fails if destination
+// already exists.
+func writeCapturedInput(destination string, data []byte) error {
+	file, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "create captured artifact input", err)
+	}
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "write captured artifact input", writeErr)
+	}
+	if closeErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "close captured artifact input", closeErr)
+	}
+	return nil
 }
 
-// attestBundleAt attests the bundle under dir while recording publishedDir
-// as the statement's output directory. A bundle set is attested in its
-// staging directory before one atomic move to publishedDir, and the signed
-// provenance must name the path the set lives at, not the transient stage.
+// attestBundleAt signs the bundle checksums under dir and copies the binary
+// attestation into the bundle, recording publishedDir as the statement's
+// output directory. A bundle or bundle set is attested in its staging
+// directory before it moves to publishedDir, and the signed provenance must
+// name the path the bundle lives at, not the transient stage.
+// dataFiles is the list of external data file paths (relative to bundle dir) to include
+// in resolvedDependencies. Returns the list of attestation files added, or nil if skipped.
 func (b *DefaultBundler) attestBundleAt(ctx context.Context, dir, publishedDir string, dataFiles []string, recipeResult *recipe.RecipeResult) ([]string, error) {
 	dir = filepath.Clean(dir)
 	publishedDir = filepath.Clean(publishedDir)
@@ -3137,11 +3782,12 @@ func (b *DefaultBundler) attestBundleAt(ctx context.Context, dir, publishedDir s
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write bundle attestation", writeErr)
 	}
 	attestFiles = append(attestFiles, attestation.BundleAttestationFile)
-	slog.Info("bundle attestation written", "path", bundleAttestPath)
+	slog.Info("bundle attestation written",
+		"path", filepath.Join(publishedDir, filepath.FromSlash(attestation.BundleAttestationFile)))
 
 	// Copy binary attestation into bundle — errors are fatal since the user
 	// opted into attestation (remove --attest to skip).
-	if err := b.verifyAndCopyBinaryAttestation(ctx, dir); err != nil {
+	if err := b.verifyAndCopyBinaryAttestation(ctx, dir, publishedDir); err != nil {
 		return nil, err
 	}
 	attestFiles = append(attestFiles, attestation.BinaryAttestationFile)
@@ -3150,8 +3796,9 @@ func (b *DefaultBundler) attestBundleAt(ctx context.Context, dir, publishedDir s
 }
 
 // verifyAndCopyBinaryAttestation resolves the running binary's attestation,
-// cryptographically verifies it (REQ-6), and copies it into the bundle directory.
-func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir string) error {
+// cryptographically verifies it (REQ-6), and copies it into the bundle
+// directory dir, which is published at publishedDir.
+func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir, publishedDir string) error {
 	// Injected, pre-verified attestation: write it directly. The caller
 	// verified identity + binary-digest binding at injection time, so we do
 	// not re-discover or re-verify here.
@@ -3226,7 +3873,8 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 		return errors.Wrap(errors.ErrCodeInternal,
 			"failed to copy binary attestation into bundle", copyErr)
 	}
-	slog.Info("binary attestation copied into bundle", "path", destPath)
+	slog.Info("binary attestation copied into bundle",
+		"path", filepath.Join(publishedDir, filepath.FromSlash(attestation.BinaryAttestationFile)))
 
 	return nil
 }
@@ -3761,8 +4409,8 @@ const (
 )
 
 var (
-	gpuOperatorComponentNames = []string{gpuOperatorComponentName, gpuOperatorOCPComponentName}
-	draComponentNames         = []string{draComponentName, "nvidia-dra-driver-gpu-ocp"}
+	gpuOperatorComponentNames = config.GPUOperatorDriverOwnership.ComponentNames
+	draComponentNames         = config.DRADriverOwnership.ComponentNames
 )
 
 func isDRAComponent(name string) bool {
@@ -3939,12 +4587,12 @@ func valuePathsIntersect(left, right string) bool {
 // did before the contract existed. The cost is that the plugin cannot be
 // descheduled ahead of a driver container restart; that is surfaced as a
 // bundle-time warning where a Driver Manager actually runs.
-func (b *DefaultBundler) injectDRAEvictionLabel(
+func (r *bundleRun) injectDRAEvictionLabel(
 	componentValues map[string]map[string]any,
 	recipeResult *recipe.RecipeResult,
 ) error {
 
-	if b == nil || b.Config == nil || componentValues == nil || recipeResult == nil {
+	if r.DefaultBundler == nil || r.Config == nil || componentValues == nil || recipeResult == nil {
 		return nil
 	}
 
@@ -3953,9 +4601,9 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 		return nil
 	}
 
-	label := b.Config.DRAEvictionNodeLabel()
+	label := r.Config.DRAEvictionNodeLabel()
 	if label == (config.NodeLabel{}) {
-		b.warnDRAEvictionNotConfigured(componentValues, draNames, gpuOperatorNames)
+		r.warnDRAEvictionNotConfigured(componentValues, draNames, gpuOperatorNames)
 		return nil
 	}
 
@@ -3993,11 +4641,11 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 		// must start rendering (issue #2846).
 		values[draNodeLabelerEnabledPath] = true
 		persistDRANodeLabelerGate(recipeResult)
-		b.warnDRAEvictionLabelDerived(draNames, label)
+		r.warnDRAEvictionLabelDerived(draNames, label)
 		return nil
 	}
 
-	b.warnDRAEvictionNodeLabelRequired(draNames, label)
+	r.warnDRAEvictionNodeLabelRequired(draNames, label)
 
 	return nil
 }
@@ -4025,7 +4673,7 @@ func persistDRANodeLabelerGate(recipeResult *recipe.RecipeResult) {
 // the label is applied by the labeler from GFD's nvidia.com/gpu.present, so no
 // node-pool provisioning is required, and the remaining gap is a GPU node GFD
 // has not labeled (no gpu.present, no eviction label, no kubelet plugin).
-func (b *DefaultBundler) warnDRAEvictionLabelDerived(draNames []string, label config.NodeLabel) {
+func (r *bundleRun) warnDRAEvictionLabelDerived(draNames []string, label config.NodeLabel) {
 	for _, name := range draNames {
 		msg := fmt.Sprintf(
 			"%s schedules its kubelet plugin only on nodes labeled %s=%s; dra-node-labeler applies that label to every node GFD reports as nvidia.com/gpu.present=true, so no node-pool labeling is required. A GPU node without gpu.present (GFD not yet running, or a node GPU Operator does not manage) that does not already carry %s=%s runs no kubelet plugin and publishes no ResourceSlices. To provision the label yourself instead, pass --set %s:enabled=false",
@@ -4036,7 +4684,7 @@ func (b *DefaultBundler) warnDRAEvictionLabelDerived(draNames []string, label co
 			label.Value,
 			draNodeLabelerComponentName,
 		)
-		b.appendWarning(msg)
+		r.appendWarning(msg)
 		slog.Warn("DRA kubelet plugin label derived by dra-node-labeler",
 			"component", name,
 			"label", label.String(),
@@ -4059,7 +4707,7 @@ func (b *DefaultBundler) warnDRAEvictionLabelDerived(draNames []string, label co
 // silently lacking DRA — measured on an EKS GB300 cluster, where unlabeling
 // one of two nodes moved the DaemonSet to DESIRED=1, not 0. DESIRED=0 applies
 // only when no GPU node carries the label at all.
-func (b *DefaultBundler) warnDRAEvictionNodeLabelRequired(draNames []string, label config.NodeLabel) {
+func (r *bundleRun) warnDRAEvictionNodeLabelRequired(draNames []string, label config.NodeLabel) {
 	for _, name := range draNames {
 		msg := fmt.Sprintf(
 			"%s schedules its kubelet plugin only on nodes labeled %s=%s; apply that label to every GPU node at node-pool provisioning time (EKS managed nodegroup labels, Karpenter NodePool spec.template.metadata.labels, or equivalent) — including when upgrading an existing cluster. Unlabeled GPU nodes silently run without DRA: they publish no ResourceSlices, and if no GPU node carries the label the kubelet-plugin DaemonSet sits at DESIRED=0. Neither Helm nor deploy.sh reports an error either way",
@@ -4067,7 +4715,7 @@ func (b *DefaultBundler) warnDRAEvictionNodeLabelRequired(draNames []string, lab
 			label.Key,
 			label.Value,
 		)
-		b.appendWarning(msg)
+		r.appendWarning(msg)
 		slog.Warn("DRA kubelet plugin requires a node label",
 			"component", name,
 			"label", label.String(),
@@ -4085,7 +4733,7 @@ func (b *DefaultBundler) warnDRAEvictionNodeLabelRequired(draNames []string, lab
 // deploys no driver pod, nothing can restart the driver under the plugin, and
 // the warning would be noise. A missing field means enabled, matching the
 // GPU Operator chart default.
-func (b *DefaultBundler) warnDRAEvictionNotConfigured(
+func (r *bundleRun) warnDRAEvictionNotConfigured(
 	componentValues map[string]map[string]any,
 	draNames []string,
 	gpuOperatorNames []string,
@@ -4107,7 +4755,7 @@ func (b *DefaultBundler) warnDRAEvictionNotConfigured(
 			"AICR did not configure automatic eviction for %s: no DRA eviction node label is set, so the kubelet plugin is not descheduled before a GPU driver container restart. The plugin runs on every accelerated node and needs no extra node label. On a driver upgrade the module unload can fail with \"failed to uninstall nvidia driver components\"; on an unchanged-config restart the stale driver rootfs is unmounted underneath the running plugin, which upstream documents as leaving NodePrepareResources unable to build CDI specs for full-GPU allocation, with no error at restart time. Set --dra-eviction-node-label (or scheduling.draEvictionNodeLabel) to opt in; the bundle then carries dra-node-labeler, which applies the label from GFD's nvidia.com/gpu.present, so no node-pool labeling is needed (pass --set dra-node-labeler:enabled=false to provision it yourself)",
 			name,
 		)
-		b.appendWarning(msg)
+		r.appendWarning(msg)
 		slog.Warn("DRA kubelet-plugin eviction not configured",
 			"component", name,
 		)

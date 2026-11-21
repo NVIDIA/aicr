@@ -20,8 +20,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/measurement"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -91,8 +91,8 @@ func TestImageCollector_Collect(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
-	// server, image, policy, node, and five custom-resource evidence subtypes.
-	assert.Len(t, m.Subtypes, 9)
+	// server, image, policy, node, and six custom-resource evidence subtypes.
+	assert.Len(t, m.Subtypes, 10)
 
 	// Find the image subtype
 	var imageSubtype *measurement.Subtype

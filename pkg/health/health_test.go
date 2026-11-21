@@ -23,11 +23,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/constraints"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/constraints"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
+	"aicr.run/pkg/serializer"
 )
 
 func TestClassifyResolve(t *testing.T) {
@@ -503,6 +503,30 @@ func TestDeclaredCoverageCompact(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.cov.Compact(); got != tt.expected {
 				t.Errorf("Compact() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestComputeComboProfile(t *testing.T) {
+	entry := recipe.CatalogEntry{Name: "leaf", Criteria: &recipe.Criteria{Service: recipe.CriteriaServiceAKS}}
+	profiled := &recipe.RecipeResult{Metadata: recipe.RecipeResultMetadata{
+		SelectedProfile: &recipe.SelectedProfile{Name: "gpuStack", Value: "azure-managed"},
+	}}
+	tests := []struct {
+		name   string
+		result *recipe.RecipeResult
+		err    error
+		want   string
+	}{
+		{"profiled resolve records name=value", profiled, nil, "gpuStack=azure-managed"},
+		{"unprofiled resolve is empty", &recipe.RecipeResult{}, nil, ""},
+		{"failed resolve is empty", profiled, errors.New(errors.ErrCodeNotFound, "missing"), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := computeCombo(entry, tt.result, tt.err).Profile; got != tt.want {
+				t.Errorf("Profile = %q, want %q", got, tt.want)
 			}
 		})
 	}

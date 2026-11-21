@@ -88,7 +88,12 @@ in the `default` namespace; `kubectl describe` shows them.
 ### Metrics
 
 The operator serves Prometheus metrics on port 8080; the chart creates no
-Service, so scrape the pod or port-forward
+Service. With the Prometheus Operator, set `operator.podMonitor.enabled` and
+the `operator.podMonitor.labels` your Prometheus selects; the chart creates the
+`PodMonitor` only while the cluster serves that kind, so on a new cluster run
+`helm upgrade` again once the recipe has installed `prometheus-operator-crds`.
+The stock AICR Prometheus keeps only the series its own consumers query, so
+scrape the operator from your own. Otherwise scrape the pod, or port-forward
 (`kubectl port-forward -n aicr-system deploy/aicr-operator 8080`):
 
 | Metric | Meaning |
@@ -99,9 +104,58 @@ Service, so scrape the pod or port-forward
 | `aicr_operator_job_runs_total{stage,result,class}` | AICR runs when first seen finished, by stage, result and, for failures, retry class (`never`, `bounded`, `transient`, `authorization`) |
 | `aicr_operator_registry_token_expiry_timestamp_seconds`, `aicr_operator_registry_token_refresh_timestamp_seconds` | When the Argo CD registry token expires and when the operator last refreshed it, as Unix times (`aws` provider); `0` until known. Only the leader refreshes the token, so a standby replica stays at `0`: alert on `max()` across operator pods |
 | `aicr_operator_registry_token_mint_failures_total` | Failed ECR token mints since the operator started (`aws` provider), including those it rode out on a still-valid token |
+| `aicr_operator_runtime_stalled{reason}` | `1` while the runtime is `Stalled=True` with this reason, else `0`; the reasons are the [troubleshooting](troubleshooting.md) ones |
+| `aicr_operator_rollout_approval_wait_seconds` | How long the rollout in progress has waited for approval, including while the engine is unavailable; `0` while none waits |
+| `aicr_operator_runtime_resolved_timestamp_seconds` | When the operator last saw the runtime resolved for its current inputs, as a Unix time, checked every 30 seconds. It stops while a resolution runs or retries, including one that keeps an already resolved runtime `Resolved=True`, such as a snapshot refresh; `0` until it has seen one since the operator started |
+| `aicr_operator_registry_failures_total{operation,code}` | Failed runtime registry and chart delivery operations (`resolve`, `pull_bundle`, `push_chart`, `reuse_chart`, `mirror_oci_chart`, `mirror_http_chart`, `push_wrapper`, `sigstore_bundles`, `describe`, `push_statement`, `pull_statement`), by error code. `reuse_chart` with `NOT_FOUND` is a chart the operator mirrors again, not an outage |
 
-Every outcome, result, stage and retry class is exported at zero from
-startup, so a rate reads zero rather than nothing before its first event.
+Every outcome, result, stage, retry class, stall reason, registry operation
+and error code is exported at zero from startup, so a rate reads zero rather
+than nothing before its first event. Only the leader reconciles: the runtime
+gauges of a standby replica stay at `0`, so alert on `max()` across operator
+pods.
+
+### Alerts
+
+Example Prometheus rules; adjust the thresholds, and add the `severity` and
+routing labels your Alertmanager expects. Each rule takes the `max()` across
+the operator's replicas and keeps `namespace`, which names the installation;
+when one Prometheus scrapes several clusters, add the label that names the
+cluster to every `by (...)`, or one cluster's values hide another's:
+
+```yaml
+groups:
+  - name: aicr-operator
+    rules:
+      # Progress needs someone. Approvals have their own alert below.
+      - alert: AICROperatorRuntimeStalled
+        expr: max by (namespace, reason) (aicr_operator_runtime_stalled{reason!~"AwaitingApproval|AwaitingAcknowledgement"}) == 1
+        for: 15m
+        annotations:
+          summary: "The AICR runtime is Stalled ({{ $labels.reason }}); see docs/operator/troubleshooting.md"
+      - alert: AICROperatorApprovalPending
+        expr: max by (namespace) (aicr_operator_rollout_approval_wait_seconds) > 4 * 3600
+        annotations:
+          summary: "An AICR rollout has waited over 4 hours for approval"
+      # A new installation fires this until its first plan resolves, and so
+      # does an operator with no ClusterRuntime: 0 reads as long ago.
+      - alert: AICROperatorNotResolved
+        expr: time() - max by (namespace) (aicr_operator_runtime_resolved_timestamp_seconds) > 3600
+        for: 10m
+        annotations:
+          summary: "The AICR runtime has not been resolved for its current generation in over an hour"
+      # reuse_chart with NOT_FOUND is a chart mirrored again; CANCELED is a
+      # shutdown.
+      - alert: AICROperatorRegistryFailing
+        expr: |
+          sum by (namespace, operation, code) (
+            increase(aicr_operator_registry_failures_total{code!="CANCELED"}[15m])
+              unless on (operation, code) aicr_operator_registry_failures_total{operation="reuse_chart", code="NOT_FOUND"}
+          ) > 0
+        for: 15m
+        annotations:
+          summary: "AICR registry operation {{ $labels.operation }} keeps failing with {{ $labels.code }}"
+```
 
 ## How a change reaches the cluster
 
@@ -130,10 +184,11 @@ startup, so a rate reads zero rather than nothing before its first event.
 6. **It waits for approval** when any step needs it (below).
 7. **Steps run one at a time** in dependency order, each with one write to
    Argo CD, and each must be ready at its current revision within
-   `spec.rollout.actionTimeout` (default 30 minutes). Removals run last, in
-   reverse order. A `manual` release with recorded steps after the apply stops
-   the rollout in `AwaitingAcknowledgement` until those steps are done and an
-   approver runs `kubectl aicr acknowledge`.
+   `spec.rollout.actionTimeout` (default 30 minutes). Removals run last,
+   dependents first as the Applications' `depends-on` and `readiness-for`
+   annotations record them. A `manual` release with recorded steps after the
+   apply stops the rollout in `AwaitingAcknowledgement` until those steps are
+   done and an approver runs `kubectl aicr acknowledge`.
 8. **Deployment validation** runs once when `spec.validation.deployment` is
    `Required`, against a new snapshot taken after every step is ready.
 9. **The rollout succeeds** and its target becomes the active plan. The whole
@@ -323,24 +378,30 @@ aicr:
     - ghcr.io/nvidia/aicr-validators/performance:v1.x.y@sha256:<digest>
 ```
 
-For example, from v1.0.0 to v1.1.2, the newest release tested in CI:
+For example, from v1.1.2 to v1.2.0, the newest release tested in CI:
 
 ```yaml
 aicr:
-  version: v1.1.2
-  image: ghcr.io/nvidia/aicr:v1.1.2@sha256:611cbcb8a44b30ccfbbf77a797ed0a8e7fae228c97088a849f70b042709a62fb
+  version: v1.2.0
+  image: ghcr.io/nvidia/aicr:v1.2.0@sha256:5ef145efe98ede9f4da7be3a66304f5fdc95dd31f825295d6a608a39feb0cac9
   validatorImages:
-    - ghcr.io/nvidia/aicr-validators/deployment:v1.1.2@sha256:f9d1cd2843ab0271d7b763c485558c1f3d4b37b984e96ad73e1ce6ae77365928
-    - ghcr.io/nvidia/aicr-validators/conformance:v1.1.2@sha256:ce74905d3df0f6a5d8bb6c7f53e979fdf02e1d778b76817f98d964d9ad913312
-    - ghcr.io/nvidia/aicr-validators/performance:v1.1.2@sha256:2d847aa5e4d0a547a86022eb5a71ec7ad8b5a801906578c77adedcdcb9083d07
+    - ghcr.io/nvidia/aicr-validators/deployment:v1.2.0@sha256:0e697d829916b20698488666d44ecde9429c7d1c6063c5ade425d2f27845ca95
+    - ghcr.io/nvidia/aicr-validators/conformance:v1.2.0@sha256:8930d96f5bf6cd72058d4496558963a9b67383d4ceb776f44cafd1a7f3259913
+    - ghcr.io/nvidia/aicr-validators/performance:v1.2.0@sha256:35f45febe754141b3f9154fc0af3273c5de6c4a9d68da154d4477ef3dd2f4722
 ```
 
-The same chart upgrade moves validation to the v1.1 identities: the launcher
-loses `cluster-admin`, the `aicr-validator` ServiceAccount gains it, and the
-snapshot launcher loses its namespace grant. For
-`h100-eks-ubuntu-training-kubeflow` the new recipe moves gpu-operator and nodewright-operator, which AICR assesses `safe`,
-and nvsentinel, which it assesses `manual` with recorded steps, so the
-rollout needs approval.
+For `h100-eks-ubuntu-training-kubeflow` the new recipe moves
+nvidia-dra-driver-gpu, which AICR assesses `safe`, and nfd, which it assesses
+`manual` with recorded steps, so the rollout needs approval. Its RBAC steps
+apply only when the topology-updater RBAC is managed outside the chart
+(`topologyUpdater.rbac.create=false`). AICR v1.2.0's nfd record has no `apply`
+step, so the rollout does not pause for acknowledgement after nfd is applied:
+if you widened the RBAC, do `narrow-nrt-rbac` yourself once every
+topology-updater Pod runs 0.20.x and you no longer need a rollback path.
+
+From v1.0.x, the same chart upgrade also moves validation to the v1.1
+identities: the launcher loses `cluster-admin`, the `aicr-validator`
+ServiceAccount gains it, and the snapshot launcher loses its namespace grant.
 
 The chart refuses a version outside `>=1.0.0, <2.0.0`, and the operator stops
 on an image that reports a version other than `aicr.version`

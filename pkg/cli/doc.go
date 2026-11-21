@@ -23,7 +23,7 @@
 // # Commands
 //
 // The workflow commands and the skill utility are summarized below. The CLI also
-// provides query, verify, evidence, diff, upgrade-check, mirror, trust, and
+// provides query, verify, evidence, diff, sweep, upgrade-check, mirror, trust, and
 // completion; run "aicr --help" for the full list, and see
 // docs/user/cli-reference.md for every command and flag.
 //
@@ -193,5 +193,5 @@
 //
 // Version information is embedded at build time using ldflags:
 //
-//	go build -ldflags="-X 'github.com/NVIDIA/aicr/pkg/cli.version=1.0.0'"
+//	go build -ldflags="-X 'aicr.run/pkg/cli.version=1.0.0'"
 package cli

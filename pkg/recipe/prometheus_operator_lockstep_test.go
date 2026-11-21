@@ -33,8 +33,7 @@ func TestPrometheusOperatorAppVersionLockstep(t *testing.T) {
 	// Chart.yaml appVersion for every chart pin used by a built-in recipe.
 	auditedAppVersions := map[string]map[string]string{
 		stackComponent: {
-			"83.7.0": "v0.90.1",
-			"84.4.0": "v0.90.1",
+			"84.5.0": "v0.90.1",
 		},
 		crdsComponent: {
 			"28.0.1": "v0.90.1",

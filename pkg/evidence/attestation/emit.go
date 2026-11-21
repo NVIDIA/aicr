@@ -21,16 +21,16 @@ import (
 	"sort"
 	"strings"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/redact"
-	"github.com/NVIDIA/aicr/pkg/oci"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/redact"
+	"aicr.run/pkg/oci"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator"
+	"aicr.run/pkg/validator/catalog"
 )
 
 // EmitOptions controls a single Emit run. The same options struct is used
@@ -188,7 +188,7 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 		return nil, err
 	}
 
-	bomBody, err := LoadOrGenerateBOMContext(ctx, opts.BOMPath, opts.Recipe, opts.Snapshot, opts.Catalog, opts.AICRVersion)
+	bomBody, err := LoadOrGenerateBOMContext(ctx, opts.BOMPath, opts.Recipe, opts.Snapshot, validatorImages, opts.AICRVersion)
 	if err != nil {
 		return nil, err
 	}

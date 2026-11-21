@@ -1,38 +1,42 @@
 # Example Recipes
 
-Example recipe files demonstrating common configurations.
+These hand-curated files illustrate `RecipeResult` structure. They are
+intentionally incomplete and differ from actual generated output: component
+sets, metadata, validation, chart pins, paths, and defaults may differ.
+Generate a current recipe before bundling or validation, even with the same
+AICR version. Do not use the checked-in illustrations as deployment inputs.
 
 ## Files
 
-- **`kind.yaml`** — Local Kind cluster with fake GPU
-- **`eks-training.yaml`** — EKS training workload
-- **`aks-training.yaml`** — AKS training workload
-- **`eks-gb200-ubuntu-training-with-validation.yaml`** — Multi-phase validation example with severity levels and remediation guidance
+- **`kind.yaml`** — Selected supporting components for a local Kind cluster; omits the GPU stack and validation.
+- **`eks-training.yaml`** — Selected EKS training components; omits validation and resolved metadata.
+- **`aks-training.yaml`** — AKS training structure; omits `metadata.selectedProfile`, its ownership locks, profile-specific overrides, and readiness constraints. The legacy `aicr.run/v1` payload does not represent a current profiled AKS recipe.
+- **`eks-gb200-ubuntu-training-with-validation.yaml`** — Authored severity and remediation examples with selected deployment and performance checks; conformance and parts of the component graph are deliberately omitted.
 
-## Using Example Recipes
+## Generate a Recipe for Operational Use
 
-Example recipes are persisted, editable artifacts, but they are not a
-cross-version compatibility boundary. After upgrading AICR, regenerate
-recipes with `aicr recipe ...` before bundling because embedded manifest
-paths, chart pins, and defaults can change between versions.
+For an EKS GB200 cluster running Ubuntu, generate a recipe from explicit
+criteria with the installed AICR version:
 
 ```shell
-# Generate deployment bundle
-aicr bundle --recipe eks-gb200-ubuntu-training-with-validation.yaml --output ./bundles
+# Generate a current recipe
+aicr recipe --service eks --accelerator gb200 --os ubuntu --intent training \
+  --output generated-recipe.yaml
 
-# With value overrides
-aicr bundle \
-  --recipe eks-gb200-ubuntu-training-with-validation.yaml \
-  --set gpuoperator:driver.version=580.105.08 \
-  --output ./bundles
-
-# Validate against snapshot (readiness constraints run first, then all phases)
-aicr snapshot --output snapshot.yaml
-aicr validate --recipe eks-gb200-ubuntu-training-with-validation.yaml --snapshot snapshot.yaml
-
-# All phases (deployment, conformance, performance)
-aicr validate --recipe eks-gb200-ubuntu-training-with-validation.yaml --snapshot snapshot.yaml --phase all
+# Generate a deployment bundle from that recipe
+aicr bundle --recipe generated-recipe.yaml --output ./bundles
 ```
+
+The generated recipe supplies the current validation configuration; the GB200
+illustration above deliberately omits conformance. Reapply any illustrative
+severity or remediation customizations you need to the generated recipe after
+reviewing its checks and constraints.
+
+For AKS, follow [AKS GPU Setup](../../docs/integrator/aks-gpu-setup.md) to capture
+the GPU pool projection and select the matching `gpuStack` profile during
+recipe generation. Current profiled output records `metadata.selectedProfile`
+and ownership locks; adding that field to the legacy `aicr.run/v1` illustration
+is not a substitute for generating a recipe.
 
 ## See Also
 

@@ -233,12 +233,14 @@ jobs:
           kubernetes: ${{ matrix.kubernetes }}
 
       # Two candidates of this commit, one to install and one to upgrade to
-      # mid-rollout; placeholder versions, never published.
+      # mid-rollout; placeholder versions, never published. Built as the
+      # release builds them, with no module fetch after the deps step.
       - name: Build the candidates
         run: |
           set -euo pipefail
-          CANDIDATE_VERSION=v0.0.0-rc.0 make operator-candidate
-          CANDIDATE_DIR=dist/candidate-next CANDIDATE_VERSION=v0.0.0-rc.1 make operator-candidate
+          make operator-candidate-deps
+          CANDIDATE_VERSION=v0.0.0-rc.0 GOPROXY=off make operator-candidate
+          CANDIDATE_DIR=dist/candidate-next CANDIDATE_VERSION=v0.0.0-rc.1 GOPROXY=off make operator-candidate
 
       - name: Run the qualification suite
         env:
@@ -262,9 +264,9 @@ jobs:
   # The lifecycle scenarios from the newest published release: its chart and
   # images, attestations verified, upgraded mid-rollout to this commit's
   # candidate, rolled back with helm rollback and uninstalled in the documented
-  # order (docs/operator/lifecycle.md). Each release keeps its own AICR
-  # default, so when the two defaults differ the upgrade also moves AICR
-  # within v1.
+  # order (docs/operator/lifecycle.md). Each side runs its own AICR, unless
+  # this commit's .settings.yaml pin is older than the published release's;
+  # then both run the published release's (tools/operator-qualify).
   qualify-published:
     name: Qualify an upgrade from the published release on Kubernetes newest
     needs: [matrix, prime-images]
@@ -284,7 +286,10 @@ jobs:
           kubernetes: newest
 
       - name: Build the candidate
-        run: CANDIDATE_VERSION=v0.0.0-rc.0 make operator-candidate
+        run: |
+          set -euo pipefail
+          make operator-candidate-deps
+          CANDIDATE_VERSION=v0.0.0-rc.0 GOPROXY=off make operator-candidate
 
       - name: Qualify the upgrade from the published release
         env:

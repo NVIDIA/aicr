@@ -19,12 +19,12 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/validations"
-	"github.com/NVIDIA/aicr/pkg/collector/topology"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/bundler/validations"
+	"aicr.run/pkg/collector/topology"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
+	"aicr.run/pkg/snapshotter"
 )
 
 // gpuOperatorComponentName is the ComponentRef.Name used by the recipe
@@ -111,7 +111,7 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"(opt-out label absent) provision the GPU node pools with " +
 				"the GKE-managed driver install (node pool " +
 				"gpu-driver-version=default). With --profile " +
-				"gpuStack=bundle-installer (pools labeled " +
+				"gpuStack=bundle-installer or gpuStack=dra (pools labeled " +
 				"gke-no-default-nvidia-gpu-device-plugin=true and created " +
 				"with gpu-driver-version=disabled) the bundle's " +
 				"gcp-driver-installer component carries the installer " +

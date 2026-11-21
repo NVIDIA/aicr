@@ -34,7 +34,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
 )
 
 const (
@@ -60,13 +60,12 @@ type candidateManifest struct {
 }
 
 var (
-	k8s         client.Client
-	approver    client.Client
-	clientset   kubernetes.Interface
-	restConfig  *rest.Config
-	aicrVersion string
-	candidate   candidateManifest
-	next        candidateManifest
+	k8s        client.Client
+	approver   client.Client
+	clientset  kubernetes.Interface
+	restConfig *rest.Config
+	candidate  candidateManifest
+	next       candidateManifest
 	// operator impersonates the operator's ServiceAccount, the only identity
 	// the chart's policy lets create rollouts.
 	operator client.Client
@@ -79,10 +78,9 @@ var (
 
 func TestMain(m *testing.M) {
 	path := os.Getenv("AICR_OPERATOR_E2E_KUBECONFIG")
-	aicrVersion = os.Getenv("AICR_OPERATOR_E2E_AICR_VERSION")
 	lifecycleOnly = os.Getenv("AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY") != ""
-	if path == "" || aicrVersion == "" || os.Getenv("AICR_OPERATOR_QUALIFY_CANDIDATE") == "" {
-		msg := "AICR_OPERATOR_E2E_KUBECONFIG, AICR_OPERATOR_E2E_AICR_VERSION and AICR_OPERATOR_QUALIFY_CANDIDATE are required (run `make operator-qualify`)"
+	if path == "" || os.Getenv("AICR_OPERATOR_QUALIFY_CANDIDATE") == "" {
+		msg := "AICR_OPERATOR_E2E_KUBECONFIG and AICR_OPERATOR_QUALIFY_CANDIDATE are required (run `make operator-qualify`)"
 		if os.Getenv("OPERATOR_E2E_REQUIRED") != "" {
 			fmt.Fprintln(os.Stderr, msg)
 			os.Exit(1)
@@ -141,4 +139,13 @@ func setup(path string) error {
 		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:" + operatorNamespace, "system:authenticated"}}
 	operator, err = client.New(asOperator, client.Options{Scheme: scheme})
 	return err
+}
+
+// installedAICR is the AICR image candidate c runs: tools/operator-qualify
+// installs AICR_E2E_IMAGE over a candidate's own.
+func installedAICR(c *candidateManifest) string {
+	if image := os.Getenv("AICR_E2E_IMAGE"); image != "" {
+		return image
+	}
+	return c.AICR.Image
 }

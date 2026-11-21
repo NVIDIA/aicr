@@ -35,6 +35,7 @@ const (
 	flagIntent              = "intent"
 	flagOS                  = "os"
 	flagPlatform            = "platform"
+	flagNodes               = "nodes"
 	flagProfile             = "profile"
 	flagRequireEvidence     = "require-evidence"
 	flagSlurmAccountingMode = "slurm-accounting-mode"
@@ -53,6 +54,10 @@ const (
 	// flagValidatorSA names the existing ServiceAccount `aicr validate` runs
 	// its validator Jobs as, in place of per-run RBAC.
 	flagValidatorSA = "validator-service-account-name"
+
+	// flagNamespace is the shared -n/--namespace flag name used by the
+	// cluster-touching commands.
+	flagNamespace = "namespace"
 )
 
 // criteriaAny is the wildcard value for any criteria dimension.

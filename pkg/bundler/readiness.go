@@ -23,10 +23,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/gatemanifest"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 	"sigs.k8s.io/yaml"
 )
 
@@ -273,13 +273,13 @@ func componentGatePlacement(provider recipe.DataProvider, componentName string, 
 // manifest probe is the same one readiness-gate emission uses, avoiding a
 // warning for kind/Talos recipes where Network Operator installs no OFED/DOCA
 // policy.
-func (b *DefaultBundler) warnPeermemReadinessDisabled(
+func (r *bundleRun) warnPeermemReadinessDisabled(
 	ctx context.Context,
 	recipeResult *recipe.RecipeResult,
 	componentValues map[string]map[string]any,
 ) error {
 
-	if b.Config == nil || b.Config.ReadinessHooks() || recipeResult == nil {
+	if r.Config == nil || r.Config.ReadinessHooks() || recipeResult == nil {
 		return nil
 	}
 
@@ -315,7 +315,7 @@ func (b *DefaultBundler) warnPeermemReadinessDisabled(
 			"gpu_operator", pair.gpuOperator,
 			"network_operator", pair.networkOperator,
 			"readiness_hooks", false)
-		b.appendWarning(warning)
+		r.appendWarning(warning)
 		return nil
 	}
 

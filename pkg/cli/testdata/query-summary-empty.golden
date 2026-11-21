@@ -1,0 +1,24 @@
+RECIPE SUMMARY
+API Version:  -
+Kind:         -
+Version:      -
+GPU Driver:   unknown
+
+CRITERIA
+  Service:      any
+  Accelerator:  any
+  Intent:       any
+  OS:           any
+  Platform:     any
+
+OVERLAYS
+  Applied:  -
+
+CONSTRAINTS
+  -
+
+COMPONENTS (0)
+NAME  TYPE  VERSION  NAMESPACE  DEPENDS ON
+
+VALIDATION
+  -

@@ -18,11 +18,11 @@ import (
 	"strings"
 	"testing"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 func TestPublishedEvidenceRequired(t *testing.T) {
@@ -61,6 +61,19 @@ func TestPublishedEvidenceRequired(t *testing.T) {
 				t.Fatalf("PublishedEvidenceRequired(%q, %v) = %v, want %v", tt.raw, tt.requested, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestRequireEvidenceEnvVarEnablesCheck proves RequireEvidenceEnvVar names the
+// variable PublishedEvidenceRequired reads.
+func TestRequireEvidenceEnvVarEnablesCheck(t *testing.T) {
+	t.Setenv(aicr.RequireEvidenceEnvVar, "on")
+	got, err := aicr.PublishedEvidenceRequired("", false)
+	if err != nil {
+		t.Fatalf("PublishedEvidenceRequired: %v", err)
+	}
+	if !got {
+		t.Fatalf("%s=on did not enable the evidence check", aicr.RequireEvidenceEnvVar)
 	}
 }
 

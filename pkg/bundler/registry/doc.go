@@ -45,8 +45,8 @@
 //	package gpuoperator
 //
 //	import (
-//	    "github.com/NVIDIA/aicr/pkg/bundler/registry"
-//	    "github.com/NVIDIA/aicr/pkg/bundler/types"
+//	    "aicr.run/pkg/bundler/registry"
+//	    "aicr.run/pkg/bundler/types"
 //	)
 //
 //	func init() {
@@ -121,9 +121,9 @@
 //	reg := registry.NewFromGlobal(cfg)
 //	bundlers := reg.GetAll()
 //
-//	// Execute bundlers in parallel
-//	for _, b := range bundlers {
-//	    go b.Make(ctx, recipe, outputDir)
+//	// Concurrent Make calls need output directories that do not overlap.
+//	for bundleType, b := range bundlers {
+//	    go b.Make(ctx, recipe, filepath.Join(outputDir, string(bundleType)))
 //	}
 //
 // # Testing

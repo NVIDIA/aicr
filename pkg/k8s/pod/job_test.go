@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s/pod"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/k8s/pod"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"

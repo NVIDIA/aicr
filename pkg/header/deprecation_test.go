@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/header"
 )
 
 // This file replaces the WarnDeprecatedAPIVersion suite. Through ADR-022 §3

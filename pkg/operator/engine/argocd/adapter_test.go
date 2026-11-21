@@ -19,7 +19,9 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,9 +36,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/plan"
 )
 
 const (
@@ -565,6 +568,146 @@ func fakeAdapter(t *testing.T, objs ...client.Object) *Adapter {
 	mapper.Add(corev1.SchemeGroupVersion.WithKind("ConfigMap"), meta.RESTScopeNamespace)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithRESTMapper(mapper).WithObjects(objs...).Build()
 	return &Adapter{Writer: c, Reader: c, Mapper: mapper, Target: target}
+}
+
+// The inventory reads what each Application follows from the annotations
+// the operator wrote: its dependencies and a readiness release's parent.
+func TestInventoryReadsWhatAnApplicationFollows(t *testing.T) {
+	t.Parallel()
+	p, r := testPlan()
+	readiness := *r
+	readiness.ID, readiness.Phase, readiness.ReadinessFor, readiness.DependsOn = "cert-manager-readiness", plan.PhaseReadiness, "cert-manager", nil
+	alone := *r
+	alone.ID, alone.DependsOn = "nfd", nil
+	releases := []*plan.Release{r, &readiness, &alone}
+	apps := make([]client.Object, 0, len(releases))
+	for _, rel := range releases {
+		app, err := Application(target, p, rel, values)
+		if err != nil {
+			t.Fatalf("Application(%s) = %v", rel.ID, err)
+		}
+		apps = append(apps, app)
+	}
+	inv, err := fakeAdapter(t, apps...).Inventory(context.Background(), uid)
+	if err != nil {
+		t.Fatalf("Inventory() = %v", err)
+	}
+	want := map[string][]string{"cert-manager": {"a", "b"}, "cert-manager-readiness": {"cert-manager"}, "nfd": nil}
+	got := map[string][]string{}
+	for _, it := range inv {
+		got[it.ReleaseID] = it.Follows
+	}
+	if !maps.EqualFunc(got, want, slices.Equal[[]string]) {
+		t.Errorf("Inventory() follows %v, want %v", got, want)
+	}
+}
+
+// Unowned names the Applications that exist without this runtime's
+// ownership, however they lack it, and neither its own nor missing ones; a
+// read that fails is an error, never an empty answer.
+func TestUnownedNamesApplicationsOfOthers(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p, r := testPlan()
+	own, err := Application(target, p, r, values)
+	if err != nil {
+		t.Fatalf("Application() = %v", err)
+	}
+	app := func(name string, labels, annotations map[string]string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(ApplicationGVK)
+		u.SetNamespace(target.Namespace)
+		u.SetName(name)
+		u.SetLabels(labels)
+		u.SetAnnotations(annotations)
+		return u
+	}
+	managed := map[string]string{v1alpha1.LabelManagedBy: v1alpha1.ManagedByValue, v1alpha1.LabelRuntime: target.RuntimeName}
+	a := fakeAdapter(t, own,
+		app("unlabeled", nil, nil),
+		app("label-only", managed, nil),
+		app("uid-only", nil, map[string]string{v1alpha1.AnnotationRuntimeUID: uid}),
+		app("another-runtime", managed, map[string]string{v1alpha1.AnnotationRuntimeUID: "someone-else"}),
+	)
+	names := []string{"unlabeled", "cert-manager", "absent", "uid-only", "label-only", "another-runtime"}
+	got, err := a.Unowned(ctx, uid, names)
+	if want := []string{"another-runtime", "label-only", "uid-only", "unlabeled"}; err != nil || !slices.Equal(got, want) {
+		t.Fatalf("Unowned() = %v, %v, want %v", got, err, want)
+	}
+	if got, err = a.Unowned(ctx, uid, nil); err != nil || len(got) != 0 {
+		t.Fatalf("Unowned(no names) = %v, %v", got, err)
+	}
+
+	a.Reader = interceptor.NewClient(a.Reader.(client.WithWatch), interceptor.Funcs{
+		Get: func(_ context.Context, _ client.WithWatch, key client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+			if key.Name == "absent" {
+				return apierrors.NewTimeoutError("injected", 1)
+			}
+			return apierrors.NewNotFound(schema.GroupResource{Resource: "applications"}, key.Name)
+		},
+	})
+	if got, err = a.Unowned(ctx, uid, names); operrors.CodeOf(err) != operrors.ErrCodeUnavailable || got != nil {
+		t.Fatalf("Unowned(failed read) = %v, %v, want UNAVAILABLE", got, err)
+	}
+}
+
+// Unowned never has more than defaults.EngineReadConcurrency reads in
+// flight, however many names it is given. Every read is held until that
+// many have started, so the bound is observed, not inferred from timing.
+func TestUnownedBoundsItsReads(t *testing.T) {
+	t.Parallel()
+	a := fakeAdapter(t)
+	names := make([]string, 4*defaults.EngineReadConcurrency)
+	for i := range names {
+		names[i] = "release-" + strconv.Itoa(i)
+	}
+	var inFlight, peak atomic.Int32
+	started, release := make(chan struct{}, len(names)), make(chan struct{})
+	a.Reader = interceptor.NewClient(a.Reader.(client.WithWatch), interceptor.Funcs{
+		Get: func(_ context.Context, _ client.WithWatch, key client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+			now := inFlight.Add(1)
+			defer inFlight.Add(-1)
+			for {
+				seen := peak.Load()
+				if now <= seen || peak.CompareAndSwap(seen, now) {
+					break
+				}
+			}
+			started <- struct{}{}
+			<-release
+			return apierrors.NewNotFound(schema.GroupResource{Resource: "applications"}, key.Name)
+		},
+	})
+	type result struct {
+		names []string
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		got, err := a.Unowned(context.Background(), uid, names)
+		done <- result{got, err}
+	}()
+	for n := range defaults.EngineReadConcurrency {
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			close(release)
+			t.Fatalf("only %d reads started, want %d at once", n, defaults.EngineReadConcurrency)
+		}
+	}
+	// With the bound reached and every read held, one more must not start.
+	select {
+	case <-started:
+		t.Errorf("more than %d reads in flight", defaults.EngineReadConcurrency)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	if r := <-done; r.err != nil || len(r.names) != 0 {
+		t.Fatalf("Unowned() = %v, %v", r.names, r.err)
+	}
+	if got := int(peak.Load()); got != defaults.EngineReadConcurrency {
+		t.Errorf("peak reads in flight = %d, want the bound %d", got, defaults.EngineReadConcurrency)
+	}
 }
 
 func TestEnsureWritesOwnedAndRefusesForeign(t *testing.T) {

@@ -17,8 +17,8 @@ package validations
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/recipe"
 )
 
 // setJSONOverride runs a spec through the real --set-json decode path

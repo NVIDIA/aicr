@@ -17,7 +17,7 @@ package attestation
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
+	"aicr.run/pkg/defaults"
 )
 
 func TestRekorPolicyLogs(t *testing.T) {

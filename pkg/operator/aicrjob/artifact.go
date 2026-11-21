@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"io"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // maxArtifactBytes bounds any AICR artifact the operator decodes; it matches

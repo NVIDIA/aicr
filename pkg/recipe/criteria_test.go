@@ -24,7 +24,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/serializer"
 )
 
 func TestParseCriteriaServiceType(t *testing.T) {
@@ -99,6 +99,7 @@ func TestParseCriteriaAcceleratorType(t *testing.T) {
 		{"b200", "b200", CriteriaAcceleratorB200, false},
 		{"b300", "b300", CriteriaAcceleratorB300, false},
 		{"B300 whitespace", " B300 ", CriteriaAcceleratorB300, false},
+		{"GB10 uppercase", "GB10", CriteriaAcceleratorGB10, false},
 		{"gb300 distinct", "gb300", CriteriaAcceleratorGB300, false},
 		{"a100", "a100", CriteriaAcceleratorA100, false},
 		{"l40", "l40", CriteriaAcceleratorL40, false},
@@ -756,7 +757,7 @@ func TestGetCriteriaAcceleratorTypes(t *testing.T) {
 	types := GetCriteriaAcceleratorTypes()
 
 	// Should return sorted list
-	expected := []string{"a100", "b200", "b300", "gb200", "gb300", "h100", "h200", "l40", "l40s", "rtx-pro-6000", "vr200"}
+	expected := []string{"a100", "b200", "b300", "gb10", "gb200", "gb300", "h100", "h200", "l40", "l40s", "rtx-pro-6000", "vr200"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaAcceleratorTypes() returned %d types, want %d", len(types), len(expected))
 	}

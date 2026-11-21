@@ -20,9 +20,9 @@ import (
 	"strings"
 	"testing"
 
-	aicrhelm "github.com/NVIDIA/aicr/pkg/helm"
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	aicrhelm "aicr.run/pkg/helm"
+	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/recipe"
 )
 
 // The two images the nvsentinel-nic-health-monitor mixin adds, as disclosed
@@ -30,7 +30,7 @@ import (
 // against its base values only, so it cannot see a mixin-gated subchart --
 // these assertions are what keep that note honest.
 const (
-	nicHealthMonitorImage = "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.28.0"
+	nicHealthMonitorImage = "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.32.0"
 	// Asserting this also pins the override that displaces the chart's
 	// frozen bitnamilegacy default; a dropped override renders the chart
 	// value and fails here rather than shipping quietly.

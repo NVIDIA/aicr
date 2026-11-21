@@ -21,8 +21,8 @@ import (
 	"strings"
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 // newNvsentinelAllowlistStore builds a MetadataStore backed by an
@@ -89,6 +89,15 @@ func TestMixinOverridesSafeForMerge(t *testing.T) {
 			},
 			existingOverrides: map[string]any{
 				"global": map[string]any{"auditLogging": map[string]any{"enabled": true}},
+			},
+		},
+		{
+			// An external copy of nvsentinel-slinky-drainer written for
+			// v1.31.0 sets customDrain.timeout, which v1.32.0 no longer reads.
+			name:          "nvsentinel leftover customDrain.timeout -> safe",
+			componentName: "nvsentinel",
+			mixinOverrides: map[string]any{
+				"node-drainer": map[string]any{"customDrain": map[string]any{"timeout": "1800"}},
 			},
 		},
 		{

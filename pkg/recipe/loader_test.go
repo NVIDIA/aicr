@@ -26,10 +26,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/header"
 )
 
 type unexpectedLoadProvider struct {
@@ -145,6 +145,18 @@ spec:
 			yamlContent: "kind: SomethingElse\napiVersion: aicr.run/v1\n",
 			wantErr:     true,
 			errContain:  `kind "SomethingElse"`,
+		},
+		{
+			// The kind is checked before the body is decoded as a RecipeResult,
+			// so a field of the same name and another type (a summary's
+			// validation list) cannot hide which document this is.
+			name: "RecipeSummary kind rejected before its body is decoded",
+			yamlContent: "apiVersion: aicr.run/v1beta1\nkind: RecipeSummary\n" +
+				"source: {apiVersion: aicr.run/v1, kind: RecipeResult}\n" +
+				"components: [{name: gpu-operator}]\n" +
+				"validation:\n  - {name: deployment, checks: [operator-health]}\n",
+			wantErr:    true,
+			errContain: `recipe file has kind "RecipeSummary", but "RecipeResult" is required`,
 		},
 		{
 			name:        "empty kind allowed",

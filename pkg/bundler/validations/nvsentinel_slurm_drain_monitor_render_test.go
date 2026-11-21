@@ -24,8 +24,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/recipe"
 )
 
 const (
@@ -33,7 +33,7 @@ const (
 	// slurmDrainMonitorImage is the image docs/user/container-images.md
 	// discloses for the mixin. The static BOM cannot see a mixin-gated
 	// subchart, so this assertion is what keeps that note honest.
-	slurmDrainMonitorImage = "ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.28.0"
+	slurmDrainMonitorImage = "ghcr.io/nvidia/nvsentinel/slurm-drain-monitor:v1.32.0"
 	slurmDrainMonitorName  = "slurm-drain-monitor"
 )
 

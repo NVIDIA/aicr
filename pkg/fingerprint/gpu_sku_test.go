@@ -44,6 +44,8 @@ func TestParseGPUSKU(t *testing.T) {
 		// B200 variants.
 		{"B200 bare", "NVIDIA B200", "b200"},
 		{"HGX B200", "NVIDIA HGX B200", "b200"},
+		// GB10 (DGX Spark).
+		{"GB10 bare", "NVIDIA GB10", "gb10"},
 		// GB200 variants (distinct token; no ordering dependency — "GB200" ≠ "B200" under exact-token matching).
 		{"GB200 bare", "NVIDIA GB200", "gb200"},
 		{"GB200 NVL72", "NVIDIA GB200 NVL72", "gb200"},
@@ -68,6 +70,7 @@ func TestParseGPUSKU(t *testing.T) {
 		{"label H200", "NVIDIA-H200", "h200"},
 		{"label A100 SXM4 80GB", "NVIDIA-A100-SXM4-80GB", "a100"},
 		{"label B200", "NVIDIA-B200", "b200"},
+		{"label GB10", "NVIDIA-GB10", "gb10"},
 		{"label GB200 NVL72", "NVIDIA-GB200-NVL72", "gb200"},
 		{"label L40", "NVIDIA-L40", "l40"},
 		{"label L40S", "NVIDIA-L40S", "l40s"},

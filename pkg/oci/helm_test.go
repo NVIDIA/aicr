@@ -30,7 +30,7 @@ import (
 	"sync"
 	"testing"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 )
 
 func writeHelmChartFixture(t *testing.T, chartName string) string {

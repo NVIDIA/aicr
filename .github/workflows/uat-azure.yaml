@@ -237,7 +237,7 @@ jobs:
         # Main cells only: release cells install a prebuilt binary and must not
         # depend on the source Go toolchain (a broken Go pin shouldn't fail them).
         if: inputs.aicr_version == '' && inputs.skip_tests != true
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
@@ -268,7 +268,7 @@ jobs:
           # this step is main-only.
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           go build \
-            -ldflags "-X github.com/NVIDIA/aicr/pkg/cli.version=main -X github.com/NVIDIA/aicr/pkg/cli.commit=${COMMIT_SHA} -X github.com/NVIDIA/aicr/pkg/cli.date=${BUILD_DATE}" \
+            -ldflags "-X aicr.run/pkg/cli.version=main -X aicr.run/pkg/cli.commit=${COMMIT_SHA} -X aicr.run/pkg/cli.date=${BUILD_DATE}" \
             -o ./aicr ./cmd/aicr
           # Assert the stamp actually landed — a broken ldflags target path would
           # otherwise silently leave the binary on the default dev/unknown

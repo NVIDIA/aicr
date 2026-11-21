@@ -20,10 +20,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe/catalog"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe/catalog"
 )
 
 func TestVerify_BundleNotFound(t *testing.T) {

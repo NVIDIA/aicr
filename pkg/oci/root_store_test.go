@@ -34,7 +34,7 @@ import (
 	"oras.land/oras-go/v2/content"
 	storeoci "oras.land/oras-go/v2/content/oci"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 )
 
 func TestRootOCIStoreInitializesDeterministicLayout(t *testing.T) {

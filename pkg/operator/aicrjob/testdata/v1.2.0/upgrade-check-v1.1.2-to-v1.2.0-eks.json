@@ -1,0 +1,67 @@
+{
+  "from": "/v112/recipe-h100-eks-ubuntu-training-kubeflow.json",
+  "to": "/w/recipe-h100-eks-ubuntu-training-kubeflow.json",
+  "deployer": "argocd",
+  "objectNamesCompared": false,
+  "objectNamesSkipped": "a recipe file records its values by reference, not by value, so it does not state the object names it deployed with. Compare against the bundle directory instead",
+  "components": [
+    {
+      "component": "nfd",
+      "change": "version",
+      "from": "0.19.0",
+      "to": "0.20.1",
+      "verdict": "manual",
+      "notes": "1 minor, 3 steps",
+      "reason": "recorded",
+      "explanation": "recorded manual: the record covering 0.20.1 describes the move from 0.19.0 to 0.20.1. Follow the steps below, then apply",
+      "jump": "1 minor",
+      "covers": "1 minor",
+      "breaking": true,
+      "downgrade": false,
+      "summary": "0.20.0 moves nfd-topology-updater to server-side apply, so its ClusterRole needs create and patch on noderesourcetopologies instead of get and update. The chart ships that rule, so chart-managed RBAC (AICR's default) needs nothing; RBAC managed outside the chart without patch crash-loops every 0.20.x topology-updater pod on its first NodeResourceTopology update.",
+      "precondition": "Know who manages the topology-updater RBAC. The steps that change it apply only when your nfd override sets topologyUpdater.rbac.create=false (check the bundle's nfd values.yaml and any --set nfd: flags). Without that override the chart manages the rule and those steps do not apply.",
+      "steps": [
+        {
+          "id": "widen-nrt-rbac",
+          "description": "Only with topologyUpdater.rbac.create=false: before the nfd release moves to 0.20.1, add create and patch to the noderesourcetopologies (topology.node.k8s.io) rule of the ClusterRole bound to the topology-updater service account, keeping get and update.",
+          "reason": "0.20.x pods write NodeResourceTopology with server-side apply and crash-loop without patch. 0.19.0 pods still running during the DaemonSet rollout, or after a rollback, need get and update."
+        },
+        {
+          "id": "sync-nfd",
+          "description": "Sync or reconcile the nfd release.",
+          "reason": "Moves nfd to 0.20.1."
+        },
+        {
+          "id": "narrow-nrt-rbac",
+          "description": "Only if you ran widen-nrt-rbac: once every topology-updater pod runs 0.20.x and you no longer need a rollback path, drop get and update from that rule.",
+          "reason": "0.20.x needs only create and patch, which is all the chart's own rule grants."
+        }
+      ],
+      "failsRun": true
+    },
+    {
+      "component": "nvidia-dra-driver-gpu",
+      "change": "version",
+      "from": "0.5.0",
+      "to": "0.5.1",
+      "verdict": "safe",
+      "notes": "1 patch, verified",
+      "reason": "recorded",
+      "explanation": "recorded safe: the record covering 0.5.1 describes the move from 0.5.0 to 0.5.1, verified by \"Live helm upgrade of the nvidia-dra-driver-gpu release from 0.5.0 to 0.5.1 with unchanged values on a two-node GB200 NVKE cluster (2026-10-29): controller and kubelet plugins rolled to v0.5.1 and the nccl-all-reduce-bw-nvls check passed across both nodes (839.5 GB/s, NVLS), where 0.5.0 could not form a two-node ComputeDomain. A diff -r of the two pulled charts shows identical CRDs, the same kubeVersion floor, the same workload and ServiceAccount names, and one new optional value (resources.computeDomains.imex.config, default empty). Upstream v0.5.1 release note and kubernetes-sigs/dra-driver-nvidia-gpu#1527.\"",
+      "jump": "1 patch",
+      "covers": "1 patch",
+      "breaking": false,
+      "downgrade": false,
+      "summary": "Patch release. The compute-domain daemon role gains delete on computedomaincliques, without which daemons joining an existing NVLink clique cannot register under the OwnerReferencesPermissionEnforcement admission plugin. The ResourceSlice ValidatingAdmissionPolicy now matches the real kubelet-plugin ServiceAccount, so its node restriction applies to the plugin's identity for the first time; it needs node-bound ServiceAccount tokens, which Kubernetes 1.32 (the chart's floor) provides. Nothing to change on upgrade.",
+      "failsRun": false
+    }
+  ],
+  "summary": {
+    "components": 2,
+    "failing": 1
+  },
+  "atRisk": {
+    "scanned": false,
+    "reason": "no cluster access requested"
+  }
+}

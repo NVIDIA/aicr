@@ -49,12 +49,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	"github.com/NVIDIA/aicr/pkg/version"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator/ctrf"
+	"aicr.run/pkg/version"
 )
 
 const (
@@ -78,7 +78,11 @@ const (
 	//   - v9 added the text scrub (TextScrubber) the CNCF submission
 	//     directory is passed through: IP, MAC and UUID aliases, container
 	//     ID and AWS account aliases, node-name aliases, JWT removal.
-	PolicyVersion = "v9"
+	//   - v10 added the resultSchema stamp naming the result contract the
+	//     validator image spoke.
+	//   - v11 added the no-metrics-backend skipReason code.
+	//   - v12 added the superseded-by-cre skipReason code.
+	PolicyVersion = "v12"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -152,7 +156,7 @@ var snapshotAllowlist = map[measurement.Type]map[string]subtypePolicy{
 			"VERSION_ID",
 			"VERSION_CODENAME",
 		),
-		// grub, sysctl, kmod intentionally absent → dropped (tuning/hardening posture)
+		// grub, sysctl, kmod, kmod-param intentionally absent → dropped (tuning/hardening posture)
 	},
 	measurement.TypeNodeTopology: {
 		"summary": keep("node-count", "taint-count", "label-count"), // counts, not identifiers
@@ -252,6 +256,8 @@ var ctrfSkipReasons = []string{
 	"dra-driver-not-installed", // standalone run with no NVIDIA DRA driver on the cluster
 	"slurm-managed-gpus",       // GPUs are allocated by Slurm, not the Kubernetes scheduler
 	"simulated-nodes",          // the workload runs on KWOK simulated nodes
+	"no-metrics-backend",       // telemetry goes to a backend the check has no query URL for
+	"superseded-by-cre",        // the recipe's qualified CRE NCCL check measures this bandwidth instead
 }
 
 // ctrfGPUAllocationPolicies holds the pkg/validator/v1 GPUAllocationPolicy*
@@ -327,7 +333,13 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 
 	// A passed result that recorded observations and drove no behavioral
 	// test; the CNCF aggregation renders its requirement OBSERVED, not PASSED.
-	"observationOnly": closedSet("true", "false"),
+	ctrf.ExtraKeyObservationOnly: closedSet("true", "false"),
+
+	// The result contract the validator image spoke, stamped on every result;
+	// the CNCF aggregation reads an unmarked pass of an observation-only
+	// check as observed either way and uses it only to word the reason. Only
+	// the versions a reader knows are publishable.
+	ctrf.ExtraKeyResultSchema: closedSet(ctrf.ResultSchemaVersion),
 }
 
 // ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.

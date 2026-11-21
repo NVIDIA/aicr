@@ -48,6 +48,8 @@ navigation:
         path: user/fabric-attached-training.md
       - page: CLI Configuration File
         path: user/cli-config.md
+      - page: Artifact Inventories and Bindings
+        path: user/artifact-inventory.md
       - page: Artifact Verification
         path: user/artifact-verification.md
       - page: API Reference
@@ -128,6 +130,8 @@ navigation:
         path: integrator/nvke-gb200-setup.md
       - page: NVKE VR200 Setup
         path: integrator/nvke-vr200-setup.md
+      - page: NVKE GB300 Setup
+        path: integrator/nvke-gb300-setup.md
       - page: EKS Dynamo Networking
         path: integrator/eks-dynamo-networking.md
       - page: GKE TCPXO Networking

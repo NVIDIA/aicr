@@ -34,11 +34,11 @@ import (
 
 	"github.com/sigstore/sigstore-go/pkg/verify"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // readBoundedFile applies a bounded compatibility context to verifier inputs.
@@ -127,7 +127,7 @@ const (
 	TrustedRepositoryPattern = `^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.*`
 
 	// requiredRepoPrefix includes the scheme+domain to ensure github.com is the
-	// actual domain, not a path segment (e.g., "evil.com/github.com/NVIDIA/aicr/"
+	// actual domain, not a path segment (e.g., "evil.com/github.com/NVIDIA/aicr/" // module-rename:keep
 	// would bypass a domain-less check). The escaped form handles regex patterns.
 	requiredRepoPrefix        = "://github.com/NVIDIA/aicr/"
 	requiredRepoPrefixEscaped = `://github\.com/NVIDIA/aicr/`

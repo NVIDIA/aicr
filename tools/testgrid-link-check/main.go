@@ -44,10 +44,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/NVIDIA/aicr/pkg/corroborate"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/testgrid"
+	"aicr.run/pkg/corroborate"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/testgrid"
 )
 
 func main() {

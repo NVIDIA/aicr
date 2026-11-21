@@ -25,8 +25,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
+	"aicr.run/pkg/recipe/providertest"
+	"aicr.run/pkg/upgrade"
 )
 
 // TestRealUpgradeRecordsWellFormed runs the ADR-021 well-formedness rules over

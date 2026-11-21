@@ -30,8 +30,8 @@ import (
 	"oras.land/oras-go/v2/registry/remote/errcode"
 	"oras.land/oras-go/v2/registry/remote/retry"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // URIScheme prefixes repository references in plans and engine objects.
@@ -138,7 +138,8 @@ func (c *Client) repository(r Repository) (*remote.Repository, error) {
 }
 
 // Resolve returns the manifest digest a tag currently points at.
-func (c *Client) Resolve(ctx context.Context, r Repository, tag string) (string, error) {
+func (c *Client) Resolve(ctx context.Context, r Repository, tag string) (_ string, err error) {
+	defer observe(opResolve, &err)
 	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
 	defer cancel()
 	repo, err := c.repository(r)

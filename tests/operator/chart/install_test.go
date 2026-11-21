@@ -38,11 +38,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/plugin"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
+	"aicr.run/pkg/operator/engine/argocd"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/plugin"
 )
 
 const (
@@ -916,8 +916,11 @@ func tenants(t *testing.T) {
 	}
 	const tenant = "alice"
 	groups := []string{"tenants"}
-	if !allowed(ctx, t, tenant, groups, authorizationv1.ResourceAttributes{Verb: "create", Group: "apps", Resource: "deployments", Namespace: "team-a"}) {
-		t.Fatal("the tenant cannot manage its own namespace; the check proves nothing")
+	// RoleBinding writes can complete before the RBAC authorizer observes them.
+	if err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		return allowed(ctx, t, tenant, groups, authorizationv1.ResourceAttributes{Verb: "create", Group: "apps", Resource: "deployments", Namespace: "team-a"}), nil
+	}); err != nil {
+		t.Fatalf("the tenant cannot manage its own namespace; the check proves nothing: %v", err)
 	}
 	operatorGroup := v1alpha1.GroupVersion.Group
 	surfaces := make([]authorizationv1.ResourceAttributes, 0, 64)

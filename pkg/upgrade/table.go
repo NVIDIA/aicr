@@ -21,7 +21,7 @@ import (
 	"text/tabwriter"
 	"unicode"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // reportWrapWidth is the column the detail blocks wrap prose at, indent

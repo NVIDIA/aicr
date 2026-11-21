@@ -40,15 +40,28 @@ spec:
   # the generated Service, and loadBalancerSourceRanges is a portable Service
   # field honored by the AWS, GCP, Azure, and OCI cloud load balancers — so this
   # single setting locks the gateway down on every platform. Through `aicr
-  # bundle`, allowedSourceRanges is never empty here: the bundler injects the
-  # private RFC1918 ranges by default (see #1373). A literally-empty value (e.g.
-  # rendering this chart standalone, outside the bundler) leaves the Service
-  # unrestricted (0.0.0.0/0).
-  {{- if $agw.allowedSourceRanges }}
+  # bundle`, allowedSourceRanges is never empty here for a LoadBalancer
+  # serviceType: the bundler injects the private RFC1918 ranges by default (see
+  # #1373). For a ClusterIP or NodePort serviceType the bundler injects nothing,
+  # because loadBalancerSourceRanges is a LoadBalancer-only field, and a
+  # NodePort gateway is reachable by every client that can reach a node. A
+  # literally-empty value (e.g. rendering this chart standalone, outside the
+  # bundler) leaves the Service unrestricted (0.0.0.0/0).
+  {{- /* serviceType overrides the controller default Service type, LoadBalancer, where no LB provider exists. */}}
+  {{- /* loadBalancerSourceRanges is LoadBalancer-only and rejected on other types, so it renders only for that type. */}}
+  {{- /* Template comments keep the default render byte-identical. */}}
+  {{- $serviceType := $agw.serviceType | default "LoadBalancer" }}
+  {{- $sourceRanges := and $agw.allowedSourceRanges (eq $serviceType "LoadBalancer") }}
+  {{- if or $agw.serviceType $sourceRanges }}
   service:
     spec:
+      {{- if $agw.serviceType }}
+      type: {{ $agw.serviceType }}
+      {{- end }}
+      {{- if $sourceRanges }}
       loadBalancerSourceRanges:
         {{- toYaml $agw.allowedSourceRanges | nindent 8 }}
+      {{- end }}
   {{- end }}
   deployment:
     metadata:

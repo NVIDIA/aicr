@@ -20,8 +20,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 func TestDigestPinnedRecipe(t *testing.T) {

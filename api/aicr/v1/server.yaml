@@ -685,6 +685,8 @@ paths:
         - $ref: "#/components/parameters/WorkloadGate"
         - $ref: "#/components/parameters/WorkloadSelector"
         - $ref: "#/components/parameters/BundleNodes"
+        - $ref: "#/components/parameters/RuntimeMetricsSeries"
+        - $ref: "#/components/parameters/RuntimeMetricsNamespace"
         - $ref: "#/components/parameters/VendorCharts"
         - $ref: "#/components/parameters/Serial"
         - $ref: "#/components/parameters/Split"
@@ -977,7 +979,7 @@ components:
       description: GPU/accelerator type.
       schema:
         type: string
-        enum: [h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
+        enum: [h100, h200, gb10, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
         default: any
     GPUAlias:
       name: gpu
@@ -986,7 +988,7 @@ components:
       description: Backward-compatible alias for accelerator.
       schema:
         type: string
-        enum: [h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
+        enum: [h100, h200, gb10, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
         default: any
     Intent:
       name: intent
@@ -1109,7 +1111,12 @@ components:
       description: >-
         Repeatable install-time component:path declaration. Rejected with
         HTTP 400 when the component is absent from the generated bundle;
-        no path is exempt. Certain gate- or contract-owned paths on present
+        no path is exempt. A declaration on a manifest-only or Kustomize
+        component is also rejected with HTTP 400, because its templates are
+        rendered when the bundle is built; the exception is a manifest-only
+        component with deployer=flux, which Flux renders at reconcile time.
+        Certain
+        gate- or contract-owned paths on present
         components are also rejected (driver-ownership paths, GPU
         allocation-policy keys, the DRA eviction paths
         kubeletPlugin.nodeSelector and driver.manager.env when both contract
@@ -1230,6 +1237,40 @@ components:
         type: integer
         minimum: 0
         default: 0
+    RuntimeMetricsSeries:
+      name: runtime-metrics-series
+      in: query
+      required: false
+      description: >
+        Repeatable metric name pattern (RE2, matched against the whole name)
+        that the runtime Prometheus server keeps, in addition to the series
+        the recipe's components declare. Rejected when the recipe enables no
+        runtime Prometheus server, or `bundlers` leaves it out.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+      example: ["inference_queue_depth"]
+    RuntimeMetricsNamespace:
+      name: runtime-metrics-namespace
+      in: query
+      required: false
+      description: >
+        Repeatable namespace whose ServiceMonitors and PodMonitors the runtime
+        Prometheus server loads, in addition to its own namespace and the
+        namespaces the recipe's own consumers read. A monitor in any other
+        namespace, another component's included, is not loaded unless that
+        namespace is listed. Rejected when the recipe enables no runtime
+        Prometheus server, or `bundlers` leaves it out.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+      example: ["inference"]
     VendorCharts:
       name: vendor-charts
       in: query
@@ -1317,7 +1358,9 @@ components:
       required: false
       description: >-
         spec.syncPolicy.retry.limit on every child Application (argocd,
-        argocd-helm). Omit to leave retry to Argo CD's auto-sync default; 0
+        argocd-helm). Omit to leave retry to Argo CD's auto-sync default,
+        except where a component declares its own default (dynamo-platform
+        when the recipe includes grove); set, it replaces those defaults. 0
         disables retries. Required by the backoff parameters.
       schema:
         type: integer
@@ -1409,7 +1452,7 @@ components:
         accelerator:
           type: string
           description: GPU/accelerator type
-          enum: [h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
+          enum: [h100, h200, gb10, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any]
           example: h100
         intent:
           type: string
@@ -1611,6 +1654,15 @@ components:
                 means a Percona operator pod AICR did not install runs, with
                 no other PerconaServerMongoDB resources.
               enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
+            rdmaNamespaceMode:
+              type: string
+              description: >
+                The RDMA subsystem's network namespace mode (ib_core
+                netns_mode) observed during snapshot-driven resolution. A
+                bundle whose RDMA attachment does not match it (the rdma CNI
+                needs exclusive, host-device alone needs shared) produces a
+                non-blocking warning.
+              enum: [exclusive, shared, unknown]
         criteria:
           $ref: "#/components/schemas/Criteria"
           description: Original criteria parameters
@@ -1919,6 +1971,7 @@ components:
                   - mariaDBOperatorState
                   - defaultStorageClassState
                   - perconaOperatorState
+                  - rdmaNamespaceMode
                   - selectedProfile
               properties:
                 mariaDBOperatorState:
@@ -1930,6 +1983,9 @@ components:
                 perconaOperatorState:
                   type: string
                   enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
+                rdmaNamespaceMode:
+                  type: string
+                  enum: [exclusive, shared, unknown]
                 excludedOverlays:
                   type: array
                   items:
@@ -2073,6 +2129,7 @@ components:
                       - mariaDBOperatorState
                       - defaultStorageClassState
                       - perconaOperatorState
+                      - rdmaNamespaceMode
                       - selectedProfile
                   not:
                     required: [selectedProfile]
@@ -2086,6 +2143,9 @@ components:
                     perconaOperatorState:
                       type: string
                       enum: [absent, api-detected, aicr-owned, operator-detected, crs-detected, unknown]
+                    rdmaNamespaceMode:
+                      type: string
+                      enum: [exclusive, shared, unknown]
                     excludedOverlays:
                       type: array
                       items:

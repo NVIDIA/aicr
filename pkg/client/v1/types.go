@@ -19,9 +19,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // Phase identifies a single validation phase. Facade-owned so the
@@ -254,7 +254,7 @@ type AgentConfig struct {
 //
 // Field meanings match the pkg/recipe.Criteria documentation:
 //   - Service: Kubernetes service flavor (eks/gke/aks/oke/ocp/kind/lke/bcm/metal3/rke2/generic/k0s/mk8s/nvke/cks).
-//   - Accelerator: GPU model identifier (h100/h200/b200/b300/gb200/gb300/a100/l40/l40s/rtx-pro-6000/vr200).
+//   - Accelerator: GPU model identifier (h100/h200/b200/b300/gb10/gb200/gb300/a100/l40/l40s/rtx-pro-6000/vr200).
 //   - Intent: workload intent (training/inference).
 //   - OS: worker-node OS (ubuntu/rhel/cos/amazonlinux/talos/ol/sles/rocky).
 //   - Platform: framework overlay (dynamo/kubeflow/kueue/nim/runai/slurm).

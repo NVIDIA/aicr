@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -34,14 +35,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
-	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
-	"github.com/NVIDIA/aicr/pkg/operator/resolver"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/registry"
+	"aicr.run/pkg/operator/registry/registrytest"
+	"aicr.run/pkg/operator/resolver"
 )
 
 // fakeRegistry serves one rendered bundle and mirrors charts in memory,
@@ -316,38 +317,55 @@ func TestResolverReplacesLostAndStaleRuns(t *testing.T) {
 	}
 }
 
-// Out-of-range and mismatched AICR versions stall resolution with
-// AICRVersionMismatch before any plan exists.
+// A rejected AICR version stalls resolution with AICRVersionMismatch before
+// any plan or render Job exists.
 func TestResolverVersionGate(t *testing.T) {
 	ctx := testContext(t)
-	freshRuntime(t, ctx, nil)
-	r, _ := newResolver(t)
-	r.Config.AICRVersion = "v2.0.0"
-	if err := reconcileResolver(t, ctx, r); err != nil {
-		t.Fatal(err)
+	tests := map[string]struct {
+		wantReason      string
+		wantRender      bool
+		version         string
+		allowPrerelease bool
+		// reported is the version the recipe run reports. Empty means no
+		// recipe run may start.
+		reported string
+	}{
+		"out-of-range version":             {wantReason: aicrjob.ReasonVersionMismatch, wantRender: false, version: "v2.0.0", allowPrerelease: false, reported: ""},
+		"artifact reports another version": {wantReason: aicrjob.ReasonVersionMismatch, wantRender: false, version: "v1.0.1", allowPrerelease: false, reported: "1.0.0"},
+		"prerelease without opt-in":        {wantReason: aicrjob.ReasonVersionMismatch, wantRender: false, version: "v1.0.1-rc.1", allowPrerelease: false, reported: ""},
+		"prerelease with opt-in":           {wantReason: ReasonResolving, wantRender: true, version: "v1.0.1-rc.1", allowPrerelease: true, reported: "1.0.1-rc.1"},
 	}
-	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionResolved); c.Reason != aicrjob.ReasonVersionMismatch || c.Status != metav1.ConditionFalse {
-		t.Fatalf("out of range: Resolved = %+v", c)
-	}
-	if len(liveJobs(t, ctx, "recipe")) != 0 {
-		t.Fatal("an out-of-range version started a Job")
-	}
-
-	r.Config.AICRVersion = "v1.0.1"
-	if err := reconcileResolver(t, ctx, r); err != nil {
-		t.Fatal(err)
-	}
-	job := liveJobs(t, ctx, "recipe")[0]
-	succeed(t, ctx, &job, lanRecipe(t))
-	if err := reconcileResolver(t, ctx, r); err != nil {
-		t.Fatal(err)
-	}
-	rt := getRuntime(t, ctx)
-	if c := cond(rt, v1alpha1.ConditionResolved); c.Reason != aicrjob.ReasonVersionMismatch || rt.Status.CandidatePlanDigest != "" {
-		t.Fatalf("mismatch: Resolved = %+v, candidate %q", c, rt.Status.CandidatePlanDigest)
-	}
-	if len(liveJobs(t, ctx, "render")) != 0 {
-		t.Fatal("a mismatched artifact reached the render stage")
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			freshRuntime(t, ctx, nil)
+			r, _ := newResolver(t)
+			r.Config.AICRVersion, r.Config.AllowPrereleaseAICR = tt.version, tt.allowPrerelease
+			if err := reconcileResolver(t, ctx, r); err != nil {
+				t.Fatal(err)
+			}
+			jobs := liveJobs(t, ctx, "recipe")
+			if tt.reported == "" {
+				if len(jobs) != 0 {
+					t.Fatalf("%d recipe Jobs started, want none", len(jobs))
+				}
+			} else {
+				if len(jobs) != 1 {
+					t.Fatalf("%d recipe Jobs started, want 1", len(jobs))
+				}
+				recipe := strings.Replace(string(lanRecipe(t)), `"version": "1.0.0"`, `"version": "`+tt.reported+`"`, 1)
+				succeed(t, ctx, &jobs[0], []byte(recipe))
+				if err := reconcileResolver(t, ctx, r); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rt := getRuntime(t, ctx)
+			if c := cond(rt, v1alpha1.ConditionResolved); c.Status != metav1.ConditionFalse || c.Reason != tt.wantReason || rt.Status.CandidatePlanDigest != "" {
+				t.Fatalf("Resolved = %+v, candidate %q, want False/%s and no plan", c, rt.Status.CandidatePlanDigest, tt.wantReason)
+			}
+			if got := len(liveJobs(t, ctx, "render")) > 0; got != tt.wantRender {
+				t.Fatalf("render Job started = %t, want %t", got, tt.wantRender)
+			}
+		})
 	}
 }
 
@@ -485,11 +503,14 @@ func TestResolverSurvivesAFaultAtEveryWrite(t *testing.T) {
 // still stalls after maxStageRuns.
 // A transient error while a resolved runtime re-resolves for changed inputs
 // of the same generation (such as the snapshot refresh) keeps it Resolved
-// with its candidate and discovery, and says what it retries.
+// with its candidate and discovery, and says what it retries. The
+// resolution time stays at the last completed resolution meanwhile.
 func TestResolverTransientErrorKeepsTheResolution(t *testing.T) {
 	ctx := testContext(t)
 	freshRuntime(t, ctx, nil)
 	r, reg := newResolver(t)
+	resolvedAt := time.Unix(10_000, 0)
+	r.Now = func() time.Time { return resolvedAt }
 	candidate := resolveCandidate(t, ctx, r, reg)
 	discovered := &v1alpha1.DiscoveryStatus{AcceleratedNodes: 2, SystemNodes: 1}
 	if err := r.applyStatus(ctx, getRuntime(t, ctx), &resolution{status: metav1.ConditionTrue, reason: ReasonResolved,
@@ -521,6 +542,60 @@ func TestResolverTransientErrorKeepsTheResolution(t *testing.T) {
 	}
 	if got.Status.Discovery == nil || got.Status.Discovery.AcceleratedNodes != 2 {
 		t.Fatalf("status.discovery = %+v; the transient error dropped it", got.Status.Discovery)
+	}
+	// The rollout controller's status writes find Resolved=True every resync.
+	runtimeState.record(got, &runtimeView{}, resolvedAt.Add(2*time.Hour))
+	if at := runtimeState.resolved(); at != float64(resolvedAt.Unix()) {
+		t.Fatalf("resolution time %g while the refresh retries, want %d", at, resolvedAt.Unix())
+	}
+}
+
+// A refresh blocked before it reports, as on a Job create that hangs, already
+// stops the resolution time: the rollout controller's resyncs, which still
+// find Resolved=True, do not advance it.
+func TestResolverBlockedRefreshStopsTheResolutionTime(t *testing.T) {
+	ctx := testContext(t)
+	freshRuntime(t, ctx, nil)
+	r, reg := newResolver(t)
+	resolvedAt := time.Unix(10_000, 0)
+	r.Now = func() time.Time { return resolvedAt }
+	candidate := resolveCandidate(t, ctx, r, reg)
+	if err := r.applyStatus(ctx, getRuntime(t, ctx), &resolution{status: metav1.ConditionTrue, reason: ReasonResolved,
+		message: "plan " + candidate + " resolved", candidate: candidate, inputDigest: getRuntime(t, ctx).Status.InputDigest}); err != nil {
+		t.Fatal(err)
+	}
+
+	r.Config.AICRImage = strings.Replace(r.Config.AICRImage, "@sha256:", "-refreshed@sha256:", 1)
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if _, job := obj.(*batchv1.Job); job {
+				once.Do(func() { close(blocked) })
+				<-release
+				return apierrors.NewServiceUnavailable("apiserver overloaded")
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+	})
+	done := make(chan error, 1)
+	go func() { done <- reconcileResolver(t, ctx, r) }()
+	select {
+	case <-blocked:
+	case <-ctx.Done():
+		t.Fatal("the refresh never created a Job")
+	}
+
+	runtimeState.record(getRuntime(t, ctx), &runtimeView{}, resolvedAt.Add(2*time.Hour))
+	at := runtimeState.resolved()
+	close(release)
+	<-done
+	if at != float64(resolvedAt.Unix()) {
+		t.Fatalf("resolution time %g while the refresh is blocked, want %d", at, resolvedAt.Unix())
 	}
 }
 
@@ -719,7 +794,7 @@ func TestReasonOf(t *testing.T) {
 	t.Parallel()
 	tests := map[string]error{
 		"Internal":            context.Canceled,
-		"AICRVersionMismatch": aicrjob.CheckSupportedVersion("v3.0.0", false),
+		"AICRVersionMismatch": aicrjob.CheckSupportedVersion("v3.0.0"),
 		"AICRInvalidRequest":  aicrjob.ErrorFromExitCode(aicrjob.StageRecipe, 2, "x"),
 		"Conflict":            operrors.New(operrors.ErrCodeConflict, "x"),
 	}

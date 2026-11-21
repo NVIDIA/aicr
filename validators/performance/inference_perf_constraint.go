@@ -32,14 +32,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
-	"github.com/NVIDIA/aicr/pkg/validator/labels"
-	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/helper"
-	"github.com/NVIDIA/aicr/validators/internal/allocmode"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/validator/catalog"
+	"aicr.run/pkg/validator/labels"
+	validatorv1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
+	"aicr.run/validators/helper"
+	"aicr.run/validators/internal/allocmode"
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
@@ -456,7 +456,12 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// Guard B: dynamo-platform must be declared in the recipe's componentRefs.
 	// Presence of a Criteria block is independent and not consulted here.
 	if !hasDynamoPlatform(ctx) {
-		validators.EmitExtraOrWarn(map[string]string{validators.ExtraKeySkipReason: validators.SkipReasonComponentNotInRecipe})
+		// The skip reason is what the aggregation reads as the NOT TESTED
+		// reason, so a reason that could not be written fails the check
+		// rather than skipping it unexplained.
+		if err := validators.EmitExtra(map[string]string{validators.ExtraKeySkipReason: validators.SkipReasonComponentNotInRecipe}); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to publish the skip reason "+validators.SkipReasonComponentNotInRecipe, err)
+		}
 		return &inferenceResult{status: inferenceSkipMsgNoDynamoPlatform}, nil
 	}
 
@@ -571,11 +576,12 @@ func validateInferencePerf(ctx *validators.Context) (*inferenceResult, error) {
 	// Run AIPerf benchmark. On failure, surface the captured pod logs so the
 	// CTRF report contains enough signal to diagnose (pip install errors,
 	// aiperf CLI failures, connection refused, etc.). Without this, the
-	// error chain alone ("pod failed") is unactionable.
+	// error chain alone ("pod failed") is unactionable. Each line is logged
+	// as a field, so a benchmark line cannot pose as a result sentinel.
 	logs, err := runAIPerfJob(ctx, endpoint, config.model, config.concurrency, config.aiperfJobName)
 	if err != nil {
 		if logs != "" {
-			fmt.Printf("AIPerf pod logs:\n%s\n", logs)
+			emitDiagnosticBlock("AIPerf pod logs", logs)
 		}
 		// Preserve the underlying code (ErrCodeTimeout for pod-wait deadline,
 		// ErrCodeInternal for Create/log-fetch failures).

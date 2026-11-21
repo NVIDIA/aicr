@@ -30,12 +30,12 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/registry/remote"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // Helm's OCI media types.
@@ -147,7 +147,8 @@ func chartManifest(m *ChartMeta, archive []byte) (config, layer ocispec.Descript
 // PushChart pushes a chart archive to r, tagged with its version, and returns
 // the manifest digest. An existing tag is reused when it points at the same
 // manifest; a tag that points elsewhere is a conflict, never overwritten.
-func (c *Client) PushChart(ctx context.Context, r Repository, archive []byte) (string, error) {
+func (c *Client) PushChart(ctx context.Context, r Repository, archive []byte) (_ string, err error) {
+	defer observe(opPushChart, &err)
 	meta, err := ReadChartMeta(archive)
 	if err != nil {
 		return "", err
@@ -172,7 +173,8 @@ func (c *Client) pushChart(ctx context.Context, r Repository, archive []byte, me
 // ReuseChart returns the chart tagged version in r, without an upstream
 // request, when the tag holds digest. A missing tag, or one holding another
 // digest, is NOT_FOUND.
-func (c *Client) ReuseChart(ctx context.Context, r Repository, version, digest string) (*MirroredChart, error) {
+func (c *Client) ReuseChart(ctx context.Context, r Repository, version, digest string) (_ *MirroredChart, err error) {
+	defer observe(opReuseChart, &err)
 	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
 	defer cancel()
 	repo, err := c.repository(r)

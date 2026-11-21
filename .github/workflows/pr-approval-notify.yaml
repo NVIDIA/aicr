@@ -1,0 +1,110 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Reminds maintainers of pull requests whose CI waits for workflow approval.
+#
+# The repository requires approval for every external contributor, so a fork
+# PR's `pull_request` workflows, the Merge Gate included, wait until a
+# maintainer clicks "Approve and run workflows", and each new push needs
+# another click. Bot PRs (Renovate) can wait the same way and are listed too. Drafts are left out until their authors ask for
+# review. `/ok-to-test` and copy-pr-bot's `/ok to test` leave no pending
+# state to query, so they are not covered.
+#
+# Read-only on purpose: the job never checks out PR code and never approves a
+# run. Approving is the supply-chain gate this reminder exists to support, so
+# the message asks the maintainer to read the diff first. It carries only PR
+# numbers: titles, branch names and logins are contributor-controlled.
+#
+# Nothing is posted when no PR is waiting. A failed or hung lookup posts a
+# pointer to the run instead; the lookup's step timeout sits below the job's
+# so a hang fails the step rather than cancelling the job, which would skip
+# the post. A Slack delivery failure or a scheduled run GitHub drops is still
+# silent, so check this workflow's run history if reminders stop.
+#
+# The schedule's `timezone` key needs actionlint 1.7.12 or later.
+
+name: PR Approval Reminder
+
+on:
+  schedule:
+    - cron: "7 6,11,15 * * *"
+      timezone: "America/Los_Angeles"
+  workflow_dispatch:
+    inputs:
+      notify_slack:
+        description: 'Post to Slack (scheduled runs always post; manual runs only log the message by default)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  remind:
+    name: Remind maintainers
+    if: github.repository == 'NVIDIA/aicr'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Find PRs waiting for approval
+        id: find
+        timeout-minutes: 3
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            const notifyPendingApprovals = require('./.github/scripts/pr-approval-notify.cjs');
+            await notifyPendingApprovals({ github, context, core });
+
+      - name: Post to Slack
+        if: ${{ !cancelled() }}
+        env:
+          SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
+          POST_SLACK: ${{ github.event_name == 'schedule' || inputs.notify_slack }}
+          FIND_OUTCOME: ${{ steps.find.outcome }}
+          MESSAGE: ${{ steps.find.outputs.message }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${FIND_OUTCOME}" != "success" ]]; then
+            MESSAGE="The PR approval check failed, so PRs may be waiting unlisted: <${RUN_URL}|run log>"
+          fi
+          if [[ -z "${MESSAGE}" ]]; then
+            echo "No PR is waiting for workflow approval; nothing to post"
+            exit 0
+          fi
+          printf '%s\n' "${MESSAGE}"
+
+          if [[ "${POST_SLACK}" != "true" ]]; then
+            echo "Slack posting is off for this run (POST_SLACK=${POST_SLACK})"
+          elif [[ -z "${SLACK_SERVICE}" ]]; then
+            echo "::warning::SLACK_SERVICE is not set; the reminder was not posted"
+          else
+            jq -n --arg text "${MESSAGE}" '{text: $text}' | curl -sSf --max-time 30 -X POST \
+              -H 'Content-type: application/json' \
+              --data @- \
+              "https://hooks.slack.com/services/${SLACK_SERVICE}"
+          fi

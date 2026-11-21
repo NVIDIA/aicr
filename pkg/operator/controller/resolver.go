@@ -31,14 +31,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	"github.com/NVIDIA/aicr/pkg/operator/config"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
-	"github.com/NVIDIA/aicr/pkg/operator/resolver"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
+	"aicr.run/pkg/operator/config"
+	"aicr.run/pkg/operator/engine/argocd"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/registry"
+	"aicr.run/pkg/operator/resolver"
 )
 
 // ResolverFieldManager owns the resolver's status fields.
@@ -125,6 +125,9 @@ type resolution struct {
 	inputDigest string
 	discovery   *v1alpha1.DiscoveryStatus
 	requeue     time.Duration
+	// refreshing marks a Resolved=True status kept while the runtime
+	// resolves again for changed inputs.
+	refreshing bool
 }
 
 // Reconcile resolves the runtime named in req.
@@ -142,6 +145,7 @@ func (r *ResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if !rt.DeletionTimestamp.IsZero() || rt.Name != v1alpha1.SingletonName {
 		return ctrl.Result{}, nil
 	}
+	runtimeState.resolutionStarted()
 	res, err := r.resolve(ctx, rt)
 	if err != nil {
 		if !isTerminal(err) {
@@ -186,7 +190,7 @@ func (r *ResolverReconciler) stages() *stages {
 }
 
 func (r *ResolverReconciler) resolve(ctx context.Context, rt *v1alpha1.ClusterRuntime) (*resolution, error) {
-	if err := aicrjob.CheckSupportedVersion(r.Config.AICRVersion, r.Config.AllowPrereleaseAICR); err != nil {
+	if err := checkAICRVersion(r.Config); err != nil {
 		return nil, err
 	}
 	waiting := waitingFor(rt)
@@ -315,6 +319,15 @@ func (r *ResolverReconciler) recipeRun(rt *v1alpha1.ClusterRuntime, input string
 	return run
 }
 
+// checkAICRVersion rejects an unsupported declared AICR version, or a
+// prerelease without the opt-in.
+func checkAICRVersion(c *config.Config) error {
+	if err := aicrjob.CheckSupportedVersion(c.AICRVersion); err != nil {
+		return err
+	}
+	return aicrjob.CheckPrereleaseAllowed(c.AICRVersion, c.AllowPrereleaseAICR)
+}
+
 // recordCriteria reports the criteria a recipe run resolved with.
 func recordCriteria(d *v1alpha1.DiscoveryStatus, recipe *aicrjob.RecipeResult) {
 	if d == nil || recipe.Criteria == nil {
@@ -349,7 +362,7 @@ func waitingFor(rt *v1alpha1.ClusterRuntime) *resolution {
 	if c := meta.FindStatusCondition(rt.Status.Conditions, v1alpha1.ConditionResolved); c != nil && c.Status == metav1.ConditionTrue &&
 		c.ObservedGeneration == rt.Generation && rt.Status.CandidatePlanDigest != "" {
 
-		w.status, w.reason = metav1.ConditionTrue, ReasonResolved
+		w.status, w.reason, w.refreshing = metav1.ConditionTrue, ReasonResolved, true
 		w.message = "plan " + rt.Status.CandidatePlanDigest + " resolved; resolving again for changed inputs"
 	}
 	return w
@@ -626,7 +639,11 @@ func (r *ResolverReconciler) applyStatus(ctx context.Context, rt *v1alpha1.Clust
 	if res.discovery != nil {
 		status["discovery"] = res.discovery
 	}
-	return applyRuntimeStatus(ctx, r.Client, rt, status, ResolverFieldManager)
+	if err := applyRuntimeStatus(ctx, r.Client, rt, status, ResolverFieldManager); err != nil {
+		return err
+	}
+	runtimeState.resolution(res, r.now())
+	return nil
 }
 
 // runTag is the registry tag a render run pushes to.

@@ -20,10 +20,10 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/allocpolicy"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/allocpolicy"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // GPU allocation policy values (#1327). The policy names the mechanism whole
@@ -312,6 +312,9 @@ func ToValidationInputWithContext(ctx context.Context, r *recipe.RecipeResult) (
 	validation := ToValidationInput(r)
 	if validation == nil {
 		return nil, nil //nolint:nilnil // mirrors ToValidationInput's nil-in/nil-out contract
+	}
+	if err := r.ValidateArtifactLock(ctx, r.ComponentRefs, nil, nil); err != nil {
+		return nil, err
 	}
 	policy, err := ResolveGPUAllocationPolicy(ctx, r)
 	if err != nil {

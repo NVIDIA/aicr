@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	aicrErrors "aicr.run/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -41,6 +41,8 @@ const (
 	creNCCLRunName     = "aicr-cre-nccl"
 	creNCCLDomain      = "communication"
 	creNCCLVariant     = "nccl-all-reduce"
+	creFabricEFA       = "efa"
+	creNetMaxBytes     = "4G"
 	creTrainingDomain  = "training"
 	creTrainingVariant = "nemotron5-8b"
 	// creGonePollInterval is how often waitForCREResourceGone re-Gets a CR
@@ -65,9 +67,8 @@ const (
 
 	// Stamped on every Certification AICR submits, because the names carry a
 	// nonce and nothing else identifies them. A validator pod that dies
-	// mid-run (eviction, OOM kill, Job deleted under it) never runs its
-	// deferred teardown — validators do not handle SIGTERM — and without this
-	// label no later run could find what it left holding the GPUs.
+	// mid-run (SIGKILL, OOM, or crash) may never run its deferred teardown.
+	// Without this label no later run could find what it left holding the GPUs.
 	creLabelManagedBy = "app.kubernetes.io/managed-by"
 	creManagedByAICR  = "aicr-validator"
 )
@@ -97,10 +98,44 @@ func uniqueCREResourceName(prefix string) (string, error) {
 // per combination: training/nemotron5-56b requires 32 GPUs and fails on a SKU
 // where nemotron5-8b passes, and a node count proven on one accelerator says
 // nothing about another.
+//
+// Image, when set, is the digest-pinned workload image submitted as the
+// category's options.image. The catalog names its images by tag, and CRE
+// applies options.image after its platform overrides, so a pin must be the
+// image those overrides select on the combination, or the run changes what it
+// measures.
+//
+// Fabric, when set, is submitted as spec.fabric. CRE detects the fabric from
+// node labels and renders the wrong transport for one it cannot classify, so a
+// combination whose detection is not known to resolve names it.
+//
+// Env, when set, is submitted as spec.env, which CRE passes to every workload
+// pod of the run. It is how the net check disables NVLS and MNNVL.
+//
+// MaxBytes, when set, is submitted as spec.maxBytes, the largest message size
+// of the sweep. CRE defaults it to 32G on GB200 and GB300, and a sweep that
+// slow does not finish inside the run budget on a network-only path, where
+// bandwidth is flat from 16M upward.
+//
+// Supersedes names the TrainJob NCCL variant the check stands in for on the
+// combination; the zero value is the default variant. Only the CRE NCCL checks
+// read it.
 type creCatalogEntry struct {
-	Domain   string
-	Variant  string
-	MaxNodes int
+	Domain     string
+	Variant    string
+	MaxNodes   int
+	Image      string
+	Fabric     string
+	Env        []creEnvVar
+	MaxBytes   string
+	Supersedes ncclVariant
+}
+
+// creEnvVar is one spec.env entry. It is a slice element rather than a map
+// entry so the rendered Certification is deterministic.
+type creEnvVar struct {
+	Name  string
+	Value string
 }
 
 // buildCRECertification renders the Certification for one catalog entry,
@@ -135,16 +170,31 @@ func buildCRECertification(
 				"variant":                entry.Variant,
 			})
 	}
+	category := map[string]any{
+		"domain":  entry.Domain,
+		"variant": entry.Variant,
+	}
+	if entry.Image != "" {
+		category["options"] = map[string]any{"image": entry.Image}
+	}
 	spec := map[string]any{
-		"categories": []any{
-			map[string]any{
-				"domain":  entry.Domain,
-				"variant": entry.Variant,
-			},
-		},
+		"categories":    []any{category},
 		"gpusPerNode":   int64(gpuConfig.GPUCountPerNode),
 		"nodesPerJob":   int64(len(nodes)),
 		"timeoutPerJob": defaults.CRECertificationTimeout.String(),
+	}
+	if entry.Fabric != "" {
+		spec["fabric"] = entry.Fabric
+	}
+	if entry.MaxBytes != "" {
+		spec["maxBytes"] = entry.MaxBytes
+	}
+	if len(entry.Env) > 0 {
+		env := make([]any, 0, len(entry.Env))
+		for _, e := range entry.Env {
+			env = append(env, map[string]any{keyName: e.Name, keyValue: e.Value})
+		}
+		spec["env"] = env
 	}
 	addCRETarget(spec, nodes)
 

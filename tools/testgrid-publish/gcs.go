@@ -22,7 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // writeGCS writes the three TestGrid build files to GCS in the mandatory

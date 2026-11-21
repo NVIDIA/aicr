@@ -25,17 +25,18 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	"github.com/NVIDIA/aicr/pkg/validator/job"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/recipes"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator/catalog"
+	"aicr.run/pkg/validator/ctrf"
+	"aicr.run/pkg/validator/job"
+	v1 "aicr.run/pkg/validator/v1"
+	"aicr.run/recipes"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -1595,5 +1596,157 @@ func TestPreflightServiceAccount(t *testing.T) {
 			}
 			errorstest.WantReportedCode(t, err, tt.wantErrCode)
 		})
+	}
+}
+
+// TestValidatePhases_RejectsUnusableServiceMetricsQueryURLBeforeClusterWork
+// pins that a query URL carrying credentials fails the run before the cluster
+// client is built, so no Job of any phase is applied, the earlier deployment
+// phase's included. A run that would not deploy ai-service-metrics, because it
+// is skipped or its phase is not requested, is not judged.
+func TestValidatePhases_RejectsUnusableServiceMetricsQueryURLBeforeClusterWork(t *testing.T) {
+	const envName = "AICR_SERVICE_METRICS_QUERY_URL"
+	checks := map[Phase][]string{
+		PhaseDeployment:  {"operator-health"},
+		PhaseConformance: {v1.AIServiceMetricsCheckName, "dra-support"},
+	}
+	errReachedCluster := stderrors.New("reached the cluster")
+
+	tests := []struct {
+		name       string
+		url        string
+		phases     []Phase
+		skip       []string
+		wantReject bool
+	}{
+		{name: "credentialed URL fails before the first phase", url: "https://user:secret@mimir.example.com",
+			phases: []Phase{PhaseDeployment, PhaseConformance}, wantReject: true},
+		{name: "usable URL passes", url: "https://mimir.example.com/prometheus",
+			phases: []Phase{PhaseDeployment, PhaseConformance}},
+		{name: "skipped check is not judged", url: "https://user:secret@mimir.example.com",
+			phases: []Phase{PhaseDeployment, PhaseConformance}, skip: []string{v1.AIServiceMetricsCheckName}},
+		{name: "phase not requested is not judged", url: "https://user:secret@mimir.example.com",
+			phases: []Phase{PhaseDeployment}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envName, tt.url)
+			v := New(WithVersion("1.0.0"), WithKubeconfig("/path/to/kubeconfig"), WithSkipChecks(tt.skip...))
+			reachedCluster := false
+			v.kubeClientFactory = func(string) (kubernetes.Interface, error) {
+				reachedCluster = true
+				return nil, errReachedCluster
+			}
+
+			_, err := v.ValidatePhases(t.Context(), tt.phases, validationWithChecks(checks), nil)
+			if !tt.wantReject {
+				if !stderrors.Is(err, errReachedCluster) {
+					t.Fatalf("ValidatePhases() error = %v, want the run to get as far as the cluster", err)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if !strings.Contains(err.Error(), envName) || strings.Contains(err.Error(), "secret") {
+				t.Errorf("error %q must name %s and not repeat the URL", err, envName)
+			}
+			if reachedCluster {
+				t.Error("ValidatePhases() built the cluster client before rejecting the URL")
+			}
+		})
+	}
+}
+
+// TestWithoutSkippedCREConstraints guards the --skip-check interaction with CRE
+// supersession: a TrainJob NCCL check skips itself when the input still
+// declares the CRE constraint, so skipping the CRE check must stop declaring it
+// or neither check measures the bandwidth.
+func TestWithoutSkippedCREConstraints(t *testing.T) {
+	const (
+		cre    = "nccl-cre-all-reduce-bw"
+		creNet = "nccl-cre-all-reduce-bw-net"
+		nvls   = "nccl-all-reduce-bw-nvls"
+	)
+	input := func() *v1.ValidationInput {
+		return &v1.ValidationInput{Config: v1.ValidationConfig{Performance: &v1.ValidationPhase{
+			Constraints: []recipe.Constraint{
+				{Name: cre, Value: ">= 700"},
+				{Name: creNet, Value: ">= 30"},
+				{Name: nvls, Value: ">= 700"},
+			},
+		}}}
+	}
+
+	tests := []struct {
+		name string
+		skip []string
+		want []string
+	}{
+		{"no skips keeps everything", nil, []string{cre, creNet, nvls}},
+		{"skipping the NVLS CRE check drops only its constraint", []string{cre}, []string{creNet, nvls}},
+		{"skipping the net CRE check drops only its constraint", []string{creNet}, []string{cre, nvls}},
+		{"skipping both CRE checks leaves the TrainJob constraint", []string{cre, creNet}, []string{nvls}},
+		{"skipping a TrainJob check keeps its constraint", []string{nvls}, []string{cre, creNet, nvls}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := input()
+			v := New(WithSkipChecks(tt.skip...))
+			out := v.withoutSkippedCREConstraints(in)
+
+			var got []string
+			for _, c := range out.Config.Performance.Constraints {
+				got = append(got, c.Name)
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("constraints = %v, want %v", got, tt.want)
+			}
+			if n := len(in.Config.Performance.Constraints); n != 3 {
+				t.Errorf("caller's input has %d constraints after the call, want 3 (must not be mutated)", n)
+			}
+		})
+	}
+
+	t.Run("nil input and nil performance phase pass through", func(t *testing.T) {
+		v := New(WithSkipChecks(cre))
+		if got := v.withoutSkippedCREConstraints(nil); got != nil {
+			t.Errorf("nil input returned %v", got)
+		}
+		bare := &v1.ValidationInput{}
+		if got := v.withoutSkippedCREConstraints(bare); got != bare {
+			t.Error("input without a performance phase was copied")
+		}
+	})
+}
+
+// TestEnsureDataConfigMapsWithholdsSkippedCRE pins the wiring: the validation
+// ConfigMap the Jobs read must not declare the CRE constraint of a skipped
+// check, even though the caller's input does.
+func TestEnsureDataConfigMapsWithholdsSkippedCRE(t *testing.T) {
+	cs := newFakeClusterClient()
+	v := New(WithRunID("skip-cre"), WithSkipChecks("nccl-cre-all-reduce-bw"))
+	in := &v1.ValidationInput{Config: v1.ValidationConfig{Performance: &v1.ValidationPhase{
+		Constraints: []recipe.Constraint{
+			{Name: "nccl-cre-all-reduce-bw", Value: ">= 700"},
+			{Name: "nccl-all-reduce-bw-nvls", Value: ">= 700"},
+		},
+	}}}
+
+	if err := v.ensureDataConfigMaps(context.Background(), cs, &snapshotter.Snapshot{}, in); err != nil {
+		t.Fatalf("ensureDataConfigMaps() error = %v", err)
+	}
+	cm, err := cs.CoreV1().ConfigMaps(v.Namespace).Get(context.Background(),
+		defaults.ValidationConfigMapPrefix+v.RunID, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get validation ConfigMap: %v", err)
+	}
+	got := cm.Data["validation.yaml"]
+	if strings.Contains(got, "nccl-cre-all-reduce-bw") {
+		t.Errorf("validation ConfigMap still declares the skipped CRE constraint:\n%s", got)
+	}
+	if !strings.Contains(got, "nccl-all-reduce-bw-nvls") {
+		t.Errorf("validation ConfigMap lost the TrainJob constraint:\n%s", got)
+	}
+	if len(in.Config.Performance.Constraints) != 2 {
+		t.Error("caller's input was mutated")
 	}
 }

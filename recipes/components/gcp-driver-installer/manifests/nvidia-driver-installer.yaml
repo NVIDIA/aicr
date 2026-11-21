@@ -49,7 +49,7 @@
 # live GB200 GKE validation).
 {{- $vals := index .Values "gcp-driver-installer" }}
 # Values-gated (ADR-015): renders nothing unless the gpuStack
-# bundle-installer profile value flips installer.enabled true.
+# bundle-installer or dra profile value flips installer.enabled true.
 # Default-off fails closed: rendering the installer is a profile
 # decision, never a chart default.
 {{- $installer := index $vals "installer" }}

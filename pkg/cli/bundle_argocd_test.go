@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"aicr.run/pkg/bundler/config"
 )
 
 func derefOr[T any](p *T, fallback T) T {

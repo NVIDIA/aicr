@@ -20,15 +20,16 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	aicr "aicr.run/pkg/client/v1"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 // writeConfig writes an AICRConfig document to a temp file and returns its path.
@@ -720,6 +721,11 @@ spec:
       nodes: 12
       storageClass: fast
       sharedStorageClass: shared
+    runtimeMetrics:
+      series:
+        - queue_depth
+      namespaces:
+        - inference
     attestation:
       enabled: true
       certificateIdentityRegexp: ^https://github\.com/NVIDIA/.*$
@@ -766,6 +772,11 @@ func TestConfig_BundleOptions(t *testing.T) {
 	}
 	if got, want := opts.SharedStorageClass, "shared"; got != want {
 		t.Errorf("SharedStorageClass = %q, want %q", got, want)
+	}
+	if got := opts.RuntimeMetrics; !slices.Equal(got.Series, []string{"queue_depth"}) ||
+		!slices.Equal(got.Namespaces, []string{"inference"}) {
+
+		t.Errorf("RuntimeMetrics = %+v, want series [queue_depth] and namespaces [inference]", got)
 	}
 	if !opts.VendorCharts {
 		t.Error("VendorCharts = false, want true")
@@ -2024,5 +2035,29 @@ func TestConfig_ValidateInputOptions_NilConfig(t *testing.T) {
 	}
 	if got.RecipePath != "" || got.SnapshotPath != "" || got.FailOnError != nil {
 		t.Errorf("got %+v, want zero value", got)
+	}
+}
+
+func TestConfigArtifactOptions(t *testing.T) {
+	var absent *aicr.Config
+	if got := absent.RecipeArtifacts(); got.Inventory != "" || len(got.AllowCatalogPins) != 0 {
+		t.Fatal(got)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte("apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  recipe:\n    artifacts:\n      inventory: release.yaml\n      allowCatalogPins: [cert-manager]\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := aicr.LoadConfig(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.RecipeArtifacts()
+	if got.Inventory != "release.yaml" || len(got.AllowCatalogPins) != 1 {
+		t.Fatal(got)
+	}
+	got.AllowCatalogPins[0] = "changed"
+	if cfg.RecipeArtifacts().AllowCatalogPins[0] != "cert-manager" {
+		t.Fatal("options share config slice")
 	}
 }

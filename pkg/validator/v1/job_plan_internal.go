@@ -18,6 +18,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -25,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
@@ -59,6 +60,10 @@ const (
 	// the combinations it is qualified on are recorded in creQualifiedEntries in
 	// validators/performance rather than gated here.
 	CRENCCLAllReduceBWCheckName = "nccl-cre-all-reduce-bw"
+
+	// CRENCCLAllReduceBWNetCheckName is the catalog name of the same check run
+	// with NVLS and MNNVL disabled, so it measures the EFA/NET path alone.
+	CRENCCLAllReduceBWNetCheckName = "nccl-cre-all-reduce-bw-net"
 
 	// CRETrainingGoodputCheckName is the catalog name of the CRE-driven
 	// training goodput check (Certification). It opts in and records its
@@ -116,12 +121,69 @@ const (
 	// same literals live in validators/conformance/workload_sandboxing_check.go.
 	sandboxRuntimeClassEnv = "AICR_SANDBOX_RUNTIME_CLASS"
 	sandboxProbeImageEnv   = "AICR_SANDBOX_PROBE_IMAGE"
+	// ImagePullSecretsEnv carries the --image-pull-secret names, comma-separated,
+	// to every validator pod, so a check that creates a per-run namespace can
+	// copy the Secrets there and attach them to its probe pods; the names are
+	// the only thing forwarded, the Secrets stay in the validator namespace.
+	// Exported so the pod side (validators.ImagePullSecretsEnv) reads the same
+	// constant instead of a mirrored literal.
+	ImagePullSecretsEnv = "AICR_IMAGE_PULL_SECRETS" //nolint:gosec // G101: env var name, not a credential
 
 	// inferencePerfNoCleanupEnv, when truthy, makes the inference-perf validator
 	// leave its namespace/DGD/workers/frontend/AIPerf Job in place after the run
 	// for post-mortem inspection. Forwarded only to the inference-perf pod.
 	inferencePerfNoCleanupEnv = "AICR_INFERENCE_PERF_NO_CLEANUP"
+
+	// GangSchedulingCheckName is the catalog name of the gang-scheduling
+	// conformance check, the only one defaults.EnvRunaiProjectNamespace is
+	// forwarded to.
+	GangSchedulingCheckName = "gang-scheduling"
+
+	// AIServiceMetricsCheckName is the catalog name of the ai-service-metrics
+	// conformance check, the only one defaults.EnvServiceMetricsQueryURL is
+	// forwarded to.
+	AIServiceMetricsCheckName = "ai-service-metrics"
 )
+
+// ParseServiceMetricsQueryURL checks a defaults.EnvServiceMetricsQueryURL
+// value and returns it without a trailing slash. Credentials in the URL are
+// rejected: the value is written into the check's Job spec and recorded in
+// its evidence. No error repeats the value.
+func ParseServiceMetricsQueryURL(raw string) (string, error) {
+	invalid := func(problem string) error {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s is not a usable Prometheus query URL: %s", defaults.EnvServiceMetricsQueryURL, problem))
+	}
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil:
+		return "", invalid("it does not parse as a URL")
+	case u.User != nil:
+		return "", invalid("it must not carry credentials")
+	case u.Scheme != "http" && u.Scheme != "https":
+		return "", invalid("its scheme must be http or https")
+	case u.Host == "":
+		return "", invalid("it has no host")
+	case u.RawQuery != "" || u.Fragment != "":
+		return "", invalid("it must be a base URL, without a query or fragment; the check appends /api/v1/query")
+	}
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+// ValidateForwardedEnv rejects a process environment value that must not
+// reach entry's Job spec. The orchestrator calls it for every check a run
+// would deploy before it deploys any; BuildJobPlan repeats it per Job.
+func ValidateForwardedEnv(entry ValidatorEntry) error {
+	if entry.Name != AIServiceMetricsCheckName {
+		return nil
+	}
+	if raw := strings.TrimSpace(os.Getenv(defaults.EnvServiceMetricsQueryURL)); raw != "" {
+		if _, err := ParseServiceMetricsQueryURL(raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // hfTokenEnvVar is the environment variable name used to forward the
 // Hugging Face API token to the inference performance validator.
@@ -138,6 +200,7 @@ func buildEnv(
 	tolerations []corev1.Toleration,
 	imageRegistryOverride string,
 	imageTagOverride string,
+	imagePullSecrets []string,
 ) []corev1.EnvVar {
 
 	env := []corev1.EnvVar{
@@ -169,6 +232,9 @@ func buildEnv(
 			Name:  "AICR_TOLERATIONS",
 			Value: serializeTolerations(tolerations),
 		})
+	}
+	if names := nonEmptyNames(imagePullSecrets); len(names) > 0 {
+		env = append(env, corev1.EnvVar{Name: ImagePullSecretsEnv, Value: strings.Join(names, ",")})
 	}
 
 	// Add CLI version and commit
@@ -262,6 +328,19 @@ func buildEnv(
 		}
 	}
 
+	// Forward the Run:ai Project namespace to the gang-scheduling check only.
+	// On a recipe that declares runai-cluster the check runs its test pods
+	// there and fails without it; the pod validates the value itself.
+	if v := strings.TrimSpace(os.Getenv(defaults.EnvRunaiProjectNamespace)); v != "" && entry.Name == GangSchedulingCheckName {
+		env = append(env, corev1.EnvVar{Name: defaults.EnvRunaiProjectNamespace, Value: v})
+	}
+
+	// Forward the owner's Prometheus query URL to the ai-service-metrics check
+	// only. BuildJobPlan has already rejected a value that is not usable.
+	if v := strings.TrimSpace(os.Getenv(defaults.EnvServiceMetricsQueryURL)); v != "" && entry.Name == AIServiceMetricsCheckName {
+		env = append(env, corev1.EnvVar{Name: defaults.EnvServiceMetricsQueryURL, Value: v})
+	}
+
 	// Add catalog entry's custom env vars. Orchestrator-controlled env vars are
 	// deliberately skipped here: they must come only from the process
 	// environment (forwarded above), never from the in-repo catalog. Appending
@@ -272,13 +351,28 @@ func buildEnv(
 		if e.Name == hfTokenEnvVar || e.Name == requireScopedInferenceGatewayEnv || e.Name == inferencePerfNoCleanupEnv || e.Name == ncclRuntimeImageEnv || e.Name == driverRuntimeImageEnv {
 			continue
 		}
-		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv {
+		if e.Name == sandboxRuntimeClassEnv || e.Name == sandboxProbeImageEnv || e.Name == ImagePullSecretsEnv || e.Name == defaults.EnvRunaiProjectNamespace {
+			continue
+		}
+		if e.Name == defaults.EnvServiceMetricsQueryURL {
 			continue
 		}
 		env = append(env, corev1.EnvVar{Name: e.Name, Value: e.Value})
 	}
 
 	return env
+}
+
+// nonEmptyNames returns names with blank entries dropped, so a flag given an
+// empty value does not forward a dangling separator.
+func nonEmptyNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n = strings.TrimSpace(n); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // buildVolumes creates volumes for snapshot and validation ConfigMaps
@@ -289,7 +383,7 @@ func buildVolumes(runID string) []corev1.Volume {
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: fmt.Sprintf("aicr-snapshot-%s", runID),
+						Name: defaults.SnapshotConfigMapPrefix + runID,
 					},
 				},
 			},
@@ -299,7 +393,7 @@ func buildVolumes(runID string) []corev1.Volume {
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: fmt.Sprintf("aicr-validation-%s", runID),
+						Name: defaults.ValidationConfigMapPrefix + runID,
 					},
 				},
 			},

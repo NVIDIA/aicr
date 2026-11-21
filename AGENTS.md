@@ -142,7 +142,7 @@ workspace paths. Use local file paths only when explicitly requested.
 
 **Errors (always use pkg/errors):**
 ```go
-import "github.com/NVIDIA/aicr/pkg/errors"
+import "aicr.run/pkg/errors"
 
 // Simple error
 return errors.New(errors.ErrCodeNotFound, "GPU not found")
@@ -164,7 +164,7 @@ In files that import `pkg/errors`, the stdlib `errors` package is aliased as `st
 ```go
 import (
     stderrors "errors"
-    "github.com/NVIDIA/aicr/pkg/errors"
+    "aicr.run/pkg/errors"
 )
 
 // GOOD - idiomatic, works through wrap chains
@@ -299,6 +299,12 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 Author `safe` only with a `verifiedBy` naming a UAT lane, KWOK run, or upstream release note; `manual` and `blocked` need at least one step for every one of the seven deployers. A wrong `safe` is worse than no record, because it converts uncertainty into false confidence; when you do not know, leave it unwritten and let it report `unknown`. `summary` is not a changelog or release note: it names what breaks and by what mechanism, tightly, because it is read beside the steps at the moment someone decides whether to upgrade. Put upstream migration guides, release notes, and the component's own docs in `references` instead. Never add a Go test asserting a verdict for a real component: verdicts are validated empirically by KWOK and UAT, and pinning them in the unit suite turns "keep tests green" into pressure to weaken records. Full authoring guide: `docs/contributor/upgrade-records.md`.
 
 **After a pin bump (in registry, overlay, or mixin) or a values change of a component whose health check asserts a CRD, or after adding or removing a CRD assertion:** run `make crd-inventory` and commit the regenerated `recipes/components/<name>/crds.yaml` files, deletions included. The tool renders each pinned chart with `--include-crds` and the values of each recipe that asserts against it, and reports every asserted CRD the render for the asserting recipe does not install. `TestHealthCheckCRDAssertionsAnchored` fails `make test` when an inventory has no entry for a pin that a registry or leaf recipe health check is checked against, or a check asserts a CRD missing from both the list that entry gives the asserting recipe and the component's vendored manifests. See "CRD assertions" in `docs/contributor/validator.md`.
+
+**After any change to a frozen public surface** (the `aicr` CLI, the REST API, the Go SDK in `pkg/client/v1`, or the bundle layout and artifact schemas): check it against the breaking table under "Deprecation Policy" in `RELEASE.md`. A breaking change owes the notice period there: ship the deprecation with a warning first, and add an entry to `docs/user/deprecations.md`. Check a change in meaning too, where the name and shape stay the same, such as a flag or parameter that now counts something else. The table lists changed defaults, exit-code meanings and documented semantics as breaking, and `TestCLISurface`, `make api-diff` and `make openapi-diff` compare the declared surface, so they do not flag it. See "The CLI Surface Baseline" in `docs/contributor/cli.md`.
+
+**After adding a versioned artifact kind** (a new wire `kind` with an `aicr.run/...` `apiVersion`): ADR-022 (`docs/design/022-artifact-maturity-and-deprecation.md`) requires a row for it in the §2 maturity map and an entry in the read gate in the same change. §7 sets the version a new kind starts at. §8 requires a loader of external data to validate the raw `kind` and `apiVersion` before hydration and to reject an empty, retired, unknown or wrong-kind value with `ErrCodeInvalidRequest`.
+
+**When a change departs from a merged ADR** (`docs/design/`): leave the ADR as written. It records what was decided at the time. Say in the PR description what the ADR decided, what changed and why, and fix code comments that cite the superseded text as current. The exception is a table an ADR tells later changes to extend, such as the ADR-022 §2 maturity map above.
 
 **Using mixins for shared OS/platform content:**
 ```yaml
@@ -600,7 +606,7 @@ Process and unique findings below; the rule sections above (Error Wrapping, Cont
 
 ## Pull Request Requirements
 
-**Pre-push checklist:** Always run `make qualify` before pushing. This is the CI-equivalent gate that covers coverage-gated tests, linting (golangci-lint + yamllint + license headers, agents sync, docs filename/MDX/YAML/shell-placeholder/link gates, chart-version pins, vendored Go proxy action digests, upgrade records, runner labels), tuning-check, e2e, vulnerability scan, license allowlist check, API compatibility (api-diff), and REST contract compatibility (openapi-diff). Do not substitute a subset of commands. `make qualify` is the closest local equivalent of the CI gate. A few checks run only in CI (e.g. the lychee docs link check on `docs/**` PRs, CodeQL, and the GPU test lanes), so a green local `qualify` does not guarantee every CI job passes.
+**Pre-push checklist:** Always run `make qualify` before pushing. This is the CI-equivalent gate that covers coverage-gated tests, linting (golangci-lint + yamllint + license headers, agents sync, docs filename/MDX/YAML/shell-placeholder/link gates, chart-version pins, vendored Go proxy action digests, upgrade records, runner labels, the pre-rename Go module path), tuning-check, e2e, vulnerability scan, license allowlist check, API compatibility (api-diff), and REST contract compatibility (openapi-diff). Do not substitute a subset of commands. `make qualify` is the closest local equivalent of the CI gate. A few checks run only in CI (e.g. the lychee docs link check on `docs/**` PRs, CodeQL, and the GPU test lanes), so a green local `qualify` does not guarantee every CI job passes.
 
 **After any change to `.settings.yaml` or a `tools/update-*-checksums` script:** run `make check-settings-checksums`. It re-derives every pinned tool's SHA256 from upstream and fails when a version pin and its checksum pin disagree — the failure mode that ships a version bump with the previous release's digest. It is deliberately **not** part of `make qualify` (it needs network), but it *is* wired into the required merge gate, so skipping it locally means finding out on the PR. A digest that drifts under an *unchanged* version pin is reported separately and must not be "fixed" by re-running the refresher: that would overwrite a reviewed value with whatever upstream now serves.
 
@@ -653,7 +659,7 @@ CI also posts per-package deltas post-push via `go-coverage-report` (`on-push-co
 - Do NOT add "Generated with Claude Code", "Created by Codex", or similar attribution
 - Add a `theme/*` label matching the PR's primary concern: `theme/recipes`, `theme/validation`, `theme/deployer`, `theme/ci-dx`, `theme/community`, `theme/supply-chain`, `theme/resilience` (GPU resilience, mainly NVSentinel). Use `dependencies` for dependency bumps. (Bug/enhancement/documentation is an org-level *issue type*, which applies to issues, not PRs. There are no `bug` or `documentation` repo labels; an `enhancement` label exists but does not set the type. `gh pr create` aborts on a nonexistent `--label`, so check `gh label list` first.)
 - Area labels are auto-assigned by `.github/labeler.yml` based on changed file paths (e.g., `area/recipes`, `area/ci`, `area/api`, `area/cli`, `area/bundler`, `area/collector`, `area/validator`, `area/docs`, `area/infra`, `area/tests`). You may also add them manually when the auto-labeler wouldn't match (e.g., issue-only PRs or cross-cutting changes).
-- Do NOT add a priority label (`P0`, `P1`, `P2`) to PRs. Priority is a field on the AICR Project board (see **Issue policy** below), not a repo label, and the PR Label Guard workflow (`.github/workflows/pr-label-guard.yaml`) strips any `P<number>` label from a pull request
+- Track priority in the linked issue’s native GitHub **Priority** field. The PR Label Guard workflow (`.github/workflows/pr-label-guard.yaml`) strips legacy `P<number>` labels from pull requests.
 - Do NOT add `size/*` labels (auto-assigned by bot)
 - **PR titles are linted.** CI enforces Conventional Commits format — `type: subject`, `type(scope): subject`, `type!: subject`, or `type(scope)!: subject`, where `!` marks a breaking change. Valid types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`. Scopes may be mixed case (`fix(GB200):`). A malformed title fails the check; editing the title re-runs it automatically. The title is the whole commit message on `main` (`squash_merge_commit_message: BLANK`) and cannot be corrected after merge
 - Keep the PR title to 70 characters or fewer; use the description for details. Over 70 warns but does not block — dependency-bot titles embed pseudo-versions that cannot be shortened
@@ -663,7 +669,7 @@ CI also posts per-package deltas post-push via `go-coverage-report` (`on-push-co
   - Prefer `gh issue create --type Bug ...` (requires `gh` v2.94.0+); use `gh issue edit <n> --type Bug` for existing issues.
   - With older `gh` versions, use the web UI or automation with the needed permissions. Current REST Issues create/edit endpoints also accept `type` for users with push access, but avoid stale ad hoc `gh api` examples because older clients or API versions may reject or silently drop the field.
 - Match the type to intent (a feature request → `Enhancement`, a docs gap → `Documentation`); the issue forms in `.github/ISSUE_TEMPLATE/` set a default type (`Bug`, `Enhancement`, `Documentation`), so only override when the template's choice is wrong.
-- The AICR Project board also has its own `Type` and `Priority` (P0–P2) fields — those are set on the *project board*, not the issue, and need a `project`-scoped token. Leave them to maintainers/automation unless explicitly asked.
+- Use the native GitHub **Priority** field on issues. `Urgent` and `High` map to P0, `Medium` to P1, and `Low` to P2. A blank value awaits triage. See [Issue Priority](CONTRIBUTING.md#issue-priority) for targets. NVIDIA currently restricts visibility to organization members and repository collaborators. Verify triagers have field edit access in the issue sidebar or through GitHub’s `viewerCanSetFields` before relying on it. The REST API requires repository push access to set field values.
 
 ## Key Files
 
@@ -726,7 +732,8 @@ aicr snapshot --output snapshot.yaml
 # generation / validate readiness fails closed (gpuStack profile):
 #   oci ce cluster list-addons --cluster-id <ocid> --all --output json > addons.json
 #   aicr snapshot --oke-addons addons.json --output snapshot.yaml
-# GKE bundle-installer only: include the pool projection or snapshot-qualified
+# GKE bundle-installer and dra only: include the pool projection or
+# snapshot-qualified
 # recipe generation / validate readiness fails closed (gpuStack profile):
 #   gcloud container node-pools list --cluster <cluster> --format=json > pools.json
 #   aicr snapshot --gke-gpu-pools pools.json --output snapshot.yaml

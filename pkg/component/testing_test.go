@@ -21,9 +21,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/result"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe"
 )
 
 // Mock bundler for testing

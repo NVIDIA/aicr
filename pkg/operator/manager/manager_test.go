@@ -16,6 +16,8 @@ package manager
 
 import (
 	"flag"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -24,8 +26,8 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 func TestDefaultOptionsAreValid(t *testing.T) {
@@ -50,6 +52,7 @@ func TestBindFlagsOverridesDefaults(t *testing.T) {
 		"--leader-elect=false",
 		"--leader-election-namespace=aicr-system",
 		"--graceful-shutdown-timeout=5s",
+		"--log-level=debug",
 	})
 	if err != nil {
 		t.Fatalf("Parse() = %v", err)
@@ -60,9 +63,27 @@ func TestBindFlagsOverridesDefaults(t *testing.T) {
 		LeaderElection:          false,
 		LeaderElectionNamespace: "aicr-system",
 		GracefulShutdownTimeout: 5 * time.Second,
+		LogLevel:                slog.LevelDebug,
 	}
 	if o != want {
 		t.Fatalf("options = %+v, want %+v", o, want)
+	}
+}
+
+// ParseFlags fills the manager options and the installation configuration
+// over their defaults, and reports a bad flag as an invalid request.
+func TestParseFlags(t *testing.T) {
+	t.Parallel()
+	f, err := ParseFlags(flag.NewFlagSet("test", flag.ContinueOnError), []string{"--log-level=warn", "--aicr-version=v1.0.0"})
+	if err != nil || f.Options.LogLevel != slog.LevelWarn || !f.Options.LeaderElection ||
+		f.Config.AICRVersion != "v1.0.0" || f.Config.JobsNamespace != "aicr-jobs" {
+
+		t.Fatalf("ParseFlags() = %+v, %v", f, err)
+	}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	if _, err = ParseFlags(fs, []string{"--log-level=loud"}); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		t.Fatalf("ParseFlags(--log-level=loud) = %v, want INVALID_REQUEST", err)
 	}
 }
 

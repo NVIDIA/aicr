@@ -22,9 +22,12 @@
 # development opt-in, so the operator refuses its development settings.
 #
 # Usage: CANDIDATE_VERSION=v0.1.0-rc.1 tools/operator-candidate [build|verify]
+#        tools/operator-candidate deps
 #   build   (default) build dist/candidate
 #   verify  build twice, the second with an empty Go build cache, and require
 #           identical bytes
+#   deps    download every module a build needs and install ko under
+#           dist/tools, so a build can then run with GOPROXY=off
 #
 # CANDIDATE_REPOSITORY names the operator image repository the candidate is
 # published to (default ghcr.io/nvidia/aicr-operator), and
@@ -46,6 +49,23 @@ trap 'rm -rf "${work}"' EXIT
 setting() { yq -r "$1" .settings.yaml; }
 # Only the commit's go.mod and go.sum select module code, never a go.work.
 export GOWORK=off
+
+# ko resolves outside this module, so `go mod download` fetches none of its
+# modules, and a `go run` of it looks up the module's deprecation even when
+# everything is cached. deps installs it, built from its source at the pin by
+# this Go, where the build finds it; a ko built by another Go compresses
+# layers differently and changes every image digest.
+ko_module="github.com/google/ko@$(setting '.build_tools.ko')"
+ko_bin="${repo_root}/dist/tools/ko@$(setting '.build_tools.ko')-$(go env GOVERSION)/ko"
+ko=(go run "${ko_module}")
+if [[ -x "${ko_bin}" ]]; then
+  ko=("${ko_bin}")
+fi
+if [[ "${1:-}" == deps ]]; then
+  go mod download
+  GOBIN="${ko_bin%/ko}" go install "${ko_module}"
+  exit 0
+fi
 
 version="${CANDIDATE_VERSION:?set CANDIDATE_VERSION to a release version, such as v0.1.0-rc.1}"
 repository="${CANDIDATE_REPOSITORY:-ghcr.io/nvidia/aicr-operator}"
@@ -82,11 +102,11 @@ build() {
   # without the development opt-in whatever the caller's environment holds.
   AICR_OPERATOR_VERSION="${version}" AICR_OPERATOR_DATE="${commit_date}" AICR_OPERATOR_DEVELOPMENT=false \
     KO_DOCKER_REPO="${repository}" \
-    go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --push=false \
+    "${ko[@]}" build --bare --push=false \
     --platform=linux/amd64,linux/arm64 --oci-layout-path "${out}/image" --sbom=none \
     ./cmd/aicr-operator >/dev/null
   KO_DOCKER_REPO="${registry_repository}" \
-    go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --push=false \
+    "${ko[@]}" build --bare --push=false \
     --platform=linux/amd64,linux/arm64 --oci-layout-path "${out}/registry-image" --sbom=none \
     ./cmd/aicr-registry >/dev/null
   local platform
@@ -101,7 +121,8 @@ build() {
   # only the cluster's own inputs, with either registry.
   helm template aicr-operator "${out}"/chart/*.tgz --namespace aicr-system --set validation.enabled=true >/dev/null
   helm template aicr-operator "${out}"/chart/*.tgz --namespace aicr-system --set validation.enabled=true \
-    --set registry.mode=external --set registry.repository=oci://registry.example.com/aicr/cluster >/dev/null
+    --set registry.mode=external --set registry.repository=oci://registry.example.com/aicr/cluster \
+    --set registry.auth.provider=static >/dev/null
   # The candidate image's own operator binary must refuse each development
   # setting. Outside CI, a host that cannot run it skips the check.
   go run ./tools/operator-release refuses -dir "${out}"
@@ -146,7 +167,7 @@ verify)
   echo "two builds of ${commit} are identical: $(yq -r '.digest' "${dir}/candidate.json")"
   ;;
 *)
-  echo "usage: $0 [build|verify]" >&2
+  echo "usage: $0 [build|verify|deps]" >&2
   exit 2
   ;;
 esac

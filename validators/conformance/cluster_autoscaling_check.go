@@ -25,11 +25,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/helper"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/k8s"
+	"aicr.run/pkg/validator/labels"
+	"aicr.run/validators"
+	"aicr.run/validators/helper"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -43,7 +44,6 @@ import (
 )
 
 const (
-	clusterAutoTestPrefix  = "cluster-auto-test-"
 	karpenterNodePoolLabel = "karpenter.sh/nodepool"
 	clusterAutoTestImage   = "docker.io/library/ubuntu:22.04"
 )
@@ -238,7 +238,7 @@ func CheckClusterAutoscaling(ctx *validators.Context) error {
 					"If the request failed, the check logs a warning naming the namespace. "+
 					"Find leftovers from earlier runs with: "+
 					"kubectl get namespaces -o name | grep %s",
-					report.Namespace, clusterAutoTestPrefix))
+					report.Namespace, defaults.ClusterAutoscalingTestNamespacePrefix))
 			return passAsObservation()
 		}
 		slog.Debug("behavioral validation failed for NodePool",
@@ -266,9 +266,9 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", randErr)
 	}
 	suffix := hex.EncodeToString(b)
-	nsName := clusterAutoTestPrefix + suffix
-	deployName := clusterAutoTestPrefix + suffix
-	hpaName := clusterAutoTestPrefix + suffix
+	nsName := defaults.ClusterAutoscalingTestNamespacePrefix + suffix
+	deployName := defaults.ClusterAutoscalingTestNamespacePrefix + suffix
+	hpaName := defaults.ClusterAutoscalingTestNamespacePrefix + suffix
 	report = &clusterAutoscalingReport{
 		NodePoolName:   nodePoolName,
 		Namespace:      nsName,
@@ -282,9 +282,15 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 	// persisted the namespace, or may still be applying it when a single
 	// Delete would see NotFound, so cleanup settles to confirmed absence
 	// within its budget instead of trusting one Delete. The ownership label
-	// is what lets it adopt a namespace that surfaces late; the rest of the
-	// gpuTestRun model (128-bit token) is not ported here.
-	run := &gpuTestRun{token: suffix, namespace: nsName}
+	// is what lets it adopt a namespace that surfaces late, and the image
+	// pull Secret names let copyImagePullSecrets serve the workload image;
+	// the rest of the gpuTestRun model (128-bit token) is not ported here.
+	run := &gpuTestRun{
+		token:              suffix,
+		namespace:          nsName,
+		imagePullSecrets:   validators.ImagePullSecretNames(),
+		validatorNamespace: validators.ValidatorNamespace(),
+	}
 	defer func() { //nolint:contextcheck // cleanup runs on its own bounded context
 		status, cleanupErr := cleanupGPUTestNamespace(clientset, run)
 		if cleanupErr != nil {
@@ -322,7 +328,7 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   nsName,
-			Labels: map[string]string{gpuTestRunLabel: run.token},
+			Labels: map[string]string{labels.GPUTestRun: run.token},
 		},
 	}
 	created, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
@@ -335,6 +341,12 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 	if err == nil {
 		run.nsObserved = true
 		run.nsUID = created.UID
+	}
+	// The workload pod resolves imagePullSecrets only in its own namespace,
+	// so the --image-pull-secret Secrets are copied in before it is created;
+	// a copy failure fails the check rather than letting the pull fail later.
+	if err = copyImagePullSecrets(ctx, clientset, run); err != nil {
+		return nil, err
 	}
 
 	// Baseline: count existing Karpenter nodes for this pool before creating test resources.
@@ -350,7 +362,7 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 	slog.Info("baseline Karpenter node count", "pool", nodePoolName, "count", baselineNodeCount)
 
 	// Create Deployment: GPU-requesting pods with Karpenter nodeSelector.
-	deploy := buildClusterAutoTestDeployment(deployName, nsName, nodePoolName)
+	deploy := buildClusterAutoTestDeployment(deployName, nsName, nodePoolName, run.imagePullSecretRefs())
 	if _, createErr := clientset.AppsV1().Deployments(nsName).Create(
 		ctx, deploy, metav1.CreateOptions{}); createErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create cluster autoscaling test deployment", createErr)
@@ -390,8 +402,9 @@ func validateClusterAutoscaling(vctx *validators.Context, nodePoolName string) (
 
 // buildClusterAutoTestDeployment creates a Deployment that requests GPU resources
 // and targets the discovered Karpenter GPU NodePool. This matches the KWOK autoscaling
-// test manifest (kwok/manifests/karpenter/hpa-gpu-scale-test.yaml).
-func buildClusterAutoTestDeployment(name, namespace, nodePoolName string) *appsv1.Deployment {
+// test manifest (kwok/manifests/karpenter/hpa-gpu-scale-test.yaml). pullSecrets
+// are the run's copied image pull Secrets (gpuTestRun.imagePullSecretRefs).
+func buildClusterAutoTestDeployment(name, namespace, nodePoolName string, pullSecrets []corev1.LocalObjectReference) *appsv1.Deployment {
 	replicas := int32(1)
 	runAsNonRoot := true
 	runAsUser := int64(65534)
@@ -426,6 +439,7 @@ func buildClusterAutoTestDeployment(name, namespace, nodePoolName string) *appsv
 					NodeSelector: map[string]string{
 						karpenterNodePoolLabel: nodePoolName,
 					},
+					ImagePullSecrets: pullSecrets,
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: &runAsNonRoot,
 						RunAsUser:    &runAsUser,

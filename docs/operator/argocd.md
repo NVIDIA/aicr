@@ -145,7 +145,7 @@ rollout that reaches the release.
 | Add the resources finalizer | The admission policy then denies every operator write to that Application, and deleting it would delete the release's resources | Remove a component through the plan; the operator adds the finalizer only for an approved `Remove` step |
 | Delete an owned Application to remove a component | Its resources stay, and the operator writes it again | Remove the component from the recipe or plan |
 | Manage these Applications from another tool (an app-of-apps, an ApplicationSet, Flux) | Two writers fight over the same objects | Leave them to the operator |
-| Create an Application with a release's name yourself | It is foreign: the operator never writes or deletes it, and the rollout that reaches that release fails (`ForeignObject`) | Use another name |
+| Create an Application with a release's name yourself | It is foreign: the operator never writes or deletes it. The runtime stalls with `ForeignObject` before it creates a rollout that would install that release, and a rollout already created fails when it reaches the release | Use another name |
 | Delete the `aicr` AppProject | Every owned Application references it | `helm upgrade` recreates it |
 | Add fields to a component's resources by hand (an env var on a Deployment, a label) | With server-side apply, Argo CD compares and self-heals only the fields its manifests set, so an added field stays, `Synced` and `Healthy`, and nothing reverts it. Fields the manifests set are reverted. | Change the component through the runtime's overrides; to undo an addition, remove the field by hand |
 

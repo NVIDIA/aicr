@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 func TestRenderEmptyReport(t *testing.T) {
@@ -440,7 +440,7 @@ func TestRenderIndexListsUntestedRequirements(t *testing.T) {
 		{Name: "ai-service-metrics", Status: "passed"},
 		{Name: "inference-gateway", Status: "passed"},
 		{Name: "pod-autoscaling", Status: "passed"},
-		{Name: "cluster-autoscaling", Status: "passed"},
+		{Name: "cluster-autoscaling", Status: "passed", Extra: stamped},
 		{Name: "robust-controller", Status: "passed"},
 		{Name: "secure-accelerator-access", Status: "passed"},
 	}}}

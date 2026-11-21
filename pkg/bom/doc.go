@@ -22,6 +22,9 @@
 //     plus recognized structured `image:` and `scalingPodImage:` descriptors.
 //     Invalid members in a recognized descriptor return an error rather than
 //     silently producing an incomplete inventory.
+//   - ExtractImageSetFromYAML does the same but keeps operator-built driver
+//     descriptors apart, and DriverImage.Qualify completes their tag with the
+//     node OS (and architecture) the operator appends.
 //   - ParseImageRef splits a container image string into registry, repository,
 //     tag, and digest components.
 //   - BuildBOM assembles a CycloneDX 1.6 document from per-component image

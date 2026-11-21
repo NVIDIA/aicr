@@ -34,18 +34,5 @@ charts:
       - schedulingshards.kai.scheduler
       - topologies.kai.scheduler
     repository: oci://ghcr.io/kai-scheduler/kai-scheduler
-    sourceVersion: v0.16.9
-  - chart: kai-scheduler
-    repository: oci://ghcr.io/kai-scheduler/kai-scheduler
-    sourceVersion: v0.17.1
-    variants:
-      - crds:
-          - bindrequests.scheduling.run.ai
-          - configs.kai.scheduler
-          - podgroups.scheduling.run.ai
-          - queues.scheduling.run.ai
-          - schedulingshards.kai.scheduler
-          - topologies.kai.scheduler
-        recipes:
-          - b300-mk8s-ubuntu-inference-dynamo
+    sourceVersion: v0.18.8
 component: kai-scheduler

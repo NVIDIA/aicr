@@ -42,8 +42,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/errors"
+	helmutil "aicr.run/pkg/helm"
 )
 
 // writeVendoredHelmFolder pulls the upstream chart bytes via puller and
@@ -130,7 +131,7 @@ func writeVendoredHelmFolder(
 		Name:         c.Name,
 		Parent:       c.Name,
 		ChartName:    subchart,
-		ChartVersion: deployer.NormalizeVersionWithDefault(c.Version),
+		ChartVersion: deployer.NormalizeVersionWithDefault(helmutil.ChartVersion(c.Repository, c.Version)),
 	}, stamp)
 	if err != nil {
 		return Folder{}, VendorRecord{}, err
@@ -193,6 +194,7 @@ func writeVendoredHelmFolder(
 	// inconsistently.
 	rec.Name = c.Name
 	rec.TarballName = tarball
+	rec.Archive = tgz
 
 	return Folder{
 		Index:       idx,

@@ -25,10 +25,13 @@
 # manager image.
 #
 # Each digest is what its tag resolved to when this file was derived. The
-# workloads pull by tag, not by digest, so the digest tells a mirror which bytes
-# to copy but does not guarantee what runs. If upstream repoints a tag, pods
-# pull bytes this file does not describe. A mirror has to serve each tag, and
-# serving it at the recorded digest keeps the cluster on the derived bytes.
+# catalog names its workloads by tag, so a Certification that sets no
+# options.image pulls by tag, not by digest: the digest tells a mirror which
+# bytes to copy but does not guarantee what runs, and if upstream repoints a
+# tag, pods pull bytes this file does not describe. AICR's
+# nccl-cre-all-reduce-bw and cre-training-goodput checks pin their workload
+# image to the digest recorded here. A mirror has to serve each tag at the
+# recorded digest, which those two checks require.
 #
 # sourceCommit is the upstream commit sourceVersion pointed to at derivation.
 # Tags are mutable, so the commit is the input that reproduces this file.
@@ -48,5 +51,5 @@ platform: aws
 runtimeFetches:
   - ref: core_v0.15.2
     url: https://github.com/NVIDIA/Megatron-LM.git
-sourceCommit: df01e52c57c4b71017a2433b0cc50375c79cb69c
-sourceVersion: v0.8.2
+sourceCommit: bdd3131c7ae293996cadbeb9e73b3b0b26988684
+sourceVersion: v0.12.0

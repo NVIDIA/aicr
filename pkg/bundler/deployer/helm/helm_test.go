@@ -30,12 +30,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/bundler/gatemanifest"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
 )
 
 // update regenerates goldens under testdata/ when set via `go test -update`.
@@ -2259,6 +2261,107 @@ func TestDeployScript_RemediationHintPreservesMergedKubeconfig(t *testing.T) {
 	}
 }
 
+// TestDeployScript_DriverDaemonSetLookupDrainsKubectl pins that the driver
+// DaemonSet lookup reads kubectl's whole listing. Under pipefail, a reader that
+// exits at its first match turns kubectl's SIGPIPE into exit 141 and aborts the
+// deploy. The rendered line runs against a stub kubectl that keeps writing.
+func TestDeployScript_DriverDaemonSetLookupDrainsKubectl(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+	rr := createTestRecipeResult()
+	rr.ComponentRefs = append(rr.ComponentRefs, recipe.ComponentRef{
+		Name:      "nvidia-dra-driver-gpu",
+		Namespace: "nvidia-dra-driver",
+		Chart:     "nvidia-dra-driver-gpu",
+		Version:   "0.4.1",
+		Source:    "https://helm.ngc.nvidia.com/nvidia",
+	})
+	rr.DeploymentOrder = append(rr.DeploymentOrder, "nvidia-dra-driver-gpu")
+	outputDir := t.TempDir()
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator":          {"driver": map[string]any{"enabled": true}},
+			"nvidia-dra-driver-gpu": {},
+		},
+		Version: "v1.0.0",
+	}
+	if _, genErr := g.Generate(context.Background(), outputDir); genErr != nil {
+		t.Fatalf("Generate failed: %v", genErr)
+	}
+	script, err := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+	if err != nil {
+		t.Fatalf("read deploy.sh: %v", err)
+	}
+	lines := strings.Split(string(script), "\n")
+	i := slices.IndexFunc(lines, func(l string) bool {
+		return strings.HasPrefix(strings.TrimSpace(l), "DRIVER_DS_NS=$(")
+	})
+	if i < 0 {
+		t.Fatal("deploy.sh no longer renders the DRIVER_DS_NS lookup")
+	}
+
+	tests := []struct {
+		name    string
+		stub    string
+		want    string
+		wantErr bool
+	}{
+		{
+			// Far more than a pipe buffer follows the match, so an early
+			// exit always leaves the stub writing into a closed pipe.
+			name: "listing continues past the match",
+			stub: "#!/bin/sh\n" +
+				"echo 'gpu-operator nvidia-driver-daemonset 1 1 1 1 1 <none> 5m'\n" +
+				"i=0\n" +
+				"while [ \"$i\" -lt 10000 ]; do echo \"zz-$i ds-$i 1 1 1 1 1 <none> 5m\"; i=$((i + 1)); done\n",
+			want: "gpu-operator",
+		},
+		{
+			// A failed listing must not read as "no driver DaemonSet".
+			name:    "failing kubectl still fails the lookup",
+			stub:    "#!/bin/sh\nexit 1\n",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			binDir := filepath.Join(dir, "bin")
+			if mkErr := os.MkdirAll(binDir, 0o750); mkErr != nil {
+				t.Fatalf("mkdir: %v", mkErr)
+			}
+			if wErr := os.WriteFile(filepath.Join(binDir, "kubectl"), []byte(tt.stub), 0o700); wErr != nil {
+				t.Fatalf("write stub: %v", wErr)
+			}
+			harness := filepath.Join(dir, "lookup.sh")
+			body := "#!/usr/bin/env bash\nset -euo pipefail\n" + lines[i] +
+				"\nprintf '%s' \"${DRIVER_DS_NS}\"\n"
+			if wErr := os.WriteFile(harness, []byte(body), 0o700); wErr != nil {
+				t.Fatalf("write harness: %v", wErr)
+			}
+			cmd := exec.Command(bashPath, harness)
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			out, runErr := cmd.Output()
+			if tt.wantErr {
+				if runErr == nil {
+					t.Errorf("lookup succeeded with %q, want it to fail", out)
+				}
+				return
+			}
+			if runErr != nil {
+				t.Fatalf("lookup aborted the script: %v", runErr)
+			}
+			if string(out) != tt.want {
+				t.Errorf("DRIVER_DS_NS = %q, want %q", out, tt.want)
+			}
+		})
+	}
+}
+
 // TestGenerate_ApplyCRDsExcludeSubcharts pins the registry's
 // ownsCRDsExcludeSubcharts reaching the rendered apply-crds.sh: nvsentinel's
 // script must skip its mongodb-store subchart (psmdb-operator owns those
@@ -2439,5 +2542,38 @@ func TestCRDGroupsInstalledBy(t *testing.T) {
 	got[0] = "mutated"
 	if again := CRDGroupsInstalledBy("gpu-operator"); again[0] == "mutated" {
 		t.Errorf("CRDGroupsInstalledBy returns the shared slice")
+	}
+}
+
+// TestGenerate_RejectsDynamicOnManifestOnly reproduces #3881 at the deployer
+// level: --dynamic on a manifest-only component used to write a stub to
+// cluster-values.yaml that no template consumed.
+func TestGenerate_RejectsDynamicOnManifestOnly(t *testing.T) {
+	g := &Generator{
+		RecipeResult: &recipe.RecipeResult{
+			Kind:       "RecipeResult",
+			APIVersion: "aicr.run/v1",
+			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "nodewright-customizations", Namespace: "nodewright"},
+			},
+			DeploymentOrder: []string{"nodewright-customizations"},
+		},
+		ComponentValues: map[string]map[string]any{"nodewright-customizations": {}},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"nodewright-customizations": {
+				"components/nodewright-customizations/manifests/customization.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: customization\n"),
+			},
+		},
+		DynamicValues: map[string][]string{"nodewright-customizations": {"acceleratedTolerations"}},
+		Version:       "v1.0.0",
+	}
+	_, err := g.Generate(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("want error rejecting --dynamic on a manifest-only component, got nil")
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if !strings.Contains(err.Error(), `component "nodewright-customizations"`) || !strings.Contains(err.Error(), "acceleratedTolerations") {
+		t.Errorf("error should name the component and path, got: %v", err)
 	}
 }

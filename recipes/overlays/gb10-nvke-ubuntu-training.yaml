@@ -1,0 +1,137 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# DGX Spark (one GB10 GPU) on NVKE, at intent training. DGX OS is Ubuntu 24.04
+# with the NVIDIA driver pre-installed.
+#
+# One GPU and no NVLink or InfiniBand: no east-west stack and no NCCL check.
+# DCGM does not support GB10: DCGM, dcgm-exporter and NVSentinel's GPU health
+# monitor are off, and no declared check reads DCGM.
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: gb10-nvke-ubuntu-training
+
+spec:
+  base: nvke
+
+  criteria:
+    service: nvke
+    accelerator: gb10
+    os: ubuntu
+    intent: training
+
+  mixins:
+    - os-ubuntu
+
+  constraints:
+    # Restated from nvke: snapshot resolution checks a leaf's own constraints.
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        # GPUDirect RDMA and GDRCopy are not supported on DGX Spark.
+        gdrcopy:
+          enabled: false
+        driver:
+          enabled: false
+        toolkit:
+          enabled: true
+          # Operator-managed, as in gb200-nvke: NVKE's containerd needs the
+          # file config source, and only GPU allocations may reach the GPU.
+          env:
+            - name: RUNTIME_CONFIG_SOURCE
+              value: file
+            - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED
+              value: "false"
+        devicePlugin:
+          enabled: true
+          # Helm replaces lists: the first two entries restate the component
+          # base. No RDMA path, so no /dev/infiniband in GPU pods.
+          env:
+            - name: DP_DISABLE_HEALTHCHECKS
+              value: "109"
+            - name: DEVICE_LIST_STRATEGY
+              value: cdi-cri,cdi-annotations,volume-mounts
+            - name: MOFED_ENABLED
+              value: "false"
+        dcgm:
+          enabled: false
+        dcgmExporter:
+          enabled: false
+
+    # The driver lives on the host, not under /run/nvidia/driver.
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        nvidiaDriverRoot: /
+
+    # No driver pod for the labeler to watch, and the GPU health monitor
+    # needs DCGM.
+    - name: nvsentinel
+      type: Helm
+      overrides:
+        labeler:
+          assumeDriverInstalled: true
+        global:
+          gpuHealthMonitor:
+            enabled: false
+        # Inert unless nvsentinel-remediation enables janitor. The reset Job
+        # reads the host driver, and waits only for operands this leaf runs.
+        janitor:
+          config:
+            controllers:
+              gpuReset:
+                resetJob:
+                  hostDriverRootPath: /
+                serviceManager:
+                  name: gpu-operator
+                  spec:
+                    namespace: gpu-operator
+                    teardownTimeout: 5m
+                    restoreTimeout: 10m
+                    apps:
+                      - appSelector: {app: nvidia-device-plugin-daemonset}
+                        nodeLabel: nvidia.com/gpu.deploy.device-plugin
+                        enabledValue: "true"
+                        disabledValue: "false"
+                      - appSelector: {app: gpu-feature-discovery}
+                        nodeLabel: nvidia.com/gpu.deploy.gpu-feature-discovery
+                        enabledValue: "true"
+                        disabledValue: "false"
+
+  validation:
+    # TODO: no performance phase yet. AICR's NCCL checks need two GPU nodes;
+    # add nccl-all-reduce-bw once two Sparks are linked over ConnectX-7.
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        # Bundles device plugin v0.18.0, which ignores GB10's unsupported
+        # NVML memory query.
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"
+    conformance:
+      # No gpu-operator-health or accelerator-metrics: both need DCGM.
+      checks:
+        - platform-health
+        - dra-support
+        - gang-scheduling
+        - driver-runtime-management

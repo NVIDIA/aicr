@@ -35,7 +35,7 @@ import (
 	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"oras.land/oras-go/v2"
@@ -44,11 +44,11 @@ import (
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/plugin"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/engine/argocd"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/plugin"
+	"aicr.run/pkg/operator/registry"
 )
 
 // renderTimeout bounds one AICR CLI render.

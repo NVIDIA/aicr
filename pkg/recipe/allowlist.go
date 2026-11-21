@@ -20,7 +20,7 @@ import (
 	"slices"
 	"strings"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 // Environment variable names for allowlist configuration.

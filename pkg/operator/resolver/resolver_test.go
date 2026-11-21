@@ -33,13 +33,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
-	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
+	"aicr.run/pkg/operator/engine/argocd"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/registry"
+	"aicr.run/pkg/operator/registry/registrytest"
 )
 
 const uid = "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"
@@ -658,7 +658,7 @@ func TestBuildLaneBundle(t *testing.T) {
 // the plan's recipe for upgrade-check and reproduce.
 func TestBuildRecordsTheBundleRecipeForValidation(t *testing.T) {
 	t.Parallel()
-	for _, version := range []string{"v1.0.0", "v1.1.2"} {
+	for _, version := range []string{"v1.0.0", "v1.1.2", "v1.2.0"} {
 		t.Run(version, func(t *testing.T) {
 			t.Parallel()
 			in := buildInput(t)

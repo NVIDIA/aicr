@@ -24,11 +24,11 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/health"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	aicr "aicr.run/pkg/client/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/health"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 )
 
 // healthNotApplicable is the placeholder rendered in the status/coverage table
@@ -110,6 +110,8 @@ Include overlays from an external data directory:
 				Category: catQueryParameters,
 			}, recipe.GetCriteriaPlatformTypes),
 			dataFlag(),
+			configFlag(),
+			externalOnlyFlag(),
 			withCompletions(&cli.StringFlag{
 				Name:     flagFormat,
 				Aliases:  []string{"t"},
@@ -129,7 +131,11 @@ Include overlays from an external data directory:
 				return err
 			}
 
-			client, err := recipeClientFromCmd(ctx, cmd, nil)
+			cfg, err := loadFacadeConfig(ctx, cmd)
+			if err != nil {
+				return err
+			}
+			client, err := recipeClientFromCmd(ctx, cmd, cfg)
 			if err != nil {
 				return err
 			}

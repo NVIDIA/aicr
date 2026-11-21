@@ -20,11 +20,12 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	appconfig "github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/oci"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/artifact"
+	appconfig "aicr.run/pkg/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/oci"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
 )
 
 // Config is a parsed AICRConfig document — the version-controlled file a team
@@ -177,7 +178,9 @@ func (c *Config) BundleVerifyOptions() (BundleVerifyOptions, error) {
 // This is the piece that lets a committed config stand up a Client at all: a
 // non-empty data directory yields a FilesystemSource layered over the embedded
 // recipe data, matching `aicr recipe --data`. When false is returned the
-// caller supplies its own source, normally EmbeddedSource.
+// caller supplies its own source, normally EmbeddedSource. externalOnly selects
+// ExternalFilesystemSource instead; a missing directory then fails at Client
+// construction rather than falling back to embedded data.
 //
 // Deliberately NOT folded into a Client option. Recipe source is fixed at
 // construction — a Client owns its DataProvider for its whole lifetime — so
@@ -188,10 +191,18 @@ func (c *Config) RecipeSource() (RecipeSourceOption, bool) {
 		return RecipeSourceOption{}, false
 	}
 	dir := c.internal.Recipe().DataDir()
+	if c.IsExternalOnly() {
+		return ExternalFilesystemSource(dir), true
+	}
 	if dir == "" {
 		return RecipeSourceOption{}, false
 	}
 	return FilesystemSource(dir), true
+}
+
+// IsExternalOnly reports spec.recipe.externalOnly.
+func (c *Config) IsExternalOnly() bool {
+	return c != nil && c.internal != nil && c.internal.Recipe().IsExternalOnly()
 }
 
 // RecipeCriteria derives resolve criteria from spec.recipe.criteria, parsed
@@ -437,6 +448,7 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 		Nodes:                resolved.Nodes,
 		StorageClass:         resolved.StorageClass,
 		SharedStorageClass:   resolved.SharedStorageClass,
+		RuntimeMetrics:       resolved.RuntimeMetrics,
 		Attest:               resolved.Attest,
 		CertIDRegexp:         resolved.CertIDRegexp,
 		VendorCharts:         resolved.VendorCharts,
@@ -1145,4 +1157,14 @@ func (c *Config) RecipeOutputOptions() RecipeOutputOptions {
 		Path:   c.internal.Recipe().OutputPath(),
 		Format: c.internal.Recipe().OutputFormat(),
 	}
+}
+
+// RecipeArtifacts derives inventory choices without sharing mutable config slices.
+func (c *Config) RecipeArtifacts() artifact.Options {
+	if c == nil || c.internal == nil || c.internal.Spec.Recipe == nil || c.internal.Spec.Recipe.Artifacts == nil {
+		return artifact.Options{}
+	}
+	result := *c.internal.Spec.Recipe.Artifacts
+	result.AllowCatalogPins = append([]string(nil), result.AllowCatalogPins...)
+	return result
 }

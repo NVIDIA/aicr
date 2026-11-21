@@ -35,19 +35,19 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
-	bundlerresult "github.com/NVIDIA/aicr/pkg/bundler/result"
-	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appconfig "github.com/NVIDIA/aicr/pkg/config"
-	evverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
-	"github.com/NVIDIA/aicr/pkg/health"
-	"github.com/NVIDIA/aicr/pkg/oci"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	bundlerconfig "aicr.run/pkg/bundler/config"
+	bundlerresult "aicr.run/pkg/bundler/result"
+	bundleverifier "aicr.run/pkg/bundler/verifier"
+	aicr "aicr.run/pkg/client/v1"
+	appconfig "aicr.run/pkg/config"
+	evverifier "aicr.run/pkg/evidence/verifier"
+	"aicr.run/pkg/health"
+	"aicr.run/pkg/oci"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/upgrade"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // TestStability_Client pins the Client constructor, its option type, and
@@ -94,6 +94,7 @@ func TestStability_RecipeResolution(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, string) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromCriteriaWithProfile)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromCriteriaWithOptions)
 	requireSignature[func(string, bool) (bool, error)](aicr.PublishedEvidenceRequired)
+	const _ string = aicr.RequireEvidenceEnvVar
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult) error]((*aicr.Client).RequirePublishedEvidence)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, *aicr.Snapshot) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromSnapshot)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.Criteria, *aicr.Snapshot, string) (*aicr.RecipeResult, error)]((*aicr.Client).ResolveRecipeFromSnapshotWithProfile)
@@ -287,7 +288,7 @@ func TestStability_Bundle(t *testing.T) {
 	// configuration" godoc); the CLI's own bundle-generation call and the
 	// aicrd /v1/bundle handler both rely on it.
 	requireType[*aicr.BundleConfig](aicr.BundleOptions{}.Config)
-	// The 19 flat fields Config.BundleOptions derives from spec.bundle.
+	// The 20 flat fields Config.BundleOptions derives from spec.bundle.
 	// Pinned by name and type together: a bare zero-value literal above
 	// would still compile through a rename or retype of any one of them.
 	_ = aicr.BundleOptions{
@@ -305,6 +306,7 @@ func TestStability_Bundle(t *testing.T) {
 		Nodes:                      0,
 		StorageClass:               "",
 		SharedStorageClass:         "",
+		RuntimeMetrics:             bundlerconfig.RuntimeMetrics{},
 		Attest:                     false,
 		CertIDRegexp:               "",
 		VendorCharts:               false,
@@ -711,4 +713,10 @@ func TestStability_Query(t *testing.T) {
 	requireSignature[func(*aicr.RecipeResult, string) (any, error)](aicr.SelectFromRecipe)
 	requireSignature[func(context.Context, *aicr.RecipeResult, string) (any, error)](aicr.SelectFromRecipeWithContext)
 	requireSignature[func(*recipe.RecipeResult) *aicr.RecipeResult](aicr.WrapResolved)
+	requireSignature[func(*aicr.RecipeResult) (*aicr.RecipeSummary, error)](aicr.SummarizeRecipe)
+
+	// RecipeSummary is a transparent alias; pin its target so a retype is a
+	// compile error, as in TestStability_TypesAndAliases.
+	//nolint:staticcheck // QF1011: explicit type pins the alias's target type.
+	var _ *recipe.Summary = (*aicr.RecipeSummary)(nil)
 }

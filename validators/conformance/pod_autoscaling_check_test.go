@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,12 +27,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator/labels"
+	v1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -402,7 +404,7 @@ func TestBuildHPADeployment(t *testing.T) {
 	t.Parallel()
 	t.Run("DRA", func(t *testing.T) {
 		t.Parallel()
-		d := buildHPADeployment("ns", true, nil, nil)
+		d := buildHPADeployment("ns", true, nil, nil, nil)
 		spec := d.Spec.Template.Spec
 		if len(spec.ResourceClaims) != 1 || ptr.Deref(spec.ResourceClaims[0].ResourceClaimTemplateName, "") != hpaWorkloadName {
 			t.Fatalf("resourceClaims = %+v, want one claim from template %s", spec.ResourceClaims, hpaWorkloadName)
@@ -424,7 +426,7 @@ func TestBuildHPADeployment(t *testing.T) {
 	t.Run("device plugin", func(t *testing.T) {
 		t.Parallel()
 		tol := []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpEqual, Value: "gpu", Effect: corev1.TaintEffectNoSchedule}}
-		d := buildHPADeployment("ns", false, []string{"node-a", "node-b"}, tol)
+		d := buildHPADeployment("ns", false, []string{"node-a", "node-b"}, tol, nil)
 		spec := d.Spec.Template.Spec
 		if len(spec.ResourceClaims) != 0 {
 			t.Errorf("device-plugin pod must not carry resourceClaims: %+v", spec.ResourceClaims)
@@ -443,7 +445,7 @@ func TestBuildHPADeployment(t *testing.T) {
 	})
 	t.Run("common shape", func(t *testing.T) {
 		t.Parallel()
-		d := buildHPADeployment("ns", false, nil, nil)
+		d := buildHPADeployment("ns", false, nil, nil, nil)
 		if ptr.Deref(d.Spec.Replicas, 0) != hpaMinReplicas {
 			t.Errorf("replicas = %d, want %d", ptr.Deref(d.Spec.Replicas, 0), hpaMinReplicas)
 		}
@@ -555,6 +557,8 @@ type fakeHPAControlPlane struct {
 	poolNever       bool
 	noPrometheus    bool
 	created         time.Time
+	// monitorPool is the PodMonitor's scrape pool, set by newTestHPAScenario.
+	monitorPool string
 
 	mu           sync.Mutex
 	hpaSeen      time.Time
@@ -588,7 +592,7 @@ func (f *fakeHPAControlPlane) poolLoaded() bool {
 func (f *fakeHPAControlPlane) listScrapePools(context.Context) ([]byte, error) {
 	pools := []string{"serviceMonitor/monitoring/kube-prometheus-stack-kubelet/0"}
 	if f.poolLoaded() {
-		pools = append(pools, scrapePoolPrefix(monitorKindPod, f.ns, hpaWorkloadName)+"0")
+		pools = append(pools, f.monitorPool)
 	}
 	return promScrapePools(pools...), nil
 }
@@ -795,6 +799,9 @@ func (f *fakeHPAControlPlane) readMetrics(ctx context.Context) ([]byte, error) {
 	return metricSamples(f.ns, values, ""), nil
 }
 
+// testPrometheusNamespace is where the recipe's Prometheus runs in these tests.
+const testPrometheusNamespace = "monitoring"
+
 func newTestHPAScenario(t *testing.T, cp *fakeHPAControlPlane, c *k8sfake.Clientset) *hpaScenario {
 	t.Helper()
 	run, err := newGPUTestRun()
@@ -822,10 +829,14 @@ func newTestHPAScenario(t *testing.T, cp *fakeHPAControlPlane, c *k8sfake.Client
 		negativeControlWindow: 400 * time.Millisecond,
 		stabilization:         time.Minute,
 		timings:               map[hpaPhase]time.Duration{},
+		monitorNamespace:      testPrometheusNamespace,
+		monitorName:           hpaWorkloadName + "-" + run.token,
 	}
 	if cp.noPrometheus {
 		s.promURL, s.listScrapePools = "", nil
+		s.monitorNamespace, s.monitorName = cp.ns, hpaWorkloadName
 	}
+	cp.monitorPool = scrapePoolPrefix(monitorKindPod, s.monitorNamespace, s.monitorName) + "0"
 	return s
 }
 
@@ -914,7 +925,7 @@ func TestHPAScenarioPhases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := k8sfake.NewClientset()
-			cp := newFakeHPAControlPlane(c, hpaTestPrefix+"unit")
+			cp := newFakeHPAControlPlane(c, defaults.PodAutoscalingTestNamespacePrefix+"unit")
 			tt.configure(cp)
 			s := newTestHPAScenario(t, cp, c)
 			cp.start()
@@ -952,8 +963,8 @@ func TestHPAScenarioPhases(t *testing.T) {
 			if _, getErr := c.CoreV1().Namespaces().Get(context.Background(), cp.ns, metav1.GetOptions{}); !k8serrors.IsNotFound(getErr) {
 				t.Errorf("namespace %s not deleted after the run: %v", cp.ns, getErr)
 			}
-			if _, getErr := s.dynClient.Resource(podMonitorGVR).Namespace(cp.ns).Get(context.Background(), hpaWorkloadName, metav1.GetOptions{}); !k8serrors.IsNotFound(getErr) {
-				t.Errorf("PodMonitor not deleted after the run: %v", getErr)
+			if _, getErr := s.dynClient.Resource(podMonitorGVR).Namespace(s.monitorNamespace).Get(context.Background(), s.monitorName, metav1.GetOptions{}); !k8serrors.IsNotFound(getErr) {
+				t.Errorf("PodMonitor %s/%s not deleted after the run: %v", s.monitorNamespace, s.monitorName, getErr)
 			}
 		})
 	}
@@ -964,7 +975,7 @@ func TestHPAScenarioPhases(t *testing.T) {
 // while livePods still counts it.
 func TestReadyLivePodsExcludesPending(t *testing.T) {
 	t.Parallel()
-	const ns = hpaTestPrefix + "ready-unit"
+	const ns = defaults.PodAutoscalingTestNamespacePrefix + "ready-unit"
 	ready := readyHPAPod(hpaWorkloadName + "-0")
 	ready.Namespace = ns
 	pending := readyHPAPod(hpaWorkloadName + "-1")
@@ -1022,7 +1033,7 @@ func TestHPAScenarioAttachPrometheus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			c := k8sfake.NewClientset(tt.objects...)
-			cp := newFakeHPAControlPlane(c, hpaTestPrefix+"attach")
+			cp := newFakeHPAControlPlane(c, defaults.PodAutoscalingTestNamespacePrefix+"attach")
 			cp.noPrometheus = true
 			s := newTestHPAScenario(t, cp, c)
 			var gotURL string
@@ -1049,24 +1060,41 @@ func TestHPAScenarioAttachPrometheus(t *testing.T) {
 			if (polled.Load() > 0) != tt.wantPolled {
 				t.Errorf("preflight listed scrape pools %d times, want polled=%t", polled.Load(), tt.wantPolled)
 			}
+			// With the recipe's Prometheus the PodMonitor goes to its
+			// namespace under a per-run name; without, it stays in the test
+			// namespace.
+			wantNS, wantName := cp.ns, hpaWorkloadName
+			if tt.wantWait {
+				wantNS, wantName = testPrometheusNamespace, hpaWorkloadName+"-"+s.testRun.token
+			}
+			if s.monitorNamespace != wantNS || s.monitorName != wantName {
+				t.Errorf("PodMonitor at %s/%s, want %s/%s", s.monitorNamespace, s.monitorName, wantNS, wantName)
+			}
 		})
 	}
 }
 
 // TestHPAScenarioDeployCreatesScrapeConfig pins that the check itself makes
-// the recipe's Prometheus scrape its pods: a PodMonitor selecting the
-// metric-source label on the metrics port, carrying the release label.
+// the recipe's Prometheus scrape its pods: a PodMonitor in the Prometheus
+// namespace that selects the test namespace and the metric-source label on
+// the metrics port, carrying the release label.
 func TestHPAScenarioDeployCreatesScrapeConfig(t *testing.T) {
 	t.Parallel()
 	c := k8sfake.NewClientset()
-	cp := newFakeHPAControlPlane(c, hpaTestPrefix+"scrape")
+	cp := newFakeHPAControlPlane(c, defaults.PodAutoscalingTestNamespacePrefix+"scrape")
 	s := newTestHPAScenario(t, cp, c)
 	if err := s.deploy(&validators.Context{Ctx: context.Background(), Clientset: c}); err != nil {
 		t.Fatalf("deploy: %v", err)
 	}
-	pm, err := s.dynClient.Resource(podMonitorGVR).Namespace(cp.ns).Get(context.Background(), hpaWorkloadName, metav1.GetOptions{})
+	pm, err := s.dynClient.Resource(podMonitorGVR).Namespace(testPrometheusNamespace).Get(context.Background(), s.monitorName, metav1.GetOptions{})
 	if err != nil {
-		t.Fatalf("PodMonitor not created: %v", err)
+		t.Fatalf("PodMonitor not created in the Prometheus namespace: %v", err)
+	}
+	if targets, _, _ := unstructured.NestedStringSlice(pm.Object, "spec", "namespaceSelector", "matchNames"); !slices.Equal(targets, []string{cp.ns}) {
+		t.Errorf("PodMonitor selects namespaces %v, want [%s]", targets, cp.ns)
+	}
+	if pm.GetLabels()[labels.GPUTestRun] != s.testRun.token {
+		t.Errorf("PodMonitor labels = %v, want %s=%s", pm.GetLabels(), labels.GPUTestRun, s.testRun.token)
 	}
 	if pm.GetLabels()[prometheusReleaseLabel] != prometheusComponentName {
 		t.Errorf("PodMonitor labels = %v, want %s=%s", pm.GetLabels(), prometheusReleaseLabel, prometheusComponentName)
@@ -1279,7 +1307,7 @@ func TestHPAScenarioRunWithCleanup_NamespaceCreateFailure(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newGPUTestRun: %v", err)
 			}
-			run.namespace = hpaTestPrefix + run.token
+			run.namespace = defaults.PodAutoscalingTestNamespacePrefix + run.token
 			s := &hpaScenario{
 				clientset: c,
 				dynClient: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
@@ -1296,5 +1324,45 @@ func TestHPAScenarioRunWithCleanup_NamespaceCreateFailure(t *testing.T) {
 				t.Errorf("phase = %q, want none — the cycle must not start without a namespace", s.phase)
 			}
 		})
+	}
+}
+
+// TestPruneStaleHPAPodMonitors pins which leftovers a run removes from the
+// Prometheus namespace: a run-labeled PodMonitor whose test namespace is
+// gone. One whose namespace still exists belongs to a live run, and one
+// without the run label or the check's name is not this check's.
+func TestPruneStaleHPAPodMonitors(t *testing.T) {
+	t.Parallel()
+	const liveNS, goneNS = defaults.PodAutoscalingTestNamespacePrefix + "live", defaults.PodAutoscalingTestNamespacePrefix + "gone"
+	monitor := func(name, target string, labeled bool) *unstructured.Unstructured {
+		pm := buildHPAPodMonitor(testPrometheusNamespace, name, target, "token-"+name)
+		if !labeled {
+			pm.SetLabels(map[string]string{prometheusReleaseLabel: prometheusComponentName})
+		}
+		return pm
+	}
+	c := k8sfake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: liveNS}})
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{podMonitorGVR: "PodMonitorList"},
+		monitor(hpaWorkloadName+"-stale", goneNS, true),
+		monitor(hpaWorkloadName+"-live", liveNS, true),
+		monitor(hpaWorkloadName+"-unlabeled", goneNS, false),
+		monitor("someone-elses", goneNS, true),
+	)
+
+	pruneStaleHPAPodMonitors(context.Background(), c, dyn, testPrometheusNamespace)
+
+	list, err := dyn.Resource(podMonitorGVR).Namespace(testPrometheusNamespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	got := make([]string, 0, len(list.Items))
+	for _, pm := range list.Items {
+		got = append(got, pm.GetName())
+	}
+	slices.Sort(got)
+	want := []string{hpaWorkloadName + "-live", hpaWorkloadName + "-unlabeled", "someone-elses"}
+	if !slices.Equal(got, want) {
+		t.Errorf("PodMonitors left = %v, want %v", got, want)
 	}
 }

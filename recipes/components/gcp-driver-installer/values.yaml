@@ -17,7 +17,7 @@
 #
 # Values-gated: the component sits unconditionally in the GKE COS chain and
 # renders NOTHING unless installer.enabled is true. The gpuStack profile owns
-# this gate — bundle-installer flips it on; gke-default pins it off. Do not set it directly: it is a profile-owned (locked) path.
+# this gate — bundle-installer and dra flip it on; gke-default pins it off. Do not set it directly: it is a profile-owned (locked) path.
 installer:
   enabled: false
 

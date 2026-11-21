@@ -123,7 +123,7 @@ Generate an optimized configuration recipe based on environment parameters.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s`, `mk8s`, `nvke`, `cks`, `any`. `mk8s` is Nebius Managed Service for Kubernetes; `nvke` is NVIDIA Kubernetes Engine (Forge/NICo bare metal). `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; aliases: `self-managed`, `self`, `vanilla`); `any` is the wildcard and does not select `generic` recipes. `generic` is never inferred from a snapshot (the fingerprint reports the detected provisioner, such as `metal3` or `rke2`), so `generic` recipes require `service=generic` explicitly, also when a snapshot is supplied; recipe evidence records that dimension as `not-inferable` with the observed provider, which does not disqualify the evidence |
-| `accelerator` | string | any | GPU type: `h100`, `h200`, `gb200`, `gb300`, `b200`, `b300`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200`, `any`. `b300` is B300 SXM, distinct from Grace Blackwell `gb300` |
+| `accelerator` | string | any | GPU type: `h100`, `h200`, `gb10`, `gb200`, `gb300`, `b200`, `b300`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200`, `any`. `b300` is B300 SXM, distinct from Grace Blackwell `gb300` |
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
 | `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `sles`, `rocky`, `any` |
@@ -320,6 +320,8 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
 `metadata.mariaDBOperatorState` is optional and appears when a snapshot supplies MariaDB Operator conflict evidence during resolution of AICR-provided Slurm accounting. It records `absent`, `api-detected`, `crs-detected`, or `unknown`; query-generated recipes and older snapshots without the collector subtype omit the field. Recipe generation remains observational: `api-detected`, `crs-detected`, and `unknown` emit warnings but still produce a recipe. At bundle time, `crs-detected` and `unknown` block AICR-provided installation, while `api-detected` or omitted evidence warns but proceeds; `absent` proceeds silently.
 
 `metadata.defaultStorageClassState` and `metadata.perconaOperatorState` are optional and appear when a snapshot supplies the matching evidence during resolution of a recipe containing the `nvsentinel-mongodb` component (added by the NVSentinel remediation step mixins). `defaultStorageClassState` records `present`, `multiple`, `absent`, or `unknown` for the StorageClass annotated as the cluster default, which the component's class-less volumes bind through. `perconaOperatorState` records `absent`, `api-detected`, `aicr-owned` (only AICR's own `nvsentinel/nvsentinel-mongodb` cluster exists), `operator-detected` (a Percona operator AICR did not install runs outside the `nvsentinel` namespace, or inside it under another Helm release), `crs-detected` (another PerconaServerMongoDB exists), or `unknown`. Query-generated recipes and older snapshots omit both fields. Recipe generation remains observational and only warns.
+
+`metadata.rdmaNamespaceMode` is optional and appears when the snapshot records the RDMA subsystem's network namespace mode (`OS.kmod-param./sys/module/ib_core/parameters/netns_mode`): `exclusive` (`N`), `shared` (`Y`), or `unknown` for any other value. Snapshots from nodes without the RDMA core module, query-generated recipes, and older snapshots omit it. Recipe generation records it without judging it; `aicr bundle` warns when it disagrees with the recipe's RDMA attachment (see [OKE GB300 fabric](../integrator/oke-gpu-setup.md#fabric)).
 
 ---
 
@@ -521,7 +523,8 @@ device plugin when resolving from a snapshot. See
 
 ```shell
 # GKE: omit profile= for the gke-default default, or select
-# gpuStack=bundle-installer explicitly, then POST to /v1/bundle.
+# gpuStack=bundle-installer (or gpuStack=dra) explicitly, then POST to
+# /v1/bundle.
 # -f stops on an HTTP error so a 4xx/5xx recipe body is never staged and
 # an error response is never written to bundles.zip.
 set -euo pipefail
@@ -543,7 +546,7 @@ Generate deployment bundles from a recipe.
 |-----------|------|---------|-------------|
 | `bundlers` | string | (all) | Comma-delimited list of recipe component names to bundle (e.g. `gpu-operator,network-operator`). Whitespace around names is trimmed. Components not listed are skipped as if disabled (their dependency edges are treated as satisfied externally). A name the recipe does not declare, or one that is disabled (by the recipe or a `set` `enabled=false` override), is rejected with HTTP 400. |
 | `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. The reserved prefix `deployer:` (`namePrefix`, `destinationServer`, `project`, `cascadeDelete`), e.g. `set=deployer:namePrefix=tenant-a-`, is **deprecated** in favor of the `argocd-*` parameters below. It still works, and a request that uses it gets a `Link: <…/deprecations.md#argo-cd-options-as-deployer-value-overrides>; rel="deprecation"` response header; no `Sunset` header is sent until a removal date is set. Supplying the same setting both ways, unknown `deployer:` keys, and the prefix with any deployer other than `argocd` or `argocd-helm` are rejected with HTTP 400. An override whose component is absent from the generated bundle is rejected with HTTP 400 (`INVALID_REQUEST`, "cannot take effect") rather than silently discarded; the scalar `enabled=false` spelling is exempt on a declared component. See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected) and the CLI reference's [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options) for full semantics. |
-| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm`, `deployer=argocd-helm`, `deployer=flux`, `deployer=helmfile`, `deployer=terraform`, and `deployer=fleet` (written to per-folder `cluster-values.yaml`). A declaration whose component is absent from the generated bundle is rejected with HTTP 400 (`INVALID_REQUEST`, "cannot take effect"); no path is exempt. Certain gate- or contract-owned paths on **present** components are also rejected — driver-ownership paths, GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled **and** `dra-eviction-node-label` is supplied, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). |
+| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm`, `deployer=argocd-helm`, `deployer=flux`, `deployer=helmfile`, `deployer=terraform`, and `deployer=fleet`. `helm`, `helmfile`, `terraform` and Fleet's default GitRepo mode write the values to per-folder `cluster-values.yaml`; `flux` writes per-component `configmap-values.yaml`; `argocd-helm` writes the bundle's root `values.yaml`; Fleet's HelmOp mode inlines them into `helmops.yaml`. A declaration whose component is absent from the generated bundle is rejected with HTTP 400 (`INVALID_REQUEST`, "cannot take effect"); no path is exempt. A declaration on a manifest-only or Kustomize component is also rejected with HTTP 400, because its templates are rendered when the bundle is built. The exception is a manifest-only component with `deployer=flux`, which Flux renders at reconcile time; `deployer=flux` does not support Kustomize components at all. Certain gate- or contract-owned paths on **present** components are also rejected — driver-ownership paths, GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled **and** `dra-eviction-node-label` is supplied, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). |
 | `system-node-selector` | string[] | | Node selectors for system components (format: `key=value`). Repeat for multiple. A key or value the Kubernetes API server would reject returns HTTP 400. |
 | `system-node-toleration` | string[] | | Tolerations for system components (format: `key=value:effect`). Repeat for multiple. A toleration the Kubernetes API server would reject returns HTTP 400. |
 | `accelerated-node-selector` | string[] | | Node selectors for GPU nodes (format: `key=value`). Repeat for multiple. A key or value the Kubernetes API server would reject returns HTTP 400. |
@@ -552,6 +555,8 @@ Generate deployment bundles from a recipe.
 | `workload-gate` | string | | Taint for nodewright-operator runtime-required workload gating (format: `key=value:effect` or `key:effect`). The key must have no DNS prefix (no `/`) and be at most 53 characters. Day 2 option; same as the CLI `--workload-gate`. |
 | `workload-selector` | string[] | | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: `key=value`). Repeat for multiple. A key or value the Kubernetes API server would reject returns HTTP 400. |
 | `nodes` | int | 0 | Estimated number of GPU nodes (0 = unset). Written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
+| `runtime-metrics-series` | string[] | | Metric name pattern the runtime Prometheus server keeps, on top of the series the recipe's components declare. RE2, matched against the whole name as scraped. Repeat for multiple. An invalid pattern, a recipe with no runtime Prometheus server, or a `bundlers` list that leaves that server out returns HTTP 400. |
+| `runtime-metrics-namespace` | string[] | | Namespace whose ServiceMonitors and PodMonitors the runtime Prometheus server loads, on top of its own namespace and the namespaces the recipe's own consumers read; a monitor in any other namespace, another component's included, needs it listed. Repeat for multiple. An invalid name, a recipe with no runtime Prometheus server, or a `bundlers` list that leaves that server out returns HTTP 400. |
 | `vendor-charts` | bool | false | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Each vendored chart is recorded in `provenance.yaml` with name, version, source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal for offline deployability — see the CLI reference's "Vendoring Charts for Air-Gap" section for the full tradeoff. Requires the `helm` binary on the API server's `$PATH`. **The server-side vendor path is opt-in and off by default** — the operator must set `AICR_ALLOW_VENDOR_CHARTS=true`, otherwise `vendor-charts=true` returns `400 vendor-charts is not enabled on this server`. Even when enabled, repository hosts that resolve to loopback, link-local, private, or cloud-metadata IPs are rejected with `400 INVALID_REQUEST`, and vendored artifacts are capped at 64 MiB. **Private HTTP(S) repository credentials:** the aicrd pre-check sends `HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` (as HTTP Basic auth) ONLY when `AICR_HELM_REPOSITORY_HOST` is set to that repository's exact host, the request scheme is `https`, and the request host matches (case-insensitive). All three conditions must hold — an operator setting only the username/password env vars will get no credentials attached, preventing a caller-supplied `Repository` URL from harvesting the operator's helm credentials. (Note: the upstream `helm pull --repo` subprocess does not itself read these env vars — private HTTP repos require a prior `helm repo add --username --password` in the aicrd image or an SDK-based puller.) OCI credentials flow through the standard docker config (`~/.docker/config.json` or `$DOCKER_CONFIG`), exactly like `helm pull oci://...`. If prerequisites are missing the request fails with a structured error code (`SERVICE_UNAVAILABLE` / HTTP 503 for missing helm). The index pre-check surfaces upstream HTTP status by class: `404` → `NOT_FOUND` / HTTP 404, `401`/`403` → `UNAUTHORIZED` / HTTP 401, `408`/`429` → `SERVICE_UNAVAILABLE` / HTTP 503 (retryable), other `4xx` → `INVALID_REQUEST` / HTTP 400, `5xx` → `SERVICE_UNAVAILABLE` / HTTP 503. A chart that keeps its registry pin and whose pulled archive differs from the entry's `helm.defaultDigest` fails with `CONFLICT` / HTTP 409 (see the CLI reference's "Vendoring Charts for Air-Gap" section). |
 | `serial` | bool | false | Sequence components strictly one at a time in deployment order, disabling the parallel rollout of independent components. Affects `deployer=argocd`, `argocd-helm`, `flux`, `helmfile`, and `terraform` (`helm` is already serial): argocd falls back to a linear sync-wave per folder, flux chains each `HelmRelease` `dependsOn` to the previous component, helmfile chains every release via `needs:`, and terraform chains every module call via `depends_on`, into one linear apply order. An escape hatch for reproducing the pre-parallelism ordering or bisecting a rollout. |
 | `split` | bool | false | Return a bundle set partitioned by registry class ([ADR-018](https://github.com/NVIDIA/aicr/blob/main/docs/design/018-class-partitioned-bundles.md)): one directory per class with enabled components (`core`, then `ops`) under a set root holding the full `recipe.yaml`, `split.yaml`, `bundle-info.yaml`, `checksums.txt` and, with `attest`, the attestation. The complete recipe is validated once before the partition is rendered. Install the classes in order and tear them down in reverse. `deployer=helm` only; rejected with `bundlers`, with a non-Helm deployer, or when the recipe is OCP, has a component without a registry entry, has a dependency from an earlier class to a later one, or disables every component of a declared class. See [Split a bundle by class](bundling.md#split-a-bundle-by-class). |
@@ -562,7 +567,7 @@ Generate deployment bundles from a recipe.
 | `argocd-destination-server` | string | `https://kubernetes.default.svc` | Cluster API URL child Applications deploy to. The parent stays on the Argo CD cluster. |
 | `argocd-project` | string | `default` | Argo CD project for child Applications. The parent stays in `default`. |
 | `argocd-cascade-delete` | bool | false | Add Argo CD's resources finalizer to the parent and every child Application. |
-| `argocd-sync-retry-limit` | int | _(unset)_ | `spec.syncPolicy.retry.limit` on every child Application. Unset leaves Argo CD's auto-sync default; `0` disables retries. Required by the backoff parameters. |
+| `argocd-sync-retry-limit` | int | _(unset)_ | `spec.syncPolicy.retry.limit` on every child Application. Unset leaves Argo CD's auto-sync default, except where a component declares its own default (`dynamo-platform` when the recipe includes `grove`); set, it replaces those defaults. `0` disables retries. Required by the backoff parameters. |
 | `argocd-sync-retry-backoff-duration` | string | _(Argo CD: `5s`)_ | Delay before the first sync retry, as a Go duration (`30s`). |
 | `argocd-sync-retry-backoff-factor` | int | _(Argo CD: `2`)_ | Multiplier applied to the retry delay after each failed sync (at least `1`). |
 | `argocd-sync-retry-backoff-max-duration` | string | _(Argo CD: `3m`)_ | Upper bound on the delay between sync retries, as a Go duration (`5m`); must not be less than `argocd-sync-retry-backoff-duration`. |
@@ -627,7 +632,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `dranet` | DRA network driver for the ConnectX-9 RDMA fabric (VR200 RKE2) |
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
 | `gatekeeper` | OPA Gatekeeper policy controller |
-| `gcp-driver-installer` | Google cos-gpu-installer DaemonSet; renders only under `gpuStack=bundle-installer` (GKE) |
+| `gcp-driver-installer` | Google cos-gpu-installer DaemonSet; renders only under `gpuStack=bundle-installer` and `gpuStack=dra` (GKE) |
 | `gke-gb200-rdma` | NCCL gIB (GPUDirect-RDMA over RoCE) plugin installer for GB200 (GKE) |
 | `gke-nccl-tcpxo` | NCCL TCPXO network plugin for optimized collective communication (GKE) |
 | `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
@@ -639,8 +644,9 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `k8s-nim-operator` | NVIDIA NIM Operator for inference microservice deployments |
 | `k8s-nim-operator-ocp` | NIM Operator variant for OpenShift (OCP) |
 | `kai-scheduler` | DRA-aware gang scheduler with topology-aware placement |
-| `kube-prometheus-stack` | Prometheus, Grafana, Alertmanager monitoring stack |
-| `kubeflow-trainer` | Kubeflow Training Operator for distributed training |
+| `kube-prometheus-stack` | Prometheus operator and the Prometheus that serves runtime PromQL queries |
+| `kubeflow-trainer` | Kubeflow Trainer v2 for distributed training |
+| `kubeflow-training-operator` | Kubeflow Training Operator v1 (`kubeflow.org/v1` jobs) for the Run:ai leaves |
 | `kueue` | Kubernetes-native job queuing for batch and AI workloads |
 | `mariadb-operator` | Official MariaDB Operator; installed only for AICR-provided Slurm accounting |
 | `mariadb-operator-crds` | Official MariaDB Operator CRDs; installed only for AICR-provided Slurm accounting |
@@ -650,7 +656,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `nfd` | Node Feature Discovery — labels nodes with hardware features; publishes per-node `NodeResourceTopology` CRDs on production GPU recipes |
 | `nfd-ocp` | Node Feature Discovery variant for OpenShift (OCP) |
 | `nfd-ocp-olm` | Node Feature Discovery for OpenShift via Operator Lifecycle Manager (OLM) |
-| `nktp` | NKTP, the NVKE Telemetry Pipeline: OpenTelemetry Operator and collectors; no stock recipe selects it yet |
+| `nktp` | NKTP telemetry pipeline: OpenTelemetry collectors for metrics, logs, events, and traces, with an evaluation backend |
 | `node-problem-detector` | Publishes node-level faults as Node Conditions for NVSentinel (opt-in) |
 | `nodewright-customizations` | Environment-specific node tuning profiles |
 | `nodewright-operator` | OS-level node tuning and kernel configuration |
@@ -751,7 +757,7 @@ curl -X POST "http://localhost:8080/v1/bundle" \
     "apiVersion": "aicr.run/v1",
     "kind": "RecipeResult",
     "componentRefs": [
-      {"name": "gpu-operator", "type": "Helm", "chart": "gpu-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "v26.7.2", "namespace": "gpu-operator", "valuesFile": "components/gpu-operator/values.yaml"},
+      {"name": "gpu-operator", "type": "Helm", "chart": "gpu-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "v26.7.3", "namespace": "gpu-operator", "valuesFile": "components/gpu-operator/values.yaml"},
       {"name": "network-operator", "type": "Helm", "chart": "network-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "26.4.1", "namespace": "nvidia-network-operator", "valuesFile": "components/network-operator/values.yaml"}
     ],
     "deploymentOrder": ["gpu-operator", "network-operator"]
@@ -1258,7 +1264,7 @@ openapi-generator-cli generate -i openapi.yaml -g typescript-fetch -o ./ts-clien
 
 **"Invalid accelerator type" error:**
 ```shell
-# Use valid values: h100, h200, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any
+# Use valid values: h100, h200, gb10, gb200, gb300, b200, b300, a100, l40, l40s, rtx-pro-6000, vr200, any
 curl "http://localhost:8080/v1/recipe?accelerator=h100"
 ```
 

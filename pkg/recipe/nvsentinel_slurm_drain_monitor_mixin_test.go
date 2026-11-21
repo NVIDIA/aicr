@@ -24,7 +24,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/recipe/providertest"
 )
 
 const (
@@ -35,7 +35,7 @@ const (
 	slurmDrainMonitorSelector = "app.kubernetes.io/name=slurmd,app.kubernetes.io/component=worker"
 	// slurmDrainMonitorSelectorVerifiedAt is the slinky-slurm-operator version
 	// the selector and the SlurmNodeStateDrain condition were verified against.
-	slurmDrainMonitorSelectorVerifiedAt = "1.2.2"
+	slurmDrainMonitorSelectorVerifiedAt = "1.2.4"
 )
 
 // slurmDrainMonitorDeployment is the workload every platform: slurm leaf asks

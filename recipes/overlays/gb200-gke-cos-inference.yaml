@@ -60,7 +60,7 @@ spec:
     # gcp-driver-installer's pinned partition-gpus init container image is
     # amd64-only and fails with "exec format error" on arm64 (found via live
     # GB200 GKE validation) — override with a multi-arch digest. Only takes
-    # effect under --profile gpuStack=bundle-installer (installer.enabled);
+    # effect under --profile gpuStack=bundle-installer or dra (installer.enabled);
     # a no-op under the gke-default profile.
     - name: gcp-driver-installer
       type: Helm

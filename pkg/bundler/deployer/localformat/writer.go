@@ -29,10 +29,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/manifest"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
+	helmutil "aicr.run/pkg/helm"
+	"aicr.run/pkg/manifest"
 )
 
 // Component is the per-component input for Write. Fields mirror the subset of
@@ -161,7 +162,7 @@ func renderInputFor(c Component) manifest.RenderInput {
 		ComponentName: c.Name,
 		Namespace:     c.Namespace,
 		ChartName:     chart,
-		ChartVersion:  deployer.NormalizeVersionWithDefault(c.Version),
+		ChartVersion:  deployer.NormalizeVersionWithDefault(helmutil.ChartVersion(c.Repository, c.Version)),
 		Values:        c.Values,
 	}
 }
@@ -371,6 +372,10 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		return WriteResult{}, err
 	}
 	opts.ComponentPreManifests = filteredPreManifests
+
+	if err := rejectBundleTimeDynamicPaths(opts); err != nil {
+		return WriteResult{}, err
+	}
 
 	// Fail fast if the layout's three-digit prefix can't accommodate the
 	// number of NNN-* folders this bundle will actually emit; a worst-case
@@ -684,6 +689,34 @@ func splitDynamicPaths(values map[string]any, dynamicPaths []string) valueSplit 
 	return valueSplit{static: static, dynamic: dynamic}
 }
 
+// rejectBundleTimeDynamicPaths fails when a component whose primary folder is
+// a local chart (manifest-only or kustomize) declares dynamic paths. Its
+// templates are rendered when the bundle is built, so a value supplied through
+// cluster-values.yaml at install time reaches no template and is silently
+// dropped (#3881). The argocd-helm deployer rejects the same shape (#1949).
+func rejectBundleTimeDynamicPaths(opts Options) error {
+	for _, c := range opts.Components {
+		if len(c.DynamicPaths) == 0 {
+			continue
+		}
+		if classify(c, opts.ComponentPostManifests[c.Name]) != KindLocalHelm {
+			continue
+		}
+		paths := strings.Join(c.DynamicPaths, ", ")
+		if c.Tag != "" || c.Path != "" {
+			// Component values do not reach a kustomize build, so --set is
+			// no remedy here either.
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("--dynamic is not supported for Kustomize component %q (paths: %s): its manifests come from a kustomize build when the bundle is built, which component values do not reach; change the setting in the Kustomize source instead",
+					c.Name, paths))
+		}
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("--dynamic is not supported for component %q (paths: %s): its manifests are rendered when the bundle is built, so an install-time value reaches no template; set the value at bundle time instead, with --set, --set-json, or the node scheduling flags such as --system-node-selector and --system-node-toleration",
+				c.Name, paths))
+	}
+	return nil
+}
+
 // classify determines the primary folder kind for a component.
 func classify(c Component, manifests map[string][]byte) FolderKind {
 	if c.Tag != "" || c.Path != "" {
@@ -756,22 +789,8 @@ func pruneStaleFolders(outputDir string) error {
 		return errors.Wrap(errors.ErrCodeInternal, "read output dir", err)
 	}
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
 		name := e.Name()
-		// Must be NNN-<something>: 3 digits then a hyphen.
-		if len(name) < 4 || name[3] != '-' {
-			continue
-		}
-		ok := true
-		for i := range 3 {
-			if name[i] < '0' || name[i] > '9' {
-				ok = false
-				break
-			}
-		}
-		if !ok {
+		if !e.IsDir() || !IsFolderName(name) {
 			continue
 		}
 		full, joinErr := deployer.SafeJoin(outputDir, name)
@@ -784,6 +803,20 @@ func pruneStaleFolders(outputDir string) error {
 		}
 	}
 	return nil
+}
+
+// IsFolderName reports whether name matches the [0-9][0-9][0-9]-* pattern
+// of an emitted component folder.
+func IsFolderName(name string) bool {
+	if len(name) < 4 || name[3] != '-' {
+		return false
+	}
+	for i := range 3 {
+		if name[i] < '0' || name[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // writeFile writes contents to path with the given mode, returning any

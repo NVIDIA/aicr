@@ -1,0 +1,95 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# nktp entered the registry at 0.1.1-rc.3 from
+# oci://ghcr.io/dsx-ai-factory/nvke/charts and moves to 0.2.0 from the NGC
+# Helm repository. One transition covers every earlier build, rc.3 included.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: nktp
+transitions:
+  - from: "<0.2.0"
+    to: "0.2.0"
+    verdict: manual
+    summary: >-
+      0.2.0 renames every Collector's OTLP exporter from otlp to otlp_grpc. An
+      override under <collector>.otelcol.config.exporters.otlp, such as a
+      backend endpoint or tls block, no longer reaches the exporter in use, so
+      telemetry goes to the bundled otel-lgtm instead, or the bundle fails
+      CheckNKTPExportersHaveBackend when otel-lgtm is disabled. The chart also
+      moves from oci://ghcr.io/dsx-ai-factory/nvke/charts to the NGC Helm
+      repository.
+    stepsByDeployer:
+      - deployers: [helmfile, terraform, fleet]
+        steps:
+          - id: rename-exporter-overrides
+            description: >-
+              Before regenerating the bundle, rename every nktp override path
+              containing otelcol.config.exporters.otlp. to
+              otelcol.config.exporters.otlp_grpc., in --set flags and in any
+              recipe overlay.
+            reason: >-
+              The old key defines an otlp exporter no pipeline uses, so the
+              override is accepted and silently ignored.
+          - id: mirror-chart-and-images
+            description: >-
+              Only when the cluster installs from a mirror: mirror chart nktp
+              0.2.0 from https://helm.ngc.nvidia.com/nvidia, and the images
+              otel/opentelemetry-collector-k8s:0.164.0,
+              grafana/otel-lgtm:0.38.0, and registry.k8s.io/kubectl:v1.35.10,
+              before upgrading.
+            reason: >-
+              The bundle now names the NGC repository, and the collectors,
+              the evaluation backend, and the chart's hook Jobs pull these
+              images. Without them the release fails to fetch or its pods
+              stay in ImagePullBackOff.
+          - id: apply-new-crds
+            description: >-
+              Before upgrading the release, apply the 0.2.0 CRDs with the
+              CRD-apply command under "Upgrading components that own CRDs" in
+              docs/user/component-catalog.md, with CHART=nktp,
+              REPO=https://helm.ngc.nvidia.com/nvidia, VERSION=0.2.0,
+              EXCLUDE_SUBCHARTS="prometheus-crds opentelemetry-operator", and
+              MANAGER=helm under helmfile, MANAGER=terraform-provider-helm
+              under terraform, and under fleet the manager that section's
+              managed-fields check reports for the installed CRDs.
+            reason: >-
+              None of these deployers applies a changed crds/ directory.
+              0.2.0 ships the same opentelemetry.io CRDs as 0.1.1-rc.3, so this
+              is a no-op from rc.3, but an earlier build may carry older ones.
+      - steps:
+          - id: rename-exporter-overrides
+            description: >-
+              Before regenerating the bundle, rename every nktp override path
+              containing otelcol.config.exporters.otlp. to
+              otelcol.config.exporters.otlp_grpc., in --set flags and in any
+              recipe overlay.
+            reason: >-
+              The old key defines an otlp exporter no pipeline uses, so the
+              override is accepted and silently ignored.
+          - id: mirror-chart-and-images
+            description: >-
+              Only when the cluster installs from a mirror: mirror chart nktp
+              0.2.0 from https://helm.ngc.nvidia.com/nvidia, and the images
+              otel/opentelemetry-collector-k8s:0.164.0,
+              grafana/otel-lgtm:0.38.0, and registry.k8s.io/kubectl:v1.35.10,
+              before upgrading.
+            reason: >-
+              The bundle now names the NGC repository, and the collectors,
+              the evaluation backend, and the chart's hook Jobs pull these
+              images. Without them the release fails to fetch or its pods
+              stay in ImagePullBackOff.
+    references:
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#nktp-telemetry-pipeline
+      - https://github.com/dsx-ai-factory/nvke-telemetry-pipeline/tree/main/nktp

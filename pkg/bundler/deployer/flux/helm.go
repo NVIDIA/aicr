@@ -23,12 +23,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
+	helmutil "aicr.run/pkg/helm"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/serializer"
 )
 
 // disableWaitAnnotation marks a recipe manifest whose controller holds the
@@ -198,7 +199,7 @@ func (g *Generator) generateHelmComponent(ref recipe.ComponentRef, compDir strin
 	// verbatim, so stripping the v prefix produces a tag that does not
 	// exist in the registry. HTTPS Helm repos use index.yaml with SemVer
 	// matching, so normalize only there.
-	version := ref.Version
+	version := helmutil.ChartVersion(ref.Source, ref.Version)
 	if !strings.HasPrefix(ref.Source, "oci://") {
 		version = deployer.NormalizeVersion(version)
 	}
@@ -432,6 +433,9 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 	// provenance.yaml must name the bytes written below, not whatever the
 	// puller reported.
 	rec.SHA256 = localformat.ArchiveSHA256(tgz)
+	rec.Name = ref.Name
+	rec.TarballName = tarball
+	rec.Archive = tgz
 
 	// Write charts/<tarball>.tgz.
 	chartsDir, err := deployer.SafeJoin(compDir, "charts")
@@ -456,7 +460,7 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 	output.TotalSize += int64(len(tgz))
 
 	// Write wrapper Chart.yaml declaring the upstream as a dependency.
-	version := deployer.NormalizeVersionWithDefault(ref.Version)
+	version := deployer.NormalizeVersionWithDefault(helmutil.ChartVersion(ref.Source, ref.Version))
 	wrapperYAML, err := localformat.RenderWrapperChartYAML(localformat.WrapperChartInput{
 		Name:           ref.Name,
 		Parent:         ref.Name,

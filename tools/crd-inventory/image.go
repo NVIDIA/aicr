@@ -34,7 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 const (

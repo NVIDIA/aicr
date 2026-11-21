@@ -31,7 +31,7 @@ import (
 
 	"github.com/opencontainers/go-digest"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 )
 
 const (

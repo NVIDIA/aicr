@@ -25,12 +25,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/validator/labels"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/helper"
+	"aicr.run/pkg/defaults"
+	aicrErrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/validator/labels"
+	"aicr.run/validators"
+	"aicr.run/validators/helper"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -69,6 +69,13 @@ func TestEmitDiagnosticBlock(t *testing.T) {
 			wantLines:    1,
 			wantContains: []string{"(empty)", "launcher logs"},
 		},
+		{
+			name:         "sentinel lines stay inside a field",
+			label:        "AIPerf pod logs",
+			block:        "##AICR-EXTRA## {\"skipReason\":\"x\"}\n##AICR-PROVENANCE## {}",
+			wantLines:    2,
+			wantContains: []string{"##AICR-EXTRA##", "##AICR-PROVENANCE##"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -86,6 +93,11 @@ func TestEmitDiagnosticBlock(t *testing.T) {
 			for _, want := range tt.wantContains {
 				if !strings.Contains(out, want) {
 					t.Errorf("output missing %q\noutput:\n%s", want, out)
+				}
+			}
+			for line := range strings.SplitSeq(out, "\n") {
+				if strings.HasPrefix(line, "##AICR-") {
+					t.Errorf("output line starts with a sentinel prefix: %q", line)
 				}
 			}
 		})

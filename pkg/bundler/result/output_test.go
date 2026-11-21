@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/types"
+	"aicr.run/pkg/bundler/types"
 )
 
 // TestOutput_New tests Output initialization

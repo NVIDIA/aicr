@@ -43,7 +43,7 @@ func TestValidationArgs(t *testing.T) {
 	if got := ValidationArgs(r, v); !slices.Equal(got, want) {
 		t.Fatalf("v1.0.0 ValidationArgs() with a key = %v", got)
 	}
-	v.AICRVersion, v.PlainHTTP, v.SigningKey = "1.1.0", false, ""
+	v.AICRVersion, v.PlainHTTP, v.SigningKey = "v1.1.0", false, ""
 	v11 := []string{"--no-sign", "--validator-service-account-name", "aicr-validator", "--image-refs", "/dev/termination-log"}
 	got := ValidationArgs(r, v)
 	if !slices.Equal(got[len(got)-len(v11):], v11) || slices.Contains(got, "--plain-http") {

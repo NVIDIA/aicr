@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/measurement"
 )
 
 func writeGKEPoolsFile(t *testing.T, content string) string {

@@ -23,7 +23,7 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/NVIDIA/aicr/pkg/operator/plugin"
+	"aicr.run/pkg/operator/plugin"
 )
 
 func main() {

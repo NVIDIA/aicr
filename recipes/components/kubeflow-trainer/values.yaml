@@ -22,7 +22,7 @@
 #   - leader election: manager.config.leaderElection.leaderElect
 #   - CRDs:            shipped in the chart's crds/ directory
 #   - service account: always created by the chart
-# Chart defaults: https://github.com/kubeflow/trainer/blob/v2.2.0/charts/kubeflow-trainer/values.yaml
+# Chart defaults: https://github.com/kubeflow/trainer/blob/v2.2.1/charts/kubeflow-trainer/values.yaml
 
 # Override release name prefix
 fullnameOverride: kubeflow-trainer
@@ -49,9 +49,9 @@ manager:
 
 # JobSet integration (required for TrainJob)
 # JobSet provides the underlying primitive for multi-replica training jobs
-# Upstream v2.2.0 dependency contract:
-# https://github.com/kubeflow/trainer/blob/v2.2.0/charts/kubeflow-trainer/Chart.yaml#L28-L31
-# https://github.com/kubeflow/trainer/blob/v2.2.0/charts/kubeflow-trainer/values.yaml#L27-L32
+# Upstream v2.2.1 dependency contract:
+# https://github.com/kubeflow/trainer/blob/v2.2.1/charts/kubeflow-trainer/Chart.yaml#L28-L31
+# https://github.com/kubeflow/trainer/blob/v2.2.1/charts/kubeflow-trainer/values.yaml#L27-L32
 jobset:
   # Install the JobSet dependency managed by Kubeflow Trainer
   # Set to false if a JobSet controller/webhook is already installed in the cluster

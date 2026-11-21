@@ -23,7 +23,7 @@ import (
 	"path"
 	"testing/fstest"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // Provider is a recipe.DataProvider over an fs.FS that reads and walks like

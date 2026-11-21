@@ -28,6 +28,12 @@ readonly IMAGE_PAIRS=(
   'gate=ghcr.io/nvidia/aicr-gate'
   'performance=ghcr.io/nvidia/aicr-validators/performance'
 )
+# The version aliases the operator gate reads by tag, so `promote
+# <validated.json> operator-versions` publishes them before it: the operator
+# checks each pinned validator's tag against its digest, and AICR's bundles
+# name the gate image by tag alone. The operator runs the aicr image by
+# digest. Every other version alias waits for the full release gate.
+readonly OPERATOR_GATE_KEYS=(conformance deployment gate performance)
 
 AICR_NETWORK_TIMEOUT_SECONDS="${AICR_NETWORK_TIMEOUT_SECONDS:-120}"
 if [[ ! "${AICR_NETWORK_TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] ||
@@ -626,16 +632,25 @@ validate_promotion_file() {
   ' "${path}" >/dev/null || die "validated promotion file has an invalid schema or release identity"
 }
 
+operator_gate_key() {
+  local key
+  for key in "${OPERATOR_GATE_KEYS[@]}"; do
+    [[ "${key}" == "$1" ]] && return 0
+  done
+  return 1
+}
+
 # promote converges the version aliases, then, for a stable release, latest.
-# With phase "versions" it stops after the version aliases: the release
-# workflow promotes them before the operator gate and latest after it.
+# With phase "operator-versions" it converges only the OPERATOR_GATE_KEYS
+# version aliases: the release workflow promotes them before the operator
+# gate and every other alias after it.
 promote_command() {
   local validated_path="$1" phase="${2:-all}" pair key expected_image image digest prior_digest version_state latest_state
   local candidate_tag revision tags current_digest
   declare -A version_actions=()
   declare -A latest_actions=()
   [[ -n "${validated_path}" ]] || die "promote requires a validated map path"
-  [[ "${phase}" == "all" || "${phase}" == "versions" ]] || die "promote phase must be versions or omitted"
+  [[ "${phase}" == "all" || "${phase}" == "operator-versions" ]] || die "promote phase must be operator-versions or omitted"
   RELEASE_TAG="${RELEASE_TAG:-}"
   IS_PRERELEASE="${IS_PRERELEASE:-}"
   validate_release_tag "${RELEASE_TAG}"
@@ -697,9 +712,13 @@ promote_command() {
   done
 
   # Phase 1: converge and verify every immutable version alias.
+  # operator-versions converges only the operator gate's.
   for pair in "${IMAGE_PAIRS[@]}"; do
     key="${pair%%=*}"
     image="${pair#*=}"
+    if [[ "${phase}" == "operator-versions" ]] && ! operator_gate_key "${key}"; then
+      continue
+    fi
     digest="$(jq -er --arg key "${key}" '.images[$key].digest' "${validated_path}")"
     if [[ "${version_actions[${key}]}" == "promote" ]]; then
       run_network crane tag "${image}@${digest}" "${RELEASE_TAG}" || die "failed to promote ${image}:${RELEASE_TAG}"
@@ -726,7 +745,7 @@ promote_command() {
 }
 
 usage() {
-  echo "usage: release-images.sh release-target | resolve <output.json> | preflight <digests.json> <validated.json> | promote <validated.json> [versions] | verify-source | publish-release" >&2
+  echo "usage: release-images.sh release-target | resolve <output.json> | preflight <digests.json> <validated.json> | promote <validated.json> [operator-versions] | verify-source | publish-release" >&2
   exit 2
 }
 

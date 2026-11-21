@@ -18,8 +18,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 // ConstraintEvalResult represents the result of evaluating a single constraint.
@@ -234,6 +234,10 @@ func (b *Builder) buildWithStore(ctx context.Context, c *Criteria, opts []BuildO
 		return nil, err
 	}
 	if err := result.ValidateCoherence(); err != nil {
+		return nil, err
+	}
+
+	if err := result.ValidateArtifactLock(buildCtx, result.ComponentRefs, nil, nil); err != nil {
 		return nil, err
 	}
 

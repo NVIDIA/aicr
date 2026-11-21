@@ -26,10 +26,10 @@ import (
 	"slices"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
 )
 
 // UpstreamChart names a pinned chart in an upstream Helm repository.
@@ -60,7 +60,8 @@ type MirroredChart struct {
 // fetched over HTTPS, or over HTTP from a host in PlainHTTPHosts. The
 // archive may be on another host than the index: chart-releaser
 // repositories keep theirs on github.com.
-func (c *Client) MirrorHTTPChart(ctx context.Context, up UpstreamChart, target Repository) (*MirroredChart, error) {
+func (c *Client) MirrorHTTPChart(ctx context.Context, up UpstreamChart, target Repository) (_ *MirroredChart, err error) {
+	defer observe(opMirrorHTTPChart, &err)
 	base, err := url.Parse(up.Repository)
 	if err != nil || base.Host == "" || !c.allowedScheme(base) {
 		return nil, invalid("upstream repository %q must be an HTTPS URL, or HTTP to a host configured for plain HTTP", up.Repository)

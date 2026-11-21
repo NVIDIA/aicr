@@ -24,10 +24,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/fingerprint"
 )
 
 func ptrInt64(v int64) *int64 { return &v }

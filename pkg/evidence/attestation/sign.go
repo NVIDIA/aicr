@@ -19,10 +19,10 @@ import (
 	"log/slog"
 	"strings"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/oci"
+	bundleattest "aicr.run/pkg/bundler/attestation"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/oci"
 )
 
 // SignExistingOptions controls SignExisting. It signs a bundle that has
@@ -161,6 +161,9 @@ func SignExisting(ctx context.Context, opts SignExistingOptions) error {
 // lockstep with bundle signing, including the Rekor v2 signing-config
 // selection (ResolveOptions.UseTUFSigningConfig).
 func signEvidenceStatement(ctx context.Context, statementJSON []byte, opts bundleattest.ResolveOptions) (*bundleattest.SignedAttestation, error) {
+	if len(statementJSON) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "empty statement")
+	}
 	if err := validateEvidenceSigningMode(opts); err != nil {
 		return nil, err
 	}
@@ -185,7 +188,7 @@ func signEvidenceStatement(ctx context.Context, statementJSON []byte, opts bundl
 
 	signCtx, cancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
 	defer cancel()
-	return bundleattest.SignStatement(signCtx, statementJSON, bundleattest.SignOptionsFromResolve(token, opts))
+	return bundleattest.SignStatement(signCtx, bundleattest.FixedStatement(statementJSON), bundleattest.SignOptionsFromResolve(token, opts))
 }
 
 // validateEvidenceSigningMode rejects a signing request no evidence signature

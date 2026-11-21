@@ -213,6 +213,7 @@ jobs:
               # modules, the actions that set up the job, the Makefile target
               # and this workflow are listed so a change to the check runs it.
               - 'recipes/*.go'
+              - 'recipes/artifacts/**'
               - 'recipes/registry.yaml'
               - 'recipes/overlays/**'
               - 'recipes/mixins/**'
@@ -222,6 +223,7 @@ jobs:
               - 'recipes/components/*/manifests/**'
               - 'tools/crd-inventory/**'
               - 'pkg/allocpolicy/*.go'
+              - 'pkg/artifact/*.go'
               - 'pkg/chainsaw/*.go'
               - 'pkg/chainsaw/validation/*.go'
               - 'pkg/constraints/expr/*.go'
@@ -482,15 +484,15 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
-      - uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26  # v4.39.2
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
         with:
           languages: go
       - run: go build ./...
-      - uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26  # v4.39.2
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
 
   analyze-skip:
     needs: [check-paths]
@@ -551,7 +553,7 @@ jobs:
         # checksum verification (the upstream installer pipes
         # `curl … | tar xvz` directly).
         env:
-          ACTIONLINT_VERSION: '1.7.11'
+          ACTIONLINT_VERSION: '1.7.12'
         run: |
           set -euo pipefail
           BASE="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
@@ -603,7 +605,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -749,7 +751,7 @@ jobs:
         run: make check-docs-shell
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -780,7 +782,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -829,7 +831,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -874,7 +876,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -935,7 +937,7 @@ jobs:
         uses: ./.github/actions/ghcr-login
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -973,7 +975,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -1017,7 +1019,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -1058,7 +1060,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -1107,7 +1109,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -1144,7 +1146,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true

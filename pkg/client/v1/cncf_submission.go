@@ -20,12 +20,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/cncf"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // CNCFVendor is the product metadata a CNCF AI Conformance submission's
@@ -259,12 +259,13 @@ func (c *Client) WriteCNCFSubmission(ctx context.Context, report *ctrf.Report, d
 	defer cancel()
 
 	res, err := cncf.WriteSubmission(ctx, dir, cncf.SubmissionInput{
-		Report:   report,
-		Version:  version,
-		Options:  cncf.AggregateOptions{NotApplicable: opts.NotApplicable, Documented: toInternalDocumented(opts.Documented)},
-		Vendor:   toInternalVendor(opts.Vendor),
-		Platform: cncfPlatform(snap, rec),
-		Tool:     cncf.Tool{Version: c.version, Commit: opts.Commit},
+		Report:          report,
+		Version:         version,
+		VersionExplicit: opts.ConformanceVersion != "",
+		Options:         cncf.AggregateOptions{NotApplicable: opts.NotApplicable, Documented: toInternalDocumented(opts.Documented)},
+		Vendor:          toInternalVendor(opts.Vendor),
+		Platform:        cncfPlatform(snap, rec),
+		Tool:            cncf.Tool{Version: c.version, Commit: opts.Commit},
 	})
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "CNCF submission failed")

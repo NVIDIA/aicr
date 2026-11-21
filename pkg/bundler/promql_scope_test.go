@@ -26,19 +26,22 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/recipetest"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/recipetest"
+	"aicr.run/pkg/serializer"
 )
 
 const (
 	testPromQLServer            = recipetest.PromQLServerComponent
 	testSMNamespaceSelectorPath = "prometheus.prometheusSpec.serviceMonitorNamespaceSelector"
 	testPMSelectorPath          = "prometheus.prometheusSpec.podMonitorSelector"
+
+	// stockValuesPath is set by components/kube-prometheus-stack/values.yaml.
+	stockValuesPath = "prometheus.prometheusSpec.ruleNamespaceSelector"
 )
 
 // staticRegistryProvider serves one registry.yaml and nothing else.
@@ -151,6 +154,7 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 		name           string
 		platform       []recipe.ComponentRef
 		serverValues   map[string]any
+		runtimeMetrics config.RuntimeMetrics
 		omitServer     bool
 		wantNamespaces []string
 		wantRegex      string // empty: the scope is zero and values are unchanged
@@ -160,22 +164,65 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 			name: "union of two consumers",
 			platform: append(slices.Clone(adapterPlatform),
 				scopeRef("dynamo-platform", "dynamo-system")),
-			wantNamespaces: []string{"dynamo-system", "gpu-operator"},
+			wantNamespaces: []string{"dynamo-system", "gpu-operator", "monitoring"},
 			wantRegex: `^(?:(?:DCGM_FI_DEV_FB_USED)|(?:DCGM_FI_DEV_GPU_UTIL)|` +
 				`(?:dynamo_frontend_requests_total)|(?:dynamo_ttft_seconds_(sum|count)))$`,
 		},
 		{
 			name:           "overlapping consumers are de-duplicated",
 			platform:       append(slices.Clone(adapterPlatform), scopeRef("gpu-dashboard", "dash")),
-			wantNamespaces: []string{"gpu-operator"},
+			wantNamespaces: []string{"gpu-operator", "monitoring"},
 			wantRegex:      `^(?:(?:(?i)foo)|(?:BAR)|(?:DCGM_FI_DEV_FB_USED)|(?:DCGM_FI_DEV_GPU_UTIL))$`,
 		},
 		{
 			name:           "null at an owned path is unset",
 			platform:       adapterPlatform,
 			serverValues:   nested(chartScopePaths.scrapeClasses, nil),
-			wantNamespaces: []string{"gpu-operator"},
+			wantNamespaces: []string{"gpu-operator", "monitoring"},
 			wantRegex:      adapterRegex,
+		},
+		{
+			name:     "runtime metrics add to the registry's declarations",
+			platform: adapterPlatform,
+			runtimeMetrics: config.RuntimeMetrics{
+				Series:     []string{"queue_depth", "DCGM_FI_DEV_GPU_UTIL"},
+				Namespaces: []string{"inference", "gpu-operator"},
+			},
+			wantNamespaces: []string{"gpu-operator", "inference", "monitoring"},
+			wantRegex:      `^(?:(?:DCGM_FI_DEV_FB_USED)|(?:DCGM_FI_DEV_GPU_UTIL)|(?:queue_depth))$`,
+		},
+		{
+			name:           "runtime metrics alone, with no consumer",
+			platform:       []recipe.ComponentRef{scopeRef(testPromQLServer, "monitoring")},
+			runtimeMetrics: config.RuntimeMetrics{Series: []string{"queue_depth"}},
+			wantNamespaces: []string{"monitoring"},
+			wantRegex:      `^(?:(?:queue_depth))$`,
+		},
+		{
+			name:           "runtime metrics with the server not emitted fail",
+			platform:       adapterPlatform,
+			runtimeMetrics: config.RuntimeMetrics{Series: []string{"queue_depth"}},
+			omitServer:     true,
+			wantErr:        "this bundle leaves out " + testPromQLServer,
+		},
+		{
+			name: "runtime metrics without an enabled server fail",
+			platform: []recipe.ComponentRef{disabledScopeRef(testPromQLServer, "monitoring"),
+				scopeRef("prometheus-adapter", "monitoring")},
+			runtimeMetrics: config.RuntimeMetrics{Namespaces: []string{"inference"}},
+			wantErr:        "this recipe enables no runtime Prometheus server",
+		},
+		{
+			name:           "runtime metrics series that is not RE2 fails",
+			platform:       adapterPlatform,
+			runtimeMetrics: config.RuntimeMetrics{Series: []string{"queue_(depth"}},
+			wantErr:        "invalid runtimeMetrics.series entry",
+		},
+		{
+			name:           "runtime metrics namespace that is not a name fails",
+			platform:       adapterPlatform,
+			runtimeMetrics: config.RuntimeMetrics{Namespaces: []string{"Inference_NS"}},
+			wantErr:        `invalid runtimeMetrics.namespaces entry "Inference_NS"`,
 		},
 		{
 			name: "disabled monitorsFrom source fails",
@@ -188,6 +235,12 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 			platform: []recipe.ComponentRef{scopeRef(testPromQLServer, "monitoring"),
 				scopeRef("gpu-operator", ""), scopeRef("prometheus-adapter", "monitoring")},
 			wantErr: `"gpu-operator" has no namespace in this recipe`,
+		},
+		{
+			name: "server without a namespace fails",
+			platform: []recipe.ComponentRef{scopeRef(testPromQLServer, ""),
+				scopeRef("gpu-operator", "gpu-operator"), scopeRef("prometheus-adapter", "monitoring")},
+			wantErr: `declares telemetry.promqlServer but has no namespace`,
 		},
 		{
 			name:     "two enabled servers fail",
@@ -234,7 +287,7 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 				t.Fatalf("marshal: %v", err)
 			}
 
-			scope, err := InjectPromQLScrapeScope(promqlTestProvider(t), tt.platform, values)
+			scope, err := InjectPromQLScrapeScope(promqlTestProvider(t), tt.platform, values, tt.runtimeMetrics)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("error = %v, want one containing %q", err, tt.wantErr)
@@ -261,7 +314,7 @@ func TestInjectPromQLScrapeScope(t *testing.T) {
 }
 
 func TestInjectPromQLScrapeScope_RegistryLoadFailure(t *testing.T) {
-	_, err := InjectPromQLScrapeScope(failingRegistryProvider{}, nil, map[string]map[string]any{})
+	_, err := InjectPromQLScrapeScope(failingRegistryProvider{}, nil, map[string]map[string]any{}, config.RuntimeMetrics{})
 	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
 }
 
@@ -271,7 +324,7 @@ func TestInjectPromQLScrapeScope_KeepRegex(t *testing.T) {
 	scope, err := InjectPromQLScrapeScope(promqlTestProvider(t), []recipe.ComponentRef{
 		scopeRef(testPromQLServer, "monitoring"), scopeRef("gpu-operator", "gpu-operator"),
 		scopeRef("dynamo-platform", "dynamo-system"), scopeRef("gpu-dashboard", "dash"),
-	}, map[string]map[string]any{testPromQLServer: {}})
+	}, map[string]map[string]any{testPromQLServer: {}}, config.RuntimeMetrics{})
 	if err != nil {
 		t.Fatalf("InjectPromQLScrapeScope: %v", err)
 	}
@@ -304,7 +357,8 @@ func TestInjectPromQLScrapeScope_Deterministic(t *testing.T) {
 	var first []byte
 	for i := range platform {
 		values := map[string]map[string]any{testPromQLServer: {}}
-		if _, err := InjectPromQLScrapeScope(provider, append(slices.Clone(platform[i:]), platform[:i]...), values); err != nil {
+		rotated := append(slices.Clone(platform[i:]), platform[:i]...)
+		if _, err := InjectPromQLScrapeScope(provider, rotated, values, config.RuntimeMetrics{}); err != nil {
 			t.Fatalf("rotation %d: %v", i, err)
 		}
 		out, err := serializer.MarshalYAMLDeterministic(values)
@@ -445,19 +499,38 @@ func TestMake_PromQLScrapeScope(t *testing.T) {
 		wantErr        string
 	}{
 		{name: "training scopes the adapter's source", criteria: training,
-			wantNamespaces: []string{"gpu-operator"}, wantRegex: adapterRegex},
+			wantNamespaces: []string{"gpu-operator", "monitoring"}, wantRegex: adapterRegex},
 		{name: "bundlers subset keeps the platform's scope", criteria: dynamo,
 			opts:           []config.Option{config.WithBundlers([]string{testPromQLServer})},
-			wantNamespaces: []string{"dynamo-system", "gpu-operator"},
+			wantNamespaces: []string{"dynamo-system", "gpu-operator", "monitoring"},
 			wantRegex:      `^(?:(?:DCGM_FI_DEV_GPU_UTIL)|(?:dynamo_frontend_requests_total))$`},
 		{name: "--set-disabled consumer drops out", criteria: dynamo, opts: []config.Option{disable("dynamoplatform")},
-			wantNamespaces: []string{"gpu-operator"}, wantRegex: adapterRegex},
-		{name: "server without consumers selects nothing and warns", criteria: training,
-			fixture:     map[string]recipe.TelemetryConfig{testPromQLServer: recipetest.FixturePromQLServer()},
-			wantRegex:   `^(?:)$`,
-			wantWarning: "no enabled component declares telemetry.promql"},
+			wantNamespaces: []string{"gpu-operator", "monitoring"}, wantRegex: adapterRegex},
+		{name: "server without consumers keeps nothing and warns", criteria: training,
+			fixture: map[string]recipe.TelemetryConfig{
+				testPromQLServer:     recipetest.FixturePromQLServer(),
+				"prometheus-adapter": {},
+				"dynamo-platform":    {},
+			},
+			wantNamespaces: []string{"monitoring"},
+			wantRegex:      `^(?:)$`,
+			wantWarning:    "no enabled component declares telemetry.promql"},
+		{name: "runtime metrics add to the declared scope", criteria: training,
+			opts: []config.Option{config.WithRuntimeMetrics(config.RuntimeMetrics{
+				Series: []string{"queue_depth"}, Namespaces: []string{"inference"},
+			})},
+			wantNamespaces: []string{"gpu-operator", "inference", "monitoring"},
+			wantRegex:      `^(?:(?:DCGM_FI_DEV_GPU_UTIL)|(?:queue_depth))$`},
 		{name: "disabling the server injects and checks nothing", criteria: training,
 			opts: []config.Option{disable(testPromQLServer, "gpuoperator")}},
+		{name: "runtime metrics with the server left out by the bundlers filter fail", criteria: training,
+			opts: []config.Option{config.WithBundlers([]string{"prometheus-adapter"}),
+				config.WithRuntimeMetrics(config.RuntimeMetrics{Namespaces: []string{"inference"}})},
+			wantErr: "this bundle leaves out " + testPromQLServer},
+		{name: "runtime metrics with the server disabled fail", criteria: training,
+			opts: []config.Option{disable(testPromQLServer, "gpuoperator"),
+				config.WithRuntimeMetrics(config.RuntimeMetrics{Series: []string{"queue_depth"}})},
+			wantErr: "this recipe enables no runtime Prometheus server"},
 		{name: "disabling a monitorsFrom source fails", criteria: training,
 			opts: []config.Option{disable("gpuoperator")}, wantErr: `"gpu-operator" is absent or disabled`},
 		{name: "--set on an owned path fails, through an alias", criteria: training,
@@ -477,11 +550,11 @@ func TestMake_PromQLScrapeScope(t *testing.T) {
 			wantErr: "--dynamic cannot override"},
 		{name: "values that set an owned path fail", criteria: training,
 			fixture: withServer(recipe.TelemetryConfig{PromQLServer: recipe.PromQLServerConfig{
-				NamespaceSelectorPaths: chartScopePaths.namespaceSelectors,
-				MonitorSelectorPaths:   chartScopePaths.monitorSelectors,
-				ScrapeClassesPath:      chartScopePaths.scrapeClasses,
+				NamespaceSelectorPaths: []string{stockValuesPath},
+				MonitorSelectorPaths:   fixtureScopePaths.monitorSelectors,
+				ScrapeClassesPath:      fixtureScopePaths.scrapeClasses,
 			}}),
-			wantErr: testSMNamespaceSelectorPath + ", which the bundler writes"},
+			wantErr: stockValuesPath + ", which the bundler writes"},
 		{name: "a --data registry with an invalid pattern fails", criteria: training,
 			fixture: invalidPattern, wantErr: "is not valid RE2"},
 	}
@@ -500,10 +573,12 @@ func TestMake_PromQLScrapeScope(t *testing.T) {
 					t.Fatalf("New: %v", newErr)
 				}
 				dir := t.TempDir()
-				if _, err = b.Make(t.Context(), result, dir); err == nil && tt.wantErr == "" {
-					warned := slices.ContainsFunc(b.warnings, func(w string) bool { return strings.Contains(w, tt.wantWarning) })
+				out, makeErr := b.Make(t.Context(), result, dir)
+				if err = makeErr; err == nil && tt.wantErr == "" {
+					notes := out.Deployment.Notes
+					warned := slices.ContainsFunc(notes, func(w string) bool { return strings.Contains(w, tt.wantWarning) })
 					if tt.wantWarning != "" && !warned {
-						t.Errorf("warnings = %v, want one containing %q", b.warnings, tt.wantWarning)
+						t.Errorf("deployment notes = %v, want one containing %q", notes, tt.wantWarning)
 					}
 					if tt.wantRegex == "" {
 						assertNoScrapeClass(t, dir)
@@ -536,6 +611,6 @@ func TestMake_SplitCarriesPromQLScrapeScope(t *testing.T) {
 		t.Fatalf("Make() error = %v", err)
 	}
 	values := readPromQLStackValues(t, filepath.Join(dest, string(recipe.ComponentClassOps)))
-	assertScrapeScope(t, values, fixtureScopePaths, []string{"cert-manager", "kai-scheduler"}, `^(?:(?:kai_queue_.*))$`)
+	assertScrapeScope(t, values, fixtureScopePaths, []string{"cert-manager", "kai-scheduler", "monitoring"}, `^(?:(?:kai_queue_.*))$`)
 	assertNoScrapeClass(t, filepath.Join(dest, string(recipe.ComponentClassCore)))
 }

@@ -28,9 +28,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 var update = flag.Bool("update", false, "update golden files")
@@ -267,6 +267,29 @@ func TestWrite_PreManifestRenderErrorPreservesCode(t *testing.T) {
 	}
 	if errorstest.ReportedCode(err) != errors.ErrCodeInvalidRequest {
 		t.Fatalf("Write() error = %v, want %s", err, errors.ErrCodeInvalidRequest)
+	}
+}
+
+func TestWrite_PostManifestRenderErrorKeepsCodeAndManifest(t *testing.T) {
+	_, err := localformat.Write(t.Context(), localformat.Options{
+		OutputDir: t.TempDir(),
+		Components: []localformat.Component{{
+			Name:      "foo",
+			Namespace: "slurm",
+			Values:    map[string]any{},
+		}},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"foo": {"components/foo/manifests/policy.yaml": []byte(`{{ fail "bad override" }}`)},
+		},
+	})
+	if err == nil {
+		t.Fatal("Write() error = nil, want post-manifest render error")
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	for _, want := range []string{"render manifest components/foo/manifests/policy.yaml for foo", "bad override"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Write() error = %q, want it to contain %q", err.Error(), want)
+		}
 	}
 }
 
@@ -1294,4 +1317,83 @@ func TestFilterEmptyPreManifests(t *testing.T) {
 			t.Fatal("FilterEmptyPreManifests() = nil error with a canceled context")
 		}
 	})
+}
+
+// TestWrite_DynamicPathsOnBundleTimeRender covers #3881: a component whose
+// primary folder is rendered at bundle time (manifest-only or kustomize) has
+// no template left for an install-time value to reach, so --dynamic on it is
+// rejected. Upstream and mixed components keep their install-time surface.
+func TestWrite_DynamicPathsOnBundleTimeRender(t *testing.T) {
+	kustomizePath, err := filepath.Abs(filepath.Join("testdata", "kustomize_input"))
+	if err != nil {
+		t.Fatalf("abs path: %v", err)
+	}
+	manifest := map[string][]byte{
+		"components/c/manifests/m.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n"),
+	}
+	tests := []struct {
+		name      string
+		component localformat.Component
+		manifests map[string][]byte
+		wantErr   bool
+		wantMsg   string // remedy the error must point to
+	}{
+		{
+			name:      "manifest-only with dynamic paths",
+			component: localformat.Component{Name: "c", Namespace: "ns", DynamicPaths: []string{"systemNodeSelector"}},
+			manifests: manifest,
+			wantErr:   true,
+			wantMsg:   "--set",
+		},
+		{
+			name:      "kustomize with dynamic paths",
+			component: localformat.Component{Name: "c", Namespace: "ns", Path: kustomizePath, DynamicPaths: []string{"image.tag"}},
+			wantErr:   true,
+			wantMsg:   "Kustomize source",
+		},
+		{
+			name:      "manifest-only without dynamic paths",
+			component: localformat.Component{Name: "c", Namespace: "ns"},
+			manifests: manifest,
+		},
+		{
+			name: "upstream chart with dynamic paths",
+			component: localformat.Component{Name: "c", Namespace: "ns", Repository: "https://charts.example.com",
+				ChartName: "c", Version: "1.0.0", DynamicPaths: []string{"nodeSelector"}},
+		},
+		{
+			name: "mixed chart and manifests with dynamic paths",
+			component: localformat.Component{Name: "c", Namespace: "ns", Repository: "https://charts.example.com",
+				ChartName: "c", Version: "1.0.0", DynamicPaths: []string{"nodeSelector"}},
+			manifests: manifest,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := localformat.Options{
+				OutputDir:  t.TempDir(),
+				Components: []localformat.Component{tt.component},
+			}
+			if tt.manifests != nil {
+				opts.ComponentPostManifests = map[string]map[string][]byte{"c": tt.manifests}
+			}
+			_, err := localformat.Write(context.Background(), opts)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("Write: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("want error rejecting --dynamic on a bundle-time render, got nil")
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if !strings.Contains(err.Error(), `component "c"`) || !strings.Contains(err.Error(), tt.component.DynamicPaths[0]) {
+				t.Errorf("error should name the component and path, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error should point to %q, got: %v", tt.wantMsg, err)
+			}
+		})
+	}
 }

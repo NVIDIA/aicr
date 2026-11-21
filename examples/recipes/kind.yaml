@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Hand-curated illustration of RecipeResult structure; intentionally incomplete.
+# Components, metadata, and validation differ from actual generated output.
+# Generate a current recipe with `aicr recipe` before bundling or validation.
+# Shows selected supporting components only; omits the GPU stack and validation.
+
 kind: RecipeResult
 apiVersion: aicr.run/v1
 metadata:

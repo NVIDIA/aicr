@@ -24,10 +24,11 @@ import (
 	"strings"
 	"testing"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
+	"golang.org/x/sys/unix"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe/providertest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -275,16 +276,70 @@ spec:
 	}
 }
 
+func TestLayeredDataProvider_ReadExternalFile(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, cancelExpired := context.WithTimeout(context.Background(), 0)
+	defer cancelExpired()
+
+	tests := []struct {
+		name     string
+		ctx      context.Context
+		path     string
+		want     string
+		wantCode aicrerrors.ErrorCode
+	}{
+		{name: "registry is not merged", ctx: context.Background(), path: "registry.yaml", want: providertest.EmptyRegistryYAML},
+		{name: "nested file", ctx: context.Background(), path: "components/x/vals.yaml", want: "a: 1\n"},
+		{name: "embedded-only file", ctx: context.Background(), path: "overlays/base.yaml", wantCode: aicrerrors.ErrCodeNotFound},
+		{name: "file grown past the limit", ctx: context.Background(), path: "grows.yaml", wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "fifo", ctx: context.Background(), path: "pipe.yaml", wantCode: aicrerrors.ErrCodeInvalidRequest},
+		{name: "canceled context", ctx: canceled, path: "registry.yaml", wantCode: aicrerrors.ErrCodeCanceled},
+		{name: "expired deadline", ctx: expired, path: "registry.yaml", wantCode: aicrerrors.ErrCodeTimeout},
+	}
+	for _, allowSymlinks := range []bool{false, true} {
+		tmpDir := providertest.WriteDir(t, map[string][]byte{
+			"registry.yaml":          []byte(providertest.EmptyRegistryYAML),
+			"components/x/vals.yaml": []byte("a: 1\n"),
+			"grows.yaml":             []byte("b: 2\n"),
+		})
+		if err := unix.Mkfifo(filepath.Join(tmpDir, "pipe.yaml"), 0o600); err != nil {
+			t.Skipf("FIFO unsupported: %v", err)
+		}
+		embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+		provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
+			ExternalDir: tmpDir, MaxFileSize: 128, AllowSymlinks: allowSymlinks,
+		})
+		if err != nil {
+			t.Fatalf("failed to create layered provider: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "grows.yaml"), []byte(strings.Repeat("b", 129)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%s/allowSymlinks=%t", tt.name, allowSymlinks), func(t *testing.T) {
+				data, err := provider.ReadExternalFile(tt.ctx, tt.path)
+				if tt.wantCode != "" {
+					errorstest.WantReportedCode(t, err, tt.wantCode)
+					return
+				}
+				if err != nil {
+					t.Fatalf("ReadExternalFile: %v", err)
+				}
+				if string(data) != tt.want {
+					t.Errorf("ReadExternalFile(%q) = %q, want %q", tt.path, data, tt.want)
+				}
+			})
+		}
+	}
+}
+
 // TestLayeredDataProvider_SecurityChecks tests security validations.
 func TestLayeredDataProvider_SecurityChecks(t *testing.T) {
 	t.Run("rejects symlinks", func(t *testing.T) {
-		tmpDir := t.TempDir()
-
-		// Create registry.yaml
-		registryContent := providertest.EmptyRegistryYAML
-		if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
-			t.Fatalf("failed to write registry.yaml: %v", err)
-		}
+		tmpDir := providertest.WriteDir(t, map[string][]byte{
+			"registry.yaml": []byte(providertest.EmptyRegistryYAML),
+		})
 
 		// Create a symlink
 		symlinkPath := filepath.Join(tmpDir, "symlink.yaml")
@@ -905,18 +960,11 @@ components:
 
 // TestLayeredDataProvider_ReadExternalFileError tests error when external file can't be read.
 func TestLayeredDataProvider_ReadExternalFileError(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create registry.yaml (required)
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(providertest.EmptyRegistryYAML), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
-
-	// Create a file that will be tracked
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":  []byte(providertest.EmptyRegistryYAML),
+		"test-file.yaml": []byte("content"),
+	})
 	testFile := filepath.Join(tmpDir, "test-file.yaml")
-	if err := os.WriteFile(testFile, []byte("content"), 0600); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
-	}
 
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
@@ -940,19 +988,12 @@ func TestLayeredDataProvider_ReadExternalFileError(t *testing.T) {
 
 // TestLayeredDataProvider_AllowSymlinks tests that symlinks work when allowed.
 func TestLayeredDataProvider_AllowSymlinks(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create registry.yaml
-	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(providertest.EmptyRegistryYAML), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
-
-	// Create a target file
-	targetContent := "target content"
+	const targetContent = "target content"
+	tmpDir := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml": []byte(providertest.EmptyRegistryYAML),
+		"target.yaml":   []byte(targetContent),
+	})
 	targetPath := filepath.Join(tmpDir, "target.yaml")
-	if err := os.WriteFile(targetPath, []byte(targetContent), 0600); err != nil {
-		t.Fatalf("failed to write target.yaml: %v", err)
-	}
 
 	// Create a symlink
 	symlinkPath := filepath.Join(tmpDir, "symlink.yaml")

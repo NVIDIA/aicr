@@ -20,9 +20,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/errors"
+	helmutil "aicr.run/pkg/helm"
 )
 
 // Helmfile is the top-level document marshaled to helmfile.yaml.
@@ -187,7 +188,7 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 			repo, alias := repositoryFor(f.Upstream)
 			repoSet[repo.URL] = repo
 			rel.Chart = alias + "/" + f.Upstream.Chart
-			rel.Version = f.Upstream.Version
+			rel.Version = helmutil.ChartVersion(f.Upstream.Repo, f.Upstream.Version)
 		case localformat.KindLocalHelm:
 			rel.Chart = "./" + f.Dir
 		default:

@@ -19,7 +19,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 	"github.com/sigstore/sigstore-go/pkg/root"
 )
 

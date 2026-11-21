@@ -23,7 +23,9 @@ transitions:
       0.17.1 replaces the global.fips boolean with global.fipsMode (on/off).
       The 0.17.0 chart also removes the admission.certSecretName and
       queuecontroller.certSecretName values; the operator uses fixed TLS secret
-      names. Existing values must be reconciled with these chart changes.
+      names. Existing values must be reconciled with these chart changes. The
+      0.17.1 PodGroup CRD also drops the phase, running, pending, failed and
+      succeeded status fields.
     precondition: >-
       This guidance covers the AICR 0.16.9 baseline and 0.17.0, assessed against
       the 0.17.0 and 0.17.1 release changes. Earlier sources are not assessed.
@@ -40,6 +42,16 @@ transitions:
             reason: >-
               Keeping removed keys does not configure the new chart and can
               silently lose the intended FIPS or certificate configuration.
+          - id: check-podgroup-status-readers
+            description: >-
+              Find dashboards, alerts or controllers that read PodGroup
+              status.phase or the running, pending, failed or succeeded
+              counters. Read scheduling diagnostics from
+              status.schedulingConditions, and take pod counts from the member
+              Pods or the owning workload's status.
+            reason: >-
+              Those fields no longer exist, so their readers see empty values
+              rather than an error.
           - id: reconcile-and-verify
             description: >-
               Apply the generated bundle through the selected deployer, then
@@ -51,3 +63,62 @@ transitions:
     references:
       - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.17.0
       - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.17.1
+  - from: ">=0.16.9 <0.16.18"
+    to: "0.16.18"
+    verdict: safe
+    verifiedBy: >-
+      Upstream release notes v0.16.10 through v0.16.18 (kai-scheduler/KAI-Scheduler),
+      which list bug fixes and dependency CVE bumps on the v0.16 LTS line
+      and no action required. The 0.16.18 chart's crds/ and values.yaml are
+      byte-identical to v0.16.9 (diff -r of the two pulled charts); the
+      templates differ only in two ServiceAccount subjects on the OpenShift
+      SCC binding and the API version a topology-migration script reads.
+      helm template with AICR's values differs only in the operator and
+      crd-upgrader image tags.
+    summary: >-
+      Patch releases on the v0.16 LTS line; CRDs and values are unchanged.
+      Nothing to change on upgrade.
+    references:
+      - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.16.18
+      - https://github.com/kai-scheduler/KAI-Scheduler/blob/main/SUPPORT.md
+  - from: ">=0.17.1 <0.18.8"
+    to: "=0.18.8"
+    verdict: manual
+    summary: >-
+      0.18.0 changes the chart's GPU sharing default from off to
+      NonMemoryEnforced, so a release that never set global.gpuSharingMode
+      starts admitting fractional GPU requests the admission webhook used to
+      reject. It also replaces the crd-upgrader hook image with helm-hooks.
+    precondition: >-
+      This guidance covers the 0.17.1 record's landing point through 0.18.7,
+      assessed against the 0.18.0 through 0.18.8 release changes. CRD names and
+      served versions are unchanged across the range.
+    stepsByDeployer:
+      - steps:
+          - id: pin-gpu-sharing-mode
+            description: >-
+              Export the installed values. Set global.gpuSharingMode explicitly
+              before applying the new bundle: Disabled keeps the pre-0.18
+              behavior, which AICR's values pin. Choose another mode only if
+              fractional GPU sharing is intended.
+            reason: >-
+              Leaving the value empty adopts NonMemoryEnforced and changes
+              admission for every GPU workload without any other signal.
+          - id: mirror-hook-image
+            description: >-
+              On mirrored or air-gapped registries, mirror the helm-hooks image
+              at the new tag before upgrading.
+            reason: >-
+              The pre-upgrade hook that applies the CRDs runs from helm-hooks
+              now, and a missing image stalls the upgrade before any CRD moves.
+          - id: reconcile-and-verify
+            description: >-
+              Apply the generated bundle through the selected deployer, then
+              verify webhook readiness and scheduling of representative queued
+              and gang workloads before resuming normal submissions.
+            reason: >-
+              Controller readiness alone does not show that queues and gang
+              admission survived the upgrade.
+    references:
+      - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.18.0
+      - https://github.com/kai-scheduler/KAI-Scheduler/releases/tag/v0.18.8

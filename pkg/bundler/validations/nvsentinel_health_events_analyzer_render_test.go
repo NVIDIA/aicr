@@ -21,8 +21,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/recipe"
 )
 
 const (
@@ -30,7 +30,7 @@ const (
 	// healthEventsAnalyzerImage is the image docs/user/container-images.md
 	// discloses for the mixin. The static BOM cannot see a mixin-gated
 	// subchart, so this assertion is what keeps that note honest.
-	healthEventsAnalyzerImage = "ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.28.0"
+	healthEventsAnalyzerImage = "ghcr.io/nvidia/nvsentinel/health-events-analyzer:v1.32.0"
 	healthEventsAnalyzerName  = "health-events-analyzer"
 )
 

@@ -20,11 +20,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/result"
-	"github.com/NVIDIA/aicr/pkg/bundler/types"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/result"
+	"aicr.run/pkg/bundler/types"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // Mock bundler for testing

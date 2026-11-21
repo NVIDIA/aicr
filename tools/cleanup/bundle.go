@@ -21,9 +21,9 @@ import (
 	"os"
 	"slices"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/inventory"
+	"aicr.run/pkg/bundler/bundleinfo"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/inventory"
 )
 
 // bundleScope is what one bundle installed, read from its bundle-info.yaml.

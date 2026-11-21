@@ -18,9 +18,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	evidenceindex "github.com/NVIDIA/aicr/pkg/evidence/index"
+	"aicr.run/pkg/errors"
+	evidenceindex "aicr.run/pkg/evidence/index"
 )
+
+// RequireEvidenceEnvVar names the environment variable PublishedEvidenceRequired
+// OR-s in. A value of 1, true, yes, or on enables the check for the process;
+// any other value, including empty, leaves it off.
+const RequireEvidenceEnvVar = evidenceindex.EnvVar
 
 // PublishedEvidenceRequired reports whether this call should reject a resolved
 // recipe that has no committed evidence pointer.

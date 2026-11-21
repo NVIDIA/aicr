@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	aicrerrors "aicr.run/pkg/errors"
 )
 
 // coverageDimension names one criteria dimension subject to the coverage

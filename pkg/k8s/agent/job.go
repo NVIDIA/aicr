@@ -19,9 +19,9 @@ import (
 	"maps"
 	"strconv"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
+	"aicr.run/pkg/defaults"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe/oskind"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"

@@ -28,7 +28,7 @@ import (
 	stderrors "errors"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 )
 
 // ReportedCode returns the Code of the outermost *errors.StructuredError in

@@ -22,14 +22,16 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/allowlist"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/recipe"
 )
 
 // EnvVar is the process-wide opt-in. A value of 1, true, yes, or on enables
@@ -149,6 +151,36 @@ func Check(result *recipe.RecipeResult, leafSource string) error {
 		return missingEvidence(id, "")
 	}
 	return nil
+}
+
+var signerClassOrder = []allowlist.Class{allowlist.ClassFirstParty, allowlist.ClassCommunity, allowlist.ClassPartner}
+
+// SignerClasses returns the distinct signer classes of each recipe id's committed
+// pointers, in first-party, community, partner order. A recipe id with no
+// committed pointer is absent. The returned map is the caller's to modify.
+func SignerClasses() (map[string][]allowlist.Class, error) {
+	doc, err := document()
+	if err != nil {
+		return nil, err
+	}
+	return signerClassesOf(doc)
+}
+
+func signerClassesOf(doc map[string][]sourcePointer) (map[string][]allowlist.Class, error) {
+	out := make(map[string][]allowlist.Class, len(doc))
+	for id, sources := range doc {
+		seen := make(map[allowlist.Class]bool, len(sources))
+		for _, source := range sources {
+			class := allowlist.Class(source.Class)
+			if !slices.Contains(signerClassOrder, class) {
+				return nil, errors.New(errors.ErrCodeInternal,
+					fmt.Sprintf("evidence pointer index records unknown class %q for recipe %q", source.Class, id))
+			}
+			seen[class] = true
+		}
+		out[id] = slices.DeleteFunc(slices.Clone(signerClassOrder), func(c allowlist.Class) bool { return !seen[c] })
+	}
+	return out, nil
 }
 
 func missingEvidence(id, why string) error {

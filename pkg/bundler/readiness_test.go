@@ -23,11 +23,11 @@ import (
 
 	stderrors "errors"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/recipe/providertest"
+	"aicr.run/pkg/bundler/config"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/recipe/providertest"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -91,11 +91,7 @@ func TestCollectComponentReadiness(t *testing.T) {
 		"components/gpu-operator/" + readinessFileName: []byte(validReadinessTestYAML),
 	})
 
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
-	if err != nil {
-		t.Fatalf("NewLayeredDataProvider: %v", err)
-	}
+	layered := dataDirProvider(t, tmpData)
 	rr := &recipe.RecipeResult{
 		ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
 	}
@@ -377,10 +373,7 @@ func TestCollectComponentReadiness(t *testing.T) {
 			recipe.RegistryFileName:                        []byte(providertest.EmptyRegistryYAML),
 			"components/gpu-operator/" + readinessFileName: []byte("kind: ConfigMap\n"),
 		})
-		badLayered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: badDir})
-		if err != nil {
-			t.Fatalf("NewLayeredDataProvider: %v", err)
-		}
+		badLayered := dataDirProvider(t, badDir)
 		badRR := &recipe.RecipeResult{
 			ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}},
 		}
@@ -555,17 +548,18 @@ func TestWarnPeermemReadinessDisabled(t *testing.T) {
 			}
 			delete(values, tt.removeComponent)
 
-			if err := b.warnPeermemReadinessDisabled(t.Context(), result, values); err != nil {
+			r := &bundleRun{DefaultBundler: b}
+			if err := r.warnPeermemReadinessDisabled(t.Context(), result, values); err != nil {
 				t.Fatalf("warnPeermemReadinessDisabled() error = %v", err)
 			}
 
-			if got := len(b.warnings); got != boolCount(tt.wantWarning) {
-				t.Fatalf("warnings = %v, want warning=%v", b.warnings, tt.wantWarning)
+			if got := len(r.warnings); got != boolCount(tt.wantWarning) {
+				t.Fatalf("warnings = %v, want warning=%v", r.warnings, tt.wantWarning)
 			}
 			if !tt.wantWarning {
 				return
 			}
-			warning := b.warnings[0]
+			warning := r.warnings[0]
 			for _, want := range []string{
 				"Warning: ", tt.wantGPUOperator, tt.wantNetworkOp,
 				gpuDriverEnabledValuePath + "=true",

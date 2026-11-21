@@ -21,8 +21,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 // hostReadTimeout is a variable so tests can shorten it.

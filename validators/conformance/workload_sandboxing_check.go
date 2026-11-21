@@ -22,9 +22,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/helper"
+	"aicr.run/pkg/errors"
+	"aicr.run/validators"
+	"aicr.run/validators/helper"
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -530,6 +530,7 @@ func buildSandboxProbePod(run *gpuTestRun, name, image, runtimeClassName, nodeNa
 			RuntimeClassName: rcName,
 			NodeName:         nodeName,
 			Tolerations:      tolerations,
+			ImagePullSecrets: run.imagePullSecretRefs(),
 			RestartPolicy:    corev1.RestartPolicyNever,
 			Containers: []corev1.Container{{
 				Name:    sandboxProbeContainer,

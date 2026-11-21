@@ -20,11 +20,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 // fakeDataProvider serves canned file content for the resolver test. A nil

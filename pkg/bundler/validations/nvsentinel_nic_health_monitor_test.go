@@ -17,8 +17,8 @@ package validations
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/recipe"
 )
 
 // TestCheckNVSentinelNicHealthMonitorRequiresMetadataCollector covers the
@@ -225,7 +225,7 @@ func TestCheckNVSentinelNicHealthMonitorRequiresMetadataCollector(t *testing.T) 
 		{
 			// Helm cannot resolve global.nicHealthMonitor.enabled when the
 			// section itself is not a table, so it warns and renders the
-			// subchart anyway (verified against chart v1.28.0). Reading a
+			// subchart anyway (verified against chart v1.30.0; the condition that gates the subchart is unchanged through v1.32.0). Reading a
 			// non-map section as "absent, therefore off" would ship exactly
 			// the no-inventory deployment this gate exists to reject.
 			name: "monitor section is a non-map, collector disabled → blocked",

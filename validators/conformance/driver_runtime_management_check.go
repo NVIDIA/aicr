@@ -21,10 +21,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/helper"
+	"aicr.run/pkg/errors"
+	validatorv1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
+	"aicr.run/validators/helper"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -361,8 +361,9 @@ func buildDriverRuntimeProbePod(run *gpuTestRun, image string, tolerations []cor
 		Command: []string{posixShell, "-c", driverRuntimeProbeScript},
 	}
 	spec := corev1.PodSpec{
-		RestartPolicy: corev1.RestartPolicyNever,
-		Tolerations:   tolerations,
+		RestartPolicy:    corev1.RestartPolicyNever,
+		Tolerations:      tolerations,
+		ImagePullSecrets: run.imagePullSecretRefs(),
 	}
 	if useDRA {
 		spec.ResourceClaims = []corev1.PodResourceClaim{{

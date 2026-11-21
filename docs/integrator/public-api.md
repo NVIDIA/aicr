@@ -2,7 +2,7 @@
 
 AICR is both a CLI and a Go library. This page documents the
 stability contract for every exported Go package. External consumers
-should prefer the `github.com/NVIDIA/aicr/pkg/client/v1` facade described
+should prefer the `aicr.run/pkg/client/v1` facade described
 in the [Go library integration guide](./go-library.md).
 
 ## Stability tiers
@@ -17,7 +17,7 @@ in the [Go library integration guide](./go-library.md).
 
 | Package | Tier | Purpose |
 |---------|------|---------|
-| `github.com/NVIDIA/aicr/pkg/client/v1` | **Public (stable)** | Facade: `Client`, `NewClient`, `NewClientContext`, request/result types, source constructors. |
+| `aicr.run/pkg/client/v1` | **Public (stable)** | Facade: `Client`, `NewClient`, `NewClientContext`, request/result types, source constructors. |
 | `pkg/recipe` | Public (evolving) | Recipe resolution, criteria, overlay system, component registry. |
 | `pkg/bundler` | Public (evolving) | Per-component Helm/Kustomize bundle generation. |
 | `pkg/validator` | Public (evolving) | Constraint evaluation, three-phase validation (executed in order: Deployment, Conformance, Performance). |
@@ -62,7 +62,7 @@ in the [Go library integration guide](./go-library.md).
 
 ## Facade type ownership
 
-The `github.com/NVIDIA/aicr/pkg/client/v1` package is Public (stable). Types
+The `aicr.run/pkg/client/v1` package is Public (stable). Types
 reachable from this surface are either facade-owned structs or transparent
 aliases — the table below documents which.
 
@@ -96,12 +96,13 @@ unrelated exports in their evolving packages remain free to change.
 | `aicr.EvidenceVerification` | `pkg/evidence/verifier.VerifyResult` | Deliberate transparent alias, for the same reason, and so `aicr.RenderEvidenceJSON` / `RenderEvidenceMarkdown` render the identical document `aicr evidence verify` emits. |
 | `aicr.CNCFRequirementAggregate` | `pkg/evidence/cncf.Aggregate` | Deliberate transparent alias. `Client.RenderCNCFEvidenceWithResult` returns the aggregation the evidence index was rendered from, so the level-scoped verdict (`Passed`, `IncompleteMusts`) is read from one place by the SDK and the CLI. Through its fields the alias also exposes `cncf.RequirementResult`, `cncf.CheckResult` and `cncf.RequirementStatus`. |
 | `aicr.UpgradeReport` | `pkg/upgrade.Report` | Deliberate transparent alias. The report is already a projection built for consumers, so `Client.UpgradeCheck` returns it unchanged and `aicr.WriteUpgradeReportTable` renders the same table `aicr upgrade-check` prints. |
+| `aicr.RecipeSummary` | `pkg/recipe.Summary` | Deliberate transparent alias. The summary is already a projection built for consumers, so `aicr.SummarizeRecipe` returns it unchanged and `aicr query --summary` renders the same value. Through its fields the alias also exposes `recipe.SummarySource`, `recipe.SummaryConstraint`, `recipe.SummaryComponent`, `recipe.SummaryPhase` and `recipe.Criteria`. |
 | `aicr.Config` | `pkg/config.AICRConfig` | **Facade-owned wrapper**, not an alias: Go cannot attach methods to another package's type through an alias, and the config document's ~30 nested types would otherwise freeze under the API-diff gate. Obtain one from `aicr.LoadConfig` (file or HTTP(S) URL) or `aicr.WrapConfig`. Its methods DERIVE options (`BundleVerifyOptions`, `RecipeSource`, `RecipeCriteria`, `RecipeResolveOptions`, ...) rather than applying them, so caller overrides stay explicit; `Unwrap()` reaches the raw document for fields the facade does not project. |
 | `aicr.CriteriaDimension`, `aicr.DimensionService` / `DimensionAccelerator` / `DimensionIntent` / `DimensionOS` / `DimensionPlatform` | string consts | **Facade-owned.** The criteria dimensions subject to the coverage post-condition, and the values `WithSnapshotCriteriaRelaxation` accepts. Values match `pkg/recipe.CoverageDimensionNames` exactly, which a test asserts. `nodes` is absent: no overlay gates on it. |
 
 ## Recommended consumption pattern
 
-1. Use `github.com/NVIDIA/aicr/pkg/client/v1` for all library integration by default.
+1. Use `aicr.run/pkg/client/v1` for all library integration by default.
 2. If the facade does not yet expose a feature you need, open an issue
    against [NVIDIA/aicr](https://github.com/NVIDIA/aicr) describing the
    missing capability — we'd rather extend the facade than have

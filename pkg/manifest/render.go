@@ -18,14 +18,15 @@
 package manifest
 
 import (
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"text/template"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 )
 
 // RenderInput provides the data needed to render a manifest template.
@@ -61,7 +62,8 @@ type chartData struct {
 
 // Render renders manifest content as a Go template with Helm-compatible data
 // and functions. Templates can use .Values, .Release, .Chart, and functions
-// like toYaml, nindent, toString, and default. Bounded to MaxSpecFileBytes
+// like toYaml, nindent, toString, default, and fail. A template that calls
+// fail returns ErrCodeInvalidRequest. Bounded to MaxSpecFileBytes
 // as a defense-in-depth check; callers reading from disk/network should
 // already enforce the same limit at the source.
 func Render(content []byte, input RenderInput) ([]byte, error) {
@@ -89,7 +91,11 @@ func Render(content []byte, input RenderInput) ([]byte, error) {
 
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to execute manifest template", err)
+		code := errors.ErrCodeInternal
+		if stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+			code = errors.ErrCodeInvalidRequest
+		}
+		return nil, errors.Wrap(code, "failed to execute manifest template", err)
 	}
 	return []byte(buf.String()), nil
 }
@@ -117,6 +123,9 @@ func helmFuncMap() template.FuncMap {
 				}
 			}
 			return "\n" + strings.Join(lines, "\n")
+		},
+		"fail": func(msg string) (string, error) {
+			return "", errors.New(errors.ErrCodeInvalidRequest, msg)
 		},
 		"toString": func(v any) string {
 			return fmt.Sprintf("%v", v)

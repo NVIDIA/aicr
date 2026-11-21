@@ -19,8 +19,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/measurement"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -64,7 +64,8 @@ const (
 //     collector reports the runtime/loaded driver via nvidia-smi, which
 //     can disagree with the installation manifest during upgrades).
 //
-// The /proc-based subtypes from pkg/collector/os (grub, sysctl, kmod) are
+// The host-file subtypes from pkg/collector/os (grub, sysctl, kmod,
+// kmod-param) are
 // intentionally not produced here; they are largely fixed by the Talos
 // image and add little drift signal. If a future constraint needs them,
 // compose them in.

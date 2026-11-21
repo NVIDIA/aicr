@@ -19,8 +19,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/recipe"
 )
 
 const (
@@ -28,7 +28,7 @@ const (
 	// eventExporterImage is the image docs/user/container-images.md
 	// discloses for the mixin. The static BOM cannot see a mixin-gated
 	// subchart, so this assertion is what keeps that note honest.
-	eventExporterImage = "ghcr.io/nvidia/nvsentinel/event-exporter:v1.28.0"
+	eventExporterImage = "ghcr.io/nvidia/nvsentinel/event-exporter:v1.32.0"
 )
 
 // TestNVSentinelEventExporterChartRender renders the pinned nvsentinel chart

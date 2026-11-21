@@ -1,0 +1,12 @@
+attestations:
+  - attestedAt: 2026-11-08T16:23:12Z
+    bundle:
+      digest: sha256:659873441562070ad4d611ff59df70925f309f2b2579adf5debc038545b2ad56
+      oci: ghcr.io/xdu31/aicr-evidence:vr200-nvke-ubuntu-training-kubeflow-64ec7d18b1cb
+      predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: https://github.com/xdu31/aicr/.github/workflows/evidence-publish.yaml@refs/heads/evidence/nvke
+      issuer: https://token.actions.githubusercontent.com
+      rekorLogIndex: 189860404
+recipe: vr200-nvke-ubuntu-training-kubeflow
+schemaVersion: 1.0.0

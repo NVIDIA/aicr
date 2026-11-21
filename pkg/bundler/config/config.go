@@ -22,10 +22,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/deprecation"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/deprecation"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
@@ -82,8 +82,9 @@ const (
 	// DeployerArgoCD generates Argo CD App of Apps manifests.
 	DeployerArgoCD DeployerType = "argocd"
 	// DeployerArgoCDHelm generates a Helm chart app-of-apps for Argo CD.
-	// All non-profile-owned values are overridable at install time via helm
-	// --set; a profiled recipe's lock template rejects profile-owned paths.
+	// Values are overridable at install time via helm --set, except
+	// profile-owned paths and GPU driver-ownership paths, which lock
+	// templates reject.
 	// Use --dynamic to pre-populate specific paths in root values.yaml.
 	DeployerArgoCDHelm DeployerType = "argocd-helm"
 	// DeployerFlux generates Flux HelmRelease manifests.
@@ -401,6 +402,10 @@ type Config struct {
 	// shared filesystem PVCs at bundle time.
 	sharedStorageClass string
 
+	// runtimeMetrics adds series and monitor namespaces to the runtime
+	// Prometheus server's scrape scope.
+	runtimeMetrics RuntimeMetrics
+
 	// draEvictionNodeLabel is the shared label used to place the DRA kubelet
 	// plugin and tell GPU Operator's Driver Manager which pods to evict during
 	// driver upgrades. It is injected only when both components are enabled.
@@ -643,6 +648,12 @@ func (c *Config) WorkloadSelector() map[string]string {
 	result := make(map[string]string, len(c.workloadSelector))
 	maps.Copy(result, c.workloadSelector)
 	return result
+}
+
+// RuntimeMetrics returns a copy of the bundle's additions to the runtime
+// Prometheus server's scrape scope.
+func (c *Config) RuntimeMetrics() RuntimeMetrics {
+	return c.runtimeMetrics.Clone()
 }
 
 // Attest returns whether bundle attestation is enabled.
@@ -995,6 +1006,15 @@ func WithWorkloadSelector(selector map[string]string) Option {
 	}
 }
 
+// WithRuntimeMetrics adds series and monitor namespaces to the runtime
+// Prometheus server's scrape scope. The bundler validates them, and rejects
+// them on a recipe that enables no such server.
+func WithRuntimeMetrics(metrics RuntimeMetrics) Option {
+	return func(c *Config) {
+		c.runtimeMetrics = metrics.Clone()
+	}
+}
+
 // WithAttest enables bundle attestation and binary verification.
 func WithAttest(attest bool) Option {
 	return func(c *Config) {
@@ -1014,7 +1034,7 @@ func WithDeterministic(deterministic bool) Option {
 
 // WithCertificateIdentityRegexp overrides the default identity pinning pattern
 // for binary attestation verification during bundle creation. The pattern must
-// contain "github.com/NVIDIA/aicr/". This is intended for testing with binaries
+// contain "github.com/NVIDIA/aicr/". This is intended for testing with binaries // module-rename:keep
 // attested by non-release workflows (e.g., build-attested.yaml).
 func WithCertificateIdentityRegexp(pattern string) Option {
 	return func(c *Config) {

@@ -12,9 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# NKTP (NVKE Telemetry Pipeline) Helm values, ADR-026. Collector resources are
-# NKTP's to tune and are not overridden here. Images are the chart's defaults
-# at the pinned chart version (ADR-006).
+# NKTP (NVKE Telemetry Pipeline) Helm values, ADR-026. Images are the chart's
+# defaults at the pinned chart version (ADR-006).
+#
+# CPU requests are four to five times below NKTP's defaults (#3849): at those
+# defaults NKTP reserved 6.68 vCPU (sidecars included) on a 3x 4-vCPU system
+# pool while using under 1 vCPU cluster-wide, starving nvsentinel's per-node
+# pods. Each autoscaled
+# collector's targetCPUUtilization is raised so it scales out at the same
+# absolute CPU as before. The HPA divides usage by the whole pod's request,
+# including the native otc-sidecar (20m on the gateways and watchdog, 10m on
+# large_target_metrics): (request + sidecar) x target equals NKTP's default.
+# Cluster-scoped pods without an HPA (target allocators, cluster_events, the
+# kube-state-metrics shard Deployments) keep a 100m floor, since their load
+# grows with cluster size; per-node pods drop further. Memory requests, all
+# limits, and replica floors stay NKTP's.
 
 # Collectors schedule ahead of workloads but never evict a running pod. The
 # field is immutable: changing it on an installed cluster means deleting the
@@ -27,6 +39,14 @@ priorityClass:
 # all five backend exporter endpoints to be set when this is disabled.
 otel-lgtm:
   enabled: true
+  # Fully qualified: CRI-O (OKE) enforces short-name resolution and rejects
+  # grafana/otel-lgtm as ambiguous. The chart's empty default means Docker Hub.
+  image:
+    registry: docker.io
+
+# Collector image for every OTel workload, qualified for the same reason.
+otelcol_image:
+  registry: docker.io
 
 opentelemetry-kube-stack:
   crds:
@@ -53,3 +73,175 @@ node-exporter:
 # only on a platform that ships none.
 metrics-server:
   enabled: false
+
+# Persistent sending queues are off: the gateways and watchdog keep their
+# queues in memory, as in 0.1.1-rc.3. NKTP's queue claims sit in a
+# volumeClaimTemplates list that storageClassPaths cannot address, so
+# --storage-class cannot reach them, and on a cluster with no default
+# StorageClass the collectors would stay Pending. An overlay that turns them
+# on restores each collector's queue extension, storage, mount, and
+# volumeClaimTemplates, with its own storageClassName. volumeMounts is NKTP's
+# list without the queue mount, so re-copy it on a chart bump.
+gateway_metrics:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 50m
+    autoscaler:
+      targetCPUUtilization: 231
+    volumeClaimTemplates: []
+    volumeMounts:
+      - name: internal-tls-server
+        mountPath: /etc/nktp/internal-tls/server
+        readOnly: true
+  otelcol:
+    config:
+      extensions:
+        file_storage/queue: null
+      exporters:
+        otlp_grpc:
+          sending_queue:
+            storage: null
+      service:
+        extensions: [health_check]
+
+gateway_logs:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 50m
+    autoscaler:
+      targetCPUUtilization: 231
+    volumeClaimTemplates: []
+    volumeMounts:
+      - name: internal-tls-server
+        mountPath: /etc/nktp/internal-tls/server
+        readOnly: true
+  otelcol:
+    config:
+      extensions:
+        file_storage/queue: null
+      exporters:
+        otlp_grpc:
+          sending_queue:
+            storage: null
+      service:
+        extensions: [health_check]
+
+gateway_traces:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 50m
+    autoscaler:
+      targetCPUUtilization: 231
+    volumeClaimTemplates: []
+    volumeMounts:
+      - name: internal-tls-server
+        mountPath: /etc/nktp/internal-tls/server
+        readOnly: true
+  otelcol:
+    config:
+      extensions:
+        file_storage/queue: null
+      exporters:
+        otlp_grpc:
+          sending_queue:
+            storage: null
+      service:
+        extensions: [health_check]
+
+watchdog:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 25m
+    autoscaler:
+      targetCPUUtilization: 200
+    targetAllocator:
+      resources:
+        requests:
+          cpu: 100m
+    volumeClaimTemplates: []
+    volumeMounts:
+      - name: internal-tls-server
+        mountPath: /etc/nktp/internal-tls/server
+        readOnly: true
+  otelcol:
+    config:
+      extensions:
+        file_storage/queue: null
+      exporters:
+        otlp_grpc:
+          sending_queue:
+            storage: null
+            # NKTP's persistent default is 82MiB per signal; in memory, keep
+            # rc.3's 8MiB, sized against the watchdog's 1Gi limit.
+            queue_size: 8388608
+      service:
+        extensions: [health_check]
+
+large_target_metrics:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 125m
+    autoscaler:
+      targetCPUUtilization: 283
+    targetAllocator:
+      resources:
+        requests:
+          cpu: 100m
+
+daemonset:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 100m
+    targetAllocator:
+      resources:
+        requests:
+          cpu: 100m
+
+cluster_events:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 100m
+
+kube-state-metrics:
+  kubernetes:
+    resources:
+      requests:
+        cpu: 25m
+  deployments:
+    unscheduled-pods:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m
+    workloads:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m
+    networking:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m
+    storage:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m
+    configuration:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m
+    cluster:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 100m

@@ -21,12 +21,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	v1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -96,7 +96,7 @@ func TestCRENCCLCleanupResult(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actual, passed, err := creNCCLCleanupResult(tt.actual, tt.passed, tt.primary, tt.delErr)
+			actual, passed, err := creNCCLCleanupResult(checkNameCRENCCLAllReduceBW, tt.actual, tt.passed, tt.primary, tt.delErr)
 			if actual != tt.wantActual || passed != tt.wantPassed {
 				t.Errorf("actual, passed = %q, %v, want %q, %v", actual, passed, tt.wantActual, tt.wantPassed)
 			}

@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/config"
+	"aicr.run/pkg/config"
 )
 
 const validYAML = `kind: AICRConfig
@@ -283,5 +283,38 @@ func TestLoad_HTTPCanceledMidFetch(t *testing.T) {
 	_, err := config.Load(ctx, srv.URL+"/hangs.yaml")
 	if err == nil {
 		t.Fatal("expected error for canceled HTTP fetch, got nil")
+	}
+}
+
+func TestLoadArtifactChoices(t *testing.T) {
+	tests := []struct {
+		name, body string
+		valid      bool
+	}{
+		{"yaml", "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  recipe:\n    artifacts:\n      inventory: release.yaml\n      allowCatalogPins: [cert-manager]\n", true},
+		{"json", `{"apiVersion":"aicr.run/v1beta1","kind":"AICRConfig","spec":{"recipe":{"artifacts":{"inventory":"release.yaml","allowCatalogPins":["cert-manager"]}}}}`, true},
+		{"unknown", "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  recipe:\n    artifacts:\n      ignoreEverything: true\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ext := ".yaml"
+			if tt.name == "json" {
+				ext = ".json"
+			}
+			path := writeTempFile(t, "config"+ext, tt.body)
+			cfg, err := config.Load(t.Context(), path)
+			if !tt.valid {
+				if err == nil {
+					t.Fatal("accepted unknown artifact config")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Spec.Recipe.Artifacts.Inventory != "release.yaml" || len(cfg.Spec.Recipe.Artifacts.AllowCatalogPins) != 1 {
+				t.Fatal(cfg.Spec.Recipe.Artifacts)
+			}
+		})
 	}
 }

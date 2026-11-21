@@ -1,0 +1,249 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NCCL all-reduce TrainingRuntime for GB300 on OKE, NVLS-transport variant.
+#
+# The GB200/OKE NVLS template, plus the node's GB300 NCCL topology
+# (/etc/nccl/topo.xml, written by the recipe's nvidia-tuned package):
+# BM.GPU.GB300.4 is the same NVL72 rack shape and IMEX domain as
+# BM.GPU.GB200.4 on OKE, so the image and MPI wiring are unchanged.
+#
+# Validates Multi-Node NVLink (MNNVL / NVLS) through the DRA compute-domain
+# IMEX channel that the validator creates before launching the TrainJob.
+# NCCL_DEBUG=INFO emits the NVLS communicator-init lines that the validator
+# uses to reject silent fallback to a network transport.
+#
+# Must stay in sync with ncclTrainingRuntimeName in nccl_all_reduce_bw_constraint.go.
+
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: nccl-all-reduce-runtime
+  namespace: ${NAMESPACE}
+  labels:
+    trainer.kubeflow.org/framework: mpi
+spec:
+  mlPolicy:
+    mpi:
+      mpiImplementation: OpenMPI
+      numProcPerNode: ${GPU_COUNT_PER_NODE}
+      runLauncherAsNode: false
+      sshAuthMountPath: /tmp/mpi-keys
+  template:
+    spec:
+      network:
+        enableDNSHostnames: true
+        publishNotReadyAddresses: true
+      replicatedJobs:
+      - name: node
+        template:
+          spec:
+            template:
+              spec:
+                resourceClaims:
+                - name: imex-channel
+                  resourceClaimTemplateName: nccl-all-reduce-imex
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:26.01-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:26.01-py3
+                  command: ["sh", "-c"]
+                  args:
+                  # sshd is installed at runtime. HTTPS and the main component
+                  # only (35 MB of indexes down to ~6 MB): plain-HTTP fetches
+                  # from ports.ubuntu.com were observed to stall for minutes
+                  # (#3109). ca-certificates ships in the image. Skipped for an
+                  # AICR_NCCL_RUNTIME_IMAGE override without a deb822 sources file.
+                  - |
+                    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+                      sed -i -e 's|http://ports.ubuntu.com|https://ports.ubuntu.com|g' \
+                             -e 's|^Components:.*|Components: main|' /etc/apt/sources.list.d/ubuntu.sources
+                    fi &&
+                    apt-get update &&
+                    apt-get install -y --no-install-recommends openssh-server &&
+                    mkdir -p /var/run/sshd &&
+                    chmod 0755 /var/run/sshd &&
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/* /root/.ssh/ &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys &&
+                    /usr/sbin/sshd -De
+                  # Ready only once sshd listens; the launcher's dependsOn
+                  # waits on it, so mpirun never races the install.
+                  readinessProbe:
+                    tcpSocket:
+                      port: 22
+                    periodSeconds: 5
+                    failureThreshold: 120
+                  resources:
+                    claims:
+                    - name: imex-channel
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                  securityContext:
+                    capabilities:
+                      add: ["IPC_LOCK"]
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                  - name: dshm
+                    mountPath: /dev/shm
+                  - name: nccl-topo
+                    mountPath: /etc/nccl/topo.xml
+                    readOnly: true
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+                # The GB300 NCCL topology nvidia-tuned writes on every node
+                # (tuning-oke-gb300.yaml, TOPO_PATH). Type File fails the pod
+                # at start if it is missing instead of letting NCCL run
+                # without it.
+                - name: nccl-topo
+                  hostPath:
+                    path: /etc/nccl/topo.xml
+                    type: File
+      # Listed after "node": JobSet requires a dependsOn target to precede
+      # the job that depends on it.
+      - name: launcher
+        replicas: 1
+        dependsOn:
+        - name: node
+          status: Ready
+        template:
+          spec:
+            template:
+              spec:
+                tolerations:
+                - operator: Exists
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:26.01-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh
+                    cp /tmp/mpi-keys/id_rsa /root/.ssh/id_rsa
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys
+                    chmod 700 /root/.ssh
+                    chmod 600 /root/.ssh/id_rsa /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:26.01-py3
+                  env:
+                  - name: LD_LIBRARY_PATH
+                    value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+                  # The launcher initializes UCX from its own environment, not
+                  # from the -x arguments it forwards to the ranks. OCI RoCEv2
+                  # is GID index 3; UCX's default (0) fails with
+                  # IBV_WC_REM_ACCESS_ERR.
+                  - name: UCX_IB_GID_INDEX
+                    value: "3"
+                  command:
+                  - /usr/local/mpi/bin/mpirun
+                  args:
+                  - -np
+                  - "${GPU_COUNT}"
+                  - --allow-run-as-root
+                  - --mca
+                  - plm_rsh_args
+                  - -o StrictHostKeyChecking=no -o ConnectionAttempts=10
+                  # MPI coordinates over TCP only (NCCL drives RDMA itself),
+                  # with UCC and HCOLL off: their RDMA paths crash on OCI's
+                  # RoCE GID layout.
+                  - --mca
+                  - pml
+                  - ob1
+                  - --mca
+                  - btl
+                  - tcp,self
+                  - --mca
+                  - btl_tcp_if_include
+                  - eth0
+                  - --mca
+                  - oob
+                  - tcp
+                  - --mca
+                  - oob_tcp_if_include
+                  - eth0
+                  - --mca
+                  - coll_ucc_enable
+                  - "0"
+                  - --mca
+                  - coll_hcoll_enable
+                  - "0"
+                  - -x
+                  - LD_LIBRARY_PATH
+                  - -x
+                  - NCCL_DEBUG=INFO
+                  - -x
+                  - NCCL_TOPO_FILE=/etc/nccl/topo.xml
+                  - -x
+                  - NCCL_NVLS_ENABLE=1
+                  - -x
+                  - NCCL_NET_PLUGIN=none
+                  - -x
+                  - NCCL_SOCKET_IFNAME=eth0
+                  - -x
+                  - NCCL_IGNORE_DISABLED_P2P=1
+                  - /usr/local/bin/${TEST_TYPE}_mpi
+                  - -b
+                  - ${MIN_MESSAGE_SIZE}
+                  - -e
+                  - ${MAX_MESSAGE_SIZE}
+                  - -f
+                  - "2"
+                  - -g
+                  - "1"
+                  resources:
+                    limits:
+                      cpu: "2"
+                      memory: 128Mi
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+      successPolicy:
+        operator: All
+        targetReplicatedJobs:
+        - launcher

@@ -30,13 +30,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/evidence"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
-	"github.com/NVIDIA/aicr/pkg/operator/registry"
-	"github.com/NVIDIA/aicr/pkg/operator/resolver"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/evidence"
+	"aicr.run/pkg/operator/plan"
+	"aicr.run/pkg/operator/registry"
+	"aicr.run/pkg/operator/resolver"
 )
 
 // Deployment validation reasons.
@@ -75,9 +75,11 @@ var validationRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 
 // EvidenceRegistry is what deployment validation needs from the runtime
 // registry: AICR's evidence by run tag with the signatures attached to it,
-// and the operator's binding pushed next to it.
+// and the operator's binding pushed next to it. Resolve and IndexManifests
+// also read the validator images' own registry.
 type EvidenceRegistry interface {
 	Resolve(ctx context.Context, r registry.Repository, tag string) (string, error)
+	IndexManifests(ctx context.Context, r registry.Repository, digest string) ([]string, error)
 	PullBundle(ctx context.Context, r registry.Repository, digest string) (*registry.Bundle, error)
 	SigstoreBundles(ctx context.Context, r registry.Repository, subject string) ([][]byte, error)
 	Describe(ctx context.Context, r registry.Repository, digest string) (ocispec.Descriptor, error)
@@ -327,7 +329,11 @@ func (r *RolloutReconciler) signer(ctx context.Context, repo registry.Repository
 // the binding records are the ones that ran: AICR v1.0.x records tags only.
 func (r *RolloutReconciler) verifyValidators(ctx context.Context, named []evidence.ValidatorImage) ([]evidence.ValidatorImage, error) {
 	pins := r.Config.ValidatorPins()
-	if err := evidence.CheckValidators(named, pins); err != nil {
+	named, err := r.toPinnedIndexDigests(ctx, named, pins)
+	if err != nil {
+		return nil, err
+	}
+	if err = evidence.CheckValidators(named, pins); err != nil {
 		return nil, err
 	}
 	verified := make([]evidence.ValidatorImage, 0, len(named))
@@ -349,6 +355,41 @@ func (r *RolloutReconciler) verifyValidators(ctx context.Context, named []eviden
 	}
 	sort.Slice(verified, func(i, j int) bool { return verified[i].Image < verified[j].Image })
 	return slices.CompactFunc(verified, func(a, b evidence.ValidatorImage) bool { return a == b }), nil
+}
+
+// toPinnedIndexDigests returns a copy of named in which each digest the
+// pinned image index lists as a platform manifest is replaced by the pinned
+// index digest. Entries with no pin or no digest, and digests the index does
+// not list, are unchanged. It returns an error if a pin's repository does not
+// parse or its index cannot be read.
+func (r *RolloutReconciler) toPinnedIndexDigests(ctx context.Context, named []evidence.ValidatorImage,
+	pins map[string]string) ([]evidence.ValidatorImage, error) {
+
+	out := slices.Clone(named)
+	listed := map[string][]string{}
+	for i, n := range out {
+		pin, ok := pins[evidence.Repository(n.Image)]
+		_, pinned, _ := strings.Cut(pin, "@")
+		if !ok || n.Digest == "" || n.Digest == pinned {
+			continue
+		}
+		manifests, seen := listed[pin]
+		if !seen {
+			repo, err := registry.ParseRepository(evidence.Repository(pin))
+			if err != nil {
+				return nil, err
+			}
+			// CRI-O records the node platform's manifest digest, not the index digest.
+			if manifests, err = r.Registry.IndexManifests(ctx, repo, pinned); err != nil {
+				return nil, err
+			}
+			listed[pin] = manifests
+		}
+		if slices.Contains(manifests, n.Digest) {
+			out[i].Digest = pinned
+		}
+	}
+	return out, nil
 }
 
 // predicate is what the operator binds AICR's evidence to.

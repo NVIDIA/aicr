@@ -131,9 +131,9 @@ DEVICE_PLUGIN_NAMESPACE="kube-system"
 
 # The DCGM host engine. NVSentinel's GPU health monitors are gated on the node
 # label nvsentinel.dgxc.nvidia.com/dcgm.version, which its labeler writes only
-# when it finds a Ready pod labelled app=nvidia-dcgm (v1.28.0 also accepts
+# when it finds a Ready pod labelled app=nvidia-dcgm (v1.32.0 also accepts
 # app=nvidia-dcgm-dra) whose image string matches `dcgm:<major>.`
-# (labeler/pkg/labeler/labeler.go at the v1.28.0 this repo pins). Nothing on
+# (labeler/pkg/labeler/labeler.go at the v1.32.0 this repo pins). Nothing on
 # that path inspects a GPU, so a real host engine reading the
 # mocked NVML driver is enough to bring the monitors up with no hardware.
 #
@@ -149,35 +149,35 @@ DEVICE_PLUGIN_NAMESPACE="kube-system"
 # setup-gpu-sim_test.sh compares it with the gpu-operator section of
 # docs/user/container-images.md. To re-resolve:
 #   docker buildx imagetools inspect nvcr.io/nvidia/cloud-native/dcgm:<version>
-# Printed sha256:48464e50... for 4.6.1-1-ubuntu24.04 on 2026-10-05 (regctl
-# manifest digest agreed), a multi-arch index (linux/amd64 and linux/arm64).
+# Printed sha256:42bdc582... for 4.7.0-ubuntu24.04 on 2026-11-18 (crane
+# digest agreed), a multi-arch index (linux/amd64 and linux/arm64).
 DCGM_REPOSITORY="nvcr.io/nvidia/cloud-native/dcgm"
-DCGM_VERSION="4.6.1-1-ubuntu24.04"
-DCGM_DIGEST="sha256:48464e50aa76671f5b204264cb4999739591112bf74330a727523f5655c6d7f2"
+DCGM_VERSION="4.7.0-ubuntu24.04"
+DCGM_DIGEST="sha256:42bdc58249e05e963ac16d4c1437de4e00a9b258ae55bfc478a2e0de216f42cd"
 # The Service name and port are NVSentinel's contract, not a preference: the
 # monitor dials nvidia-dcgm.<namespace>.svc:5555.
 DCGM_NAME="nvidia-dcgm"
 DCGM_NAMESPACE="gpu-operator"
 DCGM_PORT=5555
-# The host engine image is a 1.9GB download: its linux/amd64 manifest carries
-# 1,901,871,512 bytes of compressed layers, against 54MB for the device plugin
-# and 91MB for the nvml-mock agent (summed from `regctl manifest get` on
-# 2026-10-05). It is NOT side-loaded: the lane side-loads only AICR's own
+# The host engine image is a 2.7GB download: its linux/amd64 manifest carries
+# 2,665,602,514 bytes of compressed layers (4.7.0, summed from `crane manifest`
+# on 2026-11-18), against 54MB for the device plugin and 91MB for the
+# nvml-mock agent (summed from `regctl manifest get` on 2026-10-05). It is NOT side-loaded: the lane side-loads only AICR's own
 # ko.local images, so this comes from nvcr.io over the network on every run.
 # ROLLOUT_TIMEOUT (300s) is not enough for it.
 #
 # Measured on a cold node: a 905MB image took 338s, about 2.7MB/s, at which
-# 1.9GB takes some 710s. A too-short wait here fails the lane for being slow
+# 2.7GB takes some 990s. A too-short wait here fails the lane for being slow
 # rather than wrong, and the usual repair is to widen the timeout until it
-# stops discriminating. 900s is chosen to absorb a cold pull and still fail in
+# stops discriminating. 1200s is chosen to absorb a cold pull and still fail in
 # a bounded time when the image genuinely cannot be fetched.
-DCGM_ROLLOUT_TIMEOUT="${DCGM_ROLLOUT_TIMEOUT:-900s}"
+DCGM_ROLLOUT_TIMEOUT="${DCGM_ROLLOUT_TIMEOUT:-1200s}"
 
 # NVSentinel's GPU health monitor image, pre-pulled on the workers so that its
 # pull is budgeted here rather than inside nvsentinel's helm --wait. With the
 # host engine Ready from this script, the labeler stamps dcgm.version=4.x as
 # soon as it starts (reconcileAllNodes in labeler/pkg/labeler/labeler.go at
-# v1.28.0), the 4.x monitor DaemonSet schedules on every worker, and helm 4's
+# v1.32.0), the 4.x monitor DaemonSet schedules on every worker, and helm 4's
 # watcher waits on it with the release's 600s (helmDefaults in
 # pkg/bundler/deployer/helmfile/releases.go). A cold pull does not fit that.
 #
@@ -187,7 +187,7 @@ DCGM_ROLLOUT_TIMEOUT="${DCGM_ROLLOUT_TIMEOUT:-900s}"
 # monitor's own pull still to happen. setup-gpu-sim_test.sh pins this to the
 # nvsentinel section of docs/user/container-images.md, which make bom-docs
 # re-renders from the chart on every nvsentinel bump.
-MONITOR_PREPULL_IMAGE="ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.28.0-dcgm-4.x"
+MONITOR_PREPULL_IMAGE="ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.32.0-dcgm-4.x"
 MONITOR_PREPULL_NAME="gpu-health-monitor-prepull"
 MONITOR_PREPULL_NAMESPACE="kube-system"
 # The linux/amd64 manifest carries 2,699,785,123 bytes of compressed layers
@@ -197,7 +197,7 @@ MONITOR_PREPULL_NAMESPACE="kube-system"
 # keeps the margin the host
 # engine's budget has over its own cold pull. It runs after the host engine
 # rollout, not beside it, so the two pulls do not split the bandwidth the
-# host engine's 900s was sized on.
+# host engine's 1200s was sized on.
 MONITOR_PREPULL_TIMEOUT="${MONITOR_PREPULL_TIMEOUT:-1200s}"
 
 # The label the DEVICE PLUGIN selects on. The mock itself does not: chart
@@ -641,7 +641,7 @@ main() {
         rollout status "daemonset/${DEVICE_PLUGIN_NAME}" \
         -n "${DEVICE_PLUGIN_NAMESPACE}" --timeout="${ROLLOUT_TIMEOUT}" || return 1
 
-    # The host engine pulls a 1.9GB image, so it gets its own rollout wait
+    # The host engine pulls a 2.7GB image, so it gets its own rollout wait
     # rather than riding the device plugin's. Without this the lane races on to
     # assert NVSentinel's monitors while the labeler still has no DCGM pod to
     # read, and the monitors are legitimately absent rather than broken.

@@ -267,9 +267,9 @@ check "labelling touches only the mapped workers" "4" \
 #
 # NVSentinel's GPU health monitors are DaemonSets gated on the node label
 # nvsentinel.dgxc.nvidia.com/dcgm.version. Its labeler writes that label only
-# when it finds a READY pod carrying app=nvidia-dcgm (v1.28.0 also accepts
+# when it finds a READY pod carrying app=nvidia-dcgm (v1.30.0 also accepts
 # app=nvidia-dcgm-dra) whose IMAGE STRING matches `dcgm:<major>.`
-# (labeler/pkg/labeler/labeler.go, verified at the v1.28.0 this repo pins).
+# (labeler/pkg/labeler/labeler.go, verified at the v1.30.0 this repo pins).
 # Nothing in that path inspects a GPU, which is why a mocked NVML
 # driver under a real DCGM host engine is enough.
 #
@@ -300,7 +300,7 @@ check "the host engine release is the one gpu-operator ships" \
     "${DCGM_VERSION}"
 
 # 2. The pod label is the labeler's selector (--dcgm-app-label, default
-#    nvidia-dcgm,nvidia-dcgm-dra at v1.28.0). Rename it and the labeler sees
+#    nvidia-dcgm,nvidia-dcgm-dra at v1.30.0). Rename it and the labeler sees
 #    no DCGM pod at all.
 check "the DaemonSet carries the app label the labeler selects on" "1" \
     "$(dcgm_manifest | grep -cE '^        app: nvidia-dcgm$' | tr -d ' ')"
@@ -332,7 +332,7 @@ check "the Service exposes 5555" "1" \
 check "the Service routes only to the caller's node" "Local" \
     "$(dcgm_manifest | yq -r 'select(.kind == "Service") | .spec.internalTrafficPolicy')"
 
-# 5. The host engine image is a 1.9GB download and is not side-loaded, so it
+# 5. The host engine image is a 2.7GB download and is not side-loaded, so it
 #    cannot share the device plugin's 300s rollout budget. A wait that expires
 #    on a cold pull fails the lane for being slow rather than wrong, and the
 #    usual repair is to widen it until it no longer discriminates. Require a

@@ -29,12 +29,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/deployer"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // Output file names used across generation.
@@ -401,6 +401,10 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		resources = append(resources, compResources...)
 	}
 
+	if crdErr := g.checkVendoredCRDs(ctx); crdErr != nil {
+		return nil, crdErr
+	}
+
 	// Write root kustomization.yaml.
 	sort.Strings(resources)
 	if err := writeTemplate(output, kustomizationTemplate, RootKustomizationData{Resources: resources},
@@ -468,6 +472,7 @@ func (g *Generator) resolveVendoring(
 	refs []recipe.ComponentRef,
 ) (localformat.ChartPuller, map[string]string, error) {
 
+	g.vendorRecords = nil
 	if !g.VendorCharts {
 		return g.Puller, nil, nil
 	}
@@ -685,10 +690,8 @@ func (g *Generator) writeSources(helmSources map[string]*HelmRepoSourceData,
 		}
 	}
 
-	// Generation writes directly into --output and the directory is not
-	// cleared between runs, so a failed pre-fix run leaves its empty sources/
-	// behind. Without this, retrying into that same directory reproduces the
-	// original failure even though nothing new is created.
+	// A Generator called directly can write into a reused output directory,
+	// where an empty sources/ from an earlier run fails validateExactTree.
 	if !sourcesDirReady {
 		return removeStaleSourcesDir(sourcesDir)
 	}
@@ -705,16 +708,8 @@ func (g *Generator) writeSources(helmSources map[string]*HelmRepoSourceData,
 // carrying a source.
 //
 // The check matters most before removal, since os.Remove unlinks regular files
-// as readily as it removes empty directories. A pre-existing regular file at
-// this path reaches generation on every route: checksum.ValidateOutputRoot
-// runs first on the DefaultBundler path but permits regular files, rejecting
-// only symlinks and special objects.
-//
-// Lstat rather than Stat additionally rejects a symlink here. On the
-// DefaultBundler path that is redundant, since ValidateOutputRoot already
-// rejects a symlink anywhere under the output root before any deployer runs;
-// it still holds for a caller that constructs this Generator directly and
-// bypasses that check.
+// as readily as it removes empty directories. Lstat rather than Stat
+// additionally rejects a symlink here.
 //
 // The guarantee stops there. This is a check-then-act on a path, so a symlink
 // planted between this call and the MkdirAll or Remove that follows is not
@@ -1033,7 +1028,7 @@ func buildComponentSummaries(sortedRefs []recipe.ComponentRef, preManifests, man
 
 // resolveCRDOwners records which components may replace their CRDs on upgrade,
 // so each HelmRelease can pick between CreateReplace and helm-controller's Skip
-// default. The guard is shared with the helm and helmfile deployers; see
+// default. The guard is shared with the helm deployer; see
 // deployer.ResolveCRDOwners for why a registry failure is fatal here.
 func (g *Generator) resolveCRDOwners(ctx context.Context, refs []recipe.ComponentRef) error {
 	owners, err := deployer.ResolveCRDOwners(ctx, g.RecipeResult.DataProvider(), refs)
@@ -1047,3 +1042,7 @@ func (g *Generator) resolveCRDOwners(ctx context.Context, refs []recipe.Componen
 // ownsCRDs reports whether the named component may replace its CRDs on
 // upgrade. Unknown components are false.
 func (g *Generator) ownsCRDs(name string) bool { return g.crdOwners[name] }
+
+func (g *Generator) checkVendoredCRDs(ctx context.Context) error {
+	return deployer.CheckVendoredCRDOwnership(ctx, g.RecipeResult, localformat.VendoredArchives(g.vendorRecords))
+}

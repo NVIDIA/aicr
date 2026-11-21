@@ -21,12 +21,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	v1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -383,7 +383,7 @@ func TestRequireCRDEstablished(t *testing.T) {
 // runtime, one node, no accelerator, the probe image with a command that
 // exits 0.
 func TestBuildValidTrainJob(t *testing.T) {
-	tj := buildValidTrainJob("ns")
+	tj := buildValidTrainJob("ns", nil)
 	if tj.GetKind() != "TrainJob" || tj.GetNamespace() != "ns" || tj.GetName() != robustTrainJobName {
 		t.Fatalf("unexpected TrainJob identity: kind=%s ns=%s name=%s", tj.GetKind(), tj.GetNamespace(), tj.GetName())
 	}
@@ -441,7 +441,7 @@ func TestWaitForTrainJobReconciled(t *testing.T) {
 			dyn := newTrainerDynamicFake()
 			setTrainJobStatusOnCreate(dyn, tt.conditions...)
 			if _, err := dyn.Resource(trainJobGVR).Namespace("ns").Create(context.Background(),
-				buildValidTrainJob("ns"), metav1.CreateOptions{}); err != nil {
+				buildValidTrainJob("ns", nil), metav1.CreateOptions{}); err != nil {
 				t.Fatalf("create: %v", err)
 			}
 			report, err := waitForTrainJobReconciled(context.Background(), dyn, "ns")
@@ -476,7 +476,7 @@ func TestWaitForTrainJobReconciled_Bound(t *testing.T) {
 	dyn := newTrainerDynamicFake()
 	setTrainJobStatusOnCreate(dyn, trainJobCondition("Created", "TrainJobCreated"))
 	if _, err := dyn.Resource(trainJobGVR).Namespace("ns").Create(context.Background(),
-		buildValidTrainJob("ns"), metav1.CreateOptions{}); err != nil {
+		buildValidTrainJob("ns", nil), metav1.CreateOptions{}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	report, err := waitForTrainJobReconciled(context.Background(), dyn, "ns")
@@ -503,7 +503,7 @@ func TestWaitForTrainJobReconciled_Bound(t *testing.T) {
 func TestWaitForTrainJobReconciled_ParentCanceled(t *testing.T) {
 	dyn := newTrainerDynamicFake()
 	if _, err := dyn.Resource(trainJobGVR).Namespace("ns").Create(context.Background(),
-		buildValidTrainJob("ns"), metav1.CreateOptions{}); err != nil {
+		buildValidTrainJob("ns", nil), metav1.CreateOptions{}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -643,7 +643,7 @@ func TestReconcileKubeflowTrainJob(t *testing.T) {
 				t.Fatalf("list namespaces: %v", listErr)
 			}
 			for _, ns := range namespaces.Items {
-				if strings.HasPrefix(ns.Name, gpuTestNamespacePrefix) {
+				if strings.HasPrefix(ns.Name, defaults.GPUTestNamespacePrefix) {
 					t.Errorf("per-run namespace %s leaked", ns.Name)
 				}
 			}

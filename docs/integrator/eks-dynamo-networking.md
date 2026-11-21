@@ -1,6 +1,6 @@
 # EKS Dynamo Networking Prerequisites
 
-For `*-eks-ubuntu-inference-dynamo` recipes, AICR configures
+For `*-eks-ubuntu-inference-dynamo` and `h100-eks-amazonlinux-inference-dynamo` recipes, AICR configures
 `dynamo-platform` with Kubernetes-native discovery. As of the Dynamo 1.4+
 bump, AICR no longer installs bundled NATS by default: the request plane
 defaults to TCP and the KV event plane defaults to ZMQ
@@ -124,22 +124,23 @@ through the deployment — checking immediately after the Pod reaches
 networking failure. Then probe that specific port from the other side.
 
 The conformance validator's `ai-service-metrics` check, and `pod-autoscaling`
-when the recipe declares `kube-prometheus-stack`, add a third requirement: they
-dial Prometheus over the cluster Service (typically
-`kube-prometheus-prometheus.monitoring.svc:9090`), `ai-service-metrics` for its
-queries and both for the scrape-pool API that tells them when Prometheus has
-loaded the monitor they created. The orchestrator Job that runs either check
-tolerates every taint and sets a *preferred* `dependencyAffinity` toward
-Prometheus, so the scheduler co-locates it with the Prometheus pod when
-possible. The preference is best-effort, not required, so it
-can still fall back to any worker node (e.g. if the Prometheus node is
+when the recipe declares `kube-prometheus-stack`, add a third requirement: each
+dials a metrics endpoint over a cluster Service on port 9090.
+`ai-service-metrics` queries NKTP's `otel-lgtm` (typically
+`lgtm.nktp.svc:9090`), and `pod-autoscaling` asks Prometheus (typically
+`kube-prometheus-prometheus.monitoring.svc:9090`) for the scrape-pool API that
+tells it when Prometheus has loaded the PodMonitor it created. The orchestrator
+Job that runs either check tolerates every taint and sets a *preferred*
+`dependencyAffinity` toward the pod it dials, so the scheduler co-locates the
+two when possible. The preference is best-effort, not required, so it
+can still fall back to any worker node (e.g. if that pod's node is
 unschedulable) — including one whose ENI is in a security group that cannot
-reach the Prometheus pod.
+reach it.
 
 When that happens, the dial times out at 5 s and the check is marked `failed`:
 
 ```text
-[SERVICE_UNAVAILABLE] Prometheus unreachable at http://kube-prometheus-prometheus.monitoring.svc:9090 — verify network connectivity
+[SERVICE_UNAVAILABLE] metrics backend unreachable at http://lgtm.nktp.svc:9090 — verify network connectivity
 ```
 
 `pod-autoscaling` fails the same way at its preflight, before creating any
@@ -189,11 +190,12 @@ regardless of where Frontend and Worker land (`recipes/registry.yaml`'s
 group), so this rule is needed **even when Frontend and Worker are
 co-located** — it is not part of the Frontend↔Worker relationship above.
 
-Allow ingress on TCP `9090` (Prometheus, required for the `ai-service-metrics`
-conformance check, and for `pod-autoscaling` when the recipe declares
-`kube-prometheus-stack`) from **every security group that can host the
+Allow ingress on TCP `9090` (required for the `ai-service-metrics` conformance
+check, which dials NKTP's `otel-lgtm`, and for `pod-autoscaling`, which dials
+Prometheus when the recipe declares `kube-prometheus-stack`) from **every security group that can host the
 conformance orchestrator Job** into the **Prometheus/system security
-group**. The orchestrator Job tolerates every taint (can schedule on any
+group**. NKTP's `otel-lgtm` runs on the same system node group, so the one
+rule covers both. The orchestrator Job tolerates every taint (can schedule on any
 node group) and only *prefers* — via best-effort `dependencyAffinity` — to
 co-locate with Prometheus; on a fallback placement it can land on any
 worker node. Every node group whose pods can host the orchestrator must
@@ -206,6 +208,34 @@ SG must accept ingress from every other worker SG, not only from itself.
 If the cluster has more than two worker security groups (e.g. a separate
 inference node group), repeat the `9090` rule for each SG that can host the
 orchestrator — on a fallback placement it may land on any of them.
+
+### Inference gateway rule — for in-cluster clients on other node groups
+
+The `agentgateway` proxy behind the inference gateway runs on the system node
+group, and it listens on the Gateway listener port itself (`80` in AICR's
+Gateway), not on a remapped high port. In-cluster clients on other node groups,
+such as a workload on the GPU nodes calling the gateway's Service, reach that
+port on the proxy pod directly. Allow ingress on the listener port from every
+security group that hosts such clients into the **system security group**.
+Otherwise their requests time out.
+
+A NetworkPolicy on `agentgateway-system` must allow the same traffic. Unlike a
+security group, it applies even when the client runs on the gateway's own node.
+
+The `inference-gateway` conformance check does not need this rule when it can
+find the proxy pods, which it does for AICR's agentgateway through the proxy
+Service's selector. Its traffic probe is then scheduled onto a node running a
+gateway proxy pod, so with AICR's single proxy replica its requests to the
+gateway stay on that node. If the proxy Service has no selector or no live pod,
+the probe is not pinned and may need this rule like any other client.
+
+The check's test backends are not pinned to any node group. They run on any
+node the validator's tolerations admit (every node when none are set), so the
+gateway's hop to them can leave the system node group. Allow TCP `8080` from the
+system security group into every security group that can host them, not only
+the GPU group. On a cluster with another admitted node group, such as a
+`cpu-worker` group, a rule on the GPU group alone still fails the check with
+`did not reach the test backends`.
 
 ### Example
 

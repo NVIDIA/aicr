@@ -34,6 +34,52 @@ aicr bundle --recipe recipe.yaml --deployer argocd \
   --output ./bundles
 ```
 
+## Output directory
+
+`--output` defaults to the current directory. The bundle renders in a private
+`.aicr-stage-*` directory, inside the output directory when it exists and
+beside it when it does not, and reaches the output directory only once it is
+complete. A run that fails while rendering, or that a first Ctrl-C or
+`SIGTERM` interrupts before the bundle starts moving into place, leaves the
+output directory as it found it. A first interrupt that arrives after that
+does not stop the move.
+
+Bundling into a directory that holds an earlier bundle replaces it. Every
+top-level folder named like a component folder, three digits and a hyphen such
+as `001-gpu-operator/`, is replaced or removed whatever it holds, even one you
+created. So is a top-level file the new bundle also writes, such as
+`README.md`, along with
+`provenance.yaml`, `undeploy.sh` and an empty `static/` or `sources/`. Any
+other file, including one under a directory such as `data/`, is replaced or
+removed only when the new bundle writes a file at the same path, or the
+earlier bundle's `checksums.txt` lists it and its content still matches, such
+as a dropped `--data` file. The earlier bundle's attestation files are
+replaced or removed whatever they hold, because `checksums.txt` cannot list
+the files that sign it. The run fails and changes nothing if the directory
+holds anything else, such as a file you added under `data/`, because
+`checksums.txt` must list the whole tree. An earlier bundle is recognized only
+when its `checksums.txt` lists `bundle-info.yaml` and that file still matches.
+One with no `checksums.txt`, such as one made through the Go library with
+checksums off, is not recognized, so any of its files the new bundle does not
+write, such as a dropped `--data` file, fail the run. Bundle into a new
+directory, or remove the earlier bundle first. An `argocd-helm` bundle that
+omits the GPU Operator or the NVIDIA DRA driver also fails, before anything is
+written, when the directory holds that component's output from an earlier
+bundle. Bundle it into a new directory.
+
+A run that is killed outright, for example by `SIGKILL`, the out-of-memory
+killer, or a second Ctrl-C or `SIGTERM`, cannot clean up after itself. A run
+that fails while moving the finished bundle into an existing output directory
+keeps what it has not moved yet, and its error names the directory holding
+it. Either can leave a `.aicr-stage-*` directory behind, and the output
+directory partly replaced. Delete the `.aicr-stage-*` directory and bundle
+again. If that run reports an unexpected file, the partial replacement
+removed the `checksums.txt` that listed it, so bundle into a new directory
+instead.
+
+A `--split` set needs a path that does not exist yet. See
+[Split a bundle by class](#split-a-bundle-by-class).
+
 ## Bundle layout
 
 This is the canonical description of what a bundle contains. The trees below
@@ -385,7 +431,7 @@ version describes the wrapper instead of what it wraps.
 
 So for the `gpu-operator-post` release generated alongside gpu-operator, a
 `helm list` reports chart `gpu-operator-post-0.22.0` — the AICR version — while
-its app version and `aicr.run/component-version` both read `v26.7.2`, the
+its app version and `aicr.run/component-version` both read `v26.7.3`, the
 gpu-operator pin those manifests accompany.
 
 A component with no upstream pin — a manifest-only component, and the injected
@@ -442,6 +488,42 @@ profile's owned paths are locked. The lock is enforced per surface:
   equals, contains, or is contained by an owned path is rejected at Helm
   render time, even when the value is identical. Key presence alone
   trips the guard.
+- **argocd-helm driver-ownership paths, profiled or not**: independent of
+  any profile, an `argocd-helm` bundle that ships `gpu-operator` or
+  `gpu-operator-ocp` rejects install-time values on `driver.enabled`,
+  `toolkit.enabled` and `hostPaths.driverInstallDir`, and one that ships
+  `nvidia-dra-driver-gpu` or `nvidia-dra-driver-gpu-ocp` rejects
+  `nvidiaDriverRoot`. These paths decide who owns the GPU driver, and
+  bundle-time checks verify them (`CheckDriverOwnershipCoherence`, when the
+  bundle ships a GPU Operator), so an install-time value would bypass that
+  verdict. As above, a key that equals, contains, or is contained by a
+  guarded path trips the guard on presence alone (`false`, `null`, `[]`,
+  a scalar replacing a parent, or an identical value). The guard names
+  the path and remedy; when a scalar replaces the whole component, Helm
+  may report the component template's type error first. Set ownership at
+  bundle time instead (`aicr bundle --set gpuoperator:driver.enabled=...`)
+  so bundle-time ownership checks apply; siblings such as
+  `gpuoperator.driver.version` stay overridable. When the selected profile
+  owns the path (the AKS `gpuStack` profile owns `driver.enabled`,
+  `toolkit.enabled` and `nvidiaDriverRoot`), a bundle-time `--set` is
+  rejected as well, so choose the profile value with
+  `aicr recipe --profile gpuStack=...` instead. A `--dynamic` declaration
+  on a guarded path would stub it into the chart's root `values.yaml`,
+  which the guard rejects on every render, so `aicr bundle` rejects it.
+  The guard lives in `templates/aicr-driver-ownership-lock.yaml`.
+  With `--vendor-charts`, a component's wrapper chart forwards values to the
+  upstream chart under its dependency name, so the guard also rejects the
+  same paths there (for example `gpuoperator.gpu-operator.driver.enabled`, or
+  `dradriver.dra-driver-nvidia-gpu.nvidiaDriverRoot`); siblings such as
+  `gpuoperator.gpu-operator.driver.version` stay overridable.
+  A bundle subset (the REST `bundlers=` filter or the SDK's
+  `config.WithBundlers`) that omits these components carries no guard
+  for them. When regenerating into an existing directory, stale artifacts
+  for an omitted or disabled guarded component are rejected before any
+  output is written, even without checksums; generate into a fresh
+  directory. An existing install that sets these values at install time
+  fails after upgrading; see the
+  [upgrade note](component-catalog.md#gpu-operator-and-nvidia-dra-driver-gpu-argocd-helm-rejects-install-time-driver-ownership-values).
 - **Component presence (the synthetic `enabled` owned path)**: not
   changeable by selecting a different profile value — profile fragments
   cannot assign `enabled`, so no `--profile` choice adds or removes a
@@ -468,7 +550,9 @@ aicr bundle --recipe recipe.yaml \
 The `agentgateway` inference-gateway is **private by default**: with no
 `allowedSourceRanges` override, the bundler scopes the LoadBalancer to private
 RFC1918 ranges so it is not exposed to the public internet. Use the override
-above to admit specific clients (e.g. a corporate VPN). See
+above to admit specific clients (e.g. a corporate VPN). On a cluster with no
+LoadBalancer provider, `--set agentgateway:serviceType=ClusterIP` gives the
+gateway a ClusterIP Service instead, to which source ranges do not apply. See
 [Inference Gateway Network Exposure](component-catalog.md#inference-gateway-network-exposure).
 
 ### Size controllers for large clusters
@@ -492,25 +576,39 @@ GB300 recipe. Other recipes keep a lower limit (2Gi on OKE, the chart default
 elsewhere), so raise `limits.memory` together with the request there: a
 request above its limit is rejected.
 
-The generic GB300 recipe also sizes the NIC configuration daemon, a
-per-node DaemonSet whose pods each cache every `NicDevice` in the cluster, so
-each pod's memory grows with cluster size. Its resources come from the
-`networkoperator` values at `nicConfigurationOperator.configurationDaemon.resources`
-(256Mi request, 2Gi limit by default), which the recipe's `NicClusterPolicy`
-manifest reads. Set this path at bundle time:
+The NIC configuration daemon, a per-node DaemonSet whose pods each cache every
+`NicDevice` in the cluster, is not sized by AICR. The generic GB300 and NVKE
+VR200 recipes' `NicClusterPolicy` sets no resources for it, so the Network
+Operator applies its own default (100m CPU and 512Mi memory requests, 5Gi
+memory limit). To set them yourself, use the `networkoperator` values path
+`nicConfigurationOperator.configurationDaemon.resources`, which the policy
+manifest reads:
 
 ```bash
 aicr bundle --recipe recipe.yaml \
-  --set networkoperator:nicConfigurationOperator.configurationDaemon.resources.limits.memory=4Gi \
+  --set networkoperator:nicConfigurationOperator.configurationDaemon.resources.limits.memory=8Gi \
+  --set networkoperator:nicConfigurationOperator.configurationDaemon.resources.requests.memory=1Gi \
+  --set networkoperator:nicConfigurationOperator.configurationDaemon.resources.requests.cpu=100m \
   --output ./bundles
 ```
+
+An override replaces the operator's default as a whole: the operator fills in
+no field you leave out. It must set both `requests.memory` and
+`limits.memory`, or the bundle fails. Set `requests.cpu` as well (100m is the
+operator's default); without it the daemon runs with no CPU request.
+
+Earlier releases documented overriding `limits.memory` alone, which kept
+AICR's own requests. That command now fails: add `requests.memory` and
+`requests.cpu` to it.
 
 The `helm`, `helmfile`, `terraform`, `argocd`, and `argocd-helm` deployers
 render this manifest when the bundle is generated, so the install-time overrides
 below do not reach it. A `flux` bundle ships the manifest as a template, and Flux renders
 it at install time from the values in `network-operator-post/helmrelease.yaml`.
-Edit `spec.values.network-operator.nicConfigurationOperator.configurationDaemon.resources`
-there to resize the daemon without regenerating the bundle.
+Set `spec.values.network-operator.nicConfigurationOperator.configurationDaemon.resources`
+there to resize the daemon without regenerating the bundle, with the same three
+fields: an override missing either memory value fails when Flux renders the
+release.
 
 At bundle time, scope each resources path in the table with its override key:
 
@@ -660,6 +758,33 @@ never honored from `--set-json`/`--set-file` (present or absent — the
 typed path would write a literal `enabled:` chart value instead of
 toggling the component).
 
+**`--dynamic` on a component rendered at bundle time is rejected.** Every
+deployer that accepts a manifest-only or Kustomize component, except
+`flux`, renders its templates when the bundle is built, so a value
+supplied at install time through `cluster-values.yaml` reaches no
+template. `aicr bundle` therefore rejects
+`--dynamic` on a manifest-only component under the `helm`, `helmfile`,
+`terraform` and `fleet` deployers, and on a Kustomize component under
+`helm`, `helmfile` and `fleet`, as `argocd-helm` already does. `flux`
+packages a manifest-only component as a chart it renders at reconcile
+time, so `--dynamic` on one works there. (`terraform` and `flux` reject a
+Kustomize component whether or not it has `--dynamic`.)
+
+- **Manifest-only component:** set the value at bundle time instead, with
+  `--set`, `--set-json`, or the node scheduling flags such as
+  `--system-node-selector` and `--system-node-toleration`.
+- **Kustomize component:** component values do not reach a Kustomize
+  build, so change the setting in its Kustomize source.
+
+A component that installs an upstream chart keeps `--dynamic`, including
+one that also carries manifests. Its chart receives the install-time value.
+Under every deployer except `flux`, its own manifests (the `-pre` and
+`-post` releases) are rendered when the bundle is built, so a path that
+only those manifests read does not change them; set such a value at bundle
+time. `flux` renders those manifests at reconcile time, with the dynamic
+values from the ConfigMap that each `-pre` or `-post` HelmRelease
+references.
+
 A component whose presence a configuration profile owns cannot be removed
 at all — `enabled=false` on it is rejected regardless of the rule above.
 NVSentinel is in that position on the AKS family, whose `gpuStack`
@@ -696,10 +821,8 @@ aicr bundle --recipe recipe.yaml \
 
 Most components treat the selectors as optional, but components that declare
 `requireNodeSelector` in the registry (`nvsentinel-mongodb`, `slinky-slurm`,
-`slurm-accounting-mariadb`) fail the bundle without them.
-`kube-prometheus-stack` requires `--system-node-selector` once it has a storage
-class, so following the bundle's PVC warning with `--storage-class` alone
-fails. See the selector rows in the
+`slurm-accounting-mariadb`) fail the bundle without them. See the selector
+rows in the
 [`aicr bundle` flag table](cli-reference.md#aicr-bundle).
 
 ## Prepare DRA nodes when opting in to eviction coordination
@@ -1050,8 +1173,8 @@ never replaced.
   hand-authored recipe; register it, for example through a `--data` registry
   entry that declares its `class`;
 - a dependency points from an earlier class to a later one, including the
-  opt-in `nvsentinel-preflight` and `nvsentinel-slinky-drainer` mixins under
-  the shipped classification;
+  opt-in `nvsentinel-preflight`, `nvsentinel-preflight-runai` and
+  `nvsentinel-slinky-drainer` mixins under the shipped classification;
 - every component of a declared class is disabled, by the recipe or by
   `--set <component>:enabled=false`;
 - two components would emit the same Helm release name in the same

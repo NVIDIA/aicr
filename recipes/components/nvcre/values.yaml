@@ -18,7 +18,7 @@
 # Chart:    oci://ghcr.io/nvidia/cluster-readiness-engine
 #
 # Chart and controller image are public on GHCR and both pull anonymously:
-# `helm pull oci://ghcr.io/nvidia/cluster-readiness-engine --version v0.8.2`
+# `helm pull oci://ghcr.io/nvidia/cluster-readiness-engine --version v0.12.0`
 # succeeds with an empty registry config, so no pull secret is required.
 #
 # This file applies only when a componentRef names it explicitly as
@@ -48,10 +48,10 @@ manager:
     # version and digest together, which
     # TestNVCREValuesPinControllerImageByDigest enforces. Re-resolve with:
     #   crane digest ghcr.io/nvidia/cluster-readiness-engine/manager:<version>
-    tag: v0.8.2@sha256:c5de16ddb95bd923c6b04d04d7ff9754a7d7b83d18fa400baa33e7ae72fc593d
+    tag: v0.12.0@sha256:50eb3e1e022bacdbf103ea4694d2a939a766596b9f13d66005457482c9370eaa
 
-# Where the controller may write. The chart default is cluster in v0.8.x and
-# becomes namespaced in the next minor release; under namespaced a Workflow in
+# Where the controller may write. The chart default is cluster through v0.12.x
+# and becomes namespaced in the next minor release; under namespaced a Workflow in
 # a namespace with no RoleBinding waits with NamespacePermissionsMissing. The
 # performance validator creates its Certification in the validator's own
 # namespace and binds nothing there, so pin cluster rather than inherit the flip.

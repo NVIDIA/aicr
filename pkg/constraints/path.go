@@ -15,7 +15,7 @@
 package constraints
 
 import (
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/measurement"
 )
 
 // ConstraintPath is a parsed fully qualified constraint path.

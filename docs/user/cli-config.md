@@ -189,6 +189,9 @@ spec:
       nodes: 2
       storageClass: ""
       sharedStorageClass: ""          # RWX class for opt-in shared filesystems
+    runtimeMetrics:
+      series: []                      # metric name patterns the runtime Prometheus keeps
+      namespaces: []                  # namespaces whose monitors it loads
     attestation:
       enabled: false
       certificateIdentityRegexp: ""
@@ -298,9 +301,10 @@ exclusive** — query by criteria or derive from a snapshot, not both.
 | `input.snapshot` | string | Snapshot path to derive the recipe from |
 | `output.path` | string | Recipe output path |
 | `output.format` | string | `yaml` \| `json` \| `table` |
-| `data` | string | Data-overlay directory/archive (same as `--data`) |
+| `data` | string | External catalog directory (same as `--data`); layered over embedded data by default |
+| `externalOnly` | bool | Use only `data`, without embedded catalog reads, merges or fallbacks. Requires `data` or `--data`; explicit `--external-only=false` overrides this setting |
 | `criteriaStrict` | bool (tri-state) | Reject criteria values outside the embedded catalog; mirrors `--criteria-strict` / `AICR_CRITERIA_STRICT` (any of the three enables it) |
-| `requireEvidence` | bool (tri-state) | Reject a resolved recipe with no committed evidence pointer; mirrors `--require-evidence` / `AICR_REQUIRE_EVIDENCE` (any of the three enables it). A false value does not turn off an environment value that is already on. A resolve that uses `data` or `--data` fails, even when the leaf overlay stays embedded. Applies to `aicr recipe` and `aicr query` |
+| `requireEvidence` | bool (tri-state) | Reject a resolved recipe with no committed evidence pointer; mirrors `--require-evidence` / `AICR_REQUIRE_EVIDENCE` (any of the three enables it). A false value does not turn off an environment value that is already on. A resolve that uses `data` or `--data` fails, even when the leaf overlay stays embedded. Applies to `aicr recipe` and `aicr query`; `aicr query --recipe` is rejected while it is on |
 
 ### spec.bundle
 
@@ -318,6 +322,7 @@ Inputs to `aicr bundle`.
 | `deployment.appName` | string | Argo CD parent `Application` name override (multi-bundle installs sharing a namespace) |
 | `deployment.argocd` | object | Argo CD bundle settings for `argocd` and `argocd-helm`: `namePrefix`, `destinationServer`, `project`, `cascadeDelete`, and `syncRetry` (`limit`, `backoff.duration`, `backoff.factor`, `backoff.maxDuration`). Each mirrors an `--argocd-*` flag, which overrides it field by field. Setting a field that a `deployer:<key>` entry in `deployment.set` also sets is rejected. See [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options) |
 | `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `draEvictionNodeLabel`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`, `sharedStorageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings. `draEvictionNodeLabel` accepts one `key=value` label and has no default: setting it opts in to DRA eviction coordination, which AICR applies only when DRA and GPU Operator are both enabled. |
+| `runtimeMetrics.series` / `.namespaces` | []string | Metric name patterns (RE2) the runtime Prometheus server keeps, and namespaces whose ServiceMonitors and PodMonitors it loads, on top of what AICR's components declare. `--runtime-metrics-series` and `--runtime-metrics-namespace` each replace their own list. See [Autoscaling on a workload metric](component-catalog.md#autoscaling-on-a-workload-metric). |
 | `attestation.enabled` | bool | Enable bundle attestation (signing); keyless OIDC by default, KMS-backed when `signingKey` is set |
 | `attestation.certificateIdentityRegexp` | string | Expected signer identity |
 | `attestation.oidcDeviceFlow` | bool | Device-code flow for headless signing |
@@ -423,3 +428,10 @@ file can silently enable. It still composes with a config-supplied `trust.key`.
   examples
 - [Validation](validation.md) — validation phases and evidence workflow
 - [Bundling](bundling.md) — deployers and bundle outputs
+
+## Artifact composition
+
+`spec.recipe.artifacts` configures [artifact inventories and bindings](artifact-inventory.md) for recipe resolution and consumers, starting in AICR v1.3.0.
+`inventory` selects a local inventory file; `allowCatalogPins` lists components permitted to retain missing catalog matches.
+The default inventory location is `<data>/artifacts/inventory.yaml`.
+Without an inventory, composition is inactive.

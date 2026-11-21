@@ -20,8 +20,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/errors"
 )
 
 const hydratedNameKey = "name"
@@ -50,6 +50,7 @@ func projectObservedStates(metadata map[string]any, m *RecipeResultMetadata) {
 		"mariaDBOperatorState":     m.MariaDBOperatorState,
 		"defaultStorageClassState": m.DefaultStorageClassState,
 		"perconaOperatorState":     m.PerconaOperatorState,
+		"rdmaNamespaceMode":        m.RDMANamespaceMode,
 	} {
 		if value != "" {
 			metadata[key] = value

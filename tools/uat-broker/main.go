@@ -21,9 +21,12 @@
 //
 // Subcommands:
 //
-//	uat-broker reservations --name <name> [--file <registry>]
+//	uat-broker reservations --name <name> [--file <registry>] \
+//	    [--lifecycle <lifecycle> --skip-delete <true|false>]
 //	    Resolve one reservation row and print its fields as
 //	    GITHUB_OUTPUT-style key=value lines (redirect to "$GITHUB_OUTPUT").
+//	    With --lifecycle and --skip-delete, first refuse a skip_delete the
+//	    row cannot honor (#3670), printing nothing.
 //
 //	uat-broker reservations --list [--file <registry>]
 //	    Print every reservation name, one per line.
@@ -32,6 +35,15 @@
 //	    Print the daytime human-access rotation (#1281, DC8) as a JSON array
 //	    of {reservation, intent} — one entry per row with a non-empty
 //	    daytime-intent — for the daytime scheduler's dispatch matrix.
+//
+//	uat-broker reservations --daytime-down [--file <registry>]
+//	    Print the evening teardown set as a JSON array of {reservation,
+//	    intent}: every non-kind row, its daytime-intent or training.
+//
+//	uat-broker reservations --janitor-aws [--file <registry>]
+//	    Print the janitor's AWS legs as a JSON array of {tenancy, location,
+//	    config}: one per distinct account and region of the aws rows'
+//	    cluster-configs, read relative to the current directory.
 //
 //	uat-broker schedule [--file <registry>] [--compat <file>] \
 //	    [--ignore-floor-lines n,m] [--reservations a,b] [--previous-n N] \
@@ -70,8 +82,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/uatbroker"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/uatbroker"
 )
 
 // defaultRegistryPath is the registry location relative to the repo root,
@@ -90,8 +102,11 @@ const usage = `uat-broker — UAT reservation registry + nightly schedule helper
 
 Usage:
   uat-broker reservations --name <name> [--file <registry>]   resolve one row as key=value lines
+                         [--lifecycle <l> --skip-delete <true|false>]  refusing a skip_delete the row cannot honor
   uat-broker reservations --list [--file <registry>]          list reservation names
   uat-broker reservations --daytime [--file <registry>]       print the daytime rotation as JSON [{reservation,intent}]
+  uat-broker reservations --daytime-down [--file <registry>]  print the evening teardown set as JSON [{reservation,intent}]
+  uat-broker reservations --janitor-aws [--file <registry>]   print the janitor's AWS legs as JSON [{tenancy,location,config}]
   uat-broker schedule [--file <registry>] [--compat <file>] [--ignore-floor-lines n,m]
                       [--reservations a,b] [--previous-n N] [--include-main]
                                                               expand the nightly version matrix (tags on stdin) as JSON
@@ -150,21 +165,30 @@ func parseAndRun(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	return 0
 }
 
-// runReservations resolves one reservation row (--name) into key=value lines
-// or lists every reservation name (--list).
+// runReservations resolves one reservation row (--name) into key=value lines,
+// lists every reservation name (--list), or prints one of the JSON dispatch
+// matrices (--daytime, --daytime-down, --janitor-aws).
 func runReservations(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("reservations", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		file    string
-		name    string
-		list    bool
-		daytime bool
+		file        string
+		name        string
+		list        bool
+		daytime     bool
+		daytimeDown bool
+		janitorAWS  bool
+		lifecycle   string
+		skipDelete  string
 	)
 	fs.StringVar(&file, "file", defaultRegistryPath, "path to the reservation registry")
 	fs.StringVar(&name, "name", "", "reservation name to resolve")
 	fs.BoolVar(&list, "list", false, "list all reservation names, one per line")
 	fs.BoolVar(&daytime, "daytime", false, "print the daytime human-access rotation as JSON: [{\"reservation\",\"intent\"}]")
+	fs.BoolVar(&daytimeDown, "daytime-down", false, "print the evening daytime-down set as JSON: [{\"reservation\",\"intent\"}]")
+	fs.BoolVar(&janitorAWS, "janitor-aws", false, "print the janitor's AWS targets as JSON: [{\"tenancy\",\"location\",\"config\"}]")
+	fs.StringVar(&lifecycle, "lifecycle", "", "with --name and --skip-delete: the dispatch's lifecycle")
+	fs.StringVar(&skipDelete, "skip-delete", "", "with --name and --lifecycle: refuse a skip_delete the row cannot honor (true|false)")
 	if err := fs.Parse(args); err != nil {
 		return flagParseErr(err, "reservations")
 	}
@@ -172,11 +196,19 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"reservations: unexpected positional arguments: "+strings.Join(fs.Args(), " "))
 	}
-	// The three output modes are mutually exclusive: --name resolves one row,
-	// --list prints names, --daytime prints the daytime rotation.
-	if selected := boolCount(list, daytime, name != ""); selected > 1 {
+	if selected := boolCount(list, daytime, daytimeDown, janitorAWS, name != ""); selected > 1 {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			"reservations: --name, --list, and --daytime are mutually exclusive")
+			"reservations: --name, --list, --daytime, --daytime-down, and --janitor-aws are mutually exclusive")
+	}
+	if (lifecycle != "") != (skipDelete != "") {
+		return errors.New(errors.ErrCodeInvalidRequest, "reservations: --lifecycle and --skip-delete go together")
+	}
+	if skipDelete != "" && name == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "reservations: --skip-delete needs --name")
+	}
+	skip, err := parseSkipDelete(skipDelete)
+	if err != nil {
+		return err
 	}
 
 	reg, err := uatbroker.LoadRegistryFile(file)
@@ -184,16 +216,22 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	// The daytime rotation is JSON (a dispatch matrix), written directly by the
-	// encoder; the other two modes are line-oriented. Handle JSON first so its
-	// output path is unambiguous.
-	if daytime {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(reg.DaytimeAssignments()); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "encode daytime assignments", err)
+	// The JSON modes are dispatch matrices, written directly by the encoder;
+	// the other two modes are line-oriented. Handle JSON first so its output
+	// path is unambiguous.
+	switch {
+	case daytime:
+		return writeJSON(stdout, reg.DaytimeAssignments(), "daytime assignments")
+	case daytimeDown:
+		return writeJSON(stdout, reg.DaytimeTeardownAssignments(), "daytime-down assignments")
+	case janitorAWS:
+		// Cluster-config paths are relative to the checkout root, where the
+		// workflows invoke the tool.
+		targets, targetsErr := reg.AWSJanitorTargets(".")
+		if targetsErr != nil {
+			return targetsErr
 		}
-		return nil
+		return writeJSON(stdout, targets, "janitor AWS targets")
 	}
 
 	// Build the output first, then write it in one checked call so a broken
@@ -207,11 +245,17 @@ func runReservations(args []string, stdout, stderr io.Writer) error {
 			fmt.Fprintln(&b, n)
 		}
 	case name == "":
-		return errors.New(errors.ErrCodeInvalidRequest, "reservations: --name is required (or pass --list or --daytime)")
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"reservations: --name is required (or pass --list, --daytime, --daytime-down, or --janitor-aws)")
 	default:
 		res, lookupErr := reg.Lookup(name)
 		if lookupErr != nil {
 			return lookupErr
+		}
+		if skipDelete != "" {
+			if checkErr := res.CheckSkipDelete(lifecycle, skip); checkErr != nil {
+				return checkErr
+			}
 		}
 		// GITHUB_OUTPUT-style key=value lines; every value is single-line.
 		// slug is surfaced so uat-run.yaml's resolve step exposes
@@ -585,6 +629,28 @@ func boolCount(flags ...bool) int {
 		}
 	}
 	return n
+}
+
+// parseSkipDelete parses a --skip-delete value, which must be exactly true or
+// false; empty (the flag unset) is false.
+func parseSkipDelete(v string) (bool, error) {
+	switch v {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	}
+	return false, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("reservations: --skip-delete must be true or false; got %q", v))
+}
+
+// writeJSON writes v to w as indented JSON; what names v in the error.
+func writeJSON(w io.Writer, v any, what string) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "encode "+what, err)
+	}
+	return nil
 }
 
 // splitCSV splits a comma-separated list, trimming whitespace and dropping

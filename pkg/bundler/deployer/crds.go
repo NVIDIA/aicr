@@ -18,8 +18,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // ResolveCRDOwners reports which of refs may have their CRDs replaced on
@@ -28,7 +28,7 @@ import (
 //
 // Shared by every deployer that has to decide the question, so the guard is
 // identical across bundles: flux turns a true into `spec.upgrade.crds:
-// CreateReplace`, helm and helmfile into an apply-crds.sh step. Argo CD does
+// CreateReplace`, helm into an apply-crds.sh step. Argo CD does
 // not consult this at all. It renders charts with `--include-crds` and applies
 // CRDs as ordinary manifests every sync, so it upgrades them without an opt-in
 // and cannot be gated by one (`skipCrds` would also suppress them on first

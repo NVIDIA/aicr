@@ -27,11 +27,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/k8s/agent"
-	"github.com/NVIDIA/aicr/pkg/serializer"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/k8s/agent"
+	"aicr.run/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 )
 

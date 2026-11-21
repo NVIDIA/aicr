@@ -19,15 +19,15 @@ import (
 	"strings"
 	"testing"
 
-	aicrhelm "github.com/NVIDIA/aicr/pkg/helm"
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	aicrhelm "aicr.run/pkg/helm"
+	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/recipe"
 )
 
 // nvsentinelObjectMonitorImage is the subchart image the Object Monitor runs,
 // as disclosed in docs/user/container-images.md. The static BOM cannot see a
 // mixin-gated subchart, so this is the only check keeping that note honest.
-const nvsentinelObjectMonitorImage = "ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.28.0"
+const nvsentinelObjectMonitorImage = "ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.32.0"
 
 // objectMonitorWatchedNamespaces returns every namespace each policy must
 // match, derived from the catalog rather than hardcoded: the registry's

@@ -95,8 +95,10 @@ development:
   skipDiscovery: false                # development builds only: declared criteria, no node gates or snapshot
 ```
 
-The chart fails to render when `aicr.version` is outside `>=1.0.0, <2.0.0`,
-or is a prerelease without `aicr.allowPrerelease: true`.
+The chart fails to render when `aicr.version` is not `vX.Y.Z` with an optional
+prerelease, is outside `>=1.0.0, <2.0.0`, or is a prerelease without
+`aicr.allowPrerelease: true`. The operator exits at startup on a malformed
+`--aicr-version`, or on a prerelease without `--allow-prerelease-aicr`.
 
 A prerelease, such as a release candidate or a build from a commit, counts as
 the release it precedes: `v1.1.0-rc.1` gets the v1.1.0 behavior and is in range
@@ -413,7 +415,7 @@ spec:                                 # immutable, except the set-once approval 
     crdChange: false
     postApplySteps: [reset-breaker, verify]   # a manual record's steps after the apply; acknowledged before the plan is active
   - release: nvsentinel
-    operation: Remove                 # after installs and upgrades, in reverse active-plan order
+    operation: Remove                 # after installs and upgrades, dependents first
     assessment: NotApplicable
     uid: 3f2b…                        # the engine object to delete; set exactly on Remove steps
   approval:                           # written by an approver, never by the operator
@@ -566,8 +568,8 @@ operator-owned ConfigMap or Job, carries:
 | `operator.aicr.run/schema-version` | label | Plan document schema version (plan ConfigMaps) |
 | `operator.aicr.run/orphaned-from` | annotation | Runtime UID, set only by Orphan deletion |
 
-Engine objects also carry the plan graph, so a plan can be rebuilt from live
-state:
+Engine objects also carry the plan graph. A plan can be rebuilt from it, and
+it orders removals:
 
 | Key | Kind | Value |
 | --- | --- | --- |

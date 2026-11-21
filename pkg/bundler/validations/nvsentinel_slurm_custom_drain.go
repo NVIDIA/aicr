@@ -18,19 +18,19 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
-	"github.com/NVIDIA/aicr/pkg/component"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/bundler/drainscope"
+	"aicr.run/pkg/component"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // Paths and names CheckNVSentinelSlurmCustomDrainCoherent reads. The
 // customDrain contract values are what node-drainer must be told for the
-// slinky-drainer plugin AICR vendors (NVSentinel v1.28.0): the plugin's CRD,
+// slinky-drainer plugin AICR vendors (manifests from NVSentinel v1.30.0, image
+// v1.32.0): the plugin's CRD,
 // its template ConfigMap and the condition it sets when a drain completes.
 const (
 	slinkyDrainerComponent             = "slinky-drainer"
@@ -42,7 +42,6 @@ const (
 	nodeDrainerCustomDrainSelectorPath = drainscope.CustomDrainNodeSelectorPath
 	nodeDrainerCustomDrainNSPath       = "node-drainer.customDrain.namespace"
 	nodeDrainerCustomDrainMountPath    = "node-drainer.customDrain.templateMountPath"
-	nodeDrainerCustomDrainTimeoutPath  = "node-drainer.customDrain.timeout"
 	nodeDrainerCustomDrainStatusPath   = "node-drainer.customDrain.statusConditionStatus"
 	nodeDrainerUserNamespacesPath      = drainscope.UserNamespacesPath
 	nodeDrainerPodDrainPoliciesPath    = drainscope.PodDrainPoliciesPath
@@ -93,9 +92,8 @@ var slinkyDrainerCustomDrainContract = []struct{ path, want string }{
 //     in dry run, so the plugin acts on nodes), without slinky-slurm, or
 //     without the slinky-drainer or slinky-drainer-crds component;
 //   - customDrain's values break the plugin's contract, it creates requests
-//     outside the plugin's namespace, its timeout is not whole seconds (which
-//     node-drainer's config load rejects), it is scoped by nodeSelector (a
-//     slurmd node outside the scope keeps pod eviction), or userNamespaces or
+//     outside the plugin's namespace, it is scoped by nodeSelector (a slurmd
+//     node outside the scope keeps pod eviction), or userNamespaces or
 //     podDrainPolicies is non-empty (node-drainer then refuses to start);
 //   - the plugin watches a namespace other than the one slinky-slurm deploys
 //     worker pods to, so it finds no pods and marks every drain complete;
@@ -230,7 +228,7 @@ func CheckNVSentinelSlurmCustomDrainCoherent(ctx context.Context, componentName 
 // customDrainContractViolations checks node-drainer's customDrain values
 // against the vendored plugin, and the unscoped form of the scope rules
 // node-drainer validates at startup (pkg/config/config.go, NVSentinel
-// v1.28.0).
+// v1.32.0).
 func customDrainContractViolations(componentName string, values map[string]any, sentinelNS string) []error {
 	var errs []error
 	fail := func(format string, args ...any) {
@@ -254,12 +252,6 @@ func customDrainContractViolations(componentName string, values map[string]any, 
 		fail("%s is %q but NVSentinel and slinky-drainer run in %q -- pass --set nv-sentinel:%s=%s",
 			nodeDrainerCustomDrainNSPath, ns, sentinelNS, nodeDrainerCustomDrainNSPath, sentinelNS)
 	}
-	if !customDrainTimeoutValid(values) {
-		raw, _ := component.GetValueByPath(values, nodeDrainerCustomDrainTimeoutPath)
-		fail("%s is %v: node-drainer reads it as a whole number of seconds and fails to start on anything else "+
-			"(the chart default \"30m\" included) -- pass --set nv-sentinel:%s=1800",
-			nodeDrainerCustomDrainTimeoutPath, raw, nodeDrainerCustomDrainTimeoutPath)
-	}
 
 	// A scope cannot be checked against slurmd's placement (AICR labels no
 	// node as a Slurm worker), and a slurmd node outside it would have its
@@ -279,35 +271,6 @@ func customDrainContractViolations(componentName string, values map[string]any, 
 			nodeDrainerUserNamespacesPath, nodeDrainerPodDrainPoliciesPath, nodeDrainerCustomDrainSelectorPath)
 	}
 	return errs
-}
-
-// customDrainTimeoutValid reports whether customDrain.timeout survives
-// node-drainer's config load: the chart quotes it, and the binary parses the
-// string as a positive integer number of seconds. Helm reads a number from
-// values as a float64, so a number is checked as quote prints that float:
-// 1e6 prints "1e+06" and fails like 900.5 does.
-func customDrainTimeoutValid(values map[string]any) bool {
-	raw, ok := component.GetValueByPath(values, nodeDrainerCustomDrainTimeoutPath)
-	if !ok {
-		return false
-	}
-	var text string
-	switch v := raw.(type) {
-	case string:
-		text = v
-	case int:
-		text = fmt.Sprint(float64(v))
-	case int64:
-		text = fmt.Sprint(float64(v))
-	case uint64:
-		text = fmt.Sprint(float64(v))
-	case float64:
-		text = fmt.Sprint(v)
-	default:
-		return false
-	}
-	seconds, err := strconv.Atoi(text)
-	return err == nil && seconds > 0
 }
 
 // listEmpty reports whether v is absent, null or an empty list.

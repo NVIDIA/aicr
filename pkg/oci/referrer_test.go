@@ -32,8 +32,8 @@ import (
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/file"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	apperrors "aicr.run/pkg/errors"
 )
 
 func TestPushReferrerPreCanceledContextReturnsTimeout(t *testing.T) {

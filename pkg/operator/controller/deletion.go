@@ -29,11 +29,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/defaults"
+	"aicr.run/pkg/operator/engine/argocd"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/plan"
 )
 
 // ReasonRemovalFailed reports that the removal rollout of a runtime deleted
@@ -145,8 +145,8 @@ func (r *RolloutReconciler) orphanRuntime(ctx context.Context, rt *v1alpha1.Clus
 }
 
 // removeRuntime is deletionPolicy Delete: a removal rollout of Remove steps
-// over the live objects, in reverse order of the active plan, that requires
-// approval and supersedes any rollout in progress at its next step boundary.
+// over the live objects, in removalOrder, that requires approval and
+// supersedes any rollout in progress at its next step boundary.
 // Only a removal that retired everything removes the finalizer; a failed
 // one stalls the runtime until a retry token makes a new one.
 func (r *RolloutReconciler) removeRuntime(ctx context.Context, rt *v1alpha1.ClusterRuntime) (*runtimeView, error) {
@@ -158,6 +158,7 @@ func (r *RolloutReconciler) removeRuntime(ctx context.Context, rt *v1alpha1.Clus
 		v.engineOK, v.engineReason, v.engineMessage = false, reasonOf(err), errorMessage(err)
 		v.stalled, v.stalledReason, v.stalledMsg = true, v.engineReason, v.engineMessage
 		keepObserved(rt, v)
+		r.pendingApproval(ctx, rt, v)
 		return v, nil
 	}
 	rollouts, err := r.rollouts(ctx, rt)

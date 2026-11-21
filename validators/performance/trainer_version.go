@@ -21,10 +21,10 @@ import (
 	"os"
 	"strings"
 
+	aicrErrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/validators"
 	"github.com/Masterminds/semver/v3"
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/validators"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )

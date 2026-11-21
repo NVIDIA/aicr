@@ -15,8 +15,9 @@
 package config
 
 import (
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/recipe"
 )
 
 // Kind is the kind value for AICRConfig documents.
@@ -111,6 +112,8 @@ type SnapshotExecutionSpec struct {
 
 // RecipeSpec captures the inputs to `aicr recipe`.
 type RecipeSpec struct {
+	Artifacts     *artifact.Options        `yaml:"artifacts,omitempty" json:"artifacts,omitempty"`
+	ExternalOnly  bool                     `yaml:"externalOnly,omitempty" json:"externalOnly,omitempty"`
 	Criteria      *CriteriaSpec            `yaml:"criteria,omitempty" json:"criteria,omitempty"`
 	Configuration *RecipeConfigurationSpec `yaml:"configuration,omitempty" json:"configuration,omitempty"`
 	Input         *RecipeInputSpec         `yaml:"input,omitempty" json:"input,omitempty"`
@@ -200,12 +203,22 @@ type RecipeOutputSpec struct {
 
 // BundleSpec captures the inputs to `aicr bundle`.
 type BundleSpec struct {
-	Input       *BundleInputSpec  `yaml:"input,omitempty" json:"input,omitempty"`
-	Output      *BundleOutputSpec `yaml:"output,omitempty" json:"output,omitempty"`
-	Deployment  *DeploymentSpec   `yaml:"deployment,omitempty" json:"deployment,omitempty"`
-	Scheduling  *SchedulingSpec   `yaml:"scheduling,omitempty" json:"scheduling,omitempty"`
-	Attestation *AttestationSpec  `yaml:"attestation,omitempty" json:"attestation,omitempty"`
-	Registry    *RegistrySpec     `yaml:"registry,omitempty" json:"registry,omitempty"`
+	Input          *BundleInputSpec    `yaml:"input,omitempty" json:"input,omitempty"`
+	Output         *BundleOutputSpec   `yaml:"output,omitempty" json:"output,omitempty"`
+	Deployment     *DeploymentSpec     `yaml:"deployment,omitempty" json:"deployment,omitempty"`
+	Scheduling     *SchedulingSpec     `yaml:"scheduling,omitempty" json:"scheduling,omitempty"`
+	Attestation    *AttestationSpec    `yaml:"attestation,omitempty" json:"attestation,omitempty"`
+	Registry       *RegistrySpec       `yaml:"registry,omitempty" json:"registry,omitempty"`
+	RuntimeMetrics *RuntimeMetricsSpec `yaml:"runtimeMetrics,omitempty" json:"runtimeMetrics,omitempty"`
+}
+
+// RuntimeMetricsSpec names what the runtime Prometheus server (ADR-026) keeps
+// and loads on top of the registry's telemetry.promql declarations. Series are RE2
+// patterns matched against the whole metric name; Namespaces are namespaces
+// whose ServiceMonitors and PodMonitors are loaded.
+type RuntimeMetricsSpec struct {
+	Series     []string `yaml:"series,omitempty" json:"series,omitempty"`
+	Namespaces []string `yaml:"namespaces,omitempty" json:"namespaces,omitempty"`
 }
 
 // BundleInputSpec captures input file paths for the bundle command.

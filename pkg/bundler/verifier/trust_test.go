@@ -81,9 +81,9 @@ func TestValidateIdentityPattern(t *testing.T) {
 		{`https://github.com/attacker/NVIDIA/aicr/.*`, true},           // prefix under wrong owner
 		{`NVIDIA/aicr`, true},                                          // missing scheme and domain
 		{`NVIDIA/aicr/`, true},                                         // missing scheme and domain
-		{`github.com/NVIDIA/aicr/.*`, true},                            // missing scheme ://
-		{`https://evil.com/github.com/NVIDIA/aicr/.*`, true},           // github.com as path, not domain
-		{`https://evil.com/redirect?to=github.com/NVIDIA/aicr/`, true}, // github.com in query string
+		{`github.com/NVIDIA/aicr/.*`, true},                            // missing scheme :// (module-rename:keep)
+		{`https://evil.com/github.com/NVIDIA/aicr/.*`, true},           // github.com as path, not domain (module-rename:keep)
+		{`https://evil.com/redirect?to=github.com/NVIDIA/aicr/`, true}, // github.com in query string (module-rename:keep)
 
 		// Widening bypasses: each BEGINS with the required repository prefix
 		// and compiles cleanly, but is not CONFINED to it. Left unguarded

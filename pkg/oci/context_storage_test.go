@@ -30,9 +30,9 @@ import (
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/registry"
 
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	apperrors "aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 type testReadOnlyStorage struct {

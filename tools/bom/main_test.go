@@ -22,9 +22,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bom"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
+	"aicr.run/pkg/bom"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/helm/helmtest"
 )
 
 // writeTestRegistry writes a minimal registry YAML to path and returns the
@@ -43,8 +43,22 @@ func writeTestRegistry(t *testing.T, content string) string {
 	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
+	// Driver target resolution builds every leaf recipe, which needs a base.
+	if err := os.WriteFile(filepath.Join(dir, "overlays", "base.yaml"), []byte(testBaseOverlay), 0o644); err != nil {
+		t.Fatalf("write base.yaml: %v", err)
+	}
 	return root
 }
+
+const testBaseOverlay = `kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: base
+spec:
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32"
+`
 
 const testRegistryHelm = `apiVersion: v1
 kind: ComponentRegistry
@@ -213,7 +227,7 @@ func TestSurveyComponentHelm(t *testing.T) {
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -259,7 +273,7 @@ func TestSurveyComponentSkipHelm(t *testing.T) {
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, true)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, true, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -287,7 +301,7 @@ func TestSurveyComponentRendererError(t *testing.T) {
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -310,7 +324,7 @@ func TestSurveyComponentKustomize(t *testing.T) {
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -350,7 +364,7 @@ spec:
 		DisplayName: "My Component",
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -397,6 +411,7 @@ spec:
 		component{Name: "my-comp"},
 		&helmtest.MockRenderer{},
 		true,
+		catalogDriverTargets{},
 	)
 	if err == nil {
 		t.Fatal("surveyComponent() error = nil, want invalid structured image descriptor error")
@@ -446,7 +461,7 @@ spec:
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -832,7 +847,7 @@ func TestSurveyComponentSourceOnlyChartFallback(t *testing.T) {
 		},
 	}
 
-	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false)
+	res, surveyErr := surveyComponent(context.Background(), root, c, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -876,7 +891,7 @@ func TestSurveyComponent_DRANodeLabelerImageInventoried(t *testing.T) {
 		DisplayName: "dra-node-labeler",
 		Helm:        helmCfg{DefaultNamespace: "gpu-operator"},
 	}
-	got, surveyErr := surveyComponent(context.Background(), repoRoot, c, nil, true)
+	got, surveyErr := surveyComponent(context.Background(), repoRoot, c, nil, true, catalogDriverTargets{})
 	if surveyErr != nil {
 		t.Fatalf("surveyComponent() error = %v", surveyErr)
 	}
@@ -1066,6 +1081,97 @@ func TestReadWorkloadClosureFailsClosed(t *testing.T) {
 			}
 
 			refs, err := readWorkloadClosure(root, tt.component, pinned)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("readWorkloadClosure error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if len(refs) != len(tt.wantRefs) {
+				t.Fatalf("refs = %v, want %v", refs, tt.wantRefs)
+			}
+			for i := range refs {
+				if refs[i] != tt.wantRefs[i] {
+					t.Errorf("refs[%d] = %q, want %q", i, refs[i], tt.wantRefs[i])
+				}
+			}
+		})
+	}
+}
+
+// TestReadWorkloadClosurePerTargetFiles pins that a per-target closure
+// (workload-images-<target>.yaml) is read beside the primary one and held to
+// the same pin: a stale or empty target must not hide behind a current primary.
+func TestReadWorkloadClosurePerTargetFiles(t *testing.T) {
+	t.Parallel()
+
+	const (
+		pinned  = "v0.12.0"
+		primary = "sourceVersion: v0.12.0\nimages:\n  - image: ghcr.io/x/h100\n    digest: sha256:aaa\n"
+	)
+	tests := []struct {
+		name     string
+		targets  map[string]string
+		wantErr  bool
+		wantRefs []string
+	}{
+		{
+			name:     "no per-target file",
+			wantRefs: []string{"ghcr.io/x/h100@sha256:aaa"},
+		},
+		{
+			name: "per-target images are added after the primary's",
+			targets: map[string]string{
+				"workload-images-gb300.yaml": "sourceVersion: v0.12.0\nimages:\n  - image: ghcr.io/x/gb300\n    digest: sha256:bbb\n",
+			},
+			wantRefs: []string{"ghcr.io/x/h100@sha256:aaa", "ghcr.io/x/gb300@sha256:bbb"},
+		},
+		{
+			name: "per-target files are read in name order",
+			targets: map[string]string{
+				"workload-images-b300.yaml":  "sourceVersion: v0.12.0\nimages:\n  - image: ghcr.io/x/b300\n    digest: sha256:ccc\n",
+				"workload-images-gb300.yaml": "sourceVersion: v0.12.0\nimages:\n  - image: ghcr.io/x/gb300\n    digest: sha256:bbb\n",
+			},
+			wantRefs: []string{
+				"ghcr.io/x/h100@sha256:aaa", "ghcr.io/x/b300@sha256:ccc", "ghcr.io/x/gb300@sha256:bbb",
+			},
+		},
+		{
+			name: "stale per-target file fails even though the primary is current",
+			targets: map[string]string{
+				"workload-images-gb300.yaml": "sourceVersion: v0.8.2\nimages:\n  - image: ghcr.io/x/gb300\n    digest: sha256:bbb\n",
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty per-target file fails",
+			targets: map[string]string{
+				"workload-images-gb300.yaml": "sourceVersion: v0.12.0\nimages: []\n",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			dir := filepath.Join(root, "recipes", "components", "nvcre")
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+			files := map[string]string{"workload-images.yaml": primary}
+			for name, body := range tt.targets {
+				files[name] = body
+			}
+			for name, body := range files {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+					t.Fatalf("WriteFile %s: %v", name, err)
+				}
+			}
+
+			refs, err := readWorkloadClosure(root, "nvcre", pinned)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("readWorkloadClosure error = %v, wantErr %v", err, tt.wantErr)
 			}

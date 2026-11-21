@@ -10,7 +10,8 @@ operator:
 namespaces:
   # cert-manager is the one release rolled out; the rest are the kind
   # recipe's, which the first resolution renders before overrides disable
-  # them.
+  # them. tools/operator-qualify adds every other namespace the component
+  # registry names, for a newer AICR's recipe.
   components:
     - name: cert-manager
       podSecurity: restricted
@@ -34,6 +35,8 @@ namespaces:
     - name: node-feature-discovery
       podSecurity: privileged
     - name: monitoring
+      podSecurity: privileged
+    - name: nktp
       podSecurity: privileged
 discovery:
   # AICR's defaults are sized for GPU nodes, not a CI runner.

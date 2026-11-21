@@ -18,10 +18,10 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/drainscope"
-	"github.com/NVIDIA/aicr/pkg/component"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/drainscope"
+	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
 )
 
 // ApplyNVSentinelDrainScope runs drainscope.Apply on the nvsentinel values

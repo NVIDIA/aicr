@@ -26,8 +26,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/aicrjob"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
 )
 
 // validationNamespace is the chart's default validation namespace.
@@ -58,21 +58,7 @@ func deploymentValidation(ctx context.Context, t *testing.T, active string) {
 		// Earlier rollouts to the active plan succeeded; the one back to it
 		// waits for an approval. A scenario that failed before its rollout
 		// wrote the release returns to the active plan with none.
-		var back *v1alpha1.RuntimeRollout
-		waitFor(t, rolloutTimeout, "a rollout back to "+active+" awaiting approval, or Ready on it", func() bool {
-			for _, r := range rolloutsTo(ctx, t, active) {
-				if r.Status.Phase == v1alpha1.PhaseAwaitingApproval {
-					back = &r
-					return true
-				}
-			}
-			rt := getRuntime(ctx, t)
-			return cond(rt, v1alpha1.ConditionReady).Status == metav1.ConditionTrue && rt.Status.ActivePlanDigest == active
-		})
-		if back != nil {
-			approve(ctx, t, back.Name)
-		}
-		waitReadyOn(ctx, t, active)
+		rollOutTo(ctx, t, active)
 	}
 	// Later scenarios start from the active plan, whatever happens here.
 	defer func() {
@@ -123,11 +109,7 @@ func deploymentValidation(ctx context.Context, t *testing.T, active string) {
 	if !ok {
 		t.Fatalf("the operator ran no validation Job named %q in %s", v.Job, validationNamespace)
 	}
-	// tools/operator-qualify installs AICR_E2E_IMAGE over the candidate's.
-	image := next.AICR.Image
-	if override := os.Getenv("AICR_E2E_IMAGE"); override != "" {
-		image = override
-	}
+	image := installedAICR(&next)
 	pod := job.Spec.Template.Spec
 	if pod.ServiceAccountName != validationNamespace || len(pod.Containers) == 0 || pod.Containers[0].Image != image {
 		t.Fatalf("validation Job %s ran as %s with %v; want the launcher running the installed AICR %s",

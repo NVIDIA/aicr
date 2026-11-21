@@ -23,13 +23,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/allocpolicy"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
-	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator"
+	"aicr.run/pkg/allocpolicy"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
+	"aicr.run/pkg/validator"
 )
 
 // BuildOptions controls bundle construction. The zero value is not usable.

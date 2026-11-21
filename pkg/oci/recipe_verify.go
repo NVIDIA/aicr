@@ -17,8 +17,8 @@ package oci
 import (
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	apperrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	apperrors "aicr.run/pkg/errors"
 )
 
 type recipeMaterializationAuthorization uint8

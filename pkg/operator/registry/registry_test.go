@@ -31,6 +31,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -39,15 +40,15 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote/errcode"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/registry/registrytest"
+	"aicr.run/pkg/operator/defaults"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/registry/registrytest"
 )
 
 // testRegistry returns a client of, and a repository in, an in-memory
@@ -271,6 +272,99 @@ func pushRawManifest(t *testing.T, c *Client, r Repository, tag string, manifest
 		t.Fatal(err)
 	}
 	return desc.Digest.String()
+}
+
+// IndexManifests lists the manifests an OCI image index or a Docker manifest
+// list names, and none for a single image manifest.
+func TestIndexManifests(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, repo := testRegistry(t)
+	config := blob{ocispec.DescriptorEmptyJSON, ocispec.DescriptorEmptyJSON.Data}
+	archs := []string{"amd64", "arm64"}
+	platforms := make([]ocispec.Descriptor, 0, len(archs))
+	want := make([]string, 0, len(archs))
+	for _, arch := range archs {
+		m := imageManifest(t, ocispec.Manifest{Config: ocispec.DescriptorEmptyJSON, Layers: []ocispec.Descriptor{},
+			Annotations: map[string]string{"arch": arch}})
+		d := pushRawManifest(t, c, repo, "", m, config)
+		platforms = append(platforms, ocispec.Descriptor{MediaType: ocispec.MediaTypeImageManifest, Digest: digest.Digest(d),
+			Size: int64(len(m)), Platform: &ocispec.Platform{OS: "linux", Architecture: arch}})
+		want = append(want, d)
+	}
+	remoteRepo, err := c.repository(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pushIndex := func(mediaType string) string {
+		index, marshalErr := json.Marshal(ocispec.Index{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: mediaType, Manifests: platforms})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		desc := ocispec.Descriptor{MediaType: mediaType, Digest: digest.FromBytes(index), Size: int64(len(index))}
+		if pushErr := remoteRepo.Push(ctx, desc, bytes.NewReader(index)); pushErr != nil {
+			t.Fatal(pushErr)
+		}
+		return desc.Digest.String()
+	}
+	tests := []struct {
+		name     string
+		dgst     string
+		want     []string
+		wantCode operrors.ErrorCode
+	}{
+		{"OCI image index", pushIndex(ocispec.MediaTypeImageIndex), want, ""},
+		{"Docker manifest list", pushIndex(dockerManifestListMediaType), want, ""},
+		{"single image manifest", want[0], nil, ""},
+		{"tag", "v1.0.0", nil, operrors.ErrCodeInvalidRequest},
+		{"missing digest", digest.FromString("missing").String(), nil, operrors.ErrCodeNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := c.IndexManifests(ctx, repo, tt.dgst)
+			if code := operrors.CodeOf(err); code != tt.wantCode {
+				t.Fatalf("IndexManifests() error = %v, want code %q", err, tt.wantCode)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("IndexManifests() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// An image manifest's manifests field is not an index. Distribution refuses
+// to store one, so this registry answers with raw bytes.
+func TestIndexManifestsIgnoresImageManifestEntries(t *testing.T) {
+	t.Parallel()
+	raw, err := json.Marshal(struct {
+		ocispec.Manifest
+		Manifests []ocispec.Descriptor `json:"manifests"`
+	}{
+		ocispec.Manifest{Versioned: specs.Versioned{SchemaVersion: 2}, MediaType: ocispec.MediaTypeImageManifest,
+			Config: ocispec.DescriptorEmptyJSON, Layers: []ocispec.Descriptor{}},
+		[]ocispec.Descriptor{{MediaType: ocispec.MediaTypeImageManifest, Digest: digest.FromString("other"), Size: 2}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/manifests/") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", ocispec.MediaTypeImageManifest)
+		w.Header().Set("Docker-Content-Digest", digest.FromBytes(raw).String())
+		w.Header().Set("Content-Length", fmt.Sprint(len(raw)))
+		_, _ = w.Write(raw)
+	}))
+	t.Cleanup(srv.Close)
+	host := strings.TrimPrefix(srv.URL, "http://")
+	c := New(Options{PlainHTTPHosts: []string{host}})
+	got, err := c.IndexManifests(context.Background(), Repository{Host: host, Path: "aicr/validator"}, digest.FromBytes(raw).String())
+	if err != nil || len(got) != 0 {
+		t.Errorf("IndexManifests() = %v, %v; want none", got, err)
+	}
 }
 
 func TestPullBundle(t *testing.T) {

@@ -19,6 +19,7 @@ This package consolidates common functionality used by the snapshot agent
 (pkg/k8s/agent) and validator Job orchestrator (pkg/validator/job):
 
   - Job lifecycle: WaitForJobCompletion
+  - Job pod termination: WaitForJobPodsTermination
   - Pod phase: WaitForPodSucceeded, WaitForPodReady
   - Pod logs: StreamLogs, GetPodLogs
   - ConfigMap URIs: ParseConfigMapURI

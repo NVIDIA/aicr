@@ -27,8 +27,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/defaults"
+	aicrerrors "aicr.run/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -84,7 +84,8 @@ func readExternalFile(baseDir, relPath string, maxBytes int64, allowSymlinks boo
 
 // openExternalFile opens relPath under baseDir using the path-confinement
 // strategy appropriate to the provider's symlink policy. See readExternalFile
-// for the rationale.
+// for the rationale. It returns an ErrCodeInvalidRequest error when relPath
+// is not a regular file.
 func openExternalFile(baseDir, relPath string, allowSymlinks bool) (*os.File, error) {
 	if !allowSymlinks {
 		root, err := os.OpenRoot(baseDir)
@@ -93,6 +94,13 @@ func openExternalFile(baseDir, relPath string, allowSymlinks bool) (*os.File, er
 				fmt.Sprintf("failed to open base directory %q", baseDir), err)
 		}
 		defer func() { _ = root.Close() }()
+		info, err := root.Stat(relPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireRegularExternalFile(relPath, info); err != nil {
+			return nil, err
+		}
 		return root.Open(relPath)
 	}
 	// AllowSymlinks=true: caller opted into symlinks at walk time, but the
@@ -119,7 +127,25 @@ func openExternalFile(baseDir, relPath string, allowSymlinks bool) (*os.File, er
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("external data path %q resolves outside base directory", relPath))
 	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireRegularExternalFile(relPath, info); err != nil {
+		return nil, err
+	}
 	return os.Open(resolved) //nolint:gosec // resolved is verified to be within canonicalBase above
+}
+
+// requireRegularExternalFile returns an ErrCodeInvalidRequest error unless
+// info, the stat of relPath, describes a regular file. Opening a FIFO blocks
+// until a writer appears, which no context can interrupt.
+func requireRegularExternalFile(relPath string, info os.FileInfo) error {
+	if info.Mode().IsRegular() {
+		return nil
+	}
+	return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+		fmt.Sprintf("external data path %q is not a regular file", relPath))
 }
 
 // DataProvider abstracts access to recipe data files.
@@ -309,6 +335,13 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 		"max_file_size", config.MaxFileSize,
 		"allow_symlinks", config.AllowSymlinks)
 
+	if config.ExternalOnly && config.ExternalDir == "" {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "external-only catalog requires an external data directory")
+	}
+	if config.ExternalOnly {
+		embedded = nil
+	}
+
 	if config.MaxFileSize == 0 {
 		// Single source of truth: same constant readExternalFile uses
 		// when its caller passes a non-positive maxBytes, so direct
@@ -431,6 +464,24 @@ func (p *LayeredDataProvider) ExternalDir() string {
 	return p.externalDir
 }
 
+// ReadExternalFile returns the unmerged content of relPath, one of
+// ExternalFiles, from the external data directory. It reads under the same
+// size limit and symlink policy as ReadFile.
+func (p *LayeredDataProvider) ReadExternalFile(ctx context.Context, relPath string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, aicrerrors.WrapCtxErr(err, aicrerrors.ErrCodeTimeout, fmt.Sprintf("context ended before reading %q", relPath))
+	}
+	lookupPath := filepath.ToSlash(relPath)
+	if !p.externalFiles[lookupPath] {
+		return nil, aicrerrors.New(aicrerrors.ErrCodeNotFound, fmt.Sprintf("external data file %q not found", relPath))
+	}
+	data, err := readExternalFile(p.externalDir, lookupPath, p.maxFileSize, p.allowSymlinks)
+	if err != nil {
+		return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read external file %s", relPath))
+	}
+	return data, nil
+}
+
 // ReadFile reads a file, checking external directory first.
 // For registryFileName, returns merged content.
 // For an overlay that carries only a profile declaration, returns the embedded overlay
@@ -446,7 +497,7 @@ func (p *LayeredDataProvider) ReadFile(ctx context.Context, path string) ([]byte
 	if p.externalOnly {
 		data, err := readExternalFile(p.externalDir, lookupPath, p.maxFileSize, p.allowSymlinks)
 		if err != nil {
-			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInvalidRequest, "failed to read external catalog file")
+			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to read external catalog file %q", lookupPath))
 		}
 		return data, nil
 	}
@@ -688,7 +739,7 @@ func (p *LayeredDataProvider) getMergedRegistry(ctx context.Context) ([]byte, er
 // embedded items with the same name. New items from external are appended.
 // Embedded order is preserved.
 func mergeByName[T any](embedded, external []T, getName func(T) string) []T {
-	result := make([]T, 0, len(embedded)+len(external))
+	result := make([]T, 0, len(embedded))
 
 	extByName := make(map[string]T, len(external))
 	for _, item := range external {

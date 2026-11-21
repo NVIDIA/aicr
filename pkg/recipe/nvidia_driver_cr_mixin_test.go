@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/helm/helmtest"
-	"github.com/NVIDIA/aicr/pkg/manifest"
+	"aicr.run/pkg/helm/helmtest"
+	"aicr.run/pkg/manifest"
 	"gopkg.in/yaml.v3"
 )
 

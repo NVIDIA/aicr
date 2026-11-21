@@ -20,9 +20,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/recipe"
 )
 
 // criteriaFromCoordinate inverts a coordinate back to its five-dimension

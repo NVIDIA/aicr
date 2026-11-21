@@ -20,10 +20,11 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/validator/catalog"
-	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator/catalog"
+	"aicr.run/pkg/validator/ctrf"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 // SkipChecks narrows a run to the checks the caller can satisfy, one level
@@ -69,6 +70,60 @@ const skipCheckReason = "skipped: named in skipChecks, so the caller declared th
 // caller-declared skip from a check that found its own capability
 // inapplicable.
 const SkipCheckReasonCode = "named-in-skip-checks"
+
+// creNCCLCheckNames are the CRE-driven NCCL checks that stand in for a TrainJob
+// NCCL variant. The validator for the TrainJob variant treats a declared,
+// qualified CRE constraint as proof the CRE check measures that bandwidth.
+var creNCCLCheckNames = []string{
+	v1.CRENCCLAllReduceBWCheckName,
+	v1.CRENCCLAllReduceBWNetCheckName,
+}
+
+// withoutSkippedCREConstraints returns the validation input the Jobs read, with
+// the performance constraint of every skipped CRE NCCL check removed.
+//
+// A TrainJob NCCL check skips itself as superseded when the input still
+// declares the CRE constraint. Skipping the CRE check withholds its Job but
+// leaves that constraint declared, so without this both checks would skip and a
+// performance phase could pass having measured nothing. With the constraint
+// gone the TrainJob check runs, which is what a lane that deploys a subset of
+// the recipe (for example without nvcre) needs.
+//
+// Only the copy written to the data ConfigMap changes; the caller's input, the
+// recipe, and the CTRF report keep the declared constraint. It returns the
+// input itself when there is nothing to remove.
+func (v *Validator) withoutSkippedCREConstraints(in *v1.ValidationInput) *v1.ValidationInput {
+	if in == nil || in.Config.Performance == nil || len(in.Config.Performance.Constraints) == 0 {
+		return in
+	}
+	dropped := make(map[string]bool, len(creNCCLCheckNames))
+	for _, name := range creNCCLCheckNames {
+		if v.skipsCheck(name) {
+			dropped[name] = true
+		}
+	}
+	if len(dropped) == 0 {
+		return in
+	}
+
+	kept := make([]recipe.Constraint, 0, len(in.Config.Performance.Constraints))
+	for _, c := range in.Config.Performance.Constraints {
+		if dropped[c.Name] {
+			slog.Info("withholding constraint of skipped CRE check from validators", "name", c.Name)
+			continue
+		}
+		kept = append(kept, c)
+	}
+	if len(kept) == len(in.Config.Performance.Constraints) {
+		return in
+	}
+
+	out := *in
+	phase := *in.Config.Performance
+	phase.Constraints = kept
+	out.Config.Performance = &phase
+	return &out
+}
 
 // preflightSkipChecks fails closed on a skip list that would not do what its
 // author meant, before the cluster is prepared or any Job is deployed. It

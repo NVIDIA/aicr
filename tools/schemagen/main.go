@@ -32,9 +32,10 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/schema"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	releaseartifact "aicr.run/pkg/artifact"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/schema"
+	"aicr.run/pkg/snapshotter"
 )
 
 // SchemaBaseURI is the canonical location the generated documents claim.
@@ -64,6 +65,8 @@ type Artifact struct {
 // contract nothing emits.
 func Artifacts() []Artifact {
 	return []Artifact{
+		{Kind: releaseartifact.InventoryKind, Type: reflect.TypeOf(releaseartifact.Inventory{}), Description: "Neutral OCI release identities consumed by artifact bindings."},
+		{Kind: releaseartifact.BindingsKind, Type: reflect.TypeOf(releaseartifact.Bindings{}), Description: "Catalog dispositions mapping release artifact names to chart and image targets."},
 		{
 			Kind: "Snapshot",
 			Type: reflect.TypeOf(snapshotter.Snapshot{}),
@@ -145,6 +148,9 @@ func Render(artifact Artifact) ([]byte, error) {
 		return nil, fmt.Errorf("generate %s: %w", artifact.Kind, err)
 	}
 
+	if artifact.Kind == releaseartifact.InventoryKind || artifact.Kind == releaseartifact.BindingsKind {
+		return renderArtifactContract(generated, artifact.Kind)
+	}
 	encoded, err := json.MarshalIndent(generated, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("encode %s: %w", artifact.Kind, err)

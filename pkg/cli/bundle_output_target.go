@@ -26,8 +26,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/bundler/checksum"
+	"aicr.run/pkg/errors"
 )
 
 const bundleGenerationCopyBufferSize = 32 * 1024
@@ -897,6 +897,8 @@ func (t *bundleOutputTarget) regularFileInfos(ctx context.Context) ([]fs.FileInf
 	return infos.regularFiles, nil
 }
 
+// close releases the target's directory handles. It is safe to call on a nil
+// target and more than once, and every call returns the first call's result.
 func (t *bundleOutputTarget) close() error {
 	if t == nil {
 		return nil

@@ -17,11 +17,12 @@ package header_test
 import (
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
-	"github.com/NVIDIA/aicr/pkg/config"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"aicr.run/pkg/artifact"
+	"aicr.run/pkg/bundler/deployer/localformat"
+	"aicr.run/pkg/config"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/snapshotter"
 )
 
 // adr022Row is one row of the ADR-022 §2 per-kind maturity map, bound to the
@@ -65,6 +66,8 @@ type adr022Row struct {
 // when its loader lands.
 func adr022Map() []adr022Row {
 	return []adr022Row{
+		{kind: artifact.InventoryKind, emitted: artifact.APIVersion, target: header.GroupVersionV1Beta1, accepts: func(v string) bool { return header.IsSupportedArtifactInventory(artifact.InventoryKind, v) }},
+		{kind: artifact.BindingsKind, emitted: artifact.APIVersion, target: header.GroupVersionV1Beta1, accepts: func(v string) bool { return header.IsSupportedArtifactBindings(artifact.BindingsKind, v) }},
 		{
 			kind:    "Snapshot",
 			emitted: snapshotter.FullAPIVersion,

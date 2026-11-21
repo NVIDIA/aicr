@@ -17,7 +17,7 @@ package registry
 import (
 	"context"
 
-	"github.com/NVIDIA/aicr/pkg/operator/defaults"
+	"aicr.run/pkg/operator/defaults"
 )
 
 // MirrorOCIChart copies a chart from an upstream OCI registry into
@@ -27,7 +27,8 @@ import (
 // verified against its descriptor digest and recorded as the archive digest.
 // A runtime-registry tag that already holds another digest for the same
 // version is a conflict: the upstream content changed after it was mirrored.
-func (c *Client) MirrorOCIChart(ctx context.Context, up UpstreamChart, target Repository) (*MirroredChart, error) {
+func (c *Client) MirrorOCIChart(ctx context.Context, up UpstreamChart, target Repository) (_ *MirroredChart, err error) {
+	defer observe(opMirrorOCIChart, &err)
 	src, err := ParseRepository(up.Chart)
 	if err != nil {
 		return nil, invalid("upstream chart %q is not an OCI repository", up.Chart)

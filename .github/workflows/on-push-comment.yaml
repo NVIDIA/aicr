@@ -53,7 +53,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -165,7 +165,7 @@ jobs:
 
           # Generate delta report
           if go-coverage-report \
-            -root=github.com/NVIDIA/aicr \
+            -root=aicr.run \
             /tmp/baseline-coverage/coverage.out \
             /tmp/pr-coverage/coverage.out \
             .github/outputs/all_modified_files.json > delta-report.md 2> delta-error.log; then

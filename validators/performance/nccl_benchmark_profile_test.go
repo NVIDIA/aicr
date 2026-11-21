@@ -20,12 +20,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
+	"aicr.run/pkg/errors"
 
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	validatorv1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -194,6 +194,8 @@ func TestKnownBenchmarkProfiles(t *testing.T) {
 		"gb200/oke",
 		"gb300/eks",
 		"gb300/generic",
+		"gb300/nvke",
+		"gb300/oke",
 		"h100/aks",
 		"h100/eks",
 		"h100/gke",

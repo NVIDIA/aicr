@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# NVIDIA NIM Operator Helm values (v3.1.0)
+# NVIDIA NIM Operator Helm values (v3.1.4)
 # Manages NIM microservice lifecycle: deployment, scaling, health monitoring,
 # and model caching via NIMService, NIMPipeline, and NIMCache CRDs.
 #

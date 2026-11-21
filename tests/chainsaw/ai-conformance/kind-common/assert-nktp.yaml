@@ -1,0 +1,65 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Assert the NKTP telemetry pipeline on a kind lane: the operator, one
+# gateway, the node collector, the evaluation backend, and the resource
+# metrics API that kind.yaml turns on. recipes/checks/nktp/health-check.yaml
+# covers every workload.
+
+# OpenTelemetry Operator, which reconciles every collector
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nktp-operator
+  namespace: nktp
+status:
+  (conditions[?type == 'Available']):
+    - status: "True"
+---
+# Metrics gateway, one replica on kind
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nktp-gateway-metrics-collector
+  namespace: nktp
+status:
+  (readyReplicas > `0`): true
+---
+# Node collector on every node
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nktp-daemonset-collector
+  namespace: nktp
+status:
+  (numberReady == desiredNumberScheduled && desiredNumberScheduled > `0`): true
+---
+# otel-lgtm, the evaluation backend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lgtm
+  namespace: nktp
+status:
+  (conditions[?type == 'Available']):
+    - status: "True"
+---
+# Served by NKTP's metrics-server, which kind.yaml enables
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.metrics.k8s.io
+status:
+  (conditions[?type == 'Available']):
+    - status: "True"

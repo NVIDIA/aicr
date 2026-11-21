@@ -26,10 +26,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/NVIDIA/aicr/api/operator/v1alpha1"
-	"github.com/NVIDIA/aicr/pkg/operator/engine/argocd"
-	operrors "github.com/NVIDIA/aicr/pkg/operator/errors"
-	"github.com/NVIDIA/aicr/pkg/operator/plan"
+	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/engine/argocd"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/plan"
 )
 
 // twoReleases is a target plan of two releases, so a rollout has a step
@@ -97,10 +97,18 @@ func TestRolloutProceedsOnApproval(t *testing.T) {
 	if _, ok := recordedInventory(before); !ok {
 		t.Fatalf("the starting inventory %v does not digest to %s", before.Spec.StartingInventory, before.Spec.StartingInventoryDigest)
 	}
+	waited := clk.now.Sub(before.CreationTimestamp.Time).Seconds()
+	if got := runtimeState.approvalWait(clk.now); got != waited || stalledGauge(ReasonAwaitingApproval) != 1 || runtimeState.resolved() == 0 {
+		t.Fatalf("awaiting approval: wait %g (want %g), stalled %g, resolved at %g",
+			got, waited, stalledGauge(ReasonAwaitingApproval), runtimeState.resolved())
+	}
 
 	approve(t, ctx, before.Name, clk.now.Add(time.Hour))
 	for range 4 {
 		reconcileRollout(t, ctx, r)
+	}
+	if got := runtimeState.approvalWait(clk.now); got != 0 || stalledGauge(ReasonAwaitingApproval) != 0 {
+		t.Fatalf("approved: wait %g, stalled %g", got, stalledGauge(ReasonAwaitingApproval))
 	}
 	after := onlyRollout(t, ctx, target)
 	if after.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseSucceeded) || after.Status.Approval != v1alpha1.ApprovalApproved {
@@ -109,6 +117,40 @@ func TestRolloutProceedsOnApproval(t *testing.T) {
 	unchanged := after.Spec.ToPlanDigest == before.Spec.ToPlanDigest && after.Spec.StartingInventoryDigest == before.Spec.StartingInventoryDigest
 	if !unchanged || getRuntime(t, ctx).Status.ActivePlanDigest != target {
 		t.Fatalf("approval changed a digest: %+v -> %+v", before.Spec, after.Spec)
+	}
+}
+
+// A rollout waiting for approval keeps reporting its wait while the engine
+// is unavailable, which stops the reconcile before the rollout advances.
+func TestApprovalWaitSurvivesAnEngineOutage(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	target := twoReleases(t, ctx, rt)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	r, clk := newRollout(t, engine, false)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r)
+	reconcileRollout(t, ctx, r)
+	ro := onlyRollout(t, ctx, target)
+	if ro.Status.Phase != v1alpha1.PhaseAwaitingApproval {
+		t.Fatalf("before the outage: %+v", ro.Status)
+	}
+
+	engine.capabilities = operrors.New(operrors.ErrCodeUnavailable, "read Argo CD project aicr: not found").WithReason(argocd.ReasonProjectMissing)
+	clk.now = clk.now.Add(time.Hour)
+	reconcileRollout(t, ctx, r)
+	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled); c.Reason != argocd.ReasonProjectMissing {
+		t.Fatalf("Stalled = %+v, want %s", c, argocd.ReasonProjectMissing)
+	}
+	if got, want := runtimeState.approvalWait(clk.now), clk.now.Sub(ro.CreationTimestamp.Time).Seconds(); got != want {
+		t.Fatalf("approval wait during the outage: %g, want %g", got, want)
+	}
+
+	approve(t, ctx, ro.Name, clk.now.Add(time.Hour))
+	reconcileRollout(t, ctx, r)
+	if got := runtimeState.approvalWait(clk.now); got != 0 {
+		t.Fatalf("approved during the outage: wait %g, want 0", got)
 	}
 }
 
@@ -522,6 +564,20 @@ func TestRolloutStallsOnAnEditedRelease(t *testing.T) {
 	reconcileRollout(t, ctx, r)
 	if !slices.Contains(engine.order, "Ensure nfd") {
 		t.Fatalf("the edit was undone, but the next step did not start: %v", engine.order)
+	}
+}
+
+// What an object follows is never part of the recorded inventory: a rollout
+// created from an inventory that carries it still reads its record back.
+func TestRecordedInventoryIgnoresWhatObjectsFollow(t *testing.T) {
+	t.Parallel()
+	start := []argocd.InventoryItem{{ReleaseID: "gpu-operator", Name: "gpu-operator", UID: "u-g", Follows: []string{"nfd"}}}
+	ro := &v1alpha1.RuntimeRollout{Spec: v1alpha1.RuntimeRolloutSpec{
+		StartingInventory: startingInventory(start), StartingInventoryDigest: inventoryDigest(t, start),
+	}}
+	start[0].Follows = nil
+	if _, ok := recordedInventory(ro); !ok || ro.Spec.StartingInventoryDigest != inventoryDigest(t, start) {
+		t.Errorf("the recorded inventory does not read back, or its digest %s covers what objects follow", ro.Spec.StartingInventoryDigest)
 	}
 }
 

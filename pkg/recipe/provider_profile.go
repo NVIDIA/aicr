@@ -22,8 +22,8 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
 	"gopkg.in/yaml.v3"
 )
 
@@ -99,7 +99,7 @@ func patchOverlayProfile(path string, embedded, external []byte) (merged []byte,
 				"and a patch may only add values", path, added.Name, redeclared))
 	}
 
-	values := make(map[string]ProfileValue, len(declared.Values)+len(added.Values))
+	values := make(map[string]ProfileValue, len(declared.Values))
 	maps.Copy(values, declared.Values)
 	maps.Copy(values, added.Values)
 	declared.Values = values

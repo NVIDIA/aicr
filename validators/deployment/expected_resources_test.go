@@ -27,15 +27,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/bundler"
-	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
-	"github.com/NVIDIA/aicr/pkg/chainsaw"
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
-	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/helper"
+	"aicr.run/pkg/bundler"
+	bundlercfg "aicr.run/pkg/bundler/config"
+	"aicr.run/pkg/chainsaw"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
+	v1 "aicr.run/pkg/validator/v1"
+	"aicr.run/validators"
+	"aicr.run/validators/helper"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -292,7 +292,9 @@ func TestCheckExpectedResources_FailsWhenNodewrightCRMissing(t *testing.T) {
 		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}},
 	)
 
+	start := time.Now()
 	err := checkExpectedResources(ctx)
+	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected error when Nodewright CR is missing but CRD is registered")
 		return
@@ -300,6 +302,15 @@ func TestCheckExpectedResources_FailsWhenNodewrightCRMissing(t *testing.T) {
 	if !strings.Contains(err.Error(), "Nodewright tuning: not found (recipe declared it but the cluster has no such CR)") {
 		t.Fatalf("expected recipe-scoped Nodewright not-found failure, got: %v", err)
 		return
+	}
+	// #3703: a declared CR the cluster does not have is terminal, so the
+	// check fails at once with NotFound instead of polling the readiness
+	// budget to a timeout and leaving the chainsaw asserts unevaluated.
+	if !strings.Contains(err.Error(), "manifests were not applied to this cluster") {
+		t.Errorf("error = %v, want the absent-CR diagnosis", err)
+	}
+	if elapsed >= gpuReadinessTimeout {
+		t.Errorf("checkExpectedResources took %v, want a fast failure well under the %v readiness budget", elapsed, gpuReadinessTimeout)
 	}
 }
 

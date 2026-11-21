@@ -16,13 +16,17 @@ package main
 
 import (
 	stderrors "errors"
+	"os"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
-	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/validators"
+	aicrErrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/recipe"
+	"aicr.run/validators"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 )
 
 // creEKSH100 is the only combination qualified today; see creQualifiedEntries.
@@ -96,12 +100,204 @@ func TestCREQualifiedEntries(t *testing.T) {
 	}
 }
 
+// creEKSGB300 is the second combination qualified for nccl-cre-all-reduce-bw.
+var creEKSGB300 = creCombination{
+	Service:     recipe.CriteriaServiceEKS,
+	Accelerator: recipe.CriteriaAcceleratorGB300,
+}
+
+// nvcreClosureFor names the committed NVCRE workload closure each qualified
+// combination pins its image from, with the platform and gpuArchitecture
+// selectors the closure was derived for. A combination absent here has no
+// closure to pin from.
+var nvcreClosureFor = map[creCombination]struct {
+	path, platform, architecture string
+}{
+	creEKSH100:  {"../../recipes/components/nvcre/workload-images.yaml", "aws", "h100"},
+	creEKSGB300: {"../../recipes/components/nvcre/workload-images-gb300.yaml", "aws", "gb300"},
+}
+
+// A qualified entry pins its workload image to the digest the closure records
+// for the pinned CRE version. A chart bump re-derives the closures, so a pin
+// left behind fails here instead of running bytes the closure no longer
+// describes.
+func TestCREQualifiedImagesMatchWorkloadClosure(t *testing.T) {
+	type closureFile struct {
+		Platform        string `json:"platform"`
+		GPUArchitecture string `json:"gpuArchitecture"`
+		Images          []struct {
+			Image  string `json:"image"`
+			Digest string `json:"digest"`
+		} `json:"images"`
+	}
+	pinPattern := regexp.MustCompile(`^([^@\s]+:[^@\s]+)@(sha256:[0-9a-f]{64})$`)
+
+	for checkName, combinations := range creQualifiedEntries {
+		for combination, entry := range combinations {
+			t.Run(checkName+"/"+string(combination.Service)+"-"+string(combination.Accelerator), func(t *testing.T) {
+				source, ok := nvcreClosureFor[combination]
+				if !ok {
+					t.Fatalf("%s is qualified on %s x %s, which no committed closure covers; "+
+						"derive one for its platform and pin its image from it",
+						checkName, combination.Service, combination.Accelerator)
+				}
+				data, err := os.ReadFile(source.path)
+				if err != nil {
+					t.Fatalf("read %s: %v", source.path, err)
+				}
+				var closure closureFile
+				if err := yaml.Unmarshal(data, &closure); err != nil {
+					t.Fatalf("parse %s: %v", source.path, err)
+				}
+				if closure.Platform != source.platform || closure.GPUArchitecture != source.architecture {
+					t.Fatalf("%s resolves platform %q, gpuArchitecture %q; %s x %s needs %s, %s",
+						source.path, closure.Platform, closure.GPUArchitecture,
+						combination.Service, combination.Accelerator, source.platform, source.architecture)
+				}
+				recorded := make(map[string]string, len(closure.Images))
+				for _, img := range closure.Images {
+					recorded[img.Image] = img.Digest
+				}
+				match := pinPattern.FindStringSubmatch(entry.Image)
+				if match == nil {
+					t.Fatalf("Image = %q, want <repository>:<tag>@sha256:<64 hex>", entry.Image)
+				}
+				digest, found := recorded[match[1]]
+				if !found {
+					t.Fatalf("%s is not in %s; re-derive the pin from the closure", match[1], source.path)
+				}
+				if digest != match[2] {
+					t.Errorf("%s pins %s, the closure records %s", match[1], match[2], digest)
+				}
+			})
+		}
+	}
+}
+
+// Fabric and Supersedes are what separate the two NCCL combinations; a dropped
+// one would run the wrong transport or skip the wrong TrainJob check silently.
+func TestCRENCCLQualificationSelectsFabricAndSupersededVariant(t *testing.T) {
+	tests := []struct {
+		combination    creCombination
+		wantFabric     string
+		wantSupersedes ncclVariant
+	}{
+		{creEKSH100, "", variantDefault},
+		{creEKSGB300, "efa", variantNVLS},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.combination.Accelerator), func(t *testing.T) {
+			entry, ok := lookupCREQualification(checkNameCRENCCLAllReduceBW,
+				tt.combination.Service, tt.combination.Accelerator)
+			if !ok {
+				t.Fatalf("%s x %s is unqualified", tt.combination.Service, tt.combination.Accelerator)
+			}
+			if entry.Fabric != tt.wantFabric {
+				t.Errorf("Fabric = %q, want %q", entry.Fabric, tt.wantFabric)
+			}
+			if entry.Supersedes != tt.wantSupersedes {
+				t.Errorf("Supersedes = %q, want %q", entry.Supersedes, tt.wantSupersedes)
+			}
+		})
+	}
+}
+
+// The net check is the default check with NVLS and MNNVL off. A dropped
+// variable would measure the NVLS path under a constraint calibrated for EFA,
+// and pass it.
+func TestCRENCCLNetQualificationDisablesNVLS(t *testing.T) {
+	entry, ok := lookupCREQualification(checkNameCRENCCLAllReduceBWNET,
+		creEKSGB300.Service, creEKSGB300.Accelerator)
+	if !ok {
+		t.Fatalf("%s is unqualified on eks x gb300", checkNameCRENCCLAllReduceBWNET)
+	}
+	if entry.Supersedes != variantNET {
+		t.Errorf("Supersedes = %q, want %q", entry.Supersedes, variantNET)
+	}
+	if entry.Fabric != creFabricEFA {
+		t.Errorf("Fabric = %q, want %q", entry.Fabric, creFabricEFA)
+	}
+	if entry.MaxBytes != creNetMaxBytes {
+		t.Errorf("MaxBytes = %q, want %q", entry.MaxBytes, creNetMaxBytes)
+	}
+	dflt, _ := lookupCREQualification(checkNameCRENCCLAllReduceBW, creEKSGB300.Service, creEKSGB300.Accelerator)
+	if entry.Image != dflt.Image {
+		t.Errorf("net check image %q differs from the default check's %q", entry.Image, dflt.Image)
+	}
+	if _, ok := lookupCREQualification(checkNameCRENCCLAllReduceBWNET, creEKSH100.Service, creEKSH100.Accelerator); ok {
+		t.Errorf("%s must stay unqualified on eks x h100", checkNameCRENCCLAllReduceBWNET)
+	}
+
+	obj := mustBuildCRECertification(t, "ns", "name", twoNodeGPUConfig(), entry)
+	env, found, err := unstructured.NestedSlice(obj.Object, "spec", "env")
+	if err != nil || !found {
+		t.Fatalf("spec.env missing: found=%v err=%v", found, err)
+	}
+	got := map[string]string{}
+	for _, e := range env {
+		m, _ := e.(map[string]any)
+		name, _ := m["name"].(string)
+		value, _ := m["value"].(string)
+		got[name] = value
+	}
+	for _, name := range []string{"NCCL_NVLS_ENABLE", "NCCL_MNNVL_ENABLE"} {
+		if got[name] != "0" {
+			t.Errorf("spec.env %s = %q, want \"0\"", name, got[name])
+		}
+	}
+	if len(env) != 2 {
+		t.Errorf("spec.env has %d entries, want exactly 2: %v", len(env), env)
+	}
+	if mb, _, _ := unstructured.NestedString(obj.Object, "spec", "maxBytes"); mb != creNetMaxBytes {
+		t.Errorf("spec.maxBytes = %q, want %q", mb, creNetMaxBytes)
+	}
+	dfltObj := mustBuildCRECertification(t, "ns", "name", twoNodeGPUConfig(), dflt)
+	if _, found, _ := unstructured.NestedString(dfltObj.Object, "spec", "maxBytes"); found {
+		t.Error("the default check must not set spec.maxBytes")
+	}
+
+	// The default check carries no env: its peak must stay the NVLS-class figure.
+	dobj := mustBuildCRECertification(t, "ns", "name", twoNodeGPUConfig(), dflt)
+	if _, found, _ := unstructured.NestedSlice(dobj.Object, "spec", "env"); found {
+		t.Errorf("the default %s must not set spec.env", checkNameCRENCCLAllReduceBW)
+	}
+}
+
+// spec.fabric reaches the Certification only when the entry names one, so the
+// H100 object stays byte-for-byte what it was qualified with.
+func TestBuildCRECertificationFabric(t *testing.T) {
+	gpuConfig := twoNodeGPUConfig()
+	tests := []struct {
+		name       string
+		entry      creCatalogEntry
+		wantFabric string
+		wantSet    bool
+	}{
+		{"fabric named", creCatalogEntry{Domain: "d", Variant: "v", MaxNodes: 2, Fabric: "efa"}, "efa", true},
+		{"fabric unset", creCatalogEntry{Domain: "d", Variant: "v", MaxNodes: 2}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := mustBuildCRECertification(t, "ns", "name", gpuConfig, tt.entry)
+			got, found, err := unstructured.NestedString(obj.Object, "spec", "fabric")
+			if err != nil {
+				t.Fatalf("spec.fabric: %v", err)
+			}
+			if found != tt.wantSet || got != tt.wantFabric {
+				t.Errorf("spec.fabric = %q (found %v), want %q (found %v)", got, found, tt.wantFabric, tt.wantSet)
+			}
+		})
+	}
+}
+
 // Every check that consults the record must appear in it. Presence is what is
 // asserted, not population: a check keyed to an empty set skips everywhere,
 // which is a deliberate state, while a check missing from the record entirely
 // is an authoring slip that looks identical from the outside.
-func TestCREQualifiedEntriesCoverBothChecks(t *testing.T) {
-	for _, checkName := range []string{checkNameCRENCCLAllReduceBW, checkNameCRETrainingGoodput} {
+func TestCREQualifiedEntriesCoverEveryCheck(t *testing.T) {
+	for _, checkName := range []string{
+		checkNameCRENCCLAllReduceBW, checkNameCRENCCLAllReduceBWNET, checkNameCRETrainingGoodput,
+	} {
 		if _, ok := creQualifiedEntries[checkName]; !ok {
 			t.Errorf("%s is absent from the qualification record", checkName)
 		}
@@ -122,7 +318,7 @@ func TestCREChecksSkipUnqualifiedCombination(t *testing.T) {
 		if !found {
 			t.Fatal("constraint not found in the test context")
 		}
-		actual, passed, err := validateCRENcclAllReduceBw(ctx, constraint)
+		actual, passed, err := validateCRENcclAllReduceBw(ctx, checkNameCRENCCLAllReduceBW, constraint)
 		if err != nil {
 			t.Fatalf("unexpected error = %v", err)
 		}
@@ -167,7 +363,7 @@ func TestCREChecksRejectBadConstraintBeforeQualification(t *testing.T) {
 			if !found {
 				t.Fatal("constraint not found in the test context")
 			}
-			_, passed, err := validateCRENcclAllReduceBw(ctx, constraint)
+			_, passed, err := validateCRENcclAllReduceBw(ctx, checkNameCRENCCLAllReduceBW, constraint)
 			if err == nil {
 				t.Fatalf("error = nil, want a refusal for constraint %q", value)
 			}
@@ -215,7 +411,7 @@ func TestLookupCREQualificationUnqualified(t *testing.T) {
 				t.Fatalf("lookupCREQualification(%q, %s, %s) reported qualified with %+v",
 					tt.checkName, tt.service, tt.accelerator, entry)
 			}
-			if entry != (creCatalogEntry{}) {
+			if !reflect.DeepEqual(entry, creCatalogEntry{}) {
 				t.Errorf("entry = %+v, want zero value on an unqualified lookup", entry)
 			}
 		})

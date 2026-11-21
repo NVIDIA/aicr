@@ -20,14 +20,41 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s/pod"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/k8s/pod"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
+
+func TestContainerStatus(t *testing.T) {
+	p := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+		{Name: "sidecar", ImageID: "sidecar-id"},
+		{Name: "validator", ImageID: "validator-id"},
+	}}}
+
+	tests := []struct {
+		name      string
+		pod       *corev1.Pod
+		container string
+		wantID    string
+		wantOK    bool
+	}{
+		{"by name, not position", p, "validator", "validator-id", true},
+		{"no such container", p, "missing", "", false},
+		{"nil pod", nil, "validator", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs, ok := pod.ContainerStatus(tt.pod, tt.container)
+			if ok != tt.wantOK || cs.ImageID != tt.wantID {
+				t.Errorf("ContainerStatus() = (%q, %v), want (%q, %v)", cs.ImageID, ok, tt.wantID, tt.wantOK)
+			}
+		})
+	}
+}
 
 func TestGetPodForJob(t *testing.T) {
 	const ns = "default"
@@ -213,6 +240,63 @@ func TestGetPodForJob_TieredSelection(t *testing.T) {
 			}
 			if got == nil || got.Name != tt.wantName {
 				t.Errorf("got pod %v, want name %q", got, tt.wantName)
+			}
+		})
+	}
+}
+
+func TestGetTerminatedPodForJob(t *testing.T) {
+	const ns, jobName, container = "default", "validator-job", "validator"
+	label := map[string]string{"batch.kubernetes.io/job-name": jobName}
+	now := metav1.Now()
+	mk := func(name string, created time.Time, deleting bool, state corev1.ContainerState) *corev1.Pod {
+		p := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: label, CreationTimestamp: metav1.NewTime(created)},
+			Status:     corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: container, State: state}}},
+		}
+		if deleting {
+			p.DeletionTimestamp = &now
+			p.Finalizers = []string{"test/hold"}
+		}
+		return p
+	}
+	done := corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 3}}
+	running := corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}
+	base := time.Now()
+
+	tests := []struct {
+		name     string
+		objects  []runtime.Object
+		listErr  bool
+		wantName string
+		wantCode errors.ErrorCode
+	}{
+		{"terminating pod with terminated container", []runtime.Object{mk("a", base, true, done)}, false, "a", ""},
+		{"youngest terminated pod wins", []runtime.Object{mk("old", base, false, done), mk("new", base.Add(time.Minute), true, done)}, false, "new", ""},
+		{"terminating pod still running", []runtime.Object{mk("a", base, true, running)}, false, "", errors.ErrCodeNotFound},
+		{"no pods", nil, false, "", errors.ErrCodeNotFound},
+		{"list error", nil, true, "", errors.ErrCodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs := fake.NewSimpleClientset(tt.objects...)
+			if tt.listErr {
+				cs.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, stderrors.New("boom")
+				})
+			}
+			got, err := pod.GetTerminatedPodForJob(t.Context(), cs, ns, jobName, container)
+			if tt.wantCode != "" {
+				if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+					t.Fatalf("err = %v, want code %s", err, tt.wantCode)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Name != tt.wantName {
+				t.Errorf("pod = %s, want %s", got.Name, tt.wantName)
 			}
 		})
 	}

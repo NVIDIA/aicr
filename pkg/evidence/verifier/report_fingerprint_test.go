@@ -18,8 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"aicr.run/pkg/evidence/attestation"
+	"aicr.run/pkg/fingerprint"
 )
 
 func TestRenderMarkdown_FingerprintVerdicts(t *testing.T) {

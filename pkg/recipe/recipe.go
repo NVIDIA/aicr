@@ -17,9 +17,9 @@ package recipe
 import (
 	"fmt"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
-	"github.com/NVIDIA/aicr/pkg/measurement"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/header"
+	"aicr.run/pkg/measurement"
 )
 
 // RequestInfo holds simplified request metadata for documentation purposes.

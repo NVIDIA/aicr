@@ -231,7 +231,10 @@ libraries for a deliberately simple path model.
 
 **CLI flag reuse:** `query` embeds the same criteria flag set as `recipe` via
 shared option constructors (the `With*` functional options already used by
-`recipe.go`). The only addition is `--selector` (required, string).
+`recipe.go`). The original addition was `--selector` (required, string).
+The CLI now also supports `--summary` instead of a selector, and `--recipe` to
+load a saved recipe; see the [CLI reference](../user/cli-reference.md#aicr-query).
+These additions do not change the REST query contract.
 
 ### API endpoint
 

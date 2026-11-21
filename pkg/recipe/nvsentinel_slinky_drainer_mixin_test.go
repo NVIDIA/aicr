@@ -106,9 +106,10 @@ func assertSlinkyDrainerWired(t *testing.T, ctx context.Context, leaf string, re
 	if custom["enabled"] != true {
 		t.Errorf("%s: node-drainer.customDrain.enabled = %v, want true", leaf, custom["enabled"])
 	}
-	// The chart default "30m" fails node-drainer's config load.
-	if custom["timeout"] != "1800" {
-		t.Errorf("%s: node-drainer.customDrain.timeout = %v, want \"1800\"", leaf, custom["timeout"])
+	// NVSentinel v1.32.0 removed customDrain.timeout; the chart no longer
+	// renders it, so a value here would be dead configuration.
+	if timeout, set := custom["timeout"]; set {
+		t.Errorf("%s: node-drainer.customDrain.timeout = %v, want it unset", leaf, timeout)
 	}
 	if ns, isList := drainer["userNamespaces"].([]any); !isList || len(ns) != 0 {
 		t.Errorf("%s: node-drainer.userNamespaces = %v, want []; node-drainer refuses to start otherwise",

@@ -19,10 +19,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/config"
-	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/errors/errorstest"
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"aicr.run/pkg/bundler/config"
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/recipe"
 )
 
 // postRemediationRuleSet returns a fault-quarantine validation rule set
