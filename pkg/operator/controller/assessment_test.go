@@ -126,7 +126,7 @@ func TestAssessSteps(t *testing.T) {
 	}{
 		"steps on both sides": {record("manual", "before", "apply", "reset-breaker", "verify"), []string{"reset-breaker", "verify"}},
 		"steps before only":   {record("manual", "before", "apply"), nil},
-		"no apply step":       {record("manual", "before", "verify"), nil},
+		"no apply step":       {record("manual", "before", "verify"), []string{"before", "verify"}},
 		"a safe verdict":      {record("safe", "apply", "verify"), nil},
 	} {
 		steps = []v1alpha1.RolloutStep{upgrade("kai-scheduler")}
@@ -153,10 +153,39 @@ func TestAssessSteps(t *testing.T) {
 	}
 }
 
+// A manual record's steps after its apply step wait for an acknowledgement.
+// A record that names no apply step cannot say which steps follow the apply,
+// so every step waits.
+func TestAfterApply(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		ids  []string
+		want []string
+	}{
+		{"steps after the apply", []string{"check-host-port", "apply", "reset-breaker", "verify"}, []string{"reset-breaker", "verify"}},
+		{"apply is the last step", []string{"check-aws-replace-vm", "apply"}, nil},
+		{"no apply step", []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}, []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}},
+		{"no steps", nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var steps []aicrjob.UpgradeStep
+			for _, id := range tt.ids {
+				steps = append(steps, aicrjob.UpgradeStep{ID: id})
+			}
+			if got := afterApply(steps); !slices.Equal(got, tt.want) {
+				t.Errorf("afterApply(%v) = %v, want %v", tt.ids, got, tt.want)
+			}
+		})
+	}
+}
+
 // AICR v1.2.0's nfd record (0.19.0 to 0.20.1) names its deployer step
-// sync-nfd, not apply, so the operator finds no steps after the apply: the
-// upgrade needs approval but does not wait for narrow-nrt-rbac to be
-// acknowledged. This pins that behavior until the record marks its apply step.
+// sync-nfd, not apply, so the operator cannot tell which steps follow the
+// apply: the upgrade needs approval, and every step waits to be acknowledged
+// after the apply.
 func TestAssessStepsV120NFDRecord(t *testing.T) {
 	t.Parallel()
 	nfd := func(chart string) *plan.Document {
@@ -173,7 +202,8 @@ func TestAssessStepsV120NFDRecord(t *testing.T) {
 			}
 			steps := []v1alpha1.RolloutStep{{Release: "nfd", Operation: v1alpha1.OperationUpgrade}}
 			approval, err := assessSteps(steps, nfd("0.19.0"), nfd("0.20.1"), report)
-			if err != nil || !approval || steps[0].Assessment != v1alpha1.AssessmentManual || steps[0].PostApplySteps != nil {
+			want := []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}
+			if err != nil || !approval || steps[0].Assessment != v1alpha1.AssessmentManual || !slices.Equal(steps[0].PostApplySteps, want) {
 				t.Fatalf("assessSteps() = %v, %v; step %+v", approval, err, steps[0])
 			}
 		})
