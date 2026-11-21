@@ -91,6 +91,30 @@ whole suite, and the composite's default `task: full` preserves existing callers
     category: 'anchore-fs'
 ```
 
+#### `malware-scan/`
+**Purpose**: ClamAV malware scan of a path, with SARIF upload
+**When to use**: Release binaries, the `kubectl-aicr` plugin, the repository in the merge gate, and image layers (through `image-checks`)
+**Inputs**:
+- `scan_path` (optional): Path to scan (default: ".")
+- `database_dir` (optional): Signature database from `clamav-database`; empty downloads one for this scan
+- `expected_files` (optional): Number of non-empty files the scan must read
+- `fail_on_finding` (optional): Fail on a detection (default: "true"); an incomplete scan always fails
+- `output_file`, `category` (optional): SARIF file name and GitHub Security category
+
+Installs the ClamAV `.deb` pinned in `.settings.yaml`. Fails closed: a missing summary, a scan of no files, a count other than `expected_files`, or a file past a size or nesting limit is an error, never a pass.
+
+#### `clamav-database/`
+**Purpose**: Install the pinned ClamAV and download its signature database into a directory
+**When to use**: Once per workflow, so every scan in it reads the same database revision
+**Outputs**: `directory`, and `version` as `clamscan` reports it (engine, database revision, date)
+
+#### `image-checks/`
+**Purpose**: Release checks on one platform of a release image: vulnerabilities (Grype), malware (ClamAV) and secrets (Gitleaks, `.gitleaks.toml`)
+**When to use**: Only from `.github/workflows/check-images.yaml` and `check-operator.yaml`
+**Inputs**: `key`, `image`, `layout`, `index` (the index digest the layout must hold), `platform`, `clamav_database`, `grype_source` (`registry` for a pushed candidate, so OpenVEX statements apply; `layout` otherwise)
+
+`tools/image-unpack` verifies the layout and unpacks each layer separately, so ClamAV and Gitleaks read every file the layers ship, including files a later layer deletes. Grype catalogs the image's final filesystem and must report the manifest digest the unpack verified. All three checks run whatever the others conclude; the last step fails if any did not pass. A `checks.json` summary and the scanner reports upload as the `image-checks-<key>-<arch>-attempt-<n>` artifact.
+
 ### Development Environment Actions
 
 #### `install-e2e-tools/`
@@ -168,7 +192,7 @@ fall back to anonymous Docker Hub pulls.
 ### Build & Release Actions
 
 #### `setup-build-tools/`
-**Purpose**: Install pinned, checksum-verified tool binaries (ko, syft, crane, oras, oasdiff, setup-envtest, addlicense, goreleaser)  
+**Purpose**: Install pinned, checksum-verified tool binaries (ko, syft, crane, oras, grype, gitleaks, ClamAV, oasdiff, setup-envtest, addlicense, goreleaser)  
 **When to use**: When you need specific build tools without full build pipeline  
 **Inputs**:
 - `install_ko` (optional): Install ko (default: "false")
@@ -178,6 +202,9 @@ fall back to anonymous Docker Hub pulls.
 - `install_oras` (optional): Install oras (default: "false")
 - `oras_version` (required when `install_oras: "true"`): oras version from `load-versions`, without the leading `v`
 - `oras_sha256` (required when `install_oras: "true"`): oras linux/amd64 SHA256 from `load-versions`
+- `install_grype`, `grype_version`, `grype_sha256`: grype release binary; version and linux/amd64 SHA256 from `load-versions`, both required when installing
+- `install_gitleaks`, `gitleaks_version`, `gitleaks_sha256`: gitleaks release binary; same contract
+- `install_clamav`, `clamav_version`, `clamav_sha256`: the upstream ClamAV `.deb` (version without a prefix); same contract. ClamAV publishes no checksum file, so the pin is the only integrity check on it
 - `install_oasdiff` (optional): Install oasdiff (default: "false")
 - `oasdiff_version` (required when `install_oasdiff: "true"`): oasdiff version from `load-versions`
 - `oasdiff_sha256` (required when `install_oasdiff: "true"`): oasdiff linux/amd64 SHA256 from `load-versions`

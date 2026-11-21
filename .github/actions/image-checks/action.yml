@@ -1,0 +1,389 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'Release Image Checks'
+description: >-
+  Run the release checks on one platform of a release image read from a local
+  OCI layout: vulnerabilities (Grype), malware (ClamAV) and secrets (Gitleaks).
+  Writes a summary of every check and fails if any check did not pass.
+
+# Every check reads the same platform manifest. tools/image-unpack verifies
+# the layout against the expected index digest and unpacks each layer
+# separately, so ClamAV and Gitleaks read a file even when a later layer
+# deletes it, and ClamAV must read exactly the non-empty files the unpack
+# wrote. Grype catalogs the image's final filesystem and must report the
+# manifest digest the unpack verified. The three checks run to completion
+# whatever the others conclude, so one run reports every finding, and the
+# last step fails the job if any of them did not pass.
+#
+# Callers: .github/workflows/check-images.yaml and check-operator.yaml.
+
+inputs:
+  key:
+    description: 'Short image name for artifact and SARIF names, e.g. aicr'
+    required: true
+  image:
+    description: 'Image name without tag or digest, e.g. ghcr.io/nvidia/aicr'
+    required: true
+  layout:
+    description: 'OCI image layout whose index.json names the image index'
+    required: true
+  index:
+    description: 'Image index digest the layout must hold (sha256:...)'
+    required: true
+  platform:
+    description: 'Platform to check, linux/amd64 or linux/arm64'
+    required: true
+  clamav_database:
+    description: 'ClamAV signature database directory (.github/actions/clamav-database)'
+    required: true
+  grype_source:
+    description: >-
+      Where Grype reads the image: registry (image@index, for a pushed
+      candidate) or layout. OpenVEX statements name a product by its registry
+      repository, which Grype derives only from a registry source.
+    required: false
+    default: 'layout'
+
+outputs:
+  summary:
+    description: 'Path to the checks summary (JSON)'
+    value: ${{ steps.summary.outputs.path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      id: validate
+      shell: bash
+      env:
+        INPUT_KEY: ${{ inputs.key }}
+        INPUT_IMAGE: ${{ inputs.image }}
+        INPUT_INDEX: ${{ inputs.index }}
+        INPUT_PLATFORM: ${{ inputs.platform }}
+        INPUT_GRYPE_SOURCE: ${{ inputs.grype_source }}
+      run: |
+        set -euo pipefail
+        # shellcheck source=.github/actions/release-input-validation.sh
+        source "${GITHUB_ACTION_PATH}/../release-input-validation.sh"
+        reject_newline key "${INPUT_KEY}"
+        reject_newline image "${INPUT_IMAGE}"
+        require_release_image "${INPUT_IMAGE}"
+        [[ "${INPUT_KEY}" =~ ^[a-z0-9-]+$ ]] || { echo "::error::key must be lowercase letters, digits and hyphens"; exit 1; }
+        [[ "${INPUT_INDEX}" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "::error::index must be sha256:<64 hex>"; exit 1; }
+        case "${INPUT_PLATFORM}" in
+          linux/amd64|linux/arm64) ;;
+          *) echo "::error::platform must be linux/amd64 or linux/arm64"; exit 1 ;;
+        esac
+        case "${INPUT_GRYPE_SOURCE}" in
+          registry|layout) ;;
+          *) echo "::error::grype_source must be registry or layout"; exit 1 ;;
+        esac
+        work="${RUNNER_TEMP}/image-checks"
+        if [[ -e "${work}" ]]; then
+          echo "::error::${work} already exists; one image check per job"
+          exit 1
+        fi
+        mkdir -p "${work}/reports"
+        {
+          echo "arch=${INPUT_PLATFORM#linux/}"
+          echo "work=${work}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Load versions
+      id: versions
+      uses: ./.github/actions/load-versions
+
+    # tools/image-unpack imports only the standard library and this module, so
+    # this needs a toolchain and no module download.
+    - name: Setup Go
+      uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
+      with:
+        go-version: '${{ steps.versions.outputs.go }}'
+        cache: false
+
+    - name: Install Grype and Gitleaks
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_grype: 'true'
+        grype_version: ${{ steps.versions.outputs.grype }}
+        grype_sha256: ${{ steps.versions.outputs.grype_sha256_linux_amd64 }}
+        install_gitleaks: 'true'
+        gitleaks_version: ${{ steps.versions.outputs.gitleaks }}
+        gitleaks_sha256: ${{ steps.versions.outputs.gitleaks_sha256_linux_amd64 }}
+
+    - name: Unpack the image
+      id: unpack
+      shell: bash
+      env:
+        LAYOUT: ${{ inputs.layout }}
+        INDEX: ${{ inputs.index }}
+        PLATFORM: ${{ inputs.platform }}
+        WORK: ${{ steps.validate.outputs.work }}
+        GOFLAGS: -mod=readonly
+      run: |
+        set -euo pipefail
+        go run ./tools/image-unpack -layout "${LAYOUT}" -platform "${PLATFORM}" -index "${INDEX}" \
+          -out "${WORK}/tree" -coverage "${WORK}/reports/coverage.json"
+        coverage="${WORK}/reports/coverage.json"
+        # Assigned first so a missing field fails the step; inside echo's
+        # arguments set -e would not see jq fail.
+        manifest="$(jq -er .manifest "${coverage}")"
+        expected="$(jq -er '.totals.files - .totals.empty' "${coverage}")"
+        if [[ ! "${manifest}" =~ ^sha256:[a-f0-9]{64}$ || ! "${expected}" =~ ^[0-9]+$ ]]; then
+          echo "::error::coverage report has manifest '${manifest}' and file count '${expected}'"
+          exit 1
+        fi
+        {
+          echo "manifest=${manifest}"
+          echo "expected_files=${expected}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Vulnerability scan
+      id: cve
+      continue-on-error: true
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        INDEX: ${{ inputs.index }}
+        LAYOUT: ${{ inputs.layout }}
+        PLATFORM: ${{ inputs.platform }}
+        SOURCE: ${{ inputs.grype_source }}
+        MANIFEST: ${{ steps.unpack.outputs.manifest }}
+        REPORTS: ${{ steps.validate.outputs.work }}/reports
+      run: |
+        set -euo pipefail
+        echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+        if [[ "${SOURCE}" == registry ]]; then
+          target="registry:${IMAGE}@${INDEX}"
+        else
+          target="oci-dir:${LAYOUT}"
+        fi
+        # Exit 2 means a finding at or above --fail-on; anything else non-zero
+        # is an error.
+        rc=0
+        grype "${target}" --platform "${PLATFORM}" \
+          --config .grype.yaml --vex .openvex.json \
+          --only-fixed --fail-on high \
+          -o table -o "sarif=${REPORTS}/grype.sarif" -o "json=${REPORTS}/grype.json" || rc=$?
+        if [[ -s "${REPORTS}/grype.sarif" ]]; then
+          echo "sarif=${REPORTS}/grype.sarif" >> "$GITHUB_OUTPUT"
+        fi
+        result=passed
+        if [[ "${rc}" -eq 2 ]]; then
+          result=failed
+          echo "::error::Grype found fixable HIGH or CRITICAL vulnerabilities in ${MANIFEST}"
+        elif [[ "${rc}" -ne 0 ]]; then
+          result=error
+          echo "::error::Grype exited ${rc}"
+        fi
+        if [[ -s "${REPORTS}/grype.json" ]]; then
+          jq -r '"Grype \(.descriptor.version // "?"), database \(.descriptor.db.status.schemaVersion // "?") built \(.descriptor.db.status.built // "?")"' \
+            "${REPORTS}/grype.json"
+          scanned="$(jq -r '.source.target.manifestDigest // ""' "${REPORTS}/grype.json")"
+          if [[ "${scanned}" != "${MANIFEST}" ]]; then
+            result=error
+            echo "::error::Grype scanned manifest '${scanned}', the unpacked image is ${MANIFEST}"
+          fi
+        elif [[ "${result}" == passed ]]; then
+          result=error
+          echo "::error::Grype wrote no JSON report"
+        fi
+        echo "result=${result}" >> "$GITHUB_OUTPUT"
+        [[ "${result}" == passed ]]
+
+    - name: Upload the vulnerability SARIF
+      if: ${{ !cancelled() && steps.cve.outputs.sarif != '' }}
+      uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+      with:
+        sarif_file: ${{ steps.cve.outputs.sarif }}
+        category: anchore-image-${{ inputs.key }}-${{ steps.validate.outputs.arch }}
+      continue-on-error: true
+
+    - name: Mark the malware scan start
+      id: malware_start
+      if: ${{ !cancelled() && steps.unpack.outcome == 'success' }}
+      shell: bash
+      run: echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+    - name: Malware scan
+      id: malware
+      if: ${{ !cancelled() && steps.unpack.outcome == 'success' }}
+      continue-on-error: true
+      uses: ./.github/actions/malware-scan
+      with:
+        scan_path: ${{ steps.validate.outputs.work }}/tree/layers
+        database_dir: ${{ inputs.clamav_database }}
+        expected_files: ${{ steps.unpack.outputs.expected_files }}
+        output_file: ${{ steps.validate.outputs.work }}/reports/clamav.sarif
+        category: clamav-image-${{ inputs.key }}-${{ steps.validate.outputs.arch }}
+
+    # Run from the tree root so reported paths are relative and the
+    # .gitleaks.toml allowlists can anchor on them. The default path allowlist
+    # it extends skips third-party package trees; the summary records that
+    # scope. Archives are opened three levels deep. --redact keeps secret
+    # values out of the log and the report. Gitleaks logs a file it could not
+    # read as a warning and still exits 0, so any warning or error line other
+    # than its findings summary fails the scan.
+    - name: Secret scan
+      id: secret
+      if: ${{ !cancelled() && steps.unpack.outcome == 'success' }}
+      continue-on-error: true
+      shell: bash
+      env:
+        TREE: ${{ steps.validate.outputs.work }}/tree
+        REPORTS: ${{ steps.validate.outputs.work }}/reports
+      run: |
+        set -euo pipefail
+        echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+        config="${PWD}/.gitleaks.toml"
+        rc=0
+        (cd "${TREE}" && gitleaks dir . --config "${config}" --no-banner --no-color --redact --verbose \
+          --max-archive-depth 3 --exit-code 3 \
+          --report-format json --report-path "${REPORTS}/gitleaks.json") > "${REPORTS}/gitleaks.log" 2>&1 || rc=$?
+        cat "${REPORTS}/gitleaks.log"
+        result=passed
+        findings="$(jq -e 'length' "${REPORTS}/gitleaks.json" 2>/dev/null || echo "")"
+        skipped="$(grep -E ' (WRN|ERR) ' "${REPORTS}/gitleaks.log" | grep -vE ' WRN leaks found: [0-9]+$' || true)"
+        if [[ -z "${findings}" ]]; then
+          result=error
+          echo "::error::Gitleaks wrote no report (exit ${rc})"
+        elif [[ -n "${skipped}" ]]; then
+          result=error
+          echo "::error::Gitleaks could not read every file:"
+          printf '%s\n' "${skipped}"
+        elif [[ "${rc}" -eq 3 && "${findings}" -gt 0 ]]; then
+          result=failed
+          echo "::error::Gitleaks found ${findings} potential secret(s); values are redacted above"
+        elif [[ "${rc}" -ne 0 || "${findings}" -ne 0 ]]; then
+          result=error
+          echo "::error::Gitleaks exited ${rc} with ${findings} finding(s)"
+        fi
+        {
+          echo "findings=${findings}"
+          echo "result=${result}"
+        } >> "$GITHUB_OUTPUT"
+        [[ "${result}" == passed ]]
+
+    # Unsigned and kept with the run. It names the subject, each scanner with
+    # its version and database, the policy files by digest, the scope each
+    # scan covered and its result.
+    - name: Write the checks summary
+      id: summary
+      if: ${{ !cancelled() && steps.unpack.outcome == 'success' }}
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        INDEX: ${{ inputs.index }}
+        PLATFORM: ${{ inputs.platform }}
+        MANIFEST: ${{ steps.unpack.outputs.manifest }}
+        REPORTS: ${{ steps.validate.outputs.work }}/reports
+        CVE_RESULT: ${{ steps.cve.outputs.result || 'error' }}
+        CVE_STARTED: ${{ steps.cve.outputs.started }}
+        MALWARE_OUTCOME: ${{ steps.malware.outputs.outcome }}
+        MALWARE_STARTED: ${{ steps.malware_start.outputs.started }}
+        MALWARE_SCANNED: ${{ steps.malware.outputs.scanned_count }}
+        MALWARE_VERSION: ${{ steps.malware.outputs.version }}
+        SECRET_RESULT: ${{ steps.secret.outputs.result || 'error' }}
+        SECRET_STARTED: ${{ steps.secret.outputs.started }}
+        SECRET_FINDINGS: ${{ steps.secret.outputs.findings }}
+        GITLEAKS_VERSION: ${{ steps.versions.outputs.gitleaks }}
+        GRYPE_SOURCE: ${{ inputs.grype_source }}
+      run: |
+        set -euo pipefail
+        case "${MALWARE_OUTCOME}" in
+          clean) malware_result=passed ;;
+          infected) malware_result=failed ;;
+          *) malware_result=error ;;
+        esac
+        digest() { printf 'sha256:%s' "$(sha256sum "$1" | awk '{print $1}')"; }
+        grype_json="${REPORTS}/grype.json"
+        [[ -s "${grype_json}" ]] || echo '{}' > "${grype_json}"
+        jq -n \
+          --arg image "${IMAGE}" --arg index "${INDEX}" --arg platform "${PLATFORM}" --arg manifest "${MANIFEST}" \
+          --slurpfile coverage "${REPORTS}/coverage.json" \
+          --slurpfile grype "${grype_json}" \
+          --arg cve_result "${CVE_RESULT}" --arg cve_started "${CVE_STARTED}" --arg grype_source "${GRYPE_SOURCE}" \
+          --arg grype_config "$(digest .grype.yaml)" --arg openvex "$(digest .openvex.json)" \
+          --arg malware_result "${malware_result}" --arg malware_started "${MALWARE_STARTED}" \
+          --arg malware_version "${MALWARE_VERSION}" \
+          --arg malware_scanned "${MALWARE_SCANNED}" \
+          --arg secret_result "${SECRET_RESULT}" --arg secret_started "${SECRET_STARTED}" \
+          --arg secret_findings "${SECRET_FINDINGS}" \
+          --arg gitleaks_version "${GITLEAKS_VERSION#v}" --arg gitleaks_config "$(digest .gitleaks.toml)" \
+          '($coverage[0]) as $c | ($grype[0]) as $g | {
+            subject: {image: $image, index: $index, platform: $platform, manifest: $manifest},
+            coverage: {layers: ($c.layers | length), files: $c.totals.files, emptyFiles: $c.totals.empty,
+              binaries: $c.totals.binaries, aicrExecutables: $c.totals.aicrExecutables,
+              symlinks: $c.totals.symlinks, hardlinks: $c.totals.hardlinks, whiteouts: $c.totals.whiteouts},
+            checks: [
+              {name: "image-vulnerability-scan", result: $cve_result, startedAt: $cve_started,
+                scanner: {name: "grype", version: ($g.descriptor.version // null)},
+                source: $grype_source,
+                database: {schema: ($g.descriptor.db.status.schemaVersion // null),
+                  built: ($g.descriptor.db.status.built // null), source: ($g.descriptor.db.status.from // null)},
+                policy: {failOn: "high", onlyFixed: true, config: $grype_config, vex: $openvex},
+                findings: (($g.matches // []) | length)},
+              {name: "image-malware-scan", result: $malware_result, startedAt: $malware_started,
+                scanner: {name: "clamav", version: $malware_version},
+                policy: {maxFileSize: "1024M", maxScanSize: "1024M", maxDirRecursion: 64, alertExceedsMax: true},
+                scope: {layers: ($c.layers | length), filesExpected: ($c.totals.files - $c.totals.empty),
+                  filesScanned: (if $malware_scanned == "" then null else ($malware_scanned | tonumber) end)}},
+              {name: "image-secret-scan", result: $secret_result, startedAt: $secret_started,
+                scanner: {name: "gitleaks", version: $gitleaks_version},
+                policy: {ruleset: $gitleaks_config, maxArchiveDepth: 3},
+                scope: {layers: ($c.layers | length), imageConfig: true,
+                  aicrExecutablesAsStrings: $c.totals.aicrExecutables,
+                  otherBinaries: ($c.totals.binaries - $c.totals.aicrExecutables),
+                  binaryRule: "ELF magic or a NUL byte in the first 8000 bytes; Gitleaks skips any file it identifies as an application format (ELF among them), inside archives too",
+                  stringsLimit: "strings are packed literals; rules that need a word boundary or terminator can miss a token beside another literal",
+                  excluded: ("paths in the Gitleaks " + $gitleaks_version + " default allowlist: "
+                    + "Python library directories (standard library included), virtualenvs, node_modules, "
+                    + "vendored Go modules, documents and binaries by extension, images, fonts, lockfiles")},
+                findings: (if $secret_findings == "" then null else ($secret_findings | tonumber) end)}
+            ]
+          }' > "${REPORTS}/checks.json"
+        jq -r '.checks[] | "\(.name): \(.result)"' "${REPORTS}/checks.json"
+        echo "path=${REPORTS}/checks.json" >> "$GITHUB_OUTPUT"
+
+    - name: Upload the checks summary and reports
+      if: ${{ !cancelled() && steps.summary.outcome == 'success' }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+      with:
+        name: image-checks-${{ inputs.key }}-${{ steps.validate.outputs.arch }}-attempt-${{ github.run_attempt }}
+        path: ${{ steps.validate.outputs.work }}/reports
+        if-no-files-found: error
+        retention-days: 30
+
+    - name: Enforce the checks
+      if: always()
+      shell: bash
+      env:
+        UNPACK: ${{ steps.unpack.outcome }}
+        CVE: ${{ steps.cve.outcome }}
+        MALWARE: ${{ steps.malware.outcome }}
+        SECRET: ${{ steps.secret.outcome }}
+        SUMMARY: ${{ steps.summary.outcome }}
+        IMAGE: ${{ inputs.image }}
+        PLATFORM: ${{ inputs.platform }}
+      run: |
+        set -euo pipefail
+        failed=0
+        for check in "unpack=${UNPACK}" "vulnerability=${CVE}" "malware=${MALWARE}" "secret=${SECRET}" "summary=${SUMMARY}"; do
+          if [[ "${check#*=}" != success ]]; then
+            echo "::error::${IMAGE} ${PLATFORM}: ${check%%=*} check did not pass (${check#*=})"
+            failed=1
+          fi
+        done
+        exit "${failed}"

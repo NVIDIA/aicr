@@ -24,7 +24,9 @@ vulnerability findings in the aiperf-bench container image. The file is
 consumed by the `Weekly Image Vulnerability Scan` workflow
 (`.github/workflows/vuln-scan-images.yaml`) via the `vex:` input on
 `anchore/scan-action@v7.4.0`, which passes it to grype as `--vex
-.openvex.json`.
+.openvex.json`, and by the release image checks
+(`.github/actions/image-checks`), which pass it to the same pinned grype
+reading the candidate from the registry.
 
 It is also the source for the OpenVEX attestation each release publishes on
 every platform manifest. `.github/actions/sbom-and-attest` validates this file,
@@ -250,9 +252,9 @@ docker buildx build \
   --label "org.opencontainers.image.title=aicr-aiperf-bench" \
   .
 
-# 2. Install the exact grype version the workflow pins
-#    (lives in GrypeVersion.js of anchore/scan-action@v7.4.0)
-GRYPE_VERSION=v0.110.0  # cross-check with .github/workflows/vuln-scan-images.yaml
+# 2. Install the exact grype version the scans pin: security_tools.grype in
+#    .settings.yaml, which the weekly scan and the release image checks both run
+GRYPE_VERSION=$(yq '.security_tools.grype' .settings.yaml)
 gh release download "${GRYPE_VERSION}" --repo anchore/grype \
   --pattern "grype_*_darwin_arm64.tar.gz" -O /tmp/grype.tgz
 tar -xzf /tmp/grype.tgz -C /tmp grype && mv /tmp/grype /tmp/grype-vex

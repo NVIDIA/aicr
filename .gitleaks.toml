@@ -1,0 +1,49 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Secret scan ruleset for release images, run by .github/actions/image-checks
+# (from check-images.yaml and check-operator.yaml) over the tree
+# tools/image-unpack writes: every layer, the image config and history, and
+# the printable strings of each AICR executable. Gitleaks runs from the tree
+# root, so the paths below are relative to it.
+#
+# It extends the Gitleaks default rules for the version pinned in
+# .settings.yaml, including the default path allowlist. That allowlist skips
+# Python library directories (the standard library included), virtualenvs,
+# node_modules, vendored Go modules, documents and binaries by extension,
+# images, fonts and lockfiles, so the scan covers what AICR adds to an image
+# and the rest of the base image, not the contents of upstream packages.
+#
+# The strings of an executable are packed literals with no separator between
+# them, so a rule that needs a word boundary or a terminator after the token
+# can miss a credential compiled in beside another literal. Rules without such
+# anchors, GitHub tokens among them, still match.
+#
+# Every allowlist below names the false positive it exists for. Add one only
+# for a match confirmed not to be a credential, scoped as narrowly as the match
+# allows.
+
+title = "AICR release image secret scan"
+
+[extend]
+useDefault = true
+
+# The Go linker packs string literals back to back, so a strings file joins
+# unrelated literals into one line, and the generic rule's
+# keyword-then-assignment heuristic fires on whichever literals happen to sit
+# next to each other.
+[[allowlists]]
+description = "Generic keyword rule on the strings of an AICR executable"
+targetRules = ["generic-api-key"]
+paths = ['''^strings/[0-9]{3}/.+\.strings$''']
