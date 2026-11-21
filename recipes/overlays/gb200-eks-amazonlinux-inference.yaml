@@ -70,3 +70,10 @@ spec:
       type: Helm
       overrides:
         enabled: false
+
+    - name: al2023-toolkit-hardening
+      type: Helm
+      manifestFiles:
+        - components/al2023-toolkit-hardening/manifests/toolkit-hardening-al2023.yaml
+      dependencyRefs:
+        - nodewright-operator
