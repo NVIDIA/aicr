@@ -150,6 +150,10 @@ runs:
           echo "expected_files=${expected}"
         } >> "$GITHUB_OUTPUT"
 
+    # Grype's JSON report carries the raw image config (environment, labels,
+    # build history), and the operator's images are checked before they are
+    # public, so the raw report stays outside the uploaded reports and only an
+    # allowlisted projection of it is kept.
     - name: Vulnerability scan
       id: cve
       continue-on-error: true
@@ -162,6 +166,7 @@ runs:
         SOURCE: ${{ inputs.grype_source }}
         MANIFEST: ${{ steps.unpack.outputs.manifest }}
         REPORTS: ${{ steps.validate.outputs.work }}/reports
+        RAW: ${{ steps.validate.outputs.work }}/grype-raw.json
       run: |
         set -euo pipefail
         echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
@@ -176,7 +181,7 @@ runs:
         grype "${target}" --platform "${PLATFORM}" \
           --config .grype.yaml --vex .openvex.json \
           --only-fixed --fail-on high \
-          -o table -o "sarif=${REPORTS}/grype.sarif" -o "json=${REPORTS}/grype.json" || rc=$?
+          -o table -o "sarif=${REPORTS}/grype.sarif" -o "json=${RAW}" || rc=$?
         if [[ -s "${REPORTS}/grype.sarif" ]]; then
           echo "sarif=${REPORTS}/grype.sarif" >> "$GITHUB_OUTPUT"
         fi
@@ -188,17 +193,37 @@ runs:
           result=error
           echo "::error::Grype exited ${rc}"
         fi
-        if [[ -s "${REPORTS}/grype.json" ]]; then
+        projection='
+          def finding: {
+            vulnerability: (.vulnerability | {id, severity, namespace, fix}),
+            artifact: (.artifact | {name, version, type, purl, locations: [.locations[]? | {path, layerID}]})
+          };
+          {
+            descriptor: (.descriptor | {name, version, db}),
+            source: {type: .source.type, target: (.source.target
+              | if type == "object" then {userInput, imageID, manifestDigest, mediaType, architecture, os} else . end)},
+            distro: (.distro | {name, version}),
+            matches: [.matches[]? | finding],
+            ignoredMatches: [.ignoredMatches[]? | finding + {appliedIgnoreRules}]
+          }'
+        json="${REPORTS}/grype.json"
+        if [[ ! -s "${RAW}" ]]; then
+          if [[ "${result}" == passed ]]; then
+            result=error
+            echo "::error::Grype wrote no JSON report"
+          fi
+        elif ! jq "${projection}" "${RAW}" > "${json}"; then
+          rm -f "${json}"
+          result=error
+          echo "::error::Grype's JSON report is not readable"
+        else
           jq -r '"Grype \(.descriptor.version // "?"), database \(.descriptor.db.status.schemaVersion // "?") built \(.descriptor.db.status.built // "?")"' \
-            "${REPORTS}/grype.json"
-          scanned="$(jq -r '.source.target.manifestDigest // ""' "${REPORTS}/grype.json")"
+            "${json}"
+          scanned="$(jq -r '.source.target.manifestDigest // ""' "${json}")"
           if [[ "${scanned}" != "${MANIFEST}" ]]; then
             result=error
             echo "::error::Grype scanned manifest '${scanned}', the unpacked image is ${MANIFEST}"
           fi
-        elif [[ "${result}" == passed ]]; then
-          result=error
-          echo "::error::Grype wrote no JSON report"
         fi
         echo "result=${result}" >> "$GITHUB_OUTPUT"
         [[ "${result}" == passed ]]
@@ -232,8 +257,10 @@ runs:
     # Run from the tree root so reported paths are relative and the
     # .gitleaks.toml allowlists can anchor on them. The default path allowlist
     # it extends skips third-party package trees; the summary records that
-    # scope. Archives are opened three levels deep. --redact keeps secret
-    # values out of the log and the report. Gitleaks logs a file it could not
+    # scope. Archives are opened three levels deep. --ignore-gitleaks-allow
+    # keeps a gitleaks:allow comment inside the image from hiding a finding;
+    # exceptions belong in .gitleaks.toml. --redact keeps secret values out of
+    # the log and the report. Gitleaks logs a file it could not
     # read as a warning and still exits 0, so any warning or error line other
     # than its findings summary fails the scan.
     - name: Secret scan
@@ -250,7 +277,7 @@ runs:
         config="${PWD}/.gitleaks.toml"
         rc=0
         (cd "${TREE}" && gitleaks dir . --config "${config}" --no-banner --no-color --redact --verbose \
-          --max-archive-depth 3 --exit-code 3 \
+          --ignore-gitleaks-allow --max-archive-depth 3 --exit-code 3 \
           --report-format json --report-path "${REPORTS}/gitleaks.json") > "${REPORTS}/gitleaks.log" 2>&1 || rc=$?
         cat "${REPORTS}/gitleaks.log"
         result=passed
@@ -308,8 +335,14 @@ runs:
           *) malware_result=error ;;
         esac
         digest() { printf 'sha256:%s' "$(sha256sum "$1" | awk '{print $1}')"; }
+        # An unreadable or missing Grype report must not cost the other
+        # scanners' reports their upload; the vulnerability result already
+        # records the failure.
         grype_json="${REPORTS}/grype.json"
-        [[ -s "${grype_json}" ]] || echo '{}' > "${grype_json}"
+        if ! jq -e 'type == "object"' "${grype_json}" > /dev/null 2>&1; then
+          grype_json="$(mktemp)"
+          echo '{}' > "${grype_json}"
+        fi
         jq -n \
           --arg image "${IMAGE}" --arg index "${INDEX}" --arg platform "${PLATFORM}" --arg manifest "${MANIFEST}" \
           --slurpfile coverage "${REPORTS}/coverage.json" \
@@ -342,7 +375,7 @@ runs:
                   filesScanned: (if $malware_scanned == "" then null else ($malware_scanned | tonumber) end)}},
               {name: "image-secret-scan", result: $secret_result, startedAt: $secret_started,
                 scanner: {name: "gitleaks", version: $gitleaks_version},
-                policy: {ruleset: $gitleaks_config, maxArchiveDepth: 3},
+                policy: {ruleset: $gitleaks_config, maxArchiveDepth: 3, inlineAllowComments: "ignored"},
                 scope: {layers: ($c.layers | length), imageConfig: true,
                   aicrExecutablesAsStrings: $c.totals.aicrExecutables,
                   otherBinaries: ($c.totals.binaries - $c.totals.aicrExecutables),

@@ -28,6 +28,7 @@ import (
 	"hash"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -182,8 +183,9 @@ type imageConfig struct {
 }
 
 // Unpack verifies the layout against opts.Index, selects opts.Platform and
-// unpacks its layers, config, manifest and index under opts.Out.
-func Unpack(ctx context.Context, opts Options) (*Coverage, error) {
+// unpacks its layers, config, manifest and index under opts.Out. A failed
+// unpack removes opts.Out, so the same command can run again.
+func Unpack(ctx context.Context, opts Options) (coverage *Coverage, err error) {
 	want, err := parsePlatform(opts.Platform)
 	if err != nil {
 		return nil, err
@@ -239,13 +241,21 @@ func Unpack(ctx context.Context, opts Options) (*Coverage, error) {
 	if err = os.Mkdir(opts.Out, 0o750); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("failed to create %s", opts.Out), err)
 	}
+	defer func() {
+		if err == nil {
+			return
+		}
+		if rmErr := os.RemoveAll(opts.Out); rmErr != nil {
+			slog.Warn("failed to remove the partial unpack", "dir", opts.Out, "error", rmErr)
+		}
+	}()
 	for name, raw := range map[string][]byte{"index.json": indexRaw, "manifest.json": manifestRaw, "config.json": configRaw} {
 		if err = os.WriteFile(filepath.Join(opts.Out, name), raw, 0o600); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to write %s", name), err)
 		}
 	}
 
-	coverage := &Coverage{
+	coverage = &Coverage{
 		Index:    opts.Index,
 		Manifest: target.Digest,
 		Platform: opts.Platform,
@@ -274,6 +284,10 @@ func Unpack(ctx context.Context, opts Options) (*Coverage, error) {
 			Counts:   u.counts,
 		})
 		coverage.Totals.add(u.counts)
+	}
+	// A cancellation during the last read must not pass as a complete unpack.
+	if err = ctx.Err(); err != nil {
+		return nil, errors.WrapCtxErr(err, errors.ErrCodeTimeout, "unpack interrupted")
 	}
 	return coverage, nil
 }
@@ -386,15 +400,18 @@ func readMetadataBlob(layout string, d descriptor) ([]byte, error) {
 
 // verifyLayerBlob hashes a layer blob in full before any of it is unpacked,
 // so a tampered blob is rejected before a single file reaches a scanner.
-func verifyLayerBlob(file string, d descriptor) error {
+func verifyLayerBlob(ctx context.Context, file string, d descriptor) error {
 	f, err := os.Open(file) // #nosec G304 -- release-controlled layout path
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("failed to open layer %s", d.Digest), err)
 	}
 	defer func() { _ = f.Close() }()
 	h := sha256.New()
-	n, err := io.Copy(h, f)
+	n, err := io.Copy(h, ctxReader{ctx: ctx, r: f})
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "unpack interrupted")
+		}
 		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read layer %s", d.Digest), err)
 	}
 	if n != d.Size {
@@ -409,6 +426,28 @@ func verifyLayerBlob(file string, d descriptor) error {
 
 func digestOf(h hash.Hash) string {
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+// ctxReader fails every read once ctx is done, so a long read stops promptly.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
+// readError classifies a failed layer read: a done context is the run's, any
+// other failure the layer's.
+func readError(ctx context.Context, msg string, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "unpack interrupted")
+	}
+	return errors.Wrap(errors.ErrCodeInvalidRequest, msg, err)
 }
 
 type layerUnpacker struct {
@@ -430,7 +469,7 @@ func (u *layerUnpacker) unpack(layout string, layer descriptor, diffID string) e
 			fmt.Sprintf("layer %s or its diff_id %s is not sha256:<64 hex>", layer.Digest, diffID))
 	}
 	file := blobPath(layout, layer.Digest)
-	if err := verifyLayerBlob(file, layer); err != nil {
+	if err := verifyLayerBlob(u.ctx, file, layer); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(u.root, 0o750); err != nil {
@@ -442,11 +481,11 @@ func (u *layerUnpacker) unpack(layout string, layer descriptor, diffID string) e
 	}
 	defer func() { _ = f.Close() }()
 
-	var stream io.Reader = bufio.NewReader(f)
+	var stream io.Reader = bufio.NewReader(ctxReader{ctx: u.ctx, r: f})
 	if gzipped {
 		gz, gzErr := gzip.NewReader(stream)
 		if gzErr != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("layer %s is not gzip", layer.Digest), gzErr)
+			return readError(u.ctx, fmt.Sprintf("layer %s is not gzip", layer.Digest), gzErr)
 		}
 		defer func() { _ = gz.Close() }()
 		stream = gz
@@ -463,9 +502,12 @@ func (u *layerUnpacker) unpack(layout string, layer descriptor, diffID string) e
 			break
 		}
 		if nextErr != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("failed to read layer %s", layer.Digest), nextErr)
+			return readError(u.ctx, fmt.Sprintf("failed to read layer %s", layer.Digest), nextErr)
 		}
 		if err = u.entry(header, tr); err != nil {
+			if ctxErr := u.ctx.Err(); ctxErr != nil {
+				return errors.WrapCtxErr(ctxErr, errors.ErrCodeTimeout, "unpack interrupted")
+			}
 			code := errors.ErrCodeInvalidRequest
 			if coded, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 				code = coded.Code
@@ -476,7 +518,7 @@ func (u *layerUnpacker) unpack(layout string, layer descriptor, diffID string) e
 	// The tar reader stops at the end-of-archive marker; the diff_id covers the
 	// padding after it too.
 	if _, err = io.Copy(io.Discard, tee); err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("failed to read layer %s", layer.Digest), err)
+		return readError(u.ctx, fmt.Sprintf("failed to read layer %s", layer.Digest), err)
 	}
 	if got := digestOf(h); got != diffID {
 		return errors.New(errors.ErrCodeInvalidRequest,
@@ -507,6 +549,11 @@ func (u *layerUnpacker) entry(h *tar.Header, r io.Reader) error {
 		return nil
 	}
 	if strings.HasPrefix(path.Base(rel), ".wh.") {
+		// An OCI whiteout is an empty regular file; any other entry under
+		// that name would hold content no scanner reads.
+		if h.Typeflag != tar.TypeReg || h.Size != 0 {
+			return errors.New(errors.ErrCodeInvalidRequest, "whiteout is not an empty regular file")
+		}
 		u.counts.Whiteouts++
 		return nil
 	}
@@ -568,7 +615,7 @@ func (u *layerUnpacker) writeFile(rel string, r io.Reader) error {
 		return nil
 	}
 	u.counts.AICRExecutables++
-	return writeStrings(dest, name, filepath.Join(u.strings, filepath.FromSlash(name)+".strings"))
+	return writeStrings(u.ctx, dest, name, filepath.Join(u.strings, filepath.FromSlash(name)+".strings"))
 }
 
 // prefix keeps the first limit bytes written to it.
@@ -613,7 +660,7 @@ func isAICRModule(info *debug.BuildInfo) bool {
 // line naming the file. Gitleaks skips a file whose first bytes match a binary
 // format's magic number, and the first run is usually the random build ID, so
 // the header keeps the start of the file fixed text.
-func writeStrings(src, name, dst string) error {
+func writeStrings(ctx context.Context, src, name, dst string) error {
 	in, err := os.Open(src) // #nosec G304 -- a file this tool just wrote
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to open %s", src), err)
@@ -628,7 +675,7 @@ func writeStrings(src, name, dst string) error {
 	}
 	w := bufio.NewWriter(out)
 	if _, err = fmt.Fprintf(w, "%s %s\n", stringsHeader, name); err == nil {
-		err = extractStrings(bufio.NewReader(in), w)
+		err = extractStrings(bufio.NewReader(ctxReader{ctx: ctx, r: in}), w)
 	}
 	if closeErr := out.Close(); err == nil {
 		err = closeErr
@@ -639,16 +686,18 @@ func writeStrings(src, name, dst string) error {
 	return nil
 }
 
+// extractStrings holds a printable run only until it reaches minStringRun
+// bytes and streams the rest, so memory does not grow with the longest run.
 func extractStrings(in *bufio.Reader, out *bufio.Writer) error {
-	var run []byte
-	flush := func() error {
-		if len(run) >= minStringRun {
-			if _, err := out.Write(append(run, '\n')); err != nil {
-				return err
-			}
-		}
+	run := make([]byte, 0, minStringRun)
+	streaming := false
+	end := func() error {
 		run = run[:0]
-		return nil
+		if !streaming {
+			return nil
+		}
+		streaming = false
+		return out.WriteByte('\n')
 	}
 	for {
 		b, err := in.ReadByte()
@@ -658,15 +707,27 @@ func extractStrings(in *bufio.Reader, out *bufio.Writer) error {
 		if err != nil {
 			return err
 		}
-		if b == '\t' || (b >= 0x20 && b < 0x7f) {
-			run = append(run, b)
+		if b != '\t' && (b < 0x20 || b >= 0x7f) {
+			if err = end(); err != nil {
+				return err
+			}
 			continue
 		}
-		if err = flush(); err != nil {
-			return err
+		if streaming {
+			if err = out.WriteByte(b); err != nil {
+				return err
+			}
+			continue
+		}
+		run = append(run, b)
+		if len(run) == minStringRun {
+			if _, err = out.Write(run); err != nil {
+				return err
+			}
+			streaming = true
 		}
 	}
-	if err := flush(); err != nil {
+	if err := end(); err != nil {
 		return err
 	}
 	return out.Flush()

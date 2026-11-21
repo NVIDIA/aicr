@@ -25,11 +25,14 @@ import (
 	"encoding/json"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 
@@ -414,8 +417,6 @@ func TestUnpackRejects(t *testing.T) {
 		build    func(t *testing.T) (string, string)
 		wantCode errors.ErrorCode
 		wantMsg  string
-		// noFiles asserts the check runs before any file is written.
-		noFiles bool
 	}{
 		{
 			name: "wrong expected index",
@@ -519,7 +520,7 @@ func TestUnpackRejects(t *testing.T) {
 				})
 				return b.dir, index
 			},
-			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "hashes to", noFiles: true,
+			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "hashes to",
 		},
 		{
 			name: "wrong diff_id",
@@ -604,6 +605,24 @@ func TestUnpackRejects(t *testing.T) {
 			},
 			wantCode: errors.ErrCodeNotFound, wantMsg: "failed to open",
 		},
+		{
+			name: "whiteout with content",
+			build: func(t *testing.T) (string, string) {
+				b := newLayout(t)
+				return b.dir, b.index(b.image(testImage{platform: amd64, layers: []testLayer{{entries: []entry{file("etc/.wh.app.conf", "hidden")}}}}))
+			},
+			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "whiteout is not an empty regular file",
+		},
+		{
+			name: "whiteout that is a symlink",
+			build: func(t *testing.T) (string, string) {
+				b := newLayout(t)
+				return b.dir, b.index(b.image(testImage{platform: amd64, layers: []testLayer{{entries: []entry{
+					{name: "etc/.wh.app.conf", typeflag: tar.TypeSymlink, linkname: "elsewhere"},
+				}}}}))
+			},
+			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "whiteout is not an empty regular file",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -615,10 +634,143 @@ func TestUnpackRejects(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
 				t.Errorf("error = %v, want one naming %q", err, tt.wantMsg)
 			}
-			if _, statErr := os.Stat(filepath.Join(opts.Out, "layers", "000", "a")); tt.noFiles && !stderrors.Is(statErr, os.ErrNotExist) {
-				t.Error("a tampered layer blob wrote a file before it was rejected")
+			if _, statErr := os.Lstat(opts.Out); !stderrors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("a rejected unpack left %s behind (%v)", opts.Out, statErr)
 			}
 		})
+	}
+}
+
+// The layer blob is hashed in full before any of it is unpacked, so a
+// tampered blob never puts a file in front of a scanner.
+func TestLayerBlobVerifiedBeforeUnpack(t *testing.T) {
+	t.Parallel()
+	b := newLayout(t)
+	m := b.image(testImage{platform: amd64, layers: []testLayer{{entries: []entry{file("a", "b")}}}})
+	b.index(m)
+	manifest := manifestOf(t, b.dir, m.Digest)
+	configData, err := os.ReadFile(blobPath(b.dir, manifest.Config.Digest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config imageConfig
+	if err = json.Unmarshal(configData, &config); err != nil {
+		t.Fatal(err)
+	}
+	// The gzip header's MTIME: the stream stays valid and keeps its diff_id,
+	// so only the blob digest tells.
+	rewriteBlob(t, b.dir, manifest.Layers[0].Digest, func(d []byte) []byte {
+		d[4] ^= 0xff
+		return d
+	})
+	root := filepath.Join(t.TempDir(), "root")
+	u := &layerUnpacker{ctx: context.Background(), root: root, strings: t.TempDir(), written: map[string]bool{}}
+	err = u.unpack(b.dir, manifest.Layers[0], config.RootFS.DiffIDs[0])
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if _, statErr := os.Lstat(root); !stderrors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("a tampered layer blob created %s before it was rejected (%v)", root, statErr)
+	}
+}
+
+// cancelAfter is a context whose Err reports context.Canceled from call n+1
+// on. It counts its calls and records the function that made the last one.
+type cancelAfter struct {
+	context.Context
+	n      int64
+	calls  atomic.Int64
+	caller atomic.Pointer[string]
+}
+
+func (c *cancelAfter) Err() error {
+	if pc, _, _, ok := runtime.Caller(1); ok {
+		name := runtime.FuncForPC(pc).Name()
+		c.caller.Store(&name)
+	}
+	if c.calls.Add(1) > c.n {
+		return context.Canceled
+	}
+	return nil
+}
+
+// Every place Unpack asks its context, including every read and the check
+// before it returns, stops a canceled run as canceled and removes the tree.
+func TestUnpackStopsAtEveryCancellationPoint(t *testing.T) {
+	t.Parallel()
+	b := newLayout(t)
+	big := strings.Repeat("0123456789abcdef", 4096)
+	index := b.index(b.image(testImage{platform: amd64, layers: []testLayer{
+		{entries: []entry{file("etc/a", big), file("etc/b", "small")}, record: 10240},
+		{entries: []entry{file("opt/c", big), {name: "etc/.wh.a", typeflag: tar.TypeReg}}, mediaType: ociTar, record: 10240},
+	}}))
+	probe := &cancelAfter{Context: context.Background(), n: math.MaxInt64}
+	if _, err := Unpack(probe, unpackOptions(b.dir, index, "linux/amd64", t)); err != nil {
+		t.Fatalf("Unpack: %v", err)
+	}
+	points := probe.calls.Load()
+	if points < 8 {
+		t.Fatalf("Unpack asked its context %d times; reads are not checking it", points)
+	}
+	// A cancellation after the last read must not pass as a complete unpack.
+	if last := *probe.caller.Load(); !strings.HasSuffix(last, ".Unpack") {
+		t.Errorf("the last context check is in %s; Unpack must check after its last read", last)
+	}
+	for n := range points {
+		ctx := &cancelAfter{Context: context.Background(), n: n}
+		opts := unpackOptions(b.dir, index, "linux/amd64", t)
+		_, err := Unpack(ctx, opts)
+		if err == nil {
+			t.Errorf("canceled at check %d of %d: Unpack succeeded", n+1, points)
+			continue
+		}
+		errorstest.WantReportedCode(t, err, errors.ErrCodeCanceled)
+		if _, statErr := os.Lstat(opts.Out); !stderrors.Is(statErr, os.ErrNotExist) {
+			t.Errorf("canceled at check %d: %s left behind (%v)", n+1, opts.Out, statErr)
+		}
+	}
+}
+
+// Reads ask the context as they go, so a canceled run stops inside a large
+// layer, not after it: both the blob hash and the unpack stream ask it more
+// often the more they read.
+func TestUnpackReadsCheckTheContext(t *testing.T) {
+	t.Parallel()
+	calls := func(size int) (verify, unpack int64) {
+		b := newLayout(t)
+		m := b.image(testImage{platform: amd64, layers: []testLayer{{entries: []entry{file("a", strings.Repeat("x", size))}, mediaType: ociTar}}})
+		index := b.index(m)
+		layer := manifestOf(t, b.dir, m.Digest).Layers[0]
+		probe := &cancelAfter{Context: context.Background(), n: math.MaxInt64}
+		if err := verifyLayerBlob(probe, blobPath(b.dir, layer.Digest), layer); err != nil {
+			t.Fatalf("verifyLayerBlob: %v", err)
+		}
+		verify = probe.calls.Load()
+		probe = &cancelAfter{Context: context.Background(), n: math.MaxInt64}
+		if _, err := Unpack(probe, unpackOptions(b.dir, index, "linux/amd64", t)); err != nil {
+			t.Fatalf("Unpack: %v", err)
+		}
+		return verify, probe.calls.Load()
+	}
+	smallVerify, smallUnpack := calls(1)
+	largeVerify, largeUnpack := calls(8 << 20)
+	if largeVerify-smallVerify < 50 {
+		t.Errorf("hashing an 8 MiB layer asked the context %d times more than a tiny one", largeVerify-smallVerify)
+	}
+	if stream := (largeUnpack - largeVerify) - (smallUnpack - smallVerify); stream < 50 {
+		t.Errorf("unpacking an 8 MiB layer asked the context %d times more than a tiny one", stream)
+	}
+}
+
+func TestWriteStringsStopsWhenCanceled(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	if err := os.WriteFile(src, []byte(strings.Repeat("printable ", 100)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := writeStrings(ctx, src, "src", filepath.Join(dir, "out", "src.strings")); err == nil {
+		t.Fatal("writeStrings read a file after its context was canceled")
 	}
 }
 
@@ -811,16 +963,43 @@ func TestEntryPath(t *testing.T) {
 
 func TestExtractStrings(t *testing.T) {
 	t.Parallel()
-	in := "ab\x00abcdefgh\x01ijklm\tnopq\nshort\x00" + strings.Repeat("z", 8)
-	var out bytes.Buffer
-	w := bufio.NewWriter(&out)
-	if err := extractStrings(bufio.NewReader(strings.NewReader(in)), w); err != nil {
-		t.Fatal(err)
+	long := strings.Repeat("L", 1<<20)
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "mixed",
+			in:   "ab\x00abcdefgh\x01ijklm\tnopq\nshort\x00" + strings.Repeat("z", 8),
+			want: "abcdefgh\nijklm\tnopq\nzzzzzzzz\n",
+		},
+		{name: "one short of a run", in: "1234567\x00", want: ""},
+		{name: "exactly a run", in: "12345678\x00", want: "12345678\n"},
+		{name: "one past a run", in: "\x00123456789", want: "123456789\n"},
+		{name: "a run longer than any buffer", in: "\x00" + long + "\x00abc", want: long + "\n"},
+		{name: "runs back to back", in: "aaaaaaaa\x00\x00bbbbbbbbb", want: "aaaaaaaa\nbbbbbbbbb\n"},
 	}
-	want := "abcdefgh\nijklm\tnopq\nzzzzzzzz\n"
-	if out.String() != want {
-		t.Errorf("strings = %q, want %q", out.String(), want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var out bytes.Buffer
+			w := bufio.NewWriter(&out)
+			if err := extractStrings(bufio.NewReader(strings.NewReader(tt.in)), w); err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != tt.want {
+				t.Errorf("strings = %q, want %q", truncate(out.String()), truncate(tt.want))
+			}
+		})
 	}
+}
+
+func truncate(s string) string {
+	if len(s) > 64 {
+		return s[:64] + "..."
+	}
+	return s
 }
 
 // A runner failure inside an entry keeps its code through the layer's wrap,

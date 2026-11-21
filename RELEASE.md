@@ -457,9 +457,10 @@ main images by their candidate digests (`image-checks`,
 `.github/workflows/check-images.yaml`) and the operator's two images from the
 candidate's local layouts before they are pushed (`operator-checks`,
 `.github/workflows/check-operator.yaml`). `tools/image-unpack` verifies every
-blob against its digest and unpacks each layer separately, so the malware and
-secret scans read every file the layers ship, including files a later layer
-deletes. Grype catalogs the image's final filesystem. For the main images it
+blob against its digest and unpacks each layer separately, so files a later
+layer deletes are still scanned. The malware scan reads every non-empty file
+the layers ship; the secret scan reads them within the scope described below
+the table. Grype catalogs the image's final filesystem. For the main images it
 reads the candidate from the registry by digest, as the weekly scan does,
 because OpenVEX statements name the image by its registry repository; it must
 report the platform manifest the unpack verified.
@@ -478,10 +479,12 @@ malware-scanned but not secret-scanned. The strings of an AICR executable are
 string literals packed with no separator, so a rule that needs a word boundary
 or a terminator after the token can miss a credential compiled in beside
 another literal; rules without such anchors, GitHub tokens among them, still
-match. Each check's scope, scanner and database versions, policy file digests
+match. A `gitleaks:allow` comment inside the image does not hide a finding.
+Each check's scope, scanner and database versions, policy file digests
 and result are written to `checks.json` in the
 `image-checks-<key>-<arch>-attempt-<n>` artifact of the run; the findings are
-in the scanner reports beside it, with secret values redacted.
+in the scanner reports beside it, with secret values redacted. The Grype report
+there is a projection of the scan without the raw image config.
 
 A secret finding on one of the seven main images means the value is already
 public in the candidate tag: rotate the credential before anything else, then

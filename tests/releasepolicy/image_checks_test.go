@@ -15,6 +15,7 @@
 package releasepolicy
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -88,6 +89,16 @@ func TestMalwareScanFailsClosed(t *testing.T) {
 		{name: "limit exceeded", report: "/x: Heuristics.Limits.Exceeded.MaxFileSize FOUND\nScanned files: 9\nInfected files: 0\nTotal errors: 1\n", exit: 2, want: "error"},
 		{name: "exit 1 without an infected file", report: "Scanned files: 10\nInfected files: 0\n", exit: 1, want: "error"},
 		{name: "malformed expected count", report: "Scanned files: 10\nInfected files: 0\n", expected: "ten", want: "error"},
+		// A limit alert is a detection to ClamAV, so it can exit 1 and count
+		// as infected; waiving findings must not waive an incomplete scan.
+		{name: "limit alert counted as a detection", report: "/x: Heuristics.Limits.Exceeded.MaxScanSize FOUND\nScanned files: 10\nInfected files: 1\n", exit: 1, want: "error"},
+		{name: "detection with scan errors", report: "/x: Eicar-Test-Signature FOUND\nScanned files: 10\nInfected files: 1\nTotal errors: 1\n", exit: 1, want: "error"},
+		{name: "scan errors with exit 0", report: "Scanned files: 10\nInfected files: 0\nTotal errors: 2\n", want: "error"},
+		// Bash reads a leading zero as octal: 010 would equal 8 scanned files,
+		// and 08 would fail the comparison and fall through to clean.
+		{name: "expected count read as octal", report: "Scanned files: 8\nInfected files: 0\n", expected: "010", want: "error"},
+		{name: "expected count that is not octal", report: "Scanned files: 7\nInfected files: 0\n", expected: "08", want: "error"},
+		{name: "expected count of zero files", report: "Scanned files: 0\nInfected files: 0\n", expected: "0", want: "error"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -122,6 +133,39 @@ exit %d
 	}
 }
 
+// The SARIF driver carries ClamAV's engine, database revision and date in
+// version: that string is not the SemVer semanticVersion requires.
+func TestMalwareScanSARIFVersion(t *testing.T) {
+	t.Parallel()
+	script := compositeStep(t, ".github/actions/malware-scan/action.yml", "Convert results to SARIF")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "clamav-raw.log"), []byte("/layers/000/x: Eicar-Test-Signature FOUND\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const version = "ClamAV 1.5.5/28189/Fri Nov 20 08:24:01 2026"
+	if _, log, err := runStep(t, script, dir, "SARIF_FILE=out.sarif", "CLAMAV_VERSION="+version); err != nil {
+		t.Fatalf("convert: %v\n%s", err, log)
+	}
+	var sarif struct {
+		Runs []struct {
+			Tool struct {
+				Driver map[string]any `json:"driver"`
+			} `json:"tool"`
+			Results []any `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(readFileAt(t, filepath.Join(dir, "out.sarif")), &sarif); err != nil {
+		t.Fatal(err)
+	}
+	if len(sarif.Runs) != 1 || len(sarif.Runs[0].Results) != 1 {
+		t.Fatalf("SARIF runs = %+v", sarif.Runs)
+	}
+	driver := sarif.Runs[0].Tool.Driver
+	if _, ok := driver["semanticVersion"]; ok || driver["version"] != version {
+		t.Errorf("driver version = %v, semanticVersion = %v", driver["version"], driver["semanticVersion"])
+	}
+}
+
 func TestImageChecksVulnerabilityScanFailsClosed(t *testing.T) {
 	t.Parallel()
 	script := compositeStep(t, ".github/actions/image-checks/action.yml", "Vulnerability scan")
@@ -132,10 +176,14 @@ func TestImageChecksVulnerabilityScanFailsClosed(t *testing.T) {
 		exit    int
 		scanned string
 		noJSON  bool
-		source  string
-		want    string
+		// raw replaces the JSON report Grype writes.
+		raw    string
+		source string
+		want   string
 	}{
 		{name: "passed", scanned: manifest, want: "passed"},
+		{name: "truncated report", raw: `{"source":{"target":{"manifestDigest":"` + manifest + `"`, want: "error"},
+		{name: "report that is not an object", raw: `[]`, want: "error"},
 		{name: "passed from the registry", scanned: manifest, source: "registry", want: "passed"},
 		{name: "finding at the threshold", exit: 2, scanned: manifest, want: "failed"},
 		{name: "grype error", exit: 1, scanned: manifest, want: "error"},
@@ -150,20 +198,58 @@ func TestImageChecksVulnerabilityScanFailsClosed(t *testing.T) {
 			if err := os.MkdirAll(reports, 0o750); err != nil {
 				t.Fatal(err)
 			}
-			write := ""
-			if !tt.noJSON {
-				write = fmt.Sprintf(`printf '{"source":{"target":{"manifestDigest":"%s"}},"matches":[]}' > %q
-printf '{}' > %q
-`, tt.scanned, filepath.Join(reports, "grype.json"), filepath.Join(reports, "grype.sarif"))
+			// The raw report carries what must not be uploaded: the image config,
+			// its labels and Grype's own configuration.
+			raw := tt.raw
+			if raw == "" {
+				raw = fmt.Sprintf(`{"descriptor":{"name":"grype","version":"0.122.0","configuration":{"registry":{"auth":[{"password":"hunter2"}]}}},`+
+					`"source":{"type":"image","target":{"manifestDigest":%q,"config":"RU5WIFRPS0VOPXNlY3JldA==","labels":{"token":"secret"}}},`+
+					`"matches":[{"vulnerability":{"id":"CVE-0000-0001","severity":"High"},"artifact":{"name":"stdlib","metadata":{"secret":"x"}}}]}`, tt.scanned)
+			}
+			content := filepath.Join(dir, "content.json")
+			if err := os.WriteFile(content, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
 			}
 			args := filepath.Join(dir, "args")
-			path := fakeBin(t, "grype", fmt.Sprintf("printf '%%s\\n' \"$@\" > %q\n", args)+write+fmt.Sprintf("exit %d\n", tt.exit))
+			body := fmt.Sprintf(`printf '%%s\n' "$@" > %q
+for arg in "$@"; do
+  case "${arg}" in
+    json=*) json="${arg#json=}" ;;
+    sarif=*) sarif="${arg#sarif=}" ;;
+  esac
+done
+`, args)
+			if !tt.noJSON {
+				body += fmt.Sprintf("cp %q \"${json}\"\nprintf '{}' > \"${sarif}\"\n", content)
+			}
+			path := fakeBin(t, "grype", body+fmt.Sprintf("exit %d\n", tt.exit))
 			source := tt.source
 			if source == "" {
 				source = "layout"
 			}
+			rawPath := filepath.Join(dir, "work", "grype-raw.json")
+			if err := os.MkdirAll(filepath.Dir(rawPath), 0o750); err != nil {
+				t.Fatal(err)
+			}
 			outputs, log, err := runStep(t, script, dir, "PATH="+path, "LAYOUT=layout", "PLATFORM=linux/amd64",
-				"IMAGE=ghcr.io/nvidia/aicr", "INDEX="+index, "SOURCE="+source, "MANIFEST="+manifest, "REPORTS="+reports)
+				"IMAGE=ghcr.io/nvidia/aicr", "INDEX="+index, "SOURCE="+source, "MANIFEST="+manifest, "REPORTS="+reports, "RAW="+rawPath)
+			uploaded, readErr := os.ReadFile(filepath.Join(reports, "grype.json"))
+			switch {
+			case readErr != nil && tt.want == "passed":
+				t.Errorf("no Grype report in the uploaded reports: %v", readErr)
+			case readErr == nil:
+				for _, leak := range []string{"RU5WIFRPS0VOPXNlY3JldA==", "hunter2", "labels", "configuration", "metadata"} {
+					if strings.Contains(string(uploaded), leak) {
+						t.Errorf("the uploaded Grype report contains %q:\n%s", leak, uploaded)
+					}
+				}
+				if !json.Valid(uploaded) {
+					t.Errorf("the uploaded Grype report is not JSON:\n%s", uploaded)
+				}
+				if tt.want == "passed" && !strings.Contains(string(uploaded), "CVE-0000-0001") {
+					t.Errorf("the uploaded Grype report lost the findings:\n%s", uploaded)
+				}
+			}
 			target := strings.SplitN(string(readFileAt(t, args)), "\n", 2)[0]
 			wantTarget := map[string]string{"layout": "oci-dir:layout", "registry": "registry:ghcr.io/nvidia/aicr@" + index}[source]
 			if target != wantTarget {
@@ -230,7 +316,10 @@ func TestImageChecksSecretScanFailsClosed(t *testing.T) {
 			if i := slices.Index(sent, "--config"); i >= 0 && i+1 < len(sent) {
 				config = sent[i+1]
 			}
+			// An inline gitleaks:allow comment in a shipped file must not hide a
+			// finding.
 			if len(sent) < 2 || sent[0] != "dir" || sent[1] != "." || !slices.Contains(sent, "--no-color") ||
+				!slices.Contains(sent, "--ignore-gitleaks-allow") ||
 				!filepath.IsAbs(config) || filepath.Base(config) != ".gitleaks.toml" {
 
 				t.Errorf("gitleaks arguments = %q", sent)
@@ -240,6 +329,65 @@ func TestImageChecksSecretScanFailsClosed(t *testing.T) {
 			}
 			if (err == nil) != (tt.want == "passed") {
 				t.Errorf("step error = %v for result %s", err, tt.want)
+			}
+		})
+	}
+}
+
+// The summary is written, and the other scanners' reports uploaded, even when
+// the Grype report is missing or unreadable; the vulnerability result keeps
+// the failure.
+func TestImageChecksSummarySurvivesAnUnreadableGrypeReport(t *testing.T) {
+	t.Parallel()
+	script := compositeStep(t, ".github/actions/image-checks/action.yml", "Write the checks summary")
+	tests := []struct {
+		name        string
+		grype       string
+		cveResult   string
+		wantVersion any
+		wantMatches float64
+	}{
+		{name: "readable", grype: `{"descriptor":{"version":"0.122.0"},"matches":[{}]}`, cveResult: "failed", wantVersion: "0.122.0", wantMatches: 1},
+		{name: "truncated", grype: `{"descriptor":{"vers`, cveResult: "error"},
+		{name: "missing", cveResult: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			reports := t.TempDir()
+			coverage := `{"layers":[{}],"totals":{"files":10,"empty":2,"binaries":1,"aicrExecutables":1,"symlinks":0,"hardlinks":0,"whiteouts":0}}`
+			if err := os.WriteFile(filepath.Join(reports, "coverage.json"), []byte(coverage), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if tt.grype != "" {
+				if err := os.WriteFile(filepath.Join(reports, "grype.json"), []byte(tt.grype), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			outputs, log, err := runStep(t, script, repositoryRoot(t),
+				"IMAGE=ghcr.io/nvidia/aicr", "INDEX=sha256:3", "PLATFORM=linux/amd64", "MANIFEST=sha256:1",
+				"REPORTS="+reports, "CVE_RESULT="+tt.cveResult, "CVE_STARTED=t", "GRYPE_SOURCE=layout",
+				"MALWARE_OUTCOME=clean", "MALWARE_STARTED=t", "MALWARE_SCANNED=8", "MALWARE_VERSION=ClamAV 1.5.5",
+				"SECRET_RESULT=passed", "SECRET_STARTED=t", "SECRET_FINDINGS=0", "GITLEAKS_VERSION=v8.30.1")
+			if err != nil {
+				t.Fatalf("summary: %v\n%s", err, log)
+			}
+			var summary struct {
+				Checks []struct {
+					Name     string         `json:"name"`
+					Result   string         `json:"result"`
+					Scanner  map[string]any `json:"scanner"`
+					Findings any            `json:"findings"`
+				} `json:"checks"`
+			}
+			if err = json.Unmarshal(readFileAt(t, outputs["path"]), &summary); err != nil {
+				t.Fatal(err)
+			}
+			cve := summary.Checks[0]
+			if cve.Name != "image-vulnerability-scan" || cve.Result != tt.cveResult ||
+				cve.Scanner["version"] != tt.wantVersion || cve.Findings != tt.wantMatches {
+
+				t.Errorf("vulnerability check = %+v", cve)
 			}
 		})
 	}

@@ -87,8 +87,21 @@ func run(ctx context.Context, o options, stdout io.Writer) error {
 		}
 	}
 	// The scanners read everything under -out, so a report written there would
-	// be scanned as image content.
+	// be scanned as image content. The paths are compared as written and as
+	// the filesystem resolves them, so a symlink cannot route the report there.
 	if inside, err := within(o.out, o.coverage); err != nil || inside {
+		return errors.New(errors.ErrCodeInvalidRequest, "-coverage must be outside -out")
+	}
+	realOut, err := resolve(o.out)
+	if err != nil {
+		return err
+	}
+	realCoverage, err := resolve(o.coverage)
+	if err != nil {
+		return err
+	}
+	inside, err := within(realOut, realCoverage)
+	if err != nil || inside {
 		return errors.New(errors.ErrCodeInvalidRequest, "-coverage must be outside -out")
 	}
 	coverage, err := Unpack(ctx, Options{Layout: o.layout, Platform: o.platform, Index: o.index, Out: o.out})
@@ -107,6 +120,19 @@ func run(ctx context.Context, o options, stdout io.Writer) error {
 		coverage.Platform, coverage.Manifest, len(coverage.Layers), t.Files, t.AICRExecutables,
 		t.Binaries-t.AICRExecutables)
 	return nil
+}
+
+// resolve returns p with the symlinks of its directory resolved. That
+// directory must exist; p itself may not exist yet, but must not be a symlink.
+func resolve(p string) (string, error) {
+	if info, err := os.Lstat(p); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("%s must not be a symlink", p))
+	}
+	dir, err := filepath.EvalSymlinks(filepath.Dir(p))
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("failed to resolve the directory of %s", p), err)
+	}
+	return filepath.Join(dir, filepath.Base(p)), nil
 }
 
 // within reports whether path is dir or lies under it.

@@ -101,7 +101,7 @@ whole suite, and the composite's default `task: full` preserves existing callers
 - `fail_on_finding` (optional): Fail on a detection (default: "true"); an incomplete scan always fails
 - `output_file`, `category` (optional): SARIF file name and GitHub Security category
 
-Installs the ClamAV `.deb` pinned in `.settings.yaml`. Fails closed: a missing summary, a scan of no files, a count other than `expected_files`, or a file past a size or nesting limit is an error, never a pass.
+Installs the ClamAV `.deb` pinned in `.settings.yaml`. Fails closed: a missing summary, a scan error, a scan of no files, a count other than `expected_files`, or a file past a size or nesting limit is an error, never a pass, whatever `fail_on_finding` says.
 
 #### `clamav-database/`
 **Purpose**: Install the pinned ClamAV and download its signature database into a directory
@@ -113,7 +113,7 @@ Installs the ClamAV `.deb` pinned in `.settings.yaml`. Fails closed: a missing s
 **When to use**: Only from `.github/workflows/check-images.yaml` and `check-operator.yaml`
 **Inputs**: `key`, `image`, `layout`, `index` (the index digest the layout must hold), `platform`, `clamav_database`, `grype_source` (`registry` for a pushed candidate, so OpenVEX statements apply; `layout` otherwise)
 
-`tools/image-unpack` verifies the layout and unpacks each layer separately, so ClamAV and Gitleaks read every file the layers ship, including files a later layer deletes. Grype catalogs the image's final filesystem and must report the manifest digest the unpack verified. All three checks run whatever the others conclude; the last step fails if any did not pass. A `checks.json` summary and the scanner reports upload as the `image-checks-<key>-<arch>-attempt-<n>` artifact.
+`tools/image-unpack` verifies the layout and unpacks each layer separately, so files a later layer deletes are still on disk. ClamAV must read every non-empty file the layers ship. Gitleaks reads the layers, the image config and the strings of AICR executables, except the paths its default allowlist skips (third-party package trees, binaries and documents by extension) and executables not built from AICR; `RELEASE.md` lists that scope and `checks.json` records it. Grype catalogs the image's final filesystem and must report the manifest digest the unpack verified. All three checks run whatever the others conclude; the last step fails if any did not pass. A `checks.json` summary and the scanner reports upload as the `image-checks-<key>-<arch>-attempt-<n>` artifact; the Grype report is an allowlisted projection without the raw image config.
 
 ### Development Environment Actions
 

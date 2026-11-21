@@ -128,3 +128,87 @@ func TestRun(t *testing.T) {
 		})
 	}
 }
+
+// The report path is checked as the filesystem resolves it, so a symlink
+// cannot route the report into the tree the scanners read. Each case is
+// rejected before anything is unpacked.
+func TestRunResolvesCoveragePath(t *testing.T) {
+	t.Parallel()
+	b := newLayout(t)
+	index := b.index(b.image(testImage{platform: amd64, layers: []testLayer{{entries: []entry{file("etc/x", "y")}}}}))
+	tests := []struct {
+		name string
+		// setup returns -coverage for an -out of dir/out.
+		setup   func(t *testing.T, dir string) string
+		wantMsg string
+	}{
+		{
+			name: "-out through a linked directory",
+			setup: func(t *testing.T, dir string) string {
+				if err := os.Symlink(dir, filepath.Join(dir, "reports")); err != nil {
+					t.Fatal(err)
+				}
+				return filepath.Join(dir, "reports", "out")
+			},
+			wantMsg: "outside -out",
+		},
+		{
+			name: "a directory linked to -out before it exists",
+			setup: func(t *testing.T, dir string) string {
+				if err := os.Symlink(filepath.Join(dir, "out"), filepath.Join(dir, "reports")); err != nil {
+					t.Fatal(err)
+				}
+				return filepath.Join(dir, "reports", "coverage.json")
+			},
+			wantMsg: "failed to resolve",
+		},
+		{
+			name: "a report that is a symlink",
+			setup: func(t *testing.T, dir string) string {
+				link := filepath.Join(dir, "coverage.json")
+				if err := os.Symlink(filepath.Join(dir, "out", "coverage.json"), link); err != nil {
+					t.Fatal(err)
+				}
+				return link
+			},
+			wantMsg: "must not be a symlink",
+		},
+		{
+			name: "a missing report directory",
+			setup: func(_ *testing.T, dir string) string {
+				return filepath.Join(dir, "absent", "coverage.json")
+			},
+			wantMsg: "failed to resolve",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			o := options{layout: b.dir, platform: "linux/amd64", index: index, out: filepath.Join(dir, "out")}
+			o.coverage = tt.setup(t, dir)
+			err := run(context.Background(), o, &bytes.Buffer{})
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error = %v, want one naming %q", err, tt.wantMsg)
+			}
+			if _, statErr := os.Lstat(o.out); !os.IsNotExist(statErr) {
+				t.Errorf("-out was created before the report path was rejected (%v)", statErr)
+			}
+		})
+	}
+
+	// A report beside -out through a linked parent directory stays valid.
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "real"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "real"), filepath.Join(dir, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	o := options{layout: b.dir, platform: "linux/amd64", index: index,
+		out: filepath.Join(dir, "linked", "out"), coverage: filepath.Join(dir, "linked", "coverage.json")}
+	if err := run(context.Background(), o, &bytes.Buffer{}); err != nil {
+		t.Fatalf("run with a linked parent: %v", err)
+	}
+}
