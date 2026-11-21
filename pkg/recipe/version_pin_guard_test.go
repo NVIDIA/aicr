@@ -534,4 +534,5 @@ type versionPinExemption struct {
 
 var versionPinExemptions = []versionPinExemption{
 	{source: "b300-mk8s-ubuntu-inference-dynamo", component: "network-operator", field: "version", expectedPin: "25.7.0", expectedDefault: "26.7.1", reason: "Nebius Marketplace packages the DOCA driver for managed B300 workers; the upstream chart is a different distribution."},
+	{source: "gb300-eks-ubuntu-training-kubeflow", component: "kubeflow-trainer", field: "version", expectedPin: "2.2.1", expectedDefault: "2.4.0", reason: "NVCRE v0.12.0, which this leaf installs, supports Kubeflow Trainer 2.2.1 only; held until NVCRE supports the registry pin (#3949)."},
 }

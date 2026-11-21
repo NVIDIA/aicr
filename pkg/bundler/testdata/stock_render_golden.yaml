@@ -59,9 +59,9 @@ a100-aks-ubuntu-training-kubeflow:
   011-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   012-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  012-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  012-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   012-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  013-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  013-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   013-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   013-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -84,12 +84,12 @@ a100-aks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 2aa7b2ac7ab0c4afe7c9d800b193d10477c6501869bc7cebcc7c189e1cc1d1ab
-  UPGRADING.md: cffee1db797d4aae0ba0db69ccb66c6ac6e80e149da4e18c452906e4b34c2f58
-  bundle-info.yaml: 4222a12af67a363647ce75c018699360d29e84041e046e48fe04bc11f865de35
-  checksums.txt: 8c152ebff33a178639e5fe0ab81c3603f37d58ef19190a8ac8ec3d12aa67f750
+  README.md: 19d62e1c08f34cc88ebd61e75ef3f47d4c5b0a42b71233351053e412c45b9122
+  UPGRADING.md: 161c8344ae77f197afcc0d446d37b6f0158eed06ebefefbcacadf570c9175d1d
+  bundle-info.yaml: b9adb169028924fde4a5964b3dfbae7748ffecf3c1afff30dfd6416649c40747
+  checksums.txt: ada13eee3059d067693c2b58f77b0bc35fd1e04120f6371f64645bd6a810acfc
   deploy.sh: a08378569eb287d2d8829c69890233ea42b9ea4b6ae80766a697388fcbc7c2b8
-  recipe.yaml: afefe25b97029b63f8208f9272f6b21a2f5102043be77051bc1f678972c327e3
+  recipe.yaml: 3c2083dee54d4bf07320df04c6531890852a69d994fd607a016e5916e28c572c
 a100-any:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -195,9 +195,9 @@ a100-eks-ubuntu-training-kubeflow:
   011-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   012-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  012-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  012-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   012-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  013-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  013-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   013-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   013-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -220,12 +220,12 @@ a100-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 86c2057563223377627ea88604e6c5fb3914734da32d962f16763631102657f6
-  UPGRADING.md: 98561aa665002484811f2ec89d816c8c88e4b5545674bad98ed0e7c75d079c97
-  bundle-info.yaml: d780b8466b8e48c23707f2de1a02b2493b45569fea61c63e19e6276dbff842fc
-  checksums.txt: 81badb097b33ab252fd0896b256dad0f45bc57704096fb6accb7c49ba2c0d5a8
+  README.md: f5b98ebcf545867258d5e4f7022468b9be78ba1bdcd8d99e972c287096dd438f
+  UPGRADING.md: deb83e9f4c01dfe2344ce59f8137fd6123c8fe5b5cc8959cb1d3bde299fc4865
+  bundle-info.yaml: 4e7b0cc67a253e4853821fd00f062ea1fb6442fbf23c231a15afdcb17535d2e5
+  checksums.txt: 1acc082d362e7365c4fbe5e8ad8a0dfc5248f9a238c3c5a9ed58974c30d6e539
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: a2d341ddafe643d0ef56097496edfee56e3b82598cb91a7acf9466370f792f69
+  recipe.yaml: b3eacd0c038023755ba969b7cff7e25bb18fd6db778aea4d1706c4f82281ee9a
 a100-gke-cos-training-kubeflow:
   001-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   001-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -275,9 +275,9 @@ a100-gke-cos-training-kubeflow:
   011-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   012-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  012-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  012-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   012-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  013-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  013-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   013-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   013-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -300,12 +300,12 @@ a100-gke-cos-training-kubeflow:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: f80b7b1b7df0c897121faffab95045f91320d4d5547c1542a1ac9dacba34a5e6
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: 3e0ca69c24d8e6171f8a0e39e8254838e53e3146ab4e1d01d50405d0990eda72
-  checksums.txt: 76cd7fdfb373bd7836b9d76035d936c315889bc2758db91ab8a54c4e5f579593
+  README.md: ac1cc679ab5ca4f8d5246783746219e5345bf1fa9eab84bada1c1891deb9e04e
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: adddb2159640f18928f1610ce8a092ba2884a4d039bb7a32ad83c31baac8c6ea
+  checksums.txt: e5c55d5bb8aeaf44deb60bcae011278abe2fd53718e1d33eca04d47cad66c3b3
   deploy.sh: 511155dc137c29bbe9b1c483d38d32b9fea07535102e90b9dea0568ca801e3c8
-  recipe.yaml: bb9e5dc3334f765b9d7914772499be416599282421ab59c513dac4cee8afc45e
+  recipe.yaml: 8ec6dec92730b5a6cf6dfaa1a832ad1f82dd359f4dec42c584ef7a1f7740d0d9
 a100-oke-ubuntu-training-kubeflow:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -346,9 +346,9 @@ a100-oke-ubuntu-training-kubeflow:
   009-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   010-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  010-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  010-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   010-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  011-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  011-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   011-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   011-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -371,12 +371,12 @@ a100-oke-ubuntu-training-kubeflow:
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   015-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 97792ba0629058de0efa71a4cb17f6f1d2cb3ed68a08e821ad2820354bb96f53
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: 2c9e9e78994bd2cdfddbed4028ae781216c126bfcdf1d9ac24f371fb56f273fc
-  checksums.txt: b59aea809b04e23a19bc7fd3a77c45f8c5d992d5ce6b688587ad53f6e0a00350
+  README.md: 3598fe669284e3721749ea5cfe22a2128927228645dfad9f56c0ae83de2088f6
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: 27a61c931ab1b9070894227bb21c3a5dccfd24b3ce832cd7e3915a5a9631b0e6
+  checksums.txt: 3d30bf029e2940adc8708916f02e1628e88bb025017dfe7706ae063130814a40
   deploy.sh: f3af4ac7c2904d929b8d86b615bf0145e36ee32323875cba8e46892d79c4cc69
-  recipe.yaml: e82d0c352fb23eca3996a76aac53c6949ed537f872f914f1a703b11f350ebe6a
+  recipe.yaml: f63c55e564ef4d43143b228ba443417b50390c6109aa61a31121da80ea47adf2
 aks-ubuntu:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -654,9 +654,9 @@ b200-gke-cos-training-kubeflow:
   011-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   012-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  012-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  012-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   012-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  013-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  013-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   013-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   013-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -679,12 +679,12 @@ b200-gke-cos-training-kubeflow:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: d35b68f082d3c943f44cb285c56ddd912986f04efdd92530a184af05d9d842e0
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: f09da645ea10b28bdafa21d369eacb36ed67610207f2eebfb8ee591307388d06
-  checksums.txt: ba1252c9c00a775bb84a1cbefae1f451a1fd05c5555f7f1762f40e5f679efff6
+  README.md: c2874a97077611efd3d7be6ab3b33fbb788e3c614980c331b0ff45c6634f95aa
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: 6832226387a74270ce61089c9c6caa6252e6bedadfa1eaf5f92443a1da444e94
+  checksums.txt: a4f08939f88a34ed9ba79069c42b3c0ca7e4cf04e5126b1d3656064229bc4c77
   deploy.sh: 511155dc137c29bbe9b1c483d38d32b9fea07535102e90b9dea0568ca801e3c8
-  recipe.yaml: 8deea82c0158dfa5cbf63ed0fb1cce2682ffb15077c4807141c5bebbc7913223
+  recipe.yaml: af05cf63c97a4f88a66826c483e74d65e3b1654378561cd73782b468bdccb293
 b300-mk8s-ubuntu-inference-dynamo:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: d8043b8845f8225dc46f54e05a3a86362e30487775b59ac74f47be104e8555bd
@@ -906,9 +906,9 @@ gb10-nvke-ubuntu-training-kubeflow:
   008-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   009-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  009-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  009-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   009-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  010-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  010-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   010-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   010-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -931,12 +931,12 @@ gb10-nvke-ubuntu-training-kubeflow:
   014-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 6d7edc16bc28d8d8e6ed4829e156ee3c569f8c9cd20097451f66601f657a9829
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: c09560227b984cdc58c41ef6f5bddad7c914d27dfac62df8b2e1d20b52e02549
-  checksums.txt: c3c9807294bdf669c6200e5d55c910f081a1e7c342f8ab246d6e127437abc079
+  README.md: a411bde4d2dc34c6530bb2780de0bb377e97ade5b42cfba957ede15412d4e186
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: e73c6e745c596070af6573a4aff1cdd834789e4946630b64094c326b560a0a30
+  checksums.txt: 6cccaa953d68b90bd36f6dee8c47f86f71c5cffba3408164ce75a1e9705959ba
   deploy.sh: 06c4d439189c3b00c4c0a943f8ddfddb539eba1e23d8918704fb5e2d6ac7f747
-  recipe.yaml: 405ec1f4ab2f6d8896c1bf11cc5546a802fb503ae014c04bfd6b0c5263bbd461
+  recipe.yaml: b0cd8bb334f772c70f10d77bbc3987e57de6ba3e30692971481eb9dbfab6af53
 gb200-any:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -1238,9 +1238,9 @@ gb200-eks-ubuntu-training-kubeflow:
   012-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   013-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  013-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  013-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   013-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  014-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  014-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   014-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   014-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -1263,12 +1263,12 @@ gb200-eks-ubuntu-training-kubeflow:
   018-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: e5fb9d965a13dd531e4af99bb1a3dfaf93882a4c727c0c75974c1d43a450e2ca
-  UPGRADING.md: 98561aa665002484811f2ec89d816c8c88e4b5545674bad98ed0e7c75d079c97
-  bundle-info.yaml: c8ee746c51b6bf5398dac1f5b6b68e91bc9b0756ae9962d2523cea61a8a861c8
-  checksums.txt: 32dfa656faad42fba20d6811cf63df343502361ef70035ffcd604a5d7e9ea01e
+  README.md: d3d33769bd13013c20bc2f822e15628bb5c555b1c6e32bfb905bb14dfccd0623
+  UPGRADING.md: deb83e9f4c01dfe2344ce59f8137fd6123c8fe5b5cc8959cb1d3bde299fc4865
+  bundle-info.yaml: 598855e4a55e822f8600ff2df7070bb34558428b8b8321415317dbf4fe092bb5
+  checksums.txt: 0a1e3c8ba4f2aec908d5f657327768b8dee52b9b20bc43452a5767e231776ec9
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: 228b4b1e9cce762f3184a2dc6427eb59e03533d431b860ff2a4cd41500563979
+  recipe.yaml: dcb5c9a5ee61f7a3309ff8bbf4e1f50433a18d96df13cb48b99b53d6a97e84ca
 gb200-eks-ubuntu-training-slurm:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -1526,9 +1526,9 @@ gb200-gke-cos-training-kubeflow:
   012-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   013-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  013-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  013-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   013-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  014-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  014-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   014-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   014-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -1552,12 +1552,12 @@ gb200-gke-cos-training-kubeflow:
   018-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 2032d53de9fbefe69a5ccb1083f67bfba2418661f09197b2e5135941126992a9
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: 6dff5e5ac0e54f3460c75b29cd7f76024d8f6163c7c11b2f817f63f74fd6dbf8
-  checksums.txt: 5da75c058f223bd7d63c0c3c89319fbcf1bff79032d83b4a9acf5db472d21df6
+  README.md: e80b26fd1f4fb7dfe703e655d65b608d681335f5569f3cdaf8e5caeb87c08785
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: 0b93b23c55ad31ea532615218b7a6d0cd1e2e36d5e020a75e8737fbbc9f03fe8
+  checksums.txt: 83f3a0f5d5c2254a445e6c4409f03ef1ca871740b7b3cc7ecf77e615d4847c53
   deploy.sh: d6fc95d3864fbb9f05d4228583d6a2e370112aaafdf3e7b5c6557de0af043a0d
-  recipe.yaml: c8c52a2e3be7c1d552d7495fa4cf9cdae1ababf758de55ef06723eba0571e6af
+  recipe.yaml: 43c14c82a72f6db3e73106be720658924fd450af26a9c92f46210835c9e75061
 gb200-gke-cos-training-slurm:
   001-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   001-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -1791,9 +1791,9 @@ gb200-nvke-ubuntu-training-kubeflow:
   012-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   013-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  013-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  013-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   013-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  014-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  014-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   014-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   014-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -1821,12 +1821,12 @@ gb200-nvke-ubuntu-training-kubeflow:
   019-sriov-ib-networks/install.sh: 8f4bff183a9169f137fd0c47dc059b67b1fa6121531af7d3000b093de7c277fc
   019-sriov-ib-networks/templates/nvke-gb200.yaml: 1d78efb71cf8ecff1e40e37775d37270e9a3d9515fc23c5686ba590d611a454f
   019-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  README.md: 4e159f428757e78cf925d88e92cdb2b627c894cfdb6a1b135f351662ab6e1055
-  UPGRADING.md: ecf72ed3219ad6b83cd368bdbb179df3a7e07a0662c0b287523c966ad773fb24
-  bundle-info.yaml: f82995ba103eb3dbd0892464a4631cb9f8600a6d0011c53ba4e8cc36293513e6
-  checksums.txt: b2d860d5e91e0ac7f6361c74de09e9747e545ec9dcb52974d07e0cb7b3da5f9b
+  README.md: 2bc2bf1e55b8bc824ea763f16fe31500ba9eabe5f1ca8df9aef3f20bf721a909
+  UPGRADING.md: e6215d2767be2d8dc63d5dd9332b343631293bc76cf972818530c463511d7762
+  bundle-info.yaml: 3317dec74af6bd9b2498270a39e6ea7e44254c7779fc218c2e351b657cd26fe5
+  checksums.txt: 8fadb0d8a31ad7d8e9d74b9d8acaee739f53306e9f9bc2a4ccec8c0d00c86742
   deploy.sh: e48351a7c2155b2a845f278ae0d193e6fb71e387a965457777092c3bdc52e0a5
-  recipe.yaml: 52def9f1b8c2639f81113bf09866b54ca733a72464078ee272d4dba09ce382ff
+  recipe.yaml: 1a04b355200d856a038b8c4c0e8866ddea20472d4a668c056a85eacaed533be7
 gb200-oke-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -1961,9 +1961,9 @@ gb200-oke-ubuntu-training-kubeflow:
   010-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   011-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  011-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  011-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   011-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  012-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  012-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   012-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   012-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -1995,12 +1995,12 @@ gb200-oke-ubuntu-training-kubeflow:
   018-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 1c01019f89c6b97659c89df249627c7177d9a454c324258533cb819231735745
-  UPGRADING.md: ae7b7dba5dd80039163151c734031fadccd8cbc36bdcb4b90e15695a4ed0791c
-  bundle-info.yaml: 15e751270db725daf11322d3318eaafbc85daeb9210fe7c5de7e762043ef21e8
-  checksums.txt: eed2c669c6534ac1483aef2c87659067451a68f1e7e4095fa9c500d897f5a7f5
+  README.md: edf405207a54775f94a2add047c583be82a3e782bb59f1d54af1e098ca1898c3
+  UPGRADING.md: 6aa3a0a2ac4011e182b3066f998ea4ad78c8c36688991de0a755b7a04b8ce413
+  bundle-info.yaml: 491c1d00c5acd40e4ad0f497ebe78d8783024df3f6a24668b6afd188802c7b71
+  checksums.txt: 15cb7254c648aa1cfae37da7d9e931cb0b108e7c82e690f85eb4aa977af19cb0
   deploy.sh: f9a4377a6d7c21c93d164f6dbda94aa689f71c9eb975cc0799ca11128731ff32
-  recipe.yaml: bbc15ee40879c907126c5d7a00ffdac0357007bae9d80a58fdde42cc2556b689
+  recipe.yaml: 27c341c4fbfdc0b21b2f49e653caa0a18cbb8e32ab823986a9407f9fb0c3c25d
 gb300-any:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -2334,10 +2334,10 @@ gb300-eks-ubuntu-training-kubeflow:
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: c62243b930970cef08b180b919e3bddf5417357295f090ec60c0a4211617088f
   UPGRADING.md: d49d61bb3b32264bb848cabcc351ab7a7a0e777f0abec3d535321711c319171e
-  bundle-info.yaml: 6d7786354e7734ab5733070b587314945545cd2e066c1f4629fda77be85341f2
-  checksums.txt: 58788c68059c1b3ad3c9f20d0d4d3de568b469b4646b9e43f7b25b3e814efa60
+  bundle-info.yaml: f70c25ccbf21bee91606eabf3b894d2748e7765573c353370cdad12dd26f5675
+  checksums.txt: 17ca4b28cb2d4244f3a57ea4dc07ddbeb7e3cacc65c217b323012588e36e097b
   deploy.sh: 1d982da17f3b35665dd67f1369fa74add6b246e945ca33d874b39f25ff7b6fa6
-  recipe.yaml: da6825eb9b81ad1f383e4fed14b93ab416747c77d5e84473d8fa2e3d7bf3a3dd
+  recipe.yaml: 977acf3ed990d051e4fb60bfed65e2238f34ac7ce59daaa4edc9618c1886ebe3
 gb300-eks-ubuntu-training-slurm:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -2649,9 +2649,9 @@ gb300-gke-cos-training-kubeflow:
   011-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   012-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  012-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  012-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   012-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  013-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  013-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   013-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   013-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -2674,12 +2674,12 @@ gb300-gke-cos-training-kubeflow:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: bde929cc807893933aea11d9c7bd0ffc65d9d0c861a65c704a5d2042a9f8069d
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: e4f775af30b0bd43d3fbd66ad3f672d7a6bc89838686a2b62d6d99598dd7675e
-  checksums.txt: ad998bc258b8fdb5eb8263eb8d650b898f7cf80083c8381699dc4ff7d1d2c96e
+  README.md: 3be4468428152933cf506887a14f39aa81fbcdb81302e439c743e21facee4ca7
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: 35cddde48591d4fb12b2332d237eeb9a1786322f271d3f40c73570b3b118af71
+  checksums.txt: 6044fb572da3619c5f7ba0bfbcd80e566d03ec424d670ff86c742872f573b4d7
   deploy.sh: 511155dc137c29bbe9b1c483d38d32b9fea07535102e90b9dea0568ca801e3c8
-  recipe.yaml: 1486b3d548acf26f6ca0b4a3c8f516206b9915837b755ce167263afa9867eca7
+  recipe.yaml: 644a05b20384c58a8d2cf9823a9b2bfeb51abca5c466f8854c1918dd4b18843b
 gb300-nvke-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -2799,9 +2799,9 @@ gb300-nvke-ubuntu-training-kubeflow:
   008-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   009-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  009-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  009-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   009-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  010-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  010-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   010-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   010-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -2824,12 +2824,12 @@ gb300-nvke-ubuntu-training-kubeflow:
   014-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: f746bd42a4469757c76dbb37ab386314daf831aac8a59bf56043f0a96da39f65
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: a9310f0454f404e0781645ba26ab5e65ad84218169c311729ce14fc28b51932d
-  checksums.txt: a68fc859bcd772247c0615c1a690ec5c89985d1bb75bd1419d36bec6364819fc
+  README.md: aa61305024722931f9e5293fa046ca4ea0405d7d665edd20184628ac1cdb6394
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: b5ca6851c29fa1075896a55af76e8b9f03d1586177383d51d858cc8e1b1b78f5
+  checksums.txt: 13bc1513559647bafdf386f339d0b6a73bd1e62d905c5e069d1b092f18df237f
   deploy.sh: e2fa5886df14ab1b4f5acbb99740057af37cf8d70db740fcfa7b8cd0e8ff871e
-  recipe.yaml: be523dea8254e6387893b6932d2e9517953a1471987c2b9c9f0429b47249903f
+  recipe.yaml: f688dc2e123ff3043dec38360246704bf692eddbb54d6bba812b498284406d17
 gb300-oke-ubuntu-training:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -3056,9 +3056,9 @@ h100-aks-ubuntu-training-kubeflow:
   011-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   012-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  012-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  012-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   012-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  013-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  013-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   013-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   013-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -3081,12 +3081,12 @@ h100-aks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 62f7d5b1d5595332d31d8d18196cb72d232475330ab4bcb291a7f68cea70f71f
-  UPGRADING.md: cffee1db797d4aae0ba0db69ccb66c6ac6e80e149da4e18c452906e4b34c2f58
-  bundle-info.yaml: 9a099e32db894cbeba4734408aca94fb2a1b6754c2e2e2554864eed6ddf030b1
-  checksums.txt: 9622e692a82e8016941b5bfc04128d28e348fbb73b03cfffd9dc66d75f589761
+  README.md: 3e2528f63964a5c134780feef2c29a53b03dc421ee30a0e7ce5451d5b86a1b05
+  UPGRADING.md: 161c8344ae77f197afcc0d446d37b6f0158eed06ebefefbcacadf570c9175d1d
+  bundle-info.yaml: a71968ca4ecdd9b0ab8d4dac99796491f3cc0c98f6847741983bd1cb809f12aa
+  checksums.txt: bf71fb6b5031e711653d5a37cfc070a98aa7d3d4d1e9bec797d5d3bbb5e5502c
   deploy.sh: a08378569eb287d2d8829c69890233ea42b9ea4b6ae80766a697388fcbc7c2b8
-  recipe.yaml: 1a30882cbae5cc7162a43c430b0fe54062e5fcf0f3770e87b9db8e5f9a453df7
+  recipe.yaml: ae7753646548b03d3f6ae63aaeac064e3f64d176c194332bded725ae7d582d09
 h100-aks-ubuntu-training-slurm:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -3275,9 +3275,9 @@ h100-bcm-ubuntu-training-kubeflow:
   009-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   010-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  010-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  010-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   010-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  011-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  011-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   011-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   011-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -3300,12 +3300,12 @@ h100-bcm-ubuntu-training-kubeflow:
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   015-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 8fc9935834b5993438778bcf0933dd795a47fbdd33dcd8434c2411b53f5cecbd
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: f55fc46728584a60e19dd793b03cfb8d1e39aab5c26d80342a936bf2391bb364
-  checksums.txt: 4b0a3ab833018c9ce986d4ed4777cec4f2be4abae030b8a9985f1f5884df6759
+  README.md: 7ad2de1b6d193c51bde32cdbddb172ca0cadadf2ac94ce26fd3625266d8d73cb
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: 4e9acf49177dddfa090662655d4f7476d9428dd454209c7a7fb0fc204b079c72
+  checksums.txt: ad6ce3d0348aea299e9e9543c7bd4a3e3d5e98a76e7e0e5b520be68436f49dcc
   deploy.sh: d971f64a5be2e8128135c49f74f33bac35118c4cec374c6378579b40d73a90c2
-  recipe.yaml: d5b23688fa1bbe743d67be50e74d74a0f1467013b096f18f22f86325050886f9
+  recipe.yaml: 46a54eba50e6f5e0cff33ca20c0fd17acb211ab6d5c1bbf99ad36e8a2e2e353e
 h100-cks-ubuntu-training:
   001-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
@@ -3672,9 +3672,9 @@ h100-eks-ubuntu-training-kubeflow:
   011-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   012-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  012-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  012-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   012-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  013-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  013-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   013-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   013-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -3697,12 +3697,12 @@ h100-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 30789ff0b78280573fb4a5ab1be6d0751897692a4dc3f8ee11360209ff933b06
-  UPGRADING.md: 98561aa665002484811f2ec89d816c8c88e4b5545674bad98ed0e7c75d079c97
-  bundle-info.yaml: 6932e72371f04e270d776ba7344a39a3328e4c884ee91248574e35f2d8a9a3a8
-  checksums.txt: 6795a879da8b862c4194dec18638a2e1132311fd6e7f929f56b84c71f5d4eead
+  README.md: ebd5ed50383ce19581611a952ac6589bc4f32d75a4928ec1c5b567f9b9a27262
+  UPGRADING.md: deb83e9f4c01dfe2344ce59f8137fd6123c8fe5b5cc8959cb1d3bde299fc4865
+  bundle-info.yaml: aba26a63309e78b21c5577372441eb3dd3c079ebb54159bd83f99524cc8a8ada
+  checksums.txt: cbf524665a7849171adfdff0228bacd373161a7fcec420d757c8e581121990bd
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: ce3cd9fb0c464978f63ed834c27786dbac7ded6a72ca121c82bb6abdab00f0db
+  recipe.yaml: e4e59f6bc9a9be6db8520f00bead2d12157f5d874d1f96a656e7ad57c57694f2
 h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -3756,9 +3756,9 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   012-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   013-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  013-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  013-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   013-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  014-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  014-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   014-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   014-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -3781,12 +3781,12 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   018-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 5fd68ecc85dca51c59aa53f5818ae2321af416105c51c6678e3d40702b269aee
-  UPGRADING.md: 98561aa665002484811f2ec89d816c8c88e4b5545674bad98ed0e7c75d079c97
-  bundle-info.yaml: 50fc14b1c94a5662cc76e7d47c39785f41d92b049f6e707b9f7488ceed746d53
-  checksums.txt: 5fdec90b5e0651ce1ec562198ec6916468a5cef332c10ad40c599fc715299d14
+  README.md: c390ab483d581ff3fdfa08d09bfe2f8a84a4f2877e28076f31934174b8e220e3
+  UPGRADING.md: deb83e9f4c01dfe2344ce59f8137fd6123c8fe5b5cc8959cb1d3bde299fc4865
+  bundle-info.yaml: 8e91ed60ba53af1f3156944fdaec0f4415f3e32b4fcb2bb2d9b1f738ff67cc86
+  checksums.txt: b859c994e19fa70b6d0c44e3ec85272d6915a55ffea8c12ef3ef52e04ca95d97
   deploy.sh: 2808edb0dd40f6022b6a2edb79c620cdd2cd908a0f8f700a3142796f6fccead9
-  recipe.yaml: 5c650aa295e6cbcc439e916f308cf05ad17c10ea749a00023fce70dc569a1774
+  recipe.yaml: ea43d70aa2770e37f653e9972b9a9b0a63533940ea1f9a1eba58dc90c491df78
 h100-eks-ubuntu-training-kubeflow+nktp:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -3835,9 +3835,9 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   011-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   012-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  012-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  012-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   012-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  013-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  013-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   013-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   013-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -3860,14 +3860,14 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 30789ff0b78280573fb4a5ab1be6d0751897692a4dc3f8ee11360209ff933b06
-  UPGRADING.md: 98561aa665002484811f2ec89d816c8c88e4b5545674bad98ed0e7c75d079c97
-  bundle-info.yaml: f60babb9d843a9ba1717321e71bc1ff212d798b41679516400b6cbbe25809eac
-  checksums.txt: 58414d86de78b751430d11e8a1fa4cb63db3c3e09d9df5d59614e687d715e05a
+  README.md: ebd5ed50383ce19581611a952ac6589bc4f32d75a4928ec1c5b567f9b9a27262
+  UPGRADING.md: deb83e9f4c01dfe2344ce59f8137fd6123c8fe5b5cc8959cb1d3bde299fc4865
+  bundle-info.yaml: 1267a3467074432b6317dee6ec36e07d0e04a5c8692f164c1755e6f626d0d2a3
+  checksums.txt: 3a6acb7dc583b95942e79add37647df04a34c8312eef5c8ff7f4d452d78c8ac7
   data/overlays/stock-render-opt-in.yaml: 28518490ca46ac3ecf1b7cb220cfc55c3c4d3e3f595446b6aab9894f15f80557
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: 572834e3e8ae302b430f5834090245f022e53175b3c6bd22a8867afc408bb960
+  recipe.yaml: 740e5b5fc1be7c5831c7ea1729fa4ff2e562c75900576d65888f6bdb3a1e62cc
 h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -3921,9 +3921,9 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   012-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   013-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  013-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  013-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   013-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  014-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  014-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   014-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   014-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -3955,14 +3955,14 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   020-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 4d8885794d90b9f794c0150819573111b563034ac1ad3ec4b75549d6227f73a8
-  UPGRADING.md: d49d61bb3b32264bb848cabcc351ab7a7a0e777f0abec3d535321711c319171e
-  bundle-info.yaml: 18a42f371c9c77903e624a213a9a8a4ca82b77e991847a9bb71771dd10cd62e4
-  checksums.txt: 407224dcbfac8abfa5d993de5591d0c668599deb2c32eb2c7d5d829a9d5f14f0
+  README.md: 1b49a30688bb0155866e569f5b9e5dccc4a123e7ece42239aac304ddbc428a70
+  UPGRADING.md: a40cf3e244364e31f1de66b02dd06005e70b6bea61b9ea744fa60e9c827f66ce
+  bundle-info.yaml: 02c04a1ac4a30dae8cdc44a201c5b5869e4c40c787a9518e591a58a50a628daa
+  checksums.txt: 244f1a86fb0fa37bcd8dbdaf63d4dbe016efab72ba94149721d4f1b8a4db9e6d
   data/overlays/stock-render-opt-in.yaml: 100a230e36a3fe11b9678bb4ad0dcd59fe8ae0a51534814dace25056bb9a2ba3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: f3cf689c1ca70b4765d472d7e4286a7aad6663c47ca5912c2c2c81ee760248ae
-  recipe.yaml: 16f3256916b40663058f87c03a6b8b30adde432f08586e498d4560871c3ecb31
+  recipe.yaml: ec7d64ec76a67dd38bfde2bccae5d4b3be876345d219a973c5edff6291c0919b
 h100-eks-ubuntu-training-kueue:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
@@ -4588,9 +4588,9 @@ h100-gke-cos-training-kubeflow:
   012-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   013-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  013-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  013-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   013-kubeflow-trainer/values.yaml: 70be9b756fef786406c2651a4cced4f7759b68845f106a95129f364d211f3d10
-  014-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  014-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   014-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   014-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -4614,12 +4614,12 @@ h100-gke-cos-training-kubeflow:
   018-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: a175835b45689b1a66339006491c3253f8278a7c90242b1a8957d84256726485
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: 451fa1228f9aa20b948eb2e6def68522ffeeedaa0e0d6be8cdf6c391650b056f
-  checksums.txt: 8d1db8e6b0287dfaf4cf1a8d1c033b719c9f8a34857ae36e1aca15afd2139d10
+  README.md: ab8a97359a8cf758a1b065fad2b00876f198ac3e0015fde6a2a8356ee1b501cf
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: 72629d78dd6fde81400e1cb7fd0d127977fd795c54f23d96f84be6151c98f6db
+  checksums.txt: 32ab70647f214d4876f2afa6d2d74db7719e063ffb6e29c0f5dd60951bcd1ee6
   deploy.sh: e0addb21427e8630423a5d6e747023380194462c80140b444c2c7b26ec3b09b7
-  recipe.yaml: 10e927af6686df57fc585b4e16061311c99082e18e6921ccfad53822eec20634
+  recipe.yaml: 393c1c6b7a37e4e5780884390a58fe371617e92ebaf0bb204e98a2a9b78efd17
 h100-gke-cos-training-kubeflow+gpustack-dra:
   001-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   001-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -4676,9 +4676,9 @@ h100-gke-cos-training-kubeflow+gpustack-dra:
   012-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   013-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  013-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  013-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   013-kubeflow-trainer/values.yaml: 70be9b756fef786406c2651a4cced4f7759b68845f106a95129f364d211f3d10
-  014-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  014-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   014-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   014-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -4702,12 +4702,12 @@ h100-gke-cos-training-kubeflow+gpustack-dra:
   018-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: f2596d121a3670199f1054173eb97e95536ebcc42798e20a84d927061a9bf386
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: 9297a61929d047b71671e8ad75fff7671e13337e2992dffb79d457e8cb387688
-  checksums.txt: fd088b0c47977a7897a18cccd7d54d9d45bb4cd1c1833a7abc727502d5af9875
+  README.md: 36addf45ccfaa269c8df822deef71c8929e2e225dd56318ddd4c3ceb9fd3b99d
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: b1c7cd892bdd513218fcedfec11751784234376177c8df9f66835a249a1d58ba
+  checksums.txt: 1a3901cca708dd339d8aad8f337d3d409188cf8b41462ce5b7eed03424eb8d99
   deploy.sh: e0addb21427e8630423a5d6e747023380194462c80140b444c2c7b26ec3b09b7
-  recipe.yaml: 88ba04c4e85ceff35a7cc71026d44a2599d3d65bd6855c5a11b6f8320def947a
+  recipe.yaml: 34c549489d3d5e3b06f0e341065521d26bdaa93730b0e7542d0a177ca3361153
 h100-gke-cos-training-kueue:
   001-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   001-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -5109,9 +5109,9 @@ h100-kind-training-kubeflow:
   008-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   009-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  009-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  009-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   009-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  010-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  010-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   010-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   010-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -5138,12 +5138,12 @@ h100-kind-training-kubeflow:
   015-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   015-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   015-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: a6f51f1b1b26e3b50c2649a4e373d1762d6c5ad9256b5026e0a0106bc893f9ff
-  UPGRADING.md: ae7b7dba5dd80039163151c734031fadccd8cbc36bdcb4b90e15695a4ed0791c
-  bundle-info.yaml: a44ea852e14ff0896e9e70cebb2ecc3f7cf6336d27376d718498d32160a06cdb
-  checksums.txt: 759733165748771f705787610edad7464675a2d0262866e204600926ddca0e68
+  README.md: 45fc6394d94f38ab37ef18241483f336b707f9b82c67ad139f2d6fa8e67d09e6
+  UPGRADING.md: 6aa3a0a2ac4011e182b3066f998ea4ad78c8c36688991de0a755b7a04b8ce413
+  bundle-info.yaml: 79b5ea6fc25a911bff4ba378b2febf4accf0a300d124b3495d03ad6f0c875d77
+  checksums.txt: ecbfb8fae49204989e6bdf596b508259849b6d05e097f04ab0a0e19c7460484b
   deploy.sh: 35d89dca77600630d017cb7917ee93392825f80851ce030840a327a13542831f
-  recipe.yaml: 5ad8d061a6377b4fd0dec2fdef8ca36732d54f9f3f5a658938a328abefd98731
+  recipe.yaml: ae9357396625be8b52e247c15c1c7fa4527606bb78fa99fb91e2e6d6fcd284cf
 h100-kind-training-kueue:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -5497,9 +5497,9 @@ h200-eks-training-kubeflow:
   011-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   012-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  012-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  012-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   012-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  013-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  013-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   013-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   013-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -5522,12 +5522,12 @@ h200-eks-training-kubeflow:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 3ba8c160b12039e1f1bcfd102e05b1cf49b41572abc75dc538cd16330c399773
-  UPGRADING.md: 98561aa665002484811f2ec89d816c8c88e4b5545674bad98ed0e7c75d079c97
-  bundle-info.yaml: 9af8cf0288873ed2d42212ed4584059311819282704e2042f460fdce6c807ab8
-  checksums.txt: 117cd0356113be178117ec42351ee5a807df3b3254def344916b3938c9996c4d
+  README.md: dd1d41c197ef5b6daeb48979d80894dfc724f5dd321358cd93fb76d66c8ff3ff
+  UPGRADING.md: deb83e9f4c01dfe2344ce59f8137fd6123c8fe5b5cc8959cb1d3bde299fc4865
+  bundle-info.yaml: c499c07c780d1604a184b1322bf5fe501a82bc0908f61f631ff00c67d5e2e7a6
+  checksums.txt: 5ac223cde6aef18edb079737b9490a80aac2d8a167d8b5451932205354ae554b
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: 327746394cfbe994f99207d7b859094a3bc09de63a774e992122961ea5abb5e5
+  recipe.yaml: 228d16be9ddddc17f7bfd3a2c9ae11fd2845d48cb52b552d3ef9e38266d8007b
 h200-k0s-ubuntu-training:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -5820,9 +5820,9 @@ l40s-oke-training-kubeflow:
   009-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   010-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  010-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  010-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   010-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  011-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  011-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   011-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   011-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -5854,12 +5854,12 @@ l40s-oke-training-kubeflow:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: f62764ecc0e7f115697dd9e1b4e1c73b2a225dbb5092bd86006d5ec33d242a05
-  UPGRADING.md: ae7b7dba5dd80039163151c734031fadccd8cbc36bdcb4b90e15695a4ed0791c
-  bundle-info.yaml: 9ef95f041ae95c0ba1c1e5a2fc1be882821204fe56212b0d560bf04e964a3a07
-  checksums.txt: 916ac056e211391d6eb197825464f83128a275af41091999284b60729be0b735
+  README.md: 0259b05f7838d84861c13d20a6b27e89be9c72b0e81716e5322ce966f5180f5d
+  UPGRADING.md: 6aa3a0a2ac4011e182b3066f998ea4ad78c8c36688991de0a755b7a04b8ce413
+  bundle-info.yaml: ec53a2a3a61f929791253929a65ff49ed2f4de4fa50e707437914f9bc0f7c2a3
+  checksums.txt: b9e4310b005e243c473e8a3ea6df9e4ebf01226ec851dc91b305ca12582f29aa
   deploy.sh: f9a4377a6d7c21c93d164f6dbda94aa689f71c9eb975cc0799ca11128731ff32
-  recipe.yaml: 66a4df74d4ede296492e7652ad095fc9d8286aeaf169f7816f0d8d0ed524b787
+  recipe.yaml: cb5d34fa6780bf21f5617a17875d28f2d27a4f7fb043928d809ba270780e385f
 monitoring-hpa:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5bb299d13650bdb1baa19ea8047b33baa94eb03a48a8b5b0102f1ba533b392c2
@@ -6554,9 +6554,9 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   011-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   012-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  012-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  012-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   012-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  013-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  013-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   013-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   013-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   013-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -6579,12 +6579,12 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 0acf364592f3bfee11a79e4eb1fac1ab4e975bc937b2891bf465de8c424104f3
-  UPGRADING.md: 98561aa665002484811f2ec89d816c8c88e4b5545674bad98ed0e7c75d079c97
-  bundle-info.yaml: 7e54670e08895a0d4ef522734f526e88b302ab3c17864a9c6c73afb8eefd29d1
-  checksums.txt: 6f3771debeaf5070134bd5caaddfe54178ac276734004b335545a160f300d640
+  README.md: 85f778794fbd38d91feda3c67d6c2746f6832d199638f4d90b7dbb430444bd22
+  UPGRADING.md: deb83e9f4c01dfe2344ce59f8137fd6123c8fe5b5cc8959cb1d3bde299fc4865
+  bundle-info.yaml: d224adf41b8fd1df1794855d9b2eedeac089ab3f5e546336f8a6b4210eff478c
+  checksums.txt: 3929f3db32d455dd820c3e6a42b2b4d241f9aa45df1cb9191219be75ca32b7eb
   deploy.sh: 808bf3632cd336bcb1e82e37fe9c555488e2194ef545153e5b4e4490df415a25
-  recipe.yaml: aa06bf1c9fe651ec45d34283f1fb66edc2d03a2f41466c6f175492f21fadc0ff
+  recipe.yaml: 8877d93b7a3a3b7510180855cdbe42880c7f934997853420db4d74d82c562fbb
 rtx-pro-6000-lke-ubuntu-inference:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -6696,9 +6696,9 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   008-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   009-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  009-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  009-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   009-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  010-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  010-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   010-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   010-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -6721,12 +6721,12 @@ rtx-pro-6000-lke-ubuntu-training-kubeflow:
   014-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: e735714ae6bfc5fb37d619373537a3e0c2f4a93dd0e3079ff124dd168fe119c3
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: 1b7205a942bd333d1dc359be3f2422d65e7d8d0058d1bce00e47b97b72ec8c81
-  checksums.txt: b08991e4299260c38b57fcc81a98fc5c1de62c7b69cf2062d3d16481a863807f
+  README.md: 16b2021be937d411c07b25ee5c6faa168dacd3ca2560d84b739c4f3d98d2b133
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: bdf6efb01c34e373968cd4acc669892d517a0262db0fad4772a246413a17c102
+  checksums.txt: 33d36766fcb216a4f0c741c0e8ed9f828ce6a04f5530ea03633ba53ae5d32cbf
   deploy.sh: e2fa5886df14ab1b4f5acbb99740057af37cf8d70db740fcfa7b8cd0e8ff871e
-  recipe.yaml: 0ebf11df639dae8946adab6930edfa9559831742344beef3c040768eae6154d7
+  recipe.yaml: c4040139364660cafd10687fae357d907286e067cadcae56a499b71b8c049c2b
 vr200-nvke-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -6846,9 +6846,9 @@ vr200-nvke-ubuntu-training-kubeflow:
   008-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   009-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   009-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  009-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  009-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   009-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  010-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  010-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   010-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   010-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   010-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -6885,12 +6885,12 @@ vr200-nvke-ubuntu-training-kubeflow:
   017-sriov-ib-networks/install.sh: 8f4bff183a9169f137fd0c47dc059b67b1fa6121531af7d3000b093de7c277fc
   017-sriov-ib-networks/templates/nvke-vr200.yaml: f1f98e74ff094c8a3ff6a5a501bfef10207ff92694ee9698f23a1b5f2088aba3
   017-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
-  README.md: db2e9000e3b0c05171e779f667bad664c042e9a2fc03e4adc9be03ce6a655c82
-  UPGRADING.md: ae7b7dba5dd80039163151c734031fadccd8cbc36bdcb4b90e15695a4ed0791c
-  bundle-info.yaml: 5827bbc79b82e542aef8d62ff30792e0ddb4ec846068dccda979e19f213d0b5a
-  checksums.txt: 741718cb0a6d70ce0c08361666b672d5df17908ff6434cca97b6f1d94b5435db
+  README.md: 3efbdf68cd23fba9e4e30e7939b17dc6f7876124f311a1d9991b03048998aba0
+  UPGRADING.md: 6aa3a0a2ac4011e182b3066f998ea4ad78c8c36688991de0a755b7a04b8ce413
+  bundle-info.yaml: dbed2965d0f14fa83c662831d8f054ab41589db1378b7033aafecbfd2897e004
+  checksums.txt: d3a2aa1015e27196894747dafcb72eac7bfd425659c98ad6002f320f87c3e677
   deploy.sh: f9f65eddc05ea45b69327deeec27e66301258d3a36b79038604b7c1c30203b5b
-  recipe.yaml: c6e44eb707f4eb8071045269c740e4469ac7954ecb5f23e59adc4853931c501e
+  recipe.yaml: 1c399aed8831bfdfaf49730cd7c758fcc7202627396133265fec3b84059345ee
 vr200-rke2-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: f0f864c4eb1f1d647af123953d5df5aa1fa03226e1f8c5feb724ea42d304eb3f
@@ -7031,9 +7031,9 @@ vr200-rke2-ubuntu-training-kubeflow:
   010-kai-scheduler/values.yaml: 228a01377933bb03d4b9fe4e495016e4e4c15a8f8a441e7d61de89bb910ca0f3
   011-kubeflow-trainer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-kubeflow-trainer/install.sh: c70bb2b465bb7b53ba6257686458e82128ad52d73a9fa231769cc32d3086d51b
-  011-kubeflow-trainer/upstream.env: c5ec949e9f4ddb9965f2c0f6735bfc67b23043db374c2c456de372f8febca92a
+  011-kubeflow-trainer/upstream.env: 9f60f41b0557c21414c6399399eb220f40a1364da8cf4c0f7f7b9a15f1207e6d
   011-kubeflow-trainer/values.yaml: a6691e2d4436ac71d5e0b454e0a0e190e1978b310e8c53153c9cb31ac8d6bb14
-  012-kubeflow-trainer-post/Chart.yaml: 9283b9b30f64031c76a89ef82db83f6f92207dffd50d813675ab78bfbfa6bb09
+  012-kubeflow-trainer-post/Chart.yaml: 7ec4f029945a90ea458e611c985b3233212b4d0426c23184ebb62eec35c6d096
   012-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kubeflow-trainer-post/install.sh: a59e7faa920328b311d4d44322e45e6a3c9f2d8e316946aaf74061384f250dcb
   012-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
@@ -7056,9 +7056,9 @@ vr200-rke2-ubuntu-training-kubeflow:
   016-prometheus-adapter/install.sh: 688ee4274fe06c001af6835d7965b5da33ce3fbeb724263622737d0bb88249e3
   016-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: fc805b8f6328762303e6de81934aa4418d939b35b821960aae22b636cf57a0e7
-  UPGRADING.md: 83131d6503fc0f2e3bbbded673dd1daaeb5dc87f3ffccc56bf0b75f7ff2e1dc1
-  bundle-info.yaml: 10cd44e950bacdcea36e24ec8f162eb99304e37fe40bf9a599f6e07d1aee1620
-  checksums.txt: 231126672c83cdbe0e30d077b08bb19e9ae28f6fe5bfc6f34fb3c50b33490f8f
+  README.md: c419b18374aa8604b58e068bc47382d9a3cc332448f9cafedf9fe13a2959cc51
+  UPGRADING.md: 5f4cfc0b742fc69ca7e06d2e03844fdebf7403927d517e6ffb20495312c133a2
+  bundle-info.yaml: 6e81c7b553cda68b35684f7581cf87611dd9b88b96fc9c1f9061ad8fd2d06e51
+  checksums.txt: f92b88d77c2e5d21d60796f2e4d4d50a323b37fe75ab6af6f054330063c96781
   deploy.sh: 511155dc137c29bbe9b1c483d38d32b9fea07535102e90b9dea0568ca801e3c8
-  recipe.yaml: 95adba9f3850b4a4a8d1e3ae6c04c3fc65b44a05a3b6e6b6f6306ae7b00a63d7
+  recipe.yaml: 66539a7b97a91caed68339f1d48a0d2c1b7c9f60c3c3f0e7e53722390e6c017f

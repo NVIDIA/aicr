@@ -28,7 +28,7 @@ The catalog lists the driver version that the default chart render carries. Vers
 ## Summary
 
 - Components: **59**
-- Unique images: **143**
+- Unique images: **145**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -63,7 +63,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.4 | 1 |
 | kai-scheduler | helm | kai-scheduler | v0.18.8 | 12 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.5.0 | 2 |
-| kubeflow-trainer | helm | kubeflow-trainer | 2.2.1 | 4 |
+| kubeflow-trainer | helm | kubeflow-trainer | 2.4.0 | 4 |
 | kubeflow-training-operator | manifest | — | — | 1 |
 | kueue | helm | kueue | 0.19.13 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.2 | 1 |
@@ -106,6 +106,7 @@ from the component's registry default above.
 
 | Component | Variant Version | Declared By | Images |
 |-----------|-----------------|-------------|--------|
+| kubeflow-trainer | 2.2.1 | gb300-eks-ubuntu-training-kubeflow | 4 |
 | network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 20 |
 
 ## Images by component
@@ -251,9 +252,9 @@ _No images extracted._
 
 ### kubeflow-trainer
 
-- `ghcr.io/kubeflow/trainer/trainer-controller-manager:v2.2.1`
+- `ghcr.io/kubeflow/trainer/trainer-controller-manager:v2.4.0`
 - `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be`
-- `registry.k8s.io/jobset/jobset:v0.11.0`
+- `registry.k8s.io/jobset/jobset:v0.13.0`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21@sha256:8d9e10fd589a34ab8a0aa64f7e70ad075c8f1c69bea176350f8d211367697e3d`
 
 ### kubeflow-training-operator
@@ -451,6 +452,13 @@ _No images extracted._
 ### topograph
 
 - `nvcr.io/nvidia/topograph/topograph:v1.1.0`
+
+### kubeflow-trainer@2.2.1 (variant)
+
+- `ghcr.io/kubeflow/trainer/trainer-controller-manager:v2.2.1`
+- `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be`
+- `registry.k8s.io/jobset/jobset:v0.11.0`
+- `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21@sha256:8d9e10fd589a34ab8a0aa64f7e70ad075c8f1c69bea176350f8d211367697e3d`
 
 ### network-operator@25.7.0 (variant)
 

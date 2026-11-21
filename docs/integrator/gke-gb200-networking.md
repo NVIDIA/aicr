@@ -159,12 +159,15 @@ spec:
     image: my-registry/my-trainer:latest
 ```
 
-**Do not set `resourcesPerNode`.** On the pinned Kubeflow Trainer v2.2.1 a
-TrainJob value replaces the runtime's resource requirements outright rather
-than merging, so a job that sets it loses the `nvidia.com/gpu: "4"` request
-and with it the whole node. RDMA cannot be shared between Pods on a node, so
-that failure takes the fabric with it. If you must set it, repeat every
-resource in it, including the GPU request.
+**Do not set `resourcesPerNode`.** On the pinned Kubeflow Trainer v2.4.0 a
+TrainJob value merges into the runtime's resource requirements one resource at
+a time, so the `nvidia.com/gpu: "4"` request survives, but Torch still infers
+its per-node process count from the TrainJob value alone. A value without the
+GPU request yields a process count derived from CPU instead of one per GPU.
+Trainer 2.2.x replaced the runtime's requirements outright, which also drops
+the GPU request and with it the whole node; RDMA cannot be shared between Pods
+on a node, so that failure takes the fabric with it. If you must set it,
+repeat every resource in it, including the GPU request.
 
 **No recipe-generation input is required.** `gvnic-1` and `rdma-0` through
 `rdma-3` are fixed object names on every GB200/GKE cluster, so the runtime
