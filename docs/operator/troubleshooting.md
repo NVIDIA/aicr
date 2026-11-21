@@ -84,7 +84,7 @@ kubectl logs -n aicr-jobs "job/<job>"
 | --- | --- | --- |
 | 2 | `AICRInvalidRequest` | Not retried; AICR refused the input (an unsupported OS, a recipe constraint). Change the input |
 | 3 | `AICRNotFound` | Not retried; usually no recipe matches the criteria |
-| 4 | `AICRUnauthorized` | Retried after a backoff, three runs in all, then stalled; usually registry permissions for a pushing Job, or a ServiceAccount recreated moments before |
+| 4 | `AICRUnauthorized` | Retried after a backoff, three runs in all, then stalled; usually registry permissions for a pushing Job, or a ServiceAccount recreated moments before. While it waits, the message reads `retrying after an authorization failure` |
 | 5, 6, 7, 9 | none: `Resolving`, `retrying after a transient failure` | Retried with backoff from 10 seconds to 5 minutes, without a bound |
 | 1, 8, other | `AICRInternal` | Three runs for the same input, then stalled |
 | none (deadline, a pod that never started) | `AICRTimeout` | Three runs for the same input, then stalled. A pod evicted by a drain or node repair is replaced within the run and spends nothing. The message keeps the last reason the pod was not running (`last: Job <name> is not scheduled: …`) |
@@ -416,8 +416,9 @@ rollout is in `Validating`:
 unavailable, rate limited, canceled) means AICR could not finish the run.
 AICR can exit that way after its checks ran, when pushing or signing the
 evidence fails, so the operator first reads the evidence the run pushed. If
-it records a failed check, the rollout ends `Failed` on that run and nothing
-is run again. Its message leads with the verdict:
+it records failed checks, or otherwise does not record that validation
+passed, the rollout ends `Failed` on that run and nothing is run again. Its
+message leads with the verdict:
 `deployment validation failed: the evidence run <id> pushed records failed checks`,
 followed by how the run ended. The evidence is bound and recorded as for any
 failed run. Where `validation.signingKey` is set and the run failed before
@@ -438,19 +439,24 @@ Events until the evidence can be looked for.
 
 Validation is run at most three times: a third transient exit ends the
 rollout `Failed` with `deployment validation failed after 3 runs`, and any
-other failed run ends it on that run. An earlier run's Job is deleted as later
-runs start, and all of them when the rollout ends. Each failed run is recorded
-as an `AICRRunFailed` Event on the runtime, which the cluster keeps only for
-its Event TTL (an hour by default), and as an `AICR run failed` line in the
+other failed run ends it on that run. A failed run's Job stays while the next
+run runs and is deleted when the run after that starts; all of them are
+deleted when the rollout ends. Each failed run is recorded as an
+`AICRRunFailed` Event on the runtime, which the cluster keeps only for its
+Event TTL (an hour by default), and as an `AICR run failed` line in the
 operator's log. Retries lengthen `Validating`, never past
 `spec.rollout.deadline`: each run is bounded by the hour a validation Job is
 allowed and by the time the rollout has left.
 
 **Validation failed.** The rollout ends `Failed`. AICR exits 8 when checks
 fail, after pushing their evidence, and 2 when it refuses the recipe or its
-readiness pre-flight. `status.validation` names the Job, the run and, when
-evidence was pushed, its reference. Read the Job in `aicr-validation`, fix
-the cause, and retry: a retry is a new rollout and a new run. Validation
+readiness pre-flight. `status.validation` names the Job and the run, unless
+no run could be started, and the evidence reference when evidence was bound.
+The rollout's end deletes its validation Jobs, so read the cause in the
+rollout's message, the `AICRRunFailed` Event on the runtime (kept for the
+cluster's Event TTL) and the operator's log; a Job in `aicr-validation` can
+be read only while its rollout is still `Validating`. Fix the cause, and
+retry: a retry is a new rollout and a new run. Validation
 checks the components the bundle deploys: it runs against the recipe the
 bundle records, so a component an override turns off is not required.
 

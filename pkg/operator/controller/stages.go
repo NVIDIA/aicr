@@ -69,8 +69,11 @@ type stages struct {
 	creds registry.Provider
 	// now is the clock for retry backoff; nil is time.Now.
 	now func() time.Time
-	// retrying is the failure a stage waits out a backoff to retry, if any.
+	// retrying is the failure a stage waits out a backoff to retry, if any,
+	// introduced by retryingNote or unauthorizedNote.
 	retrying string
+	// failedJob is the newest run when drive observed it failed.
+	failedJob *batchv1.Job
 	// waiting says why the newest run's pod is not running, if it is not.
 	waiting string
 	// notStarted says the error drive returned is from starting a run, not
@@ -122,6 +125,7 @@ func (s *stages) drive(ctx context.Context, rt *v1alpha1.ClusterRuntime, run *st
 			s.waiting = outcome.Waiting
 			return nil, pollInterval, s.recordWaiting(ctx, newest, outcome.Waiting)
 		case aicrjob.StateFailed:
+			s.failedJob = newest
 			if err := s.record(ctx, rt, run.stage, newest, outcome); err != nil {
 				return nil, 0, err
 			}
@@ -262,7 +266,10 @@ func (s *stages) retry(ctx context.Context, run *stageRun, jobs []batchv1.Job, o
 		return 0, terminal(outcome.Err)
 	case outcome.Retry() == aicrjob.RetryTransient, outcome.Retry() == aicrjob.RetryAuthorization:
 		if wait := failedAt(newest).Add(backoff(attempt(newest))).Sub(s.clock()); wait > 0 {
-			s.retrying = errorMessage(outcome.Err)
+			s.retrying = retryingNote + errorMessage(outcome.Err)
+			if outcome.Retry() == aicrjob.RetryAuthorization {
+				s.retrying = unauthorizedNote + errorMessage(outcome.Err)
+			}
 			return wait, nil
 		}
 	}
@@ -274,16 +281,19 @@ func (s *stages) retry(ctx context.Context, run *stageRun, jobs []batchv1.Job, o
 	return 0, nil
 }
 
-// retryingNote introduces the failure a stage waits to retry in status
-// messages.
-const retryingNote = "retrying after a transient failure: "
+// How status messages introduce the failure a stage waits to retry: one of
+// AICR's transient exits, or an unauthorized exit.
+const (
+	retryingNote     = "retrying after a transient failure: "
+	unauthorizedNote = "retrying after an authorization failure: "
+)
 
 // waitingOn is why the stage has no result yet, for a status message: the
 // failure it waits to retry, else why its newest run's pod is not running,
 // else nothing.
 func (s *stages) waitingOn() string {
 	if s.retrying != "" {
-		return retryingNote + s.retrying
+		return s.retrying
 	}
 	return s.waiting
 }
