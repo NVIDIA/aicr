@@ -125,6 +125,8 @@ func run(ctx context.Context, o options, stdout io.Writer) error {
 // resolve returns p with the symlinks of its directory resolved. That
 // directory must exist; p itself may not exist yet, but must not be a symlink.
 func resolve(p string) (string, error) {
+	// Cleaned first: the directory of "out/" is "out" itself.
+	p = filepath.Clean(p)
 	if info, err := os.Lstat(p); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("%s must not be a symlink", p))
 	}

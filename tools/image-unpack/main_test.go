@@ -58,6 +58,7 @@ func TestRun(t *testing.T) {
 		wantMsg string
 	}{
 		{name: "writes coverage"},
+		{name: "-out with a trailing separator", mutate: func(o *options) { o.out += string(filepath.Separator) }},
 		{name: "missing -layout", mutate: func(o *options) { o.layout = "" }, want: errors.ErrCodeInvalidRequest, wantMsg: "-layout is required"},
 		{name: "missing -platform", mutate: func(o *options) { o.platform = "" }, want: errors.ErrCodeInvalidRequest, wantMsg: "-platform is required"},
 		{name: "missing -index", mutate: func(o *options) { o.index = "" }, want: errors.ErrCodeInvalidRequest, wantMsg: "-index is required"},
