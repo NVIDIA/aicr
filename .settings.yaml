@@ -85,6 +85,29 @@ linting:
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
   grype: 'v0.122.0'
+  # The release image checks (.github/actions/image-checks) install this Grype
+  # directly rather than through anchore/scan-action, whose bundled default
+  # would otherwise decide the scanner, and one run writes both the SARIF and
+  # the JSON report that names the vulnerability database. Refreshed by
+  # tools/update-grype-checksums via Renovate postUpgradeTasks; flat,
+  # uniquely-named key for the reason given on oras_sha256_linux_amd64.
+  grype_sha256_linux_amd64: 'e697e6f7224637df87e267e4318cc027feae99a8e1b80280241d32b9ee5d4920'
+  # Secret scan of the release images (.github/actions/image-checks, ruleset
+  # .gitleaks.toml). Installed from the release binary; gitleaks/gitleaks-action
+  # is not used.
+  # renovate: datasource=github-releases depName=gitleaks/gitleaks depType=security_tools
+  gitleaks: 'v8.30.1'
+  # Refreshed by tools/update-gitleaks-checksums via Renovate postUpgradeTasks.
+  gitleaks_sha256_linux_amd64: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+  # Malware scan engine (.github/actions/malware-scan), installed from the
+  # upstream .deb so the engine changes only when this pin does, not with the
+  # runner image. Stored without a prefix; release tags read clamav-<version>.
+  # renovate: datasource=github-releases depName=Cisco-Talos/clamav depType=security_tools
+  clamav: '1.5.5'
+  # Refreshed by tools/update-clamav-checksums via Renovate postUpgradeTasks.
+  # ClamAV publishes GPG signatures but no checksum manifest, so the refresher
+  # hashes the asset: trust-on-first-use, review the diff accordingly.
+  clamav_sha256_linux_amd64: 'fff17fb1f8917d1ea1308c9736dabe376077458aba000a5dadcce7193a8c538c'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.4'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools

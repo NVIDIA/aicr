@@ -40,6 +40,10 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Load versions
+      id: versions
+      uses: ./.github/actions/load-versions
+
     - name: Run Anchore Security Scan
       id: scan
       uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
@@ -50,6 +54,8 @@ runs:
         output-format: sarif
         only-fixed: true
         fail-build: false
+        # The Grype pinned in .settings.yaml, not the one scan-action bundles.
+        grype-version: ${{ steps.versions.outputs.grype }}
       continue-on-error: true
 
     - name: Check SARIF file exists

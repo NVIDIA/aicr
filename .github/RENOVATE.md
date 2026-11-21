@@ -9,7 +9,7 @@ Self-hosted Renovate keeps the project's dependencies up to date across `go.mod`
 
 - Configuration: [`.github/renovate.json5`](renovate.json5)
 - Workflow: [`.github/workflows/renovate.yaml`](workflows/renovate.yaml)
-- Companion scripts: [`tools/update-chainsaw-checksums`](../tools/update-chainsaw-checksums), [`tools/update-helmfile-checksums`](../tools/update-helmfile-checksums), [`tools/update-helm-diff-checksums`](../tools/update-helm-diff-checksums), [`tools/update-oras-checksums`](../tools/update-oras-checksums), [`tools/update-oasdiff-checksums`](../tools/update-oasdiff-checksums), [`tools/update-addlicense-checksums`](../tools/update-addlicense-checksums), [`tools/update-setup-envtest-checksums`](../tools/update-setup-envtest-checksums)
+- Companion scripts: [`tools/update-chainsaw-checksums`](../tools/update-chainsaw-checksums), [`tools/update-helmfile-checksums`](../tools/update-helmfile-checksums), [`tools/update-helm-diff-checksums`](../tools/update-helm-diff-checksums), [`tools/update-oras-checksums`](../tools/update-oras-checksums), [`tools/update-oasdiff-checksums`](../tools/update-oasdiff-checksums), [`tools/update-addlicense-checksums`](../tools/update-addlicense-checksums), [`tools/update-setup-envtest-checksums`](../tools/update-setup-envtest-checksums), [`tools/update-grype-checksums`](../tools/update-grype-checksums), [`tools/update-gitleaks-checksums`](../tools/update-gitleaks-checksums), [`tools/update-clamav-checksums`](../tools/update-clamav-checksums)
 
 Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are documented inline in `renovate.json5`. This doc covers what's covered, how to extend coverage, and the known gotchas.
 
@@ -37,6 +37,9 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | `.settings.yaml` `oras_sha256_*` | `postUpgradeTasks` → `tools/update-oras-checksums` |
 | `.settings.yaml` `oasdiff_sha256_linux_amd64` | `postUpgradeTasks` → `tools/update-oasdiff-checksums` |
 | `.settings.yaml` `addlicense_sha256_linux_amd64` | `postUpgradeTasks` → `tools/update-addlicense-checksums` |
+| `.settings.yaml` `grype_sha256_linux_amd64` | `postUpgradeTasks` → `tools/update-grype-checksums` |
+| `.settings.yaml` `gitleaks_sha256_linux_amd64` | `postUpgradeTasks` → `tools/update-gitleaks-checksums` |
+| `.settings.yaml` `clamav_sha256_linux_amd64` | `postUpgradeTasks` → `tools/update-clamav-checksums` (hashes the `.deb`; ClamAV publishes GPG signatures but no `checksums.txt`) |
 | `.settings.yaml` `setup_envtest_sha256_linux_amd64` | `postUpgradeTasks` → `tools/update-setup-envtest-checksums` (hashes the asset; controller-runtime publishes no `checksums.txt`) |
 | `go.mod` `golang.org/x/exp` / `github.com/google/go-licenses/v2` | the only pin for tools built from this module; the `gomod` manager is re-enabled for these two `// indirect` entries and `.settings.yaml` deliberately does not repeat them — `TestToolPinsLiveOnlyInGoMod` fails if it does |
 | `.go-version` (Go toolchain) | dedicated `golang-version` customManager (`go-toolchain` group) |
