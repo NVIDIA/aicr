@@ -9,6 +9,7 @@ needs one only for its snapshot step.
 
 | Demo | Description |
 |------|-------------|
+| [AICR video series](videos/README.md) | One-minute walkthroughs with editable sources and local rebuild instructions |
 | [cuj1-training.md](cuj1-training.md) | CUJ1 (training) - EKS + GKE end-to-end, plus a config-driven GKE + signed-evidence variant |
 | [cuj1-slinky-slurm.md](cuj1-slinky-slurm.md) | CUJ1 - Slinky Slurm on EKS / GKE / Kind (recipe → bundle → validate → `srun`) |
 | [slinky-slurm-demo.html](slinky-slurm-demo.html) | CUJ1 Slinky Slurm — slide deck |

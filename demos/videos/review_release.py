@@ -20,7 +20,7 @@ import re
 import subprocess
 
 VIDEOS = Path(__file__).resolve().parent
-REPO = VIDEOS.parent
+REPO = VIDEOS.parent.parent
 STABLE_TAG = re.compile(r"v(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}")
 INDEX_ID = re.compile(r"^- \[\*\*(\d{2}) · ", re.MULTILINE)
 FEATURE_PATHS = ("pkg/", "cmd/", "api/", "recipes/", "validators/", "charts/", "docs/design/")
