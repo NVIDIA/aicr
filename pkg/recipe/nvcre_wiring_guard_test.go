@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -157,8 +158,12 @@ func TestNVCREWiringGuardNamesTheMissingPiece(t *testing.T) {
 			wantMsg: "must set valuesFile",
 		},
 		{
-			name:    "no Trainer source",
-			mutate:  func(s *nvcreFragmentSpec) { s.Mixins = removeString(s.Mixins, "platform-kubeflow") },
+			name: "no Trainer source",
+			mutate: func(s *nvcreFragmentSpec) {
+				s.ComponentRefs = slices.DeleteFunc(s.ComponentRefs, func(r nvcreFragmentRef) bool {
+					return r.Name == nvcreTrainerComponent
+				})
+			},
 			wantMsg: "no kubeflow-trainer in the resolved recipe",
 		},
 		{
@@ -274,17 +279,21 @@ func TestNVCREServiceMonitorRequiresPrometheusCRDs(t *testing.T) {
 	}
 }
 
-// nvcreFragmentSpec is the documented fragment's shape: the two spec keys it
-// sets on an overlay that already inherits a stock base.
+// nvcreFragmentSpec is the documented fragment's shape: the spec keys it sets
+// on an overlay that already inherits a stock base.
 type nvcreFragmentSpec struct {
-	Mixins        []string `yaml:"mixins"`
-	ComponentRefs []struct {
-		Name           string         `yaml:"name"`
-		Type           string         `yaml:"type"`
-		ValuesFile     string         `yaml:"valuesFile,omitempty"`
-		DependencyRefs []string       `yaml:"dependencyRefs,omitempty"`
-		Overrides      map[string]any `yaml:"overrides,omitempty"`
-	} `yaml:"componentRefs"`
+	Mixins        []string           `yaml:"mixins"`
+	ComponentRefs []nvcreFragmentRef `yaml:"componentRefs"`
+}
+
+type nvcreFragmentRef struct {
+	Name           string         `yaml:"name"`
+	Type           string         `yaml:"type"`
+	Version        string         `yaml:"version,omitempty"`
+	ValuesFile     string         `yaml:"valuesFile,omitempty"`
+	ManifestFiles  []string       `yaml:"manifestFiles,omitempty"`
+	DependencyRefs []string       `yaml:"dependencyRefs,omitempty"`
+	Overrides      map[string]any `yaml:"overrides,omitempty"`
 }
 
 // readEnablingNVCREFragment returns the first YAML block under the catalog's
@@ -354,12 +363,33 @@ func buildNVCREProbeOrErr(ctx context.Context, t *testing.T, fragment nvcreFragm
 	if !ok {
 		t.Fatalf("%s has no spec block", nvcreProbeOverlayPath)
 	}
-	spec["mixins"] = fragment.Mixins
+	// The fragment tells the reader to leave platform-kubeflow out, since it
+	// declares kubeflow-trainer itself; the probe leaf's other mixins stay.
+	var mixins []any
+	if baseMixins, ok := spec["mixins"].([]any); ok {
+		for _, m := range baseMixins {
+			if m != "platform-kubeflow" {
+				mixins = append(mixins, m)
+			}
+		}
+	}
+	for _, m := range fragment.Mixins {
+		if !slices.Contains(mixins, any(m)) {
+			mixins = append(mixins, m)
+		}
+	}
+	spec["mixins"] = mixins
 	refs := make([]any, 0, len(fragment.ComponentRefs))
 	for _, ref := range fragment.ComponentRefs {
 		encoded := map[string]any{"name": ref.Name, "type": ref.Type}
+		if ref.Version != "" {
+			encoded["version"] = ref.Version
+		}
 		if ref.ValuesFile != "" {
 			encoded["valuesFile"] = ref.ValuesFile
+		}
+		if len(ref.ManifestFiles) > 0 {
+			encoded["manifestFiles"] = ref.ManifestFiles
 		}
 		if len(ref.DependencyRefs) > 0 {
 			encoded["dependencyRefs"] = ref.DependencyRefs
@@ -421,12 +451,53 @@ func (p *fileOverrideProvider) Source(path string) string {
 	return p.base.Source(path)
 }
 
-func removeString(in []string, drop string) []string {
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if s != drop {
-			out = append(out, s)
+// TestNVCRETrainerRefMatchesMixin keeps the two copies of platform-kubeflow's
+// kubeflow-trainer ref, in the NVCRE leaf and in the catalog fragment, in step
+// with the mixin. They exist only to hold the Trainer version NVCRE supports
+// (#3949), so the version is the one field allowed to differ: a manifest file
+// or dependency added to the mixin would otherwise skip the NVCRE recipe.
+func TestNVCRETrainerRefMatchesMixin(t *testing.T) {
+	const (
+		mixinPath = "mixins/platform-kubeflow.yaml"
+		leafPath  = "overlays/gb300-eks-ubuntu-training-kubeflow.yaml"
+	)
+
+	trainerRef := func(t *testing.T, what string, refs []nvcreFragmentRef) nvcreFragmentRef {
+		t.Helper()
+		i := slices.IndexFunc(refs, func(r nvcreFragmentRef) bool { return r.Name == nvcreTrainerComponent })
+		if i < 0 {
+			t.Fatalf("%s declares no %s componentRef", what, nvcreTrainerComponent)
+		}
+		return refs[i]
+	}
+	readSpec := func(t *testing.T, path string) nvcreFragmentSpec {
+		t.Helper()
+		raw, err := GetEmbeddedFS().ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var doc struct {
+			Spec nvcreFragmentSpec `yaml:"spec"`
+		}
+		if err := yaml.Unmarshal(raw, &doc); err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		return doc.Spec
+	}
+
+	want := trainerRef(t, mixinPath, readSpec(t, mixinPath).ComponentRefs)
+	copies := map[string]nvcreFragmentRef{
+		leafPath:    trainerRef(t, leafPath, readSpec(t, leafPath).ComponentRefs),
+		catalogPath: trainerRef(t, catalogPath, readEnablingNVCREFragment(t).ComponentRefs),
+	}
+	for where, got := range copies {
+		if got.Version == "" {
+			t.Errorf("%s: the %s ref sets no version; it exists only to hold one", where, nvcreTrainerComponent)
+		}
+		got.Version = want.Version
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: the %s ref differs from %s other than in version:\n got  %+v\n want %+v",
+				where, nvcreTrainerComponent, mixinPath, got, want)
 		}
 	}
-	return out
 }

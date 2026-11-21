@@ -1675,9 +1675,11 @@ See [AKS GPU Setup](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-man
 
 ## Enabling NVCRE
 
-**nvcre** is on one shipped overlay, `gb300-eks-ubuntu-training-kubeflow`, which carries the `componentRef` in the fragment below. On any other overlay, enabling it means writing the `componentRef` yourself. Two requirements are easy to miss, and each one produces a different failure.
+**nvcre** is on one shipped overlay, `gb300-eks-ubuntu-training-kubeflow`, which carries the `componentRefs` in the fragment below. On any other overlay, enabling it means writing them yourself. Three requirements are easy to miss, and each one produces a different failure.
 
-`dependencyRefs` only *orders* components that are already in `componentRefs` — it does not add one. Naming a component that is not present fails resolution outright with `component "nvcre" references unknown dependency "kubeflow-trainer"`. NVCRE drives its benchmarks through Kubeflow Trainer (`TrainJob` / `TrainingRuntime`) and the chart does not install Trainer, so Trainer has to come from somewhere else — the `platform-kubeflow` mixin is the cleanest source.
+`dependencyRefs` only *orders* components that are already in `componentRefs`: it does not add one. Naming a component that is not present fails resolution outright with `component "nvcre" references unknown dependency "kubeflow-trainer"`. NVCRE drives its benchmarks through Kubeflow Trainer (`TrainJob` / `TrainingRuntime`) and the chart does not install Trainer, so Trainer has to come from somewhere else.
+
+That Trainer has to be one NVCRE supports. NVCRE v0.12.0 supports Kubeflow Trainer **v2.2.1** only: it pins `kubeflowTrainerVersion = "v2.2.1"`, and its `setup status` reports any other Trainer version as unsupported. The registry default is 2.4.0, which is what the `platform-kubeflow` mixin brings, so the fragment declares the mixin's `kubeflow-trainer` ref itself with `version: 2.2.1` instead. A Trainer held at 2.2.1 keeps the Argo CD reconcile loop on its webhook certificate Secrets ([#3425](https://github.com/NVIDIA/aicr/issues/3425)); [#3949](https://github.com/NVIDIA/aicr/issues/3949) tracks moving to the registry default once NVCRE supports it.
 
 Component values are also never auto-discovered from the component name: a ref with no `valuesFile` and no inline overrides resolves to an empty map. Omit it and the chart defaults apply, which means a `ServiceMonitor` you did not ask for (requiring prometheus-operator CRDs) and a release-prefixed Deployment name such as `aicr-stack-nvcre-manager`, which the shipped health check cannot match.
 
@@ -1685,21 +1687,27 @@ Add this to an overlay that already inherits a stock AICR base:
 
 ```yaml
 spec:
-  mixins:
-    - platform-kubeflow          # brings in kubeflow-trainer
   componentRefs:
     - name: nvcre
       type: Helm
       valuesFile: components/nvcre/values.yaml
       dependencyRefs:
         - kubeflow-trainer
+    - name: kubeflow-trainer     # platform-kubeflow's ref, held at 2.2.1
+      type: Helm
+      version: 2.2.1
+      valuesFile: components/kubeflow-trainer/values.yaml
+      manifestFiles:
+        - components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml
+      dependencyRefs:
+        - cert-manager
+        - prometheus-operator-crds
+        - gpu-operator
 ```
 
-Do not also declare `kubeflow-trainer` locally. The mixin's ref sets `type`, `valuesFile`, and `dependencyRefs`, all of which are prohibited collision fields, and overlay chains merge before mixins — so a local ref collides rather than overrides.
+Leave `platform-kubeflow` out of the overlay's `mixins`. Its `kubeflow-trainer` ref sets `type` and `valuesFile`, which a mixin may not set on a component the overlay already declares, and overlay chains merge before mixins, so the two collide rather than override.
 
-Prerequisites: NVIDIA GPU Operator and cert-manager, both inherited from `base.yaml` by every stock recipe, plus Kubeflow Trainer, which is not — see the fragment above.
-
-NVCRE v0.12.0 expects Kubeflow Trainer **v2.2.1** — it pins `kubeflowTrainerVersion = "v2.2.1"` — which is the registry default, so its `setup status` reports a supported Trainer. A cluster still running 2.2.0 is reported as unsupported; no functional break is known between the two versions: the CRD delta is documentation text plus one embedded PodSpec field NVCRE does not set.
+Prerequisites: NVIDIA GPU Operator and cert-manager, both inherited from `base.yaml` by every stock recipe, plus Kubeflow Trainer, which is not; see the fragment above.
 
 ### Cluster-scoped objects and release ownership
 
@@ -4143,6 +4151,18 @@ the path is resolved inside the controller's own filesystem.
 `MultiKueueKubeConfigPathValidation` is alpha and off by default in 0.19 and
 upstream expects to turn it on later, so prefer `locationType: Secret` or
 `ClusterProfile` rather than taking that dependency.
+
+### `kubeflow-trainer`: `2.2.x` to `2.4.0`
+
+`2.4.0` stops declaring `data` on the trainer and JobSet webhook certificate Secrets, which ends the Argo CD reconcile loop on them ([#3425](https://github.com/NVIDIA/aicr/issues/3425)). An existing `2.2.x` install cannot move to it in one step. Upstream requires every `2.0` to `2.2` install to run `2.3.0` first, and `2.3.0` moves the Trainer CRDs out of the chart's `crds/` directory into its templates, so Helm now owns them as release resources.
+
+1. **Helm, Helmfile, Flux, Fleet and Terraform:** mark the three Trainer CRDs as belonging to the release before upgrading, or the upgrade fails with `invalid ownership metadata`. Argo CD needs no preparation.
+2. Set the `kubeflow-trainer` componentRef version to `2.3.0` in the recipe file you generated with `aicr recipe`, regenerate the bundle from it (`aicr bundle --recipe`), deploy it, and wait for the controller to become available. Edit the generated recipe, not an overlay: an overlay that inherits `platform-kubeflow` cannot set the version, because the mixin's ref for `kubeflow-trainer` collides with one the overlay declares.
+3. Then deploy the `2.4.0` bundle, once no MPI-based TrainJob is suspended.
+
+Do not roll back or uninstall while on `2.3.0`, and leave Terraform's `atomic` off for that step: its CRD templates lack the `helm.sh/resource-policy: keep` annotation `2.4.0` adds, so a rollback to `2.2.x` deletes the CRDs and every TrainJob with them. `aicr upgrade-check` and the bundle's `UPGRADING.md` print the exact commands for each deployer.
+
+`gb300-eks-ubuntu-training-kubeflow` stays on `2.2.1` because NVCRE v0.12.0 supports no other Trainer version (see [Enabling NVCRE](#enabling-nvcre)), so its upgrade path is unchanged for now.
 
 ### `nodewright-operator`: `v0.18.0` renames `Skyhook` to `NodeWright`
 

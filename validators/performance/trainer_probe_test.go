@@ -154,7 +154,7 @@ func TestIsTrainerInstalled_CompleteInstall(t *testing.T) {
 // built from these same constants, so they cannot catch a wrong value — only a
 // literal comparison can.
 //
-// Values verified against kubeflow/trainer v2.2.0: the generic kubebuilder names
+// Values verified against kubeflow/trainer v2.2.0 and v2.4.0: the generic kubebuilder names
 // in manifests/base/webhook/manifests.yaml are replaced by
 // manifests/base/webhook/patch_{validating,mutating}.yaml, each an `op: replace`
 // on /metadata/name. The kubeflow-trainer Helm chart renders the same two names.
@@ -182,7 +182,7 @@ func TestTrainerUpstreamNamesLocked(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.got != tt.want {
-				t.Errorf("got %q, want %q (must match upstream v2.2.0)", tt.got, tt.want)
+				t.Errorf("got %q, want %q (must match upstream v2.2.0 and v2.4.0)", tt.got, tt.want)
 			}
 		})
 	}
