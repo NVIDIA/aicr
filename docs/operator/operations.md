@@ -414,9 +414,9 @@ nvidia-dra-driver-gpu, which AICR assesses `safe`, and nfd, which it assesses
 apply only when the topology-updater RBAC is managed outside the chart
 (`topologyUpdater.rbac.create=false`). AICR v1.2.0's nfd record has no `apply`
 step, so after nfd is applied the rollout pauses for acknowledgement of all
-three steps: if you widened the RBAC, do `narrow-nrt-rbac` once every
-topology-updater Pod runs 0.20.x and you no longer need a rollback path, then
-acknowledge.
+three steps. Do `widen-nrt-rbac` before approving; after the pause, if you
+widened the RBAC, do `narrow-nrt-rbac` once every topology-updater Pod runs
+0.20.x and you no longer need a rollback path, then acknowledge.
 
 From v1.0.x, the same chart upgrade also moves validation to the v1.1
 identities: the launcher loses `cluster-admin`, the `aicr-validator`

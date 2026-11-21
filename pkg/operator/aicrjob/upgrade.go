@@ -59,6 +59,10 @@ type ComponentChange struct {
 	Steps        []UpgradeStep `json:"steps,omitempty"`
 }
 
+// ApplyStepID is the ID of a manual record's step where the deployer applies
+// the regenerated bundle: the one step the operator performs.
+const ApplyStepID = "apply"
+
 // UpgradeStep is one step of a transition record.
 type UpgradeStep struct {
 	ID          string `json:"id"`

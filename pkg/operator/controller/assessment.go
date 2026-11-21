@@ -264,9 +264,9 @@ func assessed(from, to *plan.Document) bool {
 
 // afterApply is the IDs of a transition record's steps after its apply, the
 // one step the operator performs. A record that names no apply step cannot
-// say which of its steps follow the apply, so all of them do.
+// say which of its steps follow the apply, so it returns all of them.
 func afterApply(steps []aicrjob.UpgradeStep) []string {
-	i := slices.IndexFunc(steps, func(s aicrjob.UpgradeStep) bool { return s.ID == "apply" })
+	i := slices.IndexFunc(steps, func(s aicrjob.UpgradeStep) bool { return s.ID == aicrjob.ApplyStepID })
 	if len(steps) == 0 || i == len(steps)-1 {
 		return nil
 	}

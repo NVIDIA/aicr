@@ -196,8 +196,9 @@ type RolloutStep struct {
 	UID string `json:"uid,omitempty"`
 
 	// PostApplySteps are the IDs, in order, of a manual transition record's
-	// steps after the apply. Once the release is ready the rollout waits for
-	// the approver to acknowledge them before the plan becomes active.
+	// steps after its apply step, or of all its steps when it names none.
+	// Once the release is ready the rollout waits for the approver to
+	// acknowledge them before the plan becomes active.
 	// +optional
 	// +listType=atomic
 	// +kubebuilder:validation:MaxItems=16
