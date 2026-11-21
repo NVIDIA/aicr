@@ -37,3 +37,187 @@ transitions:
       AICR does not set. Nothing to change on upgrade.
     references:
       - https://github.com/kubeflow/trainer/releases/tag/v2.2.1
+
+  # AICR never pins 2.3.0. It is the release upstream requires every 2.0-2.2
+  # install to pass through. This record is the first leg of that route; the
+  # blocked record below stops a 2.2 cluster from jumping to 2.4 in one step.
+  - from: ">=2.2.0 <2.3.0"
+    to: "2.3.0"
+    verdict: manual
+    summary: >-
+      2.3.0 moves the Trainer CRDs from the chart's crds/ directory into its
+      templates, so Helm now manages them as release resources. The CRDs a
+      2.2 install created carry no Helm ownership metadata, and a Helm-driven
+      upgrade fails with "invalid ownership metadata" until they do.
+    reversible: false
+    reversibleNotes: >-
+      Do not roll back or uninstall while on 2.3.0. Its CRD templates lack the
+      helm.sh/resource-policy keep annotation (added in 2.4.0), so a Helm
+      rollback to 2.2.x or an uninstall deletes the Trainer CRDs, and with
+      them every TrainJob, TrainingRuntime and ClusterTrainingRuntime. That
+      includes the automatic rollback Terraform's atomic = true performs when
+      the 2.3.0 upgrade fails, so leave atomic off for this upgrade.
+    stepsByDeployer:
+      - deployers: [helm, helmfile, flux, fleet, terraform]
+        steps:
+          - id: adopt-crds
+            description: >-
+              Find the release with `helm list -A --filter 'kubeflow-trainer$'`
+              (one row: the anchor leaves out the kubeflow-trainer-post
+              release, and Flux names the release kubeflow-kubeflow-trainer).
+              Mark the three CRDs as belonging to it, using its NAME and
+              NAMESPACE:
+              `kubectl annotate crd trainjobs.trainer.kubeflow.org
+              trainingruntimes.trainer.kubeflow.org
+              clustertrainingruntimes.trainer.kubeflow.org
+              meta.helm.sh/release-name=<NAME>
+              meta.helm.sh/release-namespace=<NAMESPACE>` and
+              `kubectl label crd trainjobs.trainer.kubeflow.org
+              trainingruntimes.trainer.kubeflow.org
+              clustertrainingruntimes.trainer.kubeflow.org
+              app.kubernetes.io/managed-by=Helm`.
+            reason: >-
+              Helm refuses to take over an existing object that names no
+              release, so without this the upgrade stops with the 2.2
+              controller still running. Upstream documents the same commands
+              in its migration guide.
+          - id: upgrade-to-2-3-0
+            description: >-
+              Set the kubeflow-trainer componentRef version to 2.3.0 in your
+              recipe, regenerate the bundle, and deploy it as usual.
+            reason: >-
+              Upstream requires 2.0 to 2.2 installs to run 2.3 before any
+              later release.
+      - steps:
+          - id: upgrade-to-2-3-0
+            description: >-
+              Set the kubeflow-trainer componentRef version to 2.3.0 in your
+              recipe, regenerate the bundle, and sync it as usual. No CRD
+              preparation is needed.
+            reason: >-
+              Argo CD applies the chart's manifests itself and does not check
+              Helm ownership metadata, so it takes over the existing CRDs on
+              sync. Upstream requires 2.0 to 2.2 installs to run 2.3 before
+              any later release.
+    references:
+      - https://github.com/kubeflow/trainer/releases/tag/v2.3.0
+      - https://github.com/kubeflow/trainer/pull/3655#issuecomment-4864247007
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#kubeflow-trainer-22x-to-240
+
+  # Shown in every 2.4 bundle, where the 2.2 to 2.3 record above is not:
+  # existing installs are on 2.2, and a bundle only renders records whose to
+  # holds its pin.
+  - from: ">=2.2.0 <2.3.0"
+    to: "2.4.0"
+    skips: ["2.3.0"]
+    verdict: blocked
+    summary: >-
+      Upstream requires a 2.2 install to run 2.3.0 before any later release,
+      and 2.3.0 is where the Trainer CRDs move into the chart's templates. A
+      Helm-driven upgrade from 2.2 fails with "invalid ownership metadata"
+      until those CRDs are marked as belonging to the release.
+    stepsByDeployer:
+      - deployers: [helm, helmfile, flux, fleet, terraform]
+        steps:
+          - id: adopt-crds
+            description: >-
+              Find the release with `helm list -A --filter 'kubeflow-trainer$'`
+              (one row: the anchor leaves out the kubeflow-trainer-post
+              release, and Flux names the release kubeflow-kubeflow-trainer).
+              Mark the three CRDs as belonging to it, using its NAME and
+              NAMESPACE:
+              `kubectl annotate crd trainjobs.trainer.kubeflow.org
+              trainingruntimes.trainer.kubeflow.org
+              clustertrainingruntimes.trainer.kubeflow.org
+              meta.helm.sh/release-name=<NAME>
+              meta.helm.sh/release-namespace=<NAMESPACE>` and
+              `kubectl label crd trainjobs.trainer.kubeflow.org
+              trainingruntimes.trainer.kubeflow.org
+              clustertrainingruntimes.trainer.kubeflow.org
+              app.kubernetes.io/managed-by=Helm`.
+            reason: >-
+              Helm refuses to take over an existing object that names no
+              release, so without this the upgrade stops with the 2.2
+              controller still running.
+          - id: land-on-2-3-0
+            description: >-
+              Set the kubeflow-trainer componentRef version to 2.3.0 in your
+              recipe, regenerate the bundle, deploy it, and wait for the
+              kubeflow-trainer-controller-manager Deployment to become
+              available. Do not roll back or uninstall while on 2.3.0, and on
+              terraform leave atomic off for this apply.
+            reason: >-
+              2.3.0's CRD templates lack the keep annotation 2.4.0 adds, so a
+              rollback or uninstall there deletes the CRDs and every TrainJob
+              with them. Terraform's atomic = true rolls a failed upgrade back
+              on its own.
+          - id: apply-this-bundle
+            description: >-
+              Once no MPI-based TrainJob is suspended, deploy this bundle as
+              usual.
+            reason: >-
+              2.4.0 sets new environment variables on MPI-based TrainJobs, and
+              a suspended one created earlier cannot take them, so it fails to
+              resume.
+      - steps:
+          - id: land-on-2-3-0
+            description: >-
+              Set the kubeflow-trainer componentRef version to 2.3.0 in your
+              recipe, regenerate the bundle, sync it, and wait for the
+              kubeflow-trainer-controller-manager Deployment to become
+              available. No CRD preparation is needed.
+            reason: >-
+              Upstream requires a 2.2 install to run 2.3.0 before any later
+              release. Argo CD applies the chart's manifests itself and does
+              not check Helm ownership metadata, so it takes over the existing
+              CRDs on sync.
+          - id: apply-this-bundle
+            description: >-
+              Once no MPI-based TrainJob is suspended, sync this bundle as
+              usual.
+            reason: >-
+              2.4.0 sets new environment variables on MPI-based TrainJobs, and
+              a suspended one created earlier cannot take them, so it fails to
+              resume.
+    references:
+      - https://github.com/kubeflow/trainer/releases/tag/v2.3.0
+      - https://github.com/kubeflow/trainer/pull/3655#issuecomment-4864247007
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#kubeflow-trainer-22x-to-240
+
+  - from: ">=2.3.0 <2.4.0"
+    to: "2.4.0"
+    verdict: manual
+    summary: >-
+      2.4.0 sets new PRTE_MCA_* environment variables on MPI-based TrainJobs
+      (DeepSpeed, MLX). A suspended MPI TrainJob created before the upgrade
+      cannot take them, because its JobSet is immutable, so it fails to
+      resume.
+    precondition: >-
+      No MPI-based TrainJob is suspended. Let running ones finish, or plan to
+      delete and recreate any suspended one after the upgrade. Every
+      replicatedJob in a runtime you authored has a name of 20 characters or
+      fewer: 2.4.0's CRDs reject a longer one when the runtime is created or
+      changed. AICR's own runtimes meet both, since they use the torch plugin
+      and name their replicatedJob node.
+    stepsByDeployer:
+      - steps:
+          - id: drain-suspended-mpi-trainjobs
+            description: >-
+              List suspended TrainJobs and their runtimes with `kubectl get
+              trainjobs -A -o
+              jsonpath='{range .items[?(@.spec.suspend==true)]}{.metadata.namespace}/{.metadata.name}{"\t"}{.spec.runtimeRef.kind}/{.spec.runtimeRef.name}{"\n"}{end}'`
+              and, for any whose runtime uses the MPI plugin, either resume and
+              finish it before upgrading or delete it and recreate it
+              afterwards.
+            reason: >-
+              Upstream's 2.4.0 notes flag this as needing action before the
+              upgrade; the affected TrainJob otherwise stays stuck after it.
+          - id: upgrade
+            description: Regenerate the bundle at the new pin and deploy or sync it as usual.
+            reason: >-
+              The chart also renders its webhook certificate Secrets without
+              a data block, which ends the Argo CD selfHeal reset loop on
+              them (NVIDIA/aicr#3425).
+    references:
+      - https://github.com/kubeflow/trainer/releases/tag/v2.4.0
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#kubeflow-trainer-22x-to-240
