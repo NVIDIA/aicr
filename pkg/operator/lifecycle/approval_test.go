@@ -334,8 +334,9 @@ func TestApproveRefusesWhatCannotBeApproved(t *testing.T) {
 
 // A manual record that names no apply step gets a note under it: the rollout
 // waits after the apply for all of its steps, so the ones meant for before
-// the upgrade must be done before approving. A record with an apply step
-// gets none.
+// the upgrade must be done before approving. A record with an apply step, a
+// blocked one and a replacement, none of which the rollout holds that way,
+// get none.
 func TestDescribeRecordedStepsWithoutApply(t *testing.T) {
 	t.Parallel()
 	report := &aicrjob.UpgradeReport{Components: []aicrjob.ComponentChange{
@@ -343,6 +344,10 @@ func TestDescribeRecordedStepsWithoutApply(t *testing.T) {
 			{ID: "widen-nrt-rbac", Description: "widen"}, {ID: "sync-nfd", Description: "sync"}, {ID: "narrow-nrt-rbac", Description: "narrow"}}},
 		{Component: "nvsentinel", Change: "version", From: "1.31.0", To: "1.32.0", Verdict: "manual", Steps: []aicrjob.UpgradeStep{
 			{ID: "check-aws-replace-vm", Description: "check"}, {ID: "apply", Description: "sync"}}},
+		{Component: "grove", Change: "version", From: "0.1.0", To: "0.2.0", Verdict: "blocked", Steps: []aicrjob.UpgradeStep{
+			{ID: "land-on-0.1.5", Description: "stop"}}},
+		{Component: "kai-scheduler", Change: "replaced", Verdict: "manual", Steps: []aicrjob.UpgradeStep{
+			{ID: "migrate-queues", Description: "migrate"}}},
 	}}
 	var out bytes.Buffer
 	describeRecordedSteps(report, &out)

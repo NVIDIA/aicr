@@ -284,7 +284,7 @@ func describeRecordedSteps(report *aicrjob.UpgradeReport, w io.Writer) {
 		for _, s := range ch.Steps {
 			fmt.Fprintf(w, "    %s: %s\n", s.ID, s.Description)
 		}
-		if ch.Assessment() == v1alpha1.AssessmentManual && len(ch.Steps) > 0 &&
+		if ch.Change == "version" && ch.Assessment() == v1alpha1.AssessmentManual && len(ch.Steps) > 0 &&
 			!slices.ContainsFunc(ch.Steps, func(s aicrjob.UpgradeStep) bool { return s.ID == aicrjob.ApplyStepID }) {
 
 			fmt.Fprintf(w, "    %s\n", noApplyStepNote)
