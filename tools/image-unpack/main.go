@@ -43,6 +43,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"aicr.run/pkg/errors"
@@ -124,17 +125,29 @@ func run(ctx context.Context, o options, stdout io.Writer) error {
 
 // resolve returns p with the symlinks of its directory resolved. That
 // directory must exist; p itself may not exist yet, but must not be a symlink.
+// p is never cleaned: the kernel applies ".." after following a symlink, and
+// cleaning would apply it before, so the checked path could differ from the
+// one the caller opens.
 func resolve(p string) (string, error) {
-	// Cleaned first: the directory of "out/" is "out" itself.
-	p = filepath.Clean(p)
-	if info, err := os.Lstat(p); err == nil && info.Mode()&os.ModeSymlink != 0 {
+	trimmed := strings.TrimRight(p, string(filepath.Separator))
+	parent, base := ".", trimmed
+	if i := strings.LastIndexByte(trimmed, filepath.Separator); i >= 0 {
+		parent, base = trimmed[:i], trimmed[i+1:]
+		if parent == "" {
+			parent = string(filepath.Separator)
+		}
+	}
+	if base == "" || base == "." || base == ".." {
+		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("%s must end in a file or directory name", p))
+	}
+	if info, err := os.Lstat(trimmed); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("%s must not be a symlink", p))
 	}
-	dir, err := filepath.EvalSymlinks(filepath.Dir(p))
+	dir, err := filepath.EvalSymlinks(parent)
 	if err != nil {
 		return "", errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("failed to resolve the directory of %s", p), err)
 	}
-	return filepath.Join(dir, filepath.Base(p)), nil
+	return filepath.Join(dir, base), nil
 }
 
 // within reports whether path is dir or lies under it.

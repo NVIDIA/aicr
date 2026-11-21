@@ -175,6 +175,33 @@ func TestRunResolvesCoveragePath(t *testing.T) {
 			wantMsg: "must not be a symlink",
 		},
 		{
+			// The kernel follows reports to real/sub before applying "..", so
+			// this names real/coverage.json, a symlink; cleaned first, it
+			// would name dir/coverage.json, which does not exist.
+			name: "a symlinked report reached through .. after a link",
+			setup: func(t *testing.T, dir string) string {
+				if err := os.MkdirAll(filepath.Join(dir, "real", "sub"), 0o750); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(dir, "real", "sub"), filepath.Join(dir, "reports")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(dir, "elsewhere"), filepath.Join(dir, "real", "coverage.json")); err != nil {
+					t.Fatal(err)
+				}
+				sep := string(filepath.Separator)
+				return filepath.Join(dir, "reports") + sep + ".." + sep + "coverage.json"
+			},
+			wantMsg: "must not be a symlink",
+		},
+		{
+			name: "a report path ending in ..",
+			setup: func(_ *testing.T, dir string) string {
+				return filepath.Join(dir, "reports") + string(filepath.Separator) + ".."
+			},
+			wantMsg: "must end in a file or directory name",
+		},
+		{
 			name: "a missing report directory",
 			setup: func(_ *testing.T, dir string) string {
 				return filepath.Join(dir, "absent", "coverage.json")
