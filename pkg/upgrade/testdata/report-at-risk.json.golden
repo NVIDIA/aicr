@@ -12,7 +12,7 @@
       "verdict": "manual",
       "notes": "1 minor, 1 step, manual across 3 minors",
       "reason": "recorded",
-      "explanation": "recorded manual: the record covering 0.18.0 describes the move from 0.17.2 to 0.18.1. Follow the steps below in order, applying the bundle at the apply step, or after the last step if none is named",
+      "explanation": "recorded manual: the record covering 0.18.0 describes the move from 0.17.2 to 0.18.1. Follow the steps below in order. The apply step is where the bundle is applied; without one, each step's own instructions say when to apply",
       "jump": "1 minor",
       "covers": "3 minors",
       "breaking": true,
