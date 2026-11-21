@@ -16,12 +16,27 @@ package main
 
 import (
 	"context"
+	"maps"
+	"net/http"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/meta/testrestmapper"
+	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/config"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	ctrlmanager "sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
 	"aicr.run/pkg/operator/config"
+	"aicr.run/pkg/operator/controller"
+	"aicr.run/pkg/operator/manager"
 	"aicr.run/pkg/operator/registry"
 	"aicr.run/pkg/operator/version"
 )
@@ -165,5 +180,60 @@ func TestCredentialProviders(t *testing.T) {
 	cfg.RegistryRepository = repository
 	if _, _, err = credentials(context.Background(), nil, nil, &cfg); err == nil {
 		t.Fatal("the aws provider accepted a registry that is not ECR")
+	}
+}
+
+// healthzRecorder records the health checks setupControllers registers.
+type healthzRecorder struct {
+	ctrlmanager.Manager
+	checks map[string]healthz.Checker
+}
+
+func (m *healthzRecorder) AddHealthzCheck(name string, check healthz.Checker) error {
+	m.checks[name] = check
+	return nil
+}
+
+// The shipped operator must serve the stuck-reconcile liveness check.
+func TestSetupControllersRegistersRolloutLiveness(t *testing.T) {
+	isolate(t)
+	t.Setenv("POD_NAME", "")
+	scheme, err := manager.NewScheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults()
+	cfg.RegistryRepository = repository
+	cfg.RegistryCredentialsSecret = "registry-auth"
+	// Nothing listens at the host and the static mapper answers instead of
+	// discovery, so setup registers its watches without reaching a cluster.
+	mgr, err := ctrl.NewManager(&rest.Config{Host: "http://127.0.0.1:1"}, ctrl.Options{
+		Scheme: scheme,
+		Cache:  controller.CacheOptions(cfg.OperatorNamespace, cfg.JobsNamespace, cfg.DiscoveryNamespace),
+		MapperProvider: func(*rest.Config, *http.Client) (meta.RESTMapper, error) {
+			return testrestmapper.TestOnlyStaticRESTMapper(scheme), nil
+		},
+		Metrics:                metricsserver.Options{BindAddress: "0"},
+		HealthProbeBindAddress: "0",
+		Controller:             ctrlconfig.Controller{SkipNameValidation: ptr.To(true)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, c := range slices.Concat(controller.Collectors(), registry.Collectors()) {
+			metrics.Registry.Unregister(c)
+		}
+	})
+	rec := &healthzRecorder{Manager: mgr, checks: map[string]healthz.Checker{}}
+	if err = setupControllers(context.Background(), rec, &cfg, "v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	check, ok := rec.checks["rollout-reconcile"]
+	if !ok {
+		t.Fatalf("health checks %v lack rollout-reconcile", slices.Collect(maps.Keys(rec.checks)))
+	}
+	if err = check(nil); err != nil {
+		t.Fatalf("rollout-reconcile with nothing in flight = %v", err)
 	}
 }
