@@ -328,9 +328,10 @@ mode on the GB300 nodes, set by the `ib_core` module parameter `netns_mode`:
 | shared (`netns_mode=1`, reads `Y`) | Oracle's GB300 images with the 6.17 kernel, and images that do not set the parameter | `host-device` alone; every namespace already sees the RDMA device | default (`rdmaCni.enabled: false`) |
 | exclusive (`netns_mode=0`, reads `N`) | images configured with `options ib_core netns_mode=0` | `host-device`, then the `rdma` CNI, which moves the VF's RDMA device into the pod; the recipe installs it with a DaemonSet | `--set networkoperator:rdmaCni.enabled=true` |
 
-The `rdma` CNI refuses to run in shared mode, and in exclusive mode
-`host-device` alone leaves the RDMA device in the host namespace. Either
-mismatch keeps NCCL pods that attach `rdma-net` from starting. Exclusive mode
+The `rdma` CNI refuses to run in shared mode, so NCCL pods that attach
+`rdma-net` do not start. In exclusive mode, `host-device` alone leaves the RDMA
+device in the host namespace: the pods start, but NCCL finds no RDMA device in
+the pod and cannot use the fabric. Exclusive mode
 is the more isolated of the two: a pod sees only the RDMA devices moved into
 it. To use it, add `options ib_core netns_mode=0` to
 `/etc/modprobe.d/ib_core.conf` on each GB300 node, rebuild the initramfs
@@ -355,16 +356,14 @@ GB300 node:
   waits for Multus instead of starting pods on the primary network alone. Multus
   comes from `network-operator`, so `aicr bundle` rejects a GB300 bundle that
   leaves `network-operator` out.
-- A systemd unit holds kubelet until the RDMA VFs have their driver bound and
-  have stopped changing. Oracle Cloud Agent rebinds each VF seconds after
-  creating it, and the SR-IOV device plugin scans once at start, so a scan
-  inside a rebind would advertise fewer `nvidia.com/mlnxnics`. This is a
-  workaround until `nvidia-tuned`'s VF gate waits for the VFs to settle
-  ([nodewright-packages#186](https://github.com/NVIDIA/nodewright-packages/issues/186)).
 - `nvidia-tuned` with `service: oci` corrects PCIe ACS on the RoCE root ports
-  (required for DMA-BUF GPUDirect RDMA), holds boot until the RDMA VFs are
-  ready, and writes the GB300 NCCL topology to `/etc/nccl/topo.xml`. Point
-  NCCL workloads at it with `NCCL_TOPO_FILE`. Each node reboots once.
+  (required for DMA-BUF GPUDirect RDMA), holds kubelet until the RDMA VFs have
+  their driver bound and have stopped changing, and writes the GB300 NCCL
+  topology to `/etc/nccl/topo.xml`. Oracle Cloud Agent rebinds each VF seconds
+  after creating it, and the SR-IOV device plugin scans once at start, so
+  without the wait a scan inside a rebind would advertise fewer
+  `nvidia.com/mlnxnics`. Point NCCL workloads at the topology with
+  `NCCL_TOPO_FILE`. Each node reboots once.
 
 The CR reboots one node at a time, and a GB300 node takes about 8 minutes to
 tune and reboot. `deploy.sh` waits on the CR within its retry budget for the
