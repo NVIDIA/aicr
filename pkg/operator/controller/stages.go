@@ -50,6 +50,10 @@ type stageRun struct {
 	// transientOnly fails the stage on a failed run of any class but AICR's
 	// transient exits, and bounds those runs to maxStageRuns.
 	transientOnly bool
+	// settled, when set, reports whether a run that failed on a transient
+	// exit reached a result anyway; such a run fails the stage and is not
+	// run again.
+	settled func(ctx context.Context, job *batchv1.Job) (bool, error)
 	// args renders the stage arguments for a new run.
 	args func(*aicrjob.Request) ([]string, error)
 	// inputs renders the run's input copies once its Job exists.
@@ -65,13 +69,16 @@ type stages struct {
 	creds registry.Provider
 	// now is the clock for retry backoff; nil is time.Now.
 	now func() time.Time
-	// retrying is the transient failure a stage waits to retry, if any.
+	// retrying is the failure a stage waits out a backoff to retry, if any.
 	retrying string
 	// waiting says why the newest run's pod is not running, if it is not.
 	waiting string
 	// notStarted says the error drive returned is from starting a run, not
 	// from a run that failed.
 	notStarted bool
+	// unsettled says the error drive returned is from a settled check that
+	// could not be made on a failed run.
+	unsettled bool
 	// events records each failed run on the runtime; nil records none.
 	events events.EventRecorder
 }
@@ -86,7 +93,8 @@ type stages struct {
 // after a backoff; AICR's transient exits without a bound, after a backoff
 // that doubles per run. A transientOnly stage gets new runs only after
 // AICR's transient exits, up to maxStageRuns runs, and fails on any other
-// failed run.
+// failed run; a stage with a settled check also fails on a transient exit
+// that check reports settled, and starts no run while the check fails.
 func (s *stages) drive(ctx context.Context, rt *v1alpha1.ClusterRuntime, run *stageRun) (*batchv1.Job, time.Duration, error) {
 	jobs, err := s.jobs(ctx, rt, run.stage, run.input)
 	if err != nil {
@@ -206,8 +214,9 @@ func (s *stages) recordWaiting(ctx context.Context, job *batchv1.Job, waiting st
 	return nil
 }
 
-// retry decides on the newest run's failure: a terminal error, a wait, or
-// neither, when a new run starts now. Before a run that follows a transient
+// retry decides on the newest run's failure: a terminal error, a wait, the
+// error of a settled check that could not be made, or none of them, when a
+// new run starts now. Before a run that follows a transient
 // failure, the earlier transient failures are removed, since an outage would
 // otherwise leave a Job per retry; a transientOnly stage therefore counts
 // its runs by the newest one's number.
@@ -232,8 +241,17 @@ func (s *stages) retry(ctx context.Context, run *stageRun, jobs []batchv1.Job, o
 		case aicrjob.RetryNever:
 		}
 	}
+	settled := false
+	if run.settled != nil && outcome.Retry() == aicrjob.RetryTransient {
+		var err error
+		if settled, err = run.settled(ctx, newest); err != nil {
+			s.unsettled = true
+			return 0, err
+		}
+	}
 	switch {
-	case run.transientOnly && (outcome.Retry() != aicrjob.RetryTransient || attempt(newest) >= maxStageRuns),
+	case settled,
+		run.transientOnly && (outcome.Retry() != aicrjob.RetryTransient || attempt(newest) >= maxStageRuns),
 		outcome.Retry() == aicrjob.RetryNever,
 		operrors.IsPermanent(outcome.Err) && outcome.Retry() != aicrjob.RetryAuthorization,
 		outcome.Retry() == aicrjob.RetryBounded && bounded >= maxStageRuns,
@@ -243,8 +261,8 @@ func (s *stages) retry(ctx context.Context, run *stageRun, jobs []batchv1.Job, o
 		}
 		return 0, terminal(outcome.Err)
 	case outcome.Retry() == aicrjob.RetryTransient, outcome.Retry() == aicrjob.RetryAuthorization:
-		s.retrying = errorMessage(outcome.Err)
 		if wait := failedAt(newest).Add(backoff(attempt(newest))).Sub(s.clock()); wait > 0 {
+			s.retrying = errorMessage(outcome.Err)
 			return wait, nil
 		}
 	}

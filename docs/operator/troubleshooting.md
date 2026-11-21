@@ -413,20 +413,38 @@ rollout is in `Validating`:
 | `taking the deployment snapshot` (rollout message, not a stall) | Validation waits for the snapshot the rollout takes after its last step; it runs in `aicr-discovery` like discovery's. The message continues with `; retrying after a transient failure: <cause>` while a failed run waits for its next one. If it fails, the rollout ends `Failed` with `the deployment snapshot failed: <cause>`: fix the cause as for a discovery snapshot, then retry |
 
 **Validation is retried.** A transient exit (5, 6, 7 or 9: timeout,
-unavailable, rate limited, canceled) means AICR could not finish the run, not
-that the cluster failed it. That includes a run whose checks finished, pass
-or fail, but whose evidence could not be pushed or signed. The rollout runs
-validation again after a backoff of 10 or 20 seconds, without a new approval.
-It stays `Validating`, and its message reads
+unavailable, rate limited, canceled) means AICR could not finish the run.
+AICR can exit that way after its checks ran, when pushing or signing the
+evidence fails, so the operator first reads the evidence the run pushed. If
+it records a failed check, the rollout ends `Failed` on that run and nothing
+is run again. Its message leads with the verdict:
+`deployment validation failed: the evidence run <id> pushed records failed checks`,
+followed by how the run ended. The evidence is bound and recorded as for any
+failed run. Where `validation.signingKey` is set and the run failed before
+signing, it cannot be bound: the message continues with
+`that evidence is not recorded on the rollout` and the evidence digest, and
+`status.validation.evidence` stays empty.
+
+Otherwise the run left no verdict of failure, and the rollout runs validation
+again after a backoff of 10 or 20 seconds, without a new approval. That
+includes a run that pushed nothing, and evidence that cannot be read as a
+verdict. The rollout stays `Validating`, and its message reads
 `deployment validation run <id> failed; retrying after a transient failure: <cause>`.
-The runtime's `Reconciling` message carries the same cause.
+The runtime's `Reconciling` message carries the same cause. While the
+registry does not answer or refuses the operator's credential, no run starts:
+the rollout's message says the run failed and that
+`its evidence cannot be read yet`, and the runtime records `ReconcileFailed`
+Events until the evidence can be looked for.
+
 Validation is run at most three times: a third transient exit ends the
 rollout `Failed` with `deployment validation failed after 3 runs`, and any
 other failed run ends it on that run. An earlier run's Job is deleted as later
-runs start, and all of them when the rollout ends; each failed run stays as an
-`AICRRunFailed` Event on the runtime. Retries lengthen `Validating`, never
-past `spec.rollout.deadline`: each run is bounded by the hour a validation
-Job is allowed and by the time the rollout has left.
+runs start, and all of them when the rollout ends. Each failed run is recorded
+as an `AICRRunFailed` Event on the runtime, which the cluster keeps only for
+its Event TTL (an hour by default), and as an `AICR run failed` line in the
+operator's log. Retries lengthen `Validating`, never past
+`spec.rollout.deadline`: each run is bounded by the hour a validation Job is
+allowed and by the time the rollout has left.
 
 **Validation failed.** The rollout ends `Failed`. AICR exits 8 when checks
 fail, after pushing their evidence, and 2 when it refuses the recipe or its

@@ -138,32 +138,13 @@ func (r *RolloutReconciler) validate(ctx context.Context, rt *v1alpha1.ClusterRu
 		return err
 	}
 	repo := r.Config.Registry().Child("evidence/" + rt.Name)
-	run := &stageRun{
-		stage: aicrjob.StageValidation, input: input, serviceAccount: r.Config.ValidationServiceAccount,
-		// A transient exit is AICR failing to finish the run, evidence
-		// included, not a verdict on the cluster, so it is run again; any
-		// other failed run fails the rollout, and a retry is a new rollout.
-		transientOnly: true,
-		deadline:      ro.Spec.Deadline.Sub(r.Now()),
-		args: func(req *aicrjob.Request) ([]string, error) {
-			return aicrjob.ValidationArgs(req, &aicrjob.Validation{
-				AICRVersion: r.Config.AICRVersion, Evidence: repo.URI() + ":" + runTag(req.RunID),
-				PlainHTTP: r.Config.RegistryPlainHTTP, ValidatorServiceAccount: r.Config.ValidatorServiceAccount,
-				SigningKey: r.Config.ValidationSigningKey, TransparencyLog: r.Config.ValidationTransparencyLog,
-			}), nil
-		},
-		inputs: func(job *batchv1.Job) ([]client.Object, error) {
-			recipeCopy, copyErr := aicrjob.InputCopy(job, aicrjob.InputTo, recipeJSON)
-			if copyErr != nil {
-				return nil, copyErr
-			}
-			snapshotCopy, copyErr := aicrjob.InputCopy(job, aicrjob.InputSnapshot, snapshot.Data)
-			return []client.Object{recipeCopy, snapshotCopy}, copyErr
-		},
-	}
+	// failedEvidence: the run failed on a transient exit, yet the evidence
+	// it pushed records a failed check.
+	failedEvidence := false
+	run := r.validationRun(ro, repo, input, recipeJSON, snapshot.Data, &failedEvidence)
 	job, wait, runErr := st.drive(ctx, rt, run)
 	if runErr != nil && !isTerminal(runErr) {
-		return runErr
+		return r.unsettledRun(ctx, ro, st, runErr)
 	}
 	jobs, err := st.jobs(ctx, rt, run.stage, input)
 	if err != nil {
@@ -196,18 +177,7 @@ func (r *RolloutReconciler) validate(ctx context.Context, rt *v1alpha1.ClusterRu
 	b := &binding{rt: rt, ro: ro, plan: p, recipeName: recipe.EvidenceName(), repo: repo, job: newest,
 		runID: ro.Status.Validation.RunID, snapshot: snapshot.Digest}
 	if runErr != nil {
-		// A failed run still pushes the evidence of what did not pass.
-		ref, _, bindErr := r.bind(ctx, b)
-		message := validationFailure(newest, runErr)
-		switch {
-		case bindErr == nil:
-		case operrors.CodeOf(bindErr) == operrors.ErrCodeNotFound:
-		case isTerminal(bindErr):
-			message += "; its evidence was rejected: " + errorMessage(bindErr)
-		default:
-			return bindErr
-		}
-		return r.failValidation(ctx, ro, ref, message)
+		return r.failedRun(ctx, ro, b, runErr, failedEvidence)
 	}
 	ref, passed, err := r.bind(ctx, b)
 	switch {
@@ -227,21 +197,139 @@ func (r *RolloutReconciler) validate(ctx context.Context, rt *v1alpha1.ClusterRu
 // failed and waits out its backoff, or its pod.
 func validationProgress(st *stages, newest *batchv1.Job) (message, waitingOn string) {
 	run := "deployment validation run " + newest.Labels[v1alpha1.LabelRunID]
-	// The newest run is the failed one until its backoff passes and the next
-	// starts.
-	if st.retrying != "" && !failedAt(newest).IsZero() {
+	if st.retrying != "" {
 		return run + " failed; " + st.waitingOn(), st.waitingOn()
 	}
 	return run + " in progress" + detail(st.waiting), st.waiting
 }
 
 // validationFailure is the rollout's message for the failed run that ends
-// it, with the number of runs when earlier ones were retried.
-func validationFailure(newest *batchv1.Job, runErr error) string {
+// it, with the number of runs when earlier ones were retried. It leads with
+// the verdict when the run failed on a transient exit after pushing evidence
+// of failed checks, since the exit alone would read as an outage.
+func validationFailure(newest *batchv1.Job, runErr error, failedEvidence bool) string {
+	head := "deployment validation failed"
 	if runs := attempt(newest); runs > 1 {
-		return "deployment validation failed after " + strconv.Itoa(runs) + " runs: " + errorMessage(runErr)
+		head += " after " + strconv.Itoa(runs) + " runs"
 	}
-	return "deployment validation failed: " + errorMessage(runErr)
+	if failedEvidence {
+		return head + ": the evidence run " + newest.Labels[v1alpha1.LabelRunID] +
+			" pushed records failed checks; the run then ended on a transient error and was not run again: " + errorMessage(runErr)
+	}
+	return head + ": " + errorMessage(runErr)
+}
+
+// unsettledRun returns the error that keeps a failed run from being judged
+// or run again. When it is the evidence that could not be looked for, the
+// rollout says so first: its message would otherwise still report the run in
+// progress.
+func (r *RolloutReconciler) unsettledRun(ctx context.Context, ro *v1alpha1.RuntimeRollout, st *stages, runErr error) error {
+	if !st.unsettled || ro.Status.Validation == nil {
+		return runErr
+	}
+	message := "deployment validation run " + ro.Status.Validation.RunID +
+		" failed; its evidence cannot be read yet, so it is neither judged nor run again: " + errorMessage(runErr)
+	if err := r.saveStatus(ctx, ro, message); err != nil {
+		return err
+	}
+	return runErr
+}
+
+// validationRun is the stage that validates a rollout: its Jobs push their
+// evidence to repo, and it sets failedEvidence when a run that failed on a
+// transient exit pushed evidence that records a failed check.
+func (r *RolloutReconciler) validationRun(ro *v1alpha1.RuntimeRollout, repo registry.Repository, input string,
+	recipeJSON, snapshot []byte, failedEvidence *bool) *stageRun {
+
+	return &stageRun{
+		stage: aicrjob.StageValidation, input: input, serviceAccount: r.Config.ValidationServiceAccount,
+		// A run AICR could not finish is run again, unless the evidence it
+		// pushed before failing already records a failed check; any other
+		// failed run fails the rollout, and a retry is a new rollout.
+		transientOnly: true,
+		settled: func(ctx context.Context, job *batchv1.Job) (bool, error) {
+			failed, err := r.failedChecks(ctx, repo, job)
+			*failedEvidence = failed
+			return failed, err
+		},
+		deadline: ro.Spec.Deadline.Sub(r.Now()),
+		args: func(req *aicrjob.Request) ([]string, error) {
+			return aicrjob.ValidationArgs(req, &aicrjob.Validation{
+				AICRVersion: r.Config.AICRVersion, Evidence: repo.URI() + ":" + runTag(req.RunID),
+				PlainHTTP: r.Config.RegistryPlainHTTP, ValidatorServiceAccount: r.Config.ValidatorServiceAccount,
+				SigningKey: r.Config.ValidationSigningKey, TransparencyLog: r.Config.ValidationTransparencyLog,
+			}), nil
+		},
+		inputs: func(job *batchv1.Job) ([]client.Object, error) {
+			recipeCopy, copyErr := aicrjob.InputCopy(job, aicrjob.InputTo, recipeJSON)
+			if copyErr != nil {
+				return nil, copyErr
+			}
+			snapshotCopy, copyErr := aicrjob.InputCopy(job, aicrjob.InputSnapshot, snapshot)
+			return []client.Object{recipeCopy, snapshotCopy}, copyErr
+		},
+	}
+}
+
+// failedChecks reports whether the evidence a run pushed records a failed
+// check. A run that pushed none records none, and neither does evidence that
+// cannot be read as a verdict. A registry that cannot be asked, for now or
+// because it refuses the operator, is an error, so that no run starts until
+// the evidence has been looked for.
+func (r *RolloutReconciler) failedChecks(ctx context.Context, repo registry.Repository, job *batchv1.Job) (bool, error) {
+	dgst, err := r.validationStages().pushed(ctx, r.Registry, aicrjob.StageValidation, job, repo)
+	if err != nil {
+		return false, unasked(err, "look for the evidence of "+job.Name)
+	}
+	bundle, err := r.Registry.PullBundle(ctx, repo, dgst)
+	if err != nil {
+		return false, unasked(err, "read the evidence of "+job.Name)
+	}
+	data, ok := bundle.Files[evidence.AICRStatementFile]
+	if !ok {
+		return false, nil
+	}
+	summary, err := evidence.ParseAICRStatement(data)
+	if err != nil {
+		return false, nil
+	}
+	return !summary.Passed(), nil
+}
+
+// unasked is the error of a registry read that did not answer whether a run
+// left evidence: nil when the registry answered that there is none, or
+// nothing readable; otherwise an error the reconcile retries. A refusal is
+// reported as unavailable, since a permanent error would be taken for the
+// run's own failure and the credential may only be stale.
+func unasked(err error, what string) error {
+	switch {
+	case operrors.CodeOf(err) == operrors.ErrCodeUnauthorized:
+		return operrors.Wrap(operrors.ErrCodeUnavailable, what, err)
+	case operrors.IsPermanent(err):
+		return nil
+	default:
+		return err
+	}
+}
+
+// failedRun ends the rollout Failed on a run that failed, binding the
+// evidence it pushed: a failed run still pushes the evidence of what did not
+// pass. failedEvidence says the run failed on a transient exit and that
+// evidence records a failed check.
+func (r *RolloutReconciler) failedRun(ctx context.Context, ro *v1alpha1.RuntimeRollout, b *binding, runErr error, failedEvidence bool) error {
+	ref, _, bindErr := r.bind(ctx, b)
+	message := validationFailure(b.job, runErr, failedEvidence)
+	switch {
+	case bindErr == nil:
+	case operrors.CodeOf(bindErr) == operrors.ErrCodeNotFound:
+	case isTerminal(bindErr) && failedEvidence:
+		message += "; that evidence is not recorded on the rollout: " + errorMessage(bindErr)
+	case isTerminal(bindErr):
+		message += "; its evidence was rejected: " + errorMessage(bindErr)
+	default:
+		return bindErr
+	}
+	return r.failValidation(ctx, ro, ref, message)
 }
 
 // failValidation ends the rollout Failed, recording the evidence a failed

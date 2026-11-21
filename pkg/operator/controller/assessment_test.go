@@ -15,6 +15,8 @@
 package controller
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -22,11 +24,14 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 	"aicr.run/pkg/operator/aicrjob"
+	"aicr.run/pkg/operator/defaults"
 	"aicr.run/pkg/operator/engine/argocd"
 	operrors "aicr.run/pkg/operator/errors"
 	"aicr.run/pkg/operator/plan"
@@ -388,6 +393,123 @@ func TestRolloutAssessmentFailures(t *testing.T) {
 				t.Fatalf("assessment exiting %d: a rollout started", exit)
 			}
 		}
+	}
+}
+
+// An assessment that was waiting to be retried and whose next run is then
+// refused for good stalls the runtime; the Reconciling condition, no longer
+// True, drops the retry it was reporting.
+func TestAssessmentRetryThatCannotStart(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	active := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "1"}, testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":1}`))
+	target := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "2"}, testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":2}`))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", UID: "u-g", PlanDigest: active}}
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r)
+	job := liveJobs(t, ctx, string(aicrjob.StageAssessment))[0]
+	clk.now = time.Now()
+	fail(t, ctx, &job, aicrjob.ExitUnavailable)
+	reconcileRollout(t, ctx, r)
+	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionReconciling); c.Reason != ReasonAssessing || !strings.HasPrefix(c.Message, retryingNote) {
+		t.Fatalf("Reconciling while the assessment waits to retry = %+v", c)
+	}
+
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if _, isJob := obj.(*batchv1.Job); isJob {
+				return apierrors.NewForbidden(batchv1.Resource("jobs"), obj.GetName(), errors.New("exceeded quota"))
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+	})
+	clk.now = time.Now().Add(defaults.StageRetryMaxBackoff + time.Minute)
+	reconcileRollout(t, ctx, r)
+	got := getRuntime(t, ctx)
+	stalled, reconciling := cond(got, v1alpha1.ConditionStalled), cond(got, v1alpha1.ConditionReconciling)
+	if stalled.Status != metav1.ConditionTrue || !strings.Contains(stalled.Message, "exceeded quota") ||
+		reconciling.Status != metav1.ConditionFalse || reconciling.Message != "" {
+
+		t.Fatalf("Stalled %+v, Reconciling %+v; want stalled on the refused Job and no Reconciling message", stalled, reconciling)
+	}
+}
+
+// An assessment that stalls while its pod was not running reports the stall
+// alone: the Reconciling condition, no longer True, carries no message about
+// what the run was waiting on.
+func TestAssessmentThatStallsDropsWhatItWaitedOn(t *testing.T) {
+	const unschedulable = "0/9 nodes are available: 9 node(s) had untolerated taint {CriticalAddonsOnly: }"
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	active := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "1"}, testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":1}`))
+	target := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "2"}, testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":2}`))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", UID: "u-g", PlanDigest: active}}
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r)
+	job := liveJobs(t, ctx, string(aicrjob.StageAssessment))[0]
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: job.Name + "-pod", Namespace: job.Namespace,
+			Labels: map[string]string{"batch.kubernetes.io/job-name": job.Name}},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "aicr", Image: aicrImage}}},
+	}
+	if err := k8s.Create(ctx, pod); err != nil {
+		t.Fatal(err)
+	}
+	pod.Status.Phase = corev1.PodPending
+	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: unschedulable}}
+	if err := k8s.Status().Update(ctx, pod); err != nil {
+		t.Fatal(err)
+	}
+	reconcileRollout(t, ctx, r)
+	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionReconciling); c.Reason != ReasonAssessing || !strings.Contains(c.Message, unschedulable) {
+		t.Fatalf("Reconciling while the assessment's pod is not running = %+v", c)
+	}
+
+	// The reason is recorded on the Job when it changes; that write is now
+	// refused for good.
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
+		t.Fatal(err)
+	}
+	const pulling = "ImagePullBackOff: back-off pulling the AICR image"
+	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: pulling}}
+	if err := k8s.Status().Update(ctx, pod); err != nil {
+		t.Fatal(err)
+	}
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			if _, isJob := obj.(*batchv1.Job); isJob {
+				return apierrors.NewForbidden(batchv1.Resource("jobs"), obj.GetName(), errors.New("denied by policy"))
+			}
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+	})
+	reconcileRollout(t, ctx, r)
+	got := getRuntime(t, ctx)
+	stalled, reconciling := cond(got, v1alpha1.ConditionStalled), cond(got, v1alpha1.ConditionReconciling)
+	if stalled.Status != metav1.ConditionTrue || !strings.Contains(stalled.Message, "denied by policy") ||
+		reconciling.Status != metav1.ConditionFalse || reconciling.Message != "" {
+
+		t.Fatalf("Stalled %+v, Reconciling %+v; want the stall and no Reconciling message", stalled, reconciling)
 	}
 }
 
