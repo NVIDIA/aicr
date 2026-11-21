@@ -121,7 +121,7 @@ aicr snapshot [flags]
 **What it captures:**
 - **SystemD Services**: containerd, docker, kubelet configurations
 - **OS Configuration**: grub, kmod, kmod-param, sysctl, release info
-- **Kubernetes**: server version, images, ClusterPolicy
+- **Kubernetes**: server version, image summary, [workload image observations](../integrator/go-library.md#workload-image-observations), ClusterPolicy
 - **GPU**: driver-free PCI/NFD hardware detection — GPU presence, GPU count, accelerator model/SKU (resolved from the PCI device ID), nvidia kernel-module loaded state, and detection source. Does not require the NVIDIA driver or `nvidia-smi`, and does not emit driver version, CUDA version, or MIG settings.
 - **NodeTopology**: node topology (cluster-wide taints and labels across all nodes)
 - **NetworkTopology**: per-hardware-group network topology (PFs, capabilities, kernel modules, machine/GPU type, fabric type) — emitted only when `--cluster-config` or `--discover-network` is set

@@ -182,6 +182,39 @@ identity with the loaded snapshot matters, such as hashing what you
 validated, capture the source contents yourself and load from that
 capture instead of re-reading afterward.
 
+### Workload image observations
+
+Find the `workload-images` subtype on the `K8s` measurement in
+`Snapshot.Unwrap().Measurements`. Its `items` contain one observation per
+regular, init, or ephemeral container. A missing subtype means this
+measurement is unavailable, as it is for older snapshots. The existing
+`image` summary still reports its original name and tag values.
+
+| Item field | Meaning |
+|---|---|
+| `context.namespace`, `pod`, `pod-uid`, `container-type`, `container` | Pod and container identity |
+| `context.node` | Node name from the Pod, empty for an unscheduled Pod |
+| `context.node-uid`, `node-os`, `node-architecture` | Optional facts read by that node name during capture |
+| `data.requested-image` | Full requested image reference, including any requested digest |
+| `data.runtime-image-id` | Raw kubelet-reported `imageID`, when present and unambiguous |
+| `data.runtime-digest` | Digest parsed from a recognized runtime ID form, when available |
+| `data.status` | `observed`, `status-missing`, `image-id-missing`, or `status-ambiguous` |
+
+Check `workload-images.data.coverage` before interpreting the list.
+`complete` means all requested containers in the paginated Pod snapshot fit
+the report, even when status or node fields are missing. `limited` means
+the 256-row or 64 KiB compact JSON budget excluded observations. `partial`
+means a later Pod page failed and earlier observations may also have hit the
+row or byte limit. `unavailable` means no Pod page was read. Status entries
+without a matching requested container do not produce rows.
+Node enrichment is best effort, with up to 32 distinct Node reads in a
+two-second budget. Missing node fields indicate unavailable facts.
+
+Keep requested and runtime identities separate. A runtime digest's syntax
+does not identify its OCI object kind or prove that it matches the requested
+image. This point-in-time measurement does not verify signatures, mutable
+tags, writable layers, mounted content, or process memory.
+
 ### Comparing snapshots for drift
 
 `DiffSnapshots` compares the measurement payloads already held by two facade

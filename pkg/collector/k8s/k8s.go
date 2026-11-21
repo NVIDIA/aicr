@@ -87,16 +87,17 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	}
 
 	var (
-		versions  map[string]measurement.Reading
-		images    map[string]measurement.Reading
-		policies  map[string]measurement.Reading
-		node      map[string]measurement.Reading
-		slinky    measurement.Subtype
-		mariaDB   measurement.Subtype
-		okeLegacy measurement.Subtype
-		okeGPU    measurement.Subtype
-		storage   measurement.Subtype
-		percona   measurement.Subtype
+		versions       map[string]measurement.Reading
+		images         map[string]measurement.Reading
+		workloadImages measurement.Subtype
+		policies       map[string]measurement.Reading
+		node           map[string]measurement.Reading
+		slinky         measurement.Subtype
+		mariaDB        measurement.Subtype
+		okeLegacy      measurement.Subtype
+		okeGPU         measurement.Subtype
+		storage        measurement.Subtype
+		percona        measurement.Subtype
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -119,11 +120,13 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	})
 
 	g.Go(func() error {
-		var err error
-		images, err = collectSafe(SubtypeImage, func() (map[string]measurement.Reading, error) {
-			return k.collectContainerImages(gctx)
+		var collectErr error
+		images, collectErr = collectSafe(SubtypeImage, func() (map[string]measurement.Reading, error) {
+			summary, observations, err := k.collectContainerImages(gctx)
+			workloadImages = observations
+			return summary, err
 		})
-		return err
+		return collectErr
 	})
 
 	g.Go(func() error {
@@ -203,6 +206,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 				Set("goVersion", versions["goVersion"]),
 		).
 		WithSubtype(measurement.Subtype{Name: SubtypeImage, Data: images}).
+		WithSubtype(workloadImages).
 		WithSubtype(measurement.Subtype{Name: "policy", Data: policies}).
 		WithSubtype(measurement.Subtype{Name: "node", Data: node}).
 		WithSubtype(slinky).
@@ -276,6 +280,7 @@ func emptyK8sMeasurement() *measurement.Measurement {
 	return measurement.NewMeasurement(measurement.TypeK8s).
 		WithSubtype(measurement.Subtype{Name: "server", Data: empty}).
 		WithSubtype(measurement.Subtype{Name: SubtypeImage, Data: empty}).
+		WithSubtype(unavailableWorkloadImages()).
 		WithSubtype(measurement.Subtype{Name: "policy", Data: empty}).
 		WithSubtype(measurement.Subtype{Name: "node", Data: empty}).
 		WithSubtype(unknownSlinkySubtype()).
