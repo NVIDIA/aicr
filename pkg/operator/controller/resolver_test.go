@@ -666,7 +666,9 @@ func TestResolverRetriesUnauthorizedUpToTheBound(t *testing.T) {
 			t.Fatal(err)
 		}
 		c := cond(getRuntime(t, ctx), v1alpha1.ConditionResolved)
-		if n := len(liveJobs(t, ctx, "recipe")); n != len(jobs) || c.Reason != ReasonResolving {
+		if n := len(liveJobs(t, ctx, "recipe")); n != len(jobs) || c.Reason != ReasonResolving ||
+			!strings.Contains(c.Message, unauthorizedNote) || strings.Contains(c.Message, "transient") {
+
 			t.Fatalf("run %d: a new run within the backoff (%d Jobs) or Resolved = %+v", run, n, c)
 		}
 		now = now.Add(backoff(run) + time.Second)

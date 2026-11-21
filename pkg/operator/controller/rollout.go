@@ -214,6 +214,7 @@ type runtimeView struct {
 	availableMessage          string
 	reconciling               bool
 	reconcilingReason         string
+	reconcilingMessage        string
 	stalled                   bool
 	stalledReason, stalledMsg string
 	// awaitingApprovalSince is when the rollout in progress started waiting
@@ -648,7 +649,7 @@ func (r *RolloutReconciler) judge(ctx context.Context, rt *v1alpha1.ClusterRunti
 	var assessment *v1alpha1.DigestedConfigMapRef
 	if assessed(base.from, p) {
 		var wait time.Duration
-		if report, assessment, wait, err = r.assess(ctx, rt, base.from, p); err != nil {
+		if report, assessment, wait, err = r.assess(ctx, rt, base.from, p, v); err != nil {
 			if isTerminal(err) {
 				v.stalled, v.stalledReason, v.stalledMsg = true, reasonOf(err), errorMessage(err)
 				return nil, false, nil, nil
@@ -1955,9 +1956,14 @@ func (r *RolloutReconciler) applyStatus(ctx context.Context, rt *v1alpha1.Cluste
 			readyReason = v.stalledReason
 		}
 	}
-	reconcilingReason := v.reconcilingReason
+	reconcilingReason, reconcilingMessage := v.reconcilingReason, ""
 	if reconcilingReason == "" {
 		reconcilingReason = ReasonRolledOut
+	}
+	// The message belongs to the work the reason names; a terminal failure
+	// of that work is reported on Stalled instead.
+	if v.reconciling {
+		reconcilingMessage = v.reconcilingMessage
 	}
 	stalledReason := v.stalledReason
 	if stalledReason == "" {
@@ -1966,7 +1972,7 @@ func (r *RolloutReconciler) applyStatus(ctx context.Context, rt *v1alpha1.Cluste
 	conditions := []any{
 		condition(rt, v1alpha1.ConditionReady, boolStatus(v.ready), readyReason, v.readyMessage),
 		condition(rt, v1alpha1.ConditionAvailable, boolStatus(v.available), availableReason, availableMessage),
-		condition(rt, v1alpha1.ConditionReconciling, boolStatus(v.reconciling), reconcilingReason, ""),
+		condition(rt, v1alpha1.ConditionReconciling, boolStatus(v.reconciling), reconcilingReason, reconcilingMessage),
 		condition(rt, v1alpha1.ConditionStalled, boolStatus(v.stalled), stalledReason, v.stalledMsg),
 		condition(rt, v1alpha1.ConditionEngineAvailable, boolStatus(v.engineOK), v.engineReason, v.engineMessage),
 	}
