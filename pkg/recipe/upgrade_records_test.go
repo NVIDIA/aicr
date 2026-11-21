@@ -16,6 +16,7 @@ package recipe
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"path"
 	"reflect"
@@ -155,12 +156,24 @@ func TestManualRecordsNameTheirApplyStep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading upgrade records: %v", err)
 	}
+	violations, checked := applyStepViolations(set)
+	for _, v := range violations {
+		t.Error(v)
+	}
+	t.Logf("checked %d manual step group(s)", checked)
+}
+
+// applyStepViolations returns, in component order, a message for each group
+// of a manual transition or replacement in set that does not hold exactly one
+// apply step, and the number of groups it checked.
+func applyStepViolations(set upgrade.Set) ([]string, int) {
 	names := make([]string, 0, len(set))
 	for name := range set {
 		names = append(names, name)
 	}
 	stdsort.Strings(names)
 
+	var violations []string
 	checked := 0
 	check := func(component, where string, groups []upgrade.StepGroup) {
 		for gi, g := range groups {
@@ -175,8 +188,12 @@ func TestManualRecordsNameTheirApplyStep(t *testing.T) {
 				}
 			}
 			if n != 1 {
-				t.Errorf("%s %s group %d (deployers %v) has %d %q steps, want exactly 1; "+
-					"see docs/contributor/upgrade-records.md", component, where, gi, g.Deployers, n, applyStepID)
+				covers := "remainder"
+				if g.Deployers != nil {
+					covers = fmt.Sprintf("deployers %v", g.Deployers)
+				}
+				violations = append(violations, fmt.Sprintf("%s %s group %d (%s) has %d %q steps, want exactly 1; "+
+					"see docs/contributor/upgrade-records.md", component, where, gi, covers, n, applyStepID))
 			}
 		}
 	}
@@ -192,7 +209,69 @@ func TestManualRecordsNameTheirApplyStep(t *testing.T) {
 			check(name, "replaces "+r.Component, r.StepsByDeployer)
 		}
 	}
-	t.Logf("checked %d manual step group(s)", checked)
+	return violations, checked
+}
+
+// The apply-step rule flags a manual group with no apply step or more than
+// one, names a remainder group as such, checks a manual replacement, and
+// leaves safe and blocked records and an exempt component's redirect alone.
+func TestApplyStepViolations(t *testing.T) {
+	steps := func(ids ...string) []upgrade.Step {
+		out := make([]upgrade.Step, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, upgrade.Step{ID: id, Description: id})
+		}
+		return out
+	}
+	record := func(component string, verdict upgrade.Verdict, groups ...upgrade.StepGroup) upgrade.Set {
+		return upgrade.Set{component: {Component: component, Transitions: []upgrade.Transition{
+			{From: "<1.0.0", To: "1.0.0", Verdict: verdict, StepsByDeployer: groups}}}}
+	}
+	tests := []struct {
+		name string
+		set  upgrade.Set
+		want []string
+	}{
+		{"one apply per group", record("nfd", upgrade.VerdictManual,
+			upgrade.StepGroup{Deployers: []string{"helm"}, Steps: steps("widen", "apply", "narrow")},
+			upgrade.StepGroup{Steps: steps("widen", "apply", "narrow")}), nil},
+		{"no apply step", record("nfd", upgrade.VerdictManual,
+			upgrade.StepGroup{Deployers: []string{"helm"}, Steps: steps("widen", "upgrade-nfd")}),
+			[]string{`nfd transition <1.0.0 -> 1.0.0 group 0 (deployers [helm]) has 0 "apply" steps`}},
+		{"two apply steps", record("nfd", upgrade.VerdictManual,
+			upgrade.StepGroup{Deployers: []string{"helm"}, Steps: steps("apply", "apply")}),
+			[]string{`group 0 (deployers [helm]) has 2 "apply" steps`}},
+		{"remainder named", record("kueue", upgrade.VerdictManual,
+			upgrade.StepGroup{Steps: steps("sync-kueue")}),
+			[]string{`group 0 (remainder) has 0 "apply" steps`}},
+		{"blocked and safe not checked", upgrade.Set{
+			"grove": {Component: "grove", Transitions: []upgrade.Transition{
+				{From: "<1.0.0", To: "1.0.0", Verdict: upgrade.VerdictBlocked, StepsByDeployer: []upgrade.StepGroup{{Steps: steps("land")}}},
+				{From: ">=1.0.0 <2.0.0", To: "2.0.0", Verdict: upgrade.VerdictSafe}}}}, nil},
+		{"manual replacement checked", upgrade.Set{"kai-scheduler": {Component: "kai-scheduler", Replaces: &upgrade.Replaces{
+			Component: "old-scheduler", Verdict: upgrade.VerdictManual, StepsByDeployer: []upgrade.StepGroup{{Steps: steps("migrate")}}}}},
+			[]string{`kai-scheduler replaces old-scheduler group 0 (remainder) has 0 "apply" steps`}},
+		{"exempt component's carrier group checked", record("runai-cluster", upgrade.VerdictManual,
+			upgrade.StepGroup{Deployers: []string{"helm"}, Steps: steps("rerun-install")},
+			upgrade.StepGroup{Steps: steps("use-helm-deployer")}),
+			[]string{`runai-cluster transition <1.0.0 -> 1.0.0 group 0 (deployers [helm]) has 0 "apply" steps`}},
+		{"exempt component's redirect skipped", record("runai-cluster", upgrade.VerdictManual,
+			upgrade.StepGroup{Deployers: []string{"helm"}, Steps: steps("apply")},
+			upgrade.StepGroup{Steps: steps("use-helm-deployer")}), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := applyStepViolations(tt.set)
+			if len(got) != len(tt.want) {
+				t.Fatalf("applyStepViolations() = %q, want %d violation(s) containing %q", got, len(tt.want), tt.want)
+			}
+			for i := range got {
+				if !strings.Contains(got[i], tt.want[i]) {
+					t.Errorf("violation %d = %q, want it to contain %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
 }
 
 // groupCovers reports whether groups[gi] holds the steps for deployer: it

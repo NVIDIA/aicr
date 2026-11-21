@@ -283,10 +283,12 @@ record, the step where the deployer applies the regenerated bundle has the id
 once the new version is running. The AICR Operator performs that step itself
 and holds the steps after it until an approver acknowledges them; a record that
 names no `apply` step makes it hold every step. Split a step that applies and
-then checks, and add the step where the apply is only implied. A group for a
-deployer that cannot carry the component, such as runai-cluster outside helm,
-applies nothing and is exempt. `TestManualRecordsNameTheirApplyStep` in
-`pkg/recipe` enforces this.
+then checks, and add the step where the apply is only implied.
+`TestManualRecordsNameTheirApplyStep` in `pkg/recipe` enforces this. A
+component that only one deployer can carry, such as runai-cluster, whose other
+groups only redirect to it and apply nothing, is listed with that deployer in
+`applyStepExempt` in `pkg/recipe/upgrade_records_test.go`; only the group for
+that deployer is checked.
 
 The remainder is a convenience, not a default. A step written for Flux or Argo
 CD reads wrong under `terraform`, which also lands there unless a group names

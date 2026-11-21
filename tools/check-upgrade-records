@@ -69,4 +69,4 @@ for name in "${TEST_NAMES[@]}"; do
 	fi
 done
 
-printf '%s\n' "${output}" | grep -E -- "^--- PASS: |checking [0-9]+ component|pin\(s\)"
+printf '%s\n' "${output}" | grep -E -- "^--- PASS: |checking [0-9]+ component|pin\(s\)|manual step group\(s\)"
