@@ -119,7 +119,8 @@ extract_step "${KIND_WORKFLOW}" '.jobs["uat-kind"]' 'Validate inputs' \
 # run_resolve <reservation> <platform> -> rc, publishing into ${WORK}/row.txt.
 # cwd is the repo root because the step resolves ./tools and ./bin relative to
 # it, exactly as it does on a runner. The nvsentinel_remediation axis (gate C
-# below) is held at its dispatch defaults unless the caller exports overrides.
+# below) and skip_delete (gate D) are held at their dispatch defaults unless the
+# caller exports overrides.
 run_resolve() {
     : > "${WORK}/row.txt"
     ( cd "${REPO_ROOT}" \
@@ -127,6 +128,7 @@ run_resolve() {
          NVSENTINEL_REMEDIATION="${NVSENTINEL_REMEDIATION:-none}" \
          INTENT="${INTENT:-training}" LIFECYCLE="${LIFECYCLE:-nightly}" \
          DEPLOYER="${DEPLOYER:-helmfile}" AICR_VERSION="${AICR_VERSION:-}" \
+         SKIP_DELETE="${SKIP_DELETE:-false}" \
          bash "${RESOLVE_STEP}" ) > "${WORK}/step.log" 2>&1
 }
 lane_verdict() {
@@ -223,6 +225,27 @@ check "a rejected remediation dispatch publishes no cloud output" "0" \
     "$(grep -c '^cloud=' "${WORK}/row.txt")"
 check "the rejection names the failed bound" "1" \
     "$(grep -c "intent must be training" "${WORK}/step.log")"
+
+# ---------------------------------------------------------------------------
+# Gate D: uat-run.yaml, may this run skip its teardown (#3670)
+# ---------------------------------------------------------------------------
+
+# The policy's cases are Go tests (Reservation.CheckSkipDelete and
+# tools/uat-broker); these pin that the step passes the dispatch to the broker
+# before the publish.
+skip_delete_verdict() { # <reservation> <lifecycle>, with skip_delete=true
+    if ( export SKIP_DELETE=true LIFECYCLE="$2"; run_resolve "$1" '' ); then
+        echo accept
+    else
+        echo reject
+    fi
+}
+
+check "nightly skip_delete is rejected on aws"        "reject" "$(skip_delete_verdict aws-h100 nightly)"
+check "a rejected skip_delete dispatch publishes NO row at all" "0" \
+    "$(wc -l < "${WORK}/row.txt" | tr -d ' ')"
+check "nightly skip_delete is accepted on kind"       "accept" "$(skip_delete_verdict kind-h100 nightly)"
+check "daytime-up skip_delete is accepted on gcp"     "accept" "$(skip_delete_verdict gcp-h100 daytime-up)"
 
 # ---------------------------------------------------------------------------
 # Gate B: uat-kind.yaml, is this a value the kind lane has a config for

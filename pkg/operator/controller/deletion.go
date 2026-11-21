@@ -145,8 +145,8 @@ func (r *RolloutReconciler) orphanRuntime(ctx context.Context, rt *v1alpha1.Clus
 }
 
 // removeRuntime is deletionPolicy Delete: a removal rollout of Remove steps
-// over the live objects, in reverse order of the active plan, that requires
-// approval and supersedes any rollout in progress at its next step boundary.
+// over the live objects, in removalOrder, that requires approval and
+// supersedes any rollout in progress at its next step boundary.
 // Only a removal that retired everything removes the finalizer; a failed
 // one stalls the runtime until a retry token makes a new one.
 func (r *RolloutReconciler) removeRuntime(ctx context.Context, rt *v1alpha1.ClusterRuntime) (*runtimeView, error) {

@@ -19,7 +19,7 @@
 # Build Tools
 build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
-  goreleaser: 'v2.20.1'
+  goreleaser: 'v2.20.2'
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
   ko: 'v0.19.1'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
@@ -84,7 +84,7 @@ linting:
 # Security Tools
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
-  grype: 'v0.121.3'
+  grype: 'v0.122.0'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.4'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
@@ -147,7 +147,7 @@ testing_tools:
   # the envtest control-plane binaries it fetches are matched to the
   # controller-runtime the tests link against.
   # renovate: datasource=go depName=sigs.k8s.io/controller-runtime/tools/setup-envtest depType=testing_tools
-  setup_envtest: 'v0.25.2'
+  setup_envtest: 'v0.25.3'
   # CI installs the released linux/amd64 binary rather than `go install`ing the
   # module, so the gate no longer depends on sum.golang.org being up (#2667).
   # The two are the same code: `tools/setup-envtest/v0.25.0` and `v0.25.0` are
@@ -165,7 +165,7 @@ testing_tools:
   # linux/amd64 only, for the reason on oasdiff_sha256_linux_amd64: this feeds
   # the setup-build-tools action, which runs on ubuntu runners, while
   # tools/setup-tools covers local dev on other platforms.
-  setup_envtest_sha256_linux_amd64: '94534f83896f3b09934d9570b213fbda04aa5c17457942270928cdca0317bf9b'
+  setup_envtest_sha256_linux_amd64: '581fc193f1b9d1603956e59be02f3c2fd5747487396403cf021664f78ced0ebe'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.3.2'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools

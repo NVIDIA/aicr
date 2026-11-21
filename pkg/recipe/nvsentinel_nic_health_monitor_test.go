@@ -188,6 +188,10 @@ func nicHealthMonitorPlatforms() []nicHealthMonitorPlatform {
 			wantMonitor: true,
 		},
 		{
+			name:     "NVKE GB10 training (DGX Spark, no ConnectX-7 rails)",
+			criteria: &Criteria{Service: CriteriaServiceNVKE, Accelerator: CriteriaAcceleratorGB10, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining},
+		},
+		{
 			name:     "EKS H100 training (aws-efa, not Mellanox)",
 			criteria: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu, Intent: CriteriaIntentTraining},
 		},

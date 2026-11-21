@@ -24,6 +24,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -200,6 +201,72 @@ func TestDeletionRemovesInReverseOrder(t *testing.T) {
 	}
 	if want := []string{"Ensure cert-manager", "Remove nfd", "Remove cert-manager"}; !slices.Equal(engine.order, want) {
 		t.Fatalf("engine calls = %v, want %v", engine.order, want)
+	}
+}
+
+// A runtime deleted with no readable active plan removes its releases
+// dependents first, by what the live Applications follow.
+func TestDeletionWithoutAReadableActivePlanRemovesDependentsFirst(t *testing.T) {
+	tests := []struct {
+		name string
+		// active sets up the active plan, if any, and returns its digest.
+		active func(*testing.T, context.Context, *v1alpha1.ClusterRuntime) string
+	}{
+		{name: "no active plan", active: func(*testing.T, context.Context, *v1alpha1.ClusterRuntime) string { return "" }},
+		{name: "the active plan is gone", active: func(t *testing.T, ctx context.Context, rt *v1alpha1.ClusterRuntime) string {
+			t.Helper()
+			active := putReleases(t, ctx, rt, testRelease("cert-manager", plan.PhasePrimary, "", `{}`))
+			succeedTo(t, ctx, rt, active)
+			name, err := plan.Name(active)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = k8s.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: operatorNS, Name: name}}); err != nil {
+				t.Fatal(err)
+			}
+			return active
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testContext(t)
+			rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+				stabilized(rt)
+				rt.Spec.DeletionPolicy = v1alpha1.DeletionDelete
+			})
+			active := tt.active(t, ctx, rt)
+			engine := newEngine()
+			engine.inventory = []argocd.InventoryItem{
+				{ReleaseID: "cert-manager", UID: "u-c", PlanDigest: active},
+				{ReleaseID: "gpu-operator", UID: "u-g", PlanDigest: active, Follows: []string{"nfd", "cert-manager"}},
+				{ReleaseID: "nfd", UID: "u-n", PlanDigest: active},
+			}
+			r, _ := newRollout(t, engine, true)
+			reconcileRollout(t, ctx, r) // finalizer
+
+			deleteRuntime(t, ctx)
+			reconcileRollout(t, ctx, r) // removal rollout
+			removal := onlyRollout(t, ctx, removalDigest(string(rt.UID)))
+			order := make([]string, 0, len(removal.Spec.Steps))
+			for _, step := range removal.Spec.Steps {
+				order = append(order, step.Release)
+			}
+			if want := []string{"gpu-operator", "nfd", "cert-manager"}; removal.Spec.FromPlanDigest != active || !slices.Equal(order, want) {
+				t.Fatalf("removal rollout from %q removes %v, want %v from %q", removal.Spec.FromPlanDigest, order, want, active)
+			}
+			for _, id := range order {
+				engine.gone[id] = true
+			}
+			for range 8 {
+				if runtimeGone(t, ctx) {
+					break
+				}
+				reconcileRollout(t, ctx, r)
+			}
+			if want := []string{"Remove gpu-operator", "Remove nfd", "Remove cert-manager"}; !slices.Equal(engine.order, want) || !runtimeGone(t, ctx) {
+				t.Fatalf("engine calls = %v, want %v; runtime gone %t", engine.order, want, runtimeGone(t, ctx))
+			}
+		})
 	}
 }
 

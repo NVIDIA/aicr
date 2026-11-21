@@ -100,7 +100,7 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 | gke     | h100         | -       | -                   | nvidia-tuning-gke 0.1.2 |
 | oke     | a100         | -       | nvidia-setup 0.10.0 | -                       |
 | oke     | gb200        | -       | nvidia-setup 0.10.0 | -                       |
-| oke     | gb300        | -       | -                   | nvidia-tuned 0.11.0     |
+| oke     | gb300        | -       | -                   | nvidia-tuned 0.11.2     |
 | oke     | l40s         | -       | nvidia-setup 0.10.0 | -                       |
 | rke2    | *            | generic | -                   | nvidia-tuned 0.11.0     |
 | rke2    | vr200        | -       | -                   | nvidia-tuned 0.11.0     |
@@ -127,9 +127,12 @@ single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`,
 `tuning-gb300.yaml`) it suppresses the whole tuning CR, since the tuning
 package is that CR's only content. On `tuning-rke2.yaml` it does the same
 unless the RDMA package below is enabled. On `tuning-oke-gb300.yaml` it drops
-`nvidia-tuned` and keeps the CR with the CRI-O and VF settle packages described
-below. No recipe sets it outside AKS today, so default renderings are unchanged
-elsewhere.
+`nvidia-tuned` and keeps the CR with the CRI-O package described below. That
+also drops the RDMA VF gate, and nothing else on OKE GB300 holds kubelet for
+the VFs: with tuning off, the host image must provide that hold, or the SR-IOV
+device plugin can scan before the VFs settle and advertise fewer
+`nvidia.com/mlnxnics` than the node has. No recipe sets it outside AKS today,
+so default renderings are unchanged elsewhere.
 
 `tuning-rke2.yaml` also carries an optional `rdma-netns-exclusive` package,
 gated by `rdmaNetnsExclusive` (default `false`; only an explicit `true`
@@ -147,24 +150,34 @@ that already have it: the package has no uninstall step, so that takes
 removing `/etc/modprobe.d/dranet-rdma-netns-exclusive.conf` and a reboot.
 
 `tuning-oke-gb300.yaml` (OKE GB300) carries a `crio-multus-default-network`
-package and an `rdma-vfs-settled` package ahead of `nvidia-tuned`. The CRI-O
-package writes `/etc/crio/crio.conf.d/99-cni-default-network.conf`, which sets
+package ahead of `nvidia-tuned`. It writes
+`/etc/crio/crio.conf.d/99-cni-default-network.conf`, which sets
 `cni_default_network = "multus-cni-network"` so CRI-O waits for Multus before
-starting pods, and restarts CRI-O. `rdma-vfs-settled` installs a systemd unit
-that holds kubelet until the RDMA VFs have their driver bound and have stopped
-changing, so the SR-IOV device plugin's one-time scan sees all of them; it is a
-workaround until `nvidia-tuned`'s own VF gate waits for the VFs to settle
-([nodewright-packages#186](https://github.com/NVIDIA/nodewright-packages/issues/186)).
-`nvidia-tuned` runs there with `service: oci`, which takes the OCI GB300
-profile and a reboot. Its DOCA Spectrum-X congestion control is set off with
-`spcx_cc: "off"`, because Oracle Cloud Agent 1.64 runs congestion control on
-the rails itself. With `--set nodewrightcustomizations:spcxCC=on`,
-`nvidia-tuned` (0.11.0 or later) defers to OCA's units when they are running,
-and otherwise runs congestion control itself, which fails on NICs whose
-firmware lacks `USER_PROGRAMMABLE_CC`. Neither shellscript package has an
-uninstall step. Before removing `network-operator` or disabling this component,
-delete the CRI-O drop-in and restart CRI-O on each node, or CRI-O keeps waiting
-for a Multus network that no longer exists and the node stays not ready.
+starting pods, and restarts CRI-O. `nvidia-tuned` runs there with
+`service: oci`, which takes the OCI GB300 profile and a reboot; its RDMA VF
+gate holds kubelet until the VFs have their driver bound and have stopped
+changing, so the SR-IOV device plugin's one-time scan sees all of them. Its
+DOCA Spectrum-X congestion control is set off with `spcx_cc: "off"`, because
+Oracle Cloud Agent 1.64 runs congestion control on the rails itself. With
+`--set nodewrightcustomizations:spcxCC=on`, `nvidia-tuned` (0.11.0 or later)
+defers to OCA's units when they are running, and otherwise runs congestion
+control itself, which fails on NICs whose firmware lacks
+`USER_PROGRAMMABLE_CC`. The CRI-O package has no uninstall step. Before
+removing `network-operator` or disabling this component, delete the CRI-O
+drop-in and restart CRI-O on each node, or CRI-O keeps waiting for a Multus
+network that no longer exists and the node stays not ready.
+
+Nodes tuned by a bundle that predates `nvidia-tuned` 0.11.2 also carry an
+`rdma-vfs-settled` unit, which Nodewright does not remove on upgrade. It holds
+kubelet for about 15 seconds on every boot after `nvidia-tuned`'s gate has
+already released. Once `nvidia-tuned` 0.11.2 has completed on a node, remove
+it there:
+
+```shell
+systemctl disable rdma-vfs-settled.service
+rm /etc/systemd/system/rdma-vfs-settled.service /usr/local/sbin/wait-rdma-vfs-settled.sh
+systemctl daemon-reload
+```
 
 The tuning CR is a normal release-managed resource (no Helm hooks), so once
 its gates leave no package to render (`tuningEnabled=false`, plus

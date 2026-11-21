@@ -567,6 +567,20 @@ func TestRolloutStallsOnAnEditedRelease(t *testing.T) {
 	}
 }
 
+// What an object follows is never part of the recorded inventory: a rollout
+// created from an inventory that carries it still reads its record back.
+func TestRecordedInventoryIgnoresWhatObjectsFollow(t *testing.T) {
+	t.Parallel()
+	start := []argocd.InventoryItem{{ReleaseID: "gpu-operator", Name: "gpu-operator", UID: "u-g", Follows: []string{"nfd"}}}
+	ro := &v1alpha1.RuntimeRollout{Spec: v1alpha1.RuntimeRolloutSpec{
+		StartingInventory: startingInventory(start), StartingInventoryDigest: inventoryDigest(t, start),
+	}}
+	start[0].Follows = nil
+	if _, ok := recordedInventory(ro); !ok || ro.Spec.StartingInventoryDigest != inventoryDigest(t, start) {
+		t.Errorf("the recorded inventory does not read back, or its digest %s covers what objects follow", ro.Spec.StartingInventoryDigest)
+	}
+}
+
 func inventoryDigest(t *testing.T, items []argocd.InventoryItem) string {
 	t.Helper()
 	raw, err := json.Marshal(items)

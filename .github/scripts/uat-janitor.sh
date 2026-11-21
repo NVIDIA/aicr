@@ -18,7 +18,7 @@
 # (GPU node, VPC network group, router/NAT, resource group, node-pool service
 # accounts and their project IAM bindings, TF state) behind when
 # teardown never runs: a runner hard-killed mid-cancel, a daytime-up held cluster
-# whose evening daytime-down never fired, a manual skip_delete run abandoned, or a
+# (the debugging hold included) whose evening daytime-down never fired, or a
 # Bringup "failure" that stranded a healthy cluster. Those orphans accumulate until
 # they exhaust a cloud quota (in Aug 2026 the GCP NETWORKS quota, 50, hit 48/50).
 #
@@ -87,14 +87,13 @@
 #   * AGE FLOOR — keyed off the RUN's updated_at (uniform across clouds), not the
 #     cloud resource's create time. Nightly/ad-hoc: NIGHTLY_MIN_AGE_HOURS (default
 #     24h). Well above the 280-min job cap, so a still-finishing run's just-created
-#     cluster is never touched — and, deliberately, long enough that a nightly
-#     `skip_delete` run (a supported debugging hold, uat-{aws,azure,gcp}.yaml) can
-#     survive a full working day before the janitor reclaims it. There is NO API
-#     signal that distinguishes a skip_delete hold from a genuine orphan, so the
-#     floor is the only lever: a real mid-cancel orphan therefore also persists up
-#     to ~a day, which is acceptable — quota pressure builds over days, and the
-#     hourly janitor reaps within the hour once the floor clears. (Lower it only if
-#     a cloud's quota headroom demands faster reclamation.) Daytime:
+#     cluster is never touched. No nightly cluster is a debugging hold:
+#     uat-run.yaml refuses `skip_delete` on a nightly cloud run (#3670), so a
+#     hold is a `lifecycle=daytime-up` cluster under the daytime floor below. A
+#     real mid-cancel orphan persists up to ~a day, which is acceptable — quota
+#     pressure builds over days, and the hourly janitor reaps within the hour once
+#     the floor clears. (Lower it only if a cloud's quota headroom demands faster
+#     reclamation.) Daytime:
 #     DAYTIME_MIN_AGE_HOURS (default 24h). daytime-up is on-demand (workflow_dispatch), so its run is
 #     already `completed` while the cluster is legitimately HELD for the working
 #     day; the sole daytime schedule is the evening daytime-down (uat-daytime.yaml,

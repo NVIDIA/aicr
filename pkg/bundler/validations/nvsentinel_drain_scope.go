@@ -336,7 +336,7 @@ func drainEntryViolations(componentName string, values map[string]any) []error {
 // that several userNamespaces entries match: it collects the namespace under
 // every matching entry's mode, then acts on Immediate before
 // DeleteAfterTimeout before AllowCompletion, whatever the entries' order
-// (node-drainer/pkg/evaluator/evaluator.go, NVSentinel v1.31.0).
+// (node-drainer/pkg/evaluator/evaluator.go, NVSentinel v1.32.0).
 func modeStrength(mode string) int {
 	return map[string]int{
 		drainscope.ModeAllowCompletion:    1,
@@ -382,7 +382,7 @@ func catchAllViolations(values map[string]any, fail func(format string, args ...
 
 // podDrainPolicyViolations checks a podDrainPolicies entry's namespace glob,
 // pod selector and owner kinds the way node-drainer compiles them at startup
-// (node-drainer/pkg/config/pod_policies.go, NVSentinel v1.31.0), where any one
+// (node-drainer/pkg/config/pod_policies.go, NVSentinel v1.32.0), where any one
 // invalid stops it from starting. An empty namespace means every namespace. A
 // policy needs a podSelector, ownerKinds, or both.
 func podDrainPolicyViolations(componentName, path string, i int, fields map[string]any) []error {

@@ -209,6 +209,22 @@ func TestArtifactNamespaceInheritance(t *testing.T) {
 	}
 	mode = recipe.InheritAll
 	wantArtifactReason(t, client.inheritIdentity(t.Context(), path, &mode, client.dp, rec), "artifact-inputs-mismatch")
+	// A recipe resolved before crdOwnership existed stays readable for
+	// namespaces, and still cannot supply full identity or be executed.
+	old.Metadata.Artifacts = rec.Metadata.Artifacts.Clone()
+	old.Metadata.Artifacts.CRDOwnership = nil
+	old.ComponentRefs[0].Namespace = "older-namespace"
+	write()
+	mode = recipe.InheritNamespace
+	if err := client.inheritIdentity(t.Context(), path, &mode, client.dp, rec); err != nil {
+		t.Fatalf("namespace inheritance without crdOwnership: %v", err)
+	}
+	if rec.ComponentRefs[0].Namespace != "older-namespace" {
+		t.Fatal("namespace not inherited from a recipe without crdOwnership")
+	}
+	mode = recipe.InheritAll
+	wantArtifactReason(t, client.inheritIdentity(t.Context(), path, &mode, client.dp, rec), "artifact-inputs-mismatch")
+	wantArtifactReason(t, recipe.CheckArtifactInputs(old.Metadata.Artifacts, client.dp), "artifact-inputs-mismatch")
 	for _, tt := range []struct {
 		name   string
 		mutate func()

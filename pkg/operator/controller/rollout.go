@@ -146,6 +146,9 @@ type Engine interface {
 	Suspend(ctx context.Context, runtimeUID string, suspended bool) ([]string, error)
 	Orphan(ctx context.Context, runtimeUID string) ([]string, error)
 	Foreign(ctx context.Context, runtimeUID string) (map[string][]string, error)
+	// Unowned returns those of names that are engine objects without this
+	// runtime's ownership.
+	Unowned(ctx context.Context, runtimeUID string, names []string) ([]string, error)
 	Adopt(ctx context.Context, fromUID, toUID, name, uid string) error
 }
 
@@ -214,6 +217,7 @@ type runtimeView struct {
 	availableMessage          string
 	reconciling               bool
 	reconcilingReason         string
+	reconcilingMessage        string
 	stalled                   bool
 	stalledReason, stalledMsg string
 	// awaitingApprovalSince is when the rollout in progress started waiting
@@ -648,7 +652,7 @@ func (r *RolloutReconciler) judge(ctx context.Context, rt *v1alpha1.ClusterRunti
 	var assessment *v1alpha1.DigestedConfigMapRef
 	if assessed(base.from, p) {
 		var wait time.Duration
-		if report, assessment, wait, err = r.assess(ctx, rt, base.from, p); err != nil {
+		if report, assessment, wait, err = r.assess(ctx, rt, base.from, p, v); err != nil {
 			if isTerminal(err) {
 				v.stalled, v.stalledReason, v.stalledMsg = true, reasonOf(err), errorMessage(err)
 				return nil, false, nil, nil
@@ -711,14 +715,16 @@ func (r *RolloutReconciler) create(ctx context.Context, rt *v1alpha1.ClusterRunt
 	if err != nil {
 		return err
 	}
+	if taken, takenErr := r.namesTaken(ctx, rt, p, inventory, v); takenErr != nil || taken {
+		return takenErr
+	}
 	var from *plan.Document
 	if active != "" {
 		if from, err = readPlan(ctx, r.Reader, r.Config.OperatorNamespace, active); err != nil {
 			if !operrors.IsPermanent(err) {
 				return err
 			}
-			// Without the active plan nothing is verified and removals
-			// follow the inventory.
+			// Without the active plan nothing is verified.
 			from = nil
 		}
 	}
@@ -786,11 +792,41 @@ func (r *RolloutReconciler) create(ctx context.Context, rt *v1alpha1.ClusterRunt
 	return nil
 }
 
+// namesTaken stalls the runtime when an engine object it does not own has
+// the name of a release p would install: the rollout would fail at that
+// release's step, after its approval and the steps before it. It reports
+// whether it stalled. An object that takes a name later still fails the step.
+func (r *RolloutReconciler) namesTaken(ctx context.Context, rt *v1alpha1.ClusterRuntime, p *plan.Document,
+	inventory []argocd.InventoryItem, v *runtimeView) (bool, error) {
+
+	owned := make(map[string]bool, len(inventory))
+	for _, i := range inventory {
+		owned[i.Name] = true
+	}
+	var names []string
+	for i := range p.Releases {
+		if id := p.Releases[i].ID; !owned[id] {
+			names = append(names, id)
+		}
+	}
+	if len(names) == 0 {
+		return false, nil
+	}
+	taken, err := r.Engine.Unowned(ctx, string(rt.UID), names)
+	if err != nil || len(taken) == 0 {
+		return false, err
+	}
+	v.stalled, v.stalledReason = true, argocd.ReasonForeignObject
+	v.stalledMsg = fmt.Sprintf("engine objects not owned by this runtime have the names of releases in plan %s: %s; remove or rename them",
+		p.DesiredStateDigest, strings.Join(taken, ", "))
+	return true, nil
+}
+
 // steps orders a transition: in the target plan's order, installs
 // for releases the inventory lacks and upgrades for the others, where a
 // readiness release that is unchanged while its parent changes is a Verify
 // that re-runs its gate; then removals of releases the target plan lacks,
-// in reverse order of the active plan, each bound to the object's UID.
+// in removalOrder, each bound to the object's UID.
 func steps(p, from *plan.Document, inventory []argocd.InventoryItem) []v1alpha1.RolloutStep {
 	live := map[string]bool{}
 	for _, i := range inventory {
@@ -816,30 +852,63 @@ func steps(p, from *plan.Document, inventory []argocd.InventoryItem) []v1alpha1.
 		}
 		out = append(out, step)
 	}
-	var removed []argocd.InventoryItem
-	for _, i := range inventory {
+	for _, i := range removalOrder(from, inventory) {
 		if release(p, i.ReleaseID) == nil {
-			removed = append(removed, i)
+			out = append(out, v1alpha1.RolloutStep{Release: i.ReleaseID, Operation: v1alpha1.OperationRemove,
+				Assessment: v1alpha1.AssessmentNotApplicable, UID: i.UID})
 		}
 	}
-	// Reverse active-plan order; releases the active plan lacks go first,
-	// in reverse inventory order.
-	position := func(id string) int {
-		if from != nil {
-			for k := range from.Releases {
-				if from.Releases[k].ID == id {
-					return k
-				}
+	return out
+}
+
+// removalOrder is the order the inventory's objects would be removed in:
+// each before every object its Application follows, directly or through
+// others. It is the reverse of an install order that takes the active
+// plan's releases in its order, then the rest in inventory order, and
+// places each object after those it follows. It never fails: a followed
+// release the inventory lacks orders nothing, and a cycle is cut where it
+// closes.
+func removalOrder(from *plan.Document, inventory []argocd.InventoryItem) []argocd.InventoryItem {
+	position := map[string]int{}
+	if from != nil {
+		for k := range from.Releases {
+			position[from.Releases[k].ID] = k
+		}
+	}
+	order := make([]int, len(inventory))
+	byRelease := make(map[string][]int, len(inventory))
+	for k := range inventory {
+		order[k] = k
+		byRelease[inventory[k].ReleaseID] = append(byRelease[inventory[k].ReleaseID], k)
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, listedA := position[inventory[order[i]].ReleaseID]
+		b, listedB := position[inventory[order[j]].ReleaseID]
+		if listedA && listedB {
+			return a < b
+		}
+		return listedA && !listedB
+	})
+	out := make([]argocd.InventoryItem, 0, len(inventory))
+	placed, visiting := make([]bool, len(inventory)), make([]bool, len(inventory))
+	var place func(k int)
+	place = func(k int) {
+		if placed[k] || visiting[k] {
+			return
+		}
+		visiting[k] = true
+		for _, id := range inventory[k].Follows {
+			for _, dep := range byRelease[id] {
+				place(dep)
 			}
 		}
-		return len(inventory)
+		visiting[k], placed[k] = false, true
+		out = append(out, inventory[k])
 	}
-	slices.Reverse(removed)
-	sort.SliceStable(removed, func(i, j int) bool { return position(removed[i].ReleaseID) > position(removed[j].ReleaseID) })
-	for _, i := range removed {
-		out = append(out, v1alpha1.RolloutStep{Release: i.ReleaseID, Operation: v1alpha1.OperationRemove,
-			Assessment: v1alpha1.AssessmentNotApplicable, UID: i.UID})
+	for _, k := range order {
+		place(k)
 	}
+	slices.Reverse(out)
 	return out
 }
 
@@ -1890,9 +1959,14 @@ func (r *RolloutReconciler) applyStatus(ctx context.Context, rt *v1alpha1.Cluste
 			readyReason = v.stalledReason
 		}
 	}
-	reconcilingReason := v.reconcilingReason
+	reconcilingReason, reconcilingMessage := v.reconcilingReason, ""
 	if reconcilingReason == "" {
 		reconcilingReason = ReasonRolledOut
+	}
+	// The message belongs to the work the reason names; a terminal failure
+	// of that work is reported on Stalled instead.
+	if v.reconciling {
+		reconcilingMessage = v.reconcilingMessage
 	}
 	stalledReason := v.stalledReason
 	if stalledReason == "" {
@@ -1901,7 +1975,7 @@ func (r *RolloutReconciler) applyStatus(ctx context.Context, rt *v1alpha1.Cluste
 	conditions := []any{
 		condition(rt, v1alpha1.ConditionReady, boolStatus(v.ready), readyReason, v.readyMessage),
 		condition(rt, v1alpha1.ConditionAvailable, boolStatus(v.available), availableReason, availableMessage),
-		condition(rt, v1alpha1.ConditionReconciling, boolStatus(v.reconciling), reconcilingReason, ""),
+		condition(rt, v1alpha1.ConditionReconciling, boolStatus(v.reconciling), reconcilingReason, reconcilingMessage),
 		condition(rt, v1alpha1.ConditionStalled, boolStatus(v.stalled), stalledReason, v.stalledMsg),
 		condition(rt, v1alpha1.ConditionEngineAvailable, boolStatus(v.engineOK), v.engineReason, v.engineMessage),
 	}

@@ -39,6 +39,14 @@ priorityClass:
 # all five backend exporter endpoints to be set when this is disabled.
 otel-lgtm:
   enabled: true
+  # Fully qualified: CRI-O (OKE) enforces short-name resolution and rejects
+  # grafana/otel-lgtm as ambiguous. The chart's empty default means Docker Hub.
+  image:
+    registry: docker.io
+
+# Collector image for every OTel workload, qualified for the same reason.
+otelcol_image:
+  registry: docker.io
 
 opentelemetry-kube-stack:
   crds:
