@@ -1,0 +1,83 @@
+{
+  "id": 6,
+  "slug": "seven-deployment-formats",
+  "title": "One recipe, seven deployment formats",
+  "track": "Core workflow",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/bundling.md#choose-a-deployer",
+  "scenes": [
+    {
+      "heading": "New deployer. Same recipe.",
+      "sub": "Move the handoff from Helm to GitOps",
+      "visual": "queue",
+      "items": [
+        "Resolved recipe",
+        "Helm today",
+        "Argo CD next"
+      ],
+      "detail": "Keep the recipe input",
+      "result": "Change the deployer output",
+      "voice": [
+        "Your platform team is moving one cluster from a Helm workflow to Argo CD.",
+        "AICR can package the same resolved configuration for a different deployment tool."
+      ]
+    },
+    {
+      "heading": "Start with the Helm output",
+      "sub": "Inspect what the bundle contains",
+      "visual": "inspect",
+      "items": [
+        "Helm values",
+        "Install script",
+        "Helmfile graph"
+      ],
+      "detail": "aicr bundle --deployer helm",
+      "result": "Per-component values and deploy.sh",
+      "voice": [
+        "For Helm, AICR renders component values and a script that installs in dependency order.",
+        "A team using Helmfile can generate the release graph in that format instead."
+      ]
+    },
+    {
+      "heading": "Render a GitOps handoff",
+      "sub": "Choose the tool’s native format",
+      "visual": "compile",
+      "items": [
+        "Argo CD applications",
+        "Argo CD Helm chart",
+        "Flux Helm releases"
+      ],
+      "detail": "aicr bundle --deployer argocd",
+      "result": "Argo CD application manifests",
+      "voice": [
+        "Choose Argo CD to get application manifests, or its Helm variant to package the app of apps.",
+        "Flux is another option with Helm releases and their sources."
+      ]
+    },
+    {
+      "heading": "Let the deployer apply it",
+      "sub": "Choose from seven output formats",
+      "visual": "trace",
+      "items": [
+        "Selected deployer",
+        "Terraform modules",
+        "Rancher Fleet files"
+      ],
+      "detail": "Generated outputs leave AICR",
+      "result": "Argo CD applies this bundle",
+      "voice": [
+        "Terraform and Rancher Fleet round out the seven formats.",
+        "For this handoff, commit the generated Argo CD artifacts to the GitOps source so Argo CD can apply them."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    25,
+    39,
+    53
+  ],
+  "viewer": "Platform engineer",
+  "payoff": "Keep one resolved recipe while generating deployer-specific artifacts and handing Argo CD the format it expects."
+}

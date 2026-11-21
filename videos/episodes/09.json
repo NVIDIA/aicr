@@ -1,0 +1,83 @@
+{
+  "id": 9,
+  "slug": "aicr-go-sdk",
+  "title": "Put AICR inside your Go app",
+  "track": "Core workflow",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/integrator/go-library.md#quick-start",
+  "scenes": [
+    {
+      "heading": "A portal needs the deployable files",
+      "sub": "Turn a form into a usable configuration",
+      "visual": "portal",
+      "items": [
+        "Engineer request",
+        "GPU stack form",
+        "Go application"
+      ],
+      "detail": "EKS · H100 · Ubuntu · training",
+      "result": "One platform request",
+      "voice": [
+        "An engineer chooses EKS, H100, Ubuntu, and training in your platform portal.",
+        "The Go application needs the resolved recipe and the files its deployment pipeline expects."
+      ]
+    },
+    {
+      "heading": "Resolve inside the Go process",
+      "sub": "Import the public AICR SDK",
+      "visual": "terminal",
+      "items": [
+        "Go client",
+        "Typed RecipeRequest",
+        "Resolved recipe"
+      ],
+      "detail": "aicr.run/pkg/client/v1",
+      "result": "client.ResolveRecipe",
+      "voice": [
+        "Import the public AICR Go client and pass in typed criteria.",
+        "ResolveRecipe gives the portal a recipe it can inspect, including selected components and their configuration."
+      ]
+    },
+    {
+      "heading": "Render the chosen output",
+      "sub": "Reuse the recipe you just resolved",
+      "visual": "compile",
+      "items": [
+        "Recipe result",
+        "Deployer options",
+        "Generated files"
+      ],
+      "detail": "client.MakeBundle",
+      "result": "Deployer-specific bundle",
+      "voice": [
+        "Pass that recipe and your deployer options into MakeBundle.",
+        "The library generates deployment artifacts in the same process, ready for the chosen deployment tool to consume."
+      ]
+    },
+    {
+      "heading": "Return something useful",
+      "sub": "Make the result visible in the portal",
+      "visual": "portal",
+      "items": [
+        "Selected versions",
+        "Bundle artifact",
+        "Deploy pipeline"
+      ],
+      "detail": "Typed response in Go",
+      "result": "Downloadable deployment bundle",
+      "voice": [
+        "The portal can show the selected versions and hand the bundle to its deployment pipeline.",
+        "Your application uses ordinary Go calls for the recipe, bundle, and errors."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    25,
+    39,
+    53
+  ],
+  "viewer": "Go developer building a platform portal",
+  "payoff": "Follow one typed platform request through ResolveRecipe and MakeBundle to deployer artifacts returned by a Go app."
+}

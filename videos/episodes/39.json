@@ -1,0 +1,83 @@
+{
+  "id": 39,
+  "slug": "ask-a-coding-agent-for-a-recipe",
+  "title": "Ask a coding agent for a recipe",
+  "track": "SDK, API, and automation",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/demos/query.md#plain-english-queries-via-the-aicr-agent-skill",
+  "scenes": [
+    {
+      "heading": "Ask a configuration question",
+      "sub": "Illustrative EKS H100 driver lookup",
+      "visual": "portal",
+      "items": [
+        "Engineer",
+        "Coding agent",
+        "Driver version"
+      ],
+      "detail": "Which driver would this deploy?",
+      "result": "Need the resolved value",
+      "voice": [
+        "You need the GPU driver version for an EKS training cluster.",
+        "Ask your coding agent the question."
+      ]
+    },
+    {
+      "heading": "Teach the agent the AICR CLI",
+      "sub": "Install the skill for Codex",
+      "visual": "terminal",
+      "items": [
+        "AICR CLI",
+        "Agent skill",
+        "Query syntax"
+      ],
+      "detail": "aicr skill --agent codex",
+      "result": "Agent instructions generated",
+      "voice": [
+        "Generate the skill for Codex using the AICR CLI.",
+        "It gives the agent command and option references for resolving GPU recipes and inspecting selected settings."
+      ]
+    },
+    {
+      "heading": "Turn the question into a query",
+      "sub": "Make the criteria and selector visible",
+      "visual": "probe",
+      "items": [
+        "EKS H100 Ubuntu",
+        "Training intent",
+        "Driver selector"
+      ],
+      "detail": "aicr query … --selector …",
+      "result": "Value resolved from selected recipe",
+      "voice": [
+        "Specify EKS, H100, Ubuntu, and training in your request.",
+        "The agent can use the skill to build a command that selects the driver version from the resolved AICR recipe."
+      ]
+    },
+    {
+      "heading": "Ask to see the evidence",
+      "sub": "Keep the command with the answer",
+      "visual": "inspect",
+      "items": [
+        "Command",
+        "Resolved value",
+        "Rerun locally"
+      ],
+      "detail": "aicr query",
+      "result": "A lookup you can repeat",
+      "voice": [
+        "Have the agent show both the returned value and the command it used.",
+        "You can rerun that command against the same catalog and check the answer yourself."
+      ]
+    }
+  ],
+  "viewer": "Platform engineer investigating a recipe with a coding agent",
+  "payoff": "A plain-English GPU question becomes an auditable AICR command and a catalog-resolved value.",
+  "edges": [
+    0,
+    9,
+    22,
+    39,
+    53
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "id": 33,
+  "slug": "where-pinned-charts-live",
+  "title": "Where do the pinned charts live?",
+  "track": "Operator",
+  "status": "preview",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/operator/index.md#choosing-a-registry",
+  "scenes": [
+    {
+      "heading": "Where will Argo CD get the chart?",
+      "sub": "Decide on registry storage before setup.",
+      "visual": "fork",
+      "items": [
+        "In-cluster registry",
+        "External registry",
+        "Storage and access"
+      ],
+      "voice": [
+        "The Operator needs a runtime registry for charts, bundles, and validation evidence.",
+        "Choose its built-in registry with storage, or provide an external OCI registry you can keep reachable."
+      ],
+      "result": "Runtime registry selected at install"
+    },
+    {
+      "heading": "Mirror the chart into that registry",
+      "sub": "The plan records the content digest.",
+      "visual": "trace",
+      "items": [
+        "Publisher chart",
+        "Runtime registry",
+        "Pinned chart digest"
+      ],
+      "voice": [
+        "The Operator mirrors the chart needed by a plan into the runtime registry.",
+        "The plan records the mirrored chart by digest so Argo CD can retrieve those exact bytes."
+      ],
+      "detail": "Illustrative chart ref: sha256:…",
+      "result": "Plan pins the mirrored chart"
+    },
+    {
+      "heading": "Argo CD retrieves the pinned copy",
+      "sub": "A missing digest prevents the pull.",
+      "visual": "gate",
+      "items": [
+        "Plan chart digest",
+        "Argo CD pull",
+        "Exact content"
+      ],
+      "voice": [
+        "Argo CD reads the chart from the runtime registry during deployment.",
+        "If the content at the pinned digest is unavailable, the pull fails and the expected release cannot become ready."
+      ],
+      "detail": "Illustrative pull: digest unavailable",
+      "result": "Missing content blocks rollout progress"
+    },
+    {
+      "heading": "Keep the registry reachable",
+      "sub": "Existing plans name their registry.",
+      "visual": "vault",
+      "items": [
+        "Registry address",
+        "Artifact retention",
+        "Plan references"
+      ],
+      "voice": [
+        "Existing plans record where their mirrored charts live.",
+        "Choose the registry mode before installation, and keep its storage and access in place for the plans the cluster uses."
+      ],
+      "result": "Deployments depend on that registry"
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    25,
+    39,
+    53
+  ],
+  "viewer": "Platform engineers setting up the Operator preview",
+  "payoff": "Follow one chart from the publisher through the runtime registry to a digest-pinned Argo CD pull."
+}

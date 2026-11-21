@@ -1,0 +1,83 @@
+{
+  "id": 23,
+  "slug": "publish-your-own-run",
+  "title": "Publish your own run",
+  "track": "Validation, evidence, and trust",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/contributor/evidence-publishing.md",
+  "scenes": [
+    {
+      "heading": "The test ran behind a firewall",
+      "sub": "Keep the run details before leaving.",
+      "visual": "probe",
+      "items": [
+        "Cluster network",
+        "Validation run",
+        "Evidence export"
+      ],
+      "voice": [
+        "Your team ran a cluster check, and a reviewer wants to see exactly what it tested.",
+        "Have AICR emit evidence with the recipe, cluster snapshot, and results."
+      ],
+      "detail": "aicr validate --emit-attestation …",
+      "result": "Evidence bundle on disk"
+    },
+    {
+      "heading": "Move the evidence to a signing host",
+      "sub": "Validation and signing can run separately.",
+      "visual": "trace",
+      "items": [
+        "Evidence exported",
+        "Signing host",
+        "OCI registry"
+      ],
+      "voice": [
+        "When the cluster network cannot reach the signing service, take the emitted evidence to a host that can.",
+        "Sign and publish the bundle there, to an OCI registry."
+      ],
+      "detail": "aicr evidence publish … --push …",
+      "result": "Signature and registry reference"
+    },
+    {
+      "heading": "Send a pointer to reviewers",
+      "sub": "The digest selects the specific bundle.",
+      "visual": "inspect",
+      "items": [
+        "Evidence pointer",
+        "Bundle digest",
+        "Signature"
+      ],
+      "voice": [
+        "Share the generated pointer with your reviewer.",
+        "Its digest selects the exact bundle, so the signature can be checked against the content and the signing identity."
+      ],
+      "detail": "pointer.yaml",
+      "result": "Pointer names exact contents"
+    },
+    {
+      "heading": "Verify the evidence",
+      "sub": "Follow the upstream signing process.",
+      "visual": "gate",
+      "items": [
+        "Resolve pointer",
+        "Verify evidence",
+        "Review test result"
+      ],
+      "voice": [
+        "A reviewer can run AICR evidence verify with the published pointer.",
+        "For upstream contributions, follow the project's keyless signing and source registration process so the results can be reviewed in context."
+      ],
+      "detail": "aicr evidence verify …",
+      "result": "Verified bundle and readable results"
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    27,
+    39,
+    53
+  ],
+  "viewer": "Contributors publishing validation evidence",
+  "payoff": "Move validation evidence from a cluster network to a signer and give reviewers an independently verifiable pointer."
+}

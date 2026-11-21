@@ -1,0 +1,83 @@
+{
+  "id": 11,
+  "slug": "check-upgrade-safety",
+  "title": "Can I make this upgrade in one step?",
+  "track": "Core workflow",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/upgrading.md",
+  "scenes": [
+    {
+      "heading": "Can this upgrade happen in one hop?",
+      "sub": "Check before applying the new bundle",
+      "visual": "fork",
+      "items": [
+        "Installed stack",
+        "Target recipe",
+        "Upgrade decision"
+      ],
+      "detail": "Known starting point required",
+      "result": "Identify the proposed transition",
+      "voice": [
+        "A new recipe changes several components in your running stack.",
+        "Before applying it, check the path from what is deployed now to the specific recipe you want."
+      ]
+    },
+    {
+      "heading": "Identify what is deployed",
+      "sub": "Use the bundle or live release records",
+      "visual": "inspect",
+      "items": [
+        "Saved deployment",
+        "Deployer records",
+        "Target recipe"
+      ],
+      "detail": "aicr upgrade-check --from cluster",
+      "result": "Compare by component",
+      "voice": [
+        "Use a saved bundle when it reflects the installed stack.",
+        "You can also tell AICR to read live release records for the selected deployer and compare those with the target recipe."
+      ]
+    },
+    {
+      "heading": "One component blocks the direct move",
+      "sub": "Illustrative transition report",
+      "visual": "gate",
+      "items": [
+        "Safe",
+        "Manual",
+        "Blocked or unknown"
+      ],
+      "detail": "Read the deployer-specific guidance",
+      "result": "Direct upgrade blocked",
+      "voice": [
+        "The report marks each component safe, manual, blocked, or unknown.",
+        "Here, one transition is blocked and the guidance identifies an intermediate release to assess before you move."
+      ]
+    },
+    {
+      "heading": "Assess the next move separately",
+      "sub": "Re-check after an intermediate upgrade",
+      "visual": "trace",
+      "items": [
+        "Intermediate target",
+        "Rerun the check",
+        "Deployment handoff"
+      ],
+      "detail": "Assess each proposed hop",
+      "result": "Apply only after review",
+      "voice": [
+        "Run upgrade check for the intermediate target and follow any required steps.",
+        "When you reach it, rerun the assessment before handing the next bundle to your deployment tool."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    26,
+    40,
+    53
+  ],
+  "viewer": "Operator planning a GPU stack upgrade",
+  "payoff": "Compare the deployed stack with a proposed recipe and use a blocked transition to decide what to assess separately."
+}

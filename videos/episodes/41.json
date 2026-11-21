@@ -1,0 +1,83 @@
+{
+  "id": 41,
+  "slug": "submit-a-slurm-job-with-slinky",
+  "title": "Submit a Slurm job with Slinky",
+  "track": "Workloads",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/demos/cuj1-slinky-slurm.md",
+  "scenes": [
+    {
+      "heading": "Run a familiar Slurm job",
+      "sub": "Illustrative EKS H100 cluster",
+      "visual": "queue",
+      "items": [
+        "Slurm user",
+        "Kubernetes GPU pool",
+        "First job"
+      ],
+      "detail": "Goal: one allocated GPU",
+      "result": "Use the Slurm scheduling path",
+      "voice": [
+        "Your team submits GPU jobs with Slurm.",
+        "How do you get that same workflow on a Kubernetes cluster?"
+      ]
+    },
+    {
+      "heading": "Choose the Slurm platform",
+      "sub": "Render the control and worker placement",
+      "visual": "compile",
+      "items": [
+        "Slurm recipe",
+        "System node placement",
+        "GPU worker placement"
+      ],
+      "detail": "aicr recipe --platform slurm",
+      "result": "Slinky controller and workers",
+      "voice": [
+        "Resolve the EKS H100 training recipe with Slurm as the platform.",
+        "Bundle the stack with your system and GPU node placement, then install it through the deployer."
+      ]
+    },
+    {
+      "heading": "Validate before submitting jobs",
+      "sub": "Check Slurm health and GPU access",
+      "visual": "gate",
+      "items": [
+        "Deployment health",
+        "Slurm conformance",
+        "GPU access check"
+      ],
+      "detail": "aicr validate",
+      "result": "Review supported phases",
+      "voice": [
+        "Run deployment and conformance validation on the installed stack.",
+        "The Slurm checks cover the login and scheduling path, and this cloud recipe checks GPU access."
+      ]
+    },
+    {
+      "heading": "See the GPU Slurm assigned",
+      "sub": "Submit a smoke job from the login pod",
+      "visual": "terminal",
+      "items": [
+        "Login pod",
+        "One-GPU request",
+        "GPU listed"
+      ],
+      "detail": "srun --gres=gpu:1 nvidia-smi -L",
+      "result": "Illustrative: one GPU listed",
+      "voice": [
+        "From the login pod, submit a small srun job requesting one GPU.",
+        "When the job runs, the command lists the GPU visible to that job."
+      ]
+    }
+  ],
+  "viewer": "Slurm user bringing a familiar job to Kubernetes",
+  "payoff": "An EKS H100 cluster gains Slinky through an AICR recipe, and an srun smoke job confirms the assigned GPU is visible.",
+  "edges": [
+    0,
+    9,
+    24,
+    37,
+    53
+  ]
+}

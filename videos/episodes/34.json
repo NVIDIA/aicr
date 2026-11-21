@@ -1,0 +1,83 @@
+{
+  "id": 34,
+  "slug": "serve-recipes-over-http",
+  "title": "Serve recipes over HTTP",
+  "track": "SDK, API, and automation",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/api-reference.md",
+  "scenes": [
+    {
+      "heading": "Turn a request into a recipe",
+      "sub": "Illustrative internal GPU portal",
+      "visual": "portal",
+      "items": [
+        "EKS H100 Ubuntu",
+        "Training workload",
+        "Generate recipe"
+      ],
+      "detail": "Request a recipe",
+      "result": "Portal adds target criteria",
+      "voice": [
+        "An engineer chooses a GPU target in your platform portal.",
+        "They need a recipe and deployment files to hand off."
+      ]
+    },
+    {
+      "heading": "Resolve the target over HTTP",
+      "sub": "Pass the environment and workload",
+      "visual": "terminal",
+      "items": [
+        "HTTP API",
+        "EKS H100 Ubuntu",
+        "Training intent"
+      ],
+      "detail": "GET /v1/recipe",
+      "result": "Illustrative: recipe JSON",
+      "voice": [
+        "The portal calls the AICR API server with EKS, H100, Ubuntu, and training.",
+        "The recipe endpoint returns resolved component versions and settings."
+      ]
+    },
+    {
+      "heading": "Render deployment files",
+      "sub": "Send the resolved recipe as the body",
+      "visual": "compile",
+      "items": [
+        "Resolved recipe",
+        "Bundle endpoint",
+        "Deployment files"
+      ],
+      "detail": "POST /v1/bundle",
+      "result": "Illustrative: bundle.zip",
+      "voice": [
+        "The portal sends that resolved recipe to the bundle endpoint.",
+        "The server renders the deployment artifacts and returns a zip file the portal can offer for download."
+      ]
+    },
+    {
+      "heading": "Put the download to work",
+      "sub": "Keep the deployment handoff explicit",
+      "visual": "trace",
+      "items": [
+        "Resolved configuration",
+        "Download bundle",
+        "Deployment tooling"
+      ],
+      "detail": "Download bundle.zip",
+      "result": "Files ready for the deployer",
+      "voice": [
+        "The engineer can inspect the recipe and download the corresponding bundle.",
+        "Their deployment system can apply those files when the team is ready to roll out the stack."
+      ]
+    }
+  ],
+  "viewer": "Internal GPU portal developer",
+  "payoff": "A selected EKS H100 target becomes a resolved recipe and deployment zip through the API.",
+  "edges": [
+    0,
+    10,
+    23,
+    37,
+    53
+  ]
+}

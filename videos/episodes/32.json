@@ -1,0 +1,82 @@
+{
+  "id": 32,
+  "slug": "keep-stack-when-operator-goes-away",
+  "title": "Keep the stack when the Operator goes away",
+  "track": "Operator",
+  "status": "preview",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/operator/lifecycle.md#uninstall",
+  "scenes": [
+    {
+      "heading": "Remove the controller or the stack?",
+      "sub": "The live releases have their own lifecycle.",
+      "visual": "fork",
+      "items": [
+        "AICR Operator",
+        "Argo CD Applications",
+        "GPU releases"
+      ],
+      "voice": [
+        "You need to remove or replace the controller, while the cluster's GPU workloads keep running.",
+        "The Operator's deletion policy determines what happens to the releases it coordinates."
+      ],
+      "result": "Choose retain or remove"
+    },
+    {
+      "heading": "Orphan keeps the releases in place",
+      "sub": "Apps reconcile while the registry is reachable.",
+      "visual": "trace",
+      "items": [
+        "ClusterRuntime removed",
+        "Applications retained",
+        "Registry reachable"
+      ],
+      "voice": [
+        "Under the default orphan policy, deleting the runtime leaves its Argo CD Applications in place.",
+        "They keep reconciling the last state while they can reach their chart registry."
+      ],
+      "detail": "spec.deletionPolicy: Orphan",
+      "result": "Running stack is retained"
+    },
+    {
+      "heading": "Adopt the orphaned Applications",
+      "sub": "A new runtime names the previous owner.",
+      "visual": "gate",
+      "items": [
+        "Old runtime UID",
+        "New runtime",
+        "Adoption approval"
+      ],
+      "voice": [
+        "When a new runtime takes over, identify the old runtime whose Applications it should adopt.",
+        "The Operator verifies those Applications and requires approval before it changes their ownership."
+      ],
+      "detail": "spec.adoption.runtimeUID",
+      "result": "Ownership changes after approval"
+    },
+    {
+      "heading": "Use Delete when teardown is intended",
+      "sub": "Approved releases come down in order.",
+      "visual": "queue",
+      "items": [
+        "Approved removal",
+        "Dependents first",
+        "Runtime removed"
+      ],
+      "voice": [
+        "Use the delete policy when you intend to remove the releases.",
+        "After approval, the removal rollout tears down dependent releases before the components they use."
+      ],
+      "detail": "spec.deletionPolicy: Delete",
+      "result": "Dependents are removed first"
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    27,
+    41,
+    53
+  ],
+  "viewer": "Operators replacing or removing the controller",
+  "payoff": "See how retaining releases differs from approved removal, including when explicit adoption is needed."
+}

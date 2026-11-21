@@ -1,0 +1,83 @@
+{
+  "id": 5,
+  "slug": "query-two-clusters",
+  "title": "One query, two clusters",
+  "track": "Core workflow",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/demos/query.md#driver-config-differs-by-accelerator",
+  "scenes": [
+    {
+      "heading": "Do both GPUs need this setting?",
+      "sub": "A script wants one exact value",
+      "visual": "terminal",
+      "items": [
+        "One script",
+        "GPU Operator",
+        "Kernel module config"
+      ],
+      "detail": "driver.kernelModuleConfig.name",
+      "result": "Need the resolved setting",
+      "voice": [
+        "A deployment script needs one GPU Operator setting.",
+        "Check the resolved value for each accelerator instead of copying a default."
+      ]
+    },
+    {
+      "heading": "Ask the same question twice",
+      "sub": "Change only the accelerator",
+      "visual": "fork",
+      "items": [
+        "EKS Ubuntu training",
+        "H100",
+        "GB200"
+      ],
+      "detail": "aicr query --selector …",
+      "result": "Same selector on both targets",
+      "voice": [
+        "Keep EKS, Ubuntu, and training fixed.",
+        "Run the AICR query twice with the selector for the GPU Operator kernel module configuration name, once for H100 and once for GB200."
+      ]
+    },
+    {
+      "heading": "One setting, two answers",
+      "sub": "Values from the tagged query demo",
+      "visual": "compare",
+      "items": [
+        "H100",
+        "GB200",
+        "Kernel module config"
+      ],
+      "detail": "GB200 selects a named configuration",
+      "result": "H100: unset",
+      "voice": [
+        "For H100, the setting is unset in this example.",
+        "The GB200 recipe returns the NVIDIA kernel module parameter configuration name, which that accelerator needs."
+      ]
+    },
+    {
+      "heading": "Use the resolved answer",
+      "sub": "Keep the target explicit in the script",
+      "visual": "trace",
+      "items": [
+        "Target criteria",
+        "Resolved value",
+        "Downstream script"
+      ],
+      "detail": "nvidia-kernel-module-params",
+      "result": "One targeted value",
+      "voice": [
+        "The script can use the returned value while keeping its target criteria explicit.",
+        "Query is useful when you need the effective setting rather than the full recipe."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    25,
+    39,
+    53
+  ],
+  "viewer": "Engineer writing deployment automation",
+  "payoff": "Hold the query selector fixed and see it return different kernel-module settings for two real recipe targets."
+}

@@ -1,0 +1,112 @@
+{
+  "id": 42,
+  "slug": "serve-a-model-with-dynamo",
+  "title": "Follow a request through Dynamo",
+  "track": "Reference cuts",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/demos/cuj2-inference.md",
+  "renderer": "dynamo_reference",
+  "scenes": [
+    {
+      "voice": [
+        "You send a chat prompt to Dynamo. Where does that request go?",
+        "Let's follow it through a CPU frontend and a GPU worker, and back."
+      ]
+    },
+    {
+      "voice": [
+        "On an existing EKS cluster, choose the AICR inference recipe for H100, Ubuntu, and Dynamo.",
+        "Apply the generated bundle to install the inference stack."
+      ]
+    },
+    {
+      "voice": [
+        "Apply the example's DynamoGraphDeployment separately.",
+        "It places the frontend on CPU nodes and the vLLM model worker on the GPU pool."
+      ]
+    },
+    {
+      "voice": [
+        "Send one chat request.",
+        "Dynamo's CPU frontend receives the prompt and routes it to the vLLM worker.",
+        "The GPU there runs the model."
+      ]
+    },
+    {
+      "voice": [
+        "Tokens flow back through the frontend.",
+        "A reply shows the whole route worked."
+      ]
+    }
+  ],
+  "edges": [
+    0.0,
+    10.0,
+    23.0,
+    35.0,
+    46.0,
+    53.0
+  ],
+  "captions": [
+    {
+      "start": 0.27,
+      "end": 4.1,
+      "text": "You send a chat prompt to Dynamo. Where does that request go?"
+    },
+    {
+      "start": 4.55,
+      "end": 8.9,
+      "text": "Let's follow it through a CPU frontend and a GPU worker, and back."
+    },
+    {
+      "start": 10.27,
+      "end": 17.25,
+      "text": "On an existing EKS cluster, choose the AICR inference recipe for H100, Ubuntu, and Dynamo."
+    },
+    {
+      "start": 17.7,
+      "end": 21.1,
+      "text": "Apply the generated bundle to install the inference stack."
+    },
+    {
+      "start": 23.27,
+      "end": 26.58,
+      "text": "Apply the example's DynamoGraphDeployment separately."
+    },
+    {
+      "start": 27.03,
+      "end": 32.8,
+      "text": "It places the frontend on CPU nodes and the vLLM model worker on the GPU pool."
+    },
+    {
+      "start": 35.27,
+      "end": 37.1,
+      "text": "Send one chat request."
+    },
+    {
+      "start": 37.55,
+      "end": 42.82,
+      "text": "Dynamo's CPU frontend receives the prompt and routes it to the vLLM worker."
+    },
+    {
+      "start": 43.27,
+      "end": 45.49,
+      "text": "The GPU there runs the model."
+    },
+    {
+      "start": 46.27,
+      "end": 48.57,
+      "text": "Tokens flow back through the frontend."
+    },
+    {
+      "start": 49.02,
+      "end": 51.38,
+      "text": "A reply shows the whole route worked."
+    },
+    {
+      "start": 54.3,
+      "end": 56.65,
+      "text": "Explore AICR at aicr.run."
+    }
+  ]
+}

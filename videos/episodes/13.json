@@ -1,0 +1,83 @@
+{
+  "id": 13,
+  "slug": "recipe-layers",
+  "title": "Build a recipe in layers",
+  "track": "Recipes and deployment",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/integrator/recipe-development.md#multi-level-inheritance",
+  "scenes": [
+    {
+      "heading": "Where did this setting come from?",
+      "sub": "Start with a value in the resolved recipe",
+      "visual": "inspect",
+      "items": [
+        "Resolved recipe",
+        "Component setting",
+        "Source question"
+      ],
+      "detail": "Inspect one resolved field",
+      "result": "Need its source layer",
+      "voice": [
+        "You see a component setting in a resolved recipe and want to know why it has that value.",
+        "Follow the layers that produced the configuration."
+      ]
+    },
+    {
+      "heading": "Build up the environment",
+      "sub": "Start broad, then apply more detail",
+      "visual": "layers",
+      "items": [
+        "Base overlay",
+        "Service overlay",
+        "GPU-specific overlay"
+      ],
+      "detail": "Example: base → eks → eks-training",
+      "result": "Layers apply in order",
+      "voice": [
+        "Start with base settings, then layer in service and accelerator configuration.",
+        "A more specific overlay can change a value that an earlier shared overlay defined."
+      ]
+    },
+    {
+      "heading": "Bring in shared requirements",
+      "sub": "Several leaves can reuse one mixin",
+      "visual": "trace",
+      "items": [
+        "Ubuntu mixin",
+        "Shared constraint",
+        "More than one leaf"
+      ],
+      "detail": "Example mixin: os-ubuntu",
+      "result": "One reusable declaration",
+      "voice": [
+        "A mixin can carry a reusable fragment, such as Ubuntu requirements or a workload platform component.",
+        "Different recipe leaves can pull in the same fragment instead of copying its definition."
+      ]
+    },
+    {
+      "heading": "Read the path to the answer",
+      "sub": "Find the exact recipe and its parent layers",
+      "visual": "terminal",
+      "items": [
+        "Catalog leaf",
+        "Resolved recipe",
+        "Inheritance chain"
+      ],
+      "detail": "metadata.appliedOverlays",
+      "result": "Trace which overlays applied",
+      "voice": [
+        "Use recipe list to find the supported leaf and then resolve it.",
+        "Read the applied overlays recorded in metadata and trace the final component value back through that chain."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    25,
+    39,
+    53
+  ],
+  "viewer": "Recipe author",
+  "payoff": "Trace a setting through recipe overlays and a reusable mixin, then use the resolved inheritance chain to identify its source."
+}

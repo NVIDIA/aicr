@@ -1,0 +1,83 @@
+{
+  "id": 17,
+  "slug": "one-bundle-two-owners",
+  "title": "One bundle, two owners",
+  "track": "Recipes and deployment",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/bundling.md#split-a-bundle-by-class",
+  "scenes": [
+    {
+      "heading": "Two teams share one GPU cluster",
+      "sub": "Agree on the runtime and workload boundary",
+      "visual": "fork",
+      "items": [
+        "Platform team",
+        "Workload team",
+        "Shared recipe"
+      ],
+      "detail": "One resolved recipe",
+      "result": "Separate deployment owners",
+      "voice": [
+        "The platform team runs the GPU runtime, and another team owns the workload platforms.",
+        "They need separate deployment handoffs that agree on the same cluster configuration."
+      ]
+    },
+    {
+      "heading": "Split at the component classes",
+      "sub": "Keep the full recipe at the root",
+      "visual": "compile",
+      "items": [
+        "Core components",
+        "Ops components",
+        "Bundle set root"
+      ],
+      "detail": "aicr bundle --split",
+      "result": "core and ops deployment outputs",
+      "voice": [
+        "Use split when generating a Helm bundle.",
+        "Core gets the components a basic GPU workload needs, while ops holds workload platforms and other components."
+      ]
+    },
+    {
+      "heading": "Pass it over in dependency order",
+      "sub": "Deploy core first, then ops",
+      "visual": "queue",
+      "items": [
+        "Core handoff",
+        "Shared prerequisites",
+        "Ops handoff"
+      ],
+      "detail": "Install: core → ops",
+      "result": "Each owner applies their part",
+      "voice": [
+        "The platform team applies core first so shared prerequisites are available.",
+        "Then the workload team applies ops. When the teams tear down the stack, they reverse that order."
+      ]
+    },
+    {
+      "heading": "Verify both folders together",
+      "sub": "Use the shared set root",
+      "visual": "gate",
+      "items": [
+        "Complete set",
+        "Root checksums",
+        "Optional attestation"
+      ],
+      "detail": "aicr verify ./bundles",
+      "result": "One verification unit",
+      "voice": [
+        "Keep the root recipe and inventory with the two folders.",
+        "Verification at the set root covers both parts together, including any attestation on the bundle set."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    24,
+    39,
+    53
+  ],
+  "viewer": "Platform and workload team leads",
+  "payoff": "Split a Helm deployment into two ordered handoffs while retaining a single root for bundle verification."
+}

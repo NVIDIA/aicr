@@ -1,0 +1,82 @@
+{
+  "id": 28,
+  "slug": "who-approves-gpu-stack-change",
+  "title": "Who approves a GPU-stack change?",
+  "track": "Operator",
+  "status": "preview",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/operator/operations.md#approving-a-rollout",
+  "scenes": [
+    {
+      "heading": "A GPU stack change reaches review",
+      "sub": "Start with the proposed rollout steps.",
+      "visual": "probe",
+      "items": [
+        "Active plan",
+        "Proposed plan",
+        "Assessed steps"
+      ],
+      "voice": [
+        "Your team wants to upgrade the GPU stack while workloads are running.",
+        "The Operator asks AICR to assess the proposed steps before it acts on them."
+      ],
+      "detail": "kubectl aicr describe rollout …",
+      "result": "Review the plan before it starts"
+    },
+    {
+      "heading": "Three paths through the gate",
+      "sub": "The step type and risk set the policy.",
+      "visual": "fork",
+      "items": [
+        "Safe chart upgrade",
+        "Approval required",
+        "Blocked change"
+      ],
+      "voice": [
+        "A safe chart upgrade without a CRD change can proceed without approval.",
+        "Installs and changes with uncertain impact need approval, and a blocked upgrade never advances."
+      ],
+      "result": "Risk assessment picks the path"
+    },
+    {
+      "heading": "A second person reviews the plan",
+      "sub": "Approval records what they accepted.",
+      "visual": "gate",
+      "items": [
+        "Runtime author",
+        "Authorized approver",
+        "Approval deadline"
+      ],
+      "voice": [
+        "An authorized approver reviews the recorded steps, including any manual requirements.",
+        "Approval ties the plan to its starting inventory and deadline, and the author cannot approve their own change."
+      ],
+      "detail": "kubectl aicr approve rollout …",
+      "result": "Separate approver signs off"
+    },
+    {
+      "heading": "The starting point changed",
+      "sub": "A changed inventory stalls execution.",
+      "visual": "compare",
+      "items": [
+        "Approved inventory",
+        "Current inventory",
+        "Rollout stalled"
+      ],
+      "voice": [
+        "If the release inventory drifts after approval, the Operator stalls before it applies the next change.",
+        "The team can investigate the difference and decide how to proceed."
+      ],
+      "detail": "Illustrative status: InventoryDrift",
+      "result": "Changed state stalls the rollout"
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    27,
+    41,
+    53
+  ],
+  "viewer": "GPU platform owners and rollout approvers",
+  "payoff": "Decide which transitions need a second person and see an approved rollout stall if its starting state changes."
+}

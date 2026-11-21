@@ -1,0 +1,81 @@
+{
+  "id": 31,
+  "slug": "prove-what-rolled-out",
+  "title": "Prove what rolled out",
+  "track": "Operator",
+  "status": "preview",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/operator/cli-reference.md#reproduce",
+  "scenes": [
+    {
+      "heading": "What exactly did this rollout install?",
+      "sub": "The plan describes the rendered changes.",
+      "visual": "probe",
+      "items": [
+        "RuntimeRollout",
+        "Recorded plan",
+        "Rendered bundle"
+      ],
+      "voice": [
+        "An operator sees a healthy cluster and wants to know what was deployed.",
+        "Start with the rollout plan, which records the recipe and bundle used for that change."
+      ],
+      "result": "Pick the rollout to audit"
+    },
+    {
+      "heading": "Recover the original render inputs",
+      "sub": "Reproduce takes the recorded plan.",
+      "visual": "terminal",
+      "items": [
+        "Plan digest",
+        "Recipe file",
+        "Pinned AICR image"
+      ],
+      "voice": [
+        "Run kubectl aicr reproduce for the plan you want to audit.",
+        "It writes the recipe and prints the pinned image, render flags, and reference to the registry bundle."
+      ],
+      "detail": "kubectl aicr reproduce sha256:…",
+      "result": "Recipe and reproducible inputs"
+    },
+    {
+      "heading": "Compare the two rendered bundles",
+      "sub": "Render locally and pull the registry copy.",
+      "visual": "compare",
+      "items": [
+        "Locally rendered",
+        "Operator bundle",
+        "Directory comparison"
+      ],
+      "voice": [
+        "Use the printed commands to render from the recorded inputs and pull the Operator's bundle.",
+        "When the directories match, the render agrees with the recorded artifact."
+      ],
+      "detail": "diff -r local-bundle operator-bundle",
+      "result": "Illustrative result: zero file diff"
+    },
+    {
+      "heading": "Find the validation record",
+      "sub": "Required deployment validation binds proof.",
+      "visual": "trace",
+      "items": [
+        "Plan and snapshot",
+        "Artifact digests",
+        "Approval record"
+      ],
+      "voice": [
+        "When deployment validation is required, a successful rollout can record an evidence reference.",
+        "The binding connects that validation to the plan, snapshot, artifact digests, and approval."
+      ],
+      "result": "Evidence tied to this rollout"
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    25,
+    39,
+    53
+  ],
+  "viewer": "GPU platform engineers auditing a rollout",
+  "payoff": "Compare the Operator’s bundle with a local render and link the rollout to its validation evidence."
+}
