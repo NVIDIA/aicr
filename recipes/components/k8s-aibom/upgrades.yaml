@@ -122,8 +122,9 @@ transitions:
               Moves k8s-aibom to the new version.
           - id: verify-crd-update
             description: >-
-              After the manual apply, confirm the new schema actually landed
-              by looking for the field the v1.5.1 CRDs add: kubectl get crd
+              Only if apply-new-crds applied the v1.5.1 CRDs, confirm the new
+              schema actually landed by looking for the field they add:
+              kubectl get crd
               aibomcontrollerconfigs.aibom.k8saibom.dev -o
               jsonpath='{.spec.versions[?(@.name=="v1beta1")].schema.openAPIV3Schema.properties.spec.properties.verification.type}'
               and expect "object". An empty result means the v1.3.0 schema
@@ -289,8 +290,8 @@ transitions:
               Moves k8s-aibom to the new version.
           - id: verify-crd-update
             description: >-
-              After the manual apply, confirm the new schema landed by
-              looking for the field the v1.6 CRDs add: kubectl get crd
+              After apply-new-crds, confirm the new schema landed by looking
+              for the field the v1.6 CRDs add: kubectl get crd
               aibomcontrollerconfigs.aibom.k8saibom.dev -o
               jsonpath='{.spec.versions[?(@.name=="v1beta1")].schema.openAPIV3Schema.properties.spec.properties.discovery.properties.workloadKinds.type}'
               and expect "array". An empty result means an older schema is
