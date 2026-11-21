@@ -70,7 +70,7 @@ func TestPrecompiledDriverExcludesGDRCopy(t *testing.T) {
 					t.Fatalf("BuildRecipeResult: %v", err)
 				}
 				op := result.GetComponentRef("gpu-operator")
-				if op == nil || !op.IsEnabled() {
+				if op == nil || !op.IsDeployable() {
 					return
 				}
 				values, err := result.GetValuesForComponentWithContext(ctx, "gpu-operator")

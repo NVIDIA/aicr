@@ -77,7 +77,7 @@ type Summary struct {
 	Constraints []SummaryConstraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
 
 	// Components are the recipe's enabled components in deployment order.
-	// Components disabled by enabled: false or install: false are omitted.
+	// Components that are not IsDeployable (enabled: false or install: false) are omitted.
 	Components []SummaryComponent `json:"components" yaml:"components"`
 
 	// Validation lists the validation phases that declare checks.
@@ -158,7 +158,7 @@ func summaryComponents(r *RecipeResult) []SummaryComponent {
 	// done marks refs already listed, and disabled refs, which are never listed.
 	done := make([]bool, len(r.ComponentRefs))
 	for i, ref := range r.ComponentRefs {
-		if !ref.IsEnabled() {
+		if !ref.IsDeployable() {
 			done[i] = true
 			continue
 		}

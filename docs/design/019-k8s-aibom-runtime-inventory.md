@@ -677,8 +677,10 @@ aicr recipe ... --runtime-inventory disabled
 
 The selection is recorded as `configuration.runtimeInventory.mode`, the recipe's
 `apiVersion` becomes `ConfiguredRecipeResultAPIVersion`, and the component's ref
-carries `install: false`. `ComponentRef.IsEnabled()` already reads that key, so
-the component leaves the resolved set, the bundle, and deployment validation.
+carries `install: false`. `ComponentRef.IsDeployable()` (which requires
+`IsInstall()`) therefore excludes the component from the resolved deploy set,
+the bundle, and deployment validation, while `IsEnabled()` stays true so the
+ref remains inventory for any probe that needs it.
 
 This satisfies Decision 2's specific objection. A bundle-time
 `--set k8s-aibom:enabled=false` was rejected because it changes neither the

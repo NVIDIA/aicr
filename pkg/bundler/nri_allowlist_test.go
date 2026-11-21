@@ -47,7 +47,7 @@ func TestWarnNRIManagementAllowlist(t *testing.T) {
 	bundled := func(gpu map[string]any, dropped ...string) map[string]map[string]any {
 		values := make(map[string]map[string]any)
 		for _, ref := range result.ComponentRefs {
-			if !ref.IsEnabled() || slices.Contains(dropped, ref.Name) {
+			if !ref.IsDeployable() || slices.Contains(dropped, ref.Name) {
 				continue
 			}
 			values[ref.Name] = map[string]any{}

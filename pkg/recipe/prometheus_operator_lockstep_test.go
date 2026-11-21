@@ -66,7 +66,7 @@ func TestPrometheusOperatorAppVersionLockstep(t *testing.T) {
 		}
 		stackRef := result.GetComponentRef(stackComponent)
 		crdsRef := result.GetComponentRef(crdsComponent)
-		if stackRef == nil || crdsRef == nil || !stackRef.IsEnabled() || !crdsRef.IsEnabled() {
+		if stackRef == nil || crdsRef == nil || !stackRef.IsDeployable() || !crdsRef.IsDeployable() {
 			continue
 		}
 		versions := chartVersionPair{stackVersion: stackRef.Version, crdsVersion: crdsRef.Version}

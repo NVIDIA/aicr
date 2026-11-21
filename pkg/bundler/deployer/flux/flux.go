@@ -781,7 +781,7 @@ func removeStaleSourcesDir(sourcesDir string) error {
 func filterEnabled(refs []recipe.ComponentRef) []recipe.ComponentRef {
 	enabled := make([]recipe.ComponentRef, 0, len(refs))
 	for _, ref := range refs {
-		if ref.IsEnabled() {
+		if ref.IsDeployable() {
 			enabled = append(enabled, ref)
 		}
 	}

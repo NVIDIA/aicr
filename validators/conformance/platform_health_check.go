@@ -41,10 +41,10 @@ func CheckPlatformHealth(ctx *validators.Context) error {
 	// 1. Verify all expected namespaces are Active
 	seen := make(map[string]bool)
 	for _, ref := range ctx.ValidationInput.ComponentRefs {
-		// Disabled refs (overrides.enabled: false) are excluded from the
-		// bundle and never deployed, so their namespaces must not be
-		// required to exist (#1678).
-		if !ref.IsEnabled() {
+		// Non-deployable refs (enabled: false or install: false) are excluded
+		// from the bundle and never deployed by AICR, so their namespaces must
+		// not be required to exist (#1678).
+		if !ref.IsDeployable() {
 			continue
 		}
 		if ref.Namespace != "" && !seen[ref.Namespace] {
@@ -64,8 +64,8 @@ func CheckPlatformHealth(ctx *validators.Context) error {
 
 	// 2. Verify all expectedResources are healthy
 	for _, ref := range ctx.ValidationInput.ComponentRefs {
-		// Same rationale as above: a disabled ref deploys nothing (#1678).
-		if !ref.IsEnabled() {
+		// Same rationale as above: a non-deployable ref deploys nothing (#1678).
+		if !ref.IsDeployable() {
 			continue
 		}
 		for _, er := range ref.ExpectedResources {

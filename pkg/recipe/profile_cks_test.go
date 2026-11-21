@@ -53,18 +53,18 @@ func TestCKSGPUStackProfile(t *testing.T) {
 					}
 					for _, name := range []string{"gpu-operator", "nfd", "nvidia-dra-driver-gpu", "dra-node-labeler", "nvsentinel", "prometheus-adapter"} {
 						ref := result.GetComponentRef(name)
-						if ref == nil || ref.IsEnabled() {
+						if ref == nil || ref.IsDeployable() {
 							t.Errorf("%s must be explicitly disabled", name)
 						}
 					}
 					for _, name := range []string{"network-operator", "nodewright-customizations"} {
-						if ref := result.GetComponentRef(name); ref != nil && ref.IsEnabled() {
+						if ref := result.GetComponentRef(name); ref != nil && ref.IsDeployable() {
 							t.Errorf("%s must not manage CoreWeave hosts", name)
 						}
 					}
 					for _, name := range []string{"cert-manager", "nodewright-operator", "prometheus-operator-crds", "kube-prometheus-stack", "k8s-ephemeral-storage-metrics", "kai-scheduler"} {
 						ref := result.GetComponentRef(name)
-						if ref == nil || !ref.IsEnabled() {
+						if ref == nil || !ref.IsDeployable() {
 							t.Errorf("missing enabled %s", name)
 						}
 					}

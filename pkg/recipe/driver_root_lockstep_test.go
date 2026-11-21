@@ -153,9 +153,9 @@ func TestDriverRootLockstep(t *testing.T) {
 				t.Skipf("lockstep N/A: nvidia-dra-driver-gpu=%v gpu-operator=%v",
 					dra != nil, op != nil)
 			}
-			if !dra.IsEnabled() || !op.IsEnabled() {
+			if !dra.IsDeployable() || !op.IsDeployable() {
 				t.Skipf("lockstep N/A: one or both components disabled (dra enabled=%v, gpu-operator enabled=%v)",
-					dra.IsEnabled(), op.IsEnabled())
+					dra.IsDeployable(), op.IsDeployable())
 			}
 			checked++
 

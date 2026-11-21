@@ -135,7 +135,7 @@ func ResolveInferenceGatewayProfile(refs []recipe.ComponentRef) (profile Inferen
 	var declared []InferenceGatewayProfile
 	for i := range refs {
 		ref := &refs[i]
-		if !ref.IsEnabled() {
+		if !ref.IsDeployable() {
 			continue
 		}
 		p, isGateway, refErr := inferenceGatewayProfileFromRef(ref)

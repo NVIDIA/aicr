@@ -249,7 +249,7 @@ func TestClassDependencyDirectionGuard(t *testing.T) {
 func assertClassDirection(t *testing.T, registry *ComponentRegistry, result *RecipeResult, name string) {
 	t.Helper()
 	for _, ref := range result.ComponentRefs {
-		if !ref.IsEnabled() {
+		if !ref.IsDeployable() {
 			continue
 		}
 		from := registry.Get(ref.Name)
@@ -259,7 +259,7 @@ func assertClassDirection(t *testing.T, registry *ComponentRegistry, result *Rec
 		fromRank, _ := from.GetClass().Rank()
 		for _, depName := range ref.DependencyRefs {
 			dep := result.GetComponentRef(depName)
-			if dep == nil || !dep.IsEnabled() {
+			if dep == nil || !dep.IsDeployable() {
 				// A declared-but-disabled dependency is satisfied
 				// outside the recipe; a missing one fails resolution.
 				continue

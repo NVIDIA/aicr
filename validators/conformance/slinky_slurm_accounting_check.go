@@ -83,7 +83,7 @@ func runSlinkySlurmAccountingProbe(
 func slurmAccountingEnabled(input *v1.ValidationInput) (bool, error) {
 	for i := range input.ComponentRefs {
 		ref := &input.ComponentRefs[i]
-		if ref.Name != slinkySlurmComponent || !ref.IsEnabled() {
+		if ref.Name != slinkySlurmComponent || !ref.IsDeployable() {
 			continue
 		}
 		value, found := component.GetValueByPath(ref.Overrides, "accounting.enabled")

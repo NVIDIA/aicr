@@ -183,7 +183,7 @@ func makeOptionalProfileBundle(t *testing.T, rr *recipe.RecipeResult, opts ...co
 func bundledExcept(rr *recipe.RecipeResult, skip ...string) []string {
 	names := make([]string, 0, len(rr.ComponentRefs))
 	for _, ref := range rr.ComponentRefs {
-		if !slices.Contains(skip, ref.Name) && ref.IsEnabled() {
+		if !slices.Contains(skip, ref.Name) && ref.IsDeployable() {
 			names = append(names, ref.Name)
 		}
 	}

@@ -1782,7 +1782,7 @@ func facadeResultFromInternal(r *recipe.RecipeResult, name string) *RecipeResult
 		}
 	}
 	for _, c := range r.ComponentRefs {
-		if !c.IsEnabled() {
+		if !c.IsDeployable() {
 			continue
 		}
 		// Project the chart the component actually deploys: a source-only

@@ -312,7 +312,7 @@ func TestValidateAccountingConfigurationRequiresEnabledComponents(t *testing.T) 
 			if err := applyBuildConfig(result, &buildConfig{accountingMode: &tt.mode}); err != nil {
 				t.Fatalf("applyBuildConfig() error = %v", err)
 			}
-			result.GetComponentRef(tt.component).Overrides[componentEnabledOverrideKey] = false
+			result.GetComponentRef(tt.component).Overrides[ComponentEnabledOverrideKey] = false
 
 			err := result.validateAccountingConfiguration()
 			if (err != nil) != tt.wantErr {
@@ -435,10 +435,10 @@ func TestBuilderAccountingBuildsAreIsolated(t *testing.T) {
 		if ref == nil {
 			t.Fatalf("result %d missing %s", i, slurmAccountingMariaDBComponentName)
 		}
-		gotInstall, ok := ref.Overrides[componentInstallOverrideKey].(bool)
+		gotInstall, ok := ref.Overrides[ComponentInstallOverrideKey].(bool)
 		if !ok || gotInstall != wantInstall {
 			t.Errorf("result %d install = %v; want %t", i,
-				ref.Overrides[componentInstallOverrideKey], wantInstall)
+				ref.Overrides[ComponentInstallOverrideKey], wantInstall)
 		}
 	}
 }
@@ -503,7 +503,7 @@ func TestBuilderMaterializesDisabledForSlurm(t *testing.T) {
 			t.Errorf("missing stable component ref %q", name)
 			continue
 		}
-		if ref.IsEnabled() {
+		if ref.IsDeployable() {
 			t.Errorf("component %q enabled in disabled mode", name)
 		}
 	}
@@ -535,7 +535,7 @@ func TestBuilderDeploymentOrderMatchesEnabledComponents(t *testing.T) {
 				inDeploymentOrder[name] = true
 			}
 			for _, ref := range result.ComponentRefs {
-				if got, want := inDeploymentOrder[ref.Name], ref.IsEnabled(); got != want {
+				if got, want := inDeploymentOrder[ref.Name], ref.IsDeployable(); got != want {
 					t.Errorf("component %q in deploymentOrder = %t, enabled = %t; order=%v",
 						ref.Name, got, want, result.DeploymentOrder)
 				}

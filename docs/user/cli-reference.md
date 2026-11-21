@@ -1112,10 +1112,11 @@ VALIDATION
 from the presence of a GPU operator. A selected profile appears as `name=value`.
 Components follow deployment order, with enabled references not listed there appended in
 recipe order; the VERSION column shows Helm chart versions or Kustomize tags.
-Components disabled with `enabled: false` or `install: false` are not deployed, so they
-are left out of the table and the `COMPONENTS (n)` count, and dependencies on them are
-dropped from DEPENDS ON. `--selector components` still lists every component, including
-disabled ones.
+Components that are not deployable (`enabled: false` or `install: false` —
+`ComponentRef.IsDeployable()`) are left out of the table and the
+`COMPONENTS (n)` count, and dependencies on them are dropped from DEPENDS ON.
+`--selector components` still lists every component, including non-deployable
+ones.
 Constraints and applied overlays keep recipe order. Validation phases always appear
 in run order: readiness, then deployment, conformance, performance as `aicr validate`
 runs them, omitting phases without checks. Empty sections and empty table cells use

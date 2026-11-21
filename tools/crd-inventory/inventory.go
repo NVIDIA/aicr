@@ -248,7 +248,7 @@ func collectAssertions(ctx context.Context, dp recipe.DataProvider, reg *recipe.
 			return nil, errors.PropagateOrWrap(leaf.Err, errors.ErrCodeInternal, "resolve leaf recipe "+leaf.Entry.Name)
 		}
 		for _, ref := range leaf.Result.ComponentRefs {
-			if !ref.IsEnabled() || strings.TrimSpace(ref.HealthCheckAsserts) == "" {
+			if !ref.IsDeployable() || strings.TrimSpace(ref.HealthCheckAsserts) == "" {
 				continue
 			}
 			names, err := parseAssertedCRDs([]byte(ref.HealthCheckAsserts))

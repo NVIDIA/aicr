@@ -148,7 +148,7 @@ func resolveSlinkySlurmNamespace(ctx *validators.Context) string {
 		return slinkySlurmNamespace
 	}
 	for _, ref := range ctx.ValidationInput.ComponentRefs {
-		if ref.Name == slinkySlurmComponent && ref.IsEnabled() && strings.TrimSpace(ref.Namespace) != "" {
+		if ref.Name == slinkySlurmComponent && ref.IsDeployable() && strings.TrimSpace(ref.Namespace) != "" {
 			return ref.Namespace
 		}
 	}
