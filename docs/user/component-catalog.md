@@ -4157,7 +4157,7 @@ upstream expects to turn it on later, so prefer `locationType: Secret` or
 `2.4.0` stops declaring `data` on the trainer and JobSet webhook certificate Secrets, which ends the Argo CD reconcile loop on them ([#3425](https://github.com/NVIDIA/aicr/issues/3425)). An existing `2.2.x` install cannot move to it in one step. Upstream requires every `2.0` to `2.2` install to run `2.3.0` first, and `2.3.0` moves the Trainer CRDs out of the chart's `crds/` directory into its templates, so Helm now owns them as release resources.
 
 1. **Helm, Helmfile, Flux, Fleet and Terraform:** mark the three Trainer CRDs as belonging to the release before upgrading, or the upgrade fails with `invalid ownership metadata`. Argo CD needs no preparation.
-2. Set the `kubeflow-trainer` componentRef version to `2.3.0` in your recipe, regenerate the bundle, deploy it, and wait for the controller to become available.
+2. Set the `kubeflow-trainer` componentRef version to `2.3.0` in the recipe file you generated with `aicr recipe`, regenerate the bundle from it (`aicr bundle --recipe`), deploy it, and wait for the controller to become available. Edit the generated recipe, not an overlay: an overlay that inherits `platform-kubeflow` cannot set the version, because the mixin's ref for `kubeflow-trainer` collides with one the overlay declares.
 3. Then deploy the `2.4.0` bundle, once no MPI-based TrainJob is suspended.
 
 Do not roll back or uninstall while on `2.3.0`, and leave Terraform's `atomic` off for that step: its CRD templates lack the `helm.sh/resource-policy: keep` annotation `2.4.0` adds, so a rollback to `2.2.x` deletes the CRDs and every TrainJob with them. `aicr upgrade-check` and the bundle's `UPGRADING.md` print the exact commands for each deployer.

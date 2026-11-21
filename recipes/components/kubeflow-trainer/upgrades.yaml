@@ -83,16 +83,20 @@ transitions:
               in its migration guide.
           - id: upgrade-to-2-3-0
             description: >-
-              Set the kubeflow-trainer componentRef version to 2.3.0 in your
-              recipe, regenerate the bundle, and deploy it as usual.
+              Set the kubeflow-trainer componentRef version to 2.3.0 in the
+              recipe file you generated with aicr recipe (not in an overlay,
+              where platform-kubeflow owns that ref), regenerate the bundle
+              from it, and deploy it as usual.
             reason: >-
               Upstream requires 2.0 to 2.2 installs to run 2.3 before any
               later release.
       - steps:
           - id: upgrade-to-2-3-0
             description: >-
-              Set the kubeflow-trainer componentRef version to 2.3.0 in your
-              recipe, regenerate the bundle, and sync it as usual. No CRD
+              Set the kubeflow-trainer componentRef version to 2.3.0 in the
+              recipe file you generated with aicr recipe (not in an overlay,
+              where platform-kubeflow owns that ref), regenerate the bundle
+              from it, and sync it as usual. No CRD
               preparation is needed.
             reason: >-
               Argo CD applies the chart's manifests itself and does not check
@@ -141,8 +145,10 @@ transitions:
               controller still running.
           - id: land-on-2-3-0
             description: >-
-              Set the kubeflow-trainer componentRef version to 2.3.0 in your
-              recipe, regenerate the bundle, deploy it, and wait for the
+              Set the kubeflow-trainer componentRef version to 2.3.0 in the
+              recipe file you generated with aicr recipe (not in an overlay,
+              where platform-kubeflow owns that ref), regenerate the bundle
+              from it, deploy it, and wait for the
               kubeflow-trainer-controller-manager Deployment to become
               available. Do not roll back or uninstall while on 2.3.0, and on
               terraform leave atomic off for this apply.
@@ -162,8 +168,10 @@ transitions:
       - steps:
           - id: land-on-2-3-0
             description: >-
-              Set the kubeflow-trainer componentRef version to 2.3.0 in your
-              recipe, regenerate the bundle, sync it, and wait for the
+              Set the kubeflow-trainer componentRef version to 2.3.0 in the
+              recipe file you generated with aicr recipe (not in an overlay,
+              where platform-kubeflow owns that ref), regenerate the bundle
+              from it, sync it, and wait for the
               kubeflow-trainer-controller-manager Deployment to become
               available. No CRD preparation is needed.
             reason: >-
