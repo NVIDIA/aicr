@@ -16,9 +16,11 @@ package controller
 
 import (
 	"context"
+	stderrors "errors"
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -29,6 +31,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
+	ctrlhealthz "sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -254,7 +257,8 @@ func TestRolloutSetupTracksReconciles(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, _ := newRollout(t, newEngine(), true)
-	r.Liveness = NewLiveness()
+	clk := &livenessClock{t: time.Unix(10_000, 0)}
+	r.Liveness = newTestLiveness(clk)
 	if err = r.SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
@@ -271,18 +275,79 @@ func TestRolloutSetupTracksReconciles(t *testing.T) {
 
 	freshRuntime(t, ctx, stabilized)
 	hc := &http.Client{Timeout: 5 * time.Second}
-	for {
+	waitHealthz := func(want string, tracked func() bool) {
+		t.Helper()
+		for {
+			if tracked() && strings.Contains(healthz(ctx, hc, probe), want) {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("want %q; /healthz: %s", want, healthz(ctx, hc, probe))
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}
+	waitHealthz("[+]rollout-reconcile ok", func() bool {
 		r.Liveness.mu.Lock()
-		tracked := r.Liveness.next
-		r.Liveness.mu.Unlock()
-		if tracked > 0 && strings.Contains(healthz(ctx, hc, probe), "[+]rollout-reconcile ok") {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("tracked %d reconciles; /healthz: %s", tracked, healthz(ctx, hc, probe))
-		case <-time.After(50 * time.Millisecond):
-		}
+		defer r.Liveness.mu.Unlock()
+		return r.Liveness.next > 0
+	})
+
+	// A reconcile left in flight past the limit fails the served check.
+	r.Liveness.start()
+	clk.add(r.Liveness.limit + time.Second)
+	waitHealthz("[-]rollout-reconcile failed", func() bool { return true })
+}
+
+// healthzRecorder records the health checks a setup registers and fails each
+// registration with err.
+type healthzRecorder struct {
+	ctrl.Manager
+	names []string
+	err   error
+}
+
+func (m *healthzRecorder) AddHealthzCheck(name string, _ ctrlhealthz.Checker) error {
+	m.names = append(m.names, name)
+	return m.err
+}
+
+func TestRolloutSetupLivenessRegistration(t *testing.T) {
+	skip := true
+	tests := []struct {
+		name      string
+		liveness  *Liveness
+		addErr    error
+		wantNames []string
+		wantCode  operrors.ErrorCode
+	}{
+		{name: "nil liveness registers no check"},
+		{name: "registration failure", liveness: NewLiveness(), addErr: stderrors.New("started"),
+			wantNames: []string{"rollout-reconcile"}, wantCode: operrors.ErrCodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
+				Scheme:                 k8s.Scheme(),
+				Metrics:                metricsserver.Options{BindAddress: "0"},
+				HealthProbeBindAddress: "0",
+				Controller:             config.Controller{SkipNameValidation: &skip},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec := &healthzRecorder{Manager: mgr, err: tt.addErr}
+			r, _ := newRollout(t, newEngine(), true)
+			r.Liveness = tt.liveness
+			err = r.SetupWithManager(rec)
+			if got := operrors.CodeOf(err); got != tt.wantCode {
+				t.Errorf("SetupWithManager() = %v, want code %q", err, tt.wantCode)
+			}
+			if !slices.Equal(rec.names, tt.wantNames) {
+				t.Errorf("health checks = %v, want %v", rec.names, tt.wantNames)
+			}
+		})
 	}
 }
 

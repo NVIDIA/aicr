@@ -100,10 +100,11 @@ const (
 	// JobScratchSizeLimit bounds the emptyDir each AICR Job writes to.
 	JobScratchSizeLimit = "1Gi"
 	// AICR Job resources. Measured on GKE H100 with AICR v1.2.0, no stage
-	// exceeded 36 MiB; the stages that run for more than seconds averaged
-	// under 0.1 CPU, and the others burst to 1.4 cores, which no CPU limit
-	// caps. The memory request keeps headroom for larger recipes, and the
-	// limit is a ceiling (https://github.com/NVIDIA/aicr/issues/3495).
+	// exceeded 36 MiB. Snapshot and validation, which run for seconds to
+	// minutes, averaged at most 0.05 CPU; recipe, render and assessment end
+	// within 2s and burst to 1.4 cores, which no CPU limit caps. The memory
+	// request keeps headroom for larger recipes, and the limit is a ceiling
+	// (https://github.com/NVIDIA/aicr/issues/3495).
 	JobCPURequest    = "100m"
 	JobMemoryRequest = "256Mi"
 	JobMemoryLimit   = "1Gi"

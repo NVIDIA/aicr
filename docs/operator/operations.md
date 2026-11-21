@@ -107,7 +107,7 @@ scrape the operator from your own. Otherwise scrape the pod, or port-forward
 | `aicr_operator_runtime_stalled{reason}` | `1` while the runtime is `Stalled=True` with this reason, else `0`; the reasons are the [troubleshooting](troubleshooting.md) ones |
 | `aicr_operator_rollout_approval_wait_seconds` | How long the rollout in progress has waited for approval, including while the engine is unavailable; `0` while none waits |
 | `aicr_operator_runtime_resolved_timestamp_seconds` | When the operator last saw the runtime resolved for its current inputs, as a Unix time, checked every 30 seconds. It stops while a resolution runs or retries, including one that keeps an already resolved runtime `Resolved=True`, such as a snapshot refresh; `0` until it has seen one since the operator started |
-| `aicr_operator_registry_failures_total{operation,code}` | Failed runtime registry and chart delivery operations (`resolve`, `pull_bundle`, `push_chart`, `reuse_chart`, `mirror_oci_chart`, `mirror_http_chart`, `push_wrapper`, `sigstore_bundles`, `describe`, `push_statement`, `pull_statement`), by error code. `reuse_chart` with `NOT_FOUND` is a chart the operator mirrors again, not an outage |
+| `aicr_operator_registry_failures_total{operation,code}` | Failed runtime registry and chart delivery operations (`resolve`, `pull_bundle`, `reuse_chart`, `mirror_oci_chart`, `mirror_http_chart`, `push_wrapper`, `sigstore_bundles`, `describe`, `push_statement`, `pull_statement`), by error code. `reuse_chart` with `NOT_FOUND` is a chart the operator mirrors again, not an outage |
 
 Every outcome, result, stage, retry class, stall reason, registry operation
 and error code is exported at zero from startup, so a rate reads zero rather
