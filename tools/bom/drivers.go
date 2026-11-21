@@ -91,7 +91,7 @@ func loadCatalogDriverTargets(ctx context.Context, repoRoot string) (catalogDriv
 		}
 		target, _ := mirror.DriverTargetForRecipe(leaf.Result)
 		for _, ref := range leaf.Result.ComponentRefs {
-			if !ref.IsEnabled() {
+			if !ref.IsDeployable() {
 				continue
 			}
 			sites, valuesErr := chartDriverSites(ctx, leaf.Result, ref.Name)

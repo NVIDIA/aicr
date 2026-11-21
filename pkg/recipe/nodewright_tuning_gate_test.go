@@ -496,7 +496,7 @@ func TestAmazonLinuxLeavesDoNotRenderTuning(t *testing.T) {
 			if ref == nil {
 				return
 			}
-			if ref.IsEnabled() {
+			if ref.IsDeployable() {
 				t.Errorf("nodewright-customizations must be disabled on os=amazonlinux (overrides=%v, manifestFiles=%v)",
 					ref.Overrides, ref.ManifestFiles)
 			}

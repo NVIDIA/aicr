@@ -47,7 +47,7 @@ func TestNKTPComponentRefsUseAICRValues(t *testing.T) {
 			continue
 		}
 		ref := leaf.Result.GetComponentRef(nktpComponent)
-		if ref == nil || !ref.IsEnabled() {
+		if ref == nil || !ref.IsDeployable() {
 			continue
 		}
 		checked++

@@ -293,7 +293,7 @@ func TestNFDFeaturePublishingContract(t *testing.T) {
 					name, cr.component, strings.Join(cr.enablePath, "."), cr.feature)
 			}
 			for _, ref := range result.ComponentRefs {
-				if !ref.IsEnabled() {
+				if !ref.IsDeployable() {
 					continue
 				}
 				for _, p := range slices.Concat(ref.PreManifestFiles, ref.ManifestFiles) {
@@ -811,7 +811,7 @@ func (cr nfdPubChartRule) on(values map[string]any) bool {
 
 func nfdPubEnabled(refs []ComponentRef, name string) bool {
 	ref, ok := findComponentRefByName(refs, name)
-	return ok && ref.IsEnabled()
+	return ok && ref.IsDeployable()
 }
 
 func nfdPubLookup(m map[string]any, path ...string) any {

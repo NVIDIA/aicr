@@ -589,9 +589,10 @@ Implementation notes:
    would fail downstream far from the root cause.
 6. **Topological sort.** `TopologicalSort()` orders components by
    `dependencyRefs` for the final `DeploymentOrder`. Cycles produce
-   `ErrCodeInvalidRequest`. Components disabled via
-   `overrides.enabled: false` (`ComponentRef.IsEnabled()`) are excluded
-   from the ordering, and an edge pointing at a declared-but-disabled
+   `ErrCodeInvalidRequest`. Components that are not deployable
+   (`ComponentRef.IsDeployable()` — not enabled via `overrides.enabled: false`
+   or install-gated via `overrides.install: false`) are excluded from the
+   ordering, and an edge pointing at a declared-but-non-deployable
    component is treated as satisfied (assumed provided externally) so it
    does not trigger a false cycle; an edge to an *undeclared* component
    still surfaces as `ErrCodeInvalidRequest`. `TopologicalLevels()` /

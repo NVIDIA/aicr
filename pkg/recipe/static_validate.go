@@ -487,7 +487,7 @@ func validateStaticMixinRefs(file string, refs []ComponentRef, registry *Compone
 	canonicalizeComponentTypes(resolved)
 	for i := range resolved {
 		ref := &resolved[i]
-		if !ref.IsEnabled() || registry.Get(ref.Name) == nil {
+		if !ref.IsDeployable() || registry.Get(ref.Name) == nil {
 			continue
 		}
 		ref.ApplyRegistryDefaults(registry.Get(ref.Name))

@@ -503,7 +503,7 @@ func TestBuilderMaterializesDisabledForSlurm(t *testing.T) {
 			t.Errorf("missing stable component ref %q", name)
 			continue
 		}
-		if ref.IsEnabled() {
+		if ref.IsDeployable() {
 			t.Errorf("component %q enabled in disabled mode", name)
 		}
 	}
@@ -535,7 +535,7 @@ func TestBuilderDeploymentOrderMatchesEnabledComponents(t *testing.T) {
 				inDeploymentOrder[name] = true
 			}
 			for _, ref := range result.ComponentRefs {
-				if got, want := inDeploymentOrder[ref.Name], ref.IsEnabled(); got != want {
+				if got, want := inDeploymentOrder[ref.Name], ref.IsDeployable(); got != want {
 					t.Errorf("component %q in deploymentOrder = %t, enabled = %t; order=%v",
 						ref.Name, got, want, result.DeploymentOrder)
 				}

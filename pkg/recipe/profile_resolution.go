@@ -344,7 +344,7 @@ func applyEffectiveProfile(
 	components := slices.Sorted(maps.Keys(ownedPaths))
 	for _, component := range components {
 		index, exists := componentIndex[component]
-		if !exists || !mergedSpec.ComponentRefs[index].IsEnabled() {
+		if !exists || !mergedSpec.ComponentRefs[index].IsDeployable() {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile %q references component %q, which is not enabled in the surviving composition",
 					effective.Declaration.Name, component))

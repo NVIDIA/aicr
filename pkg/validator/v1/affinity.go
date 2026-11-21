@@ -48,7 +48,7 @@ const preferredAffinityWeight = 100
 //     well-formed PodAffinityTerm).
 //
 // Note: required only verifies the component is present in the resolved recipe
-// (with IsEnabled() and a non-empty namespace). It does NOT check runtime
+// (with IsDeployable() and a non-empty namespace). It does NOT check runtime
 // readiness — if the dependency pods have not yet started or are crashlooping,
 // the orchestrator pod will stay Pending until the Job's activeDeadlineSeconds
 // fires. Operators triaging a hung run should inspect both the Job's pod
@@ -133,7 +133,7 @@ func resolveDeps(
 		// Skip if the component is in the recipe but disabled or unresolved
 		// (no namespace). Without this check, "required" would block the
 		// orchestrator forever waiting for a pod that never deploys.
-		resolved := found && ref.IsEnabled() && ref.Namespace != ""
+		resolved := found && ref.IsDeployable() && ref.Namespace != ""
 		req := dep.RequirementOrDefault()
 
 		if !resolved {
@@ -142,8 +142,8 @@ func resolveDeps(
 				switch {
 				case !found:
 					reason = "is not in the recipe's componentRefs"
-				case !ref.IsEnabled():
-					reason = "is disabled (overrides.enabled=false)"
+				case !ref.IsDeployable():
+					reason = "is not deployable (overrides.enabled=false or overrides.install=false)"
 				case ref.Namespace == "":
 					reason = "has no resolved namespace"
 				default:

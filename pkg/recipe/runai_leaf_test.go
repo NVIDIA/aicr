@@ -95,7 +95,7 @@ func TestRunaiLeavesDisableAICRKaiScheduler(t *testing.T) {
 			if kai == nil {
 				t.Fatal("kai-scheduler is absent; it must be present and disabled so dependencyRefs on it still resolve")
 			}
-			if kai.IsEnabled() {
+			if kai.IsDeployable() {
 				t.Error("kai-scheduler is enabled; runai-cluster bundles its own KAI Scheduler and the two cannot coexist")
 			}
 			if slices.Contains(result.DeploymentOrder, "kai-scheduler") {
@@ -106,7 +106,7 @@ func TestRunaiLeavesDisableAICRKaiScheduler(t *testing.T) {
 			if runai == nil {
 				t.Fatalf("%s is absent from the resolved recipe", runaiClusterComponent)
 			}
-			if !runai.IsEnabled() {
+			if !runai.IsDeployable() {
 				t.Errorf("%s is disabled", runaiClusterComponent)
 			}
 			if runai.Source != runaiCfg.Helm.DefaultRepository {

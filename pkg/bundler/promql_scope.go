@@ -127,7 +127,7 @@ func planPromQLScrapeScope(
 	namespaces := make(map[string]string, len(platform))
 	var enabled []string
 	for _, ref := range platform {
-		if !ref.IsEnabled() {
+		if !ref.IsDeployable() {
 			continue
 		}
 		namespaces[ref.Name] = ref.Namespace

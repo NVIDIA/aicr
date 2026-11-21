@@ -35,7 +35,7 @@ func (p *ArtifactProvider) CheckSelection(ctx context.Context, refs []ComponentR
 		if err := ctx.Err(); err != nil {
 			return errors.WrapCtxErr(err, errors.ErrCodeTimeout, "check artifact coverage")
 		}
-		if !ref.IsEnabled() || ref.Type != ComponentTypeHelm {
+		if !ref.IsDeployable() || ref.Type != ComponentTypeHelm {
 			continue
 		}
 		chartCovered := false
@@ -71,7 +71,7 @@ func (p *ArtifactProvider) CheckSelection(ctx context.Context, refs []ComponentR
 func (p *ArtifactProvider) CheckIdentities(ctx context.Context, refs []ComponentRef, values map[string]map[string]any, dynamicPaths map[string][]string) error {
 	selected := map[string]ComponentRef{}
 	for _, ref := range refs {
-		if ref.IsEnabled() {
+		if ref.IsDeployable() {
 			selected[ref.Name] = ref
 		}
 	}

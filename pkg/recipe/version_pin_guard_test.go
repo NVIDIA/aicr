@@ -332,7 +332,7 @@ func assertExemptionDefaultsInstalled(ctx context.Context, t *testing.T, store *
 		installed := false
 		for _, r := range results {
 			ref := r.GetComponentRef(e.component)
-			if ref == nil || !ref.IsEnabled() {
+			if ref == nil || !ref.IsDeployable() {
 				continue
 			}
 			// Fail closed on refs whose deploy shape does not unambiguously

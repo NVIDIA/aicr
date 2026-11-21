@@ -180,7 +180,7 @@ func TestLoadConfiguredRecipeAcceptsPrunedDisabledComponents(t *testing.T) {
 			var kept []ComponentRef
 			keptNames := map[string]bool{}
 			for _, ref := range result.ComponentRefs {
-				if !ref.IsEnabled() || ref.Name == tt.drop {
+				if !ref.IsDeployable() || ref.Name == tt.drop {
 					continue
 				}
 				kept = append(kept, ref)

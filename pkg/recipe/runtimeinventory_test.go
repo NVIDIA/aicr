@@ -129,20 +129,23 @@ func TestApplyBuildConfigRuntimeInventory(t *testing.T) {
 				t.Fatalf("%s ref missing entirely; selection must disable it, not delete it",
 					runtimeInventoryComponentName)
 			}
-			if got := ref.IsEnabled(); got != tt.wantInstalled {
-				t.Errorf("IsEnabled() = %v, want %v (overrides: %v)", got, tt.wantInstalled, ref.Overrides)
+			if got := ref.IsDeployable(); got != tt.wantInstalled {
+				t.Errorf("IsDeployable() = %v, want %v (overrides: %v)", got, tt.wantInstalled, ref.Overrides)
+			}
+			if got := ref.IsInstall(); got != tt.wantInstalled {
+				t.Errorf("IsInstall() = %v, want %v (overrides: %v)", got, tt.wantInstalled, ref.Overrides)
 			}
 
 			// The health check travels with the component: it lives on the
 			// same ref, so disabling the component takes its check out of
 			// deployment validation. This is the half a bundle-time --set
 			// could not achieve.
-			if !tt.wantInstalled && ref.IsEnabled() {
+			if !tt.wantInstalled && ref.IsDeployable() {
 				t.Error("component still enabled, so its health check would still run")
 			}
 
 			// An unrelated component must be untouched either way.
-			if other := result.GetComponentRef("gpu-operator"); other == nil || !other.IsEnabled() {
+			if other := result.GetComponentRef("gpu-operator"); other == nil || !other.IsDeployable() {
 				t.Error("gpu-operator was affected by runtime inventory selection")
 			}
 		})
@@ -194,7 +197,7 @@ func TestApplyRuntimeInventoryGrantsOnGKE(t *testing.T) {
 	if ref == nil {
 		t.Fatal("k8s-aibom was not granted to a GKE recipe that opted in")
 	}
-	if !ref.IsEnabled() {
+	if !ref.IsDeployable() {
 		t.Error("granted ref is not enabled")
 	}
 	if ref.Version == "" || ref.Source == "" {
@@ -330,7 +333,7 @@ func TestApplyBuildConfigPreservesBothConfigurations(t *testing.T) {
 
 	// The component override must survive too, so the two records agree.
 	ref := result.GetComponentRef(runtimeInventoryComponentName)
-	if ref == nil || ref.IsEnabled() {
+	if ref == nil || ref.IsDeployable() {
 		t.Error("runtime inventory component should be disabled")
 	}
 }
@@ -372,7 +375,7 @@ func TestWithRuntimeInventoryModeOption(t *testing.T) {
 // inside the accounting branch, which a runtime-inventory-only build never
 // reaches. The emitted recipe then contradicted itself — deploymentOrder named
 // a component the same document marked disabled. The bundler re-filters by
-// IsEnabled so nothing mis-deployed, but `aicr query --selector deploymentOrder`
+// IsDeployable so nothing mis-deployed, but `aicr query --selector deploymentOrder`
 // reported it.
 func TestApplyRuntimeInventoryRecomputesDeploymentOrder(t *testing.T) {
 	t.Parallel()
@@ -400,12 +403,12 @@ func TestApplyRuntimeInventoryRecomputesDeploymentOrder(t *testing.T) {
 					runtimeInventoryComponentName, inOrder, tt.wantInOrd, result.DeploymentOrder)
 			}
 
-			// The invariant that matters: deploymentOrder and IsEnabled agree.
+			// The invariant that matters: deploymentOrder and IsDeployable agree.
 			for _, ref := range result.ComponentRefs {
 				listed := slices.Contains(result.DeploymentOrder, ref.Name)
-				if listed != ref.IsEnabled() {
-					t.Errorf("component %q: inDeploymentOrder=%v IsEnabled=%v; these must agree",
-						ref.Name, listed, ref.IsEnabled())
+				if listed != ref.IsDeployable() {
+					t.Errorf("component %q: inDeploymentOrder=%v IsDeployable=%v; these must agree",
+						ref.Name, listed, ref.IsDeployable())
 				}
 			}
 		})
@@ -413,10 +416,9 @@ func TestApplyRuntimeInventoryRecomputesDeploymentOrder(t *testing.T) {
 }
 
 // TestApplyRuntimeInventoryRejectsIncoherentEnable covers a coherence gap found
-// in review: mode=enabled writes install:true, but IsEnabled fails closed on
-// either the `enabled` or the `install` key. An overlay that already set
-// `enabled: false` therefore leaves the component disabled while the recipe
-// records mode: enabled — stating a decision it does not implement.
+// in review: mode=enabled writes install:true, but an overlay that already set
+// enabled: false must reject re-enable. Without that guard the recipe would
+// record mode: enabled while leaving the component not enabled.
 func TestApplyRuntimeInventoryRejectsIncoherentEnable(t *testing.T) {
 	t.Parallel()
 
@@ -543,7 +545,7 @@ func TestApplyRuntimeInventoryRespectsDeclineOnGKE(t *testing.T) {
 	if got := errorstest.ReportedCode(err); got != errors.ErrCodeInvalidRequest {
 		t.Errorf("reported code = %q, want %q", got, errors.ErrCodeInvalidRequest)
 	}
-	if result.GetComponentRef("k8s-aibom").IsEnabled() {
+	if result.GetComponentRef("k8s-aibom").IsDeployable() {
 		t.Error("declined component was re-enabled")
 	}
 }

@@ -479,7 +479,7 @@ func requireAccountingComponentEnabled(
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("accounting mode requires component %q", component))
 	}
-	if !ref.IsEnabled() {
+	if !ref.IsDeployable() {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q must be enabled for Slurm accounting mode %q", component, mode))
 	}

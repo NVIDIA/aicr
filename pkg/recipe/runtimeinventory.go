@@ -130,7 +130,7 @@ func grantRuntimeInventoryComponent(result *RecipeResult) error {
 
 	var deps []string
 	for _, name := range runtimeInventoryCRDProviders {
-		if ref := result.GetComponentRef(name); ref != nil && ref.IsEnabled() {
+		if ref := result.GetComponentRef(name); ref != nil && ref.IsDeployable() {
 			deps = append(deps, name)
 		}
 	}
@@ -203,22 +203,23 @@ func applyRuntimeInventoryMode(result *RecipeResult, mode RuntimeInventoryMode) 
 			"intent", string(result.Criteria.Intent))
 	}
 
-	// Fail closed when the resolved recipe already declined the component and
-	// the caller asks to enable it. This must be read BEFORE the override is
-	// written: setComponentOverride writes the same `install` key an overlay
-	// uses to decline, so the write clobbers the overlay's decision and the
-	// post-write check below would only read back what it just wrote.
+	// Fail closed when the resolved recipe already made the component
+	// non-deployable (enabled: false or install: false) and the caller asks to
+	// enable it. This must be read BEFORE the override is written:
+	// setComponentOverride writes the same install key an overlay may set, so
+	// the write clobbers the overlay's decision and a post-write check would
+	// only read back what it just wrote.
 	//
-	// A recipe that declines the component has decided it must not ship there,
+	// A recipe that disables the component has decided it must not ship there,
 	// typically because the surrounding stack is unqualified with it.
 	// Re-enabling it from the command line must not silently produce that
 	// stack.
 	//
 	// Mirrors the bundle-time guard in filterEnabledComponents, which already
 	// rejects the equivalent `--set k8s-aibom:enabled=true`. The two paths
-	// should not disagree about whether a recipe-level decline is overridable.
-	declinedByRecipe := !result.GetComponentRef(runtimeInventoryComponentName).IsEnabled()
-	if parsed == RuntimeInventoryEnabled && declinedByRecipe {
+	// should not disagree about whether a recipe-level disable is overridable.
+	disabledByRecipe := !result.GetComponentRef(runtimeInventoryComponentName).IsDeployable()
+	if parsed == RuntimeInventoryEnabled && disabledByRecipe {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q is disabled by the recipe and cannot be re-enabled "+
 				"with --runtime-inventory enabled; remove the override in the recipe or "+
@@ -242,20 +243,17 @@ func applyRuntimeInventoryMode(result *RecipeResult, mode RuntimeInventoryMode) 
 		return err
 	}
 
-	// Confirm the selection actually took effect rather than trusting the key
-	// we just wrote. IsEnabled fails closed on either the `enabled` or the
-	// `install` override, so an overlay that already set `enabled: false`
-	// leaves the component disabled while this records mode: enabled — a
-	// recipe stating a decision it does not implement. Compare the resolved
-	// predicate, not the key.
+	// Confirm the install gate took effect rather than trusting the key we
+	// just wrote. Compare IsInstall (the gate this writes), not IsDeployable —
+	// a non-deployable ref (enabled: false or install: false) was already
+	// rejected above when enabling.
 	ref := result.GetComponentRef(runtimeInventoryComponentName)
-	if ref.IsEnabled() != install {
+	if ref.IsInstall() != install {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("runtime inventory mode %q cannot be applied to component %q: "+
-				"another override in the resolved recipe holds it %s; "+
+				"another override in the resolved recipe holds install=%v; "+
 				"remove that override or drop the mode",
-				parsed, runtimeInventoryComponentName,
-				map[bool]string{true: "enabled", false: "disabled"}[ref.IsEnabled()]))
+				parsed, runtimeInventoryComponentName, ref.IsInstall()))
 	}
 	return nil
 }

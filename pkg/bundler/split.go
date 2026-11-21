@@ -161,7 +161,7 @@ func planSplit(declared []recipe.ComponentRef, enabled *recipe.RecipeResult) (*s
 	for _, ref := range enabled.ComponentRefs {
 		for _, depName := range ref.DependencyRefs {
 			dep := enabled.GetComponentRef(depName)
-			if dep == nil || !dep.IsEnabled() {
+			if dep == nil || !dep.IsDeployable() {
 				continue
 			}
 			if rankOf[depName] > rankOf[ref.Name] {

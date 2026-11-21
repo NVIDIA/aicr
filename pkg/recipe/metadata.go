@@ -238,28 +238,46 @@ type ComponentRef struct {
 	HealthCheckSkip bool `json:"healthCheckSkip,omitempty" yaml:"healthCheckSkip,omitempty"`
 }
 
-// IsEnabled returns whether this component is enabled for deployment.
-// A component is disabled when its Overrides map contains enabled: false or
-// install: false. The install gate keeps a component in the resolved recipe
-// inventory while suppressing it before any deployer, mirror, BOM, or health
-// path sees it. Components without either gate are enabled by default.
+// IsEnabled reports whether this component is enabled via overrides.enabled.
+// A root overrides.enabled of false means the component is not enabled: the ref
+// stays in the resolved inventory but is out of probe and deploy scope.
+// Missing or non-bool values are treated as enabled (fail-open for that key).
+// The install gate is separate — see IsInstall and IsDeployable.
 func (c ComponentRef) IsEnabled() bool {
-	for _, key := range []string{componentEnabledOverrideKey, componentInstallOverrideKey} {
-		v, ok := c.Overrides[key]
-		if !ok {
-			continue
-		}
-		enabled, ok := v.(bool)
-		if !ok {
-			slog.Warn("component deployment gate is not a bool, treating component as enabled",
-				"component", c.Name, "key", key, "value", v)
-			continue
-		}
-		if !enabled {
-			return false
-		}
+	return boolOverride(c, componentEnabledOverrideKey, true)
+}
+
+// IsInstall reports whether AICR should install this component.
+// A root overrides.install of false keeps the ref in the resolved recipe
+// inventory (so probe-scoped validators can still read Namespace and related
+// fields) while suppressing it before any deployer, mirror, BOM, or health
+// path — use IsDeployable for that combined gate. Missing or non-bool values
+// are treated as installable (fail-open for that key).
+func (c ComponentRef) IsInstall() bool {
+	return boolOverride(c, componentInstallOverrideKey, true)
+}
+
+// IsDeployable reports whether this component should be deployed by AICR.
+// It is IsEnabled() && IsInstall() — the bundler, BOM, mirror, health, and
+// deploy-phase gate formerly implied by a dual-key IsEnabled.
+func (c ComponentRef) IsDeployable() bool {
+	return c.IsEnabled() && c.IsInstall()
+}
+
+// boolOverride reads a root Overrides bool gate. def is returned when the key
+// is absent or not a bool (with a warn on the latter).
+func boolOverride(c ComponentRef, key string, def bool) bool {
+	v, ok := c.Overrides[key]
+	if !ok {
+		return def
 	}
-	return true
+	b, ok := v.(bool)
+	if !ok {
+		slog.Warn("component deployment gate is not a bool, treating as default",
+			"component", c.Name, "key", key, "value", v, "default", def)
+		return def
+	}
+	return b
 }
 
 // ApplyRegistryDefaults fills in ComponentRef fields from ComponentConfig defaults.
@@ -873,15 +891,15 @@ func (r *RecipeResult) backfillComponentTypes() error {
 	if r == nil {
 		return nil
 	}
-	// Only touch the registry if an ENABLED ref actually needs a type. This
+	// Only touch the registry if a deployable ref actually needs a type. This
 	// avoids a spurious registry load (and its potential error) for the common
 	// case where every ref already declares a type — and, critically, for a
-	// disabled legacy stub with an empty type: ValidateCoherence skips disabled
-	// refs, so back-filling one must not be able to fail the whole recipe on a
-	// registry error when no enabled ref needs it.
+	// non-deployable legacy stub with an empty type: ValidateCoherence skips
+	// non-deployable refs, so back-filling one must not be able to fail the
+	// whole recipe on a registry error when no deployable ref needs it.
 	needsBackfill := false
 	for i := range r.ComponentRefs {
-		if r.ComponentRefs[i].Type == "" && r.ComponentRefs[i].IsEnabled() {
+		if r.ComponentRefs[i].Type == "" && r.ComponentRefs[i].IsDeployable() {
 			needsBackfill = true
 			break
 		}
@@ -898,7 +916,7 @@ func (r *RecipeResult) backfillComponentTypes() error {
 			"failed to load component registry to back-fill component types")
 	}
 	for i := range r.ComponentRefs {
-		if r.ComponentRefs[i].Type != "" || !r.ComponentRefs[i].IsEnabled() {
+		if r.ComponentRefs[i].Type != "" || !r.ComponentRefs[i].IsDeployable() {
 			continue
 		}
 		if cfg := registry.Get(r.ComponentRefs[i].Name); cfg != nil {
@@ -1024,11 +1042,11 @@ func validateRefNames(refs []ComponentRef) error {
 	return nil
 }
 
-// ValidateCoherence rejects enabled ComponentRefs whose deployment-shape fields
-// are internally inconsistent (see coherenceProblem), aggregating every
+// ValidateCoherence rejects deployable ComponentRefs whose deployment-shape
+// fields are internally inconsistent (see coherenceProblem), aggregating every
 // offender into one ErrCodeInvalidRequest so the author sees all problems at
-// once. Disabled refs are skipped: they are excluded from the bundle, so their
-// shape never reaches a deployer.
+// once. Non-deployable refs (not enabled or install-gated) are skipped: they
+// are excluded from the bundle, so their shape never reaches a deployer.
 //
 // It is invoked at every boundary that produces a RecipeResult — criteria
 // resolution (finalizeRecipeResult), file load (LoadFromFileWithProvider), and
@@ -1052,7 +1070,7 @@ func (r *RecipeResult) ValidateCoherence() error {
 	}
 	var problems []string
 	for i := range r.ComponentRefs {
-		if !r.ComponentRefs[i].IsEnabled() {
+		if !r.ComponentRefs[i].IsDeployable() {
 			continue
 		}
 		if p := r.ComponentRefs[i].coherenceProblem(); p != "" {
@@ -2022,20 +2040,21 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 }
 
 // componentSets returns two sets over refs: every declared component name,
-// and the subset whose IsEnabled() reports true. Components disabled via
-// overrides.enabled=false or overrides.install=false are excluded from
-// ordering: they are assumed to be provided externally (for example a CSP-managed cert-manager on
-// OKE), so dependency edges pointing at them are treated as already satisfied
-// rather than being reported as missing dependencies. This mirrors the
-// bundler, which filters disabled components before generating deployment
-// artifacts. The declared set lets callers distinguish a disabled component
-// (skip the edge) from an undeclared one (still an error).
+// and the subset whose IsDeployable() reports true. Components that are not
+// enabled (overrides.enabled=false) or install-gated (overrides.install=false)
+// are excluded from ordering: they are assumed to be provided externally (for
+// example a CSP-managed cert-manager on OKE), so dependency edges pointing at
+// them are treated as already satisfied rather than being reported as missing
+// dependencies. This mirrors the bundler, which filters non-deployable
+// components before generating deployment artifacts. The declared set lets
+// callers distinguish a non-deployable component (skip the edge) from an
+// undeclared one (still an error).
 func componentSets(refs []ComponentRef) (declared, enabled map[string]struct{}) {
 	declared = make(map[string]struct{}, len(refs))
 	enabled = make(map[string]struct{}, len(refs))
 	for _, c := range refs {
 		declared[c.Name] = struct{}{}
-		if c.IsEnabled() {
+		if c.IsDeployable() {
 			enabled[c.Name] = struct{}{}
 		}
 	}

@@ -2278,7 +2278,7 @@ func (r *bundleRun) platformEnabledComponents(ctx context.Context, recipeResult 
 		if overrideErr != nil {
 			return nil, nil, overrideErr
 		}
-		recipeEnabled := ref.IsEnabled()
+		recipeEnabled := ref.IsDeployable()
 		if ok {
 			if setEnabled && !recipeEnabled {
 				return nil, nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(

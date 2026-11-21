@@ -73,7 +73,7 @@ func BuildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, validato
 	}
 	results := make([]bom.ComponentResult, 0, len(rec.ComponentRefs)+1)
 	for _, c := range rec.ComponentRefs {
-		if !c.IsEnabled() {
+		if !c.IsDeployable() {
 			continue
 		}
 		// The pinned version lives in Version for Helm and Tag for Kustomize;

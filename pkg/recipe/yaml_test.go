@@ -995,13 +995,13 @@ func TestResolvedLeavesMonitoringCREmittersHaveDirectEdge(t *testing.T) {
 			continue
 		}
 		crds := leaf.Result.GetComponentRef(required)
-		if crds == nil || !crds.IsEnabled() {
+		if crds == nil || !crds.IsDeployable() {
 			continue
 		}
 		checked++
 		for _, name := range emitters {
 			comp := leaf.Result.GetComponentRef(name)
-			if comp == nil || !comp.IsEnabled() {
+			if comp == nil || !comp.IsDeployable() {
 				continue
 			}
 			if !slices.Contains(comp.DependencyRefs, required) {
@@ -1050,7 +1050,7 @@ func TestAllComponentTypesValid(t *testing.T) {
 				}
 				// Only require type to be present for enabled components;
 				// disabled (externally-provided) components may omit it.
-				if comp.IsEnabled() && comp.Type == "" {
+				if comp.IsDeployable() && comp.Type == "" {
 					t.Errorf("componentRef %q missing type field", comp.Name)
 				}
 			}

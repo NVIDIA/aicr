@@ -487,7 +487,7 @@ func prepareMirrorCandidate(
 					map[string]any{logKeyComponent: ref.Name, "value": raw})
 			}
 			delete(overrides, config.ComponentEnabledKey)
-			if enabled && !ref.IsEnabled() {
+			if enabled && !ref.IsDeployable() {
 				return nil, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("component %q is disabled by the recipe and cannot be re-enabled with --set",
 						ref.Name))
@@ -496,7 +496,7 @@ func prepareMirrorCandidate(
 				continue
 			}
 		}
-		if !ref.IsEnabled() {
+		if !ref.IsDeployable() {
 			continue
 		}
 

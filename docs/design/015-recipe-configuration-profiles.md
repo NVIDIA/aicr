@@ -283,11 +283,12 @@ spec:
             overrides:
               # Amended 2026-08-22: the gate is the nested installer.enabled,
               # not the top-level `install` originally drawn here — top-level
-              # `install`/`enabled` are component-PRESENCE gates (IsEnabled),
-              # so a false default would make the component "not enabled in
-              # the surviving composition" and deadlock resolution for every
-              # value; root `overrides.enabled` is separately rejected in
-              # fragments. A nested key is an ordinary owned value path.
+              # `install`/`enabled` are component-PRESENCE gates
+              # (IsDeployable = IsEnabled && IsInstall), so a false default
+              # would make the component non-deployable in the surviving
+              # composition and deadlock resolution for every value; root
+              # `overrides.enabled` is separately rejected in fragments. A
+              # nested key is an ordinary owned value path.
               installer: {enabled: true}
           - name: gpu-operator
             overrides:
