@@ -2,7 +2,8 @@
 # Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Verify every committed ComponentUpgrades record is well-formed (ADR-021 AC7),
+# Verify every committed ComponentUpgrades record is well-formed (ADR-021 AC7)
+# and names the apply step of each manual step group (upgrade_records_test.go),
 # and run the ADR-021 Decision 10 coverage gate against the merge base: a
 # record must cover every pin it has reached, a pin no record covers
 # may not move, and a record may not disappear. pkg/recipe's
@@ -20,6 +21,7 @@ readonly TEST_NAMES=(
 	TestRecordedComponentsCoverTheirPins
 	TestBaseCoverageViewMatchesEmbedded
 	TestChangedPinsHaveUpgradeRecords
+	TestManualRecordsNameTheirApplyStep
 )
 
 if [[ -n "${AICR_UPGRADE_BASE_REF:-}" ]]; then

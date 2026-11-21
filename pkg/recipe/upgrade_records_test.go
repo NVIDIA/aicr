@@ -137,6 +137,79 @@ func hasCRDStep(steps []upgrade.Step) bool {
 	return false
 }
 
+// applyStepID is the id of the step where a deployer applies the regenerated
+// bundle. The AICR Operator performs that step and holds the steps after it
+// for acknowledgement.
+const applyStepID = "apply"
+
+// applyStepExempt maps a component to the only deployer that can carry it.
+// Its other groups redirect to that deployer and apply nothing: runai-cluster's
+// bootstrap token is an install-time secret only helm may declare (ADR-029).
+var applyStepExempt = map[string]string{"runai-cluster": "helm"}
+
+// TestManualRecordsNameTheirApplyStep checks that every group of a manual
+// transition or replacement names its deployer's apply step "apply", exactly
+// once, so the AICR Operator can tell the steps before the apply from those
+// after it. It asserts the step's id, not a verdict.
+func TestManualRecordsNameTheirApplyStep(t *testing.T) {
+	set, _, err := LoadUpgradeRecords(context.Background(), defaultEmbeddedProvider)
+	if err != nil {
+		t.Fatalf("loading upgrade records: %v", err)
+	}
+	names := make([]string, 0, len(set))
+	for name := range set {
+		names = append(names, name)
+	}
+	stdsort.Strings(names)
+
+	checked := 0
+	check := func(component, where string, groups []upgrade.StepGroup) {
+		for gi, g := range groups {
+			if carrier, ok := applyStepExempt[component]; ok && !groupCovers(groups, gi, carrier) {
+				continue
+			}
+			checked++
+			n := 0
+			for _, s := range g.Steps {
+				if s.ID == applyStepID {
+					n++
+				}
+			}
+			if n != 1 {
+				t.Errorf("%s %s group %d (deployers %v) has %d %q steps, want exactly 1; "+
+					"see docs/contributor/upgrade-records.md", component, where, gi, g.Deployers, n, applyStepID)
+			}
+		}
+	}
+	for _, name := range names {
+		rec := set[name]
+		for i := range rec.Transitions {
+			tr := &rec.Transitions[i]
+			if tr.Verdict == upgrade.VerdictManual {
+				check(name, "transition "+tr.From+" -> "+tr.To, tr.StepsByDeployer)
+			}
+		}
+		if r := rec.Replaces; r != nil && r.Verdict == upgrade.VerdictManual {
+			check(name, "replaces "+r.Component, r.StepsByDeployer)
+		}
+	}
+	t.Logf("checked %d manual step group(s)", checked)
+}
+
+// groupCovers reports whether groups[gi] holds the steps for deployer: it
+// names the deployer, or it is the remainder and no other group names it.
+func groupCovers(groups []upgrade.StepGroup, gi int, deployer string) bool {
+	if len(groups[gi].Deployers) > 0 {
+		return slices.Contains(groups[gi].Deployers, deployer)
+	}
+	for _, g := range groups {
+		if slices.Contains(g.Deployers, deployer) {
+			return false
+		}
+	}
+	return true
+}
+
 // orphanUpgradeRecords returns the components/<name>/upgrades.yaml files that
 // no component's upgrades.file references.
 //
