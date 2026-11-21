@@ -52,16 +52,12 @@ transitions:
               configuration to the Rust endpoint picker before upgrading.
             reason: >-
               1.5.0 removes the Go EPP implementation.
-          - id: prepare-webhooks-and-workloads
+          - id: update-webhooks
             description: >-
               Update externally managed admission webhook paths and
-              apiVersions to v1beta1. Supply a main-component image; for
-              non-semver image tags or digests, set runtimeVersionOverride to
-              the actual runtime version.
+              apiVersions to v1beta1.
             reason: >-
-              Removed admission endpoints break requests, and runtime feature
-              defaults depend on the workload image rather than operator
-              version.
+              Removed admission endpoints break requests.
           - id: apply
             description: >-
               Apply the bundle with its CRDs and let the built-in storage
@@ -72,6 +68,14 @@ transitions:
             description: >-
               Verify storedVersions, webhook readiness and reconciliation of
               existing deployments.
+          - id: supply-runtime-image
+            description: >-
+              Supply a main-component image; for non-semver image tags or
+              digests, set runtimeVersionOverride to the actual runtime
+              version.
+            reason: >-
+              Runtime feature defaults depend on the workload image rather
+              than operator version.
     references:
       - https://github.com/ai-dynamo/dynamo/releases/tag/v1.5.0
       - https://github.com/ai-dynamo/dynamo/blob/v1.5.0/deploy/helm/charts/platform/README.md

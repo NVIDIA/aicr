@@ -138,8 +138,7 @@ func hasCRDStep(steps []upgrade.Step) bool {
 }
 
 // applyStepID is the id of the step where a deployer applies the regenerated
-// bundle. The AICR Operator performs that step and holds the steps after it
-// for acknowledgement.
+// bundle.
 const applyStepID = "apply"
 
 // applyStepExempt maps a component to the only deployer that can carry it.

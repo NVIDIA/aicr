@@ -3619,9 +3619,9 @@ h100-eks-ubuntu-inference-nim:
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 9dac016388ed0dd18f28640436f7948019400ec610a43a1c2d69429f53fe8485
-  UPGRADING.md: e556b751b8444c67045d2316bcf12cbb0ebfafb5f7d701db5a602d9099510529
+  UPGRADING.md: 022a18548db7a2ef82130e2a949bf3961a73c1461ace9f82308466937be6b5b1
   bundle-info.yaml: 1e068275dafc62a623dfc593f427e36afe7f828ff2eb88a623669e203f2acf19
-  checksums.txt: cc00e4a228aee1685c76d7b9e016c71d1633bec5de32280aadd4d3ed8cd348f3
+  checksums.txt: 54a5750d212dc822b185532e9232cd2355c18e0feee0e8d587562d7ec6bb63d7
   deploy.sh: a81b07fb31958892348737540f086f83c5371d9de09134b9a9cb85c49a3bf48c
   recipe.yaml: d1f88f901f5d521ad2524712130de983769c0dc1d4656211f267d1c1d446d1eb
 h100-eks-ubuntu-training-kubeflow:
@@ -5997,9 +5997,9 @@ ocp-inference-nim:
   015-prometheus-adapter-ocp-post/templates/rbac.yaml: 92814ddf5e61c955d4552123c5f2985f788e223875ca04ee441547d8a53216ed
   015-prometheus-adapter-ocp-post/values.yaml: 3460e55ec99c80aabc35acfe3dfbce6922627e918cab1f90d4973702fa7e7a6d
   README.md: 3f59f5f2e017a433ca7c0eef92bd670015622aa2d19b33bb82457e5c6a877f8b
-  UPGRADING.md: e6649c1c27c47eb089a1fe38427b24d711575a7f650a6f51d2b2b0ab527e234b
+  UPGRADING.md: 1bfd4842009e306d952c298e47acd3a10aa8139fe04057adba905971ff67c01f
   bundle-info.yaml: d514b534d5bb7828d9eebee6ca0cd9f53d7e8b5c610f76c80fcc025f7f296e7f
-  checksums.txt: 9f0abf2418d39c29593311b8cc5a73b489e9ecd4f16aa4af9d5d97329f0272c4
+  checksums.txt: 0617054007e1df6b74a8ea3150c9b4ffc2ae1337e5e5044ff201a396c1659ba0
   deploy.sh: c66ea5d8647d399996d14b1dab6a92a6e57b55dc523cf952da8c246030f2fe57
   recipe.yaml: 12b5f0e7468e1a4c6c8d3a833e31c6e0700d2f07cd91cb0d3959a3b8c9504286
 ocp-training:
@@ -6501,9 +6501,9 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: 475c6f60b98d926ff3c07cd1504eb954e2db525211f1d3ff9914db4e1bdbadc1
-  UPGRADING.md: e556b751b8444c67045d2316bcf12cbb0ebfafb5f7d701db5a602d9099510529
+  UPGRADING.md: 022a18548db7a2ef82130e2a949bf3961a73c1461ace9f82308466937be6b5b1
   bundle-info.yaml: 477554b25faa5f397f5a562c8b3fd019afc3243cd37f28912730452a1f1e99fd
-  checksums.txt: 1fbce31ff5bc7041c7e1550cd087ac257bb1e72a2a0ee2dbd8f2d50e00264c8b
+  checksums.txt: edde8de42617a20daae39c3b994fccac104c3bec3ed3514885a1ae5074ce6f30
   deploy.sh: a81b07fb31958892348737540f086f83c5371d9de09134b9a9cb85c49a3bf48c
   recipe.yaml: 8ccea881c4926a7290d29d945d068e9856d6614d1d3ad12a96f5051850784c66
 rtx-pro-6000-eks-ubuntu-training-kubeflow:
