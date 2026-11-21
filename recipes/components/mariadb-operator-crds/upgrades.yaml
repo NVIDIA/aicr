@@ -43,7 +43,7 @@ transitions:
     stepsByDeployer:
       - deployers: [helm, helmfile]
         steps:
-          - id: upgrade-crds
+          - id: apply
             description: >-
               Confirm the namespace the existing release lives in with
               `helm list -A | grep mariadb-operator-crds`, then upgrade in
@@ -59,13 +59,13 @@ transitions:
               release: that deletes the CRDs and every MariaDB with them.
           - id: continue-with-operator
             description: >-
-              Continue with mariadb-operator's upgrade-operator step.
+              Continue with mariadb-operator's apply step.
             reason: >-
               The operator moves only once the 26.10.1 CRD schema is
               Established.
       - deployers: [terraform]
         steps:
-          - id: apply-bundle
+          - id: apply
             description: >-
               Regenerate the bundle at the new pins and run terraform apply.
             reason: >-
@@ -82,7 +82,7 @@ transitions:
             reason: >-
               The same terraform apply moved the operator to 26.10.1.
       - steps:
-          - id: sync-crds
+          - id: apply
             description: >-
               Sync or reconcile the mariadb-operator-crds release to 26.10.1
               before the mariadb-operator release.
@@ -92,7 +92,7 @@ transitions:
               change: that cascade-deletes every MariaDB.
           - id: continue-with-operator
             description: >-
-              Continue with mariadb-operator's sync-operator step.
+              Continue with mariadb-operator's apply step.
             reason: >-
               The operator moves only once the 26.10.1 CRD schema is
               Established.

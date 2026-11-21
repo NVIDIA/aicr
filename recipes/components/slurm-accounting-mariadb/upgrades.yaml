@@ -54,7 +54,7 @@ transitions:
     stepsByDeployer:
       - deployers: [helm, helmfile]
         steps:
-          - id: upgrade-after-operator
+          - id: apply
             description: >-
               Once mariadb-operator-crds and mariadb-operator are at 26.10.1,
               re-run this component's install.sh (helm) or helmfile apply
@@ -84,7 +84,7 @@ transitions:
               again.
       - deployers: [terraform]
         steps:
-          - id: apply-after-operator
+          - id: apply
             description: >-
               Regenerate the bundle at the new pins and run terraform apply,
               the same apply that moves mariadb-operator-crds and
@@ -115,7 +115,7 @@ transitions:
               it. Ready on the new pod is when slurmdbd can reach its database
               again.
       - steps:
-          - id: sync-after-operator
+          - id: apply
             description: >-
               Sync or reconcile the slurm-accounting-mariadb release after the
               mariadb-operator-crds and mariadb-operator releases reach

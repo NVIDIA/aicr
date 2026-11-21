@@ -52,17 +52,26 @@ transitions:
               configuration to the Rust endpoint picker before upgrading.
             reason: >-
               1.5.0 removes the Go EPP implementation.
-          - id: reconcile-api-and-runtime
+          - id: prepare-webhooks-and-workloads
             description: >-
-              Update externally managed admission webhook paths and apiVersions
-              to v1beta1. Apply the bundle with its CRDs and let the built-in
-              storage migrator convert existing objects. Verify storedVersions,
-              webhook readiness and reconciliation of existing deployments.
-              Supply a main-component image; for non-semver image tags or
-              digests, set runtimeVersionOverride to the actual runtime version.
+              Update externally managed admission webhook paths and
+              apiVersions to v1beta1. Supply a main-component image; for
+              non-semver image tags or digests, set runtimeVersionOverride to
+              the actual runtime version.
             reason: >-
               Removed admission endpoints break requests, and runtime feature
-              defaults depend on the workload image rather than operator version.
+              defaults depend on the workload image rather than operator
+              version.
+          - id: apply
+            description: >-
+              Apply the bundle with its CRDs and let the built-in storage
+              migrator convert existing objects.
+            reason: >-
+              Moves dynamo-platform to the new version.
+          - id: verify-migration
+            description: >-
+              Verify storedVersions, webhook readiness and reconciliation of
+              existing deployments.
     references:
       - https://github.com/ai-dynamo/dynamo/releases/tag/v1.5.0
       - https://github.com/ai-dynamo/dynamo/blob/v1.5.0/deploy/helm/charts/platform/README.md
@@ -142,14 +151,18 @@ transitions:
             reason: >-
               Each one now fails at startup or reconciliation instead of
               being tolerated.
-          - id: reconcile-and-verify
+          - id: apply
             description: >-
-              Apply the generated bundle through the selected deployer, then
-              verify the Dynamo CRDs' storedVersions, webhook readiness and
+              Apply the generated bundle through the selected deployer.
+            reason: >-
+              Moves dynamo-platform to the new version.
+          - id: verify-crds-and-webhooks
+            description: >-
+              Verify the Dynamo CRDs' storedVersions, webhook readiness and
               reconciliation of existing DynamoGraphDeployments.
             reason: >-
-              Operator readiness alone does not show that existing
-              deployments reconcile under the new release.
+              Operator readiness alone does not show that existing deployments
+              reconcile under the new release.
     references:
       - https://github.com/ai-dynamo/dynamo/releases/tag/v1.6.0
       - https://github.com/ai-dynamo/dynamo/releases/tag/v1.6.2

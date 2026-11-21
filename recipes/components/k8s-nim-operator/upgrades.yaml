@@ -56,7 +56,7 @@ transitions:
             reason: >-
               The 3.1.4 CRDs enforce both, so a resource outside them is
               rejected the next time it is updated.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Apply the regenerated bundle with your deployer. The chart's
               pre-upgrade hook (operator.upgradeCRD, on by default) updates

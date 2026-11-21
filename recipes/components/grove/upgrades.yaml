@@ -63,7 +63,7 @@ transitions:
             reason: >-
               Reads the CRDs straight from the chart, so it needs no local
               checkout and runs from any directory.
-          - id: rerun-installer
+          - id: apply
             description: >-
               Re-run install.sh (helm) or helmfile apply (helmfile).
             reason: >-
@@ -92,7 +92,7 @@ transitions:
               whose document separators differ between Helm 3 and 4, and
               applies them as manager terraform-provider-helm, the manager
               the provider installed them under.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Regenerate the bundle at the new pin and run terraform apply.
             reason: >-
@@ -115,7 +115,7 @@ transitions:
               Neither Flux, Argo CD, nor Fleet applies a changed crds/
               directory on upgrade, so the CRDs are installed out of band
               here too.
-          - id: reconcile
+          - id: apply
             description: >-
               Reconcile or sync the affected releases as usual.
             reason: >-
@@ -152,7 +152,7 @@ transitions:
             reason: >-
               Installs the alpha.13 CRDs before the operator that writes
               the new status field starts.
-          - id: rerun-installer
+          - id: apply
             description: >-
               Re-run install.sh (helm) or helmfile apply (helmfile).
             reason: >-
@@ -174,7 +174,7 @@ transitions:
               whose document separators differ between Helm 3 and 4, and
               applies them as manager terraform-provider-helm, the manager
               the provider installed them under.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Regenerate the bundle at the new pin and run terraform apply.
             reason: >-
@@ -190,7 +190,7 @@ transitions:
               Neither Flux, Argo CD, nor Fleet applies a changed crds/
               directory on upgrade, so the CRDs are installed out of band
               here too.
-          - id: reconcile
+          - id: apply
             description: >-
               Reconcile or sync the affected releases as usual.
             reason: >-
@@ -224,7 +224,7 @@ transitions:
             reason: >-
               Installs the alpha.14 CRDs before the operator that writes the
               new status fields starts.
-          - id: rerun-installer
+          - id: apply
             description: >-
               Re-run deploy.sh (helm) or helmfile apply (helmfile). If you
               re-run per-component install.sh scripts by hand instead, run
@@ -253,7 +253,7 @@ transitions:
               document separators differ between Helm 3 and 4, and applies
               them as manager terraform-provider-helm, the manager the
               provider installed them under.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Regenerate the bundle at the new pin and run terraform apply.
             reason: >-
@@ -269,7 +269,7 @@ transitions:
               Neither Flux, Argo CD, nor Fleet applies a changed crds/
               directory on upgrade, so the CRDs are installed out of band
               here too.
-          - id: reconcile
+          - id: apply
             description: >-
               Reconcile or sync grove and wait for the grove-operator rollout
               to finish before reconciling dynamo-platform.
