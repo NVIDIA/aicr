@@ -69,9 +69,19 @@ type Bindings struct {
 	IgnoredArtifacts map[string]Ignored `json:"ignoredArtifacts" yaml:"ignoredArtifacts,omitempty"`
 }
 
+// Values of Chart.CRDOwnership and CRDOwnership.Policy.
+const (
+	CRDOwnershipRetain = "retain"
+
+	CRDPolicyUnchanged = "unchanged"
+	CRDPolicyRetained  = "retained"
+	CRDPolicyDisabled  = "disabled"
+)
+
 // Chart binds a chart archive to one component.
 type Chart struct {
-	Component string `json:"component" yaml:"component"`
+	Component    string `json:"component" yaml:"component"`
+	CRDOwnership string `json:"crdOwnership,omitempty" yaml:"crdOwnership,omitempty"`
 }
 
 // Image binds a manifest to one or more explicit values targets.
@@ -102,6 +112,7 @@ type Ignored struct {
 
 // Provenance records the immutable inputs and every applied or ignored identity.
 type Provenance struct {
+	CRDOwnership      *CRDOwnership     `json:"crdOwnership" yaml:"crdOwnership"`
 	InventoryDigest   string            `json:"inventoryDigest" yaml:"inventoryDigest"`
 	BindingsDigest    string            `json:"bindingsDigest" yaml:"bindingsDigest"`
 	BaseCatalogDigest string            `json:"baseCatalogDigest" yaml:"baseCatalogDigest"`
@@ -109,6 +120,13 @@ type Provenance struct {
 	Verification      string            `json:"verification" yaml:"verification"`
 	Applied           []Applied         `json:"applied" yaml:"applied"`
 	Ignored           []IgnoredIdentity `json:"ignored" yaml:"ignored"`
+}
+
+// CRDOwnership records the catalog policy before and after chart binding.
+type CRDOwnership struct {
+	Policy  string   `json:"policy" yaml:"policy"`
+	Changed []string `json:"changed" yaml:"changed"`
+	Owners  []string `json:"owners" yaml:"owners"`
 }
 
 // Applied associates a producer identity with its effective binding.

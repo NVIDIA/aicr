@@ -121,7 +121,7 @@ metadata:
   name: aicr-images
 spec:
   images:
-    - name: nvcr.io/nvidia/gpu-operator:v26.7.2
+    - name: nvcr.io/nvidia/gpu-operator:v26.7.3
     - name: registry.k8s.io/nfd/node-feature-discovery:v0.20.1
     # ...
 ---
@@ -133,7 +133,7 @@ spec:
   charts:
     - name: gpu-operator
       repoURL: https://helm.ngc.nvidia.com/nvidia
-      version: v26.7.2
+      version: v26.7.3
     # ...
 ```
 
@@ -193,10 +193,10 @@ components:
         namespace: gpu-operator
         repoName: gpu-operator
         url: https://helm.ngc.nvidia.com/nvidia
-        version: v26.7.2
+        version: v26.7.3
       # ...
     images:
-      - nvcr.io/nvidia/gpu-operator:v26.7.2
+      - nvcr.io/nvidia/gpu-operator:v26.7.3
       - registry.k8s.io/nfd/node-feature-discovery:v0.20.1
       # ...
     name: aicr-images
@@ -313,6 +313,18 @@ generate the deployment-specific manifest for a specific deployment.
 > `scalingPodImage` descriptor are the exception: `mirror list` exits nonzero
 > instead of emitting a known-incomplete image set.
 
+> **Run:ai recipes need one image mirrored by hand:** a run with no warnings
+> is still incomplete for a `--platform runai` recipe. The Kubeflow Training
+> Operator adds an `init-pytorch` init container running
+> `docker.io/library/alpine:3.10` to the workers of every PyTorchJob that has a
+> Master replica. The reference is compiled into the operator, not rendered
+> from a chart or manifest, so `mirror list` neither lists it nor warns about
+> it. Mirror `docker.io/library/alpine:3.10` yourself and have the nodes'
+> container runtime redirect `docker.io` to your registry, keeping the
+> `library/alpine` path and the `3.10` tag; otherwise PyTorch workers wait in
+> `Init:ImagePullBackOff`. See
+> [Explicit vs. implicit images](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md#explicit-vs-implicit-images).
+
 > **Runtime validation image:** `slinky-slurm-health` launches
 > `docker.io/library/alpine:3.23.3` dynamically through `srun` on GPU-backed
 > NodeSets. This image is already covered by `aicr mirror list`: it is the same
@@ -371,10 +383,12 @@ rewrite, such as the NCCL runtime image (override it with
 probe image of the `driver-runtime-management` and `workload-sandboxing`
 conformance checks (override it with `AICR_DRIVER_RUNTIME_IMAGE` and
 `AICR_SANDBOX_PROBE_IMAGE`, each a full reference to your copy); see
-[Validation](validation.md). The opt-in CRE checks `nccl-cre-all-reduce-bw`
-and `cre-training-goodput` pull their workload images by digest with no
-override variable, so mirror them at the digests
-`recipes/components/nvcre/workload-images.yaml` records; see the CRE section
+[Validation](validation.md). The opt-in CRE checks `nccl-cre-all-reduce-bw`,
+`nccl-cre-all-reduce-bw-net` and `cre-training-goodput` pull their workload images by digest with no
+override variable, so mirror them at the digests the closure for your
+combination records: `recipes/components/nvcre/workload-images.yaml` for
+`eks` x `h100`, and `recipes/components/nvcre/workload-images-gb300.yaml` for
+`eks` x `gb300` (`gb300-eks-ubuntu-training-kubeflow`); see the CRE section
 of [Validation](validation.md). Their references keep the `public.ecr.aws` and
 `nvcr.io` hosts, so a disconnected cluster also needs its nodes' container
 runtime to redirect both registries to your mirror, for example with a

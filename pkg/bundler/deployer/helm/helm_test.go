@@ -35,6 +35,8 @@ import (
 	"aicr.run/pkg/bundler/deployer/localformat"
 	"aicr.run/pkg/bundler/gatemanifest"
 	"aicr.run/pkg/component"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/recipe"
 )
 
@@ -2540,5 +2542,38 @@ func TestCRDGroupsInstalledBy(t *testing.T) {
 	got[0] = "mutated"
 	if again := CRDGroupsInstalledBy("gpu-operator"); again[0] == "mutated" {
 		t.Errorf("CRDGroupsInstalledBy returns the shared slice")
+	}
+}
+
+// TestGenerate_RejectsDynamicOnManifestOnly reproduces #3881 at the deployer
+// level: --dynamic on a manifest-only component used to write a stub to
+// cluster-values.yaml that no template consumed.
+func TestGenerate_RejectsDynamicOnManifestOnly(t *testing.T) {
+	g := &Generator{
+		RecipeResult: &recipe.RecipeResult{
+			Kind:       "RecipeResult",
+			APIVersion: "aicr.run/v1",
+			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "nodewright-customizations", Namespace: "nodewright"},
+			},
+			DeploymentOrder: []string{"nodewright-customizations"},
+		},
+		ComponentValues: map[string]map[string]any{"nodewright-customizations": {}},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"nodewright-customizations": {
+				"components/nodewright-customizations/manifests/customization.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: customization\n"),
+			},
+		},
+		DynamicValues: map[string][]string{"nodewright-customizations": {"acceleratedTolerations"}},
+		Version:       "v1.0.0",
+	}
+	_, err := g.Generate(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("want error rejecting --dynamic on a manifest-only component, got nil")
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if !strings.Contains(err.Error(), `component "nodewright-customizations"`) || !strings.Contains(err.Error(), "acceleratedTolerations") {
+		t.Errorf("error should name the component and path, got: %v", err)
 	}
 }

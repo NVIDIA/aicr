@@ -494,7 +494,31 @@ type workloadClosure struct {
 // none, so it must fail the survey instead of silently narrowing the BOM.
 var closureRequiredComponents = map[string]struct{}{"nvcre": {}}
 
-// readWorkloadClosure returns the component's declared non-rendered images.
+// readWorkloadClosure returns the component's declared non-rendered images from
+// workload-images.yaml and any workload-images-<target>.yaml beside it, one per
+// accelerator target whose workloads run different images. Each file must name
+// the pinned version, so a stale target cannot hide behind a current one.
+func readWorkloadClosure(repoRoot, componentName, pinned string) ([]string, error) {
+	dir := filepath.Join(repoRoot, "recipes", "components", componentName)
+	extra, err := filepath.Glob(filepath.Join(dir, "workload-images-*.yaml"))
+	if err != nil {
+		return nil, errors.WrapWithContext(errors.ErrCodeInternal, "list workload closure files", err,
+			map[string]any{componentContextKey: componentName})
+	}
+	sort.Strings(extra)
+
+	var out []string
+	for _, path := range append([]string{filepath.Join(dir, "workload-images.yaml")}, extra...) {
+		images, readErr := readWorkloadClosureFile(path, componentName, pinned)
+		if readErr != nil {
+			return nil, readErr
+		}
+		out = append(out, images...)
+	}
+	return out, nil
+}
+
+// readWorkloadClosureFile returns the images one closure file declares.
 // For a component outside closureRequiredComponents an absent file is normal.
 // Every other defect is fatal: degrading to a warning would emit a BOM that
 // looks complete while silently omitting the images a mirror has to carry.
@@ -505,8 +529,7 @@ var closureRequiredComponents = map[string]struct{}{"nvcre": {}}
 // under the new pin — the BOM would describe a version AICR no longer ships.
 // The check is offline and runs inside the survey, so `make bom-docs` and the
 // committed-BOM test gate it without needing a workflow of its own.
-func readWorkloadClosure(repoRoot, componentName, pinned string) ([]string, error) {
-	path := filepath.Join(repoRoot, "recipes", "components", componentName, "workload-images.yaml")
+func readWorkloadClosureFile(path, componentName, pinned string) ([]string, error) {
 	_, required := closureRequiredComponents[componentName]
 	data, err := os.ReadFile(path) //nolint:gosec // path is derived from a registry component name under the repo root
 	if err != nil {

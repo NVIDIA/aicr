@@ -24,13 +24,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// gatewayCRDRetentionGuards are the annotations every vendored Gateway API and
-// Inference Extension CRD must carry. Without them, uninstalling or pruning the
+// crdRetentionGuards are the annotations a vendored CRD whose objects users
+// author must carry: every Gateway API and Inference Extension CRD, and the
+// Kubeflow Training Operator CRDs. Without them, uninstalling or pruning the
 // release or Application that owns the CRD deletes it, with every resource of
 // its kind. Helm reads keep from the release's stored manifest on uninstall, so
 // they have to ship in the bundle that installs the CRD, not only on the live
 // object.
-var gatewayCRDRetentionGuards = map[string]string{
+var crdRetentionGuards = map[string]string{
 	"helm.sh/resource-policy":         "keep",
 	"argocd.argoproj.io/sync-options": "Delete=false,Prune=false",
 }
@@ -90,7 +91,7 @@ func TestVendoredGatewayCRDsCarryRetentionGuards(t *testing.T) {
 				continue
 			}
 			checked++
-			for key, want := range gatewayCRDRetentionGuards {
+			for key, want := range crdRetentionGuards {
 				if got := doc.Metadata.Annotations[key]; got != want {
 					t.Errorf("%s: CRD %s has %s=%q, want %q", file, doc.Metadata.Name, key, got, want)
 				}

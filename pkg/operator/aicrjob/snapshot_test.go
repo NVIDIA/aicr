@@ -16,7 +16,6 @@ package aicrjob
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -86,6 +85,16 @@ func TestParseSnapshotRejects(t *testing.T) {
 // reads exists in the schema, and every field it requires is read.
 func TestSnapshotMatchesAICRSchema(t *testing.T) {
 	t.Parallel()
+	for source, dir := range schemaDirs() {
+		t.Run(source, func(t *testing.T) {
+			t.Parallel()
+			matchSnapshotSchema(t, readSchema(t, dir, "Snapshot.schema.json"))
+		})
+	}
+}
+
+func matchSnapshotSchema(t *testing.T, data []byte) {
+	t.Helper()
 	type object struct {
 		Required   []string                   `json:"required"`
 		Properties map[string]json.RawMessage `json:"properties"`
@@ -111,7 +120,7 @@ func TestSnapshotMatchesAICRSchema(t *testing.T) {
 			}
 		}
 	}
-	root := decode(fixture(t, filepath.Join("schemas", "Snapshot.schema.json")))
+	root := decode(data)
 	check("", root, reflect.TypeFor[Snapshot]())
 	measurement := decode(decode(root.Properties["measurements"]).Items)
 	check("measurements[].", measurement, reflect.TypeFor[Measurement]())

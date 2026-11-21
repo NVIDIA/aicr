@@ -18,7 +18,7 @@
 # (GPU node, VPC network group, router/NAT, resource group, node-pool service
 # accounts and their project IAM bindings, TF state) behind when
 # teardown never runs: a runner hard-killed mid-cancel, a daytime-up held cluster
-# whose evening daytime-down never fired, a manual skip_delete run abandoned, or a
+# (the debugging hold included) whose evening daytime-down never fired, or a
 # Bringup "failure" that stranded a healthy cluster. Those orphans accumulate until
 # they exhaust a cloud quota (in Aug 2026 the GCP NETWORKS quota, 50, hit 48/50).
 #
@@ -87,14 +87,13 @@
 #   * AGE FLOOR — keyed off the RUN's updated_at (uniform across clouds), not the
 #     cloud resource's create time. Nightly/ad-hoc: NIGHTLY_MIN_AGE_HOURS (default
 #     24h). Well above the 280-min job cap, so a still-finishing run's just-created
-#     cluster is never touched — and, deliberately, long enough that a nightly
-#     `skip_delete` run (a supported debugging hold, uat-{aws,azure,gcp}.yaml) can
-#     survive a full working day before the janitor reclaims it. There is NO API
-#     signal that distinguishes a skip_delete hold from a genuine orphan, so the
-#     floor is the only lever: a real mid-cancel orphan therefore also persists up
-#     to ~a day, which is acceptable — quota pressure builds over days, and the
-#     hourly janitor reaps within the hour once the floor clears. (Lower it only if
-#     a cloud's quota headroom demands faster reclamation.) Daytime:
+#     cluster is never touched. No nightly cluster is a debugging hold:
+#     uat-run.yaml refuses `skip_delete` on a nightly cloud run (#3670), so a
+#     hold is a `lifecycle=daytime-up` cluster under the daytime floor below. A
+#     real mid-cancel orphan persists up to ~a day, which is acceptable — quota
+#     pressure builds over days, and the hourly janitor reaps within the hour once
+#     the floor clears. (Lower it only if a cloud's quota headroom demands faster
+#     reclamation.) Daytime:
 #     DAYTIME_MIN_AGE_HOURS (default 24h). daytime-up is on-demand (workflow_dispatch), so its run is
 #     already `completed` while the cluster is legitimately HELD for the working
 #     day; the sole daytime schedule is the evening daytime-down (uat-daytime.yaml,
@@ -370,6 +369,25 @@ reap() {
     echo "::warning::janitor could not stage destroy config for ${id} (destroy NOT attempted)"
     rm -f "$cfg"
     return 1
+  fi
+
+  # The GB300 config's worker instanceType is a placeholder (the type is
+  # unpublished), replaced from the AWS_GB300_INSTANCE_TYPE secret exactly as
+  # uat-aws.yaml's "Resolve GPU instance type" step does. It must be replaced
+  # here too: the EKS actuator runs `terraform refresh` before every destroy,
+  # and refresh looks up data.aws_ec2_instance_type for each worker's
+  # instanceType, so a destroy staged with the placeholder fails. Part of
+  # staging, so a dry run fails the same way. Never print the value or $cfg.
+  local placeholder=gb300-instance-type-from-secret
+  if [ "$CLOUD" = aws ] && grep -qF "$placeholder" "$cfg"; then
+    if [ -z "${GPU_INSTANCE_TYPE:-}" ] ||
+       ! PLACEHOLDER="$placeholder" GPU_INSTANCE_TYPE="$GPU_INSTANCE_TYPE" yq -i \
+         '(.. | select(tag == "!!map" and .instanceType == strenv(PLACEHOLDER)) | .instanceType) = strenv(GPU_INSTANCE_TYPE)' "$cfg" ||
+       grep -qF "$placeholder" "$cfg"; then
+      echo "::error::janitor cannot stage ${id}: ${JANITOR_CONFIG} has the ${placeholder} placeholder; GPU_INSTANCE_TYPE (the AWS_GB300_INSTANCE_TYPE secret) must be set, and every placeholder must be an instanceType (destroy NOT attempted)"
+      rm -f "$cfg"
+      return 1
+    fi
   fi
 
   if [ "$DRY_RUN" = "true" ]; then

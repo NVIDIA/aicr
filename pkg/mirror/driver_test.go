@@ -162,6 +162,7 @@ func TestArchitectureForAccelerator(t *testing.T) {
 		recipe.CriteriaAcceleratorL40:        bom.ArchAMD64,
 		recipe.CriteriaAcceleratorL40S:       bom.ArchAMD64,
 		recipe.CriteriaAcceleratorRTXPro6000: bom.ArchAMD64,
+		recipe.CriteriaAcceleratorGB10:       bom.ArchARM64,
 		recipe.CriteriaAcceleratorGB200:      bom.ArchARM64,
 		recipe.CriteriaAcceleratorGB300:      bom.ArchARM64,
 		recipe.CriteriaAcceleratorVR200:      bom.ArchARM64,

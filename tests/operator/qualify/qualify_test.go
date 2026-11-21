@@ -213,11 +213,6 @@ func firstRollout(ctx context.Context, t *testing.T) string {
 	}
 	patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) {
 		rt.Spec.Paused = false
-		for _, c := range components {
-			if c != release {
-				rt.Spec.Overrides = append(rt.Spec.Overrides, v1alpha1.Override{Component: c, Path: "enabled", Value: apiextensionsv1.JSON{Raw: []byte("false")}})
-			}
-		}
 		rt.Spec.Overrides = append(rt.Spec.Overrides, v1alpha1.Override{Component: release, Path: "resources.requests.cpu",
 			Value: apiextensionsv1.JSON{Raw: []byte(`"50m"`)}})
 		// AICR v1.2.0 enables cert-manager's ServiceMonitor, whose CRD comes
@@ -226,6 +221,7 @@ func firstRollout(ctx context.Context, t *testing.T) string {
 		// version.
 		rt.Spec.Overrides = append(rt.Spec.Overrides, v1alpha1.Override{Component: release, Path: "prometheus.servicemonitor.enabled",
 			Value: apiextensionsv1.JSON{Raw: []byte(`false`)}})
+		onlyRelease(rt, components)
 	})
 	digest := waitResolved(ctx, t)
 	ro := awaitingApproval(ctx, t, digest)
@@ -245,7 +241,8 @@ func firstRollout(ctx context.Context, t *testing.T) string {
 	return digest
 }
 
-// recipeComponents reads a plan's recipe and returns its components.
+// recipeComponents reads a plan's recipe, as the AICR release that resolved
+// it wrote it, and returns its components.
 func recipeComponents(ctx context.Context, t *testing.T, digest string) []string {
 	t.Helper()
 	doc := readPlan(ctx, t, digest)
@@ -260,7 +257,7 @@ func recipeComponents(ctx context.Context, t *testing.T, digest string) []string
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipe, err := aicrjob.ParseRecipeResult(data, aicrVersion)
+	recipe, err := aicrjob.ParseRecipeResult(data, doc.Provenance.AICRVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,22 +491,72 @@ func newerSchema(ctx context.Context, t *testing.T, active string) string {
 
 // upgradeMidRollout upgrades the operator to the next candidate, chart and
 // image, while a step is in flight: the new operator finishes the rollout
-// with one sync and creates no other.
+// with one sync and creates no other. The next candidate can run a newer
+// AICR, whose recipe can add or drop a component; a toggle naming a
+// component the new recipe lacks stalls resolution, and with it the
+// rollout. So the toggles go until the new recipe resolves, and then follow
+// it; meanwhile the rollout's plan stays pinned, so that the whole recipe
+// never becomes the target.
 func upgradeMidRollout(ctx context.Context, t *testing.T, active string) string {
 	t.Helper()
 	before := syncs(ctx, t)
 	digest, ro := nextPlan(ctx, t, active, "35m")
 	approve(ctx, t, ro.Name)
 	waitStepStarted(ctx, t, ro.Name)
+	patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) { pin(rt, digest) })
 	nothingForbidden(ctx, t)
 	t.Setenv("CANDIDATE_NEXT_DIR", filepath.Dir(os.Getenv("AICR_OPERATOR_QUALIFY_NEXT")))
 	run(ctx, t, "tools/operator-qualify", "upgrade")
 	runsCandidate(ctx, t, &next)
+	components := wholeRecipe(ctx, t, &next)
 	waitReadyOn(ctx, t, digest)
 	rolledOut(ctx, t, digest)
 	if after := syncs(ctx, t); after != before+1 {
 		t.Fatalf("the Application synced %d times for one step", after-before)
 	}
+	return follow(ctx, t, digest, components)
+}
+
+// wholeRecipe removes the component toggles once the resolver runs candidate
+// c's AICR, and returns the components of the recipe it then resolves.
+func wholeRecipe(ctx context.Context, t *testing.T, c *candidateManifest) []string {
+	t.Helper()
+	image := installedAICR(c)
+	waitFor(t, 3*time.Minute, "the resolver to run "+image, func() bool {
+		a := getRuntime(ctx, t).Status.AICR
+		return a != nil && a.Image == image
+	})
+	patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) { rt.Spec.Overrides = releaseValues(rt.Spec.Overrides) })
+	digest := waitResolved(ctx, t)
+	// A plan keeps the recipe of the resolution that first wrote it, so a
+	// digest another AICR resolved first does not name this recipe.
+	if by := readPlan(ctx, t, digest).Provenance.AICRImage; by != image {
+		t.Fatalf("plan %s was first resolved by %s, so its recipe is not %s's", digest, by, image)
+	}
+	components := recipeComponents(ctx, t, digest)
+	t.Logf("%s resolves the kind recipe to %v", image, components)
+	return components
+}
+
+// follow disables every component of a recipe but the release, unpins the
+// runtime and rolls out the plan that resolves. On the installed candidate's
+// AICR that is the pinned plan: a plan's digest leaves out the operator that
+// resolved it.
+func follow(ctx context.Context, t *testing.T, pinned string, components []string) string {
+	t.Helper()
+	patchRuntime(ctx, t, func(rt *v1alpha1.ClusterRuntime) {
+		onlyRelease(rt, components)
+		rt.Spec.Selection = v1alpha1.Selection{Policy: v1alpha1.SelectionAutomatic}
+	})
+	digest := waitResolved(ctx, t)
+	if digest != pinned {
+		if installedAICR(&next) == installedAICR(&candidate) {
+			t.Fatalf("on the same AICR, the upgraded operator resolves plan %s for the inputs of %s", digest, pinned)
+		}
+		t.Logf("%s resolves plan %s in place of %s", installedAICR(&next), digest, pinned)
+	}
+	rollOutTo(ctx, t, digest)
+	rolledOut(ctx, t, digest)
 	return digest
 }
 

@@ -43,7 +43,6 @@ func TestCheckNVSentinelSlurmCustomDrainCoherent(t *testing.T) {
 			"resource":              "drainrequests",
 			"statusConditionType":   "DrainComplete",
 			"statusConditionStatus": "True",
-			"timeout":               "1800",
 		}
 	}
 	// sentinel builds an nvsentinel ref: drainer runs node-drainer, dryRun
@@ -270,48 +269,11 @@ func TestCheckNVSentinelSlurmCustomDrainCoherent(t *testing.T) {
 				plugin("hpc")),
 		},
 		{
-			name:         "chart-default timeout 30m → blocked",
+			// NVSentinel v1.32.0 removed customDrain.timeout: the chart no
+			// longer renders it and node-drainer ignores it, so a value left
+			// from an older bundle is not a reason to block.
+			name:         "leftover customDrain.timeout → passes",
 			recipeResult: result(sentinel(true, false, customDrain(), with("timeout", "30m")), slinky, plugin("slurm")),
-			wantBlocked:  "whole number of seconds",
-		},
-		{
-			name:         "zero timeout → blocked",
-			recipeResult: result(sentinel(true, false, customDrain(), with("timeout", "0")), slinky, plugin("slurm")),
-			wantBlocked:  "whole number of seconds",
-		},
-		{
-			name: "integer timeout (--set without quotes) → passes",
-			recipeResult: result(sentinel(true, false, customDrain(), with("timeout", float64(900))), slinky,
-				plugin("slurm")),
-		},
-		{
-			name: "fractional timeout → blocked",
-			recipeResult: result(sentinel(true, false, customDrain(), with("timeout", 900.5)), slinky,
-				plugin("slurm")),
-			wantBlocked: "whole number of seconds",
-		},
-		{
-			// quote prints a float64 of 1e6 as "1e+06", which node-drainer
-			// cannot parse.
-			name: "float timeout printed in exponent form → blocked",
-			recipeResult: result(sentinel(true, false, customDrain(), with("timeout", float64(1000000))), slinky,
-				plugin("slurm")),
-			wantBlocked: "whole number of seconds",
-		},
-		{
-			// --set gives an int64; Helm reads it back as a float64 and quote
-			// prints "1e+06".
-			name: "integer timeout of a million seconds → blocked",
-			recipeResult: result(sentinel(true, false, customDrain(), with("timeout", int64(1000000))), slinky,
-				plugin("slurm")),
-			wantBlocked: "whole number of seconds",
-		},
-		{
-			name: "missing timeout → blocked",
-			recipeResult: result(sentinel(true, false, customDrain(), func(nd map[string]any) {
-				delete(nd["customDrain"].(map[string]any), "timeout")
-			}), slinky, plugin("slurm")),
-			wantBlocked: "whole number of seconds",
 		},
 		{
 			name:         "wrong CRD kind → blocked",
@@ -424,7 +386,7 @@ func TestCheckNVSentinelSlurmCustomDrainCoherent(t *testing.T) {
 		{
 			name:          "customDrain dynamic → blocked",
 			recipeResult:  result(ok, slinky, plugin("slurm")),
-			bundlerConfig: dynamic("nv-sentinel", "node-drainer.customDrain.timeout"),
+			bundlerConfig: dynamic("nv-sentinel", "node-drainer.customDrain.namespace"),
 			wantBlocked:   "--dynamic",
 		},
 		{

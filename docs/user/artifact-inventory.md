@@ -81,7 +81,56 @@ An optional target platform assertion must match exactly, including the variant;
 An image-index entry without a platform needs no target platform assertion.
 
 Every inventory entry must have one chart binding, image binding or explicit ignored disposition such as `ignoredArtifacts: {release-notes: {reason: not deployed}}`.
-Unused binding names may remain in a shared catalog; only active targets require catalog files and components to exist.
+Unused binding names may remain in a shared catalog; only active targets require catalog files and components to exist, except that `crdOwnership: retain` always requires an external registry entry.
+
+## CRD ownership under bindings
+
+A chart binding normally clears `ownsCRDs` and subchart exclusions across the
+catalog whenever its repository, chart, version or archive digest changes,
+or the old archive digest is absent. For inventory-filled chart slots, catalog
+authors can explicitly retain their policy:
+
+```yaml
+charts:
+  controller-chart:
+    component: controller
+    crdOwnership: retain
+```
+
+The only accepted value is the string `retain`. It requires external bindings
+and a component entry defined in external `registry.yaml`; an embedded binding
+or embedded-only entry fails with `artifact-target-invalid`, even if inactive.
+Every changed active chart binding must opt in, including non-owners, or all
+ownership is cleared. Unchanged and inactive bindings do not affect the choice.
+Retention survives registry relocation and preserves subchart exclusions.
+
+This attests that the chart never ships another owner's CRDs, that its owned
+CRDs are exclusive across the catalog, and that none use webhook conversion.
+It does not grant ownership to a component that lacks `ownsCRDs`.
+For `helm` and `flux`, `--vendor-charts` checks the verified archives' `crds/`
+YAML, including subcharts. Owners' exclusions are honored. A shared owned CRD
+or webhook conversion fails with `CONFLICT`, reason `crd-ownership-conflict`.
+CRDs under `templates/` remain the catalog author's responsibility.
+Vendoring is optional; non-vendored bundles rely on the attestation alone.
+Other deployers keep their existing CRD behavior.
+
+`metadata.artifacts.crdOwnership` records `policy: unchanged`, `retained` or
+`disabled`, sorted `changed` components, and sorted pre-composition `owners`.
+Under `disabled`, `owners` lists the ownership that was cleared. Under
+`retained`, Helm emits `apply-crds.sh` and Flux uses `CreateReplace` for selected
+owners whose refs still match the composed registry.
+
+Every recipe resolved with an inventory records
+`metadata.artifacts.crdOwnership`, whether or not a binding sets `retain`.
+Older binaries reject that field, and the binding field, as unknown, so every
+reader of such a recipe or catalog needs a binary that supports
+`crdOwnership`.
+
+Artifact-bearing recipes saved by older binaries lack the record. Namespace-only
+inheritance and evidence verification still read them. Validation, discovery
+and bundling fail with `artifact-inputs-mismatch` until the recipe is
+re-resolved once. Changing the binding or relocating the inventory also
+requires re-resolution because input digests change.
 
 ## Resolve and consume recipes
 

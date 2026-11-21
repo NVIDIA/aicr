@@ -35,5 +35,5 @@ charts:
       - workflows.nvcre.nvidia.com
       - workloadruns.nvcre.nvidia.com
     repository: oci://ghcr.io/nvidia
-    sourceVersion: v0.8.2
+    sourceVersion: v0.12.0
 component: nvcre

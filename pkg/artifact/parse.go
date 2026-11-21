@@ -311,6 +311,9 @@ func ValidateBindings(bindings *Bindings) error {
 		if !validName(binding.Component) || components[binding.Component] {
 			return invalid("invalid or duplicate chart component " + binding.Component)
 		}
+		if binding.CRDOwnership != "" && binding.CRDOwnership != CRDOwnershipRetain {
+			return invalid("chart crdOwnership must be retain when supplied")
+		}
 		components[binding.Component] = true
 	}
 	for name, binding := range bindings.Images {

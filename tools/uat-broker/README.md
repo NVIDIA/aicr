@@ -46,6 +46,17 @@ summary and opt-out gate (an explicit empty list skips the leg); the actual
 per-cell intents come from the broker's `schedule` output, further gated per
 version by the harness-compat floors (see [`compat`](#compat)).
 
+`uat-run.yaml` also passes the dispatch's `--lifecycle` and `--skip-delete`
+(`true` or `false`, given together). The broker then refuses
+`skip_delete=true` on a cloud reservation unless the lifecycle is
+`daytime-up` or `daytime-down` (#3670), printing no row, so the refused run
+publishes no cloud. The kind lane keeps the flag:
+
+```sh
+uat-broker reservations --name aws-h100 --lifecycle nightly --skip-delete true
+# exit 2: skip_delete=true is refused for lifecycle=nightly on reservation aws-h100 ...
+```
+
 List every reservation name (one per line):
 
 ```sh
@@ -64,7 +75,33 @@ uat-broker reservations --daytime | jq -c .
 The output is pretty-printed; the daytime scheduler compacts it with `jq -c`
 into a one-line `strategy.matrix.include` array.
 
-`--name`, `--list`, and `--daytime` are mutually exclusive.
+Print the evening teardown set in the same shape — one entry per non-kind
+row, in document order, with its `daytime-intent` or `training` when it has
+none. `daytime-up` can be dispatched against any reservation, so the evening
+`daytime-down` covers every one, not only the rotation:
+
+```sh
+uat-broker reservations --daytime-down | jq -c .
+```
+
+Print the janitor's AWS legs as JSON — one `{tenancy, location, config}`
+entry per distinct `.deployment.tenancy` / `.deployment.location` across the
+`cloud: aws` rows' cluster-configs, sorted by tenancy then location, `config`
+being the pair's first cluster-config in document order. Cluster-config paths
+resolve from the current directory, the checkout root in CI. One leg destroys
+every orphan in its account and region with that one config, so
+cluster-configs sharing a pair must agree on `.deployment.state` and
+`.deployment.stateLocation` (an omitted `stateLocation` is the config's
+`location`); the command fails otherwise, and when a
+tenancy is not a 12-digit account id or a location is not an AWS region:
+
+```sh
+uat-broker reservations --janitor-aws | jq -c .
+# [{"tenancy":"036338176747","location":"us-east-1","config":"tests/uat/aws/cluster-config-ct.yaml"}, ...]
+```
+
+`--name`, `--list`, `--daytime`, `--daytime-down`, and `--janitor-aws` are
+mutually exclusive.
 
 ### `schedule`
 

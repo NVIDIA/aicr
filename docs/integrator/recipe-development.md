@@ -148,7 +148,7 @@ The case to watch for is copying an embedded overlay and adding a mixin to your 
 
 A mixin that some other applied overlay in the chain already contributes is not reported, since its content did reach the recipe.
 
-Some platforms declare their full component stack inline per leaf overlay rather than via a platform mixin. This is the case for `--platform slurm` and `--platform dynamo`, where each leaf carries hardware-specific tuning (GPU GRES strings, accelerator resource limits) that the mixin merge path cannot represent cleanly, and for `--platform runai`, whose leaves must also turn off the base chain's `kai-scheduler` (`overrides.enabled: false`), which a mixin may not do because it only adds to a component that is already present. Other shapes like `--platform kubeflow` and `--intent inference` still use the `platform-kubeflow` / `platform-inference` mixins shown above, since their leaf-specific tuning is minimal.
+Some platforms declare their full component stack inline per leaf overlay rather than via a platform mixin. This is the case for `--platform slurm` and `--platform dynamo`, where each leaf carries hardware-specific tuning (GPU GRES strings, accelerator resource limits) that the mixin merge path cannot represent cleanly, and for `--platform runai`, whose leaves must also turn off the base chain's `kai-scheduler` (`overrides.enabled: false`), which a mixin may not do because it only adds to a component that is already present (those leaves also declare `kubeflow-training-operator` and `runai-cluster` inline). Other shapes like `--platform kubeflow` and `--intent inference` still use the `platform-kubeflow` / `platform-inference` mixins shown above, since their leaf-specific tuning is minimal.
 
 For example, `--platform slurm` leaves inline three `componentRefs`:
 
@@ -502,6 +502,8 @@ land later; none is implied by Preview alone.
 | `nvke / gb300 / ubuntu / training / kubeflow` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: adds Kubeflow Trainer to the training leaf; no evidence collected yet |
 | `nvke / gb300 / ubuntu / inference` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: the Dynamo leaf's run covers its components; no external LoadBalancer, so the gateway is in-cluster only |
 | `nvke / gb300 / ubuntu / inference / dynamo` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: validated on hardware from this leaf's own bundle; signed evidence to follow |
+| `nvke / gb10 / ubuntu / training` | [DGX OS containerd prerequisite](../user/cli-reference.md#query-mode) | pending: deployment and conformance validated on one DGX Spark; no performance phase until two Sparks are linked over ConnectX-7 |
+| `nvke / gb10 / ubuntu / training / kubeflow` | [DGX OS containerd prerequisite](../user/cli-reference.md#query-mode) | pending: adds Kubeflow Trainer to the training leaf; validated in the same run. The default `torch-distributed` runtime image is amd64-only, so set `spec.trainer.image` to an arm64 image such as NGC PyTorch 25.11 |
 | `eks / h100 / ubuntu / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 | `gke / h100 / cos / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 
@@ -1208,7 +1210,7 @@ spec:
 # recipes/registry.yaml
 - name: gpu-operator
   helm:
-    defaultVersion: v26.7.2  # Changed from v26.7.1
+    defaultVersion: v26.7.3  # Changed from v26.7.2
 ```
 
 **Adding components:**

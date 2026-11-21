@@ -116,7 +116,8 @@ func wrapperContent(name string) bool {
 // PushWrapper packages a release's local chart and pushes it to target. The
 // tag carries the archive's own digest, so different content never shares a
 // tag and an existing tag is reused only when its content matches.
-func (c *Client) PushWrapper(ctx context.Context, target Repository, files map[string][]byte) (*MirroredChart, error) {
+func (c *Client) PushWrapper(ctx context.Context, target Repository, files map[string][]byte) (_ *MirroredChart, err error) {
+	defer observe(opPushWrapper, &err)
 	archive, meta, err := PackageWrapper(files)
 	if err != nil {
 		return nil, err

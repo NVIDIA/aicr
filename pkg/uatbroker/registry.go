@@ -230,10 +230,31 @@ func (r *Registry) Validate() error {
 	return nil
 }
 
+// CheckSkipDelete returns an error unless a uat-run.yaml dispatch with
+// lifecycle may skip its teardown on r: always when skipDelete is false, on
+// the kind lane, and with LifecycleDaytimeUp or LifecycleDaytimeDown. Any
+// other lifecycle on a cloud reservation is refused (#3670).
+func (r *Reservation) CheckSkipDelete(lifecycle string, skipDelete bool) error {
+	if !skipDelete || r.Cloud == CloudKind {
+		return nil
+	}
+	switch lifecycle {
+	case LifecycleDaytimeUp, LifecycleDaytimeDown:
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+		"skip_delete=true is refused for lifecycle=%s on reservation %s (cloud %s): a retained nightly "+
+			"cluster has no reliable teardown (#3670). For a debugging hold, dispatch: "+
+			"gh workflow run uat-run.yaml -f reservation=%s -f intent=<intent> -f lifecycle=daytime-up, "+
+			"with this run's intent; lifecycle=daytime-down, "+
+			"or the 02:00 UTC evening teardown, removes that held cluster",
+		lifecycle, r.Name, r.Cloud, r.Name))
+}
+
 // DaytimeAssignments returns the daytime human-access rotation (#1281, DC8):
 // one entry per reservation that opts in via a non-empty daytime-intent, in
 // registry (document) order. Reservations with an empty daytime-intent are
-// nightly-batch only and omitted.
+// omitted.
 func (r *Registry) DaytimeAssignments() []DaytimeAssignment {
 	out := make([]DaytimeAssignment, 0, len(r.Reservations))
 	for i := range r.Reservations {
@@ -244,6 +265,27 @@ func (r *Registry) DaytimeAssignments() []DaytimeAssignment {
 			Reservation: r.Reservations[i].Name,
 			Intent:      r.Reservations[i].DaytimeIntent,
 		})
+	}
+	return out
+}
+
+// DaytimeTeardownAssignments returns the evening daytime-down set: one entry
+// per non-kind reservation, in registry (document) order, with its
+// daytime-intent, or IntentTraining when it has none. daytime-up can be
+// dispatched against any reservation, so a teardown of only the
+// DaytimeAssignments rotation would leave such a cluster held.
+func (r *Registry) DaytimeTeardownAssignments() []DaytimeAssignment {
+	out := make([]DaytimeAssignment, 0, len(r.Reservations))
+	for i := range r.Reservations {
+		res := &r.Reservations[i]
+		if res.Cloud == CloudKind {
+			continue
+		}
+		intent := res.DaytimeIntent
+		if intent == "" {
+			intent = IntentTraining
+		}
+		out = append(out, DaytimeAssignment{Reservation: res.Name, Intent: intent})
 	}
 	return out
 }

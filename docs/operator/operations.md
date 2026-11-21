@@ -22,7 +22,7 @@ kubectl get configmaps -n aicr-system -l operator.aicr.run/role=plan
 | --- | --- | --- |
 | `Ready` | The target plan is rolled out, every release is ready at its current revision, and the rollout passed deployment validation when required | `RolledOut`; `ValidationDisabled` when `spec.validation.deployment` is `Disabled`. Not ready: `RollingOut`, `NotReady`, `NoActivePlan`, `Paused`, `EngineSuspended`, `EngineSuspensionRefused`, an engine reason, `PlanUnreadable`, `Deleting`. During a rollout, `RollingOut` names it and its progress: `rollout <name>: step 9/18 gpu-operator (Upgrade)`, `rollout <name> awaiting approval`, `rollout <name>: deployment validation run <id>` or `rollout <name> stalled: <message>`; before it exists, `the target plan is not rolled out yet`, with `; its stabilization window has not passed` while it stabilizes |
 | `Available` | Every release of the active plan is ready | `Healthy`; not: `NotReady`, `NoActivePlan`. The message names the release that is not ready and why, as `release <id>: <reason>`. During a rollout, a release it already moved is checked at the rollout's target plan, one it is removing no longer counts, and the step in flight counts only once it fails. While the engine is suspended, `Available` reports `NotReady` whatever the stack's health |
-| `Reconciling` | Work is in progress | `Resolving`, `Stabilizing`, `Assessing`, `RollingOut`, `Validating`. `False` with `RolledOut` only means nothing is in progress: it is also reported while paused or stalled |
+| `Reconciling` | Work is in progress | `Resolving`, `Stabilizing`, `Assessing`, `RollingOut`, `Validating`. While `Assessing` or `Validating`, the message is set when an AICR Job waits: why its pod is not running, or `retrying after a transient failure: <cause>`. `False` with `RolledOut` only means nothing is in progress: it is also reported while paused or stalled |
 | `Stalled` | Progress needs you; the reason says why ([troubleshooting](troubleshooting.md)) | `Progressing` when not stalled |
 | `Resolved` | A plan exists for the current inputs | `Resolved`; `Resolving` while AICR Jobs run or a transient failure is retried; otherwise a terminal reason |
 | `EngineAvailable` | Argo CD's CRDs and the project are present and, with the `aws` registry provider, the registry token is fresh | `EngineMissing`, `ProjectMissing`, `RegistryCredentialsStale`. When minting a new ECR token fails while `True`, the message names the failure and whether the operator still holds a token it can use |
@@ -88,20 +88,74 @@ in the `default` namespace; `kubectl describe` shows them.
 ### Metrics
 
 The operator serves Prometheus metrics on port 8080; the chart creates no
-Service, so scrape the pod or port-forward
+Service. With the Prometheus Operator, set `operator.podMonitor.enabled` and
+the `operator.podMonitor.labels` your Prometheus selects; the chart creates the
+`PodMonitor` only while the cluster serves that kind, so on a new cluster run
+`helm upgrade` again once the recipe has installed `prometheus-operator-crds`.
+The stock AICR Prometheus keeps only the series its own consumers query, so
+scrape the operator from your own. Otherwise scrape the pod, or port-forward
 (`kubectl port-forward -n aicr-system deploy/aicr-operator 8080`):
 
 | Metric | Meaning |
 | --- | --- |
 | `aicr_operator_rollout_outcomes_total{outcome}` | Rollouts ended, by outcome |
 | `aicr_operator_job_duration_seconds{stage,result}` | AICR Job durations by stage and result |
-| `aicr_operator_validation_runs_total{result}` | Deployment validation runs by result |
+| `aicr_operator_validation_runs_total{result}` | Rollouts whose deployment validation finished, by result. A run that is retried is not counted here; it is in `aicr_operator_job_runs_total` with class `transient` |
 | `aicr_operator_job_runs_total{stage,result,class}` | AICR runs when first seen finished, by stage, result and, for failures, retry class (`never`, `bounded`, `transient`, `authorization`) |
 | `aicr_operator_registry_token_expiry_timestamp_seconds`, `aicr_operator_registry_token_refresh_timestamp_seconds` | When the Argo CD registry token expires and when the operator last refreshed it, as Unix times (`aws` provider); `0` until known. Only the leader refreshes the token, so a standby replica stays at `0`: alert on `max()` across operator pods |
 | `aicr_operator_registry_token_mint_failures_total` | Failed ECR token mints since the operator started (`aws` provider), including those it rode out on a still-valid token |
+| `aicr_operator_runtime_stalled{reason}` | `1` while the runtime is `Stalled=True` with this reason, else `0`; the reasons are the [troubleshooting](troubleshooting.md) ones |
+| `aicr_operator_rollout_approval_wait_seconds` | How long the rollout in progress has waited for approval, including while the engine is unavailable; `0` while none waits |
+| `aicr_operator_runtime_resolved_timestamp_seconds` | When the operator last saw the runtime resolved for its current inputs, as a Unix time, checked every 30 seconds. It stops while a resolution runs or retries, including one that keeps an already resolved runtime `Resolved=True`, such as a snapshot refresh; `0` until it has seen one since the operator started |
+| `aicr_operator_registry_failures_total{operation,code}` | Failed runtime registry and chart delivery operations (`resolve`, `pull_bundle`, `push_chart`, `reuse_chart`, `mirror_oci_chart`, `mirror_http_chart`, `push_wrapper`, `sigstore_bundles`, `describe`, `push_statement`, `pull_statement`), by error code. `reuse_chart` with `NOT_FOUND` is a chart the operator mirrors again, not an outage |
 
-Every outcome, result, stage and retry class is exported at zero from
-startup, so a rate reads zero rather than nothing before its first event.
+Every outcome, result, stage, retry class, stall reason, registry operation
+and error code is exported at zero from startup, so a rate reads zero rather
+than nothing before its first event. Only the leader reconciles: the runtime
+gauges of a standby replica stay at `0`, so alert on `max()` across operator
+pods.
+
+### Alerts
+
+Example Prometheus rules; adjust the thresholds, and add the `severity` and
+routing labels your Alertmanager expects. Each rule takes the `max()` across
+the operator's replicas and keeps `namespace`, which names the installation;
+when one Prometheus scrapes several clusters, add the label that names the
+cluster to every `by (...)`, or one cluster's values hide another's:
+
+```yaml
+groups:
+  - name: aicr-operator
+    rules:
+      # Progress needs someone. Approvals have their own alert below.
+      - alert: AICROperatorRuntimeStalled
+        expr: max by (namespace, reason) (aicr_operator_runtime_stalled{reason!~"AwaitingApproval|AwaitingAcknowledgement"}) == 1
+        for: 15m
+        annotations:
+          summary: "The AICR runtime is Stalled ({{ $labels.reason }}); see docs/operator/troubleshooting.md"
+      - alert: AICROperatorApprovalPending
+        expr: max by (namespace) (aicr_operator_rollout_approval_wait_seconds) > 4 * 3600
+        annotations:
+          summary: "An AICR rollout has waited over 4 hours for approval"
+      # A new installation fires this until its first plan resolves, and so
+      # does an operator with no ClusterRuntime: 0 reads as long ago.
+      - alert: AICROperatorNotResolved
+        expr: time() - max by (namespace) (aicr_operator_runtime_resolved_timestamp_seconds) > 3600
+        for: 10m
+        annotations:
+          summary: "The AICR runtime has not been resolved for its current generation in over an hour"
+      # reuse_chart with NOT_FOUND is a chart mirrored again; CANCELED is a
+      # shutdown.
+      - alert: AICROperatorRegistryFailing
+        expr: |
+          sum by (namespace, operation, code) (
+            increase(aicr_operator_registry_failures_total{code!="CANCELED"}[15m])
+              unless on (operation, code) aicr_operator_registry_failures_total{operation="reuse_chart", code="NOT_FOUND"}
+          ) > 0
+        for: 15m
+        annotations:
+          summary: "AICR registry operation {{ $labels.operation }} keeps failing with {{ $labels.code }}"
+```
 
 ## How a change reaches the cluster
 
@@ -130,12 +184,16 @@ startup, so a rate reads zero rather than nothing before its first event.
 6. **It waits for approval** when any step needs it (below).
 7. **Steps run one at a time** in dependency order, each with one write to
    Argo CD, and each must be ready at its current revision within
-   `spec.rollout.actionTimeout` (default 30 minutes). Removals run last, in
-   reverse order. A `manual` release with recorded steps after the apply stops
-   the rollout in `AwaitingAcknowledgement` until those steps are done and an
-   approver runs `kubectl aicr acknowledge`.
-8. **Deployment validation** runs once when `spec.validation.deployment` is
-   `Required`, against a new snapshot taken after every step is ready.
+   `spec.rollout.actionTimeout` (default 30 minutes). Removals run last,
+   dependents first as the Applications' `depends-on` and `readiness-for`
+   annotations record them. A `manual` release with recorded steps after the
+   apply stops the rollout in `AwaitingAcknowledgement` until those steps are
+   done and an approver runs `kubectl aicr acknowledge`.
+8. **Deployment validation** runs when `spec.validation.deployment` is
+   `Required`, against a new snapshot taken after every step is ready. It is
+   run again, at most three times in all, only when AICR could not finish a
+   run and that run pushed no evidence of a failed check
+   ([troubleshooting](troubleshooting.md#validation)).
 9. **The rollout succeeds** and its target becomes the active plan. The whole
    rollout must finish within `spec.rollout.deadline` (default 6 hours) of its
    creation.

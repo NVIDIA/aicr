@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"aicr.run/pkg/errors"
@@ -755,6 +756,47 @@ func TestDaytimeAssignmentsNone(t *testing.T) {
 	}
 }
 
+func TestDaytimeTeardownAssignments(t *testing.T) {
+	tests := []struct {
+		name string
+		rows []Reservation
+		// want is never nil: the encoder turns a nil slice into null, which
+		// the scheduler's `matrix != '[]'` guard does not catch.
+		want []DaytimeAssignment
+	}{
+		{
+			name: "every non-kind row in registry order, intent or training",
+			rows: []Reservation{
+				{Name: "aws-a", Cloud: CloudAWS, DaytimeIntent: IntentTraining},
+				{Name: "kind-a", Cloud: CloudKind, DaytimeIntent: IntentTraining},
+				{Name: "gcp-a", Cloud: CloudGCP, DaytimeIntent: IntentInference},
+				{Name: "aws-b", Cloud: CloudAWS},
+				{Name: "azure-a", Cloud: CloudAzure},
+			},
+			want: []DaytimeAssignment{
+				{Reservation: "aws-a", Intent: IntentTraining},
+				{Reservation: "gcp-a", Intent: IntentInference},
+				{Reservation: "aws-b", Intent: IntentTraining},
+				{Reservation: "azure-a", Intent: IntentTraining},
+			},
+		},
+		{
+			name: "kind-only registry",
+			rows: []Reservation{{Name: "kind-a", Cloud: CloudKind}},
+			want: []DaytimeAssignment{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := &Registry{Reservations: tt.rows}
+			got := reg.DaytimeTeardownAssignments()
+			if got == nil || !slices.Equal(got, tt.want) {
+				t.Errorf("DaytimeTeardownAssignments() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestCommittedRegistryValid guards the actual checked-in registry: it must
 // parse, validate, and carry the launch reservations. A bad data edit fails
 // here before it can break the broker workflows.
@@ -1048,5 +1090,51 @@ func TestNightlyIntentsOrDefaultCopies(t *testing.T) {
 	got[0] = "mutated"
 	if r.NightlyIntents[0] != IntentTraining {
 		t.Errorf("mutating the returned slice corrupted the reservation: %v", r.NightlyIntents)
+	}
+}
+
+func TestCheckSkipDelete(t *testing.T) {
+	tests := []struct {
+		name       string
+		cloud      string
+		lifecycle  string
+		skipDelete bool
+		// wantErr lists substrings the error must contain. Empty means no error.
+		wantErr []string
+	}{
+		{name: "false on a nightly cloud run", cloud: CloudAWS, lifecycle: LifecycleNightly},
+		{name: "false with an unknown lifecycle", cloud: CloudGCP, lifecycle: "bogus"},
+		{name: "true on the kind lane", cloud: CloudKind, lifecycle: LifecycleNightly, skipDelete: true},
+		{name: "true with daytime-up", cloud: CloudGCP, lifecycle: LifecycleDaytimeUp, skipDelete: true},
+		{name: "true with daytime-down", cloud: CloudAzure, lifecycle: LifecycleDaytimeDown, skipDelete: true},
+		{
+			name: "true on a nightly aws run", cloud: CloudAWS, lifecycle: LifecycleNightly, skipDelete: true,
+			wantErr: []string{"lifecycle=nightly on reservation r1 (cloud aws)", "-f reservation=r1 -f intent=<intent> -f lifecycle=daytime-up, with this run's intent"},
+		},
+		{name: "true on a nightly gcp run", cloud: CloudGCP, lifecycle: LifecycleNightly, skipDelete: true, wantErr: []string{"(cloud gcp)"}},
+		{name: "true on a nightly azure run", cloud: CloudAzure, lifecycle: LifecycleNightly, skipDelete: true, wantErr: []string{"(cloud azure)"}},
+		{name: "true with an unknown lifecycle", cloud: CloudAWS, lifecycle: "bogus", skipDelete: true, wantErr: []string{"lifecycle=bogus"}},
+		{name: "true with an empty lifecycle", cloud: CloudAWS, skipDelete: true, wantErr: []string{"lifecycle= on"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := &Reservation{Name: "r1", Cloud: tt.cloud}
+			err := res.CheckSkipDelete(tt.lifecycle, tt.skipDelete)
+			if len(tt.wantErr) == 0 {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("want error containing %q, got nil", tt.wantErr)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+		})
 	}
 }

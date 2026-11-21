@@ -12,6 +12,7 @@ YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml
 COMMIT             := $(shell git rev-parse HEAD)
 BRANCH             := $(shell git rev-parse --abbrev-ref HEAD)
 GO_VERSION         := $(shell cat .go-version 2>/dev/null)
+NVCRE_CLOSURE_GB300_FLAGS := -arch gb300 -entries communication/nccl-all-reduce -out recipes/components/nvcre/workload-images-gb300.yaml
 export GOTOOLCHAIN  = go$(GO_VERSION)
 GOLINT_VERSION      = $(shell golangci-lint --version 2>/dev/null | awk '{print $$4}' | sed 's/golangci-lint version //' || echo "not installed")
 KO_VERSION          = $(shell ko version 2>/dev/null || echo "not installed")
@@ -772,12 +773,14 @@ bom-pinning-check: ## Verifies every Helm component in the registry has a pinned
 	  -skip-helm
 
 .PHONY: nvcre-closure
-nvcre-closure: ## Regenerates the NVCRE workload runtime closure from the registry's pinned chart version
+nvcre-closure: ## Regenerates the NVCRE workload runtime closures (aws x h100, aws x gb300) from the registry's pinned chart version
 	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure
+	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure $(NVCRE_CLOSURE_GB300_FLAGS)
 
 .PHONY: nvcre-closure-check
-nvcre-closure-check: ## Verifies the committed NVCRE workload closure matches the pinned chart version
+nvcre-closure-check: ## Verifies the committed NVCRE workload closures match the pinned chart version
 	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure -check
+	@GOFLAGS="-mod=readonly" go run ./tools/nvcre-closure -check $(NVCRE_CLOSURE_GB300_FLAGS)
 
 .PHONY: crd-inventory
 crd-inventory: ## Regenerates recipes/components/*/crds.yaml, the CRDs each pinned chart installs (needs helm and network)
@@ -1270,13 +1273,9 @@ operator-qualify: ## Runs the operator's fault-injection suite against dist/cand
 	@./tools/operator-qualify
 
 .PHONY: operator-qualify-published
-operator-qualify-published: ## Installs the newest published operator release and runs the lifecycle scenarios upgrading to dist/candidate, both on the published release's AICR
+operator-qualify-published: ## Installs the newest published operator release and runs the lifecycle scenarios upgrading to dist/candidate
 	@./tools/operator-qualify pull-published
-	@published="$${PUBLISHED_DIR:-dist/published}"; \
-	AICR_E2E_VERSION="$${AICR_E2E_VERSION:-$$(yq -r '.aicr.version' "$$published/candidate-values.yaml")}" \
-	AICR_E2E_IMAGE="$${AICR_E2E_IMAGE:-$$(yq -r '.aicr.image' "$$published/candidate-values.yaml")}" \
-	AICR_E2E_VALIDATOR_IMAGES="$${AICR_E2E_VALIDATOR_IMAGES:-$$(yq -r '.aicr.validatorImages | join(",")' "$$published/candidate-values.yaml")}" \
-	AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY=1 QUALIFY_TIMEOUT=45m CANDIDATE_DIR="$$published" CANDIDATE_NEXT_DIR=dist/candidate ./tools/operator-qualify
+	@AICR_OPERATOR_QUALIFY_LIFECYCLE_ONLY=1 QUALIFY_TIMEOUT=45m CANDIDATE_DIR="$${PUBLISHED_DIR:-dist/published}" CANDIDATE_NEXT_DIR=dist/candidate ./tools/operator-qualify
 
 # =============================================================================
 # Tilt Local Development

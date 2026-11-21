@@ -433,6 +433,9 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 	// provenance.yaml must name the bytes written below, not whatever the
 	// puller reported.
 	rec.SHA256 = localformat.ArchiveSHA256(tgz)
+	rec.Name = ref.Name
+	rec.TarballName = tarball
+	rec.Archive = tgz
 
 	// Write charts/<tarball>.tgz.
 	chartsDir, err := deployer.SafeJoin(compDir, "charts")

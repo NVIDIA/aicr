@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # The template node-drainer renders into a DrainRequest for each quarantined
-# node: NVSentinel v1.31.0's
+# node: NVSentinel v1.32.0's
 # plugins/slinky-drainer/config/drain-template/drain-template-configmap.yaml,
 # key drain-template.yaml, byte for byte (commit 13ba7f453e10).
 #

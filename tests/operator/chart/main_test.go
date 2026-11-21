@@ -181,6 +181,11 @@ func renderFiles(ctx context.Context, chart, ns string, files []string, set ...s
 	for _, s := range set {
 		args = append(args, "--set", s)
 	}
+	return renderArgs(ctx, args...)
+}
+
+// renderArgs runs helm with args and decodes the objects it prints.
+func renderArgs(ctx context.Context, args ...string) ([]unstructured.Unstructured, string, error) {
 	out, err := helm(ctx, args...)
 	if err != nil {
 		return nil, out, err
