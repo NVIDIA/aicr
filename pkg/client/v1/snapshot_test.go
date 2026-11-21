@@ -15,6 +15,7 @@
 package aicr_test
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"net/http"
@@ -26,7 +27,12 @@ import (
 
 	aicr "aicr.run/pkg/client/v1"
 	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/fingerprint"
+	"aicr.run/pkg/measurement"
+	"aicr.run/pkg/serializer"
 	"aicr.run/pkg/snapshotter"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // validSnapshotBody is a snapshot the loader accepts. Tests that are not
@@ -77,6 +83,71 @@ func TestLoadSnapshot_RoundTripsThroughTheFacadeShape(t *testing.T) {
 	}
 	if len(internal.Measurements) != 1 {
 		t.Errorf("Measurements = %d, want 1", len(internal.Measurements))
+	}
+}
+
+func TestLoadSnapshot_WorkloadImageObservations(t *testing.T) {
+	t.Parallel()
+
+	client := newVerifyClient(t)
+	requested := "registry.invalid/team/image:tag@sha256:requested"
+	runtimeID := "containerd://sha256:observed"
+	legacy := measurement.Subtype{Name: "image", Data: map[string]measurement.Reading{
+		"image": measurement.Str("tag"),
+	}}
+	server := measurement.Subtype{Name: "server", Data: map[string]measurement.Reading{
+		"version": measurement.Str("v1.28.0"),
+	}}
+	observations := measurement.Subtype{
+		Name: "workload-images",
+		Data: map[string]measurement.Reading{"coverage": measurement.Str("complete")},
+		Items: []measurement.ItemEntry{{
+			Context: map[string]string{
+				"namespace": "ns", "pod": "pod", "pod-uid": "uid", "container-type": "regular", "container": "main",
+			},
+			Data: map[string]measurement.Reading{
+				"requested-image":  measurement.Str(requested),
+				"runtime-image-id": measurement.Str(runtimeID),
+				"status":           measurement.Str("observed"),
+			},
+		}},
+	}
+
+	for _, format := range []serializer.Format{serializer.FormatYAML, serializer.FormatJSON} {
+		t.Run(string(format), func(t *testing.T) {
+			t.Parallel()
+			load := func(subtypes ...measurement.Subtype) *aicr.Snapshot {
+				t.Helper()
+				snapshot := snapshotter.NewSnapshot()
+				snapshot.Kind, snapshot.APIVersion = "Snapshot", snapshotter.FullAPIVersion
+				snapshot.Measurements = append(snapshot.Measurements, &measurement.Measurement{
+					Type: measurement.TypeK8s, Subtypes: subtypes,
+				})
+				var body bytes.Buffer
+				require.NoError(t, serializer.NewWriter(format, &body).Serialize(t.Context(), snapshot))
+				loaded, err := client.LoadSnapshot(t.Context(), writeSnapshot(t, body.String()), "")
+				require.NoError(t, err)
+				return loaded
+			}
+			old := load(server, legacy)
+			updated := load(server, legacy, observations)
+			oldMeasurements := old.Unwrap().Measurements
+			updatedMeasurements := updated.Unwrap().Measurements
+			assert.Nil(t, oldMeasurements[0].GetSubtype("workload-images"))
+			assert.Equal(t, oldMeasurements[0].GetSubtype("image"), updatedMeasurements[0].GetSubtype("image"))
+			assert.Equal(t, fingerprint.FromMeasurements(oldMeasurements), fingerprint.FromMeasurements(updatedMeasurements))
+			oldCriteria, err := client.CriteriaFromSnapshot(old)
+			require.NoError(t, err)
+			updatedCriteria, err := client.CriteriaFromSnapshot(updated)
+			require.NoError(t, err)
+			assert.Equal(t, oldCriteria, updatedCriteria)
+			observed := updatedMeasurements[0].GetSubtype("workload-images")
+			require.NotNil(t, observed)
+			require.Len(t, observed.Items, 1)
+			assert.Equal(t, observations.Items[0].Context, observed.Items[0].Context)
+			assert.Equal(t, requested, observed.Items[0].Data["requested-image"].Any())
+			assert.Equal(t, runtimeID, observed.Items[0].Data["runtime-image-id"].Any())
+		})
 	}
 }
 
