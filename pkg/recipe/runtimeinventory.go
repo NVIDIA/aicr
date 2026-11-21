@@ -239,7 +239,7 @@ func applyRuntimeInventoryMode(result *RecipeResult, mode RuntimeInventoryMode) 
 	// override cannot deliver.
 	install := parsed == RuntimeInventoryEnabled
 	if err := setComponentOverride(result, runtimeInventoryComponentName,
-		map[string]any{componentInstallOverrideKey: install}); err != nil {
+		map[string]any{ComponentInstallOverrideKey: install}); err != nil {
 		return err
 	}
 

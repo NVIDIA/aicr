@@ -238,13 +238,20 @@ type ComponentRef struct {
 	HealthCheckSkip bool `json:"healthCheckSkip,omitempty" yaml:"healthCheckSkip,omitempty"`
 }
 
+const (
+	// ComponentEnabledOverrideKey is the root Overrides key read by IsEnabled.
+	ComponentEnabledOverrideKey = "enabled"
+	// ComponentInstallOverrideKey is the root Overrides key read by IsInstall.
+	ComponentInstallOverrideKey = "install"
+)
+
 // IsEnabled reports whether this component is enabled via overrides.enabled.
 // A root overrides.enabled of false means the component is not enabled: the ref
 // stays in the resolved inventory but is out of probe and deploy scope.
 // Missing or non-bool values are treated as enabled (fail-open for that key).
 // The install gate is separate — see IsInstall and IsDeployable.
 func (c ComponentRef) IsEnabled() bool {
-	return boolOverride(c, componentEnabledOverrideKey, true)
+	return boolOverride(c, ComponentEnabledOverrideKey, true)
 }
 
 // IsInstall reports whether AICR should install this component.
@@ -254,7 +261,7 @@ func (c ComponentRef) IsEnabled() bool {
 // path — use IsDeployable for that combined gate. Missing or non-bool values
 // are treated as installable (fail-open for that key).
 func (c ComponentRef) IsInstall() bool {
-	return boolOverride(c, componentInstallOverrideKey, true)
+	return boolOverride(c, ComponentInstallOverrideKey, true)
 }
 
 // IsDeployable reports whether this component should be deployed by AICR.

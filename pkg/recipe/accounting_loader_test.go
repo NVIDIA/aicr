@@ -115,7 +115,7 @@ func TestLoadConfiguredRecipeRejectsDisabledAccountingComponent(t *testing.T) {
 		t.Fatalf("BuildFromCriteria() error = %v", err)
 	}
 	result.GetComponentRef(mariaDBOperatorComponentName).
-		Overrides[componentEnabledOverrideKey] = false
+		Overrides[ComponentEnabledOverrideKey] = false
 
 	data, err := serializer.MarshalYAMLDeterministic(result)
 	if err != nil {
