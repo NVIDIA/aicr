@@ -110,8 +110,14 @@ for the rationale and re-enable path.
 
 The `eks` rows likewise do not apply to the `os=amazonlinux` leaves
 (`*-eks-amazonlinux-inference`). Those leaves disable
-`nodewright-customizations` entirely (`enabled: false`), so no setup or tuning
-package is rendered and host setup and tuning must come from the AMI.
+`nodewright-customizations` entirely (`enabled: false`), so no `nvidia-setup`
+or `nvidia-tuned` package is rendered and host tuning must come from the AMI.
+Device-isolation hardening on these leaves comes from a separate component,
+`al2023-toolkit-hardening` (issue #3272): it sets the container toolkit's
+device-isolation keys via `nvidia-ctk config --in-place` as its own NodeWright
+package, independent of `nodewright-customizations`, and it taint-gates GPU
+nodes (`runtimeRequired: true`, `autoTaintNewNodes` on by default) until the
+package completes.
 
 The `tuningEnabled` gate (default `true`; only an explicit `false` disables)
 applies uniformly across the tuning manifests: on the shared `tuning.yaml` it
