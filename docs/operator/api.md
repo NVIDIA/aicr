@@ -413,7 +413,7 @@ spec:                                 # immutable, except the set-once approval 
     operation: Upgrade
     assessment: Manual
     crdChange: false
-    postApplySteps: [reset-breaker, verify]   # a manual record's steps after the apply; acknowledged before the plan is active
+    postApplySteps: [reset-breaker, verify]   # a manual record's steps after its apply step (all of them when it names none); acknowledged before the plan is active
   - release: nvsentinel
     operation: Remove                 # after installs and upgrades, dependents first
     assessment: NotApplicable

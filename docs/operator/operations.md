@@ -198,9 +198,12 @@ timeout and is not checked.
    Argo CD, and each must be ready at its current revision within
    `spec.rollout.actionTimeout` (default 30 minutes). Removals run last,
    dependents first as the Applications' `depends-on` and `readiness-for`
-   annotations record them. A `manual` release with recorded steps after the
-   apply stops the rollout in `AwaitingAcknowledgement` until those steps are
-   done and an approver runs `kubectl aicr acknowledge`.
+   annotations record them. A `manual` release with recorded steps after its
+   `apply` step stops the rollout in `AwaitingAcknowledgement` until those
+   steps are done and an approver runs `kubectl aicr acknowledge`. A record
+   that names no `apply` step, as most do in AICR v1.3.0 and earlier, stops it
+   there for all of its steps, since the operator cannot tell which follow the
+   apply.
 8. **Deployment validation** runs when `spec.validation.deployment` is
    `Required`, against a new snapshot taken after every step is ready. It is
    run again, at most three times in all, only when AICR could not finish a
@@ -410,9 +413,10 @@ nvidia-dra-driver-gpu, which AICR assesses `safe`, and nfd, which it assesses
 `manual` with recorded steps, so the rollout needs approval. Its RBAC steps
 apply only when the topology-updater RBAC is managed outside the chart
 (`topologyUpdater.rbac.create=false`). AICR v1.2.0's nfd record has no `apply`
-step, so the rollout does not pause for acknowledgement after nfd is applied:
-if you widened the RBAC, do `narrow-nrt-rbac` yourself once every
-topology-updater Pod runs 0.20.x and you no longer need a rollback path.
+step, so after nfd is applied the rollout pauses for acknowledgement of all
+three steps: if you widened the RBAC, do `narrow-nrt-rbac` once every
+topology-updater Pod runs 0.20.x and you no longer need a rollback path, then
+acknowledge.
 
 From v1.0.x, the same chart upgrade also moves validation to the v1.1
 identities: the launcher loses `cluster-admin`, the `aicr-validator`
