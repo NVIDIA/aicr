@@ -1565,7 +1565,7 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			from: "1.5.0",
 			to:   "2.0.5",
 			want: "recorded manual: the record covering 2.0.0 describes the move from 1.5.0 to 2.0.5. " +
-				"Follow the steps below, then apply",
+				"Follow the steps below in order, applying the bundle at the apply step, or after the last step if none is named",
 		},
 	}
 	for _, tt := range tests {

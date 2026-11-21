@@ -1192,7 +1192,7 @@ func recordedExplanation(r ComponentResult, c crossing, n int) string {
 	case c.tr.Verdict == VerdictSafe && c.tr.VerifiedBy != "":
 		return s + verified + strconv.Quote(c.tr.VerifiedBy)
 	case c.tr.Verdict == VerdictManual:
-		return s + ". Follow the steps below, then apply"
+		return s + ". Follow the steps below in order, applying the bundle at the apply step, or after the last step if none is named"
 	case c.tr.Verdict == VerdictBlocked:
 		return s + " and blocks it in one step. Follow the steps below to get there safely"
 	default:
