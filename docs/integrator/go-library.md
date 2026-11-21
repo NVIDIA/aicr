@@ -192,7 +192,8 @@ measurement is unavailable, as it is for older snapshots. The existing
 
 | Item field | Meaning |
 |---|---|
-| `context.namespace`, `pod`, `pod-uid`, `container-type`, `container` | Pod and container identity |
+| `context.namespace`, `pod`, `pod-uid`, `container` | Pod and container identity |
+| `context.container-type` | `regular`, `init`, or `ephemeral` |
 | `context.node` | Node name from the Pod, empty for an unscheduled Pod |
 | `context.node-uid`, `node-os`, `node-architecture` | Optional facts read by that node name during capture |
 | `data.requested-image` | Full requested image reference, including any requested digest |
@@ -201,14 +202,29 @@ measurement is unavailable, as it is for older snapshots. The existing
 | `data.status` | `observed`, `status-missing`, `image-id-missing`, or `status-ambiguous` |
 
 Check `workload-images.data.coverage` before interpreting the list.
-`complete` means all requested containers in the paginated Pod snapshot fit
-the report, even when status or node fields are missing. `limited` means
-the 256-row or 64 KiB compact JSON budget excluded observations. `partial`
-means a later Pod page failed and earlier observations may also have hit the
-row or byte limit. `unavailable` means no Pod page was read. Status entries
-without a matching requested container do not produce rows.
-Node enrichment is best effort, with up to 32 distinct Node reads in a
-two-second budget. Missing node fields indicate unavailable facts.
+`complete` means all requested container rows fit and no facts successfully
+read from Nodes were dropped for size. `limited` means the 256-row or 64 KiB
+compact JSON budget omitted rows or Node facts already read. `partial` means a
+later Pod page failed, and earlier observations may also have hit a budget.
+`unavailable` means no Pod page was read. Status entries without a matching
+requested container do not produce rows.
+
+The byte budget often limits digest-pinned observations to around 100 rows,
+depending on reference and field lengths. The collector admits rows in the
+order returned by the Pod API, so earlier namespaces can fill the budget
+before later ones appear. It sorts the retained rows for output.
+
+Node enrichment attempts up to eight distinct referenced Nodes concurrently
+within two seconds or the remaining collector deadline, whichever is shorter.
+Missing node fields can reflect an omitted, failed, or incomplete Node read,
+even with `complete` row coverage. If the collector reads Node facts that
+would exceed the byte budget, it omits those fields and reports `limited`.
+See the [measurement schema](measurement-api.md#k8s-workload-images-shape).
+
+Raw snapshots, full (`--full`) evidence bundles, and operator-stored
+snapshots retain these observations, including Pod namespaces, names and UIDs,
+Node identity, and full image references that can name private registry paths.
+Minimal evidence drops this subtype.
 
 Keep requested and runtime identities separate. A runtime digest's syntax
 does not identify its OCI object kind or prove that it matches the requested
@@ -219,7 +235,8 @@ tags, writable layers, mounted content, or process memory.
 
 `DiffSnapshots` compares the measurement payloads already held by two facade
 snapshots. The comparison is in memory: it does not read a cluster or revisit
-the file, URL, or ConfigMap the snapshots came from.
+the file, URL, or ConfigMap the snapshots came from. The comparison excludes
+`K8s.workload-images`, which contains run-scoped Pod identities.
 
 ```go
 baseline, err := client.LoadSnapshot(ctx, "before.yaml", "")

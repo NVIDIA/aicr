@@ -24,6 +24,7 @@ import (
 	aicrerrors "aicr.run/pkg/errors"
 	"aicr.run/pkg/measurement"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // expiredCtxTimeout is short enough that the context is guaranteed already
@@ -224,6 +225,10 @@ func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {
 	assert.Equal(t, measurement.TypeK8s, m.Type)
 	// All standard subtypes are present. Their workload observations and resource detection are unavailable.
 	assert.Len(t, m.Subtypes, 11)
+	workloadImages := m.GetSubtype(workloadImagesSubtype)
+	require.NotNil(t, workloadImages)
+	assert.Equal(t, "unavailable", workloadImages.Data["coverage"].Any())
+	assert.Empty(t, workloadImages.Items)
 	foundSlinky := false
 	foundMariaDB := false
 	foundOKELegacy := false

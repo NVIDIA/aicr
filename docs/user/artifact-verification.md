@@ -320,8 +320,9 @@ counts, and BOM info.
 Bundles are **minimized by default**. The published `snapshot.yaml` keeps only
 an allowlisted set of fields and the CTRF reports omit per-test stdout/message,
 keeping sensitive operational detail (node names, provider instance IDs, the
-node label/taint set, OS tuning, raw container logs) out of the published
-artifact. Each test's CTRF `extra` keeps only allowlisted counts, measurements,
+node label/taint set, OS tuning, raw container logs, and workload image
+observations with Pod identities and full image references) out of the
+published artifact. Each test's CTRF `extra` keeps only allowlisted counts, measurements,
 thresholds, versions, allocation modes, transport, fabric, and runtime-source
 codes, the `nodeLocal` and `versionSatisfied` booleans, and skip-reason codes,
 never node names or IPs, and is omitted when none remain. See [Structured

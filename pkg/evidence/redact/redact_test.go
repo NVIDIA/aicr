@@ -72,6 +72,19 @@ func fullSnapshot() *snapshotter.Snapshot {
 				}},
 			}).
 			WithSubtype(measurement.Subtype{
+				Name: "workload-images",
+				Data: map[string]measurement.Reading{"coverage": measurement.Str("complete")},
+				Items: []measurement.ItemEntry{{
+					Context: map[string]string{
+						"namespace": "private-workloads", "pod": "internal-pod", "pod-uid": "synthetic-pod-uid",
+						"node": "private-node",
+					},
+					Data: map[string]measurement.Reading{
+						"requested-image": measurement.Str("registry.invalid/private/workload:stable"),
+					},
+				}},
+			}).
+			WithSubtype(measurement.Subtype{
 				Name: "mariadb-operator",
 				Data: map[string]measurement.Reading{
 					"collection-state": measurement.Str("crs-detected"),
@@ -184,7 +197,7 @@ func TestSnapshotKeepsAllowlistedSubtypesAndKeys(t *testing.T) {
 	if findMeasurement(out, measurement.TypeSystemD) != nil {
 		t.Errorf("SystemD measurement must be dropped entirely")
 	}
-	for _, sub := range []string{"slinky-slurm", "mariadb-operator"} {
+	for _, sub := range []string{"slinky-slurm", "mariadb-operator", "workload-images"} {
 		if findSubtype(out, measurement.TypeK8s, sub) != nil {
 			t.Errorf("K8s.%s must be dropped from minimal evidence", sub)
 		}

@@ -23,7 +23,7 @@
 //
 // # Collected Data
 //
-// The collector returns a measurement with 9 subtypes:
+// The collector returns a measurement with the following subtypes:
 //
 // 1. node - Node information:
 //   - provider: Cloud provider (EKS, GKE, AKS, etc.) detected from node labels
@@ -44,7 +44,10 @@
 //   - Network Operator images (ofed-driver, rdma-cni, etc.)
 //   - Application images from running pods
 //
-// 4. policy - GPU Operator ClusterPolicy:
+// 4. workload-images - Bounded requested images and runtime IDs for regular,
+// init, and ephemeral containers, with available Pod and Node context.
+//
+// 5. policy - GPU Operator ClusterPolicy:
 //   - Complete ClusterPolicy spec if GPU Operator is installed
 //   - Driver configuration (version, repository, image pull policy)
 //   - Toolkit configuration (version, repository)
@@ -53,26 +56,26 @@
 //   - MIG manager settings (mode, strategy)
 //   - Node feature discovery configuration
 //
-// 5. slinky-slurm - Slinky Slurm declared topology:
+// 6. slinky-slurm - Slinky Slurm declared topology:
 //   - Fail-closed Controller presence state
 //   - Secret-safe, single-Controller projection of associated resources
 //   - No runtime health, free-form configuration, or Secret references
 //
-// 6. mariadb-operator - Official MariaDB Operator conflict evidence:
+// 7. mariadb-operator - Official MariaDB Operator conflict evidence:
 //   - API-group and exact-resource availability
 //   - Presence of one or more official MariaDB custom resources
 //   - No database availability, operator health, or external database inference
 //
-// 7. oke-legacy-plugin - OKE legacy NVIDIA device-plugin conflict evidence
+// 8. oke-legacy-plugin - OKE legacy NVIDIA device-plugin conflict evidence
 //
-// 8. oke-gpu-plugin - device-list strategy of OKE's NvidiaGpuPlugin add-on DaemonSet
+// 9. oke-gpu-plugin - device-list strategy of OKE's NvidiaGpuPlugin add-on DaemonSet
 //
-// 9. default-storage-class - StorageClasses annotated as the cluster default:
+// 10. default-storage-class - StorageClasses annotated as the cluster default:
 //   - collection-state: present, multiple, absent, or unknown
 //   - default-count and the sorted, comma-joined default-classes names
 //   - No provisioner health or capacity inference
 //
-// 10. percona-server-mongodb - Percona Operator for MongoDB conflict evidence:
+// 11. percona-server-mongodb - Percona Operator for MongoDB conflict evidence:
 //   - psmdb.percona.com API-group and exact-resource availability
 //   - Presence of PerconaServerMongoDB custom resources other than AICR's own
 //     nvsentinel/nvsentinel-mongodb

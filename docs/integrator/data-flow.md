@@ -39,7 +39,9 @@ Each `/proc` read (sysctl, `/proc/cmdline`, `/proc/modules`) is abandoned if it 
 **Kubernetes Cluster:**
 - Source: Kubernetes API via `client-go`
 - **server**: Version info from `/version` endpoint
-- **image**: Container images from all pods across namespaces
+- **image**: Container image names and tags from Pods across namespaces
+- **workload-images**: Bounded per-container requested references and available
+  runtime image IDs with Pod and Node context
 - **policy**: GPU Operator ClusterPolicy custom resource
 - **slinky-slurm**: Controller presence plus a secret-safe, single-Controller
   projection of associated NodeSet, LoginSet, RestApi, and Accounting CRs
@@ -103,8 +105,9 @@ Each `/proc` read (sysctl, `/proc/cmdline`, `/proc/modules`) is abandoned if it 
 │   │       └─ data: map[string]Reading                   │
 │   │                                                     │
 │   ├─ K8s                                                │
-│   │   └─ subtypes: [server, image, policy, node,        │
-│   │                 slinky-slurm, mariadb-operator,     │
+│   │   └─ subtypes: [server, image, workload-images,     │
+│   │                 policy, node, slinky-slurm,          │
+│   │                 mariadb-operator,                   │
 │   │                 oke-legacy-plugin,                  │
 │   │                 default-storage-class,              │
 │   │                 percona-server-mongodb,             │
@@ -112,7 +115,8 @@ Each `/proc` read (sysctl, `/proc/cmdline`, `/proc/modules`) is abandoned if it 
 │   │                 oke-addons (--oke-addons),          │
 │   │                 gke-gpu-pools (--gke-gpu-pools)]    │
 │   │       ├─ data: map[string]Reading                   │
-│   │       └─ slinky-slurm.items: []ItemEntry            │
+│   │       ├─ workload-images.items: []ItemEntry          │
+│   │       └─ slinky-slurm.items: []ItemEntry              │
 │   │             (allowlisted resource context + data)   │
 │   │                                                     │
 │   ├─ GPU                                                │

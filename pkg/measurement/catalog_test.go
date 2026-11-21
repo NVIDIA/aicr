@@ -37,6 +37,9 @@ func TestValidatePath(t *testing.T) {
 		// --- accepted ---
 		{name: "closed scalar key", path: "K8s.server.version"},
 		{name: "closed scalar key on node", path: "K8s.node.kubelet-version"},
+		{name: "workload image coverage", path: "K8s.workload-images.coverage"},
+		{name: "workload image digest", path: "K8s.workload-images[container-type=init].runtime-digest"},
+		{name: "workload image architecture", path: "K8s.workload-images[0].node-architecture"},
 		{name: "closed scalar key on aks pools", path: "K8s.aks-gpu-pools.gpu-driver"},
 		{name: "closed scalar key on gke pools", path: "K8s.gke-gpu-pools.gpu-driver-installation"},
 		{name: "closed scalar key on gpu hardware", path: "GPU.hardware.driver-loaded"},
@@ -51,6 +54,13 @@ func TestValidatePath(t *testing.T) {
 		{name: "item key via predicate selector", path: "NetworkTopology.pfs[rail=3].pciAddress"},
 		{name: "scalar and item spaces coexist", path: "K8s.slinky-slurm.detected"},
 		{name: "item key on subtype with both spaces", path: "K8s.slinky-slurm[id=controller/ns/n].cluster-name"},
+
+		{
+			name:    "typo in workload image key",
+			path:    "K8s.workload-images[0].runtime-id",
+			wantErr: aicrerrors.ErrCodeInvalidRequest,
+			wantMsg: "unknown item key",
+		},
 
 		// --- rejected: the four addressing-form classes a flat key set misses ---
 		{

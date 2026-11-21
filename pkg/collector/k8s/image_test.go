@@ -242,7 +242,7 @@ func TestImageCollector_Pagination_MultiplePages(t *testing.T) {
 
 	images, observations, err := collector.collectContainerImages(t.Context())
 	assert.NoError(t, err)
-	assert.Equal(t, "limited", observations.Data["coverage"].Any())
+	assert.Equal(t, "limited", observations.subtype().Data["coverage"].Any())
 	assert.Len(t, images, total, "expected one unique image per pod across all pages")
 
 	// 1250 / 500 = 2.5 -> 3 pages

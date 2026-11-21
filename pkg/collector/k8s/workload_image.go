@@ -19,10 +19,14 @@ import (
 	_ "crypto/sha256" // Register the OCI digest algorithm.
 	_ "crypto/sha512" // Register SHA-384 and SHA-512 with go-digest.
 	"encoding/json"
+	"log/slog"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
+	"aicr.run/pkg/errors"
 	"aicr.run/pkg/measurement"
 	"github.com/distribution/reference"
 	digest "github.com/opencontainers/go-digest"
@@ -32,26 +36,32 @@ import (
 )
 
 const (
-	workloadImagesSubtype     = "workload-images"
-	workloadImageNodeKey      = "node"
-	workloadImageMaxRows      = 256
-	workloadImageMaxBytes     = 64 << 10
-	workloadImageMaxNodeReads = 32
-	workloadImageNodeTimeout  = 2 * time.Second
+	workloadImagesSubtype         = "workload-images"
+	workloadImageCoverageComplete = "complete"
+	workloadImageNodeKey          = "node"
+	workloadImageMaxRows          = 256
+	workloadImageMaxBytes         = 64 << 10
+	workloadImageMaxNodeReads     = 8
+	workloadImageNodeTimeout      = 2 * time.Second
 )
 
 type workloadImageObservations struct {
-	items   []measurement.ItemEntry
-	bytes   int
-	limited bool
+	items    []measurement.ItemEntry
+	bytes    int
+	limited  bool
+	coverage string
 }
 
 func unavailableWorkloadImages() measurement.Subtype {
-	return (&workloadImageObservations{}).subtype("unavailable")
+	return (&workloadImageObservations{}).subtype()
 }
 
-func (o *workloadImageObservations) subtype(coverage string) measurement.Subtype {
-	if coverage == "complete" && o.limited {
+func (o *workloadImageObservations) subtype() measurement.Subtype {
+	coverage := o.coverage
+	switch {
+	case coverage == "":
+		coverage = "unavailable"
+	case coverage == workloadImageCoverageComplete && o.limited:
 		coverage = "limited"
 	}
 	slices.SortFunc(o.items, func(a, b measurement.ItemEntry) int {
@@ -186,30 +196,50 @@ func workloadImageItemBytes(item measurement.ItemEntry) int {
 }
 
 func (o *workloadImageObservations) enrichNodes(ctx context.Context, nodes typedcorev1.NodeInterface) {
+	names := make([]string, 0, workloadImageMaxNodeReads)
+	index := make(map[string]int, workloadImageMaxNodeReads)
+	for _, item := range o.items {
+		name := item.Context[workloadImageNodeKey]
+		if _, found := index[name]; found || name == "" {
+			continue
+		}
+		index[name] = len(names)
+		names = append(names, name)
+		if len(names) == workloadImageMaxNodeReads {
+			break
+		}
+	}
+	if len(names) == 0 || ctx.Err() != nil {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, workloadImageNodeTimeout)
 	defer cancel()
 
-	cache := make(map[string]*corev1.Node)
-	for _, item := range o.items {
-		if ctx.Err() != nil {
-			return
-		}
-		name := item.Context[workloadImageNodeKey]
-		if name == "" {
-			continue
-		}
-		node, exists := cache[name]
-		if !exists && len(cache) < workloadImageMaxNodeReads {
-			// Cache denied or missing reads so repeated Pods do not retry them.
-			var err error
-			node, err = nodes.Get(ctx, name, metav1.GetOptions{})
-			if err != nil || (node != nil && node.Name != name) {
-				node = nil
+	observed := make([]*corev1.Node, len(names))
+	var failures atomic.Int32
+	var reads sync.WaitGroup
+	for i, name := range names {
+		reads.Go(func() {
+			if ctx.Err() != nil {
+				return
 			}
-			cache[name] = node
-		}
-		if node != nil {
-			o.recordNode(item, node)
+			node, err := nodes.Get(ctx, name, metav1.GetOptions{})
+			if err == nil && node != nil && node.Name == name {
+				observed[i] = node
+			} else if err == nil || !errors.IsTransient(err) {
+				failures.Add(1)
+			}
+		})
+	}
+	reads.Wait()
+	if failed := failures.Load(); failed > 0 {
+		slog.Warn("workload image Node facts unavailable", "failed-reads", failed)
+	}
+
+	for _, item := range o.items {
+		if i, found := index[item.Context[workloadImageNodeKey]]; found && observed[i] != nil {
+			o.recordNode(item, observed[i])
 		}
 	}
 }
@@ -220,9 +250,15 @@ func (o *workloadImageObservations) recordNode(item measurement.ItemEntry, node 
 		"node-os":           node.Status.NodeInfo.OperatingSystem,
 		"node-architecture": node.Status.NodeInfo.Architecture,
 	}
+	for _, value := range fields {
+		if len(value) > workloadImageMaxBytes {
+			o.limited = true
+			return
+		}
+	}
 	before := workloadImageItemBytes(item)
 	for key, value := range fields {
-		if value != "" && len(value) <= workloadImageMaxBytes {
+		if value != "" {
 			item.Context[key] = value
 		}
 	}
@@ -231,6 +267,7 @@ func (o *workloadImageObservations) recordNode(item measurement.ItemEntry, node 
 		for key := range fields {
 			delete(item.Context, key)
 		}
+		o.limited = true
 		return
 	}
 	o.bytes += added

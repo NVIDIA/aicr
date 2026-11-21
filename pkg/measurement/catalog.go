@@ -150,6 +150,15 @@ var catalog = map[Type]typeSpec{
 			"oke-gpu-plugin": {scalar: closedKeys("device-list-strategy")},
 			// Keys are container image names (pkg/collector/k8s/image.go).
 			"image": {scalar: openKeys()},
+			// pkg/collector/k8s/workload_image.go
+			"workload-images": {
+				scalar: closedKeys("coverage"),
+				item: closedKeys(
+					"namespace", "pod", "pod-uid", "container-type", "container", "node",
+					"node-uid", "node-os", "node-architecture", "requested-image",
+					"runtime-image-id", "runtime-digest", "status",
+				),
+			},
 			// Keys are discovered cluster policies (pkg/collector/k8s/policy.go).
 			"policy": {scalar: openKeys()},
 			// pkg/collector/k8s/slinky.go. The scalar api-version is the

@@ -1109,8 +1109,9 @@ func validateEvidenceFlags() []cli.Flag {
 			Name: flagFull,
 			Usage: `Emit the full (unredacted) evidence bundle. By default the bundle is minimized:
 	the snapshot is reduced to an allowlisted set of fields and per-test CTRF stdout/message are omitted,
-	so node names, provider instance IDs, the node label/taint set, OS tuning, and raw container logs are
-	not published. --full restores the complete payloads. The cryptographic verification story
+	so node names, provider instance IDs, the node label/taint set, OS tuning, raw container logs, and
+	workload image observations are withheld. --full restores the complete payloads, including Pod
+	identities and full image references. The cryptographic verification story
 	(predicate digests, manifest binding, signature) holds either way.`,
 			Category: catEvidence,
 		},

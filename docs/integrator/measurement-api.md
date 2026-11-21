@@ -75,6 +75,53 @@ Each `ItemEntry` mirrors a Subtype's scalar contract: `data` holds `Reading`
 scalars; `context` holds string-typed descriptive fields. `ItemEntry` does
 NOT support nested `items` — the scalar Reading model is preserved.
 
+## K8s workload-images shape
+
+`K8s.workload-images` records requested images from regular, init, and
+ephemeral containers and the corresponding kubelet image IDs when reported.
+Older snapshots may lack this subtype.
+
+```yaml
+type: K8s
+subtypes:
+  - subtype: workload-images
+    data:
+      coverage: complete
+    items:
+      - context:
+          namespace: example
+          pod: worker-0
+          pod-uid: 7a2b4080-8596-42fc-9172-7c6500030abe
+          container-type: regular
+          container: worker
+          node: node-a
+          node-uid: cbb0b822-9c2c-4111-83c7-620cb9d2cdf2
+          node-os: linux
+          node-architecture: arm64
+        data:
+          requested-image: registry.invalid/team/worker:stable
+          runtime-image-id: containerd://sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb
+          runtime-digest: sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb
+          status: observed
+```
+
+`data.coverage` is `complete` when all requested container rows fit
+and no Node fact already read was dropped for size, `limited` when a row
+or an already observed Node fact exceeds a budget, `partial` when
+a Pod list fails after an earlier page, or `unavailable` when no Pod page was
+read. Partial results may also include budget omissions. Node facts are
+optional, and an unscheduled Pod has an empty `context.node`. Each item
+keeps the requested image verbatim. Its `status` is `observed`,
+`status-missing`, `status-ambiguous`, or `image-id-missing`. A parsed digest
+is present only for a recognized runtime ID form.
+
+Recipe constraints can address `K8s.workload-images.coverage` and item
+fields such as `K8s.workload-images[container-type=init].runtime-digest`. Raw
+and full-evidence snapshots retain Pod and Node identities and private image
+references. The minimal evidence policy drops the subtype. See the
+[Go library guide](go-library.md#workload-image-observations) for collection
+limits and runtime digest interpretation.
+
 ## K8s slinky-slurm shape
 
 When a `K8s` measurement is emitted, it includes a `slinky-slurm` subtype that
