@@ -148,7 +148,7 @@ func validatableRecipe(ctx context.Context, t *testing.T) []byte {
 	return data
 }
 
-// validatorPins are the pinned validator images for this AICR release.
+// validatorPins are the pinned validator images for the AICR under test.
 func validatorPins(t *testing.T) map[string]string {
 	t.Helper()
 	pins := map[string]string{}

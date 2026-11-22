@@ -43,7 +43,8 @@
 # suite's deployment validation scenario sets it for its own upgrade.
 # AICR_E2E_VERSION, AICR_E2E_IMAGE and AICR_E2E_VALIDATOR_IMAGES replace every
 # candidate's own AICR. Unset, each candidate runs its own, unless the next
-# candidate's is older than the installed one's (see hold_aicr).
+# candidate's is older than the installed one's (see hold_aicr);
+# QUALIFY_KEEP_NEXT_AICR=1 keeps the next candidate's own regardless.
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -106,10 +107,14 @@ older() {
 # .settings.yaml pin a pull request builds with: going back to an older AICR
 # takes pinning an earlier plan first (docs/operator/operations.md), which an
 # operator upgrade does not do. A newer AICR, such as a release tag's own, is
-# the upgrade the chart defaults give, and each candidate keeps its own.
+# the upgrade the chart defaults give, and each candidate keeps its own. An
+# AICR built from main (tools/operator-main-aicr) is that upgrade too, though
+# its <tag>-next version sorts before its tag, and a patch release cut off a
+# branch can be newer than main's tag: QUALIFY_KEEP_NEXT_AICR=1 says so.
 hold_aicr() {
   local installed upgrade
-  if [[ -n "${AICR_E2E_VERSION:-}" || ! -f "${candidate}/candidate-values.yaml" || ! -f "${next}/candidate-values.yaml" ]]; then
+  if [[ -n "${AICR_E2E_VERSION:-}" || "${QUALIFY_KEEP_NEXT_AICR:-}" == 1 ||
+    ! -f "${candidate}/candidate-values.yaml" || ! -f "${next}/candidate-values.yaml" ]]; then
     return 0
   fi
   installed="$(yq -r '.aicr.version' "${candidate}/candidate-values.yaml")"

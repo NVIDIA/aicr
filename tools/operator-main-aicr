@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Runs the operator against AICR built from main: the newest first-parent
+# commit of main, among its last AICR_MAIN_SEARCH (default 30), whose
+# validator images on-push.yaml published. on-push.yaml publishes them only
+# once its tests pass, never for a docs-only push, and drops a queued run when
+# the next merge lands, so not every commit has them. main is AICR_MAIN_REF,
+# or else upstream/main when a fork clone has that remote, or else
+# origin/main, as last fetched. The CLI is built from that commit, stamped
+# <tag>-next as goreleaser stamps a snapshot, and imported into the kind
+# nodes by digest (import_aicr in tools/operator-lib.sh); its validators are
+# pinned by their sha-<commit> tags and digests. Nothing is published. Create
+# the cluster first with `make operator-kind-up`.
+#
+# Usage: tools/operator-main-aicr resolve|e2e|qualify
+#   resolve  print the commit, its version and its validator images as
+#            commit=, version= and validator_images= lines
+#   e2e      run the e2e suite (make operator-e2e) against it, the
+#            evidence-binding validation test included
+#   qualify  build a candidate of the checkout that runs it, and qualify the
+#            upgrade from the newest published release to that candidate
+#            (make operator-qualify-published); the candidate build needs a
+#            clean tree and replaces dist/candidate
+#
+# AICR_MAIN_COMMIT, AICR_MAIN_VERSION and AICR_MAIN_VALIDATOR_IMAGES, set
+# together, replace the resolution, as the workflow passes on its resolve
+# job's output.
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+work="$(mktemp -d)"
+trap 'rm -rf "${work}"' EXIT
+
+export OPERATOR_KIND_CLUSTER="${OPERATOR_KIND_CLUSTER:-aicr-operator}"
+export KUBECONFIG="${OPERATOR_E2E_KUBECONFIG:-${repo_root}/.operator-e2e/kubeconfig}"
+# shellcheck source=tools/operator-lib.sh
+source tools/operator-lib.sh
+
+# resolve sets commit, version and validators. A commit with none of the
+# validator tags is skipped, and so is a partly tagged newest one, which
+# on-push.yaml may still be publishing. A partly tagged older commit fails:
+# main stopped publishing a validator a release pins. A registry error fails
+# too, rather than passing for an unpublished commit.
+resolve() {
+  local ref pins candidates candidate pin repository crane tags digest present skipped=0 index=0
+  local -a repositories=() missing=()
+  if [[ -n "${AICR_MAIN_COMMIT:-}${AICR_MAIN_VERSION:-}${AICR_MAIN_VALIDATOR_IMAGES:-}" ]]; then
+    if [[ -z "${AICR_MAIN_COMMIT:-}" || -z "${AICR_MAIN_VERSION:-}" || -z "${AICR_MAIN_VALIDATOR_IMAGES:-}" ]]; then
+      echo "AICR_MAIN_COMMIT, AICR_MAIN_VERSION and AICR_MAIN_VALIDATOR_IMAGES are set together" >&2
+      return 1
+    fi
+    commit="${AICR_MAIN_COMMIT}" version="${AICR_MAIN_VERSION}" validators="${AICR_MAIN_VALIDATOR_IMAGES}"
+    return 0
+  fi
+  ref="${AICR_MAIN_REF:-}"
+  if [[ -z "${ref}" ]]; then
+    ref=origin/main
+    if git rev-parse --verify --quiet upstream/main >/dev/null; then
+      ref=upstream/main
+    fi
+  fi
+  # The validator repositories a release pins.
+  pins="$(setting '.operator.aicr_validator_images[]')"
+  for pin in ${pins}; do
+    repository="${pin%@*}"
+    repositories+=("${repository%:*}")
+  done
+  if [[ ${#repositories[@]} -eq 0 ]]; then
+    echo ".settings.yaml operator.aicr_validator_images pins no validator image" >&2
+    return 1
+  fi
+  GOBIN="${work}/bin" go install "github.com/google/go-containerregistry/cmd/crane@$(setting '.build_tools.crane')"
+  crane="${work}/bin/crane"
+  # Each repository's tags, listed once with an empty docker config, as the
+  # anonymous pulls that follow see them; a listing error fails.
+  echo '{}' >"${work}/config.json"
+  for repository in "${repositories[@]}"; do
+    tags="${work}/tags-${repository//\//_}"
+    DOCKER_CONFIG="${work}" "${crane}" ls "${repository}" >"${tags}"
+  done
+  candidates="$(git rev-list --first-parent --max-count="${AICR_MAIN_SEARCH:-30}" "${ref}")"
+  for candidate in ${candidates}; do
+    index=$((index + 1))
+    missing=()
+    for repository in "${repositories[@]}"; do
+      if ! grep -qxF "sha-${candidate}" "${work}/tags-${repository//\//_}"; then
+        missing+=("${repository}")
+      fi
+    done
+    present=$((${#repositories[@]} - ${#missing[@]}))
+    if [[ ${present} -eq 0 || (${#missing[@]} -gt 0 && ${index} -eq 1) ]]; then
+      skipped=$((skipped + 1))
+      continue
+    fi
+    if [[ ${#missing[@]} -gt 0 ]]; then
+      echo "${ref} commit ${candidate} has validator images for some pinned repositories but not ${missing[*]}" >&2
+      return 1
+    fi
+    validators=""
+    for repository in "${repositories[@]}"; do
+      digest="$(DOCKER_CONFIG="${work}" "${crane}" digest "${repository}:sha-${candidate}")"
+      validators+="${validators:+,}${repository}:sha-${candidate}@${digest}"
+    done
+    commit="${candidate}"
+    version="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${candidate}")-next"
+    echo "AICR from ${ref} commit ${candidate:0:9} (${version}); skipped ${skipped} newer commit(s) without published validator images" >&2
+    return 0
+  done
+  echo "none of the last ${AICR_MAIN_SEARCH:-30} commits of ${ref} has its validator images published" >&2
+  return 1
+}
+
+# e2e runs the suite with the resolved AICR and its validators, the
+# evidence-binding test included: nothing sets its skip here.
+e2e() {
+  import_aicr "${commit}" "${version}" "${work}"
+  AICR_E2E_IMAGE="${AICR_IMPORTED_IMAGE}" AICR_E2E_VERSION="${version}" AICR_E2E_VALIDATOR_IMAGES="${validators}" \
+    AICR_OPERATOR_E2E_SKIP_VALIDATION="" make operator-e2e
+}
+
+# qualify builds the candidate with the resolved AICR as its own and runs the
+# lifecycle scenarios from the newest published release. That release runs
+# its own AICR; the candidate keeps the resolved one, whose <tag>-next
+# version sorts before its tag (see hold_aicr in tools/operator-qualify), and
+# the suite fails if the next candidate runs any other.
+qualify() {
+  import_aicr "${commit}" "${version}" "${work}"
+  make operator-candidate-deps
+  CANDIDATE_VERSION=v0.0.0-rc.0 CANDIDATE_AICR_VERSION="${version}" CANDIDATE_AICR_IMAGE="${AICR_IMPORTED_IMAGE}" \
+    CANDIDATE_AICR_VALIDATOR_IMAGES="${validators}" GOPROXY=off make operator-candidate
+  unset AICR_E2E_VERSION AICR_E2E_IMAGE AICR_E2E_VALIDATOR_IMAGES
+  AICR_OPERATOR_QUALIFY_NEXT_AICR="${AICR_IMPORTED_IMAGE}" QUALIFY_KEEP_NEXT_AICR=1 make operator-qualify-published
+}
+
+commit="" version="" validators=""
+case "${1:-}" in
+resolve)
+  resolve
+  printf 'commit=%s\nversion=%s\nvalidator_images=%s\n' "${commit}" "${version}" "${validators}"
+  ;;
+e2e)
+  resolve
+  e2e
+  ;;
+qualify)
+  resolve
+  qualify
+  ;;
+*)
+  echo "usage: $0 resolve|e2e|qualify" >&2
+  exit 2
+  ;;
+esac
