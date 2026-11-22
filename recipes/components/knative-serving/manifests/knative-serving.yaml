@@ -14,8 +14,8 @@
 
 # The KnativeServing resource the knative-operator component reconciles into
 # Knative Serving, the Kourier ingress and the HPA autoscaler, all in this
-# resource's namespace. Every field comes from .Values.knative-serving; see
-# ../values.yaml.
+# resource's namespace. Every field comes from index .Values "knative-serving";
+# see ../values.yaml.
 #
 # The images the operator starts here are not in this file or in any chart
 # render, so the BOM and `aicr mirror list` do not list them (#3659).

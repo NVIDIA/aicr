@@ -1810,6 +1810,9 @@ Credential errors in the `ebs-plugin` log — no credential provider found, an u
 
 ```yaml
 spec:
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34.0"
   componentRefs:
     - name: knative-operator
       type: Helm
@@ -1823,6 +1826,8 @@ spec:
 
 Keep both `valuesFile`s. Component values are never discovered from the component name. Without its values file, `knative-serving` renders a `KnativeServing` resource with no version and no configuration. Keep the `dependencyRefs` too: the resource's CRD comes from the operator chart, and the dependency is what makes every deployer install the operator first.
 
+Keep the `constraints` entry as well. Serving 1.23 checks the cluster version when it starts and exits on Kubernetes older than 1.34, while the stock H100 inference bases admit 1.32. The entry replaces the inherited floor, so the recipe no longer validates against a cluster Serving cannot run on.
+
 The values file configures Serving the way Run:ai's own installer does:
 
 - **Version.** Serving 1.23.0, the newest release the pinned operator (v1.23.1) carries. `TestKnativeServingVersionMatchesOperator` fails if the operator pin and this version drift apart, so bump them together.
@@ -1830,7 +1835,26 @@ The values file configures Serving the way Run:ai's own installer does:
 - **Autoscaling.** Scale to zero is on for Knative's default autoscaler (KPA), which scales on request load. The HPA autoscaler extension is installed as well, for a Service that sets `autoscaling.knative.dev/class: hpa.autoscaling.knative.dev` to scale on CPU, memory or a custom metric. A Service on the HPA class [does not scale to zero](https://knative.dev/docs/serving/autoscaling/autoscaler-types/), so an idle GPU workload keeps its GPU. CPU and memory need the resource metrics API (`metrics-server`), and a custom metric needs an adapter that serves it through the custom metrics API, such as `prometheus-adapter`.
 - **Networking.** Kourier is the ingress, with a `ClusterIP` Service.
 
-Change any of it with `overrides` on the `knative-serving` `componentRef`. The `config` block is written into the resource as is, one key per Knative ConfigMap without its `config-` prefix, so you can also add ConfigMaps the values file does not mention. `--system-node-selector` and `--system-node-toleration` place every Serving and Kourier Deployment, as they do other system components. Without the toleration flag, those Deployments tolerate every taint, so the activator and the Kourier gateway, which carry request traffic, can land on GPU nodes; pass `--system-node-selector` to keep them on a system pool.
+Change any of it with `overrides` on the `knative-serving` `componentRef`. The `config` block is written into the resource as is, one key per Knative ConfigMap without its `config-` prefix, so you can also add ConfigMaps the values file does not mention. `--system-node-selector` and `--system-node-toleration` place every Serving and Kourier Deployment and Serving's two post-install Jobs, as they do other system components. Without the toleration flag, those Deployments tolerate every taint, so the activator and the Kourier gateway, which carry request traffic, can land on GPU nodes; pass `--system-node-selector` to keep them on a system pool.
+
+**Every `config` value must be a string.** The `KnativeServing` CRD types `spec.config` as a map of maps of strings, and the block reaches the resource untouched. A YAML boolean or number there is rejected by the API server, and the `knative-serving` install fails. Most Knative settings are booleans or numbers, so quote them in an overlay:
+
+```yaml
+    - name: knative-serving
+      type: Helm
+      valuesFile: components/knative-serving/values.yaml
+      overrides:
+        config:
+          autoscaler:
+            enable-scale-to-zero: "false"
+            target-burst-capacity: "200"
+```
+
+On the command line, plain `--set` cannot produce a string here: it turns `true`, `false` and bare numbers into typed values. Pass the value as a JSON string with `--set-json`:
+
+```bash
+--set-json 'knativeserving:config.autoscaler.enable-scale-to-zero="false"'
+```
 
 The release must stay in `knative-serving`. The operator installs Serving into the namespace of the `KnativeServing` resource, and Run:ai looks for the Serving controller and its `config-features` ConfigMap there.
 
@@ -1841,6 +1865,16 @@ The release must stay in `knative-serving`. The operator installs Serving into t
 **Images the BOM does not list.** The operator chart renders only the operator and its webhook. Every other image is started by the operator at run time, so neither the [container image list](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md) nor `aicr mirror list` includes it ([#3659](https://github.com/NVIDIA/aicr/issues/3659)). For a disconnected install, mirror these nine repositories under `gcr.io/knative-releases/knative.dev`: `serving/cmd/activator`, `serving/cmd/autoscaler`, `serving/cmd/autoscaler-hpa`, `serving/cmd/controller`, `serving/cmd/webhook`, `serving/cmd/queue`, `serving/pkg/cleanup/cmd/cleanup`, `pkg/apiextensions/storageversion/cmd/migrate` and `net-kourier/cmd/kourier`. The operator references each by `@sha256:` digest, not by tag, so copy them by digest. The digests for this pin are in the manifests the operator image embeds, published in the [operator repository at `knative-v1.23.1`](https://github.com/knative/operator/tree/knative-v1.23.1/cmd/operator/kodata): the files under `knative-serving/1.23.0/` for Serving, and `ingress/1.23/kourier/kourier.yaml` for Kourier. The Kourier gateway also runs `docker.io/envoyproxy/envoy:v1.37-latest`, a moving tag, so pin your mirror's copy deliberately. Mirroring is not enough on its own: the operator still references every image by its original host, because the `KnativeServing` resource this component renders sets no `spec.registry` and `overrides` cannot add one. A disconnected cluster therefore also needs its nodes' container runtime to redirect `gcr.io` and `docker.io` to your mirror, for example with a containerd registry mirror per host; [Air-Gapped Image Mirroring](air-gap-mirror.md) describes the same requirement for other images referenced by their original host. A digest reference resolves through such a mirror unchanged.
 
 **Upgrades.** The operator chart ships its CRDs as templates, not under `crds/`, so Helm upgrades them with the chart on every deployer and no manual CRD step is needed. Neither component sets `ownsCRDs`: those CRDs use webhook conversion.
+
+**Uninstall order.** The bundle's README lists one `helm uninstall` per release, in reverse deployment order. Do not run the `knative-operator` one straight after the `knative-serving` one. Uninstalling `knative-serving` deletes the `KnativeServing` resource, and the command can return while the resource still holds the operator's finalizer and the operator is still removing Serving. Uninstalling the operator at that point strands the resource in `Terminating`, with Serving still running and its cluster-scoped roles and webhook configurations left behind. Wait until the resource is gone:
+
+```shell
+helm uninstall knative-serving -n knative-serving
+kubectl wait --for=delete knativeserving/knative-serving -n knative-serving --timeout=10m
+helm uninstall knative-operator -n knative-operator
+```
+
+Serving's own CRDs, the `*.knative.dev` ones, stay after this, as CRDs do for other components.
 
 ## Inference Gateway Network Exposure
 

@@ -46,6 +46,16 @@ var knativeBundledServing = map[string][]string{
 	"v1.23.1": {"1.23.0"},
 }
 
+// knativeServingJobs lists the generateName of each Job Serving 1.23.0 ships
+// (4-serving-post-install-jobs.yaml under cmd/operator/kodata/knative-serving
+// in github.com/knative/operator). The operator matches a spec.workloads entry
+// to a Job by generateName, so the values file lists them with the trailing
+// hyphen. Without them the Jobs get no system placement.
+var knativeServingJobs = []string{
+	"cleanup-serving-",
+	"storage-version-migration-serving-",
+}
+
 // TestKnativeRegisteredWithoutOverlay keeps both Knative components
 // installable from the registry while no shipped overlay or mixin references
 // them. Adoption by a stock recipe removes the overlay half of this test.
@@ -136,8 +146,10 @@ func TestKnativeServingVersionMatchesOperator(t *testing.T) {
 }
 
 // TestKnativeServingHealthCheckMatchesValues keeps the health check's
-// Deployment list equal to the workloads the values file places, so a
-// Deployment added to one is not forgotten in the other.
+// Deployment list equal to the Deployments the values file places, so a
+// Deployment added to one is not forgotten in the other. The values file also
+// places Serving's Jobs, which the health check does not assert; those
+// entries are checked against knativeServingJobs.
 func TestKnativeServingHealthCheckMatchesValues(t *testing.T) {
 	t.Parallel()
 
@@ -155,12 +167,29 @@ func TestKnativeServingHealthCheckMatchesValues(t *testing.T) {
 		workloads = append(workloads, name)
 	}
 
+	// A Job entry is a generateName, which ends in a hyphen. Every other
+	// entry is a Deployment name.
+	var deployments, jobs []string
+	for _, name := range workloads {
+		if strings.HasSuffix(name, "-") {
+			jobs = append(jobs, name)
+			continue
+		}
+		deployments = append(deployments, name)
+	}
+
 	asserted := healthCheckDeployments(t, "checks/knative-serving/health-check.yaml", knativeServingNamespace)
-	slices.Sort(workloads)
+	slices.Sort(deployments)
 	slices.Sort(asserted)
-	if !slices.Equal(workloads, asserted) {
-		t.Errorf("values workloads %v differ from the Deployments the health check asserts in %s %v",
-			workloads, knativeServingNamespace, asserted)
+	if !slices.Equal(deployments, asserted) {
+		t.Errorf("values workloads Deployments %v differ from the Deployments the health check asserts in %s %v",
+			deployments, knativeServingNamespace, asserted)
+	}
+
+	slices.Sort(jobs)
+	if !slices.Equal(jobs, knativeServingJobs) {
+		t.Errorf("values workloads Jobs %v differ from the Jobs Serving ships %v; without an entry a Job gets no system placement",
+			jobs, knativeServingJobs)
 	}
 }
 

@@ -27,6 +27,10 @@ version: "1.23.0"
 
 # Rendered verbatim as spec.config: one key per Knative ConfigMap, without
 # its config- prefix. A leaf can add keys or whole ConfigMaps here.
+#
+# Every value must be a string. The KnativeServing CRD types spec.config as a
+# map of maps of strings, so a YAML boolean or number is rejected by the API
+# server: quote them ("true", "200").
 config:
   features:
     # Run:ai requires these two before it reports Knative available: its
@@ -52,17 +56,24 @@ config:
 kourierServiceType: ClusterIP
 
 # Replicas for every Serving control-plane Deployment (spec.high-availability).
+# The activator, the webhook and the Kourier gateway each have a
+# HorizontalPodAutoscaler. For those three the operator raises the
+# autoscaler's minimum to this value, and its maximum by the same amount, so
+# they can run more replicas than this.
 replicas: 1
 
-# Placement for the Deployments below. The bundle writes both paths (registry
+# Placement for the workloads below. The bundle writes both paths (registry
 # nodeScheduling): --system-node-selector, and --system-node-toleration or,
 # without that flag, a toleration of every taint, as for every system
 # component.
 nodeSelector: {}
 tolerations: []
 
-# Deployments the operator creates, in knative-serving. nodeSelector and
-# tolerations apply to each of them, through spec.workloads.
+# Workloads the operator creates, in knative-serving. nodeSelector and
+# tolerations apply to each of them, through spec.workloads. The operator
+# matches a Deployment by name and a Job by generateName, so the two
+# post-install Jobs Serving ships keep their trailing hyphen. Without those
+# two entries the Jobs stay Pending on a cluster whose nodes are all tainted.
 workloads:
   - activator
   - autoscaler
@@ -71,3 +82,5 @@ workloads:
   - webhook
   - net-kourier-controller
   - 3scale-kourier-gateway
+  - storage-version-migration-serving-
+  - cleanup-serving-
