@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -35,11 +34,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 	"aicr.run/pkg/operator/defaults"
@@ -553,25 +550,7 @@ func TestManagerRunsWithoutTheEngineCRDs(t *testing.T) {
 // namespace, never reaches the rollout controller.
 func TestEngineCacheSeesOnlyTheOperatorsApplications(t *testing.T) {
 	ctx := testContext(t)
-	crds, err := envtest.InstallCRDs(restConfig, envtest.CRDInstallOptions{
-		Paths: []string{filepath.Join("..", "..", "..", "tests", "operator", "chart", "testdata", "argocd-crds.yaml")},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Other tests need the CRDs gone, and a CRD's deletion completes
-	// asynchronously.
-	t.Cleanup(func() {
-		_ = envtest.UninstallCRDs(restConfig, envtest.CRDInstallOptions{CRDs: crds})
-		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
-			crd := &unstructured.Unstructured{}
-			crd.SetGroupVersionKind(schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"})
-			if getErr := k8s.Get(context.Background(), client.ObjectKey{Name: "applications.argoproj.io"}, crd); apierrors.IsNotFound(getErr) {
-				return
-			}
-		}
-		t.Error("the Argo CD CRDs were not removed")
-	})
+	installArgoCDCRDs(t)
 	scheme, err := manager.NewScheme()
 	if err != nil {
 		t.Fatal(err)

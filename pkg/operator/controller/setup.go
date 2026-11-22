@@ -78,10 +78,13 @@ var relevantApplication = predicate.Funcs{
 }
 
 // withoutRefresh is a copy of an Application without what a refresh
-// rewrites.
+// rewrites. The Application CRD has no status subresource, so the API
+// server moves metadata.generation on a refresh's status write as well; a
+// spec change still differs in the spec.
 func withoutRefresh(app *unstructured.Unstructured) map[string]any {
 	c := app.DeepCopy()
 	c.SetResourceVersion("")
+	c.SetGeneration(0)
 	c.SetManagedFields(nil)
 	unstructured.RemoveNestedField(c.Object, "status", "reconciledAt")
 	unstructured.RemoveNestedField(c.Object, "status", "observedAt")
