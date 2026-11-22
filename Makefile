@@ -1264,6 +1264,10 @@ operator-e2e: ## Runs the pinned AICR images as operator-built Jobs on the opera
 	AICR_OPERATOR_E2E_VALIDATOR_IMAGES=$(AICR_E2E_VALIDATOR_IMAGES) \
 	GOFLAGS="-mod=readonly" go test -count=1 -v -timeout=30m ./tests/operator/e2e/...
 
+.PHONY: operator-e2e-commit
+operator-e2e-commit: ## Runs operator-e2e against AICR built from the commit, on the operator's kind cluster
+	@./tools/operator-e2e-commit
+
 .PHONY: operator-skeleton
 operator-skeleton: ## Runs the operator with the pinned Argo CD on its kind cluster, one release end to end
 	@./tools/operator-skeleton
