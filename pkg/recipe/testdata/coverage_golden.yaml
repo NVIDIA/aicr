@@ -1707,30 +1707,19 @@ criteria(service=, accelerator=b200, intent=training, os=cos, platform=kubeflow)
         platform:
             - service=gke
 criteria(service=, accelerator=b300, intent=, os=, platform=):
-    outcome: error
-    uncovered:
-        - accelerator
-    validCompletions:
-        accelerator:
-            - service=mk8s, intent=inference, os=ubuntu, platform=dynamo
+    outcome: success
 criteria(service=, accelerator=b300, intent=, os=, platform=dynamo):
     outcome: error
     uncovered:
-        - accelerator
         - platform
     validCompletions:
-        accelerator:
-            - service=mk8s, intent=inference, os=ubuntu
         platform:
             - service=mk8s, intent=inference, os=ubuntu
 criteria(service=, accelerator=b300, intent=, os=ubuntu, platform=):
     outcome: error
     uncovered:
-        - accelerator
         - os
     validCompletions:
-        accelerator:
-            - service=mk8s, intent=inference, platform=dynamo
         os:
             - service=aks
             - service=eks
@@ -1738,12 +1727,9 @@ criteria(service=, accelerator=b300, intent=, os=ubuntu, platform=):
 criteria(service=, accelerator=b300, intent=, os=ubuntu, platform=dynamo):
     outcome: error
     uncovered:
-        - accelerator
         - os
         - platform
     validCompletions:
-        accelerator:
-            - service=mk8s, intent=inference
         os:
             - service=aks
             - service=eks
@@ -1753,11 +1739,8 @@ criteria(service=, accelerator=b300, intent=, os=ubuntu, platform=dynamo):
 criteria(service=, accelerator=b300, intent=inference, os=, platform=):
     outcome: error
     uncovered:
-        - accelerator
         - intent
     validCompletions:
-        accelerator:
-            - service=mk8s, os=ubuntu, platform=dynamo
         intent:
             - service=aks
             - service=bcm
@@ -1772,12 +1755,9 @@ criteria(service=, accelerator=b300, intent=inference, os=, platform=):
 criteria(service=, accelerator=b300, intent=inference, os=, platform=dynamo):
     outcome: error
     uncovered:
-        - accelerator
         - intent
         - platform
     validCompletions:
-        accelerator:
-            - service=mk8s, os=ubuntu
         intent:
             - service=aks
             - service=bcm
@@ -1794,12 +1774,9 @@ criteria(service=, accelerator=b300, intent=inference, os=, platform=dynamo):
 criteria(service=, accelerator=b300, intent=inference, os=ubuntu, platform=):
     outcome: error
     uncovered:
-        - accelerator
         - intent
         - os
     validCompletions:
-        accelerator:
-            - service=mk8s, platform=dynamo
         intent:
             - service=aks
             - service=bcm
@@ -1816,13 +1793,10 @@ criteria(service=, accelerator=b300, intent=inference, os=ubuntu, platform=):
 criteria(service=, accelerator=b300, intent=inference, os=ubuntu, platform=dynamo):
     outcome: error
     uncovered:
-        - accelerator
         - intent
         - os
         - platform
     validCompletions:
-        accelerator:
-            - service=mk8s
         intent:
             - service=aks
             - service=bcm
@@ -6835,70 +6809,45 @@ criteria(service=mk8s, accelerator=, intent=inference, os=ubuntu, platform=dynam
         platform:
             - accelerator=b300
 criteria(service=mk8s, accelerator=b300, intent=, os=, platform=):
-    outcome: error
-    uncovered:
-        - accelerator
-    validCompletions:
-        accelerator:
-            - intent=inference, os=ubuntu, platform=dynamo
+    outcome: success
 criteria(service=mk8s, accelerator=b300, intent=, os=, platform=dynamo):
     outcome: error
     uncovered:
-        - accelerator
         - platform
     validCompletions:
-        accelerator:
-            - intent=inference, os=ubuntu
         platform:
             - intent=inference, os=ubuntu
 criteria(service=mk8s, accelerator=b300, intent=, os=ubuntu, platform=):
     outcome: error
     uncovered:
-        - accelerator
         - os
     validCompletions:
-        accelerator:
-            - intent=inference, platform=dynamo
         os:
             - intent=inference, platform=dynamo
 criteria(service=mk8s, accelerator=b300, intent=, os=ubuntu, platform=dynamo):
     outcome: error
     uncovered:
-        - accelerator
         - os
         - platform
     validCompletions:
-        accelerator:
-            - intent=inference
         os:
             - intent=inference
         platform:
             - intent=inference
 criteria(service=mk8s, accelerator=b300, intent=inference, os=, platform=):
-    outcome: error
-    uncovered:
-        - accelerator
-    validCompletions:
-        accelerator:
-            - os=ubuntu, platform=dynamo
+    outcome: success
 criteria(service=mk8s, accelerator=b300, intent=inference, os=, platform=dynamo):
     outcome: error
     uncovered:
-        - accelerator
         - platform
     validCompletions:
-        accelerator:
-            - os=ubuntu
         platform:
             - os=ubuntu
 criteria(service=mk8s, accelerator=b300, intent=inference, os=ubuntu, platform=):
     outcome: error
     uncovered:
-        - accelerator
         - os
     validCompletions:
-        accelerator:
-            - platform=dynamo
         os:
             - platform=dynamo
 criteria(service=mk8s, accelerator=b300, intent=inference, os=ubuntu, platform=dynamo):
