@@ -233,9 +233,12 @@ Nothing is written to Argo CD while the engine is unavailable. See
 ## Waiting for approval
 
 `Stalled=True` with `AwaitingAcknowledgement` means a `manual` release is
-applied and its record has steps after the apply: do them (`kubectl aicr
-describe` lists them under "Recorded steps"), then `kubectl aicr acknowledge`
-the rollout. Nothing further starts until then.
+applied and its record has steps after its `apply` step: do them
+(`kubectl aicr describe` lists them under "Recorded steps"), then
+`kubectl aicr acknowledge` the rollout. Nothing further starts until then. A
+record that names no `apply` step lists all of its steps here, since the
+operator cannot tell which follow the apply; confirm the earlier ones were
+done too.
 
 `Stalled=True` with `AwaitingApproval` means a rollout needs an approver.
 Nothing has been written. Approve it with `kubectl aicr approve`

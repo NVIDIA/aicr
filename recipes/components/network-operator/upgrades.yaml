@@ -53,7 +53,7 @@ transitions:
             reason: >-
               Helm rollback does not revert the CRD update, so the saved copy
               is the only record of the pre-upgrade policy.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Run helmfile apply from a bundle generated at the new pins.
             reason: >-
@@ -77,7 +77,7 @@ transitions:
             reason: >-
               Helm rollback does not revert the CRD update, so the saved copy
               is the only record of the pre-upgrade policy.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Run install.sh from a bundle generated at the new pins.
             reason: >-
@@ -101,7 +101,7 @@ transitions:
             reason: >-
               Helm rollback does not revert the CRD update, so the saved copy
               is the only record of the pre-upgrade policy.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Generate a bundle at the new pins, copy it into the Terraform
               working directory as the bundle's README describes (or point the
@@ -127,7 +127,7 @@ transitions:
             reason: >-
               Helm rollback does not revert the CRD update, so the saved copy
               is the only record of the pre-upgrade policy.
-          - id: reconcile
+          - id: apply
             description: >-
               Commit a bundle generated at the new pins, then reconcile or sync
               it.
@@ -170,14 +170,20 @@ transitions:
               changes, respecting workload disruption budgets.
             reason: >-
               Driver replacement affects active RDMA workloads on each node.
-          - id: upgrade-operator-and-policy
+          - id: apply
             description: >-
-              Apply the target operator and CRDs through the selected deployer,
-              then update operand versions in the desired NicClusterPolicy.
-              Follow the documented driver upgrade procedure if applicable.
-              Verify policy readiness, operand images and RDMA workload access.
+              Apply the target operator and CRDs through the selected
+              deployer.
             reason: >-
-              Operator reconciliation alone leaves existing operand pins intact.
+              Moves network-operator to the new version.
+          - id: update-policy-and-verify
+            description: >-
+              Update operand versions in the desired NicClusterPolicy. Follow
+              the documented driver upgrade procedure if applicable. Verify
+              policy readiness, operand images and RDMA workload access.
+            reason: >-
+              Operator reconciliation alone leaves existing operand pins
+              intact.
     references:
       - https://docs.nvidia.com/networking/display/kubernetes2640/life-cycle-management.html
       - https://docs.nvidia.com/networking/display/kubernetes2570/life-cycle-management.html
@@ -204,14 +210,20 @@ transitions:
               changes, respecting workload disruption budgets.
             reason: >-
               Driver replacement affects active RDMA workloads on each node.
-          - id: upgrade-operator-and-policy
+          - id: apply
             description: >-
-              Apply the target operator and CRDs through the selected deployer,
-              then update operand versions in the desired NicClusterPolicy.
-              Follow the documented driver upgrade procedure if applicable.
-              Verify policy readiness, operand images and RDMA workload access.
+              Apply the target operator and CRDs through the selected
+              deployer.
             reason: >-
-              Operator reconciliation alone leaves existing operand pins intact.
+              Moves network-operator to the new version.
+          - id: update-policy-and-verify
+            description: >-
+              Update operand versions in the desired NicClusterPolicy. Follow
+              the documented driver upgrade procedure if applicable. Verify
+              policy readiness, operand images and RDMA workload access.
+            reason: >-
+              Operator reconciliation alone leaves existing operand pins
+              intact.
     references:
       - https://docs.nvidia.com/networking/display/kubernetes2640/life-cycle-management.html
       - https://docs.nvidia.com/networking/display/kubernetes2570/life-cycle-management.html
@@ -238,14 +250,20 @@ transitions:
               changes, respecting workload disruption budgets.
             reason: >-
               Driver replacement affects active RDMA workloads on each node.
-          - id: upgrade-operator-and-policy
+          - id: apply
             description: >-
-              Apply the target operator and CRDs through the selected deployer,
-              then update operand versions in the desired NicClusterPolicy.
-              Follow the documented driver upgrade procedure if applicable.
-              Verify policy readiness, operand images and RDMA workload access.
+              Apply the target operator and CRDs through the selected
+              deployer.
             reason: >-
-              Operator reconciliation alone leaves existing operand pins intact.
+              Moves network-operator to the new version.
+          - id: update-policy-and-verify
+            description: >-
+              Update operand versions in the desired NicClusterPolicy. Follow
+              the documented driver upgrade procedure if applicable. Verify
+              policy readiness, operand images and RDMA workload access.
+            reason: >-
+              Operator reconciliation alone leaves existing operand pins
+              intact.
     references:
       - https://docs.nvidia.com/networking/display/kubernetes2640/life-cycle-management.html
       - https://docs.nvidia.com/networking/display/kubernetes2570/life-cycle-management.html
@@ -272,14 +290,20 @@ transitions:
               changes, respecting workload disruption budgets.
             reason: >-
               Driver replacement affects active RDMA workloads on each node.
-          - id: upgrade-operator-and-policy
+          - id: apply
             description: >-
-              Apply the target operator and CRDs through the selected deployer,
-              then update operand versions in the desired NicClusterPolicy.
-              Follow the documented driver upgrade procedure if applicable.
-              Verify policy readiness, operand images and RDMA workload access.
+              Apply the target operator and CRDs through the selected
+              deployer.
             reason: >-
-              Operator reconciliation alone leaves existing operand pins intact.
+              Moves network-operator to the new version.
+          - id: update-policy-and-verify
+            description: >-
+              Update operand versions in the desired NicClusterPolicy. Follow
+              the documented driver upgrade procedure if applicable. Verify
+              policy readiness, operand images and RDMA workload access.
+            reason: >-
+              Operator reconciliation alone leaves existing operand pins
+              intact.
     references:
       - https://docs.nvidia.com/networking/display/kubernetes2640/life-cycle-management.html
       - https://docs.nvidia.com/networking/display/kubernetes2570/life-cycle-management.html

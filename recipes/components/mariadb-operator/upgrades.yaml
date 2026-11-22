@@ -96,7 +96,7 @@ transitions:
               upgraded. mariadb-system is the registry default and no overlay
               overrides it, but an inherited bundle may differ, which is what
               the helm list confirms.
-          - id: upgrade-operator
+          - id: apply
             description: >-
               Re-run install.sh (helm) or helmfile apply (helmfile).
             reason: >-
@@ -177,7 +177,7 @@ transitions:
               your own configuration manages is drift its next plan reverts. A
               non-HA instance, such as the accounting database AICR ships,
               needs no patch: it has no agent or init container to update.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Regenerate the bundle at the new pins and run terraform apply.
             reason: >-
@@ -276,7 +276,7 @@ transitions:
               The operator release needs the new CRD schema, so the CRD
               release syncs first. Never prune or delete the CRD release to
               achieve the version change: that cascade-deletes every MariaDB.
-          - id: sync-operator
+          - id: apply
             description: >-
               Sync or reconcile the mariadb-operator release.
             reason: >-
@@ -396,7 +396,7 @@ transitions:
               The operator and agent now honor the configured endpoint as
               written instead of rewriting it, so an IPv4 endpoint on an
               IPv6-only path stops working.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Apply the regenerated bundle with your deployer. The bundle
               moves mariadb-operator-crds before mariadb-operator.

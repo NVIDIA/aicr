@@ -88,7 +88,7 @@ transitions:
               hooks carries the same gap between delete and recreate; the
               failure was not reproduced on argocd, flux, or fleet
               specifically.
-          - id: upgrade-operator
+          - id: apply
             description: >-
               Bump the operator's chart version in its own Application,
               HelmRelease, or Fleet bundle and sync it, before touching any
@@ -153,7 +153,7 @@ transitions:
               never terminated by the rolling update, wedging the release on
               "Pending termination". A short operator gap is the cheaper
               failure. The exposure is that gap widening, not the deletion.
-          - id: upgrade-operator
+          - id: apply
             description: >-
               Regenerate the bundle at the new pin and run terraform apply,
               before touching any CR; the module's helm_release upgrades the
@@ -220,7 +220,7 @@ transitions:
               never terminated by the rolling update, wedging the release on
               "Pending termination". A short operator gap is the cheaper
               failure. The exposure is that gap widening, not the deletion.
-          - id: upgrade-operator
+          - id: apply
             description: >-
               helm upgrade the operator chart, before touching any CR.
             reason: >-

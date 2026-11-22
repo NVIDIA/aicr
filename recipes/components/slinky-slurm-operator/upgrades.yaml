@@ -73,15 +73,17 @@ transitions:
               away. The operator clears only drains whose reason carries its
               `slurm-operator: ` prefix; a drain with any other reason stays
               until an administrator clears it in Slurm.
-          - id: plan-worker-rollout
+          - id: apply
             description: >-
               Apply the regenerated bundle with your deployer in a window
-              where slurmd worker pods may be replaced, and watch the
-              NodeSet rollout until every pod is ready.
+              where slurmd worker pods may be replaced.
             reason: >-
               The pod template the operator builds changes (an added
               SYS_RESOURCE capability, an emptyDir spool volume and the new
               preStop), so the NodeSet controller replaces worker pods
               according to its updateStrategy.
+          - id: watch-worker-rollout
+            description: >-
+              Watch the NodeSet rollout until every pod is ready.
     references:
       - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.4/CHANGELOG/CHANGELOG-1.2.md

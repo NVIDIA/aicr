@@ -71,7 +71,7 @@ transitions:
               validation at startup. TASPartialSlices is the one 0.19.6 adds;
               a bundle before 0.19.6 rejects it as an unrecognized feature
               gate.
-          - id: upgrade-kueue
+          - id: apply
             description: >-
               Re-run install.sh (helm), helmfile apply (helmfile), or
               terraform apply on the regenerated bundle (terraform).
@@ -97,7 +97,7 @@ transitions:
               validation at startup. TASPartialSlices is the one 0.19.6 adds;
               committed ahead of the bump, a 0.19.x controller rejects it as
               an unrecognized feature gate.
-          - id: sync-kueue
+          - id: apply
             description: >-
               Sync or reconcile the kueue release.
             reason: >-
@@ -135,7 +135,7 @@ transitions:
             reason: >-
               0.19.9 and later validate the selector at startup and refuse to
               start on an invalid one.
-          - id: upgrade-kueue
+          - id: apply
             description: >-
               Re-run install.sh (helm), helmfile apply (helmfile), or
               terraform apply on the regenerated bundle (terraform).
@@ -150,7 +150,7 @@ transitions:
             reason: >-
               0.19.9 and later validate the selector at startup and refuse to
               start on an invalid one.
-          - id: sync-kueue
+          - id: apply
             description: >-
               Sync or reconcile the kueue release.
             reason: Moves kueue to 0.19.13.
