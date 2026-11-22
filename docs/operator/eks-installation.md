@@ -111,11 +111,11 @@ those exact images.
 The chart creates the namespaces the GPU stack deploys into, with their Pod
 Security levels, and keeps them on uninstall; the operator refuses a plan that
 renders into any other namespace (`NamespaceNotAllowed`, naming each release).
-For `h100-eks-ubuntu-training-kubeflow` on AICR v1.0.0 through v1.3.0 they are:
+For `h100-eks-ubuntu-training-kubeflow` on AICR v1.0.0, v1.1.2, v1.2.0 and v1.3.0 they are:
 
 | Namespace | Components |
 | --- | --- |
-| `kube-system` (exists: `create: false`) | aws-ebs-csi-driver, aws-efa |
+| `kube-system` (exists: `create: false`) | aws-ebs-csi-driver, aws-efa; from AICR v1.3.0, nktp's Services and a RoleBinding (not its release namespace) |
 | `cert-manager` | cert-manager |
 | `node-feature-discovery` | nfd |
 | `nodewright` | nodewright-operator, nodewright-customizations |

@@ -409,12 +409,18 @@ aicr:
 ```
 
 For `h100-eks-ubuntu-training-kubeflow` the new recipe adds nktp, in its own
-`nktp` namespace, and moves nodewright-operator, which AICR assesses `safe`,
-and kube-prometheus-stack and nvsentinel, which it assesses `manual` with
-recorded steps, so the rollout needs approval. Do nvsentinel's checks before
-approving; its record ends with its `apply` step, so nothing waits after it.
-AICR v1.3.0's kube-prometheus-stack record names no `apply` step, so after it
-is applied the rollout pauses for acknowledgement of all three steps. Do
+`nktp` namespace: add `{name: nktp, podSecurity: privileged}` to
+`namespaces.components` in the same chart upgrade, or the operator refuses the
+plan (`NamespaceNotAllowed`) before any rollout. It also moves
+nodewright-operator, which AICR assesses `safe`, and kube-prometheus-stack and
+nvsentinel, which it assesses `manual` with recorded steps, so the rollout
+needs approval. nodewright-operator's record is `safe` but breaking: its drains
+now evict kube-system pods, so before approving confirm
+`kubectl get pdb -n kube-system` shows ALLOWED DISRUPTIONS of at least 1 for
+workloads on nodes NodeWright interrupts. Do nvsentinel's checks before
+approving too; its record ends with its `apply` step, so nothing waits after
+it. AICR v1.3.0's kube-prometheus-stack record names no `apply` step, so after
+it is applied the rollout pauses for acknowledgement of all three steps. Do
 `export` before approving; after the pause, do `clean-up`, then acknowledge.
 
 From v1.0.x, the same chart upgrade also moves validation to the v1.1

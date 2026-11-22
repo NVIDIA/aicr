@@ -12,7 +12,7 @@ Produced on 2026-11-22 by the pinned AICR image
 | `upgrade-check-v1.2.0-to-v1.3.0-eks.json` | `aicr upgrade-check --from <v1.2.0 EKS lane recipe> --to <v1.3.0 EKS lane recipe> --deployer argocd --format json --fail-on-error=false`: kube-prometheus-stack and nvsentinel `manual`, nodewright-operator `safe`, nktp added |
 | `upgrade-check-v1.2.0-to-v1.3.0-gke.json` | The same for the GKE lane recipes, with the same verdicts |
 | `upgrade-check-eks-training-to-kubeflow.json` | `aicr upgrade-check` from the training recipe to the training + kubeflow recipe (an added component) |
-| `bundle-h100-eks-ubuntu-training-kubeflow/` | `aicr bundle --recipe <EKS lane recipe> --deployer helm --readiness-hooks`: the same files as the v1.2.0 fixture, and the full top-level listing (`LISTING.txt`) |
+| `bundle-h100-eks-ubuntu-training-kubeflow/` | `aicr bundle --recipe <EKS lane recipe> --deployer helm --readiness-hooks`: the same file selection as the v1.2.0 fixture, plus nktp's folder, and the full top-level listing (`LISTING.txt`) |
 
 Notes:
 
