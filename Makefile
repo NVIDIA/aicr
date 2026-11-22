@@ -1268,6 +1268,14 @@ operator-e2e: ## Runs the pinned AICR images as operator-built Jobs on the opera
 operator-e2e-commit: ## Runs operator-e2e against AICR built from the commit, on the operator's kind cluster
 	@./tools/operator-e2e-commit
 
+.PHONY: operator-main-aicr-e2e
+operator-main-aicr-e2e: ## Runs operator-e2e against AICR built from main with main's validators, validation test included
+	@./tools/operator-main-aicr e2e
+
+.PHONY: operator-main-aicr-qualify
+operator-main-aicr-qualify: ## Qualifies the upgrade from the newest published release to a candidate running AICR built from main
+	@./tools/operator-main-aicr qualify
+
 .PHONY: operator-skeleton
 operator-skeleton: ## Runs the operator with the pinned Argo CD on its kind cluster, one release end to end
 	@./tools/operator-skeleton

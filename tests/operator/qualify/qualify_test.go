@@ -162,6 +162,12 @@ func runsCandidate(ctx context.Context, t *testing.T, c *candidateManifest) {
 			t.Errorf("the operator runs without %s: %v", flag, args)
 		}
 	}
+	// tools/operator-main-aicr names the AICR the next candidate must run, so
+	// holding both candidates on the installed release's (hold_aicr in
+	// tools/operator-qualify) fails instead of passing.
+	if aicr := os.Getenv("AICR_OPERATOR_QUALIFY_NEXT_AICR"); aicr != "" && c == &next && !slices.Contains(args, "--aicr-image="+aicr) {
+		t.Fatalf("the next candidate's operator runs %v; want --aicr-image=%s", args, aicr)
+	}
 	logs, err := clientset.CoreV1().Pods(operatorNamespace).GetLogs(pods[0].Name, &corev1.PodLogOptions{}).DoRaw(ctx)
 	if err != nil {
 		t.Fatal(err)

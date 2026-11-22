@@ -14,73 +14,30 @@
 # limitations under the License.
 
 # Runs the operator e2e suite (make operator-e2e) against AICR built from the
-# commit instead of a pinned release. It builds ./cmd/aicr with ko, stamped
-# with the version <operator.aicr_version>-next (the shape of a goreleaser
-# snapshot), the commit and the commit date, and imports it by digest into the
-# nodes of the operator's kind cluster (make operator-kind-up). The image is
-# named as a release would be and never pushed.
+# checkout instead of a pinned release, stamped <operator.aicr_version>-next
+# (the shape of a goreleaser snapshot) and imported by digest into the nodes
+# of the operator's kind cluster (make operator-kind-up); see import_aicr in
+# tools/operator-lib.sh.
 #
 # The deployment-validation test that binds evidence to the validator images
 # is skipped. AICR built from a commit names its validators
 # ghcr.io/nvidia/aicr-validators/<phase>:sha-<commit>, which differ from the
-# release validators the suite pins, and a commit that is not on main has none
-# published.
+# release validators the suite pins, and only main commits have them
+# published; tools/operator-main-aicr runs it against a main commit's.
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "${repo_root}"
 work="$(mktemp -d)"
-# ko names an OCI layout by its path, which must parse as a lowercase image
-# reference, so the layout goes to a relative path in the gitignored
-# .operator-e2e rather than under a mktemp directory.
-layout=.operator-e2e/aicr-image
-trap 'rm -rf "${work}" "${layout}"' EXIT
-rm -rf "${layout}"
+trap 'rm -rf "${work}"' EXIT
 
-setting() { yq -r "$1" .settings.yaml; }
+export KUBECONFIG="${OPERATOR_E2E_KUBECONFIG:-${repo_root}/.operator-e2e/kubeconfig}"
+# shellcheck source=tools/operator-lib.sh
+source tools/operator-lib.sh
 
-cluster="${OPERATOR_KIND_CLUSTER:-aicr-operator}"
-kubeconfig="${OPERATOR_E2E_KUBECONFIG:-${repo_root}/.operator-e2e/kubeconfig}"
 version="$(setting '.operator.aicr_version')-next"
-repository=ghcr.io/nvidia/aicr
-nodes=()
-while IFS= read -r node; do
-  nodes+=("${node}")
-done < <(kind get nodes --name "${cluster}")
-if [[ ${#nodes[@]} -eq 0 ]]; then
-  echo "kind cluster ${cluster} has no nodes; run make operator-kind-up" >&2
-  exit 1
-fi
+import_aicr "" "${version}" "${work}"
 
-# Build for the node's architecture into an OCI layout, as the numeric user
-# goreleaser pins for releases (the base's own user is a name, which the
-# operator's runAsNonRoot Jobs refuse). An empty docker config keeps stale local
-# registry credentials away from the anonymous base-image pull.
-arch="$(kubectl --kubeconfig "${kubeconfig}" get nodes -o jsonpath='{.items[0].status.nodeInfo.architecture}')"
-commit_date="$(TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD)"
-echo '{}' > "${work}/config.json"
-DOCKER_CONFIG="${work}" KO_DOCKER_REPO="${repository}" \
-  go run "github.com/google/ko@$(setting '.build_tools.ko')" build --bare --sbom=none --push=false \
-  --ldflags=-s --ldflags=-w \
-  --ldflags="-X=aicr.run/pkg/cli.version=${version}" \
-  --ldflags="-X=aicr.run/pkg/cli.commit=$(git rev-parse HEAD)" \
-  --ldflags="-X=aicr.run/pkg/cli.date=${commit_date}" \
-  --image-user="$(yq -r '.kos[] | select(.id == "aicr") | .user' .goreleaser.yaml)" \
-  --platform="linux/${arch}" --oci-layout-path "${layout}" ./cmd/aicr >/dev/null
-
-# The operator runs AICR only pinned by digest, so import the image into every
-# node and name it by its digest, as a registry pull would (the
-# tools/operator-qualify load_image pattern).
-digest="$(yq -r '.manifests[0].digest' "${layout}/index.json")"
-yq -i -o=json ".manifests[0].annotations.\"org.opencontainers.image.ref.name\" = \"${repository}:${version}\"" "${layout}/index.json"
-tar -C "${layout}" -cf "${work}/image.tar" .
-for node in "${nodes[@]}"; do
-  docker exec -i "${node}" ctr -n k8s.io images import --digests --snapshotter=overlayfs - <"${work}/image.tar" >/dev/null
-  docker exec "${node}" ctr -n k8s.io images tag --force "${repository}:${version}" "${repository}@${digest}" >/dev/null
-done
-image="${repository}:${version}@${digest}"
-echo "AICR built from $(git rev-parse --short HEAD): ${image}"
-
-AICR_E2E_IMAGE="${image}" AICR_E2E_VERSION="${version}" \
+AICR_E2E_IMAGE="${AICR_IMPORTED_IMAGE}" AICR_E2E_VERSION="${version}" \
   AICR_OPERATOR_E2E_SKIP_VALIDATION="AICR built from a commit names validator images other than the pinned release validators" \
   make operator-e2e
