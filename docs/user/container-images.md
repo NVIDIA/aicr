@@ -27,8 +27,8 @@ The catalog lists the driver version that the default chart render carries. Vers
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **59**
-- Unique images: **143**
+- Components: **61**
+- Unique images: **145**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -62,6 +62,8 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.4 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.4 | 1 |
 | kai-scheduler | helm | kai-scheduler | v0.18.8 | 12 |
+| knative-operator | helm | knative-operator | v1.23.1 | 2 |
+| knative-serving | manifest | — | — | 0 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.5.0 | 2 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.1 | 4 |
 | kubeflow-training-operator | manifest | — | — | 1 |
@@ -243,6 +245,15 @@ _No images extracted._
 - `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.18.8`
 - `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.18.8`
 - `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.18.8`
+
+### knative-operator
+
+- `gcr.io/knative-releases/knative.dev/operator/cmd/operator:v1.23.1`
+- `gcr.io/knative-releases/knative.dev/operator/cmd/webhook:v1.23.1`
+
+### knative-serving
+
+_No images extracted._
 
 ### kube-prometheus-stack
 
