@@ -384,8 +384,8 @@ func TestObserveOutcomeFailedJobThatExitedZero(t *testing.T) {
 	}
 }
 
-// Version-gated behavior compares major.minor.patch only, so a prerelease is
-// treated as the release it precedes.
+// Version-gated behavior compares major.minor.patch only, ignoring any
+// prerelease.
 func TestSupportsV11(t *testing.T) {
 	t.Parallel()
 	cases := map[string]bool{

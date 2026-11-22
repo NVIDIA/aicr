@@ -100,9 +100,11 @@ prerelease, is outside `>=1.0.0, <2.0.0`, or is a prerelease without
 `aicr.allowPrerelease: true`. The operator exits at startup on a malformed
 `--aicr-version`, or on a prerelease without `--allow-prerelease-aicr`.
 
-A prerelease, such as a release candidate or a build from a commit, counts as
-the release it precedes: `v1.1.0-rc.1` gets the v1.1.0 behavior and is in range
-because v1.1.0 is.
+A prerelease counts as the release with the same major.minor.patch. A release
+candidate such as `v1.1.0-rc.1` gets the behavior of the v1.1.0 it precedes and
+is in range because v1.1.0 is. A build from a commit is stamped with the last
+release and `-next`, such as `v1.3.0-next`, and gets the behavior of the v1.3.0
+it follows.
 
 The operator also checks the version each AICR Job reports and stops on a
 mismatch. `engine.type` accepts only `ArgoCD` in this release; the chart schema

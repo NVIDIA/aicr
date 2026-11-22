@@ -206,6 +206,11 @@ func evidenceClient(ctx context.Context, t *testing.T) (*registry.Client, regist
 // its subject reads back by digest naming the plan, the operator digest and
 // the AICR image digest.
 func TestValidationJobPushesBindableEvidence(t *testing.T) {
+	// AICR built from a commit (tools/operator-e2e-commit) names validators
+	// :sha-<commit>, not the release validators this test pins.
+	if reason := os.Getenv("AICR_OPERATOR_E2E_SKIP_VALIDATION"); reason != "" {
+		t.Skip(reason)
+	}
 	ctx := testContext(t)
 	pins := validatorPins(t)
 	r, outcome := runValidation(ctx, t, nil)
