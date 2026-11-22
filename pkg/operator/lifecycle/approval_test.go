@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/aicrjob"
 	operrors "aicr.run/pkg/operator/errors"
 	"aicr.run/pkg/operator/plan"
 )
@@ -328,6 +329,33 @@ func TestApproveRefusesWhatCannotBeApproved(t *testing.T) {
 		if operrors.CodeOf(tc.err) != tc.code {
 			t.Errorf("%s: %v, want %s", tc.name, tc.err, tc.code)
 		}
+	}
+}
+
+// A manual record that names no apply step gets a note under it: the rollout
+// waits after the apply for all of its steps, so the ones meant for before
+// the upgrade must be done before approving. A record with an apply step, a
+// blocked one and a replacement, none of which the rollout holds that way,
+// get none.
+func TestDescribeRecordedStepsWithoutApply(t *testing.T) {
+	t.Parallel()
+	report := &aicrjob.UpgradeReport{Components: []aicrjob.ComponentChange{
+		{Component: "nfd", Change: "version", From: "0.19.0", To: "0.20.1", Verdict: "manual", Steps: []aicrjob.UpgradeStep{
+			{ID: "widen-nrt-rbac", Description: "widen"}, {ID: "sync-nfd", Description: "sync"}, {ID: "narrow-nrt-rbac", Description: "narrow"}}},
+		{Component: "nvsentinel", Change: "version", From: "1.31.0", To: "1.32.0", Verdict: "manual", Steps: []aicrjob.UpgradeStep{
+			{ID: "check-aws-replace-vm", Description: "check"}, {ID: "apply", Description: "sync"}}},
+		{Component: "grove", Change: "version", From: "0.1.0", To: "0.2.0", Verdict: "blocked", Steps: []aicrjob.UpgradeStep{
+			{ID: "land-on-0.1.5", Description: "stop"}}},
+		{Component: "kai-scheduler", Change: "replaced", Verdict: "manual", Steps: []aicrjob.UpgradeStep{
+			{ID: "migrate-queues", Description: "migrate"}}},
+	}}
+	var out bytes.Buffer
+	describeRecordedSteps(report, &out)
+	if got := strings.Count(out.String(), noApplyStepNote); got != 1 {
+		t.Fatalf("the no-apply note appears %d times, want once under nfd:\n%s", got, out.String())
+	}
+	if i, j := strings.Index(out.String(), noApplyStepNote), strings.Index(out.String(), "nvsentinel"); i > j {
+		t.Errorf("the no-apply note is not under nfd:\n%s", out.String())
 	}
 }
 

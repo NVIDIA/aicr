@@ -88,6 +88,21 @@ outputs:
   grype:
     description: 'Grype version'
     value: ${{ steps.versions.outputs.grype }}
+  grype_sha256_linux_amd64:
+    description: 'Grype SHA256 for linux/amd64'
+    value: ${{ steps.versions.outputs.grype_sha256_linux_amd64 }}
+  gitleaks:
+    description: 'Gitleaks version (release image secret scan)'
+    value: ${{ steps.versions.outputs.gitleaks }}
+  gitleaks_sha256_linux_amd64:
+    description: 'Gitleaks SHA256 for linux/amd64'
+    value: ${{ steps.versions.outputs.gitleaks_sha256_linux_amd64 }}
+  clamav:
+    description: 'ClamAV version, without a prefix (malware scan engine)'
+    value: ${{ steps.versions.outputs.clamav }}
+  clamav_sha256_linux_amd64:
+    description: 'ClamAV .deb SHA256 for linux/amd64'
+    value: ${{ steps.versions.outputs.clamav_sha256_linux_amd64 }}
   cosign:
     description: 'Cosign version (must be >= v3.1.0 so DSSE attestations are logged to Rekor v2 as hashedrekord/PAE, not the legacy dsse entry type)'
     value: ${{ steps.versions.outputs.cosign }}
@@ -231,6 +246,11 @@ runs:
 
         # Security tools
         echo "grype=$(yq eval '.security_tools.grype' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "grype_sha256_linux_amd64=$(yq eval '.security_tools.grype_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "gitleaks=$(yq eval '.security_tools.gitleaks' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "gitleaks_sha256_linux_amd64=$(yq eval '.security_tools.gitleaks_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "clamav=$(yq eval '.security_tools.clamav' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "clamav_sha256_linux_amd64=$(yq eval '.security_tools.clamav_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "cosign=$(yq eval '.security_tools.cosign' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "oras=$(yq eval '.security_tools.oras' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "oras_sha256_linux_amd64=$(yq eval '.security_tools.oras_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -295,6 +315,8 @@ runs:
         LOADED_ADDLICENSE: ${{ steps.versions.outputs.addlicense }}
         LOADED_GO_LICENSES: ${{ steps.versions.outputs.go_licenses }}
         LOADED_GRYPE: ${{ steps.versions.outputs.grype }}
+        LOADED_GITLEAKS: ${{ steps.versions.outputs.gitleaks }}
+        LOADED_CLAMAV: ${{ steps.versions.outputs.clamav }}
         LOADED_COSIGN: ${{ steps.versions.outputs.cosign }}
         LOADED_KUBECTL: ${{ steps.versions.outputs.kubectl }}
         LOADED_KUBELOGIN: ${{ steps.versions.outputs.kubelogin }}
@@ -343,6 +365,8 @@ runs:
         echo "  addlicense: ${LOADED_ADDLICENSE}"
         echo "  go_licenses: ${LOADED_GO_LICENSES}"
         echo "  grype: ${LOADED_GRYPE}"
+        echo "  gitleaks: ${LOADED_GITLEAKS}"
+        echo "  clamav: ${LOADED_CLAMAV}"
         echo "  cosign: ${LOADED_COSIGN}"
         echo "  kubectl: ${LOADED_KUBECTL}"
         echo "  kubelogin: ${LOADED_KUBELOGIN}"

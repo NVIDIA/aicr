@@ -38,6 +38,13 @@ const (
 	IntentInference = "inference"
 )
 
+// Recognized uat-run.yaml lifecycle values.
+const (
+	LifecycleNightly     = "nightly"
+	LifecycleDaytimeUp   = "daytime-up"
+	LifecycleDaytimeDown = "daytime-down"
+)
+
 // validIntents is the set of accepted intent values (Reservation.DaytimeIntent
 // and, downstream, the pipeline's intent input).
 var validIntents = map[string]bool{IntentTraining: true, IntentInference: true}
@@ -97,9 +104,10 @@ type Reservation struct {
 	// rotation (#1281, DC8) and picks the flavor stood up on it during the
 	// working day: "training" or "inference". Empty means the reservation is
 	// NOT part of the daytime rotation, though the evening teardown
-	// ([Registry.DaytimeTeardownAssignments]) still covers it. This is the
-	// configurable cloud→flavor default — data, not code — so the split
-	// (AWS=training, GCP=inference at launch) can change without a workflow edit.
+	// ([Registry.DaytimeTeardownAssignments]) still covers it unless it is a
+	// kind row. This is the configurable cloud→flavor default — data, not
+	// code — so the split (AWS=training, GCP=inference at launch) can change
+	// without a workflow edit.
 	DaytimeIntent string `yaml:"daytime-intent"`
 }
 

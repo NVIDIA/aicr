@@ -16,11 +16,11 @@ name: UAT Janitor
 
 # Backstop teardown for orphaned UAT clusters + resource groups across all three
 # clouds. The in-run "Destroy Cluster" step (uat-{gcp,aws,azure}.yaml) is the
-# first line; it cannot cover every case (a runner hard-killed mid-cancel, a
-# daytime held cluster whose evening daytime-down never fired, an abandoned
-# skip_delete run). This reaps whatever the in-run teardown missed, reconciling
-# each aicr-uat-<run_id> deployment against its owning GitHub run. See
-# .github/scripts/uat-janitor.sh for the full safety model.
+# first line; it cannot cover every case (a runner hard-killed mid-cancel, or a
+# daytime held cluster, the lifecycle=daytime-up debugging hold included, whose
+# evening daytime-down never fired). This reaps whatever the in-run teardown
+# missed, reconciling each aicr-uat-<run_id> deployment against its owning
+# GitHub run. See .github/scripts/uat-janitor.sh for the full safety model.
 #
 # ROLLOUT: dry-run-first. The scheduled run always reports only (DRY_RUN=true) —
 # it never deletes. To actually reap, dispatch this workflow with enforce=true
@@ -158,7 +158,7 @@ jobs:
         id: versions
         uses: ./.github/actions/load-versions
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true

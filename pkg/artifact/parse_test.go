@@ -214,3 +214,39 @@ func TestArtifactDocumentBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestChartCRDOwnership(t *testing.T) {
+	for _, tt := range []struct {
+		value string
+		valid bool
+	}{{"retain", true}, {"disabled", false}, {"true", false}, {`""`, false}} {
+		t.Run(tt.value, func(t *testing.T) {
+			data := []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactBindings\ncharts:\n  chart: {component: owner, crdOwnership: " + tt.value + "}\nimages: {}\n")
+			got, err := ParseBindings(data)
+			if (err == nil) != tt.valid {
+				t.Fatalf("parse: %v", err)
+			}
+			if err != nil {
+				return
+			}
+			replacement := EmptyBindings()
+			replacement.Charts["chart"] = Chart{Component: "owner"}
+			merged, err := Merge(got, replacement)
+			if err != nil || merged.Charts["chart"].CRDOwnership != "" {
+				t.Fatalf("merge: %v %+v", err, merged)
+			}
+			// The old binding shape must reject the new field, not discard it.
+			var old struct {
+				APIVersion string `json:"apiVersion"`
+				Kind       string `json:"kind"`
+				Charts     map[string]struct {
+					Component string `json:"component"`
+				} `json:"charts"`
+				Images map[string]Image `json:"images"`
+			}
+			if err := decode(data, &old); err == nil || !strings.Contains(err.Error(), "unknown field crdOwnership") {
+				t.Fatalf("old reader: %v", err)
+			}
+		})
+	}
+}

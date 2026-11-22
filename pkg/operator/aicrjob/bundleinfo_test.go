@@ -61,8 +61,10 @@ func parseBundleInfoFixture(t *testing.T, version string) {
 			t.Errorf("release %s phase = %q, want %q", name, phases[name], phase)
 		}
 	}
-	if len(b.Layout.Releases) != 17 {
-		t.Errorf("releases = %d, want 17", len(b.Layout.Releases))
+	// The bundle drops dra-node-labeler and adds the readiness and post
+	// releases.
+	if want := laneComponents(version) + 1; len(b.Layout.Releases) != want {
+		t.Errorf("releases = %d, want %d", len(b.Layout.Releases), want)
 	}
 
 	r, err := b.ParseBundleRecipe(fixture(t, bundleFixture+"recipe.yaml"), version)

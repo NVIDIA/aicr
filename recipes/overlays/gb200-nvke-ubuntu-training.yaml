@@ -30,6 +30,8 @@ spec:
     intent: training
 
   mixins:
+    # NVKE trays expose ConnectX-7 rails.
+    - nvsentinel-nic-health-monitor
     - os-ubuntu
 
   constraints:

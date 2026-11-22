@@ -95,6 +95,134 @@ jobs:
       security-events: write
 
   # =============================================================================
+  # Source checks on the tagged commit: the Go dependency license allowlist and
+  # CodeQL. The merge gate runs both on pull requests and main pushes, but a
+  # commit merged with GITHUB_TOKEN triggers no push workflow and a patch tag can
+  # be cut from a commit main never checked, so the release checks its own
+  # commit. Both run beside the builds; aicr-check fails closed on them.
+  # =============================================================================
+
+  license-check:
+    name: License Check
+    runs-on: ubuntu-24.04
+    needs: [detect]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Setup Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+          cache-dependency-path: |
+            go.sum
+
+      - name: Install go-licenses
+        uses: ./.github/actions/install-go-licenses
+        with:
+          version: ${{ steps.versions.outputs.go_licenses }}
+
+      - name: Check dependency licenses
+        run: make license-check
+
+  # Blocks on the same threshold as the image vulnerability scan: an open alert
+  # of High or Critical security severity on this tag. It reads alert state from
+  # the code scanning API, once this analysis is processed, rather than the
+  # SARIF the analysis writes, because a dismissed alert is still in the SARIF.
+  codeql:
+    name: CodeQL (Go)
+    runs-on: ubuntu-24.04
+    needs: [detect]
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Setup Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+        with:
+          languages: go
+
+      - name: Build
+        run: go build ./...
+
+      - name: Analyze
+        id: analyze
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+
+      # analyze stops waiting for processing after a few minutes, or on a
+      # status-request error, and still succeeds. Until this upload is
+      # processed the tag ref has no CodeQL alerts at all, so an empty list
+      # proves nothing: wait for "complete" first and fail on anything else.
+      - name: Block on open High or Critical alerts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
+          SARIF_ID: ${{ steps.analyze.outputs.sarif-id }}
+          PROCESSING_TIMEOUT_SECONDS: '900'
+          POLL_SECONDS: '15'
+        run: |
+          set -euo pipefail
+          if [[ -z "${SARIF_ID}" ]]; then
+            echo "::error::analyze reported no SARIF upload to wait for"
+            exit 1
+          fi
+          deadline=$((SECONDS + PROCESSING_TIMEOUT_SECONDS))
+          while :; do
+            status="$(gh api "repos/${REPO}/code-scanning/sarifs/${SARIF_ID}" --jq .processing_status)"
+            case "${status}" in
+              complete) break ;;
+              pending) ;;
+              *)
+                echo "::error::CodeQL upload ${SARIF_ID} processing status is '${status}'"
+                exit 1
+                ;;
+            esac
+            if (( SECONDS >= deadline )); then
+              echo "::error::CodeQL upload ${SARIF_ID} still pending after ${PROCESSING_TIMEOUT_SECONDS}s"
+              exit 1
+            fi
+            sleep "${POLL_SECONDS}"
+          done
+          alerts="$(gh api -X GET "repos/${REPO}/code-scanning/alerts" \
+            -f ref="${REF}" -f state=open -f tool_name=CodeQL -f per_page=100 --paginate \
+            --jq '.[] | select(.rule.security_severity_level == "high" or .rule.security_severity_level == "critical")
+              | "#\(.number) \(.rule.security_severity_level) \(.rule.id) \(.most_recent_instance.location.path):\(.most_recent_instance.location.start_line)"')"
+          if [[ -n "${alerts}" ]]; then
+            echo "::error::Open CodeQL alerts of High or Critical security severity on ${REF}:"
+            printf '%s\n' "${alerts}"
+            exit 1
+          fi
+          echo "No open High or Critical CodeQL alerts on ${REF}"
+
+  # =============================================================================
   # Build Job: GoReleaser (binaries, ko images, draft GitHub release)
   # =============================================================================
 
@@ -127,7 +255,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           # This download is the release's proxy-coverage measurement. Restoring
@@ -419,7 +547,7 @@ jobs:
 
       - name: Setup Go
         if: matrix.phase != 'aiperf-bench'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           # A restored public-proxy module cache would put this release image
@@ -532,7 +660,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           # Compilation itself is the proxy-coverage measurement for this image.
@@ -753,90 +881,22 @@ jobs:
           retention-days: 14
 
   # =============================================================================
-  # Container Image Vulnerability Scan (runs after all images are built)
+  # Release image checks (runs after all images are built): vulnerabilities,
+  # malware and secrets on each platform of each candidate, pulled by the
+  # digests resolve-candidates pinned (.github/workflows/check-images.yaml)
   # =============================================================================
 
-  image-vuln-scan:
-    name: Image Vuln Scan (${{ matrix.image.key }}/${{ matrix.platform.arch }})
-    runs-on: ubuntu-24.04
+  image-checks:
+    name: Image Checks
     needs: [resolve-candidates]
-    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
       packages: read
       security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        image:
-          - key: aicr
-            ref: ghcr.io/nvidia/aicr
-          - key: aicrd
-            ref: ghcr.io/nvidia/aicrd
-          - key: deployment
-            ref: ghcr.io/nvidia/aicr-validators/deployment
-          - key: performance
-            ref: ghcr.io/nvidia/aicr-validators/performance
-          - key: conformance
-            ref: ghcr.io/nvidia/aicr-validators/conformance
-          - key: aiperf-bench
-            ref: ghcr.io/nvidia/aicr-validators/aiperf-bench
-          - key: gate
-            ref: ghcr.io/nvidia/aicr-gate
-        platform:
-          - name: linux/amd64
-            arch: amd64
-          - name: linux/arm64
-            arch: arm64
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Authenticate to registry
-        uses: ./.github/actions/ghcr-login
-
-      - name: Scan container image
-        id: scan
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
-        env:
-          GRYPE_PLATFORM: ${{ matrix.platform.name }}
-        with:
-          image: '${{ matrix.image.ref }}@${{ fromJSON(needs.resolve-candidates.outputs.digest_map)[matrix.image.key] }}'
-          severity-cutoff: 'high'
-          output-format: sarif
-          only-fixed: true
-          fail-build: true
-          config: .grype.yaml
-          # OpenVEX statements with per-CVE reachability evidence for
-          # aiperf-bench suppressions. Grype applies statements only to
-          # products whose PURL matches, so this is a no-op for the other
-          # images in the matrix. Must mirror the input in
-          # vuln-scan-images.yaml or the release scan re-flags CVEs that
-          # the dedicated scan already suppressed.
-          vex: .openvex.json
-        continue-on-error: true
-
-      - name: Upload SARIF to GitHub Security
-        if: hashFiles('results.sarif') != '' || steps.scan.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
-        with:
-          sarif_file: ${{ steps.scan.outputs.sarif }}
-          category: 'anchore-image-${{ matrix.image.key }}-${{ matrix.platform.arch }}'
-        continue-on-error: true
-
-      - name: Fail on vulnerabilities
-        if: steps.scan.outcome == 'failure'
-        shell: bash
-        env:
-          IMAGE_REF: '${{ matrix.image.ref }}@${{ fromJSON(needs.resolve-candidates.outputs.digest_map)[matrix.image.key] }}'
-        run: |
-          set -euo pipefail
-          echo "::error::Vulnerability scan found issues in ${IMAGE_REF}"
-          echo "Check the Security tab for details."
-          exit 1
+    uses: ./.github/workflows/check-images.yaml
+    with:
+      digest_map: ${{ needs.resolve-candidates.outputs.digest_map }}
 
   # =============================================================================
   # Attestation Job (runs after all images are pushed and scanned)
@@ -849,7 +909,7 @@ jobs:
   # See #1536.
   attest:
     name: Attest Images
-    needs: [detect, image-vuln-scan, resolve-candidates]
+    needs: [detect, image-checks, resolve-candidates]
     permissions:
       contents: read
       packages: write
@@ -862,14 +922,14 @@ jobs:
 
 
   # =============================================================================
-  # AICR integrity: require resolution, scan, and attestation to all succeed
-  # before any immutable version alias is published
+  # AICR integrity: require resolution, the image and source checks, and
+  # attestation to all succeed before any immutable version alias is published
   # =============================================================================
 
   aicr-check:
     name: AICR Integrity Check
     runs-on: ubuntu-24.04
-    needs: [resolve-candidates, image-vuln-scan, attest]
+    needs: [resolve-candidates, image-checks, attest, license-check, codeql]
     if: always()
     timeout-minutes: 5
     permissions:
@@ -878,14 +938,18 @@ jobs:
       - name: Check AICR security gates
         env:
           RESOLVE_RESULT: ${{ needs.resolve-candidates.result }}
-          SCAN_RESULT: ${{ needs.image-vuln-scan.result }}
+          IMAGE_CHECKS_RESULT: ${{ needs.image-checks.result }}
           ATTEST_RESULT: ${{ needs.attest.result }}
+          LICENSE_CHECK_RESULT: ${{ needs.license-check.result }}
+          CODEQL_RESULT: ${{ needs.codeql.result }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           if [[ "${RESOLVE_RESULT}" != "success" || \
-            "${SCAN_RESULT}" != "success" || \
-            "${ATTEST_RESULT}" != "success" ]]; then
+            "${IMAGE_CHECKS_RESULT}" != "success" || \
+            "${ATTEST_RESULT}" != "success" || \
+            "${LICENSE_CHECK_RESULT}" != "success" || \
+            "${CODEQL_RESULT}" != "success" ]]; then
             echo "::error::AICR security gates did not all succeed for ${TAG}."
             echo "::error::Candidate aliases remain non-public; repair the failure and rerun this tag."
             exit 1
@@ -967,7 +1031,7 @@ jobs:
   release-check:
     name: Release Integrity Check
     runs-on: ubuntu-24.04
-    needs: [resolve-candidates, image-vuln-scan, attest, promote-versions, operator-candidate, operator-scan, operator-reproducible, operator-lifecycle, operator-validation]
+    needs: [resolve-candidates, image-checks, attest, license-check, codeql, promote-versions, operator-candidate, operator-checks, operator-reproducible, operator-lifecycle, operator-validation]
     if: always()
     timeout-minutes: 5
     permissions:
@@ -976,11 +1040,13 @@ jobs:
       - name: Check release security gates
         env:
           RESOLVE_RESULT: ${{ needs.resolve-candidates.result }}
-          SCAN_RESULT: ${{ needs.image-vuln-scan.result }}
+          IMAGE_CHECKS_RESULT: ${{ needs.image-checks.result }}
           ATTEST_RESULT: ${{ needs.attest.result }}
+          LICENSE_CHECK_RESULT: ${{ needs.license-check.result }}
+          CODEQL_RESULT: ${{ needs.codeql.result }}
           PROMOTE_VERSIONS_RESULT: ${{ needs.promote-versions.result }}
           OPERATOR_CANDIDATE_RESULT: ${{ needs.operator-candidate.result }}
-          OPERATOR_SCAN_RESULT: ${{ needs.operator-scan.result }}
+          OPERATOR_CHECKS_RESULT: ${{ needs.operator-checks.result }}
           OPERATOR_REPRODUCIBLE_RESULT: ${{ needs.operator-reproducible.result }}
           OPERATOR_LIFECYCLE_RESULT: ${{ needs.operator-lifecycle.result }}
           OPERATOR_VALIDATION_RESULT: ${{ needs.operator-validation.result }}
@@ -988,11 +1054,13 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${RESOLVE_RESULT}" != "success" || \
-            "${SCAN_RESULT}" != "success" || \
+            "${IMAGE_CHECKS_RESULT}" != "success" || \
             "${ATTEST_RESULT}" != "success" || \
+            "${LICENSE_CHECK_RESULT}" != "success" || \
+            "${CODEQL_RESULT}" != "success" || \
             "${PROMOTE_VERSIONS_RESULT}" != "success" || \
             "${OPERATOR_CANDIDATE_RESULT}" != "success" || \
-            "${OPERATOR_SCAN_RESULT}" != "success" || \
+            "${OPERATOR_CHECKS_RESULT}" != "success" || \
             "${OPERATOR_REPRODUCIBLE_RESULT}" != "success" || \
             "${OPERATOR_LIFECYCLE_RESULT}" != "success" || \
             "${OPERATOR_VALIDATION_RESULT}" != "success" ]]; then
@@ -1010,9 +1078,10 @@ jobs:
   # this tag's AICR images, by the digests resolve-candidates pinned; once
   # promote-versions has published the validator and gate version aliases, the
   # lifecycle check runs the operator with them and the validation check runs
-  # the validator images. It is scanned like every release image; release-check
-  # fails closed on its build, scan, reproducibility, lifecycle and validation
-  # checks, so they gate the remaining version aliases and :latest too. It is
+  # the validator images. Its images get the same checks as every release image;
+  # release-check fails closed on its build, image checks, reproducibility,
+  # lifecycle and validation, so they gate the remaining version aliases and
+  # :latest too. It is
   # published and attested only after
   # promote-images, and publish waits for it, so a failing operator blocks the
   # release.
@@ -1040,7 +1109,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
@@ -1152,7 +1221,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
@@ -1304,98 +1373,23 @@ jobs:
         if: ${{ always() }}
         run: make operator-kind-down
 
-  operator-scan:
-    name: Operator Vuln Scan (${{ matrix.platform.arch }})
-    runs-on: ubuntu-24.04
+  # The operator and in-cluster registry images, checked from the candidate's
+  # local layouts before anything is pushed (.github/workflows/check-operator.yaml).
+  operator-checks:
+    name: Operator Image Checks
     needs: [operator-candidate]
-    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
       security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - name: linux/amd64
-            arch: amd64
-          - name: linux/arm64
-            arch: arm64
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Download the candidate
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
-        with:
-          name: ${{ needs.operator-candidate.outputs.artifact }}
-          path: dist/candidate
-
-      - name: Scan the operator image
-        id: scan
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
-        env:
-          GRYPE_PLATFORM: ${{ matrix.platform.name }}
-        with:
-          image: 'oci-dir:dist/candidate/image'
-          severity-cutoff: 'high'
-          output-format: sarif
-          only-fixed: true
-          fail-build: true
-          config: .grype.yaml
-          vex: .openvex.json
-        continue-on-error: true
-
-      - name: Upload SARIF to GitHub Security
-        if: hashFiles('results.sarif') != '' || steps.scan.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
-        with:
-          sarif_file: ${{ steps.scan.outputs.sarif }}
-          category: 'anchore-image-aicr-operator-${{ matrix.platform.arch }}'
-        continue-on-error: true
-
-      # The chart's in-cluster registry (cmd/aicr-registry), built with the
-      # operator and held to the same bar.
-      - name: Scan the in-cluster registry image
-        id: registry-scan
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
-        env:
-          GRYPE_PLATFORM: ${{ matrix.platform.name }}
-        with:
-          image: 'oci-dir:dist/candidate/registry-image'
-          severity-cutoff: 'high'
-          output-format: sarif
-          only-fixed: true
-          fail-build: true
-          config: .grype.yaml
-          vex: .openvex.json
-        continue-on-error: true
-
-      - name: Upload the registry SARIF to GitHub Security
-        if: steps.registry-scan.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
-        with:
-          sarif_file: ${{ steps.registry-scan.outputs.sarif }}
-          category: 'anchore-image-aicr-registry-${{ matrix.platform.arch }}'
-        continue-on-error: true
-
-      - name: Fail on vulnerabilities
-        if: steps.scan.outcome == 'failure' || steps.registry-scan.outcome == 'failure'
-        env:
-          OPERATOR_SCAN: ${{ steps.scan.outcome }}
-          REGISTRY_SCAN: ${{ steps.registry-scan.outcome }}
-          PLATFORM: ${{ matrix.platform.name }}
-        run: |
-          [[ "${OPERATOR_SCAN}" == failure ]] && echo "::error::Vulnerability scan found issues in the operator image for ${PLATFORM}"
-          [[ "${REGISTRY_SCAN}" == failure ]] && echo "::error::Vulnerability scan found issues in the in-cluster registry image for ${PLATFORM}"
-          exit 1
+    uses: ./.github/workflows/check-operator.yaml
+    with:
+      artifact: ${{ needs.operator-candidate.outputs.artifact }}
 
   operator-publish:
     name: Publish Operator Artifacts
     runs-on: ubuntu-24.04
-    needs: [detect, release-check, promote-images, operator-candidate, operator-scan, operator-reproducible, operator-lifecycle]
+    needs: [detect, release-check, promote-images, operator-candidate, operator-checks, operator-reproducible, operator-lifecycle]
     timeout-minutes: 20
     outputs:
       digests: ${{ steps.digests.outputs.digests }}
@@ -1415,7 +1409,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
@@ -1926,7 +1920,9 @@ jobs:
       - build-gate
       - docker-manifest
       - resolve-candidates
-      - image-vuln-scan
+      - image-checks
+      - license-check
+      - codeql
       - attest
       - attach-source
       - aicr-check
@@ -1934,7 +1930,7 @@ jobs:
       - release-check
       - promote-images
       - operator-candidate
-      - operator-scan
+      - operator-checks
       - operator-reproducible
       - operator-lifecycle
       - operator-validation
@@ -1956,14 +1952,16 @@ jobs:
           BUILD_GATE: ${{ needs.build-gate.result }}
           MANIFEST: ${{ needs.docker-manifest.result }}
           RESOLVE: ${{ needs.resolve-candidates.result }}
-          VULN_SCAN: ${{ needs.image-vuln-scan.result }}
+          IMAGE_CHECKS: ${{ needs.image-checks.result }}
+          LICENSE_CHECK: ${{ needs.license-check.result }}
+          CODEQL: ${{ needs.codeql.result }}
           ATTEST: ${{ needs.attest.result }}
           AICR_CHECK: ${{ needs.aicr-check.result }}
           PROMOTE_VERSIONS: ${{ needs.promote-versions.result }}
           RELEASE_CHECK: ${{ needs.release-check.result }}
           PROMOTE: ${{ needs.promote-images.result }}
           OPERATOR_CANDIDATE: ${{ needs.operator-candidate.result }}
-          OPERATOR_SCAN: ${{ needs.operator-scan.result }}
+          OPERATOR_CHECKS: ${{ needs.operator-checks.result }}
           OPERATOR_REPRODUCIBLE: ${{ needs.operator-reproducible.result }}
           OPERATOR_LIFECYCLE: ${{ needs.operator-lifecycle.result }}
           OPERATOR_VALIDATION: ${{ needs.operator-validation.result }}
@@ -1996,14 +1994,16 @@ jobs:
             echo "| Build (Gate) | ${BUILD_GATE} |"
             echo "| Docker Manifest | ${MANIFEST} |"
             echo "| Resolve Candidate Digests | ${RESOLVE} |"
-            echo "| Vulnerability Scan | ${VULN_SCAN} |"
+            echo "| Image Checks (vulnerability, malware, secret) | ${IMAGE_CHECKS} |"
+            echo "| License Check | ${LICENSE_CHECK} |"
+            echo "| CodeQL | ${CODEQL} |"
             echo "| Attestation | ${ATTEST} |"
             echo "| AICR Check | ${AICR_CHECK} |"
             echo "| Operator Gate Version Aliases | ${PROMOTE_VERSIONS} |"
             echo "| Release Check | ${RELEASE_CHECK} |"
             echo "| Remaining Version Aliases and latest | ${PROMOTE} |"
             echo "| Operator Candidate | ${OPERATOR_CANDIDATE} |"
-            echo "| Operator Vulnerability Scan | ${OPERATOR_SCAN} |"
+            echo "| Operator Image Checks | ${OPERATOR_CHECKS} |"
             echo "| Operator Reproducibility | ${OPERATOR_REPRODUCIBLE} |"
             echo "| Operator Lifecycle | ${OPERATOR_LIFECYCLE} |"
             echo "| Operator Validation | ${OPERATOR_VALIDATION} |"

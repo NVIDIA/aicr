@@ -28,9 +28,18 @@ import (
 
 // Golden fixtures were produced by each supported AICR minor's pinned image
 // for the lane criteria (see testdata/<version>/README.md): the lowest
-// supported release, the newest, and v1.1.2, the release the newest's
+// supported release, the newest, and the releases each newer release's
 // upgrade-check fixtures start from.
-var fixtureVersions = []string{"v1.0.0", "v1.1.2", "v1.2.0"}
+var fixtureVersions = []string{"v1.0.0", "v1.1.2", "v1.2.0", "v1.3.0"}
+
+// laneComponents is the number of components the lane recipes resolve in
+// version: v1.3.0 adds nktp.
+func laneComponents(version string) int {
+	if version == "v1.3.0" {
+		return 17
+	}
+	return 16
+}
 
 // Lane recipe fixtures, the same for every fixture version.
 var laneFixtures = map[string]struct {
@@ -81,8 +90,8 @@ func parseLaneFixture(t *testing.T, version, file, apiVersion string, criteria C
 	if r.APIVersion != apiVersion || *r.Criteria != criteria {
 		t.Errorf("apiVersion=%s criteria=%+v", r.APIVersion, *r.Criteria)
 	}
-	if len(r.ComponentRefs) != 16 {
-		t.Errorf("components = %d, want 16", len(r.ComponentRefs))
+	if want := laneComponents(version); len(r.ComponentRefs) != want {
+		t.Errorf("components = %d, want %d", len(r.ComponentRefs), want)
 	}
 	var gpu *ComponentRef
 	for i := range r.ComponentRefs {
@@ -155,15 +164,40 @@ func TestParseIgnoresAddedFields(t *testing.T) {
 	}
 }
 
+// commitSchemas is the commit's own copy of AICR's published schemas, which
+// tools/schemagen keeps in step with the Go types. Checking it alongside the
+// released copies catches a change the operator cannot read on the PR that
+// makes it.
+var commitSchemas = filepath.Join("..", "..", "..", "api", "aicr", "v1", "schemas")
+
+// schemaDirs maps each schema source to its directory: every fixture
+// version, and the commit.
+func schemaDirs() map[string]string {
+	dirs := map[string]string{"commit": commitSchemas}
+	for _, version := range fixtureVersions {
+		dirs[version] = filepath.Join("testdata", version, "schemas")
+	}
+	return dirs
+}
+
+func readSchema(t *testing.T, dir, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	return data
+}
+
 // Contract test against AICR's published schema: every field the operator
 // reads exists in the schema with the same name, and every field the schema
 // requires is one the operator reads.
 func TestRecipeResultMatchesAICRSchema(t *testing.T) {
 	t.Parallel()
-	for _, version := range fixtureVersions {
-		t.Run(version, func(t *testing.T) {
+	for source, dir := range schemaDirs() {
+		t.Run(source, func(t *testing.T) {
 			t.Parallel()
-			matchRecipeResultSchema(t, fixtureAt(t, version, filepath.Join("schemas", "RecipeResult.schema.json")))
+			matchRecipeResultSchema(t, readSchema(t, dir, "RecipeResult.schema.json"))
 		})
 	}
 }

@@ -68,8 +68,9 @@ Prints what an approver decides on:
   the digest the rollout records: each component's change, versions, verdict
   and notes. Without one it prints `Assessment: none`;
 - under "Recorded steps", each transition record's precondition (`before:`)
-  and steps. The operator performs only the apply; approving acknowledges the
-  steps before it, and `acknowledge` the steps after it;
+  and steps. The operator performs only the `apply` step; approving
+  acknowledges the steps before it, and `acknowledge` the steps after it, or
+  every step when the record names no `apply` step;
 - each acknowledgement already given (`Acknowledged: <release> by <user>`).
 
 ## acknowledge

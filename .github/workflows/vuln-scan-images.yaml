@@ -66,7 +66,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -174,7 +174,7 @@ jobs:
 
       - name: Setup Go
         if: matrix.phase != 'aiperf-bench'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -256,7 +256,7 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
@@ -360,7 +360,7 @@ jobs:
           - ghcr.io/nvidia/aicr-validators/aiperf-bench
           - ghcr.io/nvidia/aicr-gate
           # aicr-operator and aicr-registry are scanned once per architecture,
-          # as the release's operator-scan does; see include below.
+          # as the release's operator-checks do; see include below.
           # AICR does not build the images below. They ship only with the
           # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
           # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
@@ -446,50 +446,50 @@ jobs:
           # TestCSPHealthMonitorImagesPinnedEverywhere fail if these drift
           # apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/preflight
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
-            tag: v1.31.0
+            tag: v1.32.0
             large: true
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
-            tag: v1.31.0
+            tag: v1.32.0
             large: true
           - image: ghcr.io/nvidia/nvsentinel/nic-health-monitor
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/slurm-drain-monitor
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/fault-quarantine
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/node-drainer
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/fault-remediation
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/janitor
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/janitor-provider
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/gpu-reset
-            tag: v1.31.0
+            tag: v1.32.0
           # Pinned by digest in recipes/components/slinky-drainer/manifests.
           - image: ghcr.io/nvidia/nvsentinel/slinky-drainer
-            tag: v1.31.0@sha256:d839d35cc25f6ffa22c016a3a38eeeb98a3ef91a3eb32326d728b3c3fa10e646
+            tag: v1.32.0@sha256:57c2402ebb13c6aaec0aeb48b4f67c310066a15d2239d4c679599572f705eee0
           - image: ghcr.io/nvidia/nvsentinel/health-events-analyzer
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/event-exporter
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/log-collector
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/file-server-cleanup
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/lifecycle-manager
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/csp-health-monitor
-            tag: v1.31.0
+            tag: v1.32.0
           - image: ghcr.io/nvidia/nvsentinel/maintenance-notifier
-            tag: v1.31.0
+            tag: v1.32.0
           # The nvsentinel chart's own pins for the file server's third-party
           # images. The weekly TestNVSentinelLogCollectorChartRender fails if a
           # chart bump moves them; TestLogCollectorImagesPinnedEverywhere then
@@ -527,6 +527,10 @@ jobs:
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
 
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
       - name: Scan container image
         id: scan
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
@@ -546,6 +550,9 @@ jobs:
           output-format: json
           only-fixed: true
           fail-build: false
+          # The release image checks run this same Grype, so a finding this
+          # scan reports is the one the release gate would.
+          grype-version: ${{ steps.versions.outputs.grype }}
           config: .grype.yaml
           # OpenVEX statements with per-CVE reachability evidence for
           # aiperf-bench suppressions. Grype applies statements only to

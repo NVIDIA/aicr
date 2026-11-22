@@ -125,6 +125,7 @@ func renderArtifactContract(generated *schema.Schema, kind string) ([]byte, erro
 		}
 		chart := property(document, artifactChartsKey)["additionalProperties"].(map[string]any)
 		properties(chart)["component"] = name
+		property(chart, "crdOwnership")["enum"] = []string{"retain"}
 		image := property(document, artifactImagesKey)["additionalProperties"].(map[string]any)
 		targets := property(image, "targets")
 		targets["minItems"] = 1

@@ -1,0 +1,82 @@
+{
+  "id": 20,
+  "slug": "gpu-fast-link",
+  "title": "Are the GPUs using the fast link?",
+  "track": "Validation, evidence, and trust",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/validation.md#training-performance-validation",
+  "scenes": [
+    {
+      "heading": "Training finished. What path did it use?",
+      "sub": "A completed job can hide a network fallback.",
+      "visual": "fork",
+      "items": [
+        "GPU worker A",
+        "RDMA fabric",
+        "Socket fallback"
+      ],
+      "voice": [
+        "A multi-node training job finishes on your cluster.",
+        "Workers can still exchange data if NCCL falls back to sockets, so completion alone leaves the transport in question."
+      ],
+      "detail": "Illustrative network paths",
+      "result": "Traffic goes through sockets"
+    },
+    {
+      "heading": "Run a fabric-specific check",
+      "sub": "The recipe tells AICR which check to run.",
+      "visual": "probe",
+      "items": [
+        "Performance phase",
+        "NCCL all-reduce",
+        "GPU worker pair"
+      ],
+      "voice": [
+        "Run the performance phase for a recipe with the network-specific check.",
+        "Its NCCL all-reduce job sends data across the GPU workers and measures bus bandwidth."
+      ],
+      "detail": "nccl-all-reduce-bw-net",
+      "result": "All-reduce completes"
+    },
+    {
+      "heading": "Open the transport result",
+      "sub": "The expected transport is part of the verdict.",
+      "visual": "inspect",
+      "items": [
+        "Expected RDMA",
+        "Observed Socket",
+        "Bandwidth floor"
+      ],
+      "voice": [
+        "The check compares bandwidth with the recipe's floor and inspects which transport actually carried traffic.",
+        "A supported recipe can fail its fabric check when NCCL reports sockets where it expected RDMA."
+      ],
+      "detail": "Illustrative NCCL transport report",
+      "result": "Expected RDMA, observed Socket"
+    },
+    {
+      "heading": "Investigate the network path",
+      "sub": "Use the check result to narrow the search.",
+      "visual": "trace",
+      "items": [
+        "Transport mismatch",
+        "Inspect GPU network",
+        "Run the check again"
+      ],
+      "voice": [
+        "Use the mismatch to investigate the worker network setup and repeat the same check.",
+        "A ready workload and the intended fabric are two separate things to verify."
+      ],
+      "result": "Finished job, failed fabric check"
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    26,
+    41,
+    53
+  ],
+  "viewer": "GPU infrastructure operators",
+  "payoff": "See a completed training benchmark fail its fabric check when NCCL falls back to sockets."
+}

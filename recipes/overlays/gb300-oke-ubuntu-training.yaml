@@ -96,8 +96,8 @@ spec:
         gdrcopy:
           enabled: true
 
-    # CRI-O Multus default network, the RDMA VF settle gate, then
-    # nvidia-tuned's OCI GB300 profile, under every gpuStack value. Added to
+    # CRI-O Multus default network, then nvidia-tuned's OCI GB300 profile,
+    # under every gpuStack value. Added to
     # the OKE root's toolkit-hardening manifest (manifestFiles merge).
     # nvidia-tuned names the provider oci, not oke. multiNodeTraining
     # resolves to the OCI nvidia-gb300-performance chain. Depends on
@@ -164,9 +164,10 @@ spec:
           value: ">= 300"
         - name: nccl-all-reduce-bw-nvls
           value: ">= 700"
+    # No cluster-autoscaling: GB300 node pools are fixed-size (OKE has no
+    # node-pool autoscaling field), and the check has no OKE probe.
     conformance:
       checks:
         - gang-scheduling
         - pod-autoscaling
-        - cluster-autoscaling
         - secure-accelerator-access

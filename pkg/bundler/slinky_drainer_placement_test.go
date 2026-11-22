@@ -173,7 +173,7 @@ func placementSentinel() recipe.ComponentRef {
 				"templateMountPath": "/etc/drain-template", "templateFileName": "drain-template.yaml",
 				"namespace": "nvsentinel", "apiGroup": "nvsentinel.nvidia.com", "version": "v1alpha1",
 				"kind": "DrainRequest", "resource": "drainrequests", "statusConditionType": "DrainComplete",
-				"statusConditionStatus": "True", "timeout": "1800"}},
+				"statusConditionStatus": "True"}},
 		}}
 }
 

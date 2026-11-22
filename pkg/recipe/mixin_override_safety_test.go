@@ -92,6 +92,15 @@ func TestMixinOverridesSafeForMerge(t *testing.T) {
 			},
 		},
 		{
+			// An external copy of nvsentinel-slinky-drainer written for
+			// v1.31.0 sets customDrain.timeout, which v1.32.0 no longer reads.
+			name:          "nvsentinel leftover customDrain.timeout -> safe",
+			componentName: "nvsentinel",
+			mixinOverrides: map[string]any{
+				"node-drainer": map[string]any{"customDrain": map[string]any{"timeout": "1800"}},
+			},
+		},
+		{
 			// A mixin reaching into an unrelated, already-chained component
 			// and disabling its driver. gpu-operator declares no
 			// mixinSafeOverridePaths, so every path on it is rejected.

@@ -52,10 +52,14 @@ transitions:
             reason: >-
               Those fields no longer exist, so their readers see empty values
               rather than an error.
-          - id: reconcile-and-verify
+          - id: apply
             description: >-
-              Apply the generated bundle through the selected deployer, then
-              verify webhook readiness and scheduling of representative queued
+              Apply the generated bundle through the selected deployer.
+            reason: >-
+              Moves kai-scheduler to the new version.
+          - id: verify-scheduling
+            description: >-
+              Verify webhook readiness and scheduling of representative queued
               and gang workloads before resuming normal submissions.
             reason: >-
               Controller readiness alone does not verify existing queue and
@@ -111,10 +115,14 @@ transitions:
             reason: >-
               The pre-upgrade hook that applies the CRDs runs from helm-hooks
               now, and a missing image stalls the upgrade before any CRD moves.
-          - id: reconcile-and-verify
+          - id: apply
             description: >-
-              Apply the generated bundle through the selected deployer, then
-              verify webhook readiness and scheduling of representative queued
+              Apply the generated bundle through the selected deployer.
+            reason: >-
+              Moves kai-scheduler to the new version.
+          - id: verify-scheduling
+            description: >-
+              Verify webhook readiness and scheduling of representative queued
               and gang workloads before resuming normal submissions.
             reason: >-
               Controller readiness alone does not show that queues and gang

@@ -15,6 +15,8 @@
 package controller
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -22,11 +24,14 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 	"aicr.run/pkg/operator/aicrjob"
+	"aicr.run/pkg/operator/defaults"
 	"aicr.run/pkg/operator/engine/argocd"
 	operrors "aicr.run/pkg/operator/errors"
 	"aicr.run/pkg/operator/plan"
@@ -121,7 +126,7 @@ func TestAssessSteps(t *testing.T) {
 	}{
 		"steps on both sides": {record("manual", "before", "apply", "reset-breaker", "verify"), []string{"reset-breaker", "verify"}},
 		"steps before only":   {record("manual", "before", "apply"), nil},
-		"no apply step":       {record("manual", "before", "verify"), nil},
+		"no apply step":       {record("manual", "before", "verify"), []string{"before", "verify"}},
 		"a safe verdict":      {record("safe", "apply", "verify"), nil},
 	} {
 		steps = []v1alpha1.RolloutStep{upgrade("kai-scheduler")}
@@ -148,10 +153,39 @@ func TestAssessSteps(t *testing.T) {
 	}
 }
 
+// A manual record's steps after its apply step wait for an acknowledgement.
+// A record that names no apply step cannot say which steps follow the apply,
+// so every step waits.
+func TestAfterApply(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		ids  []string
+		want []string
+	}{
+		{"steps after the apply", []string{"check-host-port", "apply", "reset-breaker", "verify"}, []string{"reset-breaker", "verify"}},
+		{"apply is the last step", []string{"check-aws-replace-vm", "apply"}, nil},
+		{"no apply step", []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}, []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}},
+		{"no steps", nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var steps []aicrjob.UpgradeStep
+			for _, id := range tt.ids {
+				steps = append(steps, aicrjob.UpgradeStep{ID: id})
+			}
+			if got := afterApply(steps); !slices.Equal(got, tt.want) {
+				t.Errorf("afterApply(%v) = %v, want %v", tt.ids, got, tt.want)
+			}
+		})
+	}
+}
+
 // AICR v1.2.0's nfd record (0.19.0 to 0.20.1) names its deployer step
-// sync-nfd, not apply, so the operator finds no steps after the apply: the
-// upgrade needs approval but does not wait for narrow-nrt-rbac to be
-// acknowledged. This pins that behavior until the record marks its apply step.
+// sync-nfd, not apply, so the operator cannot tell which steps follow the
+// apply: the upgrade needs approval, and every step waits to be acknowledged
+// after the apply.
 func TestAssessStepsV120NFDRecord(t *testing.T) {
 	t.Parallel()
 	nfd := func(chart string) *plan.Document {
@@ -168,10 +202,46 @@ func TestAssessStepsV120NFDRecord(t *testing.T) {
 			}
 			steps := []v1alpha1.RolloutStep{{Release: "nfd", Operation: v1alpha1.OperationUpgrade}}
 			approval, err := assessSteps(steps, nfd("0.19.0"), nfd("0.20.1"), report)
-			if err != nil || !approval || steps[0].Assessment != v1alpha1.AssessmentManual || steps[0].PostApplySteps != nil {
+			want := []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}
+			if err != nil || !approval || steps[0].Assessment != v1alpha1.AssessmentManual || !slices.Equal(steps[0].PostApplySteps, want) {
 				t.Fatalf("assessSteps() = %v, %v; step %+v", approval, err, steps[0])
 			}
 		})
+	}
+}
+
+// AICR v1.3.0's kube-prometheus-stack record (84.4.0 to 84.5.0) names no
+// apply step, so every step waits to be acknowledged after the apply.
+// nvsentinel's record (1.28.0 to 1.31.0) ends with its apply step, so
+// nothing waits after it.
+func TestAssessStepsV130Records(t *testing.T) {
+	t.Parallel()
+	doc := func(component, namespace, chart string) *plan.Document {
+		return &plan.Document{Releases: []plan.Release{{ID: component, Component: component, TargetNamespace: namespace,
+			Chart:  plan.Chart{Repository: "oci://r/charts/" + component, Digest: plan.DigestOf([]byte(chart))},
+			Values: plan.DigestedRef{Digest: plan.DigestOf([]byte("v1"))}}}}
+	}
+	for _, lane := range []string{"eks", "gke"} {
+		report, err := aicrjob.ParseUpgradeReport(fixture(t, "..", "aicrjob", "testdata", "v1.3.0", "upgrade-check-v1.2.0-to-v1.3.0-"+lane+".json"), "argocd")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			component, namespace, from, to string
+			want                           []string
+		}{
+			{"kube-prometheus-stack", "monitoring", "84.4.0", "84.5.0", []string{"export", "upgrade", "clean-up"}},
+			{"nvsentinel", "nvsentinel", "v1.28.0", "v1.31.0", nil},
+		} {
+			t.Run(lane+"/"+tc.component, func(t *testing.T) {
+				t.Parallel()
+				steps := []v1alpha1.RolloutStep{{Release: tc.component, Operation: v1alpha1.OperationUpgrade}}
+				approval, err := assessSteps(steps, doc(tc.component, tc.namespace, tc.from), doc(tc.component, tc.namespace, tc.to), report)
+				if err != nil || !approval || steps[0].Assessment != v1alpha1.AssessmentManual || !slices.Equal(steps[0].PostApplySteps, tc.want) {
+					t.Fatalf("assessSteps() = %v, %v; step %+v", approval, err, steps[0])
+				}
+			})
+		}
 	}
 }
 
@@ -374,7 +444,11 @@ func TestRolloutAssessmentFailures(t *testing.T) {
 		got := getRuntime(t, ctx)
 		reason := cond(got, v1alpha1.ConditionStalled).Reason
 		if want == ReasonAssessing {
-			reason = cond(got, v1alpha1.ConditionReconciling).Reason
+			reconciling := cond(got, v1alpha1.ConditionReconciling)
+			reason = reconciling.Reason
+			if !strings.Contains(reconciling.Message, "retrying after a transient failure") {
+				t.Errorf("assessment exiting %d: Reconciling message %q does not report the retry", exit, reconciling.Message)
+			}
 		}
 		if reason != want || len(engine.order) != 0 {
 			t.Fatalf("assessment exiting %d: reason %q, engine writes %v", exit, reason, engine.order)
@@ -384,6 +458,123 @@ func TestRolloutAssessmentFailures(t *testing.T) {
 				t.Fatalf("assessment exiting %d: a rollout started", exit)
 			}
 		}
+	}
+}
+
+// An assessment that was waiting to be retried and whose next run is then
+// refused for good stalls the runtime; the Reconciling condition, no longer
+// True, drops the retry it was reporting.
+func TestAssessmentRetryThatCannotStart(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	active := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "1"}, testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":1}`))
+	target := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "2"}, testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":2}`))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", UID: "u-g", PlanDigest: active}}
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r)
+	job := liveJobs(t, ctx, string(aicrjob.StageAssessment))[0]
+	clk.now = time.Now()
+	fail(t, ctx, &job, aicrjob.ExitUnavailable)
+	reconcileRollout(t, ctx, r)
+	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionReconciling); c.Reason != ReasonAssessing || !strings.HasPrefix(c.Message, retryingNote) {
+		t.Fatalf("Reconciling while the assessment waits to retry = %+v", c)
+	}
+
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if _, isJob := obj.(*batchv1.Job); isJob {
+				return apierrors.NewForbidden(batchv1.Resource("jobs"), obj.GetName(), errors.New("exceeded quota"))
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+	})
+	clk.now = time.Now().Add(defaults.StageRetryMaxBackoff + time.Minute)
+	reconcileRollout(t, ctx, r)
+	got := getRuntime(t, ctx)
+	stalled, reconciling := cond(got, v1alpha1.ConditionStalled), cond(got, v1alpha1.ConditionReconciling)
+	if stalled.Status != metav1.ConditionTrue || !strings.Contains(stalled.Message, "exceeded quota") ||
+		reconciling.Status != metav1.ConditionFalse || reconciling.Message != "" {
+
+		t.Fatalf("Stalled %+v, Reconciling %+v; want stalled on the refused Job and no Reconciling message", stalled, reconciling)
+	}
+}
+
+// An assessment that stalls while its pod was not running reports the stall
+// alone: the Reconciling condition, no longer True, carries no message about
+// what the run was waiting on.
+func TestAssessmentThatStallsDropsWhatItWaitedOn(t *testing.T) {
+	const unschedulable = "0/9 nodes are available: 9 node(s) had untolerated taint {CriticalAddonsOnly: }"
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	active := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "1"}, testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":1}`))
+	target := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "2"}, testRelease("gpu-operator", plan.PhasePrimary, "", `{"a":2}`))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", UID: "u-g", PlanDigest: active}}
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r)
+	job := liveJobs(t, ctx, string(aicrjob.StageAssessment))[0]
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: job.Name + "-pod", Namespace: job.Namespace,
+			Labels: map[string]string{"batch.kubernetes.io/job-name": job.Name}},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "aicr", Image: aicrImage}}},
+	}
+	if err := k8s.Create(ctx, pod); err != nil {
+		t.Fatal(err)
+	}
+	pod.Status.Phase = corev1.PodPending
+	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: unschedulable}}
+	if err := k8s.Status().Update(ctx, pod); err != nil {
+		t.Fatal(err)
+	}
+	reconcileRollout(t, ctx, r)
+	if c := cond(getRuntime(t, ctx), v1alpha1.ConditionReconciling); c.Reason != ReasonAssessing || !strings.Contains(c.Message, unschedulable) {
+		t.Fatalf("Reconciling while the assessment's pod is not running = %+v", c)
+	}
+
+	// The reason is recorded on the Job when it changes; that write is now
+	// refused for good.
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
+		t.Fatal(err)
+	}
+	const pulling = "ImagePullBackOff: back-off pulling the AICR image"
+	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: pulling}}
+	if err := k8s.Status().Update(ctx, pod); err != nil {
+		t.Fatal(err)
+	}
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			if _, isJob := obj.(*batchv1.Job); isJob {
+				return apierrors.NewForbidden(batchv1.Resource("jobs"), obj.GetName(), errors.New("denied by policy"))
+			}
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+	})
+	reconcileRollout(t, ctx, r)
+	got := getRuntime(t, ctx)
+	stalled, reconciling := cond(got, v1alpha1.ConditionStalled), cond(got, v1alpha1.ConditionReconciling)
+	if stalled.Status != metav1.ConditionTrue || !strings.Contains(stalled.Message, "denied by policy") ||
+		reconciling.Status != metav1.ConditionFalse || reconciling.Message != "" {
+
+		t.Fatalf("Stalled %+v, Reconciling %+v; want the stall and no Reconciling message", stalled, reconciling)
 	}
 }
 

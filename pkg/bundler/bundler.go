@@ -133,6 +133,10 @@ type DefaultBundler struct {
 	// directly instead of re-finding/re-verifying/re-reading. Empty (the CLI
 	// default) preserves the discover-and-verify-per-run path exactly.
 	verifiedBinaryAttestation []byte
+
+	// chartPuller replaces the default chart puller of a split set; tests
+	// set it to vendor charts without a registry.
+	chartPuller localformat.ChartPuller
 }
 
 // bundleRun holds the state of one Make call.

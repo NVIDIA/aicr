@@ -53,8 +53,8 @@ var deployers = map[plan.Engine]string{plan.EngineArgoCD: "argocd", plan.EngineF
 // assess runs, or reuses, AICR's upgrade-check between the active and the
 // target plan's recipes. The report is kept in the operator
 // namespace, labeled with the transition, and its run removed. It returns a
-// nil report while the Job runs.
-func (r *RolloutReconciler) assess(ctx context.Context, rt *v1alpha1.ClusterRuntime, from, to *plan.Document) (
+// nil report while the Job runs or waits to be retried, and tells v why.
+func (r *RolloutReconciler) assess(ctx context.Context, rt *v1alpha1.ClusterRuntime, from, to *plan.Document, v *runtimeView) (
 	*aicrjob.UpgradeReport, *v1alpha1.DigestedConfigMapRef, time.Duration, error) {
 
 	deployer := deployers[r.Config.Engine]
@@ -88,6 +88,7 @@ func (r *RolloutReconciler) assess(ctx context.Context, rt *v1alpha1.ClusterRunt
 		},
 	})
 	if err != nil || job == nil {
+		v.reconcilingMessage = st.waitingOn()
 		return nil, nil, wait, err
 	}
 	data, err := st.output(ctx, job)
@@ -262,10 +263,11 @@ func assessed(from, to *plan.Document) bool {
 }
 
 // afterApply is the IDs of a transition record's steps after its apply, the
-// one step the operator performs; none without an apply step.
+// one step the operator performs. A record that names no apply step cannot
+// say which of its steps follow the apply, so it returns all of them.
 func afterApply(steps []aicrjob.UpgradeStep) []string {
-	i := slices.IndexFunc(steps, func(s aicrjob.UpgradeStep) bool { return s.ID == "apply" })
-	if i < 0 || i == len(steps)-1 {
+	i := slices.IndexFunc(steps, func(s aicrjob.UpgradeStep) bool { return s.ID == aicrjob.ApplyStepID })
+	if len(steps) == 0 || i == len(steps)-1 {
 		return nil
 	}
 	ids := make([]string, 0, len(steps)-i-1)

@@ -1,0 +1,81 @@
+{
+  "id": 30,
+  "slug": "rollback-by-plan-digest",
+  "title": "Roll back by plan digest",
+  "track": "Operator",
+  "status": "preview",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/operator/operations.md#rolling-back-by-pinning",
+  "scenes": [
+    {
+      "heading": "Return to a known plan",
+      "sub": "Find the earlier plan you want.",
+      "visual": "compare",
+      "items": [
+        "Active plan",
+        "Retained earlier plan",
+        "Plan digest"
+      ],
+      "voice": [
+        "A GPU stack change has a problem, and you want to restore the configuration you ran before.",
+        "Find that retained plan and identify it by its digest."
+      ],
+      "result": "Select a specific retained plan"
+    },
+    {
+      "heading": "Pin the earlier plan as target",
+      "sub": "The plan becomes the rollout target.",
+      "visual": "vault",
+      "items": [
+        "Selection policy",
+        "Earlier plan digest",
+        "Target plan"
+      ],
+      "voice": [
+        "Switch the runtime selection policy to pinned and provide that plan digest.",
+        "The Operator sets the earlier plan as the target while the current plan stays active."
+      ],
+      "detail": "spec.selection.pinnedPlanDigest",
+      "result": "Earlier plan is selected"
+    },
+    {
+      "heading": "Assess and approve the route back",
+      "sub": "The transition starts from live state.",
+      "visual": "gate",
+      "items": [
+        "Current inventory",
+        "Reverse transition",
+        "Approval"
+      ],
+      "voice": [
+        "The Operator assesses the transition from the active plan to your selected target.",
+        "In this example, restoring an earlier values file needs approval before the step can begin."
+      ],
+      "detail": "Illustrative rollback: values change",
+      "result": "Reverse change awaits approval"
+    },
+    {
+      "heading": "Wait for the rollout result",
+      "sub": "The earlier plan becomes active on success.",
+      "visual": "queue",
+      "items": [
+        "Ordered steps",
+        "Revision is ready",
+        "Earlier plan active"
+      ],
+      "voice": [
+        "Argo CD applies the steps in order, and the Operator checks readiness at each revision.",
+        "On success, the previously retained plan becomes the active plan again."
+      ],
+      "result": "Active plan now matches pinned digest"
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    24,
+    39,
+    53
+  ],
+  "viewer": "GPU platform operators reversing a change",
+  "payoff": "Select a retained plan by its digest, then assess and approve the transition back to it."
+}

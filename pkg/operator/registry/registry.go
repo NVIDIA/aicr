@@ -138,7 +138,8 @@ func (c *Client) repository(r Repository) (*remote.Repository, error) {
 }
 
 // Resolve returns the manifest digest a tag currently points at.
-func (c *Client) Resolve(ctx context.Context, r Repository, tag string) (string, error) {
+func (c *Client) Resolve(ctx context.Context, r Repository, tag string) (_ string, err error) {
+	defer observe(opResolve, &err)
 	ctx, cancel := context.WithTimeout(ctx, defaults.RegistryTimeout)
 	defer cancel()
 	repo, err := c.repository(r)

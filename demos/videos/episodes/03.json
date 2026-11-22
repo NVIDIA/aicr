@@ -1,0 +1,83 @@
+{
+  "id": 3,
+  "slug": "cluster-snapshot",
+  "title": "What’s running in my GPU cluster?",
+  "track": "Core workflow",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/agent-deployment.md",
+  "scenes": [
+    {
+      "heading": "What did the last team install?",
+      "sub": "The handover only says GPU cluster",
+      "visual": "incident",
+      "items": [
+        "Inherited cluster",
+        "Incomplete runbook",
+        "First install decision"
+      ],
+      "detail": "Runbook: GPU cluster",
+      "result": "Need observed facts",
+      "voice": [
+        "You inherit a GPU cluster, and the handover only says it has GPUs.",
+        "Before you choose a recipe, find out what is actually running."
+      ]
+    },
+    {
+      "heading": "Ask the running cluster",
+      "sub": "Capture it against the right kubeconfig",
+      "visual": "probe",
+      "items": [
+        "Kubeconfig",
+        "Snapshot agent",
+        "Worker node"
+      ],
+      "detail": "aicr snapshot",
+      "result": "Agent runs as a Kubernetes Job",
+      "voice": [
+        "Run AICR snapshot against the kubeconfig for this cluster.",
+        "The CLI starts a Kubernetes Job with the snapshot agent, which reads cluster state and inspects a worker node."
+      ]
+    },
+    {
+      "heading": "Read what the agent found",
+      "sub": "Illustrative snapshot",
+      "visual": "inspect",
+      "items": [
+        "GPU model",
+        "OS and kernel",
+        "Installed operators"
+      ],
+      "detail": "Example GPU model: H100",
+      "result": "Observed cluster state",
+      "voice": [
+        "The snapshot records hardware, the operating system and kernel, the Kubernetes version, and installed components.",
+        "In this example, the record identifies an H100 rather than leaving the accelerator to guesswork."
+      ]
+    },
+    {
+      "heading": "Keep that observation",
+      "sub": "Save it for the next decision",
+      "visual": "trace",
+      "items": [
+        "Snapshot file",
+        "Recipe input",
+        "Readiness check"
+      ],
+      "detail": "File or ConfigMap",
+      "result": "Reuse without collecting again",
+      "voice": [
+        "Save the snapshot to a file or a Kubernetes ConfigMap.",
+        "Use the same observation to supply cluster facts when generating a recipe, then use it again for the readiness check."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    25,
+    39,
+    53
+  ],
+  "viewer": "GPU cluster operator",
+  "payoff": "Replace an incomplete handover with a reusable snapshot that records the GPU, node software, and installed components."
+}

@@ -196,10 +196,12 @@ transitions:
           - id: stable-kebab-case-id
             description: What to do.
             reason: Why, and what happens if you skip it.
+          - id: apply          # manual: the deployer's apply, named exactly this
+            description: Re-run install.sh (helm) or helmfile apply (helmfile).
       - steps:                 # omit `deployers` for the remainder: every
                                # deployer no group names, terraform included
-          - id: reconcile
-            description: Sync as usual.
+          - id: apply
+            description: Apply the regenerated bundle with your deployer.
 ```
 
 ### `summary` is not a release note
@@ -274,6 +276,19 @@ Write the steps a given deployer needs in that deployer's group, even when they
 duplicate another group's. A group is one ordered sequence a reader follows top
 to bottom, not a fragment to be assembled. Step ids may repeat across groups,
 since a consumer addresses a step as (deployer, id).
+
+**Name a `manual` group's apply step `apply`.** In every group of a `manual`
+record, the step where the deployer applies the regenerated bundle has the id
+`apply`, exactly once: the steps before it are done first, the steps after it
+once the new version is running. The AICR Operator performs that step itself
+and holds the steps after it until an approver acknowledges them; a record that
+names no `apply` step makes it hold every step. Split a step that applies and
+then checks, and add the step where the apply is only implied.
+`TestManualRecordsNameTheirApplyStep` in `pkg/recipe` enforces this. A
+component that only one deployer can carry, such as runai-cluster, whose other
+groups only redirect to it and apply nothing, is listed with that deployer in
+`applyStepExempt` in `pkg/recipe/upgrade_records_test.go`; only the group for
+that deployer is checked.
 
 The remainder is a convenience, not a default. A step written for Flux or Argo
 CD reads wrong under `terraform`, which also lands there unless a group names
@@ -456,7 +471,8 @@ aicr upgrade-check --from "${OLD_RECIPE}" --to "${NEW_RECIPE}" --deployer helm
 ```
 
 The gate runs every well-formedness rule over every record the registry
-references, then both coverage checks above against the merge base with
+references, checks each `manual` group's `apply` step, then both coverage
+checks above against the merge base with
 `upstream/main` when your clone has that remote, else `origin/main`; set
 `AICR_UPGRADE_BASE_REF` to compare against another ref, and fetch the base
 first, since a stale one reports moves that are already on `main`. CI runs it

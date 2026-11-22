@@ -60,7 +60,8 @@ type MirroredChart struct {
 // fetched over HTTPS, or over HTTP from a host in PlainHTTPHosts. The
 // archive may be on another host than the index: chart-releaser
 // repositories keep theirs on github.com.
-func (c *Client) MirrorHTTPChart(ctx context.Context, up UpstreamChart, target Repository) (*MirroredChart, error) {
+func (c *Client) MirrorHTTPChart(ctx context.Context, up UpstreamChart, target Repository) (_ *MirroredChart, err error) {
+	defer observe(opMirrorHTTPChart, &err)
 	base, err := url.Parse(up.Repository)
 	if err != nil || base.Host == "" || !c.allowedScheme(base) {
 		return nil, invalid("upstream repository %q must be an HTTPS URL, or HTTP to a host configured for plain HTTP", up.Repository)
@@ -98,7 +99,7 @@ func (c *Client) MirrorHTTPChart(ctx context.Context, up UpstreamChart, target R
 		return nil, invalid("archive holds chart %s %s, want %s %s", meta.Name, meta.Version, up.Chart, up.Version)
 	}
 	repo := target.Child(up.Chart)
-	digest, err := c.PushChart(ctx, repo, archive)
+	digest, err := c.pushChart(ctx, repo, archive, meta, meta.Tag())
 	if err != nil {
 		return nil, err
 	}

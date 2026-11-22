@@ -61,14 +61,17 @@ transitions:
               runai-cluster cluster-values.yaml to the new token.
             reason: >-
               install.sh refuses to run Helm while that value is empty.
-          - id: rerun-install
+          - id: apply
             description: >-
               Re-run deploy.sh, or the runai-cluster install.sh, within two
-              hours of issuing the token. Then clear the token from
-              cluster-values.yaml.
+              hours of issuing the token.
             reason: >-
-              Moves runai-cluster to 3.0.24. Clearing the value keeps the token
-              from sitting at rest on the install machine.
+              Moves runai-cluster to 3.0.24.
+          - id: clear-token
+            description: >-
+              Clear the token from cluster-values.yaml.
+            reason: >-
+              Keeps the token from sitting at rest on the install machine.
       - steps:
           - id: use-helm-deployer
             description: >-

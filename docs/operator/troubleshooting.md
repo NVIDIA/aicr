@@ -23,6 +23,7 @@ reason and message.
 | `EngineMissing`, `ProjectMissing`; `Unauthorized` on `EngineAvailable` | [Argo CD not available](#argo-cd-not-available) |
 | `AwaitingApproval`, `AwaitingAcknowledgement` | [Waiting for approval](#waiting-for-approval) |
 | `TransitionBlocked` | [Transition blocked](#transition-blocked) |
+| `ForeignObject` | [Application name taken](#application-name-taken) |
 | `InventoryDrift`, `StepUnknown`, `MovedReleaseMissing`, `EngineSuspensionRefused` | [Rollout stalled](#rollout-stalled) |
 | `RolloutFailed`, `RolloutExpired`, `RolloutRevoked`; `ForeignObject` on `Ready` | [Rollout failed, expired or revoked](#rollout-failed-expired-or-revoked) |
 | `ValidationUnavailable` | [Validation](#validation) |
@@ -83,11 +84,15 @@ kubectl logs -n aicr-jobs "job/<job>"
 | --- | --- | --- |
 | 2 | `AICRInvalidRequest` | Not retried; AICR refused the input (an unsupported OS, a recipe constraint). Change the input |
 | 3 | `AICRNotFound` | Not retried; usually no recipe matches the criteria |
-| 4 | `AICRUnauthorized` | Retried after a backoff, three runs in all, then stalled; usually registry permissions for a pushing Job, or a ServiceAccount recreated moments before |
+| 4 | `AICRUnauthorized` | Retried after a backoff, three runs in all, then stalled; usually registry permissions for a pushing Job, or a ServiceAccount recreated moments before. While it waits, the message reads `retrying after an authorization failure` |
 | 5, 6, 7, 9 | none: `Resolving`, `retrying after a transient failure` | Retried with backoff from 10 seconds to 5 minutes, without a bound |
 | 1, 8, other | `AICRInternal` | Three runs for the same input, then stalled |
 | none (deadline, a pod that never started) | `AICRTimeout` | Three runs for the same input, then stalled. A pod evicted by a drain or node repair is replaced within the run and spends nothing. The message keeps the last reason the pod was not running (`last: Job <name> is not scheduled: …`) |
 | none (`InvalidImageName`, `CreateContainerConfigError`) | `AICRInvalidRequest` | Not retried: the cluster can never start the container as configured. Fix the AICR image reference or the missing configuration, then request a snapshot |
+
+Deployment validation is stricter: it is run at most three times, and only
+after exits 5, 6, 7 or 9. Any other failed run ends the rollout
+([Validation](#validation)).
 
 While a run waits, the runtime's message names its Job and why its pod is
 not running, instead of `AICR Jobs are running`:
@@ -228,9 +233,12 @@ Nothing is written to Argo CD while the engine is unavailable. See
 ## Waiting for approval
 
 `Stalled=True` with `AwaitingAcknowledgement` means a `manual` release is
-applied and its record has steps after the apply: do them (`kubectl aicr
-describe` lists them under "Recorded steps"), then `kubectl aicr acknowledge`
-the rollout. Nothing further starts until then.
+applied and its record has steps after its `apply` step: do them
+(`kubectl aicr describe` lists them under "Recorded steps"), then
+`kubectl aicr acknowledge` the rollout. Nothing further starts until then. A
+record that names no `apply` step lists all of its steps here, since the
+operator cannot tell which follow the apply; confirm the earlier ones were
+done too.
 
 `Stalled=True` with `AwaitingApproval` means a rollout needs an approver.
 Nothing has been written. Approve it with `kubectl aicr approve`
@@ -254,6 +262,51 @@ migration the operator does not perform: AICR assessed a component `blocked`,
 or a release would change namespace or chart name. No rollout is created. Return to a plan without that change (revert the input, or
 [pin](operations.md#rolling-back-by-pinning) the active plan); a supported
 migration is a separate procedure, outside the operator.
+
+## Application name taken
+
+Before it creates a rollout, the operator checks the name of every release the
+target plan would install, that is, every release of the plan that the runtime
+does not already own. If an Application with one of those names exists
+without the operator's labels and this runtime's UID annotation, the runtime
+stalls with `ForeignObject` and names it. No rollout is created, so nothing
+of the target plan is applied; the active plan's releases stay in place and
+are still repaired. The operator never writes or deletes an Application it
+does not own.
+
+How to clear it depends on what the Application deploys:
+
+- **Something else.** Recreate it under another name, or remove it.
+- **This component**, as a child Application written by
+  `aicr bundle --deployer argocd` does by default, under the release's name.
+  Release it from its parent first: the parent's automated sync recreates a
+  child that is only deleted, and the stall never clears. Then remove it. Do
+  not rename it, which leaves two Applications writing the same resources
+  ([what to leave alone](argocd.md#what-to-leave-alone)).
+
+Deleting an Application that carries a
+`resources-finalizer.argocd.argoproj.io` finalizer, with or without its
+`/foreground` or `/background` suffix, also deletes the resources it manages.
+Removing the finalizer first, or deleting with
+`argocd app delete <name> --cascade=false`, leaves them in the cluster, still
+tracked under the Application's name. Once the stall clears, the release's
+Application has that name, takes them over, and prunes those its release does
+not render. To keep such a resource, first annotate it
+`argocd.argoproj.io/sync-options: Prune=false`, which holds under any
+tracking method, or remove what Argo CD tracks it by: the
+`argocd.argoproj.io/tracking-id` annotation, or under label tracking the
+instance label (`app.kubernetes.io/instance` unless configured otherwise).
+
+The stall clears at the next reconcile, with no retry, and the rollout is
+then created as any other is: after the stabilization window, and not while
+the runtime is paused or the engine suspended. An Application an earlier
+runtime left carries that
+runtime's UID and stalls with
+[`OrphanedObjectsPresent`](#orphaned-objects-and-re-adoption) instead.
+
+An Application that takes a release's name after the rollout was created is
+not caught here. It fails the rollout at that release's step
+([Rollout failed, expired or revoked](#rollout-failed-expired-or-revoked)).
 
 ## Rollout stalled
 
@@ -330,7 +383,7 @@ even when an Application's last operation still shows the failed sync
 | Message | Cause | Next |
 | --- | --- | --- |
 | `release <id>: SyncFailed` or `SyncError` | Argo CD's sync failed. The message continues with Argo CD's own error, folded to one line and cut to 240 characters (`release <id>: SyncFailed: <error>`) | Read the error in the message; `kubectl -n argocd get application <id> -o yaml` (`status.operationState`, `status.conditions`) has the full text. Fix, then retry. For a failed hook, see the note below this table |
-| `[CONFLICT] Application argocd/<name> exists without this runtime's ownership` | An Application with the release's name exists without the operator's labels and this runtime's UID annotation (`ForeignObject`); the operator never writes or deletes it | Remove or rename it, then retry. If an earlier runtime left it, [adopt](#orphaned-objects-and-re-adoption) instead. On an active-plan release it shows as `Ready=False` with `ForeignObject` |
+| `[CONFLICT] Application argocd/<name> exists without this runtime's ownership` | An Application took the release's name after the rollout was created, without the operator's labels and this runtime's UID annotation (`ForeignObject`); the operator never writes or deletes it. One that exists earlier [stalls the runtime](#application-name-taken) before a rollout is created | Remove or rename it, then retry. If an earlier runtime left it, [adopt](#orphaned-objects-and-re-adoption) instead. On an active-plan release it shows as `Ready=False` with `ForeignObject` |
 | `release <id> not ready within 30m0s (<reason>)` | The release did not become ready at its current revision within `actionTimeout`; the reason is the last observation, such as `HealthProgressing`, `HealthDegraded`, or `SpecDrifted` when its Application was edited while the step ran | Inspect the component's workloads in its namespace; fix, then retry. Raise `spec.rollout.actionTimeout` if the component is slow but healthy |
 | `release <id> not removed within …` | Argo CD did not finish deleting the release's resources | See [Argo CD Application](#argo-cd-application) |
 | `the approval expired` | The approval expired before every step ran | Retry, and approve with a longer `--expires` |
@@ -360,13 +413,53 @@ rollout is in `Validating`:
 | --- | --- |
 | `deployment validation is not installed (validation.enabled)` | Install the validation identities (`validation.enabled: true` with `aicr.validatorImages`) or set `spec.validation.deployment: Disabled`. The runtime stalls before any step; a rollout created while validation was installed stalls in `Validating` |
 | `plan <digest> records no recipe to validate against` | The rollout targets a plan rebuilt from Applications and was created by an operator that predates `PlanWithoutRecipe`; set `Disabled` for this rollout, or roll to a resolved plan. Current operators refuse such a rollout before any step |
-| `taking the deployment snapshot` (rollout message, not a stall) | Validation waits for the snapshot the rollout takes after its last step; it runs in `aicr-discovery` like discovery's. If it fails, the rollout ends `Failed` with `the deployment snapshot failed: <cause>`: fix the cause as for a discovery snapshot, then retry |
+| `taking the deployment snapshot` (rollout message, not a stall) | Validation waits for the snapshot the rollout takes after its last step; it runs in `aicr-discovery` like discovery's. The message continues with `; retrying after a transient failure: <cause>` while a failed run waits for its next one. If it fails, the rollout ends `Failed` with `the deployment snapshot failed: <cause>`: fix the cause as for a discovery snapshot, then retry |
+
+**Validation is retried.** A transient exit (5, 6, 7 or 9: timeout,
+unavailable, rate limited, canceled) means AICR could not finish the run.
+AICR can exit that way after its checks ran, when pushing or signing the
+evidence fails, so the operator first reads the evidence the run pushed. If
+it records failed checks, or otherwise does not record that validation
+passed, the rollout ends `Failed` on that run and nothing is run again. Its
+message leads with the verdict:
+`deployment validation failed: the evidence run <id> pushed records failed checks`,
+followed by how the run ended. The evidence is bound and recorded as for any
+failed run. Where `validation.signingKey` is set and the run failed before
+signing, it cannot be bound: the message continues with
+`that evidence is not recorded on the rollout` and the evidence digest, and
+`status.validation.evidence` stays empty.
+
+Otherwise the run left no verdict of failure, and the rollout runs validation
+again after a backoff of 10 or 20 seconds, without a new approval. That
+includes a run that pushed nothing, and evidence that cannot be read as a
+verdict. The rollout stays `Validating`, and its message reads
+`deployment validation run <id> failed; retrying after a transient failure: <cause>`.
+The runtime's `Reconciling` message carries the same cause. While the
+registry does not answer or refuses the operator's credential, no run starts:
+the rollout's message says the run failed and that
+`its evidence cannot be read yet`, and the runtime records `ReconcileFailed`
+Events until the evidence can be looked for.
+
+Validation is run at most three times: a third transient exit ends the
+rollout `Failed` with `deployment validation failed after 3 runs`, and any
+other failed run ends it on that run. A failed run's Job stays while the next
+run runs and is deleted when the run after that starts; all of them are
+deleted when the rollout ends. Each failed run is recorded as an
+`AICRRunFailed` Event on the runtime, which the cluster keeps only for its
+Event TTL (an hour by default), and as an `AICR run failed` line in the
+operator's log. Retries lengthen `Validating`, never past
+`spec.rollout.deadline`: each run is bounded by the hour a validation Job is
+allowed and by the time the rollout has left.
 
 **Validation failed.** The rollout ends `Failed`. AICR exits 8 when checks
 fail, after pushing their evidence, and 2 when it refuses the recipe or its
-readiness pre-flight. `status.validation` names the Job, the run and, when
-evidence was pushed, its reference. Read the Job in `aicr-validation`, fix
-the cause, and retry: a retry is a new rollout and a new run. Validation
+readiness pre-flight. `status.validation` names the Job and the run, unless
+no run could be started, and the evidence reference when evidence was bound.
+The rollout's end deletes its validation Jobs, so read the cause in the
+rollout's message, the `AICRRunFailed` Event on the runtime (kept for the
+cluster's Event TTL) and the operator's log; a Job in `aicr-validation` can
+be read only while its rollout is still `Validating`. Fix the cause, and
+retry: a retry is a new rollout and a new run. Validation
 checks the components the bundle deploys: it runs against the recipe the
 bundle records, so a component an override turns off is not required.
 
@@ -458,10 +551,18 @@ Deleting the runtime runs its `operator.aicr.run/cleanup` finalizer.
   `Application` CRD is served; on this path a failure to list Applications is
   reported only in the operator's log. `PlanUnreadable` also blocks it.
 - **`deletionPolicy: Delete`** creates a removal rollout that deletes every
-  release in reverse order. It always needs approval (`AwaitingApproval`). It
-  does not start while the runtime is paused or the engine suspended. If it
-  fails or expires, the runtime is `Stalled` with `RemovalFailed` and keeps the
-  finalizer until a [retry](operations.md#retrying).
+  release, dependents first. The order is the reverse of an install order:
+  the active plan's releases in plan order, then any others, each placed
+  after every release its Application's `depends-on` and `readiness-for`
+  annotations name. It comes from the live Applications, so it holds when the
+  active plan cannot be read. A dependency that is missing from the
+  annotations is not enforced, and releases in a dependency cycle cannot all
+  go before what they follow. The removal runs either way, and its steps are
+  listed on the rollout before approval. It always needs approval
+  (`AwaitingApproval`). It does not start while the runtime is paused or the
+  engine suspended. If it fails or expires, the runtime is `Stalled` with
+  `RemovalFailed` and keeps the finalizer until a
+  [retry](operations.md#retrying).
 
 Removing the finalizer by hand is safe for the stack: nothing has an owner
 reference, so nothing cascades, and Argo CD keeps reconciling. The Applications

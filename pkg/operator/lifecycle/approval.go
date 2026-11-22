@@ -258,6 +258,11 @@ func describeReport(ctx context.Context, c client.Reader, namespace string, ref 
 	return nil
 }
 
+// noApplyStepNote follows a manual record that names no apply step, whose
+// steps the rollout holds for acknowledgement after the apply, all of them.
+const noApplyStepNote = "(this record names no apply step: do the steps meant for before the upgrade before approving; " +
+	"once the release is applied the rollout waits for `kubectl aicr acknowledge` of all of them)"
+
 // describeRecordedSteps lists each transition record's precondition and
 // steps. The operator performs only the apply; approving the rollout takes
 // on the precondition and every other step.
@@ -278,6 +283,11 @@ func describeRecordedSteps(report *aicrjob.UpgradeReport, w io.Writer) {
 		}
 		for _, s := range ch.Steps {
 			fmt.Fprintf(w, "    %s: %s\n", s.ID, s.Description)
+		}
+		if ch.Change == "version" && ch.Assessment() == v1alpha1.AssessmentManual && len(ch.Steps) > 0 &&
+			!slices.ContainsFunc(ch.Steps, func(s aicrjob.UpgradeStep) bool { return s.ID == aicrjob.ApplyStepID }) {
+
+			fmt.Fprintf(w, "    %s\n", noApplyStepNote)
 		}
 	}
 }

@@ -73,7 +73,7 @@ const (
 	// stage, then stall.
 	RetryBounded Retry = iota
 	// RetryTransient: AICR exited timeout, unavailable, rate limited or
-	// canceled; new runs follow with backoff, without a bound.
+	// canceled; new runs follow with backoff, and the class sets no bound.
 	RetryTransient
 	// RetryNever: invalid input or not found; the stage stalls until its
 	// input changes.

@@ -127,6 +127,7 @@ func setupControllers(ctx context.Context, mgr ctrlmanager.Manager, cfg *config.
 	rolloutController := &controller.RolloutReconciler{
 		Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Config: cfg, Engine: engine, Now: time.Now,
 		Events: mgr.GetEventRecorder(argocd.FieldManager), Registry: reg, JobCredentials: provider,
+		Liveness: controller.NewLiveness(),
 	}
 	// The chart passes the pod's own name, so evidence can bind the digest
 	// the operator runs as.
@@ -142,6 +143,7 @@ func setupControllers(ctx context.Context, mgr ctrlmanager.Manager, cfg *config.
 		metrics.Registry.MustRegister(refresher.Collectors()...)
 	}
 	metrics.Registry.MustRegister(controller.Collectors()...)
+	metrics.Registry.MustRegister(registry.Collectors()...)
 	return rolloutController.SetupWithManager(mgr)
 }
 

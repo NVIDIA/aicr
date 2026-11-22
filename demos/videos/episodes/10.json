@@ -1,0 +1,83 @@
+{
+  "id": 10,
+  "slug": "detect-cluster-drift",
+  "title": "What changed since last week?",
+  "track": "Core workflow",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/cli-reference.md#aicr-diff",
+  "scenes": [
+    {
+      "heading": "The training cluster changed",
+      "sub": "Start from the last known good snapshot",
+      "visual": "incident",
+      "items": [
+        "Stable last week",
+        "Changed today",
+        "Saved baseline"
+      ],
+      "detail": "baseline.yaml",
+      "result": "A reference point",
+      "voice": [
+        "Last week the training cluster behaved as expected. Today it does not.",
+        "A saved snapshot gives the on-call engineer a baseline instead of a guess."
+      ]
+    },
+    {
+      "heading": "Capture a fresh observation",
+      "sub": "Compare the same cluster context",
+      "visual": "probe",
+      "items": [
+        "Cluster context",
+        "Baseline snapshot",
+        "Target snapshot"
+      ],
+      "detail": "aicr diff --baseline … --target …",
+      "result": "Two snapshots compared",
+      "voice": [
+        "Check that the kubeconfig points to the same cluster, then take a fresh snapshot.",
+        "Pass the saved baseline and the new target into AICR diff."
+      ]
+    },
+    {
+      "heading": "Find the changed reading",
+      "sub": "Illustrative diff",
+      "visual": "compare",
+      "items": [
+        "Baseline kernel",
+        "Current kernel",
+        "Changed entry"
+      ],
+      "detail": "Example: kernel version changed",
+      "result": "Before and after values",
+      "voice": [
+        "The report shows earlier and current values together.",
+        "In this example, a kernel version changed, so the engineer can investigate that reading and see any added or removed entries."
+      ]
+    },
+    {
+      "heading": "Surface drift in CI",
+      "sub": "Decide when drift should interrupt the job",
+      "visual": "gate",
+      "items": [
+        "Scheduled comparison",
+        "Drift report",
+        "CI status"
+      ],
+      "detail": "--fail-on-drift",
+      "result": "Nonzero exit when drift is detected",
+      "voice": [
+        "A pipeline can save the structured diff and use the fail on drift flag.",
+        "That makes drift interrupt the job while preserving the report for investigation."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    24,
+    39,
+    53
+  ],
+  "viewer": "On-call cluster operator",
+  "payoff": "Use a saved baseline and fresh snapshot to identify one changed kernel reading and flag drift in CI."
+}

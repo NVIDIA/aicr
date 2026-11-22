@@ -97,6 +97,9 @@ fi
 SPECS=(
   "update-addlicense-checksums|addlicense"
   "update-chainsaw-checksums|chainsaw"
+  "update-clamav-checksums|clamav"
+  "update-gitleaks-checksums|gitleaks"
+  "update-grype-checksums|grype"
   "update-helm-diff-checksums|helm_diff"
   "update-helmfile-checksums|helmfile"
   "update-oasdiff-checksums|oasdiff"

@@ -206,6 +206,7 @@
             "any",
             "b200",
             "b300",
+            "gb10",
             "gb200",
             "gb300",
             "h100",
@@ -370,6 +371,9 @@
                     "properties": {
                       "component": {
                         "type": "string"
+                      },
+                      "crdOwnership": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -453,6 +457,40 @@
             "bindingsDigest": {
               "type": "string"
             },
+            "crdOwnership": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "changed": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "owners": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "policy": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "changed",
+                "owners",
+                "policy"
+              ]
+            },
             "ignored": {
               "type": [
                 "array",
@@ -531,6 +569,7 @@
             "applied",
             "baseCatalogDigest",
             "bindingsDigest",
+            "crdOwnership",
             "ignored",
             "inventoryDigest",
             "verification"

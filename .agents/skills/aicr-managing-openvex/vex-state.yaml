@@ -81,10 +81,10 @@ deliberate_exclusions:
       leg (or grype gaining manifest-wide scanning), at which point the arm64
       result is measured and the inference above is no longer load-bearing
     correction_2026_09_21: >-
-      Scope this to the WEEKLY scan only. The release scan in
-      .github/workflows/on-tag.yaml already has a per-arch leg: its matrix
-      crosses each image with linux/amd64 and linux/arm64 and sets
-      `GRYPE_PLATFORM: ${{ matrix.platform.name }}`, and the v0.22.0-rc1 run
+      Scope this to the WEEKLY scan only. The release scan already has a
+      per-arch leg (now .github/workflows/check-images.yaml: its matrix
+      crosses each image with linux/amd64 and linux/arm64 and
+      .github/actions/image-checks passes `--platform` to grype), and the v0.22.0-rc1 run
       produced a distinct `anchore-image-aiperf-bench-arm64` SARIF category. So
       arm64 IS measured at release time, and an arm64-only finding will block a
       release even though the weekly scan never sees it. The `invalidated_by`

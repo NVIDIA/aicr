@@ -1,0 +1,83 @@
+{
+  "id": 40,
+  "slug": "launch-distributed-training",
+  "title": "Launch distributed training",
+  "track": "Workloads",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/demos/cuj1-training.md",
+  "scenes": [
+    {
+      "heading": "Prove workers span two nodes",
+      "sub": "Adapt the documented EKS smoke test",
+      "visual": "compare",
+      "items": [
+        "One-node smoke",
+        "Two-node goal",
+        "GPU training"
+      ],
+      "detail": "Illustrative target: two EKS nodes",
+      "result": "Separate workers by node",
+      "voice": [
+        "A one-GPU smoke test shows the model can start.",
+        "You want to adapt that flow for two separate EKS nodes."
+      ]
+    },
+    {
+      "heading": "Install a training-ready stack",
+      "sub": "Resolve the Kubeflow training recipe",
+      "visual": "compile",
+      "items": [
+        "EKS H100 Ubuntu",
+        "Kubeflow training",
+        "ClusterTrainingRuntime"
+      ],
+      "detail": "aicr bundle",
+      "result": "Training runtime applied",
+      "voice": [
+        "Choose the Kubeflow training recipe for EKS, H100, and Ubuntu.",
+        "Bundle it with the target GPU placement, then apply the generated files through your deployer."
+      ]
+    },
+    {
+      "heading": "Set the job’s worker shape",
+      "sub": "Submit a workload through Kubeflow Trainer",
+      "visual": "queue",
+      "items": [
+        "Two-node TrainJob",
+        "GPUs per node",
+        "Training runtime"
+      ],
+      "detail": "spec.trainer.numNodes: 2",
+      "result": "Two worker placements to check",
+      "voice": [
+        "Submit a TrainJob with two nodes and a GPU request per node.",
+        "Reference the training runtime and use a workload image that can run the distributed job."
+      ]
+    },
+    {
+      "heading": "Check where the workers ran",
+      "sub": "Read worker pods and job completion",
+      "visual": "inspect",
+      "items": [
+        "Worker pod A",
+        "Worker pod B",
+        "Completed TrainJob"
+      ],
+      "detail": "kubectl get pods -o wide",
+      "result": "Example: worker-a and worker-b",
+      "voice": [
+        "Check pod placement and follow both workers’ logs.",
+        "For a successful two-node run, you want to see distinct GPU nodes and a completed TrainJob."
+      ]
+    }
+  ],
+  "viewer": "Training engineer extending a Kubeflow smoke test",
+  "payoff": "A two-node adaptation makes the job shape explicit and shows how to verify that workers land on separate GPU nodes.",
+  "edges": [
+    0,
+    11,
+    24,
+    39,
+    53
+  ]
+}

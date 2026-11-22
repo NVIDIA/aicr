@@ -468,6 +468,10 @@ func TestArtifactSavedInputChecks(t *testing.T) {
 	}
 	changed := p.ArtifactProvenance()
 	changed.InventoryDigest = "sha256:" + strings.Repeat("f", 64)
+	oldRecord := p.ArtifactProvenance()
+	oldRecord.CRDOwnership = nil
+	retainedRecord := p.ArtifactProvenance()
+	retainedRecord.Applied[0].Chart.CRDOwnership = "retain"
 	tests := []struct {
 		name     string
 		record   *artifact.Provenance
@@ -479,6 +483,8 @@ func TestArtifactSavedInputChecks(t *testing.T) {
 		{"missing inputs", p.ArtifactProvenance(), nil, "artifact-inputs-required"},
 		{"matching", p.ArtifactProvenance(), p, ""},
 		{"mismatch", changed, p, "artifact-inputs-mismatch"},
+		{"older provenance", oldRecord, p, "artifact-inputs-mismatch"},
+		{"retention changed", retainedRecord, p, "artifact-inputs-mismatch"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -782,6 +788,47 @@ func TestStaticArtifactInactiveDoesNotCaptureCatalog(t *testing.T) {
 	errorstest.WantReportedCode(t, invalidErr, errors.ErrCodeInvalidRequest)
 }
 
+func TestStaticArtifactInactiveEnforcesCRDOwnershipLayer(t *testing.T) {
+	tests := []struct {
+		name, binding string
+		valid         bool
+	}{
+		{"external entry", "runner-chart: {component: runner, crdOwnership: retain}", true},
+		{"embedded-only entry", "runner-chart: {component: nvsentinel, crdOwnership: retain}", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files, _ := artifactCatalogFixture()
+			bindings := []byte(strings.Replace(string(files[artifactBindingsPath]), "runner-chart: {component: runner}", tt.binding, 1))
+			if string(bindings) == string(files[artifactBindingsPath]) {
+				t.Fatal("fixture binding not replaced")
+			}
+			check := func(err error) {
+				t.Helper()
+				if tt.valid {
+					if err != nil {
+						t.Fatal(err)
+					}
+					return
+				}
+				if err == nil || !strings.Contains(err.Error(), "artifact-target-invalid") {
+					t.Fatalf("got %v", err)
+				}
+			}
+			newProvider := func(files map[string][]byte) DataProvider {
+				provider, err := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), LayeredProviderConfig{ExternalDir: writeArtifactCatalog(t, files)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return provider
+			}
+			check(validateStaticArtifactInput(t.Context(), newProvider(files), artifact.Options{}, artifact.BindingsKind, bindings))
+			files[artifactBindingsPath] = bindings
+			check(validateStaticArtifacts(t.Context(), newProvider(files), artifact.Options{}))
+		})
+	}
+}
+
 func TestStaticArtifactCandidateMergesEmbeddedBindings(t *testing.T) {
 	candidate := []byte("apiVersion: aicr.run/v1beta1\nkind: ArtifactBindings\ncharts:\n  duplicate-cert-manager: {component: cert-manager}\nimages: {}\n")
 	for _, externalOnly := range []bool{false, true} {
@@ -827,5 +874,93 @@ func TestArtifactExternalOnlyExcludesEmbeddedInputs(t *testing.T) {
 	}
 	if _, err := snapshot.ReadFile(t.Context(), "components/gpu-operator/values.yaml"); err == nil {
 		t.Fatal("external-only composition exposed embedded values")
+	}
+}
+
+func TestArtifactCRDOwnership(t *testing.T) {
+	for _, tt := range []struct {
+		name, retain, policy                                      string
+		exact, relocate, embeddedBinding, embeddedEntry, inactive bool
+	}{
+		{name: "changed", policy: "disabled"},
+		{name: "retained", retain: "retain", policy: "retained"},
+		{name: "mixed", retain: "retain", policy: "disabled"},
+		{name: "unchanged", exact: true, policy: "unchanged"},
+		{name: "unchanged retain", exact: true, retain: "retain", policy: "unchanged"},
+		{name: "relocated retain", exact: true, relocate: true, retain: "retain", policy: "retained"},
+		{name: "relocated default", exact: true, relocate: true, policy: "disabled"},
+		{name: "embedded binding", retain: "retain", embeddedBinding: true},
+		{name: "embedded entry", retain: "retain", embeddedEntry: true},
+		{name: "inactive retain", retain: "retain", inactive: true, policy: "disabled"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			files, inventory := artifactCatalogFixture()
+			embedded := map[string][]byte{}
+			var registry ComponentRegistry
+			if err := yaml.Unmarshal(files[registryFileName], &registry); err != nil {
+				t.Fatal(err)
+			}
+			registry.Components[0].OwnsCRDsExcludeSubcharts = []string{"shared"}
+			if tt.exact {
+				registry.Components[0].Helm = HelmConfig{DefaultRepository: "oci://new.test/charts", DefaultChart: "runner", DefaultVersion: "v2.0.0_build.1", DefaultDigest: "sha256:" + strings.Repeat("b", 64)}
+			}
+			if tt.relocate {
+				registry.Components[0].Helm.DefaultRepository = "oci://old.test/charts"
+			}
+			var err error
+			files[registryFileName], err = yaml.Marshal(registry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.retain != "" {
+				target := "runner-chart: {component: runner}"
+				replacement := "runner-chart: {component: runner, crdOwnership: retain}"
+				if tt.inactive {
+					target = "absent-chart: {component: stale-component}"
+					replacement = "absent-chart: {component: other, crdOwnership: retain}"
+				}
+				files[artifactBindingsPath] = []byte(strings.Replace(string(files[artifactBindingsPath]), target, replacement, 1))
+			}
+			if tt.name == "mixed" {
+				files[artifactBindingsPath] = []byte(strings.Replace(string(files[artifactBindingsPath]), "absent-chart: {component: stale-component}", "absent-chart: {component: other}", 1))
+				inventory = append(inventory, []byte("- name: absent-chart\n  type: chart\n  reference: oci://new.test/charts/other\n  version: v1.0.0\n  manifestDigest: sha256:"+strings.Repeat("a", 64)+"\n  archiveDigest: sha256:"+strings.Repeat("b", 64)+"\n")...)
+			}
+			if tt.embeddedBinding {
+				embedded[artifactBindingsPath] = files[artifactBindingsPath]
+				delete(files, artifactBindingsPath)
+			}
+			if tt.embeddedEntry {
+				embedded[registryFileName] = files[registryFileName]
+				files[registryFileName] = []byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n")
+			}
+			p, err := composeCapturedArtifacts(t.Context(), embedded, files, inventory, artifact.Options{})
+			if tt.policy == "" {
+				if err == nil || !strings.Contains(err.Error(), "artifact-target-invalid") {
+					t.Fatalf("got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy := p.provenance.CRDOwnership
+			if policy.Policy != tt.policy || strings.Join(policy.Owners, ",") != "other,runner" {
+				t.Fatalf("policy = %+v", policy)
+			}
+			if err := artifact.ValidateProvenance(&p.provenance); err != nil {
+				t.Fatal(err)
+			}
+			if err := yaml.Unmarshal(p.files[registryFileName], &registry); err != nil {
+				t.Fatal(err)
+			}
+			for _, component := range registry.Components {
+				if component.OwnsCRDs != (tt.policy != "disabled") {
+					t.Fatalf("owner %s = %v", component.Name, component.OwnsCRDs)
+				}
+			}
+			if tt.policy != "disabled" && len(registry.Components[0].OwnsCRDsExcludeSubcharts) != 1 {
+				t.Fatal("lost exclusions")
+			}
+		})
 	}
 }
