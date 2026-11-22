@@ -18,12 +18,13 @@
 # dashboards and a Prometheus patch release from 83.7.0 (the AKS pin), so the
 # steps are about the values change.
 #
-# No AICR release pins 84.5.0, so a released cluster crosses the reduction and
-# the later chart bump in one upgrade. The reduction is the only boundary that
-# asks anything of an operator, so its to range reaches through the current pin
-# and skips lists the safe boundary inside it. A jump from below 84.5.0 then
-# lands on the reduction steps, and a bundle at the pin carries them, rather
-# than being told to stop at a version AICR never shipped.
+# AICR v1.3.0 is the only release that pins 84.5.0. A cluster on v1.2.0 or
+# earlier (84.4.0, or 83.7.0 on AKS) can upgrade past v1.3.0, and then crosses
+# the reduction and the later chart bump in one upgrade. The reduction is the
+# only boundary that asks anything of an operator, so its to range reaches
+# through the current pin and skips lists the safe boundary inside it. A jump
+# from below 84.5.0 then lands on the reduction steps, and a bundle at the pin
+# carries them, rather than being told to deploy a v1.3.0 bundle on the way.
 #
 # The steps were run for that direct jump on a single-node Kind v1.37.0
 # cluster, 2026-11-15, with the v1.2.0 EKS bundle (84.4.0, Grafana, PVC) as
