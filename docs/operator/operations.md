@@ -411,7 +411,14 @@ aicr:
 For `h100-eks-ubuntu-training-kubeflow` the new recipe adds nktp, in its own
 `nktp` namespace: add `{name: nktp, podSecurity: privileged}` to
 `namespaces.components` in the same chart upgrade, or the operator refuses the
-plan (`NamespaceNotAllowed`) before any rollout. It also moves
+plan (`NamespaceNotAllowed`) before any rollout. nktp also runs its own
+metrics-server, which registers the cluster-wide
+`v1beta1.metrics.k8s.io` APIService. If
+`kubectl get apiservice v1beta1.metrics.k8s.io` shows that another provider
+already serves it, such as the EKS metrics-server add-on, resolve that before
+approving: either add a `spec.overrides` entry that turns nktp's off
+(`component: nktp`, `path: metrics-server.enabled`, `value: false`), or remove
+the other provider. The recipe also moves
 nodewright-operator, which AICR assesses `safe`, and kube-prometheus-stack and
 nvsentinel, which it assesses `manual` with recorded steps, so the rollout
 needs approval. nodewright-operator's record is `safe` but breaking: its drains
