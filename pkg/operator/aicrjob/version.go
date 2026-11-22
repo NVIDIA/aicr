@@ -37,7 +37,7 @@ const (
 const v11 = "v1.1.0"
 
 // SupportsV11 reports whether an AICR version has the v1.1.0 features. A
-// prerelease counts as the release it precedes.
+// prerelease counts as the release with the same major.minor.patch.
 func SupportsV11(version string) bool {
 	return semver.Compare(Core(version), v11) >= 0
 }
@@ -59,7 +59,7 @@ const (
 
 // CheckSupportedVersion rejects an AICR version that CheckDeclaredVersion
 // rejects or whose release is outside the supported range. A prerelease is in
-// range when the release it precedes is.
+// range when the release with the same major.minor.patch is.
 func CheckSupportedVersion(version string) error {
 	if err := CheckDeclaredVersion(version); err != nil {
 		return err
