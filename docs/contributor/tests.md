@@ -621,6 +621,13 @@ CI runs the equivalent, plus a few checks that exist only there — the lychee
 link check on `docs/**`, CodeQL, and the GPU test lanes — so a green local
 `make qualify` makes CI likely to pass, not certain.
 
+`.github/workflows/operator-e2e-commit.yaml` runs the operator's kind e2e
+suite (`make operator-e2e-commit`) against `aicr` built from the commit, on
+pull requests that change AICR or the operator. It extends the operator
+contract check above to the Jobs the operator runs, and is informational, not
+part of `gate`. It skips the deployment-validation test, which binds evidence
+to the pinned release validators; AICR built from a commit names its own.
+
 **Branch lint gate for Go changes.** If a PR changes any `.go` file,
 you must also run:
 

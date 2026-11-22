@@ -1,0 +1,131 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AICR Operator (ADR-027) e2e suite against AICR built from the commit
+# (`make operator-e2e-commit`), on changes to AICR itself: a change to AICR's
+# Job arguments, outputs or image references that the operator cannot read
+# fails on the pull request that makes it, not when the operator adopts the
+# next release. operator-e2e.yaml runs the same suite against the pinned
+# releases. The deployment-validation test that binds evidence to the pinned
+# release validators is skipped here. Informational: merge-gate.yaml's gate
+# does not include it.
+
+name: Operator E2E (commit AICR)
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      # Every package ./cmd/aicr compiles, and the operator.
+      - 'cmd/aicr/**'
+      - 'pkg/**'
+      - 'recipes/**'
+      - 'validators/**'
+      - 'api/operator/**'
+      - 'tests/operator/**'
+      - 'tools/operator-e2e-commit'
+      - 'tools/operator-kind'
+      - 'tools/operator-lib.sh'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.ko.yaml'
+      - '.goreleaser.yaml'
+      - '.settings.yaml'
+      - '.github/workflows/operator-e2e-commit.yaml'
+      - '.github/actions/operator-kind/**'
+      - '.github/actions/load-versions/**'
+      - '.github/actions/prep-kind-runner/**'
+      - '.github/actions/setup-build-tools/**'
+      - '.go-version'
+      - 'kwok/scripts/lib/image-cache.sh'
+      - 'kwok/scripts/lib/preload-image.sh'
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# Push runs key on the SHA, as operator-e2e.yaml's do.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Pulls the ECR Public registry image the kind cluster needs once, into the
+  # cache the KWOK and operator lanes share (kwok/scripts/lib/image-cache.sh).
+  # A cache hit pulls nothing. This lane installs no Argo CD, so it skips the
+  # redis image operator-e2e.yaml also primes.
+  prime-images:
+    name: Prime image cache (${{ matrix.image }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [registry]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve image pins and cache keys
+        id: images
+        run: |
+          set -euo pipefail
+          bash kwok/scripts/lib/image-cache.sh settings .settings.yaml | tee -a "$GITHUB_OUTPUT"
+
+      - name: Cache image tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: /tmp/kwok-image-cache/${{ matrix.image }}
+          key: ${{ steps.images.outputs[format('{0}_key', matrix.image)] }}
+
+      - name: Prime image
+        env:
+          IMAGE: ${{ steps.images.outputs[format('{0}_image', matrix.image)] }}
+          CACHE_DIR: /tmp/kwok-image-cache/${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          bash kwok/scripts/lib/image-cache.sh save "${CACHE_DIR}" "${IMAGE}"
+
+  # The job timeout exceeds the suite's own 30-minute bound plus the build, so
+  # a hung suite fails with Go's goroutine dump and the cleanup still runs.
+  e2e:
+    name: AICR built from the commit on Kubernetes newest
+    needs: [prime-images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the kind cluster
+        uses: ./.github/actions/operator-kind
+        with:
+          kubernetes: newest
+
+      - name: Run e2e tests against AICR built from the commit
+        env:
+          OPERATOR_E2E_REQUIRED: '1'
+        run: make operator-e2e-commit
+
+      - name: Delete kind cluster
+        if: ${{ always() }}
+        run: make operator-kind-down
