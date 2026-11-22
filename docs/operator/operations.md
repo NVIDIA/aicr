@@ -396,27 +396,26 @@ aicr:
     - ghcr.io/nvidia/aicr-validators/performance:v1.x.y@sha256:<digest>
 ```
 
-For example, from v1.1.2 to v1.2.0, the newest release tested in CI:
+For example, from v1.2.0 to v1.3.0, the newest release tested in CI:
 
 ```yaml
 aicr:
-  version: v1.2.0
-  image: ghcr.io/nvidia/aicr:v1.2.0@sha256:5ef145efe98ede9f4da7be3a66304f5fdc95dd31f825295d6a608a39feb0cac9
+  version: v1.3.0
+  image: ghcr.io/nvidia/aicr:v1.3.0@sha256:4c7ac0f9461c14b7d9a4e86d7742b968a25149ed83bcbc52cd87e11d22871304
   validatorImages:
-    - ghcr.io/nvidia/aicr-validators/deployment:v1.2.0@sha256:0e697d829916b20698488666d44ecde9429c7d1c6063c5ade425d2f27845ca95
-    - ghcr.io/nvidia/aicr-validators/conformance:v1.2.0@sha256:8930d96f5bf6cd72058d4496558963a9b67383d4ceb776f44cafd1a7f3259913
-    - ghcr.io/nvidia/aicr-validators/performance:v1.2.0@sha256:35f45febe754141b3f9154fc0af3273c5de6c4a9d68da154d4477ef3dd2f4722
+    - ghcr.io/nvidia/aicr-validators/deployment:v1.3.0@sha256:46f13d013f73280f216c531d6cb758ec15442aa832310635a0d62f81c7c50b51
+    - ghcr.io/nvidia/aicr-validators/conformance:v1.3.0@sha256:1f40feb5e8be3f86dd9cf21cdda7701cf552bb915b8687c952de7604c9446e5a
+    - ghcr.io/nvidia/aicr-validators/performance:v1.3.0@sha256:3e6377cffd2f640c7e201cadd1f18d6a87bcdcb38b1672c4626a89e0dacef98e
 ```
 
-For `h100-eks-ubuntu-training-kubeflow` the new recipe moves
-nvidia-dra-driver-gpu, which AICR assesses `safe`, and nfd, which it assesses
-`manual` with recorded steps, so the rollout needs approval. Its RBAC steps
-apply only when the topology-updater RBAC is managed outside the chart
-(`topologyUpdater.rbac.create=false`). AICR v1.2.0's nfd record has no `apply`
-step, so after nfd is applied the rollout pauses for acknowledgement of all
-three steps. Do `widen-nrt-rbac` before approving; after the pause, if you
-widened the RBAC, do `narrow-nrt-rbac` once every topology-updater Pod runs
-0.20.x and you no longer need a rollback path, then acknowledge.
+For `h100-eks-ubuntu-training-kubeflow` the new recipe adds nktp, in its own
+`nktp` namespace, and moves nodewright-operator, which AICR assesses `safe`,
+and kube-prometheus-stack and nvsentinel, which it assesses `manual` with
+recorded steps, so the rollout needs approval. Do nvsentinel's checks before
+approving; its record ends with its `apply` step, so nothing waits after it.
+AICR v1.3.0's kube-prometheus-stack record names no `apply` step, so after it
+is applied the rollout pauses for acknowledgement of all three steps. Do
+`export` before approving; after the pause, do `clean-up`, then acknowledge.
 
 From v1.0.x, the same chart upgrade also moves validation to the v1.1
 identities: the launcher loses `cluster-admin`, the `aicr-validator`

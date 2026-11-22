@@ -658,7 +658,8 @@ func TestBuildLaneBundle(t *testing.T) {
 // the plan's recipe for upgrade-check and reproduce.
 func TestBuildRecordsTheBundleRecipeForValidation(t *testing.T) {
 	t.Parallel()
-	for _, version := range []string{"v1.0.0", "v1.1.2", "v1.2.0"} {
+	// v1.3.0 adds nktp to the lane bundle.
+	for version, components := range map[string]int{"v1.0.0": 15, "v1.1.2": 15, "v1.2.0": 15, "v1.3.0": 16} {
 		t.Run(version, func(t *testing.T) {
 			t.Parallel()
 			in := buildInput(t)
@@ -690,7 +691,7 @@ func TestBuildRecordsTheBundleRecipeForValidation(t *testing.T) {
 			for _, c := range recipe.ComponentRefs {
 				names = append(names, c.Name)
 			}
-			if len(names) != 15 || slices.Contains(names, "dra-node-labeler") || !slices.Contains(names, "gpu-operator") {
+			if len(names) != components || slices.Contains(names, "dra-node-labeler") || !slices.Contains(names, "gpu-operator") {
 				t.Fatalf("validation recipe components = %v", names)
 			}
 		})

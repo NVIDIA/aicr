@@ -111,7 +111,7 @@ those exact images.
 The chart creates the namespaces the GPU stack deploys into, with their Pod
 Security levels, and keeps them on uninstall; the operator refuses a plan that
 renders into any other namespace (`NamespaceNotAllowed`, naming each release).
-For `h100-eks-ubuntu-training-kubeflow` on AICR v1.0.0, v1.1.2 and v1.2.0 they are:
+For `h100-eks-ubuntu-training-kubeflow` on AICR v1.0.0 through v1.3.0 they are:
 
 | Namespace | Components |
 | --- | --- |
@@ -126,6 +126,7 @@ For `h100-eks-ubuntu-training-kubeflow` on AICR v1.0.0, v1.1.2 and v1.2.0 they a
 | `kubeflow` | kubeflow-trainer and its post-install release |
 | `nvidia-dra-driver` | nvidia-dra-driver-gpu |
 | `nvsentinel` | nvsentinel |
+| `nktp` | nktp (AICR v1.3.0 and later) |
 
 The Pod Security level each needs has not been measured yet. Until then use `privileged`, which admits the host-level agents in GPU
 Operator, the DRA driver, node feature discovery and the monitoring stack.
@@ -160,6 +161,7 @@ namespaces:
     - {name: kubeflow, podSecurity: privileged}
     - {name: nvidia-dra-driver, podSecurity: privileged}
     - {name: nvsentinel, podSecurity: privileged}
+    - {name: nktp, podSecurity: privileged}
 approvers:
   groups: [<approver group>]
 validation:

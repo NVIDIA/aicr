@@ -210,6 +210,41 @@ func TestAssessStepsV120NFDRecord(t *testing.T) {
 	}
 }
 
+// AICR v1.3.0's kube-prometheus-stack record (84.4.0 to 84.5.0) names no
+// apply step, so every step waits to be acknowledged after the apply.
+// nvsentinel's record (1.28.0 to 1.31.0) ends with its apply step, so
+// nothing waits after it.
+func TestAssessStepsV130Records(t *testing.T) {
+	t.Parallel()
+	doc := func(component, namespace, chart string) *plan.Document {
+		return &plan.Document{Releases: []plan.Release{{ID: component, Component: component, TargetNamespace: namespace,
+			Chart:  plan.Chart{Repository: "oci://r/charts/" + component, Digest: plan.DigestOf([]byte(chart))},
+			Values: plan.DigestedRef{Digest: plan.DigestOf([]byte("v1"))}}}}
+	}
+	for _, lane := range []string{"eks", "gke"} {
+		report, err := aicrjob.ParseUpgradeReport(fixture(t, "..", "aicrjob", "testdata", "v1.3.0", "upgrade-check-v1.2.0-to-v1.3.0-"+lane+".json"), "argocd")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			component, namespace, from, to string
+			want                           []string
+		}{
+			{"kube-prometheus-stack", "monitoring", "84.4.0", "84.5.0", []string{"export", "upgrade", "clean-up"}},
+			{"nvsentinel", "nvsentinel", "v1.28.0", "v1.31.0", nil},
+		} {
+			t.Run(lane+"/"+tc.component, func(t *testing.T) {
+				t.Parallel()
+				steps := []v1alpha1.RolloutStep{{Release: tc.component, Operation: v1alpha1.OperationUpgrade}}
+				approval, err := assessSteps(steps, doc(tc.component, tc.namespace, tc.from), doc(tc.component, tc.namespace, tc.to), report)
+				if err != nil || !approval || steps[0].Assessment != v1alpha1.AssessmentManual || !slices.Equal(steps[0].PostApplySteps, tc.want) {
+					t.Fatalf("assessSteps() = %v, %v; step %+v", approval, err, steps[0])
+				}
+			})
+		}
+	}
+}
+
 // A recipe change runs AICR's upgrade-check before the rollout exists; the
 // report is kept, referenced from the rollout, and decides approval. A
 // blocked verdict stalls without a rollout.
