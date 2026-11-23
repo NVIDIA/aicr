@@ -44,6 +44,7 @@ import (
 	"aicr.run/pkg/operator/engine/argocd"
 	operrors "aicr.run/pkg/operator/errors"
 	"aicr.run/pkg/operator/evidence"
+	"aicr.run/pkg/operator/lifecycle"
 	"aicr.run/pkg/operator/plan"
 	"aicr.run/pkg/operator/registry"
 )
@@ -1211,10 +1212,27 @@ func (r *RolloutReconciler) awaitAcknowledgement(ctx context.Context, ro *v1alph
 	if stop != nil {
 		return r.finish(ctx, ro, stop.phase, stop.message)
 	}
-	message := "release " + step.Release + " is applied; acknowledge its post-apply steps: " + strings.Join(step.PostApplySteps, ", ")
+	message := "release " + step.Release + " is applied; " + r.heldSteps(ctx, ro, step) + ": " + strings.Join(step.PostApplySteps, ", ")
 	ro.Status.Phase = v1alpha1.PhaseAwaitingAcknowledgement
 	v.stalled, v.stalledReason, v.stalledMsg = true, ReasonAwaitingAcknowledgement, "rollout "+ro.Name+": "+message
 	return r.saveStatus(ctx, ro, message)
+}
+
+// heldSteps says what the approver acknowledges for step: its record's steps
+// after the apply, or all of them when the record names no apply step. When
+// it cannot tell, as for a plan or report it cannot read or steps carried
+// from an earlier rollout, the wording is true either way.
+func (r *RolloutReconciler) heldSteps(ctx context.Context, ro *v1alpha1.RuntimeRollout, step v1alpha1.RolloutStep) string {
+	every, err := lifecycle.HoldsEveryStep(ctx, r.Reader, r.Config.OperatorNamespace, ro, step)
+	switch {
+	case err != nil:
+		log.FromContext(ctx).Info("cannot tell whether a record names an apply step", "release", step.Release, "error", err.Error())
+		return "acknowledge the steps its record holds"
+	case every:
+		return "its record names no apply step, so acknowledge all of its steps"
+	default:
+		return "acknowledge its post-apply steps"
+	}
 }
 
 // timeoutFrom is when the step's action timeout started: the step's start,
