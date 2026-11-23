@@ -36,6 +36,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 	"aicr.run/pkg/operator/aicrjob"
@@ -186,6 +187,9 @@ type RolloutReconciler struct {
 	steps pendingEvents
 	// plans holds the content each plan references, for retention.
 	plans planRefs
+	// wrap, when set, wraps the reconciler SetupWithManager registers, so a
+	// test can see each request a watch enqueues.
+	wrap func(reconcile.Reconciler) reconcile.Reconciler
 }
 
 // pendingEvents are step Events held until the status that records their
@@ -1105,16 +1109,20 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 	if err == nil {
 		err = r.prompt(ctx, p, rel, values, verify, obs.Reason)
 	}
-	if err == nil && !verify && (obs.State == argocd.StateMissing || obs.Reason == argocd.ReasonSpecNotWritten) {
+	if err == nil && (obs.State == argocd.StateMissing || obs.Reason == argocd.ReasonSpecNotWritten) &&
+		now.Sub(timeoutFrom(cur)) <= ro.Spec.ActionTimeout.Duration {
 		// The step was recorded, then the operator stopped before its write
 		// landed: make it now, unless the approval ended since,
-		// which no landed mutation outlives.
+		// which no landed mutation outlives. A step that syncs writes its
+		// spec and its sync together, but the engine writes neither while
+		// an earlier sync of the release is pending or running, so the
+		// write is asked for again only within the action timeout.
 		if stop != nil {
 			return false, r.finish(ctx, ro, stop.phase, stop.message)
 		}
 		if err = r.mutate(ctx, p, rel, step, values); err == nil {
 			v.requeue = pollInterval
-			return false, r.saveStatus(ctx, ro, "release "+step.Release+": written again after an interrupted step")
+			return false, r.saveStatus(ctx, ro, "release "+step.Release+": its write did not land; asked for it again")
 		}
 	}
 	if err != nil {

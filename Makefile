@@ -26,6 +26,7 @@ ifeq ($(LINT_TIMEOUT),)
 LINT_TIMEOUT       := 5m
 endif
 TEST_TIMEOUT       ?= $(shell yq -r '.quality.test_timeout' .settings.yaml 2>/dev/null)
+SETUP_ENVTEST_VERSION ?= $(shell yq -r '.testing_tools.setup_envtest' .settings.yaml 2>/dev/null)
 ifeq ($(TEST_TIMEOUT),)
 TEST_TIMEOUT       := 10m
 endif
@@ -381,7 +382,14 @@ test-go:
 	@set -e; \
 	echo "Running tests with race detector..."; \
 	packages=$$($(MAKE) --no-print-directory test-packages); \
-	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
+	assets=$$(setup-envtest use -p path || true); \
+	if [ -z "$$assets" ]; then \
+		echo "make test runs the envtest suites, which need setup-envtest and its binaries:" >&2; \
+		echo "  go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)" >&2; \
+		echo "  setup-envtest use -p path" >&2; \
+		exit 1; \
+	fi; \
+	KUBEBUILDER_ASSETS=$$assets \
 	AICR_CRITERIA_STRICT=1 \
 	$(GO_TEST_COMMAND) -coverprofile=coverage.full.out $$packages || exit 1; \
 	grep -v '^aicr.run/validators/' coverage.full.out > coverage.out; \

@@ -30,6 +30,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 	"aicr.run/pkg/operator/aicrjob"
@@ -83,6 +84,9 @@ type ResolverReconciler struct {
 	// refused is the last plan the checks refused for its inputs alone, so a
 	// resync reports it again without pulling bundles and mirroring charts.
 	refused *refusal
+	// wrap, when set, wraps the reconciler SetupWithManager registers, so a
+	// test can see each request a watch enqueues.
+	wrap func(reconcile.Reconciler) reconcile.Reconciler
 }
 
 // refusal is a plan check's verdict on an input digest.

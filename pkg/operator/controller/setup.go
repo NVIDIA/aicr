@@ -114,8 +114,11 @@ func (r *ResolverReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if !r.Config.SkipDiscovery {
 		b = b.Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(toSingleton), builder.WithPredicates(relevantNode))
 	}
-	err := b.Complete(r)
-	if err != nil {
+	var rec reconcile.Reconciler = r
+	if r.wrap != nil {
+		rec = r.wrap(rec)
+	}
+	if err := b.Complete(rec); err != nil {
 		return operrors.Wrap(operrors.ErrCodeInternal, "register the resolver", err)
 	}
 	return nil
@@ -132,6 +135,9 @@ func (r *RolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		if err := mgr.AddHealthzCheck("rollout-reconcile", r.Liveness.Check); err != nil {
 			return operrors.Wrap(operrors.ErrCodeInternal, "register the rollout liveness check", err)
 		}
+	}
+	if r.wrap != nil {
+		rec = r.wrap(rec)
 	}
 	c, err := ctrl.NewControllerManagedBy(mgr).
 		Named("rollout").

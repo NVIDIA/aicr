@@ -379,6 +379,15 @@ git checkout -b docs/update-contributing-guide
 
 ### 3. Run Tests
 
+`make test` runs the envtest suites, which start a real kube-apiserver and etcd, and fails when it cannot get them. Install `setup-envtest` at the version `.settings.yaml` pins under `testing_tools.setup_envtest`, and fetch the binaries once:
+
+```bash
+go install sigs.k8s.io/controller-runtime/tools/setup-envtest@<version>
+setup-envtest use -p path
+```
+
+A plain `go test` of a package with envtest suites skips them when `KUBEBUILDER_ASSETS` is not set.
+
 ```bash
 # Run unit tests with race detector
 make test
