@@ -76,6 +76,10 @@ recipes:
     sources:
       - slug: a5460c0aead783a8b1316659e75e7acc
         class: community
+  - id: gb300-oke-ubuntu-training-gpustack-operator-managed
+    sources:
+      - slug: a5460c0aead783a8b1316659e75e7acc
+        class: community
   - id: h100-aks-ubuntu-inference-dynamo
     sources:
       - slug: 5bf9e82f0e90a11528ac85f4bcb866c8
