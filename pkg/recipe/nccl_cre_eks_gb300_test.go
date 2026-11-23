@@ -117,7 +117,7 @@ func TestGB300EKSTrainingCREAdoption(t *testing.T) {
 				value string
 			}{
 				{creCheck, tt.wantCRE, ">= 700"},
-				{creNetCheck, tt.wantCRE, ">= 30"},
+				{creNetCheck, tt.wantCRE, ">= 40"},
 				{netCheck, tt.wantTrainJob, ">= 40"},
 				{nvlsCheck, tt.wantTrainJob, ">= 700"},
 			}

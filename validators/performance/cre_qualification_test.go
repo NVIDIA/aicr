@@ -240,13 +240,14 @@ func TestCRENCCLNetQualificationDisablesNVLS(t *testing.T) {
 		value, _ := m["value"].(string)
 		got[name] = value
 	}
-	for _, name := range []string{"NCCL_NVLS_ENABLE", "NCCL_MNNVL_ENABLE"} {
-		if got[name] != "0" {
-			t.Errorf("spec.env %s = %q, want \"0\"", name, got[name])
+	want := map[string]string{"NCCL_NVLS_ENABLE": "0", "NCCL_MNNVL_ENABLE": "0", "NCCL_ALGO": "Tree"}
+	for name, value := range want {
+		if got[name] != value {
+			t.Errorf("spec.env %s = %q, want %q", name, got[name], value)
 		}
 	}
-	if len(env) != 2 {
-		t.Errorf("spec.env has %d entries, want exactly 2: %v", len(env), env)
+	if len(env) != len(want) {
+		t.Errorf("spec.env has %d entries, want exactly %d: %v", len(env), len(want), env)
 	}
 	if mb, _, _ := unstructured.NestedString(obj.Object, "spec", "maxBytes"); mb != creNetMaxBytes {
 		t.Errorf("spec.maxBytes = %q, want %q", mb, creNetMaxBytes)

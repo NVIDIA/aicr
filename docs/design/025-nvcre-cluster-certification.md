@@ -419,7 +419,8 @@ This amendment is proposed with the change that adds it and takes effect on
 maintainer approval. It admits `nvcre` to one stock recipe,
 `gb300-eks-ubuntu-training-kubeflow` (`eks`, `gb300`, `ubuntu`, `training`,
 `kubeflow`), and has it declare `nccl-cre-all-reduce-bw` with `>= 700` and
-`nccl-cre-all-reduce-bw-net` with `>= 30`. No other overlay changes.
+`nccl-cre-all-reduce-bw-net` with `>= 30` (raised to `>= 40` by the follow-up
+below). No other overlay changes.
 
 CRE reports one peak bus bandwidth per run. On GB300 the default peak is the
 NVLS path over the NVL72 IMEX domain, so `nccl-cre-all-reduce-bw` stands in for
@@ -473,6 +474,15 @@ not finish inside the 30-minute run budget (the first live attempt timed out),
 and bandwidth is flat from 16M upward, so the cap does not change the peak. Which
 of NCCL and aws-ofi-nccl regressed is unresolved, and the run used one EFA device
 per node, so multi-EFA behavior is unmeasured.
+
+Follow-up ([#3911](https://github.com/NVIDIA/aicr/issues/3911)): an
+`NCCL_DEBUG=INFO` diff of 2.30.4 against 2.31.2 places the regression in NCCL's
+tuner, not aws-ofi-nccl. From 16M upward 2.31.2 picks Ring over Tree for
+AllReduce, because its Tree estimate fell from 21.4 to 11.0 GB/s while Ring
+stayed at 13.7. Forcing `NCCL_ALGO=Tree` on the 2.31.2 image measures about
+46 GB/s. The net entry now adds `NCCL_ALGO=Tree` to `spec.env` and the floor
+returns to 40. The override is removed once
+[NVIDIA/nccl#2630](https://github.com/NVIDIA/nccl/issues/2630) is fixed.
 
 Gate status at the `v0.12.0` pin, for this adoption:
 

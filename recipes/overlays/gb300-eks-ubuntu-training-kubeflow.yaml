@@ -68,10 +68,9 @@ spec:
       # the same way, with NVLS and MNNVL disabled so the peak is the EFA path.
       # The new nccl-tests image (NCCL 2.31.2, aws-ofi-nccl 1.21.1) measures
       # about 31 GB/s there, against about 45 on the 2.27.7 and 1.16.3 image the
-      # TrainJob check uses; the NVCRE team treats it as a regression to fix and
-      # asked to stay on the new image. The floor is 30, below the 40 TrainJob
-      # holds, and passes at 90% of it. Raise it back once the regression is
-      # fixed.
+      # TrainJob check uses, because 2.31.2's tuner picks Ring over Tree. The
+      # qualified entry forces NCCL_ALGO=Tree, which restores about 46 GB/s, so
+      # the floor is the 40 the TrainJob check holds.
       checks:
         - nccl-cre-all-reduce-bw
         - nccl-cre-all-reduce-bw-net
@@ -79,8 +78,8 @@ spec:
         - name: nccl-cre-all-reduce-bw
           value: ">= 700"
         - name: nccl-cre-all-reduce-bw-net
-          # TODO(#3911): raise back to ">= 40" once the EFA regression is fixed.
-          value: ">= 30"
+          # TODO(#3911): drop the NCCL_ALGO=Tree override once NVIDIA/nccl#2630 is fixed.
+          value: ">= 40"
     conformance:
       checks:
         - robust-controller
