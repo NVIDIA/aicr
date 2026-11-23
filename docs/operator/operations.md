@@ -47,7 +47,8 @@ code and the end of its error output: `aicr render exited 3: …`.
 target plan (first 16 hex characters) and deadline. The phases are
 `AwaitingApproval`, `Progressing`, `AwaitingAcknowledgement` (a `manual`
 release is applied and waits for `kubectl aicr acknowledge` of its post-apply
-steps), `Stalled` and `Validating`, and the terminal
+steps, or of all its record's steps when the record names no `apply` step),
+`Stalled` and `Validating`, and the terminal
 `Succeeded`, `Failed`, `Expired`, `Revoked`, `Superseded` and `Orphaned`. A
 rollout that has not started shows no phase (`kubectl aicr describe` prints
 `Pending`). The terminal outcome is also set once as the
@@ -187,10 +188,11 @@ timeout and is not checked.
 3. **The candidate stabilizes** for `spec.rollout.stabilizationWindow`
    (default 10 minutes) from its creation (`Reconciling=True`, `Stabilizing`).
 4. **The transition is assessed.** An `aicr upgrade-check` Job compares the
-   active plan's recipe with the target's (`Assessing`). A blocked verdict, or
-   a release that changes namespace or chart name, stops here with
-   `TransitionBlocked`. A renamed release is a `Remove` of the old and an
-   `Install` of the new.
+   active plan's recipe with the target's (`Assessing`). A blocked verdict, a
+   release that changes namespace or chart name, or a `manual` record that
+   holds more steps, or a longer step id, for acknowledgement than a rollout
+   records stops here with `TransitionBlocked`. A renamed release is a
+   `Remove` of the old and an `Install` of the new.
 5. **A rollout is created** from the assessment and the live Applications
    (`RolloutCreated`). Its steps, deadline and starting inventory are fixed.
 6. **It waits for approval** when any step needs it (below).
@@ -235,7 +237,13 @@ approval. Approval is the approver's statement that workloads are prepared:
 the operator never drains nodes, and GPU Operator owns driver-upgrade drains.
 For an upgrade AICR assesses `manual`, approving also takes on the record's
 precondition and every step but the apply, which is the only one the operator
-performs; `kubectl aicr describe` lists them under "Recorded steps".
+performs; `kubectl aicr describe` lists them under "Recorded steps". It
+lists each `safe` record's summary there too: a `safe` upgrade with no CRD
+change needs no approval of its own, but when it shares a rollout with one
+that does, its summary can name a check to make before approving. `breaking`
+beside a verdict means the versions cross a major, a minor below 1.0, or a
+prerelease of the same version; it does not change whether a step needs
+approval.
 
 Approvers are the users and groups in the chart's `approvers` value. They hold
 the `aicr-operator-approver` roles, which grant no `ClusterRuntime` edits, so
@@ -421,8 +429,10 @@ approving: either add a `spec.overrides` entry that turns nktp's off
 the other provider. The recipe also moves
 nodewright-operator, which AICR assesses `safe`, and kube-prometheus-stack and
 nvsentinel, which it assesses `manual` with recorded steps, so the rollout
-needs approval. nodewright-operator's record is `safe` but breaking: its drains
-now evict kube-system pods, so before approving confirm
+needs approval. nodewright-operator's upgrade is `safe` but crosses a
+breaking boundary, and its record's summary, which `kubectl aicr describe`
+shows, names a check: its drains now evict kube-system pods, so before
+approving confirm
 `kubectl get pdb -n kube-system` shows ALLOWED DISRUPTIONS of at least 1 for
 workloads on nodes NodeWright interrupts. Do nvsentinel's checks before
 approving too; its record ends with its `apply` step, so nothing waits after

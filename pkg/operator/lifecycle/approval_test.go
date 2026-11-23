@@ -435,3 +435,141 @@ func TestDescribe(t *testing.T) {
 		t.Fatalf("a report that does not match the rollout's digest: %v", err)
 	}
 }
+
+// Every record with a summary is listed with it, safe ones included, and a
+// breaking one says so: a safe record's pre-upgrade action is only in its
+// summary. A record with nothing to tell is not listed.
+func TestDescribeRecordSummaries(t *testing.T) {
+	t.Parallel()
+	report := &aicrjob.UpgradeReport{Components: []aicrjob.ComponentChange{
+		{Component: "nodewright-operator", Change: "version", From: "v0.20.0", To: "v0.21.0", Verdict: "safe", Breaking: true,
+			Summary: "confirm kubectl get pdb -n kube-system shows ALLOWED DISRUPTIONS of at least 1"},
+		{Component: "nfd", Change: "version", From: "0.18.0", To: "0.19.0", Verdict: "safe"},
+		{Component: "nvsentinel", Change: "version", From: "v1.0.0", To: "v1.1.0", Verdict: "manual",
+			Steps: []aicrjob.UpgradeStep{{ID: aicrjob.ApplyStepID, Description: "sync"}}},
+	}}
+	var out bytes.Buffer
+	describeRecordedSteps(report, &out)
+	for _, want := range []string{"nodewright-operator v0.20.0 -> v0.21.0 (safe, breaking)\n", "summary: confirm kubectl get pdb -n kube-system",
+		"nvsentinel v1.0.0 -> v1.1.0 (manual)\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("recorded steps lack %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "nfd") {
+		t.Errorf("a record with no summary, precondition or steps is listed:\n%s", out.String())
+	}
+}
+
+// putPlan stores a valid plan with releases, as the resolver writes it, and
+// returns its digest.
+func putPlan(t *testing.T, ctx context.Context, releases ...plan.Release) string {
+	t.Helper()
+	recipe := plan.RecipeContent([]byte(`{}`))
+	for i := range releases {
+		releases[i].Phase, releases[i].TargetNamespace = plan.PhasePrimary, releases[i].Component
+		releases[i].Chart = plan.Chart{Source: plan.ChartWrapper, Repository: "oci://registry.example.com/aicr/cluster/wrappers/" + releases[i].ID,
+			Version: "1.0.0", Digest: "sha256:" + strings.Repeat("c", 64)}
+		releases[i].Values = plan.ValuesContent(releases[i].ID, []byte(`{}`)).Ref()
+	}
+	doc := &plan.Document{
+		SchemaVersion: plan.SchemaVersion, RuntimeUID: "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0", Engine: plan.EngineArgoCD, EnginePolicy: "argocd.v1",
+		Provenance: plan.Provenance{Source: plan.SourceResolved, AICRImage: "ghcr.io/nvidia/aicr:v1.3.0@sha256:" + strings.Repeat("d", 64),
+			Bundle: "oci://registry.example.com/aicr/cluster/bundles/cluster@sha256:" + strings.Repeat("b", 64)},
+		Recipe:   &plan.Recipe{Name: "h100-eks-ubuntu-training", ConfigMapRef: recipe.Ref()},
+		Releases: releases,
+	}
+	digest, err := plan.ComputeDesiredStateDigest(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.DesiredStateDigest = digest
+	cm, err := plan.ToConfigMap(doc, namespace, v1alpha1.SingletonName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = admin.Create(ctx, cm); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Delete(context.WithoutCancel(ctx), cm) })
+	return digest
+}
+
+// HoldsEveryStep finds a release's component in the rollout's target plan,
+// whose release IDs need not be component names, and reads that component's
+// record in the assessment report the rollout records.
+func TestHoldsEveryStep(t *testing.T) {
+	ctx := testContext(t)
+	target := putPlan(t, ctx, plan.Release{ID: "nfd-main", Component: "nfd"}, plan.Release{ID: "gpu-operator-main", Component: "gpu-operator"},
+		plan.Release{ID: "kai", Component: "kai-scheduler"})
+	content := plan.AssessmentContent([]byte(`{"deployer":"argocd","objectNamesCompared":true,"components":[` +
+		`{"component":"nfd","change":"version","verdict":"manual","steps":[{"id":"widen","description":"w"},{"id":"sync","description":"s"}]},` +
+		`{"component":"gpu-operator","change":"version","verdict":"manual","steps":[{"id":"apply","description":"a"},{"id":"verify","description":"v"}]}],` +
+		`"summary":{}}`))
+	cm, err := content.ConfigMap(namespace, v1alpha1.SingletonName, "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = admin.Create(ctx, cm); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Delete(context.WithoutCancel(ctx), cm) })
+	ro := newRollout(t, ctx, "rollout-holds-every-step", func(ro *v1alpha1.RuntimeRollout) {
+		ro.Spec.ToPlanDigest = target
+		ro.Spec.AssessmentRef = &v1alpha1.DigestedConfigMapRef{ConfigMap: content.Name, Digest: content.Digest}
+	})
+	held := func(release string, ids ...string) v1alpha1.RolloutStep {
+		return v1alpha1.RolloutStep{Release: release, PostApplySteps: ids}
+	}
+	for _, tc := range []struct {
+		step v1alpha1.RolloutStep
+		want bool
+	}{
+		{held("nfd-main", "widen", "sync"), true},
+		{held("gpu-operator-main", "verify"), false},
+	} {
+		if got, hErr := HoldsEveryStep(ctx, admin, namespace, ro, tc.step); hErr != nil || got != tc.want {
+			t.Errorf("HoldsEveryStep(%s) = %t, %v; want %t", tc.step.Release, got, hErr, tc.want)
+		}
+	}
+	// Steps carried from an earlier rollout can be held for a release whose
+	// record this rollout's report lacks or words differently, or with no
+	// report at all; none of them says which steps they are.
+	for name, step := range map[string]v1alpha1.RolloutStep{
+		"a release the target plan lacks":            held("absent", "widen"),
+		"a component the report has no record for":   held("kai", "migrate-queues"),
+		"steps the report's record does not hold":    held("nfd-main", "widen"),
+		"steps before the apply of the report's one": held("gpu-operator-main", "apply", "verify"),
+	} {
+		if _, err = HoldsEveryStep(ctx, admin, namespace, ro, step); operrors.CodeOf(err) != operrors.ErrCodeNotFound {
+			t.Errorf("%s: %v; want NotFound", name, err)
+		}
+	}
+	// A plan or report it cannot read is an error, never an answer.
+	corrupt := "sha256:" + strings.Repeat("e", 64)
+	corruptName, err := plan.Name(corrupt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: corruptName}, Data: map[string]string{"plan.json": "{"}}
+	if err = admin.Create(ctx, bad); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Delete(context.WithoutCancel(ctx), bad) })
+	for name, edit := range map[string]func(*v1alpha1.RuntimeRollout){
+		"a report whose digest differs": func(ro *v1alpha1.RuntimeRollout) {
+			ro.Spec.AssessmentRef = &v1alpha1.DigestedConfigMapRef{ConfigMap: content.Name, Digest: "sha256:" + strings.Repeat("0", 64)}
+		},
+		"a missing report": func(ro *v1alpha1.RuntimeRollout) {
+			ro.Spec.AssessmentRef = &v1alpha1.DigestedConfigMapRef{ConfigMap: content.Name + "-gone", Digest: content.Digest}
+		},
+		"a plan that does not parse": func(ro *v1alpha1.RuntimeRollout) { ro.Spec.ToPlanDigest = corrupt },
+		"no assessment":              func(ro *v1alpha1.RuntimeRollout) { ro.Spec.AssessmentRef = nil },
+	} {
+		broken := ro.DeepCopy()
+		edit(broken)
+		if got, hErr := HoldsEveryStep(ctx, admin, namespace, broken, held("nfd-main", "widen", "sync")); hErr == nil {
+			t.Errorf("%s: %t, no error", name, got)
+		}
+	}
+}

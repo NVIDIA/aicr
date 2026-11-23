@@ -236,9 +236,14 @@ Nothing is written to Argo CD while the engine is unavailable. See
 applied and its record has steps after its `apply` step: do them
 (`kubectl aicr describe` lists them under "Recorded steps"), then
 `kubectl aicr acknowledge` the rollout. Nothing further starts until then. A
-record that names no `apply` step lists all of its steps here, since the
-operator cannot tell which follow the apply; confirm the earlier ones were
-done too.
+record that names no `apply` step holds all of its steps, since the operator
+cannot tell which follow the apply, and the message says
+`its record names no apply step, so acknowledge all of its steps`; confirm the
+earlier ones were done too. A message that says
+`acknowledge the steps its record holds` means the operator could not tell
+which: it could not read the rollout's plan or assessment report, or the steps
+came from an earlier rollout that did not finish. `kubectl aicr describe` lists
+the record the rollout was assessed with.
 
 `Stalled=True` with `AwaitingApproval` means a rollout needs an approver.
 Nothing has been written. Approve it with `kubectl aicr approve`
@@ -257,11 +262,21 @@ If approval is refused, the message says why:
 
 ## Transition blocked
 
-`TransitionBlocked` means the move from the active plan to the target needs a
-migration the operator does not perform: AICR assessed a component `blocked`,
-or a release would change namespace or chart name. No rollout is created. Return to a plan without that change (revert the input, or
-[pin](operations.md#rolling-back-by-pinning) the active plan); a supported
-migration is a separate procedure, outside the operator.
+`TransitionBlocked` means the operator will not start the move from the active
+plan to the target, and creates no rollout for it. Either the move needs a
+migration the operator does not perform, or a `manual` record holds more for
+acknowledgement than a rollout records.
+
+A migration is needed when AICR assessed a component `blocked`, or a release
+would change namespace or chart name. Return to a plan without that change
+(revert the input, or [pin](operations.md#rolling-back-by-pinning) the active
+plan); a supported migration is a separate procedure, outside the operator.
+
+A rollout records at most 16 steps for acknowledgement per release, each step
+id at most 63 characters. The message names the release past either bound.
+AICR's released records stay within both, so this takes an AICR image built
+with other records. Run an AICR whose records fit, or return to a plan without
+that upgrade as above.
 
 ## Application name taken
 

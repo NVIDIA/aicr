@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -150,35 +151,6 @@ func TestAssessSteps(t *testing.T) {
 	_, err = assessSteps([]v1alpha1.RolloutStep{upgrade("nfd")}, from, moved, report)
 	if operrors.ReasonOf(err) != ReasonTransitionBlocked || !strings.Contains(err.Error(), "nfd moves from nfd/node-feature-discovery to other/node-feature-discovery") {
 		t.Errorf("namespace change: %v", err)
-	}
-}
-
-// A manual record's steps after its apply step wait for an acknowledgement.
-// A record that names no apply step cannot say which steps follow the apply,
-// so every step waits.
-func TestAfterApply(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		ids  []string
-		want []string
-	}{
-		{"steps after the apply", []string{"check-host-port", "apply", "reset-breaker", "verify"}, []string{"reset-breaker", "verify"}},
-		{"apply is the last step", []string{"check-aws-replace-vm", "apply"}, nil},
-		{"no apply step", []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}, []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}},
-		{"no steps", nil, nil},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			var steps []aicrjob.UpgradeStep
-			for _, id := range tt.ids {
-				steps = append(steps, aicrjob.UpgradeStep{ID: id})
-			}
-			if got := afterApply(steps); !slices.Equal(got, tt.want) {
-				t.Errorf("afterApply(%v) = %v, want %v", tt.ids, got, tt.want)
-			}
-		})
 	}
 }
 
@@ -620,7 +592,8 @@ func TestManualPostApplyStepsAwaitAcknowledgement(t *testing.T) {
 	ro = onlyRollout(t, ctx, target)
 	got := getRuntime(t, ctx)
 	stalled := cond(got, v1alpha1.ConditionStalled)
-	if ro.Status.Phase != v1alpha1.PhaseAwaitingAcknowledgement || !strings.Contains(ro.Status.Message, "reset-breaker, verify") ||
+	if ro.Status.Phase != v1alpha1.PhaseAwaitingAcknowledgement ||
+		!strings.Contains(ro.Status.Message, "acknowledge its post-apply steps: reset-breaker, verify") ||
 		stalled.Reason != ReasonAwaitingAcknowledgement || got.Status.ActivePlanDigest != active {
 
 		t.Fatalf("after the apply: rollout %+v, Stalled %+v, active %s", ro.Status, stalled, got.Status.ActivePlanDigest)
@@ -758,5 +731,233 @@ func TestAssessmentIsRunAgainForAnotherAICRImage(t *testing.T) {
 	again := slices.DeleteFunc(liveJobs(t, ctx, "assessment"), func(j batchv1.Job) bool { return j.Name == first[0].Name })
 	if len(again) != 1 || again[0].Spec.Template.Spec.Containers[0].Image != r.Config.AICRImage {
 		t.Fatalf("assessment Jobs for the new AICR image = %+v", again)
+	}
+}
+
+// A manual record holding more steps than a rollout records stalls the
+// transition with TransitionBlocked, naming the release, and creates no
+// rollout for the API server to refuse and the controller to retry.
+func TestOversizedHoldStallsTheTransition(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	gpu := func(chart string) releaseWithValues {
+		r := testRelease("gpu-operator", plan.PhasePrimary, "", `{}`)
+		r.Chart.Digest = plan.DigestOf([]byte(chart))
+		return r
+	}
+	active := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "1"}, gpu("g1"))
+	target := putResolved(t, ctx, rt, map[string]string{"service": "eks", "version": "2"}, gpu("g2"))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.ensured["gpu-operator"] = active
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "gpu-operator", UID: "u-g", PlanDigest: active}}
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r)
+	steps := `{"id":"apply","description":"apply"}`
+	for _, id := range heldIDs(maxHeldSteps+1, 10) {
+		steps += `,{"id":"` + id + `","description":"` + id + `"}`
+	}
+	job := liveJobs(t, ctx, "assessment")[0]
+	succeed(t, ctx, &job, []byte(`{"deployer":"argocd","objectNamesCompared":false,"components":[`+
+		`{"component":"gpu-operator","change":"version","from":"v25.10.1","to":"v26.7.1","verdict":"manual","breaking":true,"downgrade":false,"failsRun":false,`+
+		`"steps":[`+steps+`]}],"summary":{"components":1,"failing":0}}`))
+	for range 2 {
+		reconcileRollout(t, ctx, r)
+	}
+	c := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled)
+	if c.Reason != ReasonTransitionBlocked || !strings.Contains(c.Message, fmt.Sprintf("gpu-operator holds %d steps", maxHeldSteps+1)) {
+		t.Fatalf("Stalled = %+v", c)
+	}
+	for _, x := range rollouts(t, ctx) {
+		if x.Spec.ToPlanDigest == target {
+			t.Fatal("a transition whose hold a rollout cannot record got a rollout")
+		}
+	}
+}
+
+// A manual record that names no apply step holds all of its steps after the
+// apply, and the stall says so instead of calling steps meant for before the
+// upgrade post-apply steps.
+func TestRecordWithoutApplyAwaitsAllItsSteps(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		reportGone bool
+		want       string
+	}{
+		{"the report names the record", false,
+			"release nfd is applied; its record names no apply step, so acknowledge all of its steps: widen-nrt-rbac, sync-nfd, narrow-nrt-rbac"},
+		// Without the report the operator cannot tell which steps it holds.
+		{"the report is gone", true,
+			"release nfd is applied; acknowledge the steps its record holds: widen-nrt-rbac, sync-nfd, narrow-nrt-rbac"},
+	} {
+		t.Run(tc.name, func(t *testing.T) { recordWithoutApplyAwaits(t, tc.reportGone, tc.want) })
+	}
+}
+
+func recordWithoutApplyAwaits(t *testing.T, reportGone bool, want string) {
+	t.Helper()
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	nfd := func(chart string) releaseWithValues {
+		r := testRelease("nfd", plan.PhasePrimary, "", `{}`)
+		r.Chart.Digest = plan.DigestOf([]byte(chart))
+		return r
+	}
+	active := putResolved(t, ctx, rt, map[string]string{"service": "gke", "version": "1"}, nfd("n1"))
+	target := putResolved(t, ctx, rt, map[string]string{"service": "gke", "version": "2"}, nfd("n2"))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.ensured["nfd"] = active
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "nfd", UID: "u-n", PlanDigest: active}}
+	r, clk := newRollout(t, engine, false)
+	clk.now = time.Now().Add(2 * time.Second)
+
+	reconcileRollout(t, ctx, r)
+	job := liveJobs(t, ctx, "assessment")[0]
+	succeed(t, ctx, &job, []byte(`{"deployer":"argocd","objectNamesCompared":false,"components":[`+
+		`{"component":"nfd","change":"version","from":"0.19.0","to":"0.20.1","verdict":"manual","breaking":true,"downgrade":false,"failsRun":false,`+
+		`"steps":[{"id":"widen-nrt-rbac","description":"widen"},{"id":"sync-nfd","description":"sync"},{"id":"narrow-nrt-rbac","description":"narrow"}]}],`+
+		`"summary":{"components":1,"failing":0}}`))
+	reconcileRollout(t, ctx, r)
+	approve(t, ctx, onlyRollout(t, ctx, target).Name, clk.now.Add(time.Hour))
+	if reportGone {
+		ref := onlyRollout(t, ctx, target).Spec.AssessmentRef
+		gone := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: operatorNS, Name: ref.ConfigMap}}
+		if err := k8s.Delete(ctx, gone); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 3 {
+		reconcileRollout(t, ctx, r)
+	}
+	ro := onlyRollout(t, ctx, target)
+	stalled := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled)
+	if ro.Status.Phase != v1alpha1.PhaseAwaitingAcknowledgement || !strings.Contains(ro.Status.Message, want) ||
+		stalled.Reason != ReasonAwaitingAcknowledgement || !strings.Contains(stalled.Message, want) {
+
+		t.Fatalf("rollout %+v, Stalled %+v; want %q", ro.Status, stalled, want)
+	}
+}
+
+// heldIDs returns n distinct step ids, each length characters long when
+// length leaves room for the index.
+func heldIDs(n, length int) []string {
+	ids := make([]string, 0, n)
+	for i := range n {
+		ids = append(ids, fmt.Sprintf("s%0*d", length-1, i))
+	}
+	return ids
+}
+
+// A manual record's held steps must fit the RuntimeRollout CRD. Past either
+// bound, the transition is blocked, naming the release, instead of creating
+// a rollout the API server refuses and the controller retries.
+func TestAssessStepsHeldStepLimits(t *testing.T) {
+	t.Parallel()
+	rel := func(chart string) plan.Release {
+		return plan.Release{ID: "kai-scheduler", Component: "kai-scheduler", TargetNamespace: "kai",
+			Chart: plan.Chart{Repository: "oci://r/charts/kai-scheduler", Digest: plan.DigestOf([]byte(chart))}}
+	}
+	from, to := &plan.Document{Releases: []plan.Release{rel("k1")}}, &plan.Document{Releases: []plan.Release{rel("k2")}}
+	tests := []struct {
+		name string
+		held []string
+		want string
+	}{
+		{"at both limits", heldIDs(maxHeldSteps, maxHeldStepIDLength), ""},
+		{"one step too many", heldIDs(maxHeldSteps+1, 10), fmt.Sprintf("kai-scheduler holds %d steps", maxHeldSteps+1)},
+		{"an id too long", heldIDs(1, maxHeldStepIDLength+1), fmt.Sprintf("is %d characters", maxHeldStepIDLength+1)},
+		// Characters, not bytes, as the API server counts them.
+		{"a multibyte id at the limit", []string{strings.Repeat("é", maxHeldStepIDLength)}, ""},
+		{"a multibyte id too long", []string{strings.Repeat("é", maxHeldStepIDLength+1)}, fmt.Sprintf("is %d characters", maxHeldStepIDLength+1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := aicrjob.ComponentChange{Component: "kai-scheduler", Change: "version", Verdict: "manual",
+				Steps: []aicrjob.UpgradeStep{{ID: "apply", Description: "apply"}}}
+			for _, id := range tt.held {
+				c.Steps = append(c.Steps, aicrjob.UpgradeStep{ID: id, Description: id})
+			}
+			steps := []v1alpha1.RolloutStep{{Release: "kai-scheduler", Operation: v1alpha1.OperationUpgrade}}
+			_, err := assessSteps(steps, from, to, &aicrjob.UpgradeReport{Components: []aicrjob.ComponentChange{c}})
+			switch {
+			case tt.want == "" && err != nil:
+				t.Fatalf("assessSteps() = %v", err)
+			case tt.want == "" && !slices.Equal(steps[0].PostApplySteps, tt.held):
+				t.Fatalf("postApplySteps %v, want %v", steps[0].PostApplySteps, tt.held)
+			case tt.want != "" && (operrors.ReasonOf(err) != ReasonTransitionBlocked || !strings.Contains(err.Error(), tt.want)):
+				t.Fatalf("assessSteps() = %v, want %s naming %q", err, ReasonTransitionBlocked, tt.want)
+			}
+		})
+	}
+}
+
+// A transition that is both blocked and holds more than a rollout records
+// names the migration it needs: recording the steps would not make it
+// startable.
+func TestAssessStepsBlockedBeforeHold(t *testing.T) {
+	t.Parallel()
+	rel := func(id, chart string) plan.Release {
+		return plan.Release{ID: id, Component: id, TargetNamespace: id,
+			Chart: plan.Chart{Repository: "oci://r/charts/" + id, Digest: plan.DigestOf([]byte(chart))}}
+	}
+	from := &plan.Document{Releases: []plan.Release{rel("kai-scheduler", "k1"), rel("nfd", "n1")}}
+	to := &plan.Document{Releases: []plan.Release{rel("kai-scheduler", "k2"), rel("nfd", "n2")}}
+	held := aicrjob.ComponentChange{Component: "kai-scheduler", Change: "version", Verdict: "manual",
+		Steps: []aicrjob.UpgradeStep{{ID: "apply", Description: "apply"}}}
+	for _, id := range heldIDs(maxHeldSteps+1, 10) {
+		held.Steps = append(held.Steps, aicrjob.UpgradeStep{ID: id, Description: id})
+	}
+	report := &aicrjob.UpgradeReport{Components: []aicrjob.ComponentChange{held,
+		{Component: "nfd", Change: "version", Verdict: "blocked"}}}
+	steps := []v1alpha1.RolloutStep{
+		{Release: "kai-scheduler", Operation: v1alpha1.OperationUpgrade},
+		{Release: "nfd", Operation: v1alpha1.OperationUpgrade},
+	}
+	_, err := assessSteps(steps, from, to, report)
+	if operrors.ReasonOf(err) != ReasonTransitionBlocked || !strings.Contains(err.Error(), "needs a separately qualified migration") ||
+		strings.Contains(err.Error(), "cannot record the steps") {
+
+		t.Fatalf("assessSteps() = %v, want the blocked verdict's migration, not the hold", err)
+	}
+}
+
+// maxHeldSteps and maxHeldStepIDLength are the RuntimeRollout CRD's own
+// bounds on a step's postApplySteps: a rollout at both is stored, and one
+// past either is refused.
+func TestHeldStepLimitsMatchTheCRD(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, nil)
+	create := func(name string, held []string) error {
+		ro := &v1alpha1.RuntimeRollout{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{v1alpha1.LabelRuntime: rt.Name}},
+			Spec: v1alpha1.RuntimeRolloutSpec{
+				SchemaVersion: v1alpha1.RolloutSchemaVersion, RuntimeUID: string(rt.UID), ToPlanDigest: plan.DigestOf([]byte("to")),
+				StartingInventoryDigest: plan.DigestOf([]byte("to")), Deadline: metav1.NewTime(time.Now().Add(time.Hour)),
+				ActionTimeout: metav1.Duration{Duration: time.Minute},
+				Steps: []v1alpha1.RolloutStep{{Release: "kai-scheduler", Operation: v1alpha1.OperationUpgrade,
+					Assessment: v1alpha1.AssessmentManual, PostApplySteps: held}},
+			},
+		}
+		return k8s.Create(ctx, ro)
+	}
+	if err := create("rollout-held-limits-1", heldIDs(maxHeldSteps, maxHeldStepIDLength)); err != nil {
+		t.Fatalf("a rollout at both limits: %v", err)
+	}
+	if err := create("rollout-held-limits-4", []string{strings.Repeat("é", maxHeldStepIDLength)}); err != nil {
+		t.Fatalf("a rollout holding an id of %d two-byte characters: %v", maxHeldStepIDLength, err)
+	}
+	for name, held := range map[string][]string{
+		"rollout-held-limits-2": heldIDs(maxHeldSteps+1, 10),
+		"rollout-held-limits-3": heldIDs(1, maxHeldStepIDLength+1),
+	} {
+		if err := create(name, held); !apierrors.IsInvalid(err) {
+			t.Errorf("%s holding %d steps, the longest %d characters: %v, want the API server to refuse it",
+				name, len(held), len(held[len(held)-1]), err)
+		}
 	}
 }
