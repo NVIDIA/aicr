@@ -566,7 +566,7 @@ are reported as skipped (`superseded-by-cre`). A CRE NCCL check supersedes its
 TrainJob check only when the recipe both lists it in `performance.checks` and
 declares its constraint, on a combination qualified for that variant; a
 constraint declared without the check leaves the TrainJob check running. The
-same rule covers `eks` x `h100`: a recipe that opts into
+same rule covers `eks` x `h100` and `gke` x `h100`: a recipe that opts into
 `nccl-cre-all-reduce-bw` there skips `nccl-all-reduce-bw` as
 `superseded-by-cre`. The net floor is 40, the same as the TrainJob check. On
 the newer `nccl-tests` image CRE selects (NCCL 2.31.2, aws-ofi-nccl 1.21.1) the
@@ -608,7 +608,7 @@ percentage (`>= 50`) can never be satisfied.
 
 | Check | What it measures | Qualified combinations |
 |---|---|---|
-| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100`, `eks` x `gb300` |
+| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100`, `eks` x `gb300`, `gke` x `h100` |
 | `nccl-cre-all-reduce-bw-net` | The same run with `NCCL_NVLS_ENABLE=0` and `NCCL_MNNVL_ENABLE=0` set through `spec.env`, so the peak is the EFA/NET path, plus `NCCL_ALGO=Tree` until NVIDIA/nccl#2630 is fixed | `eks` x `gb300` |
 | `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | `eks` x `h100` |
 
@@ -639,12 +639,17 @@ for `eks` x `gb300`. The `gke` x `h100` entry of `nccl-cre-all-reduce-bw`
 pins no image: CRE picks the workload image from the TCPXO plugin release it
 detects on the cluster (`nvcr.io/nvidia/pytorch:25.06-py3` for plugin v1.0.15
 and v1.0.16, `nvcr.io/nvidia/pytorch:26.01-py3` for v1.0.17), so no closure
-records a digest for it and the run pulls that image by tag.
+records a digest for it and the run pulls that image by tag. CRE also runs a
+`tcpxo-daemon` container from
+`us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev`, by the tag
+Google pairs with the plugin release (`v1.0.21` for plugin v1.0.15, `v1.0.22`
+for v1.0.16, `v1.0.23` for v1.0.17) and with `imagePullPolicy: Always`, so a
+mirror for `gke` x `h100` has to serve that image and tag as well.
 
 #### Relation to the TrainJob check
 
-On `eks` x `h100`, a recipe that runs `nccl-cre-all-reduce-bw` skips
-`nccl-all-reduce-bw` as `superseded-by-cre`, so one validation run reports
+On `eks` x `h100` and `gke` x `h100`, a recipe that runs
+`nccl-cre-all-reduce-bw` skips `nccl-all-reduce-bw` as `superseded-by-cre`, so one validation run reports
 only the CRE result. The comparison below predates that supersession; to
 repeat it, run each check in a separate validation. `nccl-cre-all-reduce-bw`
 reads 1.65 GB/s (0.34%) higher than `nccl-all-reduce-bw` on the same two nodes:
@@ -1089,7 +1094,7 @@ Skipping a CRE NCCL check (`nccl-cre-all-reduce-bw` or
 `nccl-cre-all-reduce-bw-net`) also ends its supersession: the validators no
 longer see that check's constraint, so the TrainJob check it replaces
 (`nccl-all-reduce-bw-nvls` or `nccl-all-reduce-bw-net` on `eks` x `gb300`,
-`nccl-all-reduce-bw` on `eks` x `h100`) runs instead of skipping
+`nccl-all-reduce-bw` on `eks` x `h100` and `gke` x `h100`) runs instead of skipping
 as `superseded-by-cre`. A lane without `nvcre` therefore falls back to TrainJob
 coverage rather than measuring nothing.
 

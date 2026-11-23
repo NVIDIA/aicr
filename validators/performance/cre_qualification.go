@@ -37,13 +37,13 @@ type creCombination struct {
 // threshold in the recipe, never a new code path.
 //
 // nccl-cre-all-reduce-bw is qualified on eks x h100, eks x gb300 and gke x h100.
-// It was
-// re-measured on CRE v0.8.2, the registry pin at the time, on 2026-10-23 against
-// 2x p5.48xlarge on a
-// NodeWright-tuned cluster: 489.70 GB/s bus bandwidth, against 489.33 GB/s
-// from the TrainJob nccl-all-reduce-bw check on the same nodes and 489.80 GB/s
-// at the original 2026-09-02 qualification on v0.1.0. It has not been
-// re-measured on the current pin, v0.12.0.
+//
+// On eks x h100 it was re-measured on CRE v0.8.2, the registry pin at the time,
+// on 2026-10-23 against 2x p5.48xlarge on a NodeWright-tuned cluster: 489.70
+// GB/s bus bandwidth, against 489.33 GB/s from the TrainJob nccl-all-reduce-bw
+// check on the same nodes and 489.80 GB/s at the original 2026-09-02
+// qualification on v0.1.0. It has not been re-measured on the current pin,
+// v0.12.0.
 //
 // On eks x gb300 it was measured on CRE v0.12.0 on 2026-11-18 against 2x
 // p6e-gb300.36xlarge (8 GPUs, one EFA device per node) with spec.fabric efa:

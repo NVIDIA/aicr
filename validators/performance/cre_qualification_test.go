@@ -73,8 +73,8 @@ func TestBuildCRECertificationCarriesNamespace(t *testing.T) {
 }
 
 // The GKE H100 entry leaves the workload image and fabric to CRE, which derives
-// the image from the TCPXO plugin release and the fabric from node labels. A
-// Certification that named either would override what the cluster selects.
+// the image from the TCPXO plugin release and renders tcpxo by default on GCP
+// H100. A pinned image would override what the cluster's plugin selects.
 func TestCREGKEH100EntryLeavesImageAndFabricToCRE(t *testing.T) {
 	entry, ok := lookupCREQualification(checkNameCRENCCLAllReduceBW, creGKEH100.Service, creGKEH100.Accelerator)
 	if !ok {
@@ -232,9 +232,10 @@ func TestCRENCCLQualificationSelectsFabricAndSupersededVariant(t *testing.T) {
 	}{
 		{creEKSH100, "", variantDefault},
 		{creEKSGB300, "efa", variantNVLS},
+		{creGKEH100, "", variantDefault},
 	}
 	for _, tt := range tests {
-		t.Run(string(tt.combination.Accelerator), func(t *testing.T) {
+		t.Run(string(tt.combination.Service)+"_"+string(tt.combination.Accelerator), func(t *testing.T) {
 			entry, ok := lookupCREQualification(checkNameCRENCCLAllReduceBW,
 				tt.combination.Service, tt.combination.Accelerator)
 			if !ok {

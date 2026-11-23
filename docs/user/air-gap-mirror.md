@@ -392,9 +392,13 @@ combination records: `recipes/components/nvcre/workload-images.yaml` for
 of [Validation](validation.md). The `gke` x `h100` entry pins no digest, so
 mirror `nvcr.io/nvidia/pytorch:25.06-py3` (TCPXO plugin v1.0.15 and v1.0.16) or
 `nvcr.io/nvidia/pytorch:26.01-py3` (v1.0.17) by tag, whichever your cluster's
-plugin selects. Their references keep the `public.ecr.aws` and
-`nvcr.io` hosts, so a disconnected cluster also needs its nodes' container
-runtime to redirect both registries to your mirror, for example with a
+plugin selects, together with the `tcpxo-daemon` image CRE pairs with that
+plugin release:
+`us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev` at `v1.0.21`
+(plugin v1.0.15), `v1.0.22` (v1.0.16) or `v1.0.23` (v1.0.17), pulled with
+`imagePullPolicy: Always`. Their references keep the `public.ecr.aws`,
+`nvcr.io` and `us-docker.pkg.dev` hosts, so a disconnected cluster also needs
+its nodes' container runtime to redirect those registries to your mirror, for example with a
 containerd registry mirror per host. A digest reference resolves through such a
 mirror unchanged.
 
