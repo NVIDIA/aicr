@@ -24,7 +24,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/prometheus/client_golang v1.25.0
 	github.com/sigstore/protobuf-specs v0.5.2
-	github.com/sigstore/rekor-monitor v0.0.0-20261102142904-679a7031962b
+	github.com/sigstore/rekor-monitor v0.0.0-20261113160059-fbc5fc49d94d
 	github.com/sigstore/sigstore v1.11.3
 	github.com/sigstore/sigstore-go v1.4.0
 	github.com/sigstore/sigstore/pkg/signature/kms/aws v1.11.3
@@ -58,6 +58,7 @@ require (
 	sigs.k8s.io/kustomize/kyaml v0.21.2
 	sigs.k8s.io/node-feature-discovery v0.20.1
 	sigs.k8s.io/node-feature-discovery/api/nfd v0.20.1
+	sigs.k8s.io/randfill v1.0.0
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2
 	sigs.k8s.io/yaml v1.6.0
 )
@@ -122,7 +123,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.10.0 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.8 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.9 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/analysis v1.0.1 // indirect
 	github.com/go-openapi/errors v0.22.9 // indirect
@@ -277,7 +278,6 @@ require (
 	k8s.io/kubernetes v1.37.2 // indirect
 	k8s.io/streaming v0.37.2 // indirect
 	sigs.k8s.io/json v0.0.0-20260909141634-11ed52e25bc5 // indirect
-	sigs.k8s.io/randfill v1.0.0 // indirect
 )
 
 // apidiff and go-licenses are built from this module rather than installed

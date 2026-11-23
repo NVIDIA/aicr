@@ -16,8 +16,6 @@ package resolver
 
 import (
 	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
@@ -145,12 +143,12 @@ func hasPath(values map[string]any, p string) bool {
 // values.yaml, with each bundled subchart's defaults under its name, as Helm
 // scopes them. Subcharts may be directories or nested archives; archives
 // nested deeper than the CRD scan follows contribute nothing.
-func chartDefaults(archive []byte) (map[string]any, error) {
-	return chartDefaultsAt(archive, 0)
+func chartDefaults(archive []byte, b *chartBudget) (map[string]any, error) {
+	return chartDefaultsAt(archive, 0, b)
 }
 
-func chartDefaultsAt(archive []byte, depth int) (map[string]any, error) {
-	files, err := readArchive(archive)
+func chartDefaultsAt(archive []byte, depth int, b *chartBudget) (map[string]any, error) {
+	files, err := readArchive(archive, b)
 	if err != nil {
 		return nil, err
 	}
@@ -169,8 +167,11 @@ func chartDefaultsAt(archive []byte, depth int) (map[string]any, error) {
 				defaults = mergeValues(defaults, map[string]any{parts[2]: doc})
 			}
 		case len(parts) == 3 && parts[1] == subchartsDir && strings.HasSuffix(parts[2], ".tgz") && depth < maxNestedCharts:
-			sub, serr := chartDefaultsAt(data, depth+1)
+			sub, serr := chartDefaultsAt(data, depth+1, b)
 			if serr != nil {
+				if b.spent() {
+					return nil, serr
+				}
 				continue
 			}
 			meta, merr := registry.ReadChartMeta(data)
@@ -184,23 +185,32 @@ func chartDefaultsAt(archive []byte, depth int) (map[string]any, error) {
 }
 
 // readArchive reads the values files and nested chart archives of a chart
-// archive, bounded per file, in total and in number.
-func readArchive(archive []byte) (map[string][]byte, error) {
-	gz, err := gzip.NewReader(bytes.NewReader(archive))
+// archive, bounded per file, in total and in number, charging every entry
+// to the chart's budget.
+func readArchive(archive []byte, b *chartBudget) (map[string][]byte, error) {
+	tr, gz, err := b.open(archive)
 	if err != nil {
-		return nil, operrors.New(operrors.ErrCodeInvalidRequest, "chart archive is not gzip")
+		return nil, err
 	}
 	defer gz.Close()
-	tr := tar.NewReader(gz)
 	files := map[string][]byte{}
 	entries, total := 0, 0
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
+			if b.spent() {
+				return nil, errChartBudget()
+			}
 			return files, nil
 		}
 		if err != nil {
+			if b.spent() {
+				return nil, errChartBudget()
+			}
 			return nil, operrors.New(operrors.ErrCodeInvalidRequest, "chart archive is not a tar archive")
+		}
+		if !b.admit(h) {
+			return nil, errChartBudget()
 		}
 		name := path.Clean(h.Name)
 		if h.Typeflag != tar.TypeReg || (path.Base(name) != chartValuesFile && !strings.HasSuffix(name, ".tgz")) {

@@ -1255,6 +1255,10 @@ operator-candidate: ## Builds an operator candidate into dist/candidate (CANDIDA
 operator-candidate-verify: ## Builds the operator candidate twice and requires identical bytes
 	@./tools/operator-candidate verify
 
+.PHONY: operator-aicr-pins
+operator-aicr-pins: ## Checks the operator's AICR pins agree and that each pinned image is its published release's, with provenance (gh signed in)
+	@GOFLAGS="-mod=readonly" go run ./tools/operator-release pins -settings .settings.yaml -attestations
+
 .PHONY: operator-e2e
 operator-e2e: ## Runs the pinned AICR images as operator-built Jobs on the operator's kind cluster
 	@AICR_OPERATOR_E2E_KUBECONFIG=$(OPERATOR_E2E_KUBECONFIG) \
