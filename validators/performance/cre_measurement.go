@@ -311,7 +311,8 @@ func certificationWorkflowName(obj *unstructured.Unstructured, domain, variant s
 
 // creBandwidthReading is what a run's finalized BandwidthMeasurements recorded.
 // Transports is CRE's own record of the NCCL "Using network <name>" banners it
-// parsed from the launcher log while the run was live, sorted and distinct.
+// parsed from its live samples of the launcher log and its final read of the
+// finished log, sorted and distinct.
 type creBandwidthReading struct {
 	MaxBusGBps float64
 	Transports []string

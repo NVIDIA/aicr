@@ -15,7 +15,9 @@
 package main
 
 import (
+	"bytes"
 	stderrors "errors"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -458,4 +460,36 @@ func TestVerifyCRETransportKeepsLogReadError(t *testing.T) {
 		t.Fatalf("error = %v, want the launcher-logs-required message", err)
 	}
 	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+}
+
+func TestVerifyCRETransportWarnsOnlyWhenLogUnreadable(t *testing.T) {
+	logReadFailed := errors.New(errors.ErrCodeNotFound, "no CRE launcher pods found")
+	tests := []struct {
+		name     string
+		logErr   error
+		wantWarn bool
+	}{
+		{"unreadable log warns with the read error", logReadFailed, true},
+		{"bannerless log does not warn", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			defer slog.SetDefault(prev)
+
+			if _, err := verifyCRETransport("no banner here", tt.logErr, []string{"FasTrak"}); err != nil {
+				t.Fatalf("verifyCRETransport() error = %v", err)
+			}
+
+			out := buf.String()
+			if got := strings.Contains(out, "level=WARN"); got != tt.wantWarn {
+				t.Fatalf("WARN emitted = %v, want %v\noutput:\n%s", got, tt.wantWarn, out)
+			}
+			if tt.wantWarn && !strings.Contains(out, "no CRE launcher pods found") {
+				t.Errorf("WARN record missing the read error\noutput:\n%s", out)
+			}
+		})
+	}
 }
