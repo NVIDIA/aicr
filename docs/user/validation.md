@@ -557,7 +557,7 @@ qualified is recorded as data. Shipped overlays keep the TrainJob
 `nccl-all-reduce-bw*` path. The one exception is
 `gb300-eks-ubuntu-training-kubeflow`, which installs `nvcre` and declares
 `nccl-cre-all-reduce-bw` with `>= 700` and `nccl-cre-all-reduce-bw-net` with
-`>= 30`. CRE reports one peak bus bandwidth, which on an NVL72 fabric is the
+`>= 40`. CRE reports one peak bus bandwidth, which on an NVL72 fabric is the
 NVLS path, so `nccl-cre-all-reduce-bw` stands in for
 `nccl-all-reduce-bw-nvls`. `nccl-cre-all-reduce-bw-net` is the same run with
 NVLS and MNNVL disabled, so its peak is the EFA path alone, and it stands in for
@@ -568,11 +568,14 @@ declares its constraint, on a combination qualified for that variant; a
 constraint declared without the check leaves the TrainJob check running. The
 same rule covers `eks` x `h100`: a recipe that opts into
 `nccl-cre-all-reduce-bw` there skips `nccl-all-reduce-bw` as
-`superseded-by-cre`. The net floor is 30, below the 40
-the TrainJob check holds: on the newer `nccl-tests` image CRE selects (NCCL
-2.31.2, aws-ofi-nccl 1.21.1) the EFA-only path measures about 31 GB/s, against
-about 45 on the image the TrainJob check uses, and the NVCRE team is treating
-that as a regression to fix. Raise the floor once it is fixed. On every other
+`superseded-by-cre`. The net floor is 40, the same as the TrainJob check. On
+the newer `nccl-tests` image CRE selects (NCCL 2.31.2, aws-ofi-nccl 1.21.1) the
+EFA-only path measures about 31 GB/s by default, because the NCCL tuner picks
+Ring over Tree for AllReduce
+([NVIDIA/nccl#2630](https://github.com/NVIDIA/nccl/issues/2630)), so the check
+also sets `NCCL_ALGO=Tree`. Tree measured about 46 GB/s in the
+[#3911](https://github.com/NVIDIA/aicr/issues/3911) diagnostic run; a run
+through this check with the override is pending. On every other
 overlay, nothing below runs unless you ask for it.
 
 Enabling a CRE check takes two steps and needs both. Add the `nvcre` component
@@ -606,7 +609,7 @@ percentage (`>= 50`) can never be satisfied.
 | Check | What it measures | Qualified combinations |
 |---|---|---|
 | `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100`, `eks` x `gb300` |
-| `nccl-cre-all-reduce-bw-net` | The same run with `NCCL_NVLS_ENABLE=0` and `NCCL_MNNVL_ENABLE=0` set through `spec.env`, so the peak is the EFA/NET path | `eks` x `gb300` |
+| `nccl-cre-all-reduce-bw-net` | The same run with `NCCL_NVLS_ENABLE=0` and `NCCL_MNNVL_ENABLE=0` set through `spec.env`, so the peak is the EFA/NET path, plus `NCCL_ALGO=Tree` until NVIDIA/nccl#2630 is fixed | `eks` x `gb300` |
 | `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | `eks` x `h100` |
 
 The catalog entry each check drives, and the node footprint it runs on, come

@@ -2475,10 +2475,10 @@ gb300-eks-ubuntu-training-kubeflow:
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: c62243b930970cef08b180b919e3bddf5417357295f090ec60c0a4211617088f
   UPGRADING.md: e95c1b035a91a719fac8c03f6c039f8ebff9e2825a089d1d15fe6ec8a83b46de
-  bundle-info.yaml: 6d7786354e7734ab5733070b587314945545cd2e066c1f4629fda77be85341f2
-  checksums.txt: 426414dacf7d207cda64b577438be2d312f229490c45b7eff8e29b2cfbbc7077
+  bundle-info.yaml: 7ada6d7857f38a67fdff6defb5a4ef2fd22d0c721dcacb0eac1815909d0cef11
+  checksums.txt: 87df17127e32728c0f1bccc6bca279ad249c0b6c45731a2f1d77fb37d6ca727f
   deploy.sh: 1d982da17f3b35665dd67f1369fa74add6b246e945ca33d874b39f25ff7b6fa6
-  recipe.yaml: da6825eb9b81ad1f383e4fed14b93ab416747c77d5e84473d8fa2e3d7bf3a3dd
+  recipe.yaml: 46068945268ce32f739025bcec2c2a45bd787f5b6d6ae3aae7c58d44823ab5d0
 gb300-eks-ubuntu-training-slurm:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a
