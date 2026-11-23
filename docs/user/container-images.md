@@ -88,7 +88,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | psmdb-operator | helm | psmdb-operator | 1.23.2 | 1 |
 | rdma-modules | manifest | — | — | 1 |
-| runai-cluster | helm | runai-cluster | 3.0.24 | 10 |
+| runai-cluster | helm | runai-cluster | 3.0.26 | 10 |
 | slinky-drainer | manifest | — | — | 1 |
 | slinky-drainer-crds | manifest | — | — | 0 |
 | slinky-slurm | helm | slurm | 1.2.4 | 5 |
@@ -406,10 +406,10 @@ _No images extracted._
 - `ghcr.io/kai-scheduler/kai-resource-management/krm-operator:v0.18.8`
 - `ghcr.io/kai-scheduler/kai-scheduler/helm-hooks:v0.18.8`
 - `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.18.8`
-- `nvcr.io/nvidia/runai-oss/go-operator:3.0.24`
-- `nvcr.io/nvidia/runai-oss/helm-hooks-handler:3.0.24`
-- `nvcr.io/nvidia/runai-oss/karta-migrate:3.0.24`
-- `nvcr.io/nvidia/runai-oss/runai-crd-upgrader:3.0.24`
+- `nvcr.io/nvidia/runai-oss/go-operator:3.0.26`
+- `nvcr.io/nvidia/runai-oss/helm-hooks-handler:3.0.26`
+- `nvcr.io/nvidia/runai-oss/karta-migrate:3.0.26`
+- `nvcr.io/nvidia/runai-oss/runai-crd-upgrader:3.0.26`
 
 ### slinky-drainer
 
