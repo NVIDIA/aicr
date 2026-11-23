@@ -43,7 +43,10 @@ transitions:
     references:
       - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.2/CHANGELOG/CHANGELOG-1.2.md
   - from: ">=1.2.2 <1.2.4"
-    to: "1.2.4"
+    # The ceiling reaches 1.2.5, a fix release assessed by the record below,
+    # so a jump from before 1.2.4 straight to the pin keeps these steps.
+    to: ">=1.2.4 <=1.2.5"
+    skips: ["1.2.5"]
     verdict: manual
     summary: >-
       From 1.2.3 a preStop handler set on a NodeSet's slurmd replaces the
@@ -81,7 +84,8 @@ transitions:
               The pod template the operator builds changes (an added
               SYS_RESOURCE capability, an emptyDir spool volume and the new
               preStop), so the NodeSet controller replaces worker pods
-              according to its updateStrategy.
+              according to its updateStrategy. At 1.2.5 with accounting
+              enabled, the slurmdbd pod is also replaced once.
           - id: watch-worker-rollout
             description: >-
               Watch the NodeSet rollout until every pod is ready.

@@ -19,7 +19,10 @@ transitions:
   # from starts at 2.59.0, the release AICR pinned before 2.68.0 and the only
   # one assessed here; an origin below it resolves to blocked.
   - from: ">=2.59.0 <2.68.0"
-    to: "2.68.0"
+    # The ceiling reaches 2.68.1, a rebuild patch assessed by the record
+    # below, so a jump from before 2.68.0 straight to the pin keeps these steps.
+    to: ">=2.68.0 <=2.68.1"
+    skips: ["2.68.1"]
     verdict: manual
     summary: >-
       Three changes in this span can break a customized install. Driver 1.63
