@@ -397,6 +397,26 @@ printf '\n%s══ Pre-flight checks ══════════════�
 
 preflight_failed=false
 
+# A folder that owns CRDs bounds its CRD step with timeout(1), which stock
+# macOS does not ship, and its apply-crds.sh refuses to run without it. Say so
+# here, before anything is installed. A dry run never applies CRDs. The bundle
+# path is quoted outside the glob, as in the install loop, so brackets or
+# asterisks in it are not read as pattern syntax.
+crd_step=false
+for _crd_script in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/apply-crds.sh; do
+  if [[ -f "${_crd_script}" ]]; then
+    crd_step=true
+    break
+  fi
+done
+if [[ -z "${DRY_RUN_FLAG}" && "${crd_step}" == "true" ]] &&
+  ! command -v timeout >/dev/null 2>&1 && ! command -v gtimeout >/dev/null 2>&1; then
+  echo "ERROR: components in this bundle own CRDs, and their apply-crds.sh needs"
+  echo "  timeout(1) or gtimeout(1) to bound the CRD step. Install GNU coreutils"
+  echo "  (macOS: brew install coreutils), then deploy again."
+  preflight_failed=true
+fi
+
 # Bundle namespace list (deduplicated)
 BUNDLE_NAMESPACES=$(echo "foo " | tr ' ' '\n' | sort -u | tr '\n' ' ')
 
