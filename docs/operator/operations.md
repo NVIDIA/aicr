@@ -232,6 +232,14 @@ A rollout needs approval when any step does:
 | Remove, adoption and runtime removal | Required |
 | Verify (re-run a readiness gate) | Not required |
 
+A chart owns CRDs when it, or a subchart it packages, has a `crds/`
+directory or a template or other file that declares one. A chart the
+operator cannot scan in full counts as owning them: one with a template or
+other file over 8 MiB, or with subcharts packaged more than two levels deep.
+A component's chart too large for the operator to read at all stops
+resolution instead; see [Render and registry
+content](troubleshooting.md#render-and-registry-content).
+
 AICR has transition records for few components, so most upgrades need
 approval. Approval is the approver's statement that workloads are prepared:
 the operator never drains nodes, and GPU Operator owns driver-upgrade drains.

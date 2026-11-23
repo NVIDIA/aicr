@@ -16,7 +16,7 @@ reason and message.
 | Reason | Runbook |
 | --- | --- |
 | `NodeGroupEmpty`, `PlacementOverlap`, `AcceleratedGroupHeterogeneous`, `SnapshotIncomplete`, `CriteriaConflict` | [Discovery](#discovery) |
-| `OverridePathUnknown`, `InvalidOverride`, `InvalidPlacement`, `NamespaceNotAllowed`, `ChartSourceUnsupported`, `ContentTooLarge`, `Conflict` | [Render and registry content](#render-and-registry-content) |
+| `OverridePathUnknown`, `InvalidOverride`, `InvalidPlacement`, `NamespaceNotAllowed`, `ChartSourceUnsupported`, `ContentTooLarge`, `Conflict`; `InvalidRequest` with `chart of release` in the `Resolved` message | [Render and registry content](#render-and-registry-content) |
 | `AICRInvalidRequest`, `AICRNotFound`, `AICRUnauthorized`, `AICRInternal`, `AICRTimeout` | [AICR Job failures](#aicr-job-failures) |
 | `retrying after a transient failure` or `[SERVICE_UNAVAILABLE]` in the `Resolved` message, `RegistryCredentialsUnavailable`, `Unauthorized` on `Resolved`, `RegistryCredentialsStale` | [Registry and credential outages](#registry-and-credential-outages) |
 | `AICRVersionMismatch`, `AICRArtifactUnsupported` | [AICR version mismatch](#aicr-version-mismatch) |
@@ -65,6 +65,7 @@ kubectl annotate clusterruntime cluster operator.aicr.run/resnapshot="$(date +%s
 | `NamespaceNotAllowed` | The recipe renders a release into a namespace missing from the chart's `namespaces.components`; the message names each release | Add the namespace to `namespaces.components` with its Pod Security level and `helm upgrade` |
 | `ChartSourceUnsupported` | A bundle release names no chart the operator can serve | A recipe the operator does not support yet; report it |
 | `ContentTooLarge` | A values or recipe document exceeds a ConfigMap (1 MiB) | Reduce the overrides |
+| `InvalidRequest` with `chart of release <name>` in the message | The named release's chart cannot be read: it is not a gzip tar archive, its values do not parse, or it exceeds one of the operator's read limits. The largest is 64 MiB decompressed or 4,096 files and directories over the operator's two reads of a component's chart, for its CRDs and its default values, packaged subcharts included | A recipe the operator does not support yet; report it with the release name |
 | `Conflict` | A chart tag in your registry already holds different bytes, or an upstream archive does not match its index digest | Upstream content changed after it was mirrored, or the registry was modified. Find out which before deleting the tag; the operator never overwrites it |
 
 Fixing the runtime's `spec` starts a new resolution.
