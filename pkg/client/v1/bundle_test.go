@@ -298,8 +298,8 @@ func TestMakeBundle_TimeoutOptIn(t *testing.T) {
 }
 
 // fixtureBundleAttester returns fixed, non-nil bundle JSON from Attest so the
-// bundler reaches verifyAndCopyBinaryAttestation (a nil return short-circuits
-// attestBundle before the binary attestation is embedded). It stands in for the
+// bundler reaches the binary attestation's write into the bundle (a nil return
+// short-circuits attestBundle before that write). It stands in for the
 // real keyless attester the CLI/server build under --attest.
 type fixtureBundleAttester struct {
 	bundleJSON []byte

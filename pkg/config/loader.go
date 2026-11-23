@@ -123,10 +123,35 @@ func detectFormat(source string) sourceFormat {
 	return formatYAML
 }
 
+// readFile reads a local config file. The open and the read run on their own
+// goroutine, so a canceled context returns at once even while the kernel holds
+// them, as it does for a FIFO with no writer or a hung network mount. Such a
+// read stays blocked until the kernel releases it (for a FIFO, until a writer
+// opens it or the process exits), and its result is then dropped. Pipes stay
+// supported, so `--config <(...)` and `--config /dev/stdin` work.
 func readFile(ctx context.Context, path string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled before file read", err)
+		return nil, errors.WrapCtxErr(err, errors.ErrCodeTimeout, "context canceled before file read")
 	}
+	type result struct {
+		data []byte
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		data, err := readFileBounded(path)
+		done <- result{data: data, err: err}
+	}()
+	select {
+	case r := <-done:
+		return r.data, r.err
+	case <-ctx.Done():
+		return nil, errors.WrapCtxErr(ctx.Err(), errors.ErrCodeTimeout,
+			fmt.Sprintf("stopped reading config file %q", path))
+	}
+}
+
+func readFileBounded(path string) ([]byte, error) {
 	// Stream the read through io.LimitReader rather than os.ReadFile so a
 	// hostile path (/proc symlink, FUSE mount, NFS) cannot force the
 	// process to allocate an unbounded buffer before we react to the size.
