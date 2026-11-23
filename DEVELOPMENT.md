@@ -654,6 +654,7 @@ Its unit and envtest suites run in `make test`. The targets below cover the rest
 | `make operator-build` | Build `dist/aicr-operator` and `dist/kubectl-aicr` (development version, with the `aicr_operator_development` tag) |
 | `make generate` | Regenerate deep copies and CRDs after an API type change |
 | `make operator-check-generated` | Fail when generated code or CRDs are stale |
+| `make operator-aicr-pins` | Check that the `operator:` AICR pins in `.settings.yaml` agree, and that each pinned image is its release's: the GitHub release is published, the image's version tag resolves to the pinned digest, and the digest has SLSA provenance from the release's tag (`gh` signed in). Run it when adopting an AICR release; `make test` checks that the pins agree, and Operator E2E runs the whole check |
 | `make operator-envtest-floor` | CRD validation and chart suites on the Kubernetes floor |
 | `make operator-kind-up` / `operator-kind-up-floor` | Create the two-node `aicr-operator` kind cluster with an in-cluster registry |
 | `make operator-kind-down` | Delete it |

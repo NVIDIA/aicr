@@ -410,6 +410,7 @@ operator:
   # AICR release the operator is built and qualified against outside a
   # release; a release tag's chart defaults to that tag's own AICR. Digests resolved
   # from ghcr.io on 2026-11-22; v1.3.0 is commit d3493485869ca0a3f49f1058b3985d6ed536b6b2.
+  # `make operator-aicr-pins` checks these pins and aicr_e2e when adopting a release.
   aicr_version: 'v1.3.0'
   aicr_image: 'ghcr.io/nvidia/aicr:v1.3.0@sha256:4c7ac0f9461c14b7d9a4e86d7742b968a25149ed83bcbc52cd87e11d22871304'
   aicr_validator_images:
