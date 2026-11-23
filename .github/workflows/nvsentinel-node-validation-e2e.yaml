@@ -73,7 +73,7 @@ concurrency:
 jobs:
   test:
     name: NVSentinel Node Validation E2E
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     # The script's bounded waits sum to ~43 minutes worst case (node Ready 2,
     # cert-manager 10, nvsentinel rollout 10, new-node validation 10, failed
     # validation and release 11), before kind create, go build, four bundles
