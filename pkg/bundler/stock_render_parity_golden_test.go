@@ -151,6 +151,28 @@ var stockRenderOptIns = []stockRenderOptIn{
 		covers: []string{"node-problem-detector", "nvcre", "gatekeeper"},
 	},
 	{
+		// No stock recipe selects Knative yet. The KnativeServing resource
+		// needs the operator's CRD, hence the dependency edge.
+		name: "h100-gke-cos-inference-dynamo+knative",
+		leaf: "h100-gke-cos-inference-dynamo",
+		overlay: &overlayAddition{
+			componentRefs: []recipe.ComponentRef{
+				{
+					Name:       "knative-operator",
+					Type:       recipe.ComponentTypeHelm,
+					ValuesFile: "components/knative-operator/values.yaml",
+				},
+				{
+					Name:           "knative-serving",
+					Type:           recipe.ComponentTypeHelm,
+					ValuesFile:     "components/knative-serving/values.yaml",
+					DependencyRefs: []string{"knative-operator"},
+				},
+			},
+		},
+		covers: []string{"knative-operator", "knative-serving"},
+	},
+	{
 		// No stock recipe selects nktp yet; the dependency edges are ADR-026's.
 		name: "h100-eks-ubuntu-training-kubeflow+nktp",
 		leaf: "h100-eks-ubuntu-training-kubeflow",
