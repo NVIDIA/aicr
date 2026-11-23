@@ -4781,9 +4781,9 @@ h100-gke-cos-inference-dynamo+knative:
   024-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   024-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   README.md: dcd521b5d2dd14df864ecf0e9e7056ef0a8a5327462155a4bbf958d57fcb7294
-  UPGRADING.md: 50274a942dca4d1a0047221a304eace523e33b4980ea5f6d5d044ba0a19c86b8
+  UPGRADING.md: e79e06553aa80e41181caccceeab8459790131e4d624cb063c0234bcacc3581b
   bundle-info.yaml: b770593aa70ea6e5083950f08d3dd7944491e4cd787785e0db548cc5f60d6e49
-  checksums.txt: 8fab63987916133eae5460836b6eb6fc73e7eb82ab90552aa3576568d2e0ab1d
+  checksums.txt: 10c0a2f70cd54959bdb8e0bb324680b997c5895bc7897abdfbc5da68ac3fdeb4
   data/overlays/stock-render-opt-in.yaml: aca45cd707e9340ba67a197f6464662cc8a401d3cd566a58f254a1ea6a325453
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 1810a9f523e34f6079bd427b6b842f09034bb10d3955b6e6378b1d61e10a82be
