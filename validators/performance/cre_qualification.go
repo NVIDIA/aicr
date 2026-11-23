@@ -59,8 +59,9 @@ type creCombination struct {
 // aws-ofi-nccl 1.21.1 image the catalog selects it measures about 31 GB/s,
 // against about 45 GB/s on the 2.27.7 and 1.16.3 image the TrainJob check uses:
 // 2.31.2's tuner picks Ring over Tree for AllReduce from 16M up. The entry also
-// sets NCCL_ALGO=Tree, which restores about 46 GB/s, until NVIDIA/nccl#2630 is
-// fixed (#3911).
+// sets NCCL_ALGO=Tree until NVIDIA/nccl#2630 is fixed (#3911). Tree measured
+// about 46 GB/s in the #3911 diagnostic run; a run through this check with the
+// override is pending.
 //
 // cre-training-goodput is qualified on eks x h100 with training/nemotron5-8b,
 // measured on the same v0.8.2 run, also not re-measured on v0.12.0: goodput 0.5723, 462.05 TFLOPS per GPU, 0.914

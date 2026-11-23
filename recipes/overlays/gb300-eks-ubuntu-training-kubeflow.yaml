@@ -69,8 +69,9 @@ spec:
       # The new nccl-tests image (NCCL 2.31.2, aws-ofi-nccl 1.21.1) measures
       # about 31 GB/s there, against about 45 on the 2.27.7 and 1.16.3 image the
       # TrainJob check uses, because 2.31.2's tuner picks Ring over Tree. The
-      # qualified entry forces NCCL_ALGO=Tree, which restores about 46 GB/s, so
-      # the floor is the 40 the TrainJob check holds.
+      # qualified entry forces NCCL_ALGO=Tree, which measured about 46 GB/s in
+      # the #3911 diagnostic run (a run through this check is pending), so the
+      # floor is the 40 the TrainJob check holds.
       checks:
         - nccl-cre-all-reduce-bw
         - nccl-cre-all-reduce-bw-net

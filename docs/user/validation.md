@@ -573,7 +573,9 @@ the newer `nccl-tests` image CRE selects (NCCL 2.31.2, aws-ofi-nccl 1.21.1) the
 EFA-only path measures about 31 GB/s by default, because the NCCL tuner picks
 Ring over Tree for AllReduce
 ([NVIDIA/nccl#2630](https://github.com/NVIDIA/nccl/issues/2630)), so the check
-also sets `NCCL_ALGO=Tree`, which restores about 46 GB/s. On every other
+also sets `NCCL_ALGO=Tree`. Tree measured about 46 GB/s in the
+[#3911](https://github.com/NVIDIA/aicr/issues/3911) diagnostic run; a run
+through this check with the override is pending. On every other
 overlay, nothing below runs unless you ask for it.
 
 Enabling a CRE check takes two steps and needs both. Add the `nvcre` component
