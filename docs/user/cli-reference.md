@@ -3317,8 +3317,8 @@ The generated ArtifactGenerator CRs extract per-component chart directories from
 When `--attest` is passed, the bundle command performs five steps:
 
 1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
-2. **Acquires a signing credential** — in the default keyless mode this is an OIDC token (see [OIDC Token Sources](#oidc-token-sources) below); with `--signing-key` this step instead resolves the KMS key and no OIDC token is acquired (see [KMS-Backed Signing](#kms-backed-signing)).
-3. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by NVIDIA CI. This ensures only NVIDIA-built binaries can produce attested bundles.
+2. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by NVIDIA CI. This ensures only NVIDIA-built binaries can produce attested bundles. An attestation that does not verify, such as one left beside the binary by a different build, stops the command here, before any OIDC login, KMS call or transparency-log entry.
+3. **Acquires a signing credential** — in the default keyless mode this is an OIDC token (see [OIDC Token Sources](#oidc-token-sources) below); with `--signing-key` this step instead resolves the KMS key and no OIDC token is acquired (see [KMS-Backed Signing](#kms-backed-signing)).
 4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the generated closed-world inventory, including `recipe.yaml`, and the binary that produced it.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 

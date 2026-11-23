@@ -503,7 +503,7 @@ jobs:
           - image: docker.io/percona/percona-server-mongodb-operator
             tag: 1.23.1@sha256:78c87b933e184b9af36dbb0078751862c75934c1521c33d3be4d0a38aa58dd0a
           - image: docker.io/percona/percona-server-mongodb
-            tag: 8.0.32-14@sha256:5ba5f240d2dc98bc6236ab1d79c0862c4b62dba9d98cd0ffdf716c30473d2d11
+            tag: 8.0.38-16@sha256:60ec65283ad2108622762910fc964ed4a2617efd05301c691dcb203a04566d97
           - image: docker.io/percona/mongodb_exporter
             tag: 0.54.0@sha256:934e9db87e85e0fa63654e73c3504845993a254e898783ca905e65a68848b5a4
           - image: docker.io/percona/percona-backup-mongodb

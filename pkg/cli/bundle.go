@@ -1717,8 +1717,8 @@ func runBundleCmdWithDependencies(
 		}
 	}
 
-	// Note: binary attestation pre-flight check is handled inside
-	// MakeBundle via bundler.New().
+	// MakeBundle checks that the binary attestation exists (bundler.New) and
+	// verifies it before signing.
 	attester, err := selectAttester(ctx, opts)
 	if err != nil {
 		return err

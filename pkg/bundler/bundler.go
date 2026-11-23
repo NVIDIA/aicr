@@ -137,6 +137,21 @@ type DefaultBundler struct {
 	// chartPuller replaces the default chart puller of a split set; tests
 	// set it to vendor charts without a registry.
 	chartPuller localformat.ChartPuller
+
+	// executable replaces os.Executable for attestation; tests set it to
+	// place a binary and its attestation sidecar in a directory they own.
+	executable func() (string, error)
+
+	// verifyBinary replaces verifier.VerifyBinaryAttestationData; tests set it
+	// to accept a sidecar without a signed fixture.
+	verifyBinary func(ctx context.Context, data []byte, identityPattern string, digest []byte) (string, error)
+}
+
+func (b *DefaultBundler) executablePath() (string, error) {
+	if b.executable != nil {
+		return b.executable()
+	}
+	return os.Executable()
 }
 
 // bundleRun holds the state of one Make call.
@@ -3721,7 +3736,7 @@ func (b *DefaultBundler) attestBundleAt(ctx context.Context, dir, publishedDir s
 	}
 
 	// Find and add binary attestation as a resolved dependency
-	binaryPath, err := os.Executable()
+	binaryPath, err := b.executablePath()
 	if err == nil {
 		binaryDigest, digestErr := attestation.ComputeFileDigestContext(ctx, binaryPath)
 		if digestErr != nil {
@@ -3749,6 +3764,14 @@ func (b *DefaultBundler) attestBundleAt(ctx context.Context, dir, publishedDir s
 			URI:    fmt.Sprintf("file://%s", dataFile),
 			Digest: map[string]string{digestAlgoSHA256: dataDigest},
 		})
+	}
+
+	// Verify the binary attestation before signing, so a sidecar from another
+	// build fails here rather than after an OIDC login and a transparency-log
+	// entry for a bundle that is then discarded.
+	binaryAttestData, err := b.binaryAttestation(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Sign
@@ -3785,9 +3808,7 @@ func (b *DefaultBundler) attestBundleAt(ctx context.Context, dir, publishedDir s
 	slog.Info("bundle attestation written",
 		"path", filepath.Join(publishedDir, filepath.FromSlash(attestation.BundleAttestationFile)))
 
-	// Copy binary attestation into bundle — errors are fatal since the user
-	// opted into attestation (remove --attest to skip).
-	if err := b.verifyAndCopyBinaryAttestation(ctx, dir, publishedDir); err != nil {
+	if err := writeBinaryAttestation(dir, publishedDir, binaryAttestData); err != nil {
 		return nil, err
 	}
 	attestFiles = append(attestFiles, attestation.BinaryAttestationFile)
@@ -3795,43 +3816,31 @@ func (b *DefaultBundler) attestBundleAt(ctx context.Context, dir, publishedDir s
 	return attestFiles, nil
 }
 
-// verifyAndCopyBinaryAttestation resolves the running binary's attestation,
-// cryptographically verifies it (REQ-6), and copies it into the bundle
-// directory dir, which is published at publishedDir.
-func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir, publishedDir string) error {
-	// Injected, pre-verified attestation: write it directly. The caller
-	// verified identity + binary-digest binding at injection time, so we do
-	// not re-discover or re-verify here.
+// binaryAttestation returns the running binary's attestation, verified: the
+// injected bytes the caller already verified, or the sidecar next to the
+// binary, verified here (REQ-6) against the CI identity and this binary's
+// digest. The bytes returned are the bytes verified, so the copy written into
+// the bundle cannot differ from them.
+func (b *DefaultBundler) binaryAttestation(ctx context.Context) ([]byte, error) {
 	if len(b.verifiedBinaryAttestation) > 0 {
-		destPath, joinErr := deployer.SafeJoin(dir, attestation.BinaryAttestationFile)
-		if joinErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "unsafe binary attestation path", joinErr)
-		}
-		if writeErr := os.WriteFile(destPath, b.verifiedBinaryAttestation, 0600); writeErr != nil { //nolint:gosec // path validated by SafeJoin
-			return errors.Wrap(errors.ErrCodeInternal, "failed to write injected binary attestation", writeErr)
-		}
-		slog.Info("embedded pre-verified binary attestation")
-		return nil
+		return b.verifiedBinaryAttestation, nil
 	}
 
-	binaryPath, execErr := os.Executable()
+	binaryPath, execErr := b.executablePath()
 	if execErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
+		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"could not resolve executable path; remove --attest to skip", execErr)
 	}
 
 	binaryAttestPath, findErr := attestation.FindBinaryAttestation(binaryPath)
 	if findErr != nil {
-		return errors.Wrap(errors.ErrCodeNotFound,
+		return nil, errors.Wrap(errors.ErrCodeNotFound,
 			"binary attestation not found; reinstall from a release archive or remove --attest to skip", findErr)
 	}
 
-	// REQ-6: Cryptographically verify binary attestation before attesting bundles.
-	// Confirms the binary was built by NVIDIA CI (identity-pinned) and the
-	// attestation binds to this specific binary's content.
 	binaryDigest, digestErr := checksum.SHA256RawContext(ctx, binaryPath)
 	if digestErr != nil {
-		return errors.PropagateOrWrap(
+		return nil, errors.PropagateOrWrap(
 			digestErr, errors.ErrCodeInternal, "failed to compute binary digest for provenance verification")
 	}
 
@@ -3839,43 +3848,49 @@ func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir
 	if b.Config.CertificateIdentityRegexp() != "" {
 		identityPattern = b.Config.CertificateIdentityRegexp()
 		if err := verifier.ValidateIdentityPattern(identityPattern); err != nil {
-			return err
+			return nil, err
 		}
 		slog.Warn("using custom certificate identity pattern for binary attestation — "+
 			"bundle will not pass verification with default settings",
 			"pattern", identityPattern)
 	}
 
-	// Read once, verify that exact buffer, write the same buffer: the file
-	// cannot be swapped between verification and copy.
 	binaryAttestData, readErr := verifier.ReadBinaryAttestation(ctx, binaryAttestPath)
 	if readErr != nil {
-		return errors.PropagateOrWrap(readErr, errors.ErrCodeInternal,
+		return nil, errors.PropagateOrWrap(readErr, errors.ErrCodeInternal,
 			"binary attestation exists but cannot be read: "+binaryAttestPath)
 	}
 
-	binaryBuilder, verifyErr := verifier.VerifyBinaryAttestationData(ctx, binaryAttestData, identityPattern, binaryDigest)
+	verify := verifier.VerifyBinaryAttestationData
+	if b.verifyBinary != nil {
+		verify = b.verifyBinary
+	}
+	binaryBuilder, verifyErr := verify(ctx, binaryAttestData, identityPattern, binaryDigest)
 	if verifyErr != nil {
 		if stderrors.Is(verifyErr, errors.New(errors.ErrCodeTimeout, "")) {
-			return verifyErr
+			return nil, verifyErr
 		}
-		return errors.Wrap(errors.ErrCodeUnauthorized,
-			"binary attestation verification failed; only NVIDIA-built binaries can attest bundles — "+
-				"remove --attest to skip", verifyErr)
+		return nil, errors.Wrap(errors.ErrCodeUnauthorized,
+			"binary attestation verification failed: it must be NVIDIA CI's attestation of this exact binary; "+
+				"reinstall from a release archive or remove --attest to skip", verifyErr)
 	}
 	slog.Info("binary provenance verified", "builder", binaryBuilder)
+	return binaryAttestData, nil
+}
 
+// writeBinaryAttestation writes a verified binary attestation into the bundle
+// directory dir, which is published at publishedDir.
+func writeBinaryAttestation(dir, publishedDir string, data []byte) error {
 	destPath, joinErr := deployer.SafeJoin(dir, attestation.BinaryAttestationFile)
 	if joinErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "unsafe binary attestation path", joinErr)
 	}
-	if copyErr := os.WriteFile(destPath, binaryAttestData, 0600); copyErr != nil { //nolint:gosec // path validated by SafeJoin
+	if err := os.WriteFile(destPath, data, 0600); err != nil { //nolint:gosec // path validated by SafeJoin
 		return errors.Wrap(errors.ErrCodeInternal,
-			"failed to copy binary attestation into bundle", copyErr)
+			"failed to copy binary attestation into bundle", err)
 	}
 	slog.Info("binary attestation copied into bundle",
 		"path", filepath.Join(publishedDir, filepath.FromSlash(attestation.BinaryAttestationFile)))
-
 	return nil
 }
 
