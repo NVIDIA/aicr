@@ -81,7 +81,6 @@ reviews:
     revisit_when: an EKS add-on release carrying v0.5.22-eksbuild.9 is confirmed
   - component: cert-manager
     from: v1.20.5
-    to: v1.21.3
     candidates:
       - predating minor v1.21.3
     verdict: hold
