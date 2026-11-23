@@ -3889,7 +3889,7 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   011-dra-node-labeler/Chart.yaml: 58bb63cbcd76f8077189545c72d0bbad4503ea392e67cd533d5f91435635dc50
   011-dra-node-labeler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   011-dra-node-labeler/install.sh: 4acbd445011c41fbcdda9381a33c61b1711b1ac9a14902d865a67a0b650233e2
-  011-dra-node-labeler/templates/dra-node-labeler.yaml: 3cc7017469c8f840581ec8cf1ef62e312bdb7c6ae696693edd4df317368dcf7e
+  011-dra-node-labeler/templates/dra-node-labeler.yaml: 5e7a80fd6e14924b3f55ea642e7d174b27fd9eea1f031ced34a853918e159998
   011-dra-node-labeler/values.yaml: b031d0171f8e9b9ebf4a83a60e961eb48a29e1cd2d6c255d134e5139f4508e27
   012-kai-scheduler/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   012-kai-scheduler/install.sh: 529a6fd19ca71cbf0d2f5bcf40ce817db93713c5c0183e59d690bff9745f95cc
@@ -3925,7 +3925,7 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   README.md: 5fd68ecc85dca51c59aa53f5818ae2321af416105c51c6678e3d40702b269aee
   UPGRADING.md: 1c9871a0c666578eb10656503dc31588085fe827392f8d714a9ac321b204ca5e
   bundle-info.yaml: 50fc14b1c94a5662cc76e7d47c39785f41d92b049f6e707b9f7488ceed746d53
-  checksums.txt: 91923adfb7dabaad59362d528a1e48a70aa7c79d0a8cb1f26ec43238a795c04f
+  checksums.txt: 0514e5b296af24d186126d0c6e4bdfb0853b180a386996d2c68a4f12090fa3c6
   deploy.sh: 2808edb0dd40f6022b6a2edb79c620cdd2cd908a0f8f700a3142796f6fccead9
   recipe.yaml: 5c650aa295e6cbcc439e916f308cf05ad17c10ea749a00023fce70dc569a1774
 h100-eks-ubuntu-training-kubeflow+nktp:
