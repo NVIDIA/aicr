@@ -36,6 +36,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 	"aicr.run/pkg/operator/aicrjob"
@@ -186,6 +187,9 @@ type RolloutReconciler struct {
 	steps pendingEvents
 	// plans holds the content each plan references, for retention.
 	plans planRefs
+	// wrap, when set, wraps the reconciler SetupWithManager registers, so a
+	// test can see each request a watch enqueues.
+	wrap func(reconcile.Reconciler) reconcile.Reconciler
 }
 
 // pendingEvents are step Events held until the status that records their
