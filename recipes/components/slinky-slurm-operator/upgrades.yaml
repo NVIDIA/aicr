@@ -87,3 +87,17 @@ transitions:
               Watch the NodeSet rollout until every pod is ready.
     references:
       - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.4/CHANGELOG/CHANGELOG-1.2.md
+  - from: ">=1.2.4 <1.2.5"
+    to: "1.2.5"
+    verdict: safe
+    verifiedBy: >-
+      Upstream changelog CHANGELOG-1.2.md (SlinkyProject/slurm-operator) at
+      v1.2.5: fixes only (Slurm node status now syncs for unhealthy pods,
+      accounting pod template metadata is respected) plus Go CVE updates,
+      with no action required. helm template of 1.2.4 and 1.2.5 with AICR's
+      values renders the same 16 objects, differing only in the operator and
+      webhook image tags and the version labels.
+    summary: >-
+      Patch release of fixes. Nothing to change on upgrade.
+    references:
+      - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.5/CHANGELOG/CHANGELOG-1.2.md

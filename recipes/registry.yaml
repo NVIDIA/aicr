@@ -1890,7 +1890,7 @@ components:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator-crds
       # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm-operator-crds
-      defaultVersion: "1.2.4"
+      defaultVersion: "1.2.5"
       defaultNamespace: slinky
 
   - name: mariadb-operator-crds
@@ -1997,7 +1997,7 @@ components:
       # file mirrors the chart defaults explicitly for documentation, but
       # an upstream default flip would otherwise pass through unnoticed.
       # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm-operator
-      defaultVersion: "1.2.4"
+      defaultVersion: "1.2.5"
       defaultNamespace: slinky
     nodeScheduling:
       system:
@@ -2029,7 +2029,7 @@ components:
       # pkg/recipe TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths
       # enforces their alignment with the scheduling paths below.
       # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm
-      defaultVersion: "1.2.4"
+      defaultVersion: "1.2.5"
       defaultNamespace: slurm
     sharedStorageClassPaths:
       - storage.home.storageClassName
