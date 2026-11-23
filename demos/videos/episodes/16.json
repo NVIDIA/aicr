@@ -1,0 +1,83 @@
+{
+  "id": 16,
+  "slug": "bring-release-artifacts",
+  "title": "Bring your own release artifacts",
+  "track": "Recipes and deployment",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/artifact-inventory.md",
+  "scenes": [
+    {
+      "heading": "The release knows the exact bytes",
+      "sub": "Keep artifact identities with the publisher",
+      "visual": "inspect",
+      "items": [
+        "Publisher inventory",
+        "Versioned chart",
+        "Image digest"
+      ],
+      "detail": "ArtifactInventory",
+      "result": "Release identity is explicit",
+      "voice": [
+        "A publisher knows the exact chart and image it released.",
+        "An artifact inventory lets that publisher supply those identities separately from the catalog that describes a cluster."
+      ]
+    },
+    {
+      "heading": "Map the release to a component",
+      "sub": "Bindings connect inventory and settings",
+      "visual": "trace",
+      "items": [
+        "Artifact entry",
+        "Component mapping",
+        "Image values"
+      ],
+      "detail": "ArtifactBindings",
+      "result": "Chart and image select their targets",
+      "voice": [
+        "Chart bindings map inventory entries to recipe components.",
+        "Image bindings identify which chart value holds the digest, so the recipe can carry the publisher’s exact image identity."
+      ]
+    },
+    {
+      "heading": "Inspect the recorded provenance",
+      "sub": "Resolve the recipe with the bindings",
+      "visual": "terminal",
+      "items": [
+        "Inventory digest",
+        "Catalog digest",
+        "Applied identities"
+      ],
+      "detail": "metadata.artifacts",
+      "result": "Selected identities recorded",
+      "voice": [
+        "Resolve the recipe with the matching inventory and bindings.",
+        "AICR records the input digests and applied identities so an operator can trace what the recipe selected."
+      ]
+    },
+    {
+      "heading": "Replay with the same inputs",
+      "sub": "Preserve provenance during handoff",
+      "visual": "vault",
+      "items": [
+        "Saved recipe",
+        "Captured data",
+        "Bundle output"
+      ],
+      "detail": "Use matching data for reuse",
+      "result": "Bundle carries its external inputs",
+      "voice": [
+        "The bundle captures the external inputs used for resolution.",
+        "To reuse the saved recipe for bundling or validation, provide the same inputs so their provenance can be checked."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    26,
+    40,
+    53
+  ],
+  "viewer": "Release publisher supplying pinned artifacts",
+  "payoff": "Bind an exact chart and image release into the selected recipe, then inspect its recorded artifact provenance."
+}

@@ -16,6 +16,8 @@ package registry
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -83,5 +85,31 @@ func TestFailuresCountByOperationAndCode(t *testing.T) {
 		if got := failureCount(tc.op, tc.code) - before; got != 1 {
 			t.Errorf("%s: counted %g failures of %s/%s, want 1", tc.name, got, tc.op, tc.code)
 		}
+	}
+}
+
+// A mirror whose push fails counts once, as mirror_http_chart, not again as
+// push_chart.
+func TestFailedMirrorPushCountsOnce(t *testing.T) {
+	_, repo := testRegistry(t)
+	ctx := context.Background()
+	archive := chartArchive(t, "demo", "1.0.0", "")
+	sum := sha256.Sum256(archive)
+	base := upstream(t, archive, hex.EncodeToString(sum[:]), "demo-1.0.0.tgz")
+	c := New(Options{PlainHTTPHosts: []string{repo.Host, hostOf(t, base)}})
+	charts := repo.Child("charts")
+	if _, err := c.PushChart(ctx, charts.Child("demo"), chartArchive(t, "demo", "1.0.0", "\nother: content")); err != nil {
+		t.Fatal(err)
+	}
+
+	mirrored, pushed := failureCount(opMirrorHTTPChart, operrors.ErrCodeConflict), failureCount(opPushChart, operrors.ErrCodeConflict)
+	if _, err := c.MirrorHTTPChart(ctx, UpstreamChart{Repository: base, Chart: "demo", Version: "1.0.0"}, charts); operrors.CodeOf(err) != operrors.ErrCodeConflict {
+		t.Fatalf("mirror over a different chart = %v, want CONFLICT", err)
+	}
+	if got := failureCount(opMirrorHTTPChart, operrors.ErrCodeConflict) - mirrored; got != 1 {
+		t.Errorf("mirror_http_chart counted %g, want 1", got)
+	}
+	if got := failureCount(opPushChart, operrors.ErrCodeConflict) - pushed; got != 0 {
+		t.Errorf("push_chart counted %g, want 0", got)
 	}
 }

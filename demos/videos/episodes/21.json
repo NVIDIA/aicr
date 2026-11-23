@@ -1,0 +1,81 @@
+{
+  "id": 21,
+  "slug": "inference-first-token",
+  "title": "How fast is the first token?",
+  "track": "Validation, evidence, and trust",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/validation.md#inference-performance-validation",
+  "scenes": [
+    {
+      "heading": "The client is waiting for token one",
+      "sub": "Fast streaming can follow a slow start.",
+      "visual": "trace",
+      "items": [
+        "Request arrives",
+        "First token",
+        "Token stream"
+      ],
+      "voice": [
+        "A model may stream tokens quickly once it starts.",
+        "For the client, the wait from sending the request to seeing the first token is a separate concern."
+      ],
+      "result": "Wait ends at the first token"
+    },
+    {
+      "heading": "Benchmark a repeatable workload",
+      "sub": "Warm up before measuring steady state.",
+      "visual": "queue",
+      "items": [
+        "Dynamo graph",
+        "vLLM model",
+        "AIPerf Job"
+      ],
+      "voice": [
+        "On a supported inference recipe, the performance check deploys Dynamo with a vLLM-served model.",
+        "AIPerf warms it up, then sends a repeatable measured workload against that deployment."
+      ],
+      "detail": "inference-perf",
+      "result": "Warm-up stays out of the result"
+    },
+    {
+      "heading": "Read latency and output rate",
+      "sub": "Two measurements answer different questions.",
+      "visual": "plot",
+      "items": [
+        "Request-to-first token",
+        "p99 latency",
+        "Output tokens/sec"
+      ],
+      "voice": [
+        "Look at the ninety-ninth percentile of time to first token to see the slow end of requests.",
+        "Output tokens per second measures how fast the service produced text."
+      ],
+      "detail": "Illustrative traces, no benchmark figures",
+      "result": "Startup latency and throughput"
+    },
+    {
+      "heading": "Check both limits",
+      "sub": "Compare this workload against the recipe.",
+      "visual": "gate",
+      "items": [
+        "Latency ceiling",
+        "Throughput floor",
+        "Check verdict"
+      ],
+      "voice": [
+        "AICR compares both measurements with the recipe's thresholds.",
+        "When interpreting the result, keep the tested model and workload parameters in view because they define the benchmark."
+      ],
+      "result": "Both thresholds checked"
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    25,
+    41,
+    53
+  ],
+  "viewer": "Inference platform engineers",
+  "payoff": "Read startup latency and steady-state throughput as separate checks against recipe thresholds."
+}

@@ -1,0 +1,83 @@
+{
+  "id": 18,
+  "slug": "secrets-at-install-time",
+  "title": "Supply secrets at install time",
+  "track": "Recipes and deployment",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/bundling.md#required-and-install-time-secret-inputs",
+  "scenes": [
+    {
+      "heading": "The installer needs a secret",
+      "sub": "Example from the Run:ai preview",
+      "visual": "vault",
+      "items": [
+        "Run:ai bootstrap",
+        "Bundle generation",
+        "Install machine"
+      ],
+      "detail": "Bootstrap token",
+      "result": "Keep the value out of the bundle",
+      "voice": [
+        "A Run AI cluster needs a bootstrap token when it is installed.",
+        "The bundle may travel between teams, so supply that credential only on the install machine."
+      ]
+    },
+    {
+      "heading": "Describe the required input",
+      "sub": "AICR distinguishes secret paths",
+      "visual": "gate",
+      "items": [
+        "Required values",
+        "Install-time secret",
+        "Dynamic declaration"
+      ],
+      "detail": "--dynamic runai:controlPlane.bootstrapToken",
+      "result": "Only the input slot is declared",
+      "voice": [
+        "The catalog marks the bootstrap token as an install time secret.",
+        "Declare its path as dynamic at bundle time so the generated bundle carries a place to supply it."
+      ]
+    },
+    {
+      "heading": "Hand off the bundle before the token",
+      "sub": "Show only the generated input slot",
+      "visual": "trace",
+      "items": [
+        "Generated bundle",
+        "Input slot",
+        "Install-side owner"
+      ],
+      "detail": "cluster-values.yaml",
+      "result": "Credential is supplied after handoff",
+      "voice": [
+        "The generated component includes a cluster values file for install time inputs.",
+        "The install side fills the required slot there when it is ready to deploy."
+      ]
+    },
+    {
+      "heading": "Apply from the installation environment",
+      "sub": "The deployer consumes the filled values",
+      "visual": "queue",
+      "items": [
+        "Install-side values",
+        "Deployment tool",
+        "Component install"
+      ],
+      "detail": "Supply the token locally",
+      "result": "Deployer reads the required input",
+      "voice": [
+        "The deployment tool reads the filled values during installation.",
+        "The team that generated the artifact can hand it off before anyone supplies the actual credential."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    26,
+    39,
+    53
+  ],
+  "viewer": "Integrator handing off a credentialed install",
+  "payoff": "Show a required bootstrap-token slot moving into an install-time values file while the generated bundle stays free of the token."
+}

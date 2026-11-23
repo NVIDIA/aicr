@@ -1,0 +1,83 @@
+{
+  "id": 26,
+  "slug": "bring-your-own-validation-check",
+  "title": "Bring your own validation check",
+  "track": "Validation, evidence, and trust",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/integrator/validator-extension.md",
+  "scenes": [
+    {
+      "heading": "The recipe needs one more check",
+      "sub": "Example: a required storage class.",
+      "visual": "probe",
+      "items": [
+        "Existing checks",
+        "Local requirement",
+        "Storage class"
+      ],
+      "voice": [
+        "Your application team depends on a storage class specific to its clusters.",
+        "Add a validation check for that requirement so its result appears alongside the checks AICR already runs."
+      ],
+      "detail": "Illustrative custom check",
+      "result": "Check named storage-policy"
+    },
+    {
+      "heading": "Package it and declare its contract",
+      "sub": "Give AICR an image and a phase.",
+      "visual": "compile",
+      "items": [
+        "Validator image",
+        "Catalog entry",
+        "Deployment phase"
+      ],
+      "voice": [
+        "Package the storage check as a container that follows AICR's exit-code contract.",
+        "Register the image, timeout, and phase in the validator catalog under your external data directory."
+      ],
+      "detail": "validators/catalog.yaml",
+      "result": "Catalog entry resolves to image"
+    },
+    {
+      "heading": "An unknown check stops early",
+      "sub": "The recipe and catalog names must match.",
+      "visual": "gate",
+      "items": [
+        "Recipe checks",
+        "Catalog names",
+        "Job creation held"
+      ],
+      "voice": [
+        "Reference the check by its exact name in the recipe's deployment phase.",
+        "If there is a typo or a phase mismatch, AICR rejects the run before creating a validator Job."
+      ],
+      "detail": "Illustrative typo: storage-polic",
+      "result": "Unknown check. No Job created."
+    },
+    {
+      "heading": "Correct the name and run again",
+      "sub": "Read the custom and built-in results.",
+      "visual": "dashboard",
+      "items": [
+        "Custom check result",
+        "Built-in results",
+        "Validation report"
+      ],
+      "voice": [
+        "With the name corrected, run validation using your recipe and external data.",
+        "The report shows the storage check with the built-in checks, so operators can see which requirement needs attention."
+      ],
+      "detail": "aicr validate --data …",
+      "result": "Storage check in the phase report"
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    25,
+    39,
+    53
+  ],
+  "viewer": "Teams extending validation",
+  "payoff": "Register a containerized prerequisite check and catch a misspelled catalog name before any Job starts."
+}

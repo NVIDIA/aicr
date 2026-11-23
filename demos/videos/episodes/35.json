@@ -1,0 +1,83 @@
+{
+  "id": 35,
+  "slug": "run-validation-from-go",
+  "title": "Run validation from Go",
+  "track": "SDK, API, and automation",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/integrator/go-library.md#snapshotting-and-validation",
+  "scenes": [
+    {
+      "heading": "A partial report still matters",
+      "sub": "Illustrative interrupted validation",
+      "visual": "dashboard",
+      "items": [
+        "Deployment passed",
+        "Later phase stopped",
+        "Operator investigation"
+      ],
+      "detail": "Report interrupted",
+      "result": "Completed work is still useful",
+      "voice": [
+        "Some checks passed before GPU cluster validation was interrupted.",
+        "The dashboard needs to show what ran and why the full run stopped."
+      ]
+    },
+    {
+      "heading": "Pass desired and observed state",
+      "sub": "Use the deployed recipe and snapshot",
+      "visual": "compare",
+      "items": [
+        "Deployed recipe",
+        "Cluster snapshot",
+        "Validation target"
+      ],
+      "detail": "aicr.run/pkg/client/v1",
+      "result": "Desired and observed state",
+      "voice": [
+        "Load the deployed recipe and a snapshot of the same cluster.",
+        "Your Go service supplies both to AICR with credentials for the validation target."
+      ]
+    },
+    {
+      "heading": "Run the selected phases in Go",
+      "sub": "The call returns results and an error",
+      "visual": "trace",
+      "items": [
+        "Go service",
+        "ValidateState",
+        "Validator Jobs"
+      ],
+      "detail": "results, err := client.ValidateState(…)",
+      "result": "Completed phases and partial results",
+      "voice": [
+        "Call ValidateState for the phases your workflow needs.",
+        "The call can return completed phase results together with an error, such as cancellation during a later phase."
+      ]
+    },
+    {
+      "heading": "Keep the result and the error",
+      "sub": "Show the real state of the run",
+      "visual": "dashboard",
+      "items": [
+        "Deployment results",
+        "Canceled run",
+        "Operator next step"
+      ],
+      "detail": "Illustrative: err = canceled",
+      "result": "Run interrupted",
+      "voice": [
+        "Render the completed results and the error in the portal.",
+        "When the run stops early, mark it interrupted and retain the details the operator can already use."
+      ]
+    }
+  ],
+  "viewer": "Go developer building a validation dashboard",
+  "payoff": "A Go portal shows completed checks and an interruption together, making a partial run useful.",
+  "edges": [
+    0,
+    11,
+    23,
+    38,
+    53
+  ]
+}

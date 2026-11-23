@@ -1,0 +1,83 @@
+{
+  "id": 4,
+  "slug": "pick-a-recipe",
+  "title": "How AICR picks a recipe",
+  "track": "Core workflow",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/integrator/data-flow.md#recipe-input-options",
+  "scenes": [
+    {
+      "heading": "Same cluster. Different job.",
+      "sub": "A team moves from training to serving",
+      "visual": "fork",
+      "items": [
+        "EKS cluster",
+        "H100 accelerator",
+        "Ubuntu worker nodes"
+      ],
+      "detail": "Existing cluster target",
+      "result": "Keep the cluster criteria",
+      "voice": [
+        "A team used its EKS cluster for training. Now it wants to serve a model on the same H100 workers.",
+        "Which inputs should change?"
+      ]
+    },
+    {
+      "heading": "Resolve the training target",
+      "sub": "Describe the workload and platform",
+      "visual": "compile",
+      "items": [
+        "H100 on EKS",
+        "Training intent",
+        "Kubeflow platform"
+      ],
+      "detail": "--intent training --platform kubeflow",
+      "result": "Training recipe",
+      "voice": [
+        "For the training target, set intent to training and platform to Kubeflow.",
+        "The recipe resolver combines that workload choice with the service, accelerator, and operating system criteria."
+      ]
+    },
+    {
+      "heading": "Change what the cluster should run",
+      "sub": "Keep the hardware criteria fixed",
+      "visual": "compare",
+      "items": [
+        "Training and Kubeflow",
+        "Inference and NIM",
+        "Resolved components"
+      ],
+      "detail": "--intent inference --platform nim",
+      "result": "Inference recipe with NIM Operator",
+      "voice": [
+        "The inference run uses the same cluster criteria with inference intent and the NIM platform.",
+        "That selection produces a recipe with the NIM Operator for model-serving workloads."
+      ]
+    },
+    {
+      "heading": "Inspect the difference",
+      "sub": "Use the resolved recipe as the record",
+      "visual": "inspect",
+      "items": [
+        "Resolved components",
+        "Pinned versions",
+        "Checks"
+      ],
+      "detail": "Compare both recipe outputs",
+      "result": "Two distinct configurations",
+      "voice": [
+        "Open the two outputs and compare their component lists, versions, and checks.",
+        "The two runs show exactly what AICR would configure for each workload on the same hardware."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    26,
+    40,
+    53
+  ],
+  "viewer": "Platform engineer",
+  "payoff": "Change the intent from training to inference and see a distinct resolved recipe for the same hardware."
+}

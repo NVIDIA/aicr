@@ -1,0 +1,101 @@
+{
+  "id": 27,
+  "slug": "healthy-at-which-revision",
+  "title": "Healthy at which revision?",
+  "track": "Operator preview",
+  "status": "preview",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/operator/argocd.md#readiness-at-the-current-revision",
+  "renderer": "revision",
+  "scenes": [
+    {
+      "voice": [
+        "Argo CD says the GPU release is healthy.",
+        "Look closer at the revision.",
+        "That green status belongs to the version already running."
+      ]
+    },
+    {
+      "voice": [
+        "AICR Operator requests the new revision and Argo CD takes over the sync.",
+        "A dependent release stays in the queue while the status still describes the previous one."
+      ]
+    },
+    {
+      "voice": [
+        "The Operator checks the chart digest and the values Argo CD compared.",
+        "It also needs a fresh sync or reconcile, healthy resources, and a status clear of sync or comparison errors.",
+        "Now the signal belongs to this rollout step."
+      ]
+    },
+    {
+      "voice": [
+        "With the new revision ready, the Operator advances to the dependent release.",
+        "When deployment validation is enabled, AICR checks the finished stack and can attach evidence to the rollout plan."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    10.5,
+    23,
+    40,
+    53
+  ],
+  "captions": [
+    {
+      "start": 0.27,
+      "end": 3.38,
+      "text": "Argo CD says the GPU release is healthy."
+    },
+    {
+      "start": 3.83,
+      "end": 5.66,
+      "text": "Look closer at the revision."
+    },
+    {
+      "start": 6.11,
+      "end": 9.32,
+      "text": "That green status belongs to the version already running."
+    },
+    {
+      "start": 10.77,
+      "end": 15.75,
+      "text": "AICR Operator requests the new revision and Argo CD takes over the sync."
+    },
+    {
+      "start": 16.2,
+      "end": 20.85,
+      "text": "A dependent release stays in the queue while the status still describes the previous one."
+    },
+    {
+      "start": 23.27,
+      "end": 27.91,
+      "text": "The Operator checks the chart digest and the values Argo CD compared."
+    },
+    {
+      "start": 28.36,
+      "end": 35.13,
+      "text": "It also needs a fresh sync or reconcile, healthy resources, and a status clear of sync or comparison errors."
+    },
+    {
+      "start": 35.58,
+      "end": 38.26,
+      "text": "Now the signal belongs to this rollout step."
+    },
+    {
+      "start": 40.27,
+      "end": 44.92,
+      "text": "With the new revision ready, the Operator advances to the dependent release."
+    },
+    {
+      "start": 45.37,
+      "end": 51.75,
+      "text": "When deployment validation is enabled, AICR checks the finished stack and can attach evidence to the rollout plan."
+    },
+    {
+      "start": 54.3,
+      "end": 56.65,
+      "text": "Explore AICR at aicr.run."
+    }
+  ]
+}

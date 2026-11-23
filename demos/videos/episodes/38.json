@@ -1,0 +1,83 @@
+{
+  "id": 38,
+  "slug": "put-aicr-in-ci",
+  "title": "Put AICR in CI",
+  "track": "SDK, API, and automation",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/integrator/automation.md#pattern-2-canonical-snapshot-to-bundle-pipeline",
+  "scenes": [
+    {
+      "heading": "Which bundle reached the cluster?",
+      "sub": "Illustrative stack promotion",
+      "visual": "incident",
+      "items": [
+        "Build job",
+        "Deployment job",
+        "Validation report"
+      ],
+      "detail": "Check the artifact handoff",
+      "result": "Candidate identity matters",
+      "voice": [
+        "A GPU infrastructure team wants to know what its pipeline deployed.",
+        "The promotion needs one traceable artifact from build through validation."
+      ]
+    },
+    {
+      "heading": "Build from recorded cluster facts",
+      "sub": "Snapshot and recipe move with the build",
+      "visual": "compile",
+      "items": [
+        "Saved snapshot",
+        "Resolved recipe",
+        "Deployment bundle"
+      ],
+      "detail": "aicr bundle --recipe recipe.yaml",
+      "result": "Candidate bundle recorded",
+      "voice": [
+        "Start with a saved cluster snapshot and resolve the recipe for your workload.",
+        "Generate a bundle and store that output for the later verification and deployment stages."
+      ]
+    },
+    {
+      "heading": "Make verification a promotion gate",
+      "sub": "Send the verified build to the deployer",
+      "visual": "gate",
+      "items": [
+        "Candidate bundle",
+        "AICR verify",
+        "Approved deployer"
+      ],
+      "detail": "aicr verify ./bundle",
+      "result": "Passing artifacts advance",
+      "voice": [
+        "Run bundle verification on the saved artifact before deployment.",
+        "If the bundle passes the configured checks and receives any required approval, give that same artifact to the deployment tooling."
+      ]
+    },
+    {
+      "heading": "Check the running stack",
+      "sub": "Use the recipe the deployer actually used",
+      "visual": "trace",
+      "items": [
+        "Installed components",
+        "Bundled recipe",
+        "Validation report"
+      ],
+      "detail": "aicr validate --recipe ./bundle/recipe.yaml",
+      "result": "Checks use the deployed recipe",
+      "voice": [
+        "After deployment, validate the running cluster against the recipe inside the bundle.",
+        "The report lets the team inspect the deployed stack and stop promotion if checks fail."
+      ]
+    }
+  ],
+  "viewer": "CI maintainer protecting a GPU-stack promotion",
+  "payoff": "CI deploys the exact verified bundle and checks the running stack against the recipe carried inside it.",
+  "edges": [
+    0,
+    10,
+    24,
+    39,
+    53
+  ]
+}

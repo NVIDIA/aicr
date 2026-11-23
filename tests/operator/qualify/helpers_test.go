@@ -35,6 +35,8 @@ import (
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 	"aicr.run/pkg/operator/defaults"
 	"aicr.run/pkg/operator/engine/argocd"
+	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/lifecycle"
 )
 
 // release is the one release the suite rolls out.
@@ -205,10 +207,21 @@ func approve(ctx context.Context, t *testing.T, name string) {
 	}
 }
 
-// waitReadyOn waits until the runtime is Ready with digest active.
+// waitReadyOn waits until the runtime is Ready with digest active. On the way
+// it acknowledges, as the approver, any manual release paused for its
+// post-apply steps, as `kubectl aicr acknowledge` does.
 func waitReadyOn(ctx context.Context, t *testing.T, digest string) {
 	t.Helper()
 	waitFor(t, rolloutTimeout, "Ready on "+digest, func() bool {
+		for _, r := range rolloutsTo(ctx, t, digest) {
+			if r.Status.Phase != v1alpha1.PhaseAwaitingAcknowledgement {
+				continue
+			}
+			_, _, err := lifecycle.Acknowledge(ctx, approver, r.Name, approverUser, time.Now())
+			if err != nil && operrors.CodeOf(err) != operrors.ErrCodeConflict {
+				t.Fatalf("acknowledge %s: %v", r.Name, err)
+			}
+		}
 		rt := getRuntime(ctx, t)
 		return cond(rt, v1alpha1.ConditionReady).Status == metav1.ConditionTrue && rt.Status.ActivePlanDigest == digest
 	})

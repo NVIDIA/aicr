@@ -44,6 +44,7 @@ import (
 	"aicr.run/pkg/operator/engine/argocd"
 	operrors "aicr.run/pkg/operator/errors"
 	"aicr.run/pkg/operator/evidence"
+	"aicr.run/pkg/operator/lifecycle"
 	"aicr.run/pkg/operator/plan"
 	"aicr.run/pkg/operator/registry"
 )
@@ -177,9 +178,14 @@ type RolloutReconciler struct {
 	// Operator reports the operator's own image and the digest it runs as,
 	// for the evidence; nil records none.
 	Operator func(context.Context) (evidence.Image, error)
+	// Liveness tracks each reconcile and serves the rollout-reconcile health
+	// check; nil does neither.
+	Liveness *Liveness
 
 	// steps holds the step Events of transitions not yet stored.
 	steps pendingEvents
+	// plans holds the content each plan references, for retention.
+	plans planRefs
 }
 
 // pendingEvents are step Events held until the status that records their
@@ -214,6 +220,7 @@ type runtimeView struct {
 	availableMessage          string
 	reconciling               bool
 	reconcilingReason         string
+	reconcilingMessage        string
 	stalled                   bool
 	stalledReason, stalledMsg string
 	// awaitingApprovalSince is when the rollout in progress started waiting
@@ -648,7 +655,7 @@ func (r *RolloutReconciler) judge(ctx context.Context, rt *v1alpha1.ClusterRunti
 	var assessment *v1alpha1.DigestedConfigMapRef
 	if assessed(base.from, p) {
 		var wait time.Duration
-		if report, assessment, wait, err = r.assess(ctx, rt, base.from, p); err != nil {
+		if report, assessment, wait, err = r.assess(ctx, rt, base.from, p, v); err != nil {
 			if isTerminal(err) {
 				v.stalled, v.stalledReason, v.stalledMsg = true, reasonOf(err), errorMessage(err)
 				return nil, false, nil, nil
@@ -1207,10 +1214,27 @@ func (r *RolloutReconciler) awaitAcknowledgement(ctx context.Context, ro *v1alph
 	if stop != nil {
 		return r.finish(ctx, ro, stop.phase, stop.message)
 	}
-	message := "release " + step.Release + " is applied; acknowledge its post-apply steps: " + strings.Join(step.PostApplySteps, ", ")
+	message := "release " + step.Release + " is applied; " + r.heldSteps(ctx, ro, step) + ": " + strings.Join(step.PostApplySteps, ", ")
 	ro.Status.Phase = v1alpha1.PhaseAwaitingAcknowledgement
 	v.stalled, v.stalledReason, v.stalledMsg = true, ReasonAwaitingAcknowledgement, "rollout "+ro.Name+": "+message
 	return r.saveStatus(ctx, ro, message)
+}
+
+// heldSteps says what the approver acknowledges for step: its record's steps
+// after the apply, or all of them when the record names no apply step. When
+// it cannot tell, as for a plan or report it cannot read or steps carried
+// from an earlier rollout, the wording is true either way.
+func (r *RolloutReconciler) heldSteps(ctx context.Context, ro *v1alpha1.RuntimeRollout, step v1alpha1.RolloutStep) string {
+	every, err := lifecycle.HoldsEveryStep(ctx, r.Reader, r.Config.OperatorNamespace, ro, step)
+	switch {
+	case err != nil:
+		log.FromContext(ctx).Info("cannot tell whether a record names an apply step", "release", step.Release, "error", err.Error())
+		return "acknowledge the steps its record holds"
+	case every:
+		return "its record names no apply step, so acknowledge all of its steps"
+	default:
+		return "acknowledge its post-apply steps"
+	}
 }
 
 // timeoutFrom is when the step's action timeout started: the step's start,
@@ -1955,9 +1979,14 @@ func (r *RolloutReconciler) applyStatus(ctx context.Context, rt *v1alpha1.Cluste
 			readyReason = v.stalledReason
 		}
 	}
-	reconcilingReason := v.reconcilingReason
+	reconcilingReason, reconcilingMessage := v.reconcilingReason, ""
 	if reconcilingReason == "" {
 		reconcilingReason = ReasonRolledOut
+	}
+	// The message belongs to the work the reason names; a terminal failure
+	// of that work is reported on Stalled instead.
+	if v.reconciling {
+		reconcilingMessage = v.reconcilingMessage
 	}
 	stalledReason := v.stalledReason
 	if stalledReason == "" {
@@ -1966,7 +1995,7 @@ func (r *RolloutReconciler) applyStatus(ctx context.Context, rt *v1alpha1.Cluste
 	conditions := []any{
 		condition(rt, v1alpha1.ConditionReady, boolStatus(v.ready), readyReason, v.readyMessage),
 		condition(rt, v1alpha1.ConditionAvailable, boolStatus(v.available), availableReason, availableMessage),
-		condition(rt, v1alpha1.ConditionReconciling, boolStatus(v.reconciling), reconcilingReason, ""),
+		condition(rt, v1alpha1.ConditionReconciling, boolStatus(v.reconciling), reconcilingReason, reconcilingMessage),
 		condition(rt, v1alpha1.ConditionStalled, boolStatus(v.stalled), stalledReason, v.stalledMsg),
 		condition(rt, v1alpha1.ConditionEngineAvailable, boolStatus(v.engineOK), v.engineReason, v.engineMessage),
 	}

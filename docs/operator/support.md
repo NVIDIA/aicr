@@ -25,7 +25,7 @@ digests it qualified, with the AICR image digest they were qualified against.
 
 | Component | Supported | Tested in CI |
 | --- | --- | --- |
-| AICR | `>=1.0.0, <2.0.0`, enforced by the chart and checked against the version AICR records in its snapshot, recipe, bundle and evidence | v1.0.0 and v1.2.0 |
+| AICR | `>=1.0.0, <2.0.0`, enforced by the chart and checked against the version AICR records in its snapshot, recipe, bundle and evidence | v1.0.0 and v1.3.0 |
 | Kubernetes | 1.34 or later (the chart's `kubeVersion`) | The newest 1.34 patch and 1.37 |
 | Argo CD | v3.4.2 (Argo Helm chart 9.5.14), the release AICR's own CI pins | v3.4.2 |
 | Deployment engine | Argo CD; a Flux adapter follows | — |
@@ -76,8 +76,9 @@ published evidence.
 ### Evidence on a running cluster
 
 With `spec.validation.deployment: Required`, each rollout runs AICR's
-deployment validation once and, when it passes, records the evidence reference
-on the rollout:
+deployment validation and, when it passes, records the evidence reference on
+the rollout. A run AICR could not finish, and that pushed no evidence of a
+failed check, is run again; only the last run's evidence is recorded:
 
 ```shell
 kubectl get runtimerollouts -l operator.aicr.run/outcome=Succeeded \

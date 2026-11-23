@@ -446,6 +446,11 @@
       matchDepNames: ["orhun/git-cliff", "kubernetes-sigs/kind", "tilt-dev/ctlptl", "tilt-dev/tilt", "gohugoio/hugo"],
       extractVersion: "^v(?<version>.+)$",
     },
+    // ClamAV release tags read clamav-<version>; .settings.yaml stores the bare version.
+    {
+      matchDepNames: ["Cisco-Talos/clamav"],
+      extractVersion: "^clamav-(?<version>.+)$",
+    },
     // Node.js LTS major-version channel.
     {
       matchDepNames: ["node"],
@@ -494,6 +499,37 @@
       matchDepNames: ["oras-project/oras"],
       postUpgradeTasks: {
         commands: ["./tools/update-oras-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- release image scanners refresh their pinned linux/amd64 SHA256 ----
+    // Same contract as oras above. The checksum-verified installs run in the
+    // release workflow and in the malware scans of the merge gate and the
+    // daily vulnerability scan, so a bump that left the digest behind could
+    // first fail at release time; check-settings-checksums catches it on the
+    // PR instead.
+    {
+      matchDepNames: ["anchore/grype"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-grype-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+    {
+      matchDepNames: ["gitleaks/gitleaks"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-gitleaks-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+    {
+      matchDepNames: ["Cisco-Talos/clamav"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-clamav-checksums {{{newVersion}}}"],
         fileFilters: [".settings.yaml"],
         executionMode: "update",
       },

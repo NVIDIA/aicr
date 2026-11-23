@@ -51,7 +51,7 @@ transitions:
               Export any Grafana dashboards, Alertmanager configuration, and
               PrometheusRules you still need.
             reason: The upgrade deletes them.
-          - id: upgrade
+          - id: apply
             description: >-
               Re-run install.sh (helm), helmfile apply (helmfile), or
               terraform apply (terraform) on the new bundle, upgrading this
@@ -78,7 +78,7 @@ transitions:
               Export any Grafana dashboards, Alertmanager configuration, and
               PrometheusRules you still need.
             reason: The upgrade deletes them.
-          - id: upgrade
+          - id: apply
             description: >-
               Sync or reconcile the new bundle, upgrading this release before
               nktp.

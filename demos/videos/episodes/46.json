@@ -1,0 +1,80 @@
+{
+  "id": 46,
+  "slug": "clean-up-interrupted-validation",
+  "title": "Clean up after an interrupted validation run",
+  "track": "Unreleased",
+  "status": "main",
+  "source": "https://github.com/NVIDIA/aicr/blob/c8903a38a3f6d80be5be0516b010413c8a4df54e/docs/user/cli-reference.md#aicr-sweep",
+  "scenes": [
+    {
+      "heading": "A killed run can leave resources",
+      "sub": "Unreleased AICR main branch feature.",
+      "visual": "incident",
+      "items": [
+        "Interrupted validation",
+        "Stale objects",
+        "Active workloads"
+      ],
+      "voice": [
+        "A forcibly terminated validation run can leave its Kubernetes objects behind.",
+        "The main branch adds a sweep command that identifies supported leftovers from earlier validation runs."
+      ],
+      "result": "Only eligible validation resources"
+    },
+    {
+      "heading": "Preview the candidate list",
+      "sub": "Read the cluster context before applying.",
+      "visual": "terminal",
+      "items": [
+        "Cluster context",
+        "API server",
+        "Candidate objects"
+      ],
+      "voice": [
+        "Start with a dry run and inspect the Kubernetes context and API server it prints.",
+        "Then check the exact list of candidate objects before deciding whether to apply cleanup."
+      ],
+      "detail": "aicr sweep --dry-run",
+      "result": "Candidates listed. Nothing deleted."
+    },
+    {
+      "heading": "Protect active validation work",
+      "sub": "Check age, ownership, and liveness.",
+      "visual": "inspect",
+      "items": [
+        "Run ownership",
+        "Resource age",
+        "Live Job guard"
+      ],
+      "voice": [
+        "Sweep looks at the resource age, expected ownership markers, and signs of a live run.",
+        "A retained validator Job guards run-scoped resources while the Job is still present."
+      ],
+      "result": "Retained Job guards its run resources"
+    },
+    {
+      "heading": "Confirm and recheck before cleanup",
+      "sub": "The apply path reviews current state.",
+      "visual": "gate",
+      "items": [
+        "Review candidates",
+        "Confirm cleanup",
+        "Eligible removals"
+      ],
+      "voice": [
+        "Interactive cleanup asks for confirmation, then checks the live state before deleting eligible objects.",
+        "The result shows what was removed, so you can follow up on anything left behind."
+      ],
+      "result": "Apply only to rechecked candidates"
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    25,
+    40,
+    53
+  ],
+  "viewer": "Operators cleaning up interrupted validation runs",
+  "payoff": "Preview which run-scoped resources sweep would remove and see the checks that precede deletion."
+}

@@ -1,0 +1,83 @@
+{
+  "id": 19,
+  "slug": "deploy-behind-an-air-gap",
+  "title": "Deploy behind an air gap",
+  "track": "Recipes and deployment",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/air-gap-mirror.md",
+  "scenes": [
+    {
+      "heading": "Public registry access is closed",
+      "sub": "Plan the inputs before crossing the gap",
+      "visual": "incident",
+      "items": [
+        "Staging network",
+        "Air-gapped cluster",
+        "Missing image pull"
+      ],
+      "detail": "Target can reach a private registry",
+      "result": "Identify dependencies first",
+      "voice": [
+        "The cluster cannot reach public registries.",
+        "Stage the charts and images before installing, or a pull can fail even with the correct configuration."
+      ]
+    },
+    {
+      "heading": "Discover what the recipe references",
+      "sub": "Resolve dependencies from rendered values",
+      "visual": "probe",
+      "items": [
+        "Recipe values",
+        "Chart references",
+        "Image references"
+      ],
+      "detail": "aicr mirror list",
+      "result": "Inventory for a mirroring workflow",
+      "voice": [
+        "AICR mirror list renders the component charts with the recipe values.",
+        "The inventory lists the image and chart references for a mirroring workflow to stage."
+      ]
+    },
+    {
+      "heading": "Bring the dependencies across",
+      "sub": "Mirror images and vendor chart bytes",
+      "visual": "vault",
+      "items": [
+        "Mirroring tool",
+        "Private registry",
+        "Vendored Helm charts"
+      ],
+      "detail": "--vendor-charts",
+      "result": "Chart bytes accompany the bundle",
+      "voice": [
+        "Use your mirroring tool to copy the required images to the private registry.",
+        "Vendoring carries the Helm chart bytes in the bundle, ready for the disconnected install."
+      ]
+    },
+    {
+      "heading": "Deploy from reachable sources",
+      "sub": "Hand the staged inputs to the deployer",
+      "visual": "trace",
+      "items": [
+        "Local chart files",
+        "Mirrored images",
+        "Cluster install"
+      ],
+      "detail": "Use the mirrored image references",
+      "result": "Deployment has its required sources",
+      "voice": [
+        "Point the deployment at those mirrored image locations and use the vendored charts.",
+        "Your deployment tool now has the configuration and the inputs it can reach."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    25,
+    40,
+    53
+  ],
+  "viewer": "Platform operator preparing an air-gapped cluster",
+  "payoff": "Build a reachable package for an isolated cluster by discovering, mirroring, and vendoring the recipe’s actual dependencies."
+}

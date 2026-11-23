@@ -1,0 +1,158 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Reusable workflow that runs the release checks (.github/actions/image-checks)
+# on each platform of the AICR Operator's two images, aicr-operator and
+# aicr-registry, read from the operator candidate's local OCI layouts. Nothing
+# has been pushed yet: operator-publish pushes these same layouts only after
+# release-check, which fails closed on this workflow.
+#
+# The index digests come from the candidate's own candidate.json, which
+# tools/operator-release wrote when it built the layouts; the unpack step
+# checks each layout against its digest. Grype reads the layout too, since
+# nothing is in the registry yet; .openvex.json carries no statement for these
+# images. A reusable workflow for the same reason as check-images.yaml.
+
+name: Check Operator Images (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        description: 'Name of the operator candidate artifact (dist/candidate)'
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  validate-inputs:
+    name: Validate Check Inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      artifact: ${{ steps.validate.outputs.artifact }}
+    steps:
+      - name: Validate inputs
+        id: validate
+        env:
+          INPUT_ARTIFACT: ${{ inputs.artifact }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${INPUT_ARTIFACT}" =~ ^aicr-operator-candidate-candidate-[0-9]+-[0-9]+-attempt-[0-9]+$ ]]; then
+            echo "::error::artifact is not an operator candidate artifact name"
+            exit 1
+          fi
+          echo "artifact=${INPUT_ARTIFACT}" >> "$GITHUB_OUTPUT"
+
+  clamav-database:
+    name: ClamAV Signature Database
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      artifact: ${{ steps.name.outputs.artifact }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the signature database
+        uses: ./.github/actions/clamav-database
+        with:
+          directory: ${{ runner.temp }}/clamav-db
+
+      - name: Name the database artifact
+        id: name
+        run: echo "artifact=clamav-db-operator-attempt-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the signature database
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: ${{ steps.name.outputs.artifact }}
+          path: ${{ runner.temp }}/clamav-db
+          if-no-files-found: error
+          # A failed check can be rerun for 30 days.
+          retention-days: 30
+
+  check:
+    name: Check ${{ matrix.image.key }}/${{ matrix.platform.arch }}
+    runs-on: ubuntu-24.04
+    needs: [validate-inputs, clamav-database]
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - key: aicr-operator
+            ref: ghcr.io/nvidia/aicr-operator
+            layout: image
+            field: operator
+          - key: aicr-registry
+            ref: ghcr.io/nvidia/aicr-registry
+            layout: registry-image
+            field: registry
+        platform:
+          - name: linux/amd64
+            arch: amd64
+          - name: linux/arm64
+            arch: arm64
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: ${{ needs.validate-inputs.outputs.artifact }}
+          path: ${{ runner.temp }}/candidate
+
+      - name: Read the index digest
+        id: digest
+        env:
+          CANDIDATE: ${{ runner.temp }}/candidate/candidate.json
+          FIELD: ${{ matrix.image.field }}
+        run: |
+          set -euo pipefail
+          digest="$(jq -er --arg field "${FIELD}" '.[$field].digest' "${CANDIDATE}")"
+          if [[ ! "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::candidate.json has no ${FIELD} index digest"
+            exit 1
+          fi
+          echo "index=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Download the signature database
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: ${{ needs.clamav-database.outputs.artifact }}
+          path: ${{ runner.temp }}/clamav-db
+
+      - name: Check ${{ matrix.image.key }} ${{ matrix.platform.name }}
+        uses: ./.github/actions/image-checks
+        with:
+          key: ${{ matrix.image.key }}
+          image: ${{ matrix.image.ref }}
+          layout: ${{ runner.temp }}/candidate/${{ matrix.image.layout }}
+          index: ${{ steps.digest.outputs.index }}
+          platform: ${{ matrix.platform.name }}
+          clamav_database: ${{ runner.temp }}/clamav-db

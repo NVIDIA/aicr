@@ -1,0 +1,83 @@
+{
+  "id": 44,
+  "slug": "what-happens-when-a-gpu-fails",
+  "title": "What happens when a GPU fails?",
+  "track": "Workloads",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/component-catalog.md#nvsentinel-deployment-posture",
+  "scenes": [
+    {
+      "heading": "One worker reports a GPU fault",
+      "sub": "Illustrative cluster incident",
+      "visual": "incident",
+      "items": [
+        "GPU worker",
+        "Fault detected",
+        "Operator on call"
+      ],
+      "detail": "GPU worker A",
+      "result": "Health event raised",
+      "voice": [
+        "A worker reports a GPU fault.",
+        "The operator needs to know what happens next."
+      ]
+    },
+    {
+      "heading": "See what monitoring did",
+      "sub": "Read the NVSentinel health signal",
+      "visual": "inspect",
+      "items": [
+        "NVSentinel monitor",
+        "Health event",
+        "Affected node"
+      ],
+      "detail": "Stock posture: monitor only",
+      "result": "The operator can investigate",
+      "voice": [
+        "The stock AICR configuration uses NVSentinel for monitoring.",
+        "It surfaces the health event so the operator can see the affected node and decide what to do."
+      ]
+    },
+    {
+      "heading": "Enable an explicit quarantine policy",
+      "sub": "Select the mixin for qualifying faults",
+      "visual": "gate",
+      "items": [
+        "Quarantine mixin",
+        "Cordon node",
+        "Drain workloads"
+      ],
+      "detail": "nvsentinel-quarantine",
+      "result": "New pods stay off that node",
+      "voice": [
+        "For teams that want automatic quarantine, add the quarantine mixin to the recipe catalog and deploy the updated bundle.",
+        "On qualifying fatal faults, the configured controllers cordon and drain the node."
+      ]
+    },
+    {
+      "heading": "Choose how hardware gets repaired",
+      "sub": "Make automatic remediation a policy choice",
+      "visual": "fork",
+      "items": [
+        "Quarantined node",
+        "Operator repair",
+        "Remediation policy"
+      ],
+      "detail": "Optional: nvsentinel-remediation",
+      "result": "Choose the response you want",
+      "voice": [
+        "Quarantine leaves the node isolated for investigation.",
+        "Teams that want a configured action such as a reboot can choose the remediation mixin and its recovery policy."
+      ]
+    }
+  ],
+  "viewer": "GPU cluster operator selecting a fault response",
+  "payoff": "Follow an NVSentinel event from stock monitoring to an explicitly configured quarantine policy for qualifying faults.",
+  "edges": [
+    0,
+    8,
+    21,
+    38,
+    53
+  ]
+}

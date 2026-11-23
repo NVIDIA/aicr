@@ -207,13 +207,15 @@ Every release must pass these automated gates before artifacts are published:
 - License header verification
 - Vulnerability scans (Anchore in release workflows, Grype in `make scan`)
 - E2E tests: hermetic Chainsaw CLI suites (`--no-cluster`) and the `aicrd` + CLI suite on a Kind cluster
-- Per-platform vulnerability scans of the exact candidate image digests
+- The Go dependency license allowlist (`make license-check`) and CodeQL (Go) on the tagged commit
+- Per-platform vulnerability, malware and secret checks of the exact candidate image digests (see [Release Checks](#release-checks))
+- Malware scans of the release binaries and the `kubectl-aicr` plugin
 - SLSA Build Level 3 provenance for those same digests
 
 Container builds first publish only a run-unique
 `candidate-<run-id>-<run-attempt>` tag. Version aliases stay unchanged until
-all seven candidate digests pass AICR's own gates (resolution, scans and
-attestation). The operator gate needs the validator and gate images' version
+all seven candidate digests pass AICR's own gates (resolution, image and
+source checks, and attestation). The operator gate needs the validator and gate images' version
 aliases, so those are promoted first; the `aicr`, `aicrd` and `aiperf-bench`
 version aliases, `latest` and the public GitHub release stay unchanged until
 the operator gate passes too. Homebrew publication starts only after the GitHub
@@ -401,8 +403,10 @@ added SLSA provenance on each platform manifest; a hotfix cut from v0.21.1
 without it publishes weaker provenance than
 [SECURITY.md](SECURITY.md#supply-chain-security) promises. Cherry-pick any
 `.github/workflows/**` and `.github/actions/**` change affecting build, scan, or
-attestation before tagging, and check that the published attestations match a
-current release.
+attestation before tagging, together with the inputs the release checks read:
+`.gitleaks.toml`, `.grype.yaml`, `.openvex.json`, `tools/image-unpack/**` and
+the scanner pins in `.settings.yaml` (`security_tools`). Then check that the
+published attestations match a current release.
 
 ## Release Pipeline
 
@@ -410,9 +414,10 @@ current release.
 Tag Push --> CI --> Candidate Images --> Resolve Digests --> Scan + Attest --> Promote Operator Gate Version Aliases --> Operator Gate --> Promote Remaining Version Aliases and latest --> Publish
 ```
 
-The workflow resolves one authoritative seven-image digest map, scans both
-architectures of each digest, and generates provenance and per-platform SBOMs
-before promotion. A read-only preflight checks every candidate, attestation,
+The workflow resolves one authoritative seven-image digest map, checks both
+architectures of each digest (see [Release Checks](#release-checks)), checks
+the tagged commit's dependency licenses and CodeQL alerts, and generates
+provenance and per-platform SBOMs before promotion. A read-only preflight checks every candidate, attestation,
 version alias, and `latest` alias before the first registry write. Stable
 releases also fail closed if the same or a newer stable version is already
 public, even if registry aliases were changed out of band.
@@ -421,7 +426,8 @@ Promotion runs in two jobs.
 
 - `promote-versions` creates and verifies the immutable version aliases of the
   `deployment`, `conformance` and `performance` validators and of `aicr-gate`
-  once AICR's own gates pass (`aicr-check`: resolution, scans and attestation).
+  once AICR's own gates pass (`aicr-check`: resolution, image checks, license
+  check, CodeQL and attestation).
   It runs before the operator gate, because the operator qualifies this tag's
   AICR, which resolves those images by the version tag: the operator checks
   each validator's tag against its pinned digest, and AICR's bundles name the
@@ -443,6 +449,55 @@ idempotent and finishes only the remaining aliases. A repository-wide
 concurrency group serializes promotion, but GitHub Actions keeps at most one
 pending run and may replace an older one, so confirm the surviving run belongs
 to the intended release before retrying.
+
+### Release Checks
+
+Each release image is checked on both architectures before promotion: the seven
+main images by their candidate digests (`image-checks`,
+`.github/workflows/check-images.yaml`) and the operator's two images from the
+candidate's local layouts before they are pushed (`operator-checks`,
+`.github/workflows/check-operator.yaml`). `tools/image-unpack` verifies every
+blob against its digest and unpacks each layer separately, so files a later
+layer deletes are still scanned. The malware scan reads every non-empty file
+the layers ship; the secret scan reads them within the scope described below
+the table. Grype catalogs the image's final filesystem. For the main images it
+reads the candidate from the registry by digest, as the weekly scan does,
+because OpenVEX statements name the image by its registry repository; it must
+report the platform manifest the unpack verified.
+
+| Check | Scanner (pinned in `.settings.yaml`) | Blocks on |
+|-------|--------------------------------------|-----------|
+| `image-vulnerability-scan` | Grype, with `.grype.yaml` and `.openvex.json` | A fixable High or Critical vulnerability |
+| `image-malware-scan` | ClamAV, one signature database per workflow | Any detection, or a scan that did not read every non-empty file (a size or nesting limit counts as not read) |
+| `image-secret-scan` | Gitleaks, with `.gitleaks.toml` | Any finding in a layer, the image config and history, or the printable strings of an AICR executable, and any file Gitleaks could not read |
+
+The secret scan keeps the Gitleaks default path allowlist, which skips Python
+library directories (the standard library included), virtualenvs,
+`node_modules`, vendored Go modules, documents and binaries by extension,
+images, fonts and lockfiles. Executables not built from AICR are
+malware-scanned but not secret-scanned. The strings of an AICR executable are
+string literals packed with no separator, so a rule that needs a word boundary
+or a terminator after the token can miss a credential compiled in beside
+another literal; rules without such anchors, GitHub tokens among them, still
+match. A `gitleaks:allow` comment inside the image does not hide a finding.
+Each check's scope, scanner and database versions, policy file digests
+and result are written to `checks.json` in the
+`image-checks-<key>-<arch>-attempt-<n>` artifact of the run; the findings are
+in the scanner reports beside it, with secret values redacted. The Grype report
+there is a projection of the scan without the raw image config.
+
+A secret finding on one of the seven main images means the value is already
+public in the candidate tag: rotate the credential before anything else, then
+fix the image and cut a new tag. A false positive is fixed in
+`.gitleaks.toml` with the narrowest allowlist the match allows and a
+description of why it is not a credential.
+
+The `codeql` job analyzes the tagged commit (Go) and blocks on an open CodeQL
+alert of High or Critical security severity on the tag, the same threshold as
+the image vulnerability scan. It waits until GitHub has processed this
+analysis and reads alert state from the code scanning API, so a dismissed
+alert does not block. Fixing the code needs a new tag; an alert dismissed with
+a reason clears on a rerun of the failed jobs.
 
 Candidate and per-architecture candidate tags are intentionally retained.
 Automated cleanup waits on a reviewed policy for shared-manifest deletion and
@@ -484,8 +539,9 @@ diagnosis, and recovery.
 The [AICR Operator](docs/operator/index.md) ships at the release's version
 outside the image promotion above: `operator-candidate` builds it from the tag
 (`make operator-candidate`) and malware-scans the `kubectl-aicr` binaries,
-`operator-scan` scans the operator and in-cluster registry images on both
-architectures, `operator-reproducible` builds the candidate twice (the second
+`operator-checks` runs the [release checks](#release-checks) on the operator
+and in-cluster registry images on both architectures, from the candidate's
+local layouts before anything is pushed, `operator-reproducible` builds the candidate twice (the second
 time with an empty Go build cache) and requires identical bytes, and
 `operator-lifecycle` installs the newest published operator release older than
 the tag and runs the qualify suite's lifecycle scenarios upgrading to this

@@ -1,0 +1,135 @@
+{
+  "id": 1,
+  "slug": "aicr-overview",
+  "title": "AICR Overview",
+  "track": "Opening episodes",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/README.md#how-it-works",
+  "renderer": "overview",
+  "scenes": [
+    {
+      "voice": [
+        "A Kubernetes GPU cluster has a lot of moving parts.",
+        "One mismatched driver can stall a deployment."
+      ]
+    },
+    {
+      "voice": [
+        "Meet NVIDIA AI Cluster Runtime, or AICR.",
+        "It’s open source and makes GPU cluster configurations reproducible."
+      ]
+    },
+    {
+      "voice": [
+        "Describe your target or capture a cluster snapshot.",
+        "Choose training or inference, and AICR generates a version-pinned recipe."
+      ]
+    },
+    {
+      "voice": [
+        "Bundle the recipe for the deployer you already use, like Helm or Argo CD.",
+        "Then deploy with that tool."
+      ]
+    },
+    {
+      "voice": [
+        "Validate the deployed cluster against the same recipe.",
+        "Check health, performance, and conformance, and optionally publish signed evidence."
+      ]
+    },
+    {
+      "voice": [
+        "As your cluster changes, the optional AICR Operator coordinates rollouts.",
+        "Argo CD applies the changes."
+      ]
+    },
+    {
+      "voice": [
+        "Explore the recipes and get involved.",
+        "Visit the address on screen."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    7,
+    16,
+    25,
+    34,
+    43,
+    53,
+    60
+  ],
+  "captions": [
+    {
+      "start": 0.23,
+      "end": 4.08,
+      "text": "A Kubernetes GPU cluster has a lot of moving parts."
+    },
+    {
+      "start": 4.1,
+      "end": 6.78,
+      "text": "One mismatched driver can stall a deployment."
+    },
+    {
+      "start": 7.23,
+      "end": 10.42,
+      "text": "Meet NVIDIA AI Cluster Runtime, or AICR."
+    },
+    {
+      "start": 10.882,
+      "end": 15.452,
+      "text": "It’s open source and makes GPU cluster configurations reproducible."
+    },
+    {
+      "start": 16.23,
+      "end": 19.55,
+      "text": "Describe your target or capture a cluster snapshot."
+    },
+    {
+      "start": 19.845,
+      "end": 24.395,
+      "text": "Choose training or inference, and AICR generates a version-pinned recipe."
+    },
+    {
+      "start": 25.43,
+      "end": 30.44,
+      "text": "Bundle the recipe for the deployer you already use, like Helm or Argo CD."
+    },
+    {
+      "start": 30.92,
+      "end": 32.87,
+      "text": "Then deploy with that tool."
+    },
+    {
+      "start": 34.23,
+      "end": 37.62,
+      "text": "Validate the deployed cluster against the same recipe."
+    },
+    {
+      "start": 37.64,
+      "end": 42.27,
+      "text": "Check health, performance, and conformance, and optionally publish signed evidence."
+    },
+    {
+      "start": 43.43,
+      "end": 48.39,
+      "text": "As your cluster changes, the optional AICR Operator coordinates rollouts."
+    },
+    {
+      "start": 48.87,
+      "end": 51.29,
+      "text": "Argo CD applies the changes."
+    },
+    {
+      "start": 53.23,
+      "end": 55.89,
+      "text": "Explore the recipes and get involved."
+    },
+    {
+      "start": 56.33,
+      "end": 58.4,
+      "text": "Visit the address on screen."
+    }
+  ]
+}

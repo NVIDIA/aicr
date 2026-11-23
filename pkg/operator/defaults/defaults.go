@@ -29,6 +29,12 @@ const (
 	GracefulShutdownTimeout = 30 * time.Second
 	// RolloutReconcileTimeout bounds one reconcile of the rollout controller.
 	RolloutReconcileTimeout = 30 * time.Minute
+	// RolloutLivenessGrace is margin for a rollout reconcile to return once
+	// RolloutReconcileTimeout cancels it, before the liveness check fails.
+	// Its I/O follows the canceled context and returns within seconds, so
+	// one RegistryTimeout is margin only; a reconcile still running after it
+	// is wedged.
+	RolloutLivenessGrace = RegistryTimeout
 )
 
 // kubectl aicr plugin.
@@ -93,7 +99,11 @@ const (
 	StageRetryMaxBackoff = 5 * time.Minute
 	// JobScratchSizeLimit bounds the emptyDir each AICR Job writes to.
 	JobScratchSizeLimit = "1Gi"
-	// Initial AICR Job resources: estimates until measured on real profiles
+	// AICR Job resources. Measured on GKE H100 with AICR v1.2.0, no stage
+	// exceeded 36 MiB. Snapshot and validation, which run for seconds to
+	// minutes, averaged at most 0.05 CPU; recipe, render and assessment end
+	// within 2s and burst to 1.4 cores, which no CPU limit caps. The memory
+	// request keeps headroom for larger recipes, and the limit is a ceiling
 	// (https://github.com/NVIDIA/aicr/issues/3495).
 	JobCPURequest    = "100m"
 	JobMemoryRequest = "256Mi"

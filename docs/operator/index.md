@@ -234,9 +234,10 @@ kubectl aicr describe "${ROLLOUT}"
 kubectl aicr approve "${ROLLOUT}" --expires 2h --reason "Maintenance window"
 ```
 
-A `manual` transition whose record has steps after the apply pauses once that
-release is applied; do those steps, then run `kubectl aicr acknowledge` on the
-rollout.
+A `manual` transition whose record has steps after its `apply` step pauses once
+that release is applied; do those steps, then run `kubectl aicr acknowledge` on
+the rollout. A record that names no `apply` step, as most do in AICR v1.3.0 and
+earlier, pauses there for all of its steps.
 
 [Day-2 operations](operations.md) covers reading status, approvals, pausing,
 rollback and AICR upgrades, and [troubleshooting](troubleshooting.md) every

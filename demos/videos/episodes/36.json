@@ -1,0 +1,83 @@
+{
+  "id": 36,
+  "slug": "two-catalogs-in-one-go-process",
+  "title": "Two catalogs in one Go process",
+  "track": "SDK, API, and automation",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/integrator/go-library.md#recipe-sources",
+  "scenes": [
+    {
+      "heading": "Two teams have different catalogs",
+      "sub": "Illustrative shared platform service",
+      "visual": "fork",
+      "items": [
+        "Research team",
+        "Shared Go service",
+        "Production team"
+      ],
+      "detail": "Same target requested",
+      "result": "Choose the catalog per request",
+      "voice": [
+        "Two teams share a Go service for GPU recipes.",
+        "Each expects the settings from its own catalog."
+      ]
+    },
+    {
+      "heading": "Bind each client to its source",
+      "sub": "Select the recipe provider at construction",
+      "visual": "layers",
+      "items": [
+        "Research client",
+        "Filesystem overrides",
+        "Production client"
+      ],
+      "detail": "aicr.WithRecipeSource(…)",
+      "result": "Catalog scoped per client",
+      "voice": [
+        "Create a client for each catalog.",
+        "Research can layer filesystem overrides on the built-in recipes, while production uses a client pointed at its own catalog."
+      ]
+    },
+    {
+      "heading": "Pin the production catalog",
+      "sub": "Select the immutable OCI manifest",
+      "visual": "vault",
+      "items": [
+        "OCI repository",
+        "Manifest digest",
+        "Client workspace"
+      ],
+      "detail": "aicr.OCISource(repository, digest)",
+      "result": "Requested digest verified",
+      "voice": [
+        "Use a full manifest digest to select the production catalog from an OCI registry.",
+        "AICR checks the downloaded content before using it to resolve any recipe for that client."
+      ]
+    },
+    {
+      "heading": "Resolve the same target twice",
+      "sub": "Route the request to the selected client",
+      "visual": "compare",
+      "items": [
+        "Same target criteria",
+        "Research recipe",
+        "Production recipe"
+      ],
+      "detail": "Illustrative: H100 training",
+      "result": "Each team gets its catalog’s result",
+      "voice": [
+        "Now resolve the same GPU and workload criteria in each client.",
+        "The platform can return the team-specific result because each request goes through its configured catalog."
+      ]
+    }
+  ],
+  "viewer": "Platform developer serving separate teams",
+  "payoff": "Two clients resolve the same target against their configured catalogs, with an immutable OCI digest for production.",
+  "edges": [
+    0,
+    9,
+    22,
+    38,
+    53
+  ]
+}

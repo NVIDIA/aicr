@@ -15,11 +15,13 @@
 package controller
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -31,11 +33,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 	"aicr.run/pkg/operator/aicrjob"
+	"aicr.run/pkg/operator/defaults"
 	operrors "aicr.run/pkg/operator/errors"
 	"aicr.run/pkg/operator/evidence"
 	"aicr.run/pkg/operator/plan"
@@ -59,6 +64,8 @@ type fakeEvidence struct {
 	bundles    map[string]*registry.Bundle
 	statements map[string][]byte
 	resolveErr error
+	// pullErr fails every evidence bundle read.
+	pullErr error
 	// aicrVersion is the AICR version evidence reports; empty is 1.0.0.
 	aicrVersion string
 	// attestation, when set, is AICR's signed statement, which AICR
@@ -102,6 +109,9 @@ func (f *fakeEvidence) Resolve(_ context.Context, r registry.Repository, tag str
 func (f *fakeEvidence) PullBundle(_ context.Context, _ registry.Repository, d string) (*registry.Bundle, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.pullErr != nil {
+		return nil, f.pullErr
+	}
 	if b, ok := f.bundles[d]; ok {
 		return b, nil
 	}
@@ -586,6 +596,8 @@ func TestValidationFailureFailsRollout(t *testing.T) {
 	}{
 		"checks failed":     {exit: aicrjob.ExitInternal, pushed: true, evidence: true},
 		"pre-flight failed": {exit: aicrjob.ExitInvalidInput},
+		"unauthorized":      {exit: aicrjob.ExitUnauthorized},
+		"no exit":           {exit: -1},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := testContext(t)
@@ -600,17 +612,582 @@ func TestValidationFailureFailsRollout(t *testing.T) {
 			ro := rollout(t, ctx)
 			if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || ro.Annotations[v1alpha1.AnnotationEvidence] != "" ||
 				ro.Status.Validation.Result != resultFailed || (ro.Status.Validation.Evidence != "") != tc.evidence ||
-				!strings.Contains(ro.Status.Message, "deployment validation failed") {
+				!strings.Contains(ro.Status.Message, "deployment validation failed: ") {
 
 				t.Fatalf("rollout = %v %+v", ro.Labels, ro.Status)
 			}
 			if tc.evidence && f.binding(t, ro.Status.Validation.Evidence).Predicate.Result != "Failed" {
 				t.Fatal("failed run bound as passed")
 			}
+			if strings.Contains(ro.Status.Message, "ended on a transient error") {
+				t.Fatalf("a run that did not fail on a transient exit is reported as one: %q", ro.Status.Message)
+			}
 			if got := getRuntime(t, ctx); got.Status.ActivePlanDigest != "" {
 				t.Fatalf("a failed validation promoted %s", got.Status.ActivePlanDigest)
 			}
 		})
+	}
+}
+
+// A validation run AICR ended on a transient exit judged nothing: it is run
+// again after a backoff, within the rollout and its approval, up to
+// maxStageRuns runs, and the rollout says so meanwhile. Any other failure
+// still fails the rollout on that run.
+func TestValidationRetriesTransientExits(t *testing.T) {
+	tests := []struct {
+		name string
+		// exits are the exit codes of the runs that fail, in order.
+		exits []int32
+		// passes: the run after them passes.
+		passes bool
+		// wantFailure is in the message of the rollout the last of them fails.
+		wantFailure string
+	}{
+		{name: "the run after a transient exit passes", exits: []int32{aicrjob.ExitUnavailable}, passes: true},
+		{name: "transient exits fail the rollout at the bound",
+			exits:       []int32{aicrjob.ExitUnavailable, aicrjob.ExitTimeout, aicrjob.ExitRateLimited},
+			wantFailure: "deployment validation failed after 3 runs"},
+		{name: "another failure after a transient exit fails at once",
+			exits: []int32{aicrjob.ExitCanceled, aicrjob.ExitInternal}, wantFailure: "deployment validation failed after 2 runs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testContext(t)
+			validatedRuntime(t, ctx)
+			r, f := newValidating(t, newEngine(), true)
+			now := time.Now()
+			r.Now = func() time.Time { return now }
+			job := untilValidating(t, ctx, r)
+			for run, exit := range tt.exits {
+				// The Job's failure is stamped with the wall clock.
+				now = time.Now()
+				failReporting(t, ctx, job, exit, "[SERVICE_UNAVAILABLE] the registry is down")
+				reconcileRollout(t, ctx, r)
+				ro := rollout(t, ctx)
+				if run == len(tt.exits)-1 && !tt.passes {
+					if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || ro.Status.Validation.Result != resultFailed ||
+						!strings.Contains(ro.Status.Message, tt.wantFailure) {
+
+						t.Fatalf("run %d exiting %d: rollout = %v %+v, want Failed with %q", run+1, exit, ro.Labels, ro.Status, tt.wantFailure)
+					}
+					if c := cond(getRuntime(t, ctx), v1alpha1.ConditionReconciling); c.Message != "" {
+						t.Fatalf("Reconciling after the rollout failed = %+v, want no message", c)
+					}
+					return
+				}
+				if ro.Labels[v1alpha1.LabelOutcome] != "" || ro.Status.Phase != v1alpha1.PhaseValidating ||
+					ro.Status.Validation.Result != resultPending || ro.Status.Validation.Job != job.Name ||
+					!strings.Contains(ro.Status.Message, "retrying after a transient failure") ||
+					!strings.Contains(ro.Status.Message, "the registry is down") {
+
+					t.Fatalf("run %d exiting %d: rollout = %v %+v, want it waiting to retry", run+1, exit, ro.Labels, ro.Status)
+				}
+				if c := cond(getRuntime(t, ctx), v1alpha1.ConditionReconciling); c.Reason != ReasonValidating ||
+					!strings.HasPrefix(c.Message, retryingNote) || !strings.Contains(c.Message, "the registry is down") {
+
+					t.Fatalf("run %d exiting %d: Reconciling = %+v, want the retry and its cause", run+1, exit, c)
+				}
+				// Nothing starts before the backoff passes.
+				reconcileRollout(t, ctx, r)
+				if got := rollout(t, ctx).Status.Validation.Job; got != job.Name {
+					t.Fatalf("run %d: a new run %s started within the backoff", run+1, got)
+				}
+				now = time.Now().Add(defaults.StageRetryMaxBackoff + time.Minute)
+				reconcileRollout(t, ctx, r)
+				ro = rollout(t, ctx)
+				next := &batchv1.Job{}
+				if err := k8s.Get(ctx, client.ObjectKey{Namespace: validateNS, Name: ro.Status.Validation.Job}, next); err != nil {
+					t.Fatal(err)
+				}
+				if next.Name == job.Name || attempt(next) != run+2 || strings.Contains(ro.Status.Message, "retrying") ||
+					cond(getRuntime(t, ctx), v1alpha1.ConditionReconciling).Message != "" {
+
+					t.Fatalf("after the backoff: Job %s (attempt %d), message %q; want run %d in progress",
+						next.Name, attempt(next), ro.Status.Message, run+2)
+				}
+				job = next
+			}
+			f.pushEvidence(t, job.Labels[v1alpha1.LabelRunID], "h100", 0, deploymentValidator, conformanceValidator)
+			succeed(t, ctx, job, nil)
+			reconcileRollout(t, ctx, r)
+			if ro := rollout(t, ctx); ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseSucceeded) || ro.Status.Validation.Result != resultPassed ||
+				ro.Status.Validation.RunID != job.Labels[v1alpha1.LabelRunID] {
+
+				t.Fatalf("rollout after the passing run = %v %+v", ro.Labels, ro.Status)
+			}
+			if c := cond(getRuntime(t, ctx), v1alpha1.ConditionReconciling); c.Message != "" {
+				t.Fatalf("Reconciling after the rollout succeeded = %+v, want no message", c)
+			}
+		})
+	}
+}
+
+// The run the stage judged is the one recorded and bound, even when it has
+// left the Job listing by the time the rollout reads it again: whether an
+// earlier run that was retried is then the newest one listed, or none is.
+func TestValidationBindsTheRunItJudged(t *testing.T) {
+	tests := []struct {
+		name    string
+		retried bool
+		// exit is how the judged run ends; zero passes.
+		exit int32
+	}{
+		{name: "a first run that passed"},
+		{name: "a run that passed after a retried one", retried: true},
+		{name: "a first run that failed its checks", exit: aicrjob.ExitInternal},
+		{name: "a run that failed its checks after a retried one", retried: true, exit: aicrjob.ExitInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testContext(t)
+			validatedRuntime(t, ctx)
+			r, f := newValidating(t, newEngine(), true)
+			now := time.Now()
+			r.Now = func() time.Time { return now }
+			judged := untilValidating(t, ctx, r)
+			if tt.retried {
+				first := judged
+				failReporting(t, ctx, first, aicrjob.ExitUnavailable, "[SERVICE_UNAVAILABLE] the registry is down")
+				reconcileRollout(t, ctx, r)
+				now = time.Now().Add(defaults.StageRetryMaxBackoff + time.Minute)
+				reconcileRollout(t, ctx, r)
+				judged = &batchv1.Job{}
+				if err := k8s.Get(ctx, client.ObjectKey{Namespace: validateNS, Name: rollout(t, ctx).Status.Validation.Job}, judged); err != nil {
+					t.Fatal(err)
+				}
+				if judged.Name == first.Name {
+					t.Fatal("no second run started")
+				}
+			}
+			wantOutcome, wantResult, failedChecks := v1alpha1.PhaseSucceeded, resultPassed, 0
+			if tt.exit != 0 {
+				wantOutcome, wantResult, failedChecks = v1alpha1.PhaseFailed, resultFailed, 3
+			}
+			f.pushEvidence(t, judged.Labels[v1alpha1.LabelRunID], "h100", failedChecks, deploymentValidator, conformanceValidator)
+			if tt.exit == 0 {
+				succeed(t, ctx, judged, nil)
+			} else {
+				fail(t, ctx, judged, tt.exit)
+			}
+
+			// The stage reads the validation Jobs once to drive them; every
+			// later listing in the reconcile no longer shows the run it
+			// judged.
+			base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen := 0
+			r.Reader = interceptor.NewClient(base, interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if err := c.List(ctx, list, opts...); err != nil {
+						return err
+					}
+					jobs, isJobs := list.(*batchv1.JobList)
+					if !isJobs || !slices.ContainsFunc(jobs.Items, func(j batchv1.Job) bool { return j.Name == judged.Name }) {
+						return nil
+					}
+					// pruneValidation lists them first, then the stage.
+					if seen++; seen > 2 {
+						jobs.Items = slices.DeleteFunc(jobs.Items, func(j batchv1.Job) bool { return j.Name == judged.Name })
+					}
+					return nil
+				},
+			})
+			reconcileRollout(t, ctx, r)
+			ro := rollout(t, ctx)
+			if seen <= 2 {
+				t.Fatalf("the validation Jobs were listed %d times, so the judged run never left the listing", seen)
+			}
+			val := ro.Status.Validation
+			if ro.Labels[v1alpha1.LabelOutcome] != string(wantOutcome) || val.Job != judged.Name ||
+				val.RunID != judged.Labels[v1alpha1.LabelRunID] || val.Result != wantResult || val.Evidence == "" {
+
+				t.Fatalf("rollout = %v %+v, want %s on run %s with its evidence", ro.Labels, val, wantOutcome, judged.Name)
+			}
+		})
+	}
+}
+
+// A run that failed on a transient exit is run again only when it left no
+// verdict of failure: evidence it pushed that records a failed check ends
+// the rollout Failed on that run, with that evidence, and nothing is run
+// again. Evidence that cannot be read as a verdict is no verdict. While the
+// registry does not answer, or refuses the operator, no run starts.
+func TestValidationTransientExitReadsTheRunsEvidence(t *testing.T) {
+	const (
+		failed  = "the rollout fails on the run"
+		rerun   = "a second run starts"
+		blocked = "no run starts until the registry answers, then the rollout fails on the run"
+	)
+	unavailable := operrors.New(operrors.ErrCodeUnavailable, "registry down")
+	refused := operrors.New(operrors.ErrCodeUnauthorized, "registry refused the credential")
+	tests := []struct {
+		name string
+		// failedChecks is the number of failed checks in the evidence the
+		// run pushed; negative pushes none.
+		failedChecks int
+		// spoil changes the pushed evidence bundle before the run fails.
+		spoil               func(*registry.Bundle)
+		resolveErr, pullErr error
+		want                string
+		// wantVerdict is what the failure message says the evidence
+		// records; empty is failed checks.
+		wantVerdict string
+	}{
+		{name: "evidence records a failed check", failedChecks: 3, want: failed},
+		{name: "evidence records a phase with no check passed or failed", failedChecks: 0, want: failed,
+			wantVerdict: "records no failed check, but not that validation passed",
+			spoil: func(b *registry.Bundle) {
+				b.Files[evidence.AICRStatementFile] = []byte(strings.Replace(string(b.Files[evidence.AICRStatementFile]),
+					`"passed":4`, `"passed":0,"skipped":4`, 1))
+			}},
+		{name: "evidence records every check passed", failedChecks: 0, want: rerun},
+		{name: "no evidence was pushed", failedChecks: -1, want: rerun},
+		{name: "evidence without a statement", failedChecks: 3, want: rerun,
+			spoil: func(b *registry.Bundle) { delete(b.Files, evidence.AICRStatementFile) }},
+		{name: "evidence whose statement does not parse", failedChecks: 3, want: rerun,
+			spoil: func(b *registry.Bundle) { b.Files[evidence.AICRStatementFile] = []byte("not a statement") }},
+		{name: "evidence the registry cannot serve as a bundle", failedChecks: 3, want: rerun,
+			pullErr: operrors.New(operrors.ErrCodeInvalidRequest, "not an evidence bundle")},
+		{name: "the registry does not answer for the tag", failedChecks: 3, resolveErr: unavailable, want: blocked},
+		{name: "the registry refuses the tag lookup", failedChecks: 3, resolveErr: refused, want: blocked},
+		{name: "the registry does not answer for the evidence", failedChecks: 3, pullErr: unavailable, want: blocked},
+		{name: "the registry refuses the evidence read", failedChecks: 3, pullErr: refused, want: blocked},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := testContext(t)
+			validatedRuntime(t, ctx)
+			r, f := newValidating(t, newEngine(), true)
+			now := time.Now()
+			r.Now = func() time.Time { return now }
+			job := untilValidating(t, ctx, r)
+			if tt.failedChecks >= 0 {
+				d := f.pushEvidence(t, job.Labels[v1alpha1.LabelRunID], "h100", tt.failedChecks, deploymentValidator, conformanceValidator)
+				if tt.spoil != nil {
+					tt.spoil(f.bundles[d])
+				}
+			}
+			now = time.Now()
+			failReporting(t, ctx, job, aicrjob.ExitUnavailable, "[SERVICE_UNAVAILABLE] signing timed out")
+			past := func() { now = time.Now().Add(defaults.StageRetryMaxBackoff + time.Minute) }
+			runs := func() int { return len(liveJobs(t, ctx, string(aicrjob.StageValidation))) }
+
+			f.resolveErr, f.pullErr = tt.resolveErr, tt.pullErr
+			if tt.want == blocked {
+				for range 2 {
+					if _, err := r.Reconcile(ctx, request); operrors.CodeOf(err) != operrors.ErrCodeUnavailable {
+						t.Fatalf("Reconcile() = %v, want UNAVAILABLE while the evidence cannot be read", err)
+					}
+					past()
+				}
+				ro := rollout(t, ctx)
+				if ro.Labels[v1alpha1.LabelOutcome] != "" || runs() != 1 {
+					t.Fatalf("while the registry does not answer: rollout %v, %d runs; want no outcome and no new run", ro.Labels, runs())
+				}
+				if want := "deployment validation run " + job.Labels[v1alpha1.LabelRunID] + " failed; its evidence cannot be read yet"; !strings.Contains(ro.Status.Message, want) {
+					t.Fatalf("while the registry does not answer: rollout message %q, want %q", ro.Status.Message, want)
+				}
+				f.resolveErr, f.pullErr = nil, nil
+			}
+			reconcileRollout(t, ctx, r)
+			past()
+			reconcileRollout(t, ctx, r)
+			ro := rollout(t, ctx)
+			if tt.want == rerun {
+				if ro.Labels[v1alpha1.LabelOutcome] != "" || ro.Status.Validation.Job == job.Name || runs() != 2 {
+					t.Fatalf("rollout %v %+v with %d runs, want a second run in progress", ro.Labels, ro.Status.Validation, runs())
+				}
+				return
+			}
+			val := ro.Status.Validation
+			verdict := cmp.Or(tt.wantVerdict, "records failed checks")
+			if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || val.Result != resultFailed || val.Job != job.Name ||
+				val.RunID != job.Labels[v1alpha1.LabelRunID] || val.Evidence == "" ||
+				!strings.HasPrefix(ro.Status.Message, "deployment validation failed: the evidence run "+val.RunID+" pushed "+verdict+"; ") ||
+				!strings.Contains(ro.Status.Message, "signing timed out") {
+
+				t.Fatalf("rollout %v %+v %q, want Failed on run %s with its evidence", ro.Labels, val, ro.Status.Message, job.Name)
+			}
+			if f.binding(t, val.Evidence).Predicate.Result != "Failed" {
+				t.Fatal("the failed run's evidence is bound as passed")
+			}
+			if got := getRuntime(t, ctx); got.Status.ActivePlanDigest != "" {
+				t.Fatalf("a run with failed checks promoted %s", got.Status.ActivePlanDigest)
+			}
+		})
+	}
+}
+
+// A run whose evidence cannot be read yet is named from the Job the stage
+// observed, not from the rollout's stored status, which a failed status
+// write can leave naming an earlier run.
+func TestValidationNamesTheRunWhoseEvidenceCannotBeRead(t *testing.T) {
+	ctx := testContext(t)
+	validatedRuntime(t, ctx)
+	r, f := newValidating(t, newEngine(), true)
+	now := time.Now()
+	r.Now = func() time.Time { return now }
+	first := untilValidating(t, ctx, r)
+	failReporting(t, ctx, first, aicrjob.ExitUnavailable, "[SERVICE_UNAVAILABLE] the registry is down")
+	reconcileRollout(t, ctx, r)
+	now = time.Now().Add(defaults.StageRetryMaxBackoff + time.Minute)
+	reconcileRollout(t, ctx, r)
+	ro := rollout(t, ctx)
+	second := &batchv1.Job{}
+	if err := k8s.Get(ctx, client.ObjectKey{Namespace: validateNS, Name: ro.Status.Validation.Job}, second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Name == first.Name {
+		t.Fatal("no second run started")
+	}
+	// The status write that recorded the second run is lost.
+	ro.Status.Validation = &v1alpha1.ValidationStatus{Job: first.Name, RunID: first.Labels[v1alpha1.LabelRunID], Result: resultPending}
+	if err := k8s.Status().Update(ctx, ro); err != nil {
+		t.Fatal(err)
+	}
+	now = time.Now()
+	failReporting(t, ctx, second, aicrjob.ExitUnavailable, "[SERVICE_UNAVAILABLE] the registry is down")
+	f.resolveErr = operrors.New(operrors.ErrCodeUnavailable, "registry down")
+	if _, err := r.Reconcile(ctx, request); operrors.CodeOf(err) != operrors.ErrCodeUnavailable {
+		t.Fatalf("Reconcile() = %v, want UNAVAILABLE", err)
+	}
+	ro = rollout(t, ctx)
+	runID := second.Labels[v1alpha1.LabelRunID]
+	if ro.Status.Validation.Job != second.Name || ro.Status.Validation.RunID != runID ||
+		!strings.Contains(ro.Status.Message, "deployment validation run "+runID+" failed; its evidence cannot be read yet") {
+
+		t.Fatalf("rollout %+v %q, want the second run %s named", ro.Status.Validation, ro.Status.Message, runID)
+	}
+}
+
+// With a signing key, a run whose checks failed and whose signing then timed
+// out leaves unsigned evidence: the rollout fails on that run and nothing is
+// run again. The evidence cannot be bound without its signature, so the
+// rollout names it in its message and records no evidence reference.
+func TestValidationSigningTimeoutAfterFailedChecks(t *testing.T) {
+	ctx := testContext(t)
+	validatedRuntime(t, ctx)
+	r, f := newValidating(t, newEngine(), true)
+	r.Config.AICRVersion, f.aicrVersion = "v1.1.2", "1.1.2"
+	r.Config.ValidationSigningKey, r.Config.ValidationTransparencyLog = "awskms:///alias/aicr-evidence", false
+	now := time.Now()
+	r.Now = func() time.Time { return now }
+	job := untilValidating(t, ctx, r)
+	d := f.pushEvidence(t, job.Labels[v1alpha1.LabelRunID], "h100", 3, deploymentValidator, conformanceValidator)
+	now = time.Now()
+	// The termination message is the end of AICR's log, not a pushed digest.
+	failReporting(t, ctx, job, aicrjob.ExitTimeout, "[TIMEOUT] sign evidence: context deadline exceeded")
+	reconcileRollout(t, ctx, r)
+	now = time.Now().Add(defaults.StageRetryMaxBackoff + time.Minute)
+	reconcileRollout(t, ctx, r)
+	ro := rollout(t, ctx)
+	val := ro.Status.Validation
+	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || val.Result != resultFailed || val.Job != job.Name || val.Evidence != "" {
+		t.Fatalf("rollout %v %+v, want Failed on run %s with no bound evidence", ro.Labels, val, job.Name)
+	}
+	for _, want := range []string{"deployment validation failed: the evidence run " + val.RunID + " pushed records failed checks",
+		"sign evidence: context deadline exceeded", "that evidence is not recorded on the rollout", d, "is not signed"} {
+		if !strings.Contains(ro.Status.Message, want) {
+			t.Fatalf("rollout message %q lacks %q", ro.Status.Message, want)
+		}
+	}
+	if got := getRuntime(t, ctx); got.Status.ActivePlanDigest != "" {
+		t.Fatalf("a run with failed checks promoted %s", got.Status.ActivePlanDigest)
+	}
+}
+
+// A failed run whose evidence cannot be read for now does not end the
+// rollout without it: the reconcile is retried, and the evidence is bound
+// once the registry answers.
+func TestValidationFailureWaitsForItsEvidence(t *testing.T) {
+	ctx := testContext(t)
+	validatedRuntime(t, ctx)
+	r, f := newValidating(t, newEngine(), true)
+	job := untilValidating(t, ctx, r)
+	f.pushEvidence(t, job.Labels[v1alpha1.LabelRunID], "h100", 3, deploymentValidator)
+	fail(t, ctx, job, aicrjob.ExitInternal)
+	f.pullErr = operrors.New(operrors.ErrCodeUnavailable, "registry down")
+	if _, err := r.Reconcile(ctx, request); operrors.CodeOf(err) != operrors.ErrCodeUnavailable {
+		t.Fatalf("Reconcile() = %v, want UNAVAILABLE", err)
+	}
+	if ro := rollout(t, ctx); ro.Labels[v1alpha1.LabelOutcome] != "" {
+		t.Fatalf("outcome while the evidence cannot be read: %v", ro.Labels)
+	}
+	f.pullErr = nil
+	reconcileRollout(t, ctx, r)
+	if ro := rollout(t, ctx); ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || ro.Status.Validation.Evidence == "" {
+		t.Fatalf("rollout %v %+v, want Failed with its evidence", ro.Labels, ro.Status.Validation)
+	}
+}
+
+// A retry that cannot be started for now is retried by the reconcile and is
+// not reported as evidence that cannot be read: the rollout keeps the
+// failed run's retry message and no outcome.
+func TestValidationRetryThatCannotStartForNow(t *testing.T) {
+	ctx := testContext(t)
+	validatedRuntime(t, ctx)
+	r, _ := newValidating(t, newEngine(), true)
+	now := time.Now()
+	r.Now = func() time.Time { return now }
+	job := untilValidating(t, ctx, r)
+	failReporting(t, ctx, job, aicrjob.ExitUnavailable, "[SERVICE_UNAVAILABLE] the registry is down")
+	reconcileRollout(t, ctx, r)
+
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if _, isJob := obj.(*batchv1.Job); isJob {
+				return apierrors.NewServiceUnavailable("the API server is busy")
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+	})
+	now = time.Now().Add(defaults.StageRetryMaxBackoff + time.Minute)
+	if _, err = r.Reconcile(ctx, request); operrors.CodeOf(err) != operrors.ErrCodeUnavailable {
+		t.Fatalf("Reconcile() = %v, want UNAVAILABLE", err)
+	}
+	ro := rollout(t, ctx)
+	if ro.Labels[v1alpha1.LabelOutcome] != "" || strings.Contains(ro.Status.Message, "its evidence cannot be read yet") ||
+		!strings.Contains(ro.Status.Message, retryingNote) {
+
+		t.Fatalf("rollout %v %q, want no outcome and the retry message kept", ro.Labels, ro.Status.Message)
+	}
+}
+
+// A validation Job left suspended, as by an operator restart between
+// creating and starting it, whose start is then refused for good fails the
+// rollout as a run that could not run, naming no run.
+func TestValidationResumeThatIsRefused(t *testing.T) {
+	ctx := testContext(t)
+	validatedRuntime(t, ctx)
+	r, _ := newValidating(t, newEngine(), true)
+	job := untilValidating(t, ctx, r)
+	suspend := client.MergeFrom(job.DeepCopy())
+	yes := true
+	job.Spec.Suspend = &yes
+	if err := k8s.Patch(ctx, job, suspend); err != nil {
+		t.Fatal(err)
+	}
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			if _, isJob := obj.(*batchv1.Job); isJob {
+				return apierrors.NewForbidden(batchv1.Resource("jobs"), obj.GetName(), errors.New("denied by policy"))
+			}
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+	})
+	reconcileRollout(t, ctx, r)
+	ro := rollout(t, ctx)
+	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || !strings.Contains(ro.Status.Message, "deployment validation could not run") ||
+		!strings.Contains(ro.Status.Message, "denied by policy") || ro.Status.Validation.Job != "" || ro.Status.Validation.Result != resultFailed {
+
+		t.Fatalf("rollout = %v %+v, want Failed because validation could not run, naming no run", ro.Labels, ro.Status)
+	}
+}
+
+// What a validation stage waits on is reported on the rollout and on the
+// runtime's Reconciling condition: a deployment snapshot waiting to be
+// retried, and a validation run whose pod is not running.
+func TestValidationReportsWhatItWaitsOn(t *testing.T) {
+	const unschedulable = "0/9 nodes are available: 9 node(s) had untolerated taint {CriticalAddonsOnly: }"
+	t.Run("a deployment snapshot that is retried", func(t *testing.T) {
+		ctx := testContext(t)
+		validatedRuntime(t, ctx)
+		r, _ := newValidating(t, newEngine(), true)
+		var snapshots []batchv1.Job
+		for range 6 {
+			reconcileRollout(t, ctx, r)
+			if snapshots = liveJobs(t, ctx, string(aicrjob.StageSnapshot)); len(snapshots) > 0 {
+				break
+			}
+		}
+		if len(snapshots) != 1 {
+			t.Fatalf("deployment snapshot Jobs = %d", len(snapshots))
+		}
+		now := time.Now()
+		r.Now = func() time.Time { return now }
+		failReporting(t, ctx, &snapshots[0], aicrjob.ExitUnavailable, "[SERVICE_UNAVAILABLE] the API server is busy")
+		reconcileRollout(t, ctx, r)
+		ro, c := rollout(t, ctx), cond(getRuntime(t, ctx), v1alpha1.ConditionReconciling)
+		if !strings.Contains(ro.Status.Message, "taking the deployment snapshot; "+retryingNote) || c.Reason != ReasonValidating ||
+			!strings.HasPrefix(c.Message, retryingNote) || !strings.Contains(c.Message, "the API server is busy") {
+
+			t.Fatalf("rollout message %q, Reconciling %+v; want the snapshot's retry on both", ro.Status.Message, c)
+		}
+	})
+	t.Run("a run whose pod is not running", func(t *testing.T) {
+		ctx := testContext(t)
+		validatedRuntime(t, ctx)
+		r, _ := newValidating(t, newEngine(), true)
+		job := untilValidating(t, ctx, r)
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: job.Name + "-pod", Namespace: job.Namespace,
+				Labels: map[string]string{"batch.kubernetes.io/job-name": job.Name}},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "aicr", Image: aicrImage}}},
+		}
+		if err := k8s.Create(ctx, pod); err != nil {
+			t.Fatal(err)
+		}
+		pod.Status.Phase = corev1.PodPending
+		pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: unschedulable}}
+		if err := k8s.Status().Update(ctx, pod); err != nil {
+			t.Fatal(err)
+		}
+		reconcileRollout(t, ctx, r)
+		ro, c := rollout(t, ctx), cond(getRuntime(t, ctx), v1alpha1.ConditionReconciling)
+		if !strings.Contains(ro.Status.Message, "in progress; ") || !strings.Contains(ro.Status.Message, unschedulable) ||
+			c.Reason != ReasonValidating || !strings.Contains(c.Message, unschedulable) {
+
+			t.Fatalf("rollout message %q, Reconciling %+v; want why the pod is not running on both", ro.Status.Message, c)
+		}
+	})
+}
+
+// A run that cannot be started after a transient exit fails the rollout as
+// one that could not run: the earlier run, and any evidence it pushed, is not
+// reported as the failure.
+func TestValidationRetryThatCannotStart(t *testing.T) {
+	ctx := testContext(t)
+	validatedRuntime(t, ctx)
+	r, f := newValidating(t, newEngine(), true)
+	now := time.Now()
+	r.Now = func() time.Time { return now }
+	job := untilValidating(t, ctx, r)
+	f.pushEvidence(t, job.Labels[v1alpha1.LabelRunID], "h100", 0, deploymentValidator, conformanceValidator)
+	failReporting(t, ctx, job, aicrjob.ExitUnavailable, "[SERVICE_UNAVAILABLE] the registry is down")
+	reconcileRollout(t, ctx, r)
+
+	base, err := client.NewWithWatch(restConfig, client.Options{Scheme: k8s.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Client = interceptor.NewClient(base, interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if _, isJob := obj.(*batchv1.Job); isJob {
+				return apierrors.NewForbidden(batchv1.Resource("jobs"), obj.GetName(), errors.New("exceeded quota"))
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+	})
+	now = time.Now().Add(defaults.StageRetryMaxBackoff + time.Minute)
+	reconcileRollout(t, ctx, r)
+	ro := rollout(t, ctx)
+	if ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) || !strings.Contains(ro.Status.Message, "deployment validation could not run") ||
+		!strings.Contains(ro.Status.Message, "exceeded quota") {
+
+		t.Fatalf("rollout = %v %+v, want Failed because validation could not run", ro.Labels, ro.Status)
+	}
+	if val := ro.Status.Validation; val.Result != resultFailed || val.Job != "" || val.Evidence != "" {
+		t.Fatalf("validation status = %+v, want no run and no evidence named", val)
 	}
 }
 

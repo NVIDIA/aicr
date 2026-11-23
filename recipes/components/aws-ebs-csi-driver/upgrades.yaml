@@ -54,18 +54,22 @@ transitions:
             reason: >-
               From 1.67 the driver rejects create and clone requests whose
               topology names neither, which it used to accept.
-          - id: apply-and-verify-taint
+          - id: apply
             description: >-
-              Apply the regenerated bundle with your deployer, then wait for
-              every ebs-csi-node pod to be ready and its Node to drop the
-              ebs.csi.aws.com/agent-not-ready taint. Only if a ready pod's
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves aws-ebs-csi-driver to the new version.
+          - id: verify-taint
+            description: >-
+              Wait for every ebs-csi-node pod to be ready and its Node to drop
+              the ebs.csi.aws.com/agent-not-ready taint. Only if a ready pod's
               ebs-plugin container keeps logging "Failed to remove
               agent-not-ready taint" with an error naming the
               ValidatingAdmissionPolicy ebs-csi-node, set
               node.validatingAdmissionPolicy.enabled to false and re-apply.
             reason: >-
-              Upstream recommends that taint on every node while it starts,
-              so its presence alone is not a failure. The policy denies its
+              Upstream recommends that taint on every node while it starts, so
+              its presence alone is not a failure. The policy denies its
               removal only when the token lacks the node-name claim, which
               would leave the node unschedulable for EBS volumes.
     references:

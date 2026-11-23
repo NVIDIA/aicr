@@ -1,0 +1,81 @@
+{
+  "id": 24,
+  "slug": "deploy-gate-for-bundle-trust",
+  "title": "Turn trust into a deployment gate",
+  "track": "Validation, evidence, and trust",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/artifact-verification.md#minimum-trust-level-enforcement",
+  "scenes": [
+    {
+      "heading": "Make deployment wait for proof",
+      "sub": "Put the check before the handoff.",
+      "visual": "queue",
+      "items": [
+        "Build complete",
+        "Verification gate",
+        "Deploy waiting"
+      ],
+      "voice": [
+        "Your pipeline has a rendered bundle and a deployment stage ready to go.",
+        "Make that handoff depend on verification, so your policy can stop an unqualified artifact."
+      ],
+      "result": "Deployment waits at the gate"
+    },
+    {
+      "heading": "Require verified trust",
+      "sub": "Check the full attestation chain.",
+      "visual": "trace",
+      "items": [
+        "File inventory",
+        "Bundle signer",
+        "AICR binary proof"
+      ],
+      "voice": [
+        "Require the verified level explicitly.",
+        "AICR checks the bundle inventory and attestation, verifies the binary attestation against NVIDIA CI, and requires the bundle to use embedded data."
+      ],
+      "detail": "aicr verify --min-trust-level verified …",
+      "result": "The policy requires verified"
+    },
+    {
+      "heading": "Watch a valid bundle fall short",
+      "sub": "Attested can be below your policy.",
+      "visual": "gate",
+      "items": [
+        "External data used",
+        "Actual: attested",
+        "Required: verified"
+      ],
+      "voice": [
+        "A signed bundle built with external data can qualify as attested.",
+        "When the pipeline requires verified, AICR returns a nonzero exit code and the deployment stage stays blocked."
+      ],
+      "detail": "Illustrative gate result",
+      "result": "Exit nonzero. No deployment."
+    },
+    {
+      "heading": "Pass through the tested artifact",
+      "sub": "Keep the artifact the same at handoff.",
+      "visual": "trace",
+      "items": [
+        "Verified bundle",
+        "Successful exit",
+        "Chosen deployer"
+      ],
+      "voice": [
+        "When verification meets your policy, pass that same bundle to the deployment stage.",
+        "The check now sits before every handoff to the tool that changes the cluster."
+      ],
+      "result": "Verified bundle reaches deploy"
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    26,
+    41,
+    53
+  ],
+  "viewer": "CI and release engineers",
+  "payoff": "Enforce verified trust in CI and watch a valid but lower-trust bundle stop before deployment."
+}

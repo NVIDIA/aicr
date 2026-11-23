@@ -1,0 +1,107 @@
+{
+  "id": 42,
+  "slug": "aicr-inference-dynamo-and-nim",
+  "title": "Run inference with AICR",
+  "track": "Workload stories",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/demos/cuj2-inference.md",
+  "renderer": "inference",
+  "scenes": [
+    {
+      "voice": [
+        "You have a GPU cluster ready for inference.",
+        "Do you want to run Dynamo or NVIDIA NIM?",
+        "AICR supports both."
+      ]
+    },
+    {
+      "voice": [
+        "Start with the same cluster target.",
+        "Choose Dynamo or NIM as the platform.",
+        "AICR resolves a recipe with the component versions and settings for that choice, then turns it into a bundle."
+      ]
+    },
+    {
+      "voice": [
+        "Apply the bundle for your chosen platform with your deployment tool.",
+        "AICR checks the installed stack against the recipe saved in that bundle."
+      ]
+    },
+    {
+      "voice": [
+        "Then deploy your model workload.",
+        "The Dynamo example uses a DynamoGraphDeployment. With NIM, create a NIMService.",
+        "Send a test request to the endpoint you chose."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    10,
+    25,
+    39,
+    53
+  ],
+  "captions": [
+    {
+      "start": 0.27,
+      "end": 2.92,
+      "text": "You have a GPU cluster ready for inference."
+    },
+    {
+      "start": 3.37,
+      "end": 6.04,
+      "text": "Do you want to run Dynamo or NVIDIA NIM?"
+    },
+    {
+      "start": 6.49,
+      "end": 8.2,
+      "text": "AICR supports both."
+    },
+    {
+      "start": 10.27,
+      "end": 12.45,
+      "text": "Start with the same cluster target."
+    },
+    {
+      "start": 12.9,
+      "end": 15.47,
+      "text": "Choose Dynamo or NIM as the platform."
+    },
+    {
+      "start": 15.92,
+      "end": 22.15,
+      "text": "AICR resolves a recipe with the component versions and settings for that choice, then turns it into a bundle."
+    },
+    {
+      "start": 25.27,
+      "end": 28.96,
+      "text": "Apply the bundle for your chosen platform with your deployment tool."
+    },
+    {
+      "start": 29.41,
+      "end": 33.73,
+      "text": "AICR checks the installed stack against the recipe saved in that bundle."
+    },
+    {
+      "start": 39.27,
+      "end": 41.43,
+      "text": "Then deploy your model workload."
+    },
+    {
+      "start": 41.88,
+      "end": 47.58,
+      "text": "The Dynamo example uses a DynamoGraphDeployment. With NIM, create a NIMService."
+    },
+    {
+      "start": 48.03,
+      "end": 50.78,
+      "text": "Send a test request to the endpoint you chose."
+    },
+    {
+      "start": 54.3,
+      "end": 56.65,
+      "text": "Explore AICR at aicr.run."
+    }
+  ]
+}

@@ -43,7 +43,7 @@ transitions:
     stepsByDeployer:
       - deployers: [helm, helmfile]
         steps:
-          - id: upgrade-crds
+          - id: apply
             description: >-
               Confirm the namespace the existing release lives in with
               `helm list -A | grep mariadb-operator-crds`, then upgrade in
@@ -59,13 +59,13 @@ transitions:
               release: that deletes the CRDs and every MariaDB with them.
           - id: continue-with-operator
             description: >-
-              Continue with mariadb-operator's upgrade-operator step.
+              Continue with mariadb-operator's apply step.
             reason: >-
               The operator moves only once the 26.10.1 CRD schema is
               Established.
       - deployers: [terraform]
         steps:
-          - id: apply-bundle
+          - id: apply
             description: >-
               Regenerate the bundle at the new pins and run terraform apply.
             reason: >-
@@ -82,20 +82,16 @@ transitions:
             reason: >-
               The same terraform apply moved the operator to 26.10.1.
       - steps:
-          - id: sync-crds
+          - id: apply
             description: >-
               Sync or reconcile the mariadb-operator-crds release to 26.10.1
-              before the mariadb-operator release.
+              before the mariadb-operator release. Continue with
+              mariadb-operator's apply step.
             reason: >-
               The operator release needs the new CRD schema, so this release
               syncs first. Never prune or delete it to achieve the version
-              change: that cascade-deletes every MariaDB.
-          - id: continue-with-operator
-            description: >-
-              Continue with mariadb-operator's sync-operator step.
-            reason: >-
-              The operator moves only once the 26.10.1 CRD schema is
-              Established.
+              change: that cascade-deletes every MariaDB. The operator moves
+              only once the 26.10.1 CRD schema is Established.
     references:
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#mariadb-operator-2630-or-2660-to-26101
       - https://github.com/mariadb-operator/mariadb-operator/blob/main/docs/releases/UPGRADE_26.10.0.md

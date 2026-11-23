@@ -18,7 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -35,11 +35,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 	"aicr.run/pkg/operator/defaults"
@@ -454,7 +452,12 @@ func TestRolloutRetention(t *testing.T) {
 	engine.ensured["cert-manager"] = active
 	engine.inventory = []argocd.InventoryItem{{ReleaseID: "cert-manager", UID: "u-c", PlanDigest: active}}
 	r, _ := newRollout(t, engine, true)
+	reads := &dataReads{Reader: k8s}
+	r.Reader = reads
 	reconcileRollout(t, ctx, r)
+	if reads.lists != 0 {
+		t.Errorf("an idle reconcile listed ConfigMaps with their data %d times", reads.lists)
+	}
 
 	ros := rollouts(t, ctx)
 	succeeded := 0
@@ -473,6 +476,171 @@ func TestRolloutRetention(t *testing.T) {
 	if len(plans.Items) != 6 {
 		t.Fatalf("plans kept = %d, want the active one and five others", len(plans.Items))
 	}
+}
+
+// Retention reads each plan's data once. Every pass keeps the content that
+// retained plans reference and deletes content nothing references, but a
+// pass after the first lists ConfigMaps without their data and reads only a
+// plan that changed since.
+func TestRetentionReadsEachPlanOnce(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	active := putPlan(t, ctx, rt, "50m")
+	for i := range 8 {
+		putPlan(t, ctx, rt, fmt.Sprintf("%dm", 60+i))
+	}
+	r, c := newRollout(t, newEngine(), true)
+	reads := &dataReads{Reader: k8s}
+	r.Reader = reads
+	c.now = c.now.Add(2 * defaults.ContentGracePeriod)
+	rt = getRuntime(t, ctx)
+	pass := func(name string) []string {
+		t.Helper()
+		if err := r.retain(ctx, rt, active, active, ""); err != nil {
+			t.Fatalf("%s: retain() = %v", name, err)
+		}
+		plans := listRole(t, ctx, v1alpha1.RolePlan)
+		if len(plans) != 1+defaults.RetainedPlans {
+			t.Fatalf("%s: plans kept = %d, want the active one and %d others", name, len(plans), defaults.RetainedPlans)
+		}
+		referenced := map[string]bool{}
+		for i := range plans {
+			doc, err := plan.FromConfigMap(&plans[i])
+			if err != nil {
+				t.Fatal(err)
+			}
+			referenced[doc.Recipe.ConfigMapRef.ConfigMap] = true
+			for _, rel := range doc.Releases {
+				referenced[rel.Values.ConfigMap] = true
+			}
+		}
+		var content []string
+		for _, role := range []string{v1alpha1.RoleRecipe, v1alpha1.RoleValues} {
+			for _, cm := range listRole(t, ctx, role) {
+				content = append(content, cm.Name)
+			}
+		}
+		slices.Sort(content)
+		if want := slices.Sorted(maps.Keys(referenced)); !slices.Equal(content, want) {
+			t.Errorf("%s: content kept = %v, want what the kept plans reference: %v", name, content, want)
+		}
+		return reads.take()
+	}
+	for _, role := range pass("first pass") {
+		if role != v1alpha1.RolePlan {
+			t.Errorf("the first pass read a %s ConfigMap's data, which it does not decode", role)
+		}
+	}
+	if got := pass("idle pass"); len(got) != 0 {
+		t.Errorf("an idle pass read the data of %d ConfigMaps: %v", len(got), got)
+	}
+
+	changed := listRole(t, ctx, v1alpha1.RolePlan)[0]
+	changed.Labels["touched"] = "true"
+	if err := k8s.Update(ctx, &changed); err != nil {
+		t.Fatal(err)
+	}
+	if got := pass("after a plan changed"); len(got) != 1 || got[0] != v1alpha1.RolePlan {
+		t.Errorf("after one plan changed, retention read %v", got)
+	}
+	if got := len(r.plans.refs); got != 1+defaults.RetainedPlans {
+		t.Errorf("retention remembers %d plan versions, want only the %d it kept", got, 1+defaults.RetainedPlans)
+	}
+}
+
+// A plan retention cannot read stops the pass before any content is
+// deleted, since the content it references is unknown. A plan deleted
+// since the list references nothing.
+func TestRetentionStopsAtAnUnreadablePlan(t *testing.T) {
+	tests := map[string]struct {
+		read     func(name string) error
+		wantCode operrors.ErrorCode
+		kept     bool
+	}{
+		"unreadable": {read: func(string) error { return apierrors.NewServiceUnavailable("down") }, wantCode: operrors.ErrCodeUnavailable, kept: true},
+		"gone": {read: func(name string) error {
+			return apierrors.NewNotFound(corev1.Resource("configmaps"), name)
+		}},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx := testContext(t)
+			rt := freshRuntime(t, ctx, stabilized)
+			active := putPlan(t, ctx, rt, "50m")
+			for i := range 8 {
+				putPlan(t, ctx, rt, fmt.Sprintf("%dm", 60+i))
+			}
+			r, c := newRollout(t, newEngine(), true)
+			r.Reader = &dataReads{Reader: k8s, fail: tt.read}
+			c.now = c.now.Add(2 * defaults.ContentGracePeriod)
+			content := len(listRole(t, ctx, v1alpha1.RoleValues))
+			err := r.retain(ctx, getRuntime(t, ctx), active, active, "")
+			if got := operrors.CodeOf(err); (err != nil || tt.wantCode != "") && got != tt.wantCode {
+				t.Fatalf("retain() = %v, want code %q", err, tt.wantCode)
+			}
+			if after := len(listRole(t, ctx, v1alpha1.RoleValues)); tt.kept && after != content {
+				t.Errorf("values kept = %d of %d; a pass that cannot read a plan deleted content", after, content)
+			}
+		})
+	}
+}
+
+// listRole lists the operator's ConfigMaps of one role.
+func listRole(t *testing.T, ctx context.Context, role string) []corev1.ConfigMap {
+	t.Helper()
+	list := &corev1.ConfigMapList{}
+	if err := k8s.List(ctx, list, client.InNamespace(operatorNS), client.MatchingLabels{v1alpha1.LabelRole: role}); err != nil {
+		t.Fatal(err)
+	}
+	return list.Items
+}
+
+// dataReads records the role of each ConfigMap a reader returns with its
+// data, and counts the ConfigMap lists that return data.
+type dataReads struct {
+	client.Reader
+	// fail, when set, fails each Get it returns an error for.
+	fail  func(name string) error
+	mu    sync.Mutex
+	roles []string
+	lists int
+}
+
+func (d *dataReads) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if d.fail != nil {
+		if err := d.fail(key.Name); err != nil {
+			return err
+		}
+	}
+	err := d.Reader.Get(ctx, key, obj, opts...)
+	if cm, ok := obj.(*corev1.ConfigMap); ok && err == nil {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		d.roles = append(d.roles, cm.Labels[v1alpha1.LabelRole])
+	}
+	return err
+}
+
+func (d *dataReads) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	err := d.Reader.List(ctx, list, opts...)
+	if cms, ok := list.(*corev1.ConfigMapList); ok && err == nil {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		d.lists++
+		for i := range cms.Items {
+			d.roles = append(d.roles, cms.Items[i].Labels[v1alpha1.LabelRole])
+		}
+	}
+	return err
+}
+
+// take returns the roles read since the last take.
+func (d *dataReads) take() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := d.roles
+	d.roles = nil
+	return out
 }
 
 // The engine watch waits for the engine kind and registers once.
@@ -553,25 +721,7 @@ func TestManagerRunsWithoutTheEngineCRDs(t *testing.T) {
 // namespace, never reaches the rollout controller.
 func TestEngineCacheSeesOnlyTheOperatorsApplications(t *testing.T) {
 	ctx := testContext(t)
-	crds, err := envtest.InstallCRDs(restConfig, envtest.CRDInstallOptions{
-		Paths: []string{filepath.Join("..", "..", "..", "tests", "operator", "chart", "testdata", "argocd-crds.yaml")},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Other tests need the CRDs gone, and a CRD's deletion completes
-	// asynchronously.
-	t.Cleanup(func() {
-		_ = envtest.UninstallCRDs(restConfig, envtest.CRDInstallOptions{CRDs: crds})
-		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
-			crd := &unstructured.Unstructured{}
-			crd.SetGroupVersionKind(schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"})
-			if getErr := k8s.Get(context.Background(), client.ObjectKey{Name: "applications.argoproj.io"}, crd); apierrors.IsNotFound(getErr) {
-				return
-			}
-		}
-		t.Error("the Argo CD CRDs were not removed")
-	})
+	installArgoCDCRDs(t)
 	scheme, err := manager.NewScheme()
 	if err != nil {
 		t.Fatal(err)

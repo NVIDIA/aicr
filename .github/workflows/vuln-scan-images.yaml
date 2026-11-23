@@ -360,7 +360,7 @@ jobs:
           - ghcr.io/nvidia/aicr-validators/aiperf-bench
           - ghcr.io/nvidia/aicr-gate
           # aicr-operator and aicr-registry are scanned once per architecture,
-          # as the release's operator-scan does; see include below.
+          # as the release's operator-checks do; see include below.
           # AICR does not build the images below. They ship only with the
           # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
           # (#2610), nvsentinel-nic-health-monitor, nvsentinel-slurm-drain-monitor
@@ -527,6 +527,10 @@ jobs:
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
 
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
       - name: Scan container image
         id: scan
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
@@ -546,6 +550,9 @@ jobs:
           output-format: json
           only-fixed: true
           fail-build: false
+          # The release image checks run this same Grype, so a finding this
+          # scan reports is the one the release gate would.
+          grype-version: ${{ steps.versions.outputs.grype }}
           config: .grype.yaml
           # OpenVEX statements with per-CVE reachability evidence for
           # aiperf-bench suppressions. Grype applies statements only to

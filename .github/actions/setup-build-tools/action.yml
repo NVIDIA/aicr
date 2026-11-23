@@ -14,7 +14,7 @@
 
 name: 'Setup Build Tools'
 description: >-
-  Install build, release, and testing tools (ko, syft, crane, oras, oasdiff, setup-envtest,
+  Install build, release, and testing tools (ko, syft, crane, oras, grype, gitleaks, ClamAV, oasdiff, setup-envtest,
   addlicense, goreleaser, chainsaw, helm, helmfile, kubectl, kind, yq, flux, hauler, zarf, ctlptl)
 
 inputs:
@@ -84,6 +84,42 @@ inputs:
     default: ''
   addlicense_sha256:
     description: 'addlicense SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions; required when install_addlicense=true)'
+    required: false
+    default: ''
+  install_grype:
+    description: 'Install grype (true/false)'
+    required: false
+    default: 'false'
+  grype_version:
+    description: 'grype version (from .settings.yaml via load-versions; required when install_grype=true)'
+    required: false
+    default: ''
+  grype_sha256:
+    description: 'grype SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions; required when install_grype=true)'
+    required: false
+    default: ''
+  install_gitleaks:
+    description: 'Install gitleaks (true/false)'
+    required: false
+    default: 'false'
+  gitleaks_version:
+    description: 'gitleaks version (from .settings.yaml via load-versions; required when install_gitleaks=true)'
+    required: false
+    default: ''
+  gitleaks_sha256:
+    description: 'gitleaks SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions; required when install_gitleaks=true)'
+    required: false
+    default: ''
+  install_clamav:
+    description: 'Install ClamAV from the upstream .deb (true/false)'
+    required: false
+    default: 'false'
+  clamav_version:
+    description: 'ClamAV version, without a prefix (from .settings.yaml via load-versions; required when install_clamav=true)'
+    required: false
+    default: ''
+  clamav_sha256:
+    description: 'ClamAV .deb SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions; required when install_clamav=true)'
     required: false
     default: ''
   install_goreleaser:
@@ -284,6 +320,126 @@ runs:
         sudo chmod +x /usr/local/bin/oras
         rm -rf "${ORAS_TMP}"
         echo "oras installed: $(oras version 2>&1 | grep -E '^Version:' || echo "${ORAS_VERSION}")"
+
+    # The release image checks run this Grype directly, so the scanner is the
+    # .settings.yaml pin rather than whatever anchore/scan-action bundles, and
+    # one run writes both the SARIF and the JSON that records the database.
+    # Same pinned-digest contract as oras above (tools/update-grype-checksums).
+    - name: Install grype
+      if: inputs.install_grype == 'true'
+      shell: bash
+      env:
+        GRYPE_INPUT_VERSION: ${{ inputs.grype_version }}
+        GRYPE_INPUT_SHA256: ${{ inputs.grype_sha256 }}
+      run: |
+        set -euo pipefail
+        GRYPE_VERSION="${GRYPE_INPUT_VERSION#v}"
+        if [[ -z "${GRYPE_VERSION}" ]]; then
+          echo "::error::install_grype=true requires grype_version"
+          exit 1
+        fi
+        if [[ ! "${GRYPE_INPUT_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "::error::install_grype=true requires grype_sha256 to be a 64-character lowercase sha256 (got '${GRYPE_INPUT_SHA256}')"
+          exit 1
+        fi
+        GRYPE_TAR="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+        GRYPE_TMP="$(mktemp -d)"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${GRYPE_TMP}/${GRYPE_TAR}" \
+          "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/${GRYPE_TAR}"
+        ACTUAL=$(sha256sum "${GRYPE_TMP}/${GRYPE_TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${GRYPE_INPUT_SHA256}" ]]; then
+          echo "::error::grype checksum mismatch: expected '${GRYPE_INPUT_SHA256}', got '${ACTUAL}'"
+          exit 1
+        fi
+        tar -xzf "${GRYPE_TMP}/${GRYPE_TAR}" -C "${GRYPE_TMP}" grype
+        sudo mv "${GRYPE_TMP}/grype" /usr/local/bin/grype
+        sudo chmod +x /usr/local/bin/grype
+        rm -rf "${GRYPE_TMP}"
+        installed="$(grype version -o json | jq -r .version)"
+        if [[ "${installed}" != "${GRYPE_VERSION}" ]]; then
+          echo "::error::grype reports version '${installed}', want '${GRYPE_VERSION}'"
+          exit 1
+        fi
+        echo "grype installed: ${installed}"
+
+    # The release binary, not gitleaks/gitleaks-action. Same pinned-digest
+    # contract as oras above (tools/update-gitleaks-checksums).
+    - name: Install gitleaks
+      if: inputs.install_gitleaks == 'true'
+      shell: bash
+      env:
+        GITLEAKS_INPUT_VERSION: ${{ inputs.gitleaks_version }}
+        GITLEAKS_INPUT_SHA256: ${{ inputs.gitleaks_sha256 }}
+      run: |
+        set -euo pipefail
+        GITLEAKS_VERSION="${GITLEAKS_INPUT_VERSION#v}"
+        if [[ -z "${GITLEAKS_VERSION}" ]]; then
+          echo "::error::install_gitleaks=true requires gitleaks_version"
+          exit 1
+        fi
+        if [[ ! "${GITLEAKS_INPUT_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "::error::install_gitleaks=true requires gitleaks_sha256 to be a 64-character lowercase sha256 (got '${GITLEAKS_INPUT_SHA256}')"
+          exit 1
+        fi
+        GITLEAKS_TAR="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+        GITLEAKS_TMP="$(mktemp -d)"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${GITLEAKS_TMP}/${GITLEAKS_TAR}" \
+          "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${GITLEAKS_TAR}"
+        ACTUAL=$(sha256sum "${GITLEAKS_TMP}/${GITLEAKS_TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${GITLEAKS_INPUT_SHA256}" ]]; then
+          echo "::error::gitleaks checksum mismatch: expected '${GITLEAKS_INPUT_SHA256}', got '${ACTUAL}'"
+          exit 1
+        fi
+        tar -xzf "${GITLEAKS_TMP}/${GITLEAKS_TAR}" -C "${GITLEAKS_TMP}" gitleaks
+        sudo mv "${GITLEAKS_TMP}/gitleaks" /usr/local/bin/gitleaks
+        sudo chmod +x /usr/local/bin/gitleaks
+        rm -rf "${GITLEAKS_TMP}"
+        installed="$(gitleaks version)"
+        if [[ "${installed#v}" != "${GITLEAKS_VERSION}" ]]; then
+          echo "::error::gitleaks reports version '${installed}', want '${GITLEAKS_VERSION}'"
+          exit 1
+        fi
+        echo "gitleaks installed: ${installed}"
+
+    # The upstream .deb pinned in .settings.yaml, not the distribution package,
+    # so the engine changes with the pin rather than with the runner image. It
+    # installs under /usr/local and bundles its libraries. Same pinned-digest
+    # contract as oras above (tools/update-clamav-checksums).
+    - name: Install ClamAV
+      if: inputs.install_clamav == 'true'
+      shell: bash
+      env:
+        CLAMAV_INPUT_VERSION: ${{ inputs.clamav_version }}
+        CLAMAV_INPUT_SHA256: ${{ inputs.clamav_sha256 }}
+      run: |
+        set -euo pipefail
+        CLAMAV_VERSION="${CLAMAV_INPUT_VERSION#clamav-}"
+        if [[ ! "${CLAMAV_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::install_clamav=true requires clamav_version as X.Y.Z (got '${CLAMAV_INPUT_VERSION}')"
+          exit 1
+        fi
+        if [[ ! "${CLAMAV_INPUT_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "::error::install_clamav=true requires clamav_sha256 to be a 64-character lowercase sha256 (got '${CLAMAV_INPUT_SHA256}')"
+          exit 1
+        fi
+        CLAMAV_DEB="clamav-${CLAMAV_VERSION}.linux.x86_64.deb"
+        CLAMAV_TMP="$(mktemp -d)"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 120 -o "${CLAMAV_TMP}/${CLAMAV_DEB}" \
+          "https://github.com/Cisco-Talos/clamav/releases/download/clamav-${CLAMAV_VERSION}/${CLAMAV_DEB}"
+        ACTUAL=$(sha256sum "${CLAMAV_TMP}/${CLAMAV_DEB}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${CLAMAV_INPUT_SHA256}" ]]; then
+          echo "::error::ClamAV checksum mismatch: expected '${CLAMAV_INPUT_SHA256}', got '${ACTUAL}'"
+          exit 1
+        fi
+        sudo dpkg -i "${CLAMAV_TMP}/${CLAMAV_DEB}" >/dev/null
+        sudo ldconfig
+        rm -rf "${CLAMAV_TMP}"
+        installed="$(clamscan --version)"
+        if [[ "${installed}" != "ClamAV ${CLAMAV_VERSION}"* ]]; then
+          echo "::error::clamscan reports '${installed}', want ClamAV ${CLAMAV_VERSION}"
+          exit 1
+        fi
+        echo "ClamAV installed: ${installed}"
 
     # Binary release rather than `go install`, for the same reason as #2664:
     # `go install pkg@version` builds outside the main module, so go.sum covers

@@ -55,7 +55,7 @@ transitions:
               helmfile upgrades through Helm, which never applies a changed
               crds/ directory, and Percona requires the new CRDs before the new
               operator.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Run helmfile apply from a bundle generated at the new pins.
             reason: >-
@@ -81,7 +81,7 @@ transitions:
               helm_release upgrades through Helm, which never applies a changed
               crds/ directory, and Percona requires the new CRDs before the new
               operator.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Regenerate the bundle at the new pins and run terraform apply.
             reason: >-
@@ -109,7 +109,7 @@ transitions:
               Fleet's Helm upgrade skips crds/, so Fleet never applies a
               changed crds/ directory, and Percona requires the new CRDs
               before the new operator.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Push the regenerated bundle (GitRepo mode) or apply the
               regenerated helmops.yaml (HelmOp mode) and let Fleet reconcile
@@ -126,7 +126,7 @@ transitions:
               on the new images.
       - deployers: [helm]
         steps:
-          - id: apply-bundle
+          - id: apply
             description: >-
               Run install.sh from a bundle generated at the new pins.
             reason: >-
@@ -141,7 +141,7 @@ transitions:
               The members restart one at a time; ready means all three rejoined
               on the new images.
       - steps:
-          - id: reconcile
+          - id: apply
             description: >-
               Commit a bundle generated at the new pins, then reconcile or sync
               it.
@@ -195,7 +195,7 @@ transitions:
               helmfile upgrades through Helm, which never applies a changed
               crds/ directory, and Percona requires the new CRDs before the new
               operator.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Run helmfile apply from a bundle generated at the new pins.
             reason: >-
@@ -221,7 +221,7 @@ transitions:
               helm_release upgrades through Helm, which never applies a changed
               crds/ directory, and Percona requires the new CRDs before the new
               operator.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Regenerate the bundle at the new pins and run terraform apply.
             reason: >-
@@ -249,7 +249,7 @@ transitions:
               Fleet's Helm upgrade skips crds/, so Fleet never applies a
               changed crds/ directory, and Percona requires the new CRDs
               before the new operator.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Push the regenerated bundle (GitRepo mode) or apply the
               regenerated helmops.yaml (HelmOp mode) and let Fleet reconcile
@@ -266,7 +266,7 @@ transitions:
               on the new images.
       - deployers: [helm]
         steps:
-          - id: apply-bundle
+          - id: apply
             description: >-
               Run install.sh from a bundle generated at the new pins.
             reason: >-
@@ -281,7 +281,7 @@ transitions:
               The members restart one at a time; ready means all three rejoined
               on the new images.
       - steps:
-          - id: reconcile
+          - id: apply
             description: >-
               Commit a bundle generated at the new pins, then reconcile or sync
               it.

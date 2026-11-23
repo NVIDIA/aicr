@@ -16,7 +16,7 @@ reason and message.
 | Reason | Runbook |
 | --- | --- |
 | `NodeGroupEmpty`, `PlacementOverlap`, `AcceleratedGroupHeterogeneous`, `SnapshotIncomplete`, `CriteriaConflict` | [Discovery](#discovery) |
-| `OverridePathUnknown`, `InvalidOverride`, `InvalidPlacement`, `NamespaceNotAllowed`, `ChartSourceUnsupported`, `ContentTooLarge`, `Conflict` | [Render and registry content](#render-and-registry-content) |
+| `OverridePathUnknown`, `InvalidOverride`, `InvalidPlacement`, `NamespaceNotAllowed`, `ChartSourceUnsupported`, `ContentTooLarge`, `Conflict`; `InvalidRequest` with `chart of release` in the `Resolved` message | [Render and registry content](#render-and-registry-content) |
 | `AICRInvalidRequest`, `AICRNotFound`, `AICRUnauthorized`, `AICRInternal`, `AICRTimeout` | [AICR Job failures](#aicr-job-failures) |
 | `retrying after a transient failure` or `[SERVICE_UNAVAILABLE]` in the `Resolved` message, `RegistryCredentialsUnavailable`, `Unauthorized` on `Resolved`, `RegistryCredentialsStale` | [Registry and credential outages](#registry-and-credential-outages) |
 | `AICRVersionMismatch`, `AICRArtifactUnsupported` | [AICR version mismatch](#aicr-version-mismatch) |
@@ -65,6 +65,7 @@ kubectl annotate clusterruntime cluster operator.aicr.run/resnapshot="$(date +%s
 | `NamespaceNotAllowed` | The recipe renders a release into a namespace missing from the chart's `namespaces.components`; the message names each release | Add the namespace to `namespaces.components` with its Pod Security level and `helm upgrade` |
 | `ChartSourceUnsupported` | A bundle release names no chart the operator can serve | A recipe the operator does not support yet; report it |
 | `ContentTooLarge` | A values or recipe document exceeds a ConfigMap (1 MiB) | Reduce the overrides |
+| `InvalidRequest` with `chart of release <name>` in the message | The named release's chart cannot be read: it is not a gzip tar archive, its values do not parse, or it exceeds one of the operator's read limits. The largest is 64 MiB decompressed or 4,096 files and directories over the operator's two reads of a component's chart, for its CRDs and its default values, packaged subcharts included | A recipe the operator does not support yet; report it with the release name |
 | `Conflict` | A chart tag in your registry already holds different bytes, or an upstream archive does not match its index digest | Upstream content changed after it was mirrored, or the registry was modified. Find out which before deleting the tag; the operator never overwrites it |
 
 Fixing the runtime's `spec` starts a new resolution.
@@ -84,11 +85,15 @@ kubectl logs -n aicr-jobs "job/<job>"
 | --- | --- | --- |
 | 2 | `AICRInvalidRequest` | Not retried; AICR refused the input (an unsupported OS, a recipe constraint). Change the input |
 | 3 | `AICRNotFound` | Not retried; usually no recipe matches the criteria |
-| 4 | `AICRUnauthorized` | Retried after a backoff, three runs in all, then stalled; usually registry permissions for a pushing Job, or a ServiceAccount recreated moments before |
+| 4 | `AICRUnauthorized` | Retried after a backoff, three runs in all, then stalled; usually registry permissions for a pushing Job, or a ServiceAccount recreated moments before. While it waits, the message reads `retrying after an authorization failure` |
 | 5, 6, 7, 9 | none: `Resolving`, `retrying after a transient failure` | Retried with backoff from 10 seconds to 5 minutes, without a bound |
 | 1, 8, other | `AICRInternal` | Three runs for the same input, then stalled |
 | none (deadline, a pod that never started) | `AICRTimeout` | Three runs for the same input, then stalled. A pod evicted by a drain or node repair is replaced within the run and spends nothing. The message keeps the last reason the pod was not running (`last: Job <name> is not scheduled: …`) |
 | none (`InvalidImageName`, `CreateContainerConfigError`) | `AICRInvalidRequest` | Not retried: the cluster can never start the container as configured. Fix the AICR image reference or the missing configuration, then request a snapshot |
+
+Deployment validation is stricter: it is run at most three times, and only
+after exits 5, 6, 7 or 9. Any other failed run ends the rollout
+([Validation](#validation)).
 
 While a run waits, the runtime's message names its Job and why its pod is
 not running, instead of `AICR Jobs are running`:
@@ -229,9 +234,17 @@ Nothing is written to Argo CD while the engine is unavailable. See
 ## Waiting for approval
 
 `Stalled=True` with `AwaitingAcknowledgement` means a `manual` release is
-applied and its record has steps after the apply: do them (`kubectl aicr
-describe` lists them under "Recorded steps"), then `kubectl aicr acknowledge`
-the rollout. Nothing further starts until then.
+applied and its record has steps after its `apply` step: do them
+(`kubectl aicr describe` lists them under "Recorded steps"), then
+`kubectl aicr acknowledge` the rollout. Nothing further starts until then. A
+record that names no `apply` step holds all of its steps, since the operator
+cannot tell which follow the apply, and the message says
+`its record names no apply step, so acknowledge all of its steps`; confirm the
+earlier ones were done too. A message that says
+`acknowledge the steps its record holds` means the operator could not tell
+which: it could not read the rollout's plan or assessment report, or the steps
+came from an earlier rollout that did not finish. `kubectl aicr describe` lists
+the record the rollout was assessed with.
 
 `Stalled=True` with `AwaitingApproval` means a rollout needs an approver.
 Nothing has been written. Approve it with `kubectl aicr approve`
@@ -250,11 +263,21 @@ If approval is refused, the message says why:
 
 ## Transition blocked
 
-`TransitionBlocked` means the move from the active plan to the target needs a
-migration the operator does not perform: AICR assessed a component `blocked`,
-or a release would change namespace or chart name. No rollout is created. Return to a plan without that change (revert the input, or
-[pin](operations.md#rolling-back-by-pinning) the active plan); a supported
-migration is a separate procedure, outside the operator.
+`TransitionBlocked` means the operator will not start the move from the active
+plan to the target, and creates no rollout for it. Either the move needs a
+migration the operator does not perform, or a `manual` record holds more for
+acknowledgement than a rollout records.
+
+A migration is needed when AICR assessed a component `blocked`, or a release
+would change namespace or chart name. Return to a plan without that change
+(revert the input, or [pin](operations.md#rolling-back-by-pinning) the active
+plan); a supported migration is a separate procedure, outside the operator.
+
+A rollout records at most 16 steps for acknowledgement per release, each step
+id at most 63 characters. The message names the release past either bound.
+AICR's released records stay within both, so this takes an AICR image built
+with other records. Run an AICR whose records fit, or return to a plan without
+that upgrade as above.
 
 ## Application name taken
 
@@ -406,13 +429,53 @@ rollout is in `Validating`:
 | --- | --- |
 | `deployment validation is not installed (validation.enabled)` | Install the validation identities (`validation.enabled: true` with `aicr.validatorImages`) or set `spec.validation.deployment: Disabled`. The runtime stalls before any step; a rollout created while validation was installed stalls in `Validating` |
 | `plan <digest> records no recipe to validate against` | The rollout targets a plan rebuilt from Applications and was created by an operator that predates `PlanWithoutRecipe`; set `Disabled` for this rollout, or roll to a resolved plan. Current operators refuse such a rollout before any step |
-| `taking the deployment snapshot` (rollout message, not a stall) | Validation waits for the snapshot the rollout takes after its last step; it runs in `aicr-discovery` like discovery's. If it fails, the rollout ends `Failed` with `the deployment snapshot failed: <cause>`: fix the cause as for a discovery snapshot, then retry |
+| `taking the deployment snapshot` (rollout message, not a stall) | Validation waits for the snapshot the rollout takes after its last step; it runs in `aicr-discovery` like discovery's. The message continues with `; retrying after a transient failure: <cause>` while a failed run waits for its next one. If it fails, the rollout ends `Failed` with `the deployment snapshot failed: <cause>`: fix the cause as for a discovery snapshot, then retry |
+
+**Validation is retried.** A transient exit (5, 6, 7 or 9: timeout,
+unavailable, rate limited, canceled) means AICR could not finish the run.
+AICR can exit that way after its checks ran, when pushing or signing the
+evidence fails, so the operator first reads the evidence the run pushed. If
+it records failed checks, or otherwise does not record that validation
+passed, the rollout ends `Failed` on that run and nothing is run again. Its
+message leads with the verdict:
+`deployment validation failed: the evidence run <id> pushed records failed checks`,
+followed by how the run ended. The evidence is bound and recorded as for any
+failed run. Where `validation.signingKey` is set and the run failed before
+signing, it cannot be bound: the message continues with
+`that evidence is not recorded on the rollout` and the evidence digest, and
+`status.validation.evidence` stays empty.
+
+Otherwise the run left no verdict of failure, and the rollout runs validation
+again after a backoff of 10 or 20 seconds, without a new approval. That
+includes a run that pushed nothing, and evidence that cannot be read as a
+verdict. The rollout stays `Validating`, and its message reads
+`deployment validation run <id> failed; retrying after a transient failure: <cause>`.
+The runtime's `Reconciling` message carries the same cause. While the
+registry does not answer or refuses the operator's credential, no run starts:
+the rollout's message says the run failed and that
+`its evidence cannot be read yet`, and the runtime records `ReconcileFailed`
+Events until the evidence can be looked for.
+
+Validation is run at most three times: a third transient exit ends the
+rollout `Failed` with `deployment validation failed after 3 runs`, and any
+other failed run ends it on that run. A failed run's Job stays while the next
+run runs and is deleted when the run after that starts; all of them are
+deleted when the rollout ends. Each failed run is recorded as an
+`AICRRunFailed` Event on the runtime, which the cluster keeps only for its
+Event TTL (an hour by default), and as an `AICR run failed` line in the
+operator's log. Retries lengthen `Validating`, never past
+`spec.rollout.deadline`: each run is bounded by the hour a validation Job is
+allowed and by the time the rollout has left.
 
 **Validation failed.** The rollout ends `Failed`. AICR exits 8 when checks
 fail, after pushing their evidence, and 2 when it refuses the recipe or its
-readiness pre-flight. `status.validation` names the Job, the run and, when
-evidence was pushed, its reference. Read the Job in `aicr-validation`, fix
-the cause, and retry: a retry is a new rollout and a new run. Validation
+readiness pre-flight. `status.validation` names the Job and the run, unless
+no run could be started, and the evidence reference when evidence was bound.
+The rollout's end deletes its validation Jobs, so read the cause in the
+rollout's message, the `AICRRunFailed` Event on the runtime (kept for the
+cluster's Event TTL) and the operator's log; a Job in `aicr-validation` can
+be read only while its rollout is still `Validating`. Fix the cause, and
+retry: a retry is a new rollout and a new run. Validation
 checks the components the bundle deploys: it runs against the recipe the
 bundle records, so a component an override turns off is not required.
 
