@@ -271,21 +271,6 @@ func assessed(from, to *plan.Document) bool {
 	return from != nil && from.Recipe != nil && to.Recipe != nil && from.Recipe.ConfigMapRef.Digest != to.Recipe.ConfigMapRef.Digest
 }
 
-// afterApply is the IDs of a transition record's steps after its apply, the
-// one step the operator performs. A record that names no apply step cannot
-// say which of its steps follow the apply, so it returns all of them.
-func afterApply(steps []aicrjob.UpgradeStep) []string {
-	i := slices.IndexFunc(steps, func(s aicrjob.UpgradeStep) bool { return s.ID == aicrjob.ApplyStepID })
-	if len(steps) == 0 || i == len(steps)-1 {
-		return nil
-	}
-	ids := make([]string, 0, len(steps)-i-1)
-	for _, s := range steps[i+1:] {
-		ids = append(ids, s.ID)
-	}
-	return ids
-}
-
 // assessSteps assesses each step and reports whether the rollout requires
 // approval:
 //
@@ -310,7 +295,7 @@ func assessSteps(steps []v1alpha1.RolloutStep, from, to *plan.Document, report *
 			case c.Change == "version":
 				verdicts[c.Component] = c.Assessment()
 				if c.Assessment() == v1alpha1.AssessmentManual {
-					postApply[c.Component] = afterApply(c.Steps)
+					postApply[c.Component], _ = aicrjob.HeldSteps(c.Steps)
 				}
 			case c.Assessment() == v1alpha1.AssessmentBlocked:
 				// A replacement surfaces as a removal and an install, which

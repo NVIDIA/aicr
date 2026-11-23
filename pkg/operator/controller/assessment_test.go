@@ -154,35 +154,6 @@ func TestAssessSteps(t *testing.T) {
 	}
 }
 
-// A manual record's steps after its apply step wait for an acknowledgement.
-// A record that names no apply step cannot say which steps follow the apply,
-// so every step waits.
-func TestAfterApply(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		ids  []string
-		want []string
-	}{
-		{"steps after the apply", []string{"check-host-port", "apply", "reset-breaker", "verify"}, []string{"reset-breaker", "verify"}},
-		{"apply is the last step", []string{"check-aws-replace-vm", "apply"}, nil},
-		{"no apply step", []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}, []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}},
-		{"no steps", nil, nil},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			var steps []aicrjob.UpgradeStep
-			for _, id := range tt.ids {
-				steps = append(steps, aicrjob.UpgradeStep{ID: id})
-			}
-			if got := afterApply(steps); !slices.Equal(got, tt.want) {
-				t.Errorf("afterApply(%v) = %v, want %v", tt.ids, got, tt.want)
-			}
-		})
-	}
-}
-
 // AICR v1.2.0's nfd record (0.19.0 to 0.20.1) names its deployer step
 // sync-nfd, not apply, so the operator cannot tell which steps follow the
 // apply: the upgrade needs approval, and every step waits to be acknowledged
@@ -621,7 +592,8 @@ func TestManualPostApplyStepsAwaitAcknowledgement(t *testing.T) {
 	ro = onlyRollout(t, ctx, target)
 	got := getRuntime(t, ctx)
 	stalled := cond(got, v1alpha1.ConditionStalled)
-	if ro.Status.Phase != v1alpha1.PhaseAwaitingAcknowledgement || !strings.Contains(ro.Status.Message, "reset-breaker, verify") ||
+	if ro.Status.Phase != v1alpha1.PhaseAwaitingAcknowledgement ||
+		!strings.Contains(ro.Status.Message, "acknowledge its post-apply steps: reset-breaker, verify") ||
 		stalled.Reason != ReasonAwaitingAcknowledgement || got.Status.ActivePlanDigest != active {
 
 		t.Fatalf("after the apply: rollout %+v, Stalled %+v, active %s", ro.Status, stalled, got.Status.ActivePlanDigest)
@@ -802,6 +774,71 @@ func TestOversizedHoldStallsTheTransition(t *testing.T) {
 		if x.Spec.ToPlanDigest == target {
 			t.Fatal("a transition whose hold a rollout cannot record got a rollout")
 		}
+	}
+}
+
+// A manual record that names no apply step holds all of its steps after the
+// apply, and the stall says so instead of calling steps meant for before the
+// upgrade post-apply steps.
+func TestRecordWithoutApplyAwaitsAllItsSteps(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		reportGone bool
+		want       string
+	}{
+		{"the report names the record", false,
+			"release nfd is applied; its record names no apply step, so acknowledge all of its steps: widen-nrt-rbac, sync-nfd, narrow-nrt-rbac"},
+		// Without the report the operator cannot tell which steps it holds.
+		{"the report is gone", true,
+			"release nfd is applied; acknowledge the steps its record holds: widen-nrt-rbac, sync-nfd, narrow-nrt-rbac"},
+	} {
+		t.Run(tc.name, func(t *testing.T) { recordWithoutApplyAwaits(t, tc.reportGone, tc.want) })
+	}
+}
+
+func recordWithoutApplyAwaits(t *testing.T, reportGone bool, want string) {
+	t.Helper()
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, stabilized)
+	nfd := func(chart string) releaseWithValues {
+		r := testRelease("nfd", plan.PhasePrimary, "", `{}`)
+		r.Chart.Digest = plan.DigestOf([]byte(chart))
+		return r
+	}
+	active := putResolved(t, ctx, rt, map[string]string{"service": "gke", "version": "1"}, nfd("n1"))
+	target := putResolved(t, ctx, rt, map[string]string{"service": "gke", "version": "2"}, nfd("n2"))
+	succeedTo(t, ctx, rt, active)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.ensured["nfd"] = active
+	engine.inventory = []argocd.InventoryItem{{ReleaseID: "nfd", UID: "u-n", PlanDigest: active}}
+	r, clk := newRollout(t, engine, false)
+	clk.now = time.Now().Add(2 * time.Second)
+
+	reconcileRollout(t, ctx, r)
+	job := liveJobs(t, ctx, "assessment")[0]
+	succeed(t, ctx, &job, []byte(`{"deployer":"argocd","objectNamesCompared":false,"components":[`+
+		`{"component":"nfd","change":"version","from":"0.19.0","to":"0.20.1","verdict":"manual","breaking":true,"downgrade":false,"failsRun":false,`+
+		`"steps":[{"id":"widen-nrt-rbac","description":"widen"},{"id":"sync-nfd","description":"sync"},{"id":"narrow-nrt-rbac","description":"narrow"}]}],`+
+		`"summary":{"components":1,"failing":0}}`))
+	reconcileRollout(t, ctx, r)
+	approve(t, ctx, onlyRollout(t, ctx, target).Name, clk.now.Add(time.Hour))
+	if reportGone {
+		ref := onlyRollout(t, ctx, target).Spec.AssessmentRef
+		gone := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: operatorNS, Name: ref.ConfigMap}}
+		if err := k8s.Delete(ctx, gone); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 3 {
+		reconcileRollout(t, ctx, r)
+	}
+	ro := onlyRollout(t, ctx, target)
+	stalled := cond(getRuntime(t, ctx), v1alpha1.ConditionStalled)
+	if ro.Status.Phase != v1alpha1.PhaseAwaitingAcknowledgement || !strings.Contains(ro.Status.Message, want) ||
+		stalled.Reason != ReasonAwaitingAcknowledgement || !strings.Contains(stalled.Message, want) {
+
+		t.Fatalf("rollout %+v, Stalled %+v; want %q", ro.Status, stalled, want)
 	}
 }
 
