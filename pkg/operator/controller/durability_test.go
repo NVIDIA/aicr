@@ -935,6 +935,8 @@ type faults struct {
 	n      int
 	landed bool
 	writes int
+	// failed is the write the fault failed.
+	failed string
 }
 
 func (f *faults) at(op string, after bool) error {
@@ -943,6 +945,7 @@ func (f *faults) at(op string, after bool) error {
 	}
 	f.writes++
 	if f.writes == f.n {
+		f.failed = op
 		return operrors.New(operrors.ErrCodeUnavailable, fmt.Sprintf("injected fault at write %d (%s, landed %t)", f.n, op, f.landed))
 	}
 	return nil
@@ -979,6 +982,9 @@ func faultingClient(t *testing.T, f *faults) client.Client {
 		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
 			return f.write("delete "+obj.GetName(), func() error { return c.Delete(ctx, obj, opts...) })
 		},
+		Apply: func(ctx context.Context, c client.WithWatch, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+			return f.write("apply", func() error { return c.Apply(ctx, obj, opts...) })
+		},
 		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 			return f.write(sub+" "+obj.GetName(), func() error { return c.SubResource(sub).Update(ctx, obj, opts...) })
 		},
@@ -993,13 +999,78 @@ func faultingClient(t *testing.T, f *faults) client.Client {
 
 // faultingRollout is a rollout controller whose API writes and engine
 // mutations go through one fault plan.
-func faultingRollout(t *testing.T, engine *fakeEngine, n int, landed bool) (*RolloutReconciler, *int) {
+func faultingRollout(t *testing.T, engine *fakeEngine, n int, landed bool) (*RolloutReconciler, *faults) {
 	t.Helper()
 	f := &faults{n: n, landed: landed}
 	engine.fault = f.at
 	r, _ := newRollout(t, engine, true)
 	r.Client = faultingClient(t, f)
-	return r, &f.writes
+	return r, f
+}
+
+// A fault at every write of a rollout that verifies a readiness release and
+// removes a release the target lacks, API or engine, before it lands or
+// after, changes nothing about the outcome: one rollout, Succeeded, each
+// engine write made once and in order. The faults include the Verify, the
+// Remove and the cleanup finalizer's apply.
+func TestRolloutVerifyAndRemoveSurviveAFaultAtEveryWrite(t *testing.T) {
+	want := []string{"Ensure gpu-operator", "Verify gpu-operator-readiness", "Remove nvsentinel"}
+	faulted := map[string]bool{}
+	run := func(n int, landed bool) int {
+		ctx := testContext(t)
+		rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+			rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+		})
+		gate := testRelease("gpu-operator-readiness", plan.PhaseReadiness, "gpu-operator", `{}`)
+		active := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":1}`), gate,
+			testRelease("nvsentinel", plan.PhasePrimary, "", `{}`))
+		succeedTo(t, ctx, rt, active)
+		target := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":2}`), gate)
+		resolved(t, ctx, target)
+		engine := newEngine()
+		engine.inventory = []argocd.InventoryItem{
+			{ReleaseID: "gpu-operator", UID: "u-g"}, {ReleaseID: "gpu-operator-readiness", UID: "u-r"}, {ReleaseID: "nvsentinel", UID: "u-s"},
+		}
+		engine.gone["nvsentinel"] = true
+		r, f := faultingRollout(t, engine, n, landed)
+		r.Now = func() time.Time { return time.Now().Add(2 * time.Second) }
+		for range 14 {
+			_, _ = r.Reconcile(ctx, request)
+		}
+		where := fmt.Sprintf("fault at write %d, %s (landed %t)", n, f.failed, landed)
+		ros := rolloutsTo(t, ctx, target)
+		if len(ros) != 1 || ros[0].Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseSucceeded) {
+			for i := range ros {
+				t.Logf("rollout %s: %s %s", ros[i].Name, ros[i].Status.Phase, ros[i].Status.Message)
+			}
+			t.Fatalf("%s: %d rollouts, the last not Succeeded; engine writes %v", where, len(ros), engine.order)
+		}
+		faulted[fmt.Sprintf("%s (landed %t)", f.failed, landed)] = true
+		if !slices.Equal(engine.order, want) {
+			t.Fatalf("%s: engine writes %v, want %v", where, engine.order, want)
+		}
+		if got := getRuntime(t, ctx); got.Status.ActivePlanDigest != target || cond(got, v1alpha1.ConditionReady).Status != metav1.ConditionTrue {
+			t.Fatalf("%s: runtime %+v", where, got.Status)
+		}
+		return f.writes
+	}
+	total := run(0, false)
+	if total < 5 {
+		t.Fatalf("a clean rollout made only %d writes", total)
+	}
+	for n := 1; n <= total; n++ {
+		for _, landed := range []bool{false, true} {
+			run(n, landed)
+		}
+	}
+	for _, op := range []string{"Verify gpu-operator-readiness", "Remove nvsentinel", "apply"} {
+		for _, landed := range []bool{false, true} {
+			if key := fmt.Sprintf("%s (landed %t)", op, landed); !faulted[key] {
+				t.Errorf("no fault hit %s; faulted %v", key, faulted)
+			}
+		}
+	}
+	t.Logf("a fault at each of %d writes, before and after it landed, kept the outcome", total)
 }
 
 // A fault at every write the rollout controller makes, API or engine,
@@ -1007,17 +1078,19 @@ func faultingRollout(t *testing.T, engine *fakeEngine, n int, landed bool) (*Rol
 // one rollout, Succeeded, each release written once and in order, the
 // second only after the first is current-revision ready.
 func TestRolloutSurvivesAFaultAtEveryWrite(t *testing.T) {
-	ctx := testContext(t)
+	faulted := map[string]bool{}
 	run := func(n int, landed bool) int {
+		ctx := testContext(t)
 		rt := freshRuntime(t, ctx, stabilized)
 		digest := putReleases(t, ctx, rt, testRelease("cert-manager", plan.PhasePrimary, "", `{"cpu":"50m"}`),
 			testRelease("nfd", plan.PhasePrimary, "", `{}`))
 		resolved(t, ctx, digest)
 		engine := newEngine()
-		r, writes := faultingRollout(t, engine, n, landed)
+		r, f := faultingRollout(t, engine, n, landed)
 		for range 12 {
 			_, _ = r.Reconcile(ctx, request)
 		}
+		faulted[fmt.Sprintf("%s (landed %t)", f.failed, landed)] = true
 		ros := rolloutsTo(t, ctx, digest)
 		where := fmt.Sprintf("fault at write %d (landed %t)", n, landed)
 		if len(ros) != 1 || ros[0].Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseSucceeded) {
@@ -1029,7 +1102,7 @@ func TestRolloutSurvivesAFaultAtEveryWrite(t *testing.T) {
 		if got := getRuntime(t, ctx); got.Status.ActivePlanDigest != digest || cond(got, v1alpha1.ConditionReady).Status != metav1.ConditionTrue {
 			t.Fatalf("%s: runtime %+v", where, got.Status)
 		}
-		return *writes
+		return f.writes
 	}
 	total := run(0, false)
 	if total < 5 {
@@ -1038,6 +1111,11 @@ func TestRolloutSurvivesAFaultAtEveryWrite(t *testing.T) {
 	for n := 1; n <= total; n++ {
 		for _, landed := range []bool{false, true} {
 			run(n, landed)
+		}
+	}
+	for _, landed := range []bool{false, true} {
+		if key := fmt.Sprintf("apply (landed %t)", landed); !faulted[key] {
+			t.Errorf("no fault hit the cleanup finalizer's %s; faulted %v", key, faulted)
 		}
 	}
 	t.Logf("a fault at each of %d writes, before and after it landed, kept the outcome", total)
