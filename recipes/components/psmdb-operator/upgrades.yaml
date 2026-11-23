@@ -32,7 +32,7 @@ transitions:
       members then restart one at a time, because their init container and
       mongodb_exporter sidecar images change in the same bundle. crVersion
       stays at 1.23.0. The MongoDB server image is pinned separately in
-      nvsentinel-mongodb, so a bundle generated after it moved to 8.0.32-14
+      nvsentinel-mongodb, so a bundle generated after it moved to 8.0.38-16
       also rolls mongod in that pass: a same-major patch with no FCV change.
     precondition: >-
       The nvsentinel-mongodb cluster is healthy. Check with `kubectl get
