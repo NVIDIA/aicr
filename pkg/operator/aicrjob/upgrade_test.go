@@ -239,3 +239,75 @@ func TestAssessmentMapping(t *testing.T) {
 		}
 	}
 }
+
+// Only a manual version change whose record has steps and names no apply
+// step holds every step for acknowledgement; a component the report does not
+// list holds nothing.
+// A manual record's steps after its apply step wait for an acknowledgement.
+// A record that names no apply step cannot say which steps follow the apply,
+// so every step waits.
+func TestHeldSteps(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		ids   []string
+		want  []string
+		every bool
+	}{
+		{"steps after the apply", []string{"check-host-port", ApplyStepID, "reset-breaker", "verify"}, []string{"reset-breaker", "verify"}, false},
+		{"apply is the last step", []string{"check-aws-replace-vm", ApplyStepID}, nil, false},
+		{"no apply step", []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}, []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}, true},
+		{"no steps", nil, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var steps []UpgradeStep
+			for _, id := range tt.ids {
+				steps = append(steps, UpgradeStep{ID: id})
+			}
+			if got, every := HeldSteps(steps); !slices.Equal(got, tt.want) || every != tt.every {
+				t.Errorf("HeldSteps(%v) = %v, %t; want %v, %t", tt.ids, got, every, tt.want, tt.every)
+			}
+		})
+	}
+}
+
+func TestUpgradeReportHoldsEveryStep(t *testing.T) {
+	t.Parallel()
+	steps := func(ids ...string) []UpgradeStep {
+		out := make([]UpgradeStep, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, UpgradeStep{ID: id, Description: id})
+		}
+		return out
+	}
+	report := &UpgradeReport{Components: []ComponentChange{
+		{Component: "nfd", Change: "version", Verdict: "manual", Steps: steps("widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac")},
+		{Component: "nvsentinel", Change: "version", Verdict: "manual", Steps: steps("check", ApplyStepID, "verify")},
+		{Component: "kube-prometheus-stack", Change: "version", Verdict: "safe", Steps: steps("export")},
+		{Component: "kai-scheduler", Change: "replaced", Verdict: "manual", Steps: steps("migrate-queues")},
+		{Component: "dynamo-platform", Change: "version", Verdict: "manual"},
+	}}
+	nfd := []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}
+	tests := []struct {
+		component string
+		held      []string
+		every, ok bool
+	}{
+		{"nfd", nfd, true, true},
+		{"nvsentinel", []string{"verify"}, false, true},
+		// Steps carried from an earlier rollout need not be this record's.
+		{"nfd", []string{"widen-nrt-rbac"}, false, false},
+		{"nvsentinel", []string{"check", ApplyStepID, "verify"}, false, false},
+		{"kube-prometheus-stack", []string{"export"}, false, false},
+		{"kai-scheduler", []string{"migrate-queues"}, false, false},
+		{"dynamo-platform", nil, false, false},
+		{"absent", nfd, false, false},
+	}
+	for _, tt := range tests {
+		if every, ok := report.HoldsEveryStep(tt.component, tt.held); every != tt.every || ok != tt.ok {
+			t.Errorf("HoldsEveryStep(%q, %v) = %t, %t; want %t, %t", tt.component, tt.held, every, ok, tt.every, tt.ok)
+		}
+	}
+}

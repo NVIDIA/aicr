@@ -236,9 +236,14 @@ Nothing is written to Argo CD while the engine is unavailable. See
 applied and its record has steps after its `apply` step: do them
 (`kubectl aicr describe` lists them under "Recorded steps"), then
 `kubectl aicr acknowledge` the rollout. Nothing further starts until then. A
-record that names no `apply` step lists all of its steps here, since the
-operator cannot tell which follow the apply; confirm the earlier ones were
-done too.
+record that names no `apply` step holds all of its steps, since the operator
+cannot tell which follow the apply, and the message says
+`its record names no apply step, so acknowledge all of its steps`; confirm the
+earlier ones were done too. A message that says
+`acknowledge the steps its record holds` means the operator could not tell
+which: it could not read the rollout's plan or assessment report, or the steps
+came from an earlier rollout that did not finish. `kubectl aicr describe` lists
+the record the rollout was assessed with.
 
 `Stalled=True` with `AwaitingApproval` means a rollout needs an approver.
 Nothing has been written. Approve it with `kubectl aicr approve`

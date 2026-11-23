@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
+	"aicr.run/pkg/operator/plan"
 )
 
 // The commands end to end against a real API server, as a certificate user
@@ -112,5 +113,65 @@ func TestRunAgainstAnAPIServer(t *testing.T) {
 	}
 	if err = Run(ctx, []string{"approve", "rollout-missing", "--kubeconfig", kubeconfig, "--reason", "x"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("approving a missing rollout succeeded")
+	}
+
+	// Acknowledging a record that names no apply step covers all of its
+	// steps, and the output says so; without the plan to map the release to
+	// its component, the output claims neither.
+	doc, objs := testPlan(t, `{}`, nil)
+	reportOf := func(steps string) *plan.Content {
+		return plan.AssessmentContent([]byte(`{"deployer":"argocd","objectNamesCompared":true,"components":[` +
+			`{"component":"cert-manager","change":"version","verdict":"manual","steps":[` + steps + `]}],"summary":{}}`))
+	}
+	noApply := reportOf(`{"id":"widen","description":"w"},{"id":"sync","description":"s"}`)
+	withApply := reportOf(`{"id":"check","description":"c"},{"id":"apply","description":"a"},{"id":"widen","description":"w"},{"id":"sync","description":"s"}`)
+	for _, report := range []*plan.Content{noApply, withApply} {
+		cm, cmErr := report.ConfigMap(testNS, v1alpha1.SingletonName, doc.RuntimeUID, nil)
+		if cmErr != nil {
+			t.Fatal(cmErr)
+		}
+		objs = append(objs, cm)
+	}
+	for _, o := range objs {
+		if err = admin.Create(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name, toPlan string
+		report       *plan.Content
+		want         string
+	}{
+		{"rollout-plugin-acknowledge", doc.DesiredStateDigest, noApply,
+			"carol acknowledged all steps of cert-manager's record (widen, sync), which names no apply step; the rollout continues"},
+		{"rollout-plugin-acknowledge-apply", doc.DesiredStateDigest, withApply,
+			"carol acknowledged the post-apply steps of cert-manager (widen, sync); the rollout continues"},
+		{"rollout-plugin-acknowledge-no-plan", "sha256:" + strings.Repeat("0", 64), noApply,
+			"carol acknowledged the steps cert-manager's record holds (widen, sync); the rollout continues"},
+	} {
+		held := ro.DeepCopy()
+		held.ObjectMeta = metav1.ObjectMeta{Name: tc.name, Labels: ro.Labels}
+		held.Spec.ToPlanDigest, held.Spec.StartingInventoryDigest = tc.toPlan, tc.toPlan
+		held.Spec.AssessmentRef = &v1alpha1.DigestedConfigMapRef{ConfigMap: tc.report.Name, Digest: tc.report.Digest}
+		held.Spec.Steps = []v1alpha1.RolloutStep{{Release: "cert-manager", Operation: v1alpha1.OperationUpgrade,
+			Assessment: v1alpha1.AssessmentManual, PostApplySteps: []string{"widen", "sync"}}}
+		if err = admin.Create(ctx, held); err != nil {
+			t.Fatal(err)
+		}
+		if err = Run(ctx, []string{"approve", held.Name, "--kubeconfig", kubeconfig, "--reason", "window"}, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+		if err = admin.Get(ctx, client.ObjectKeyFromObject(held), held); err != nil {
+			t.Fatal(err)
+		}
+		held.Status.Phase = v1alpha1.PhaseAwaitingAcknowledgement
+		held.Status.Releases = []v1alpha1.ReleaseStatus{{ID: "cert-manager", State: v1alpha1.ReleaseReady}}
+		if err = admin.Status().Update(ctx, held); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		if err = Run(ctx, []string{"acknowledge", held.Name, "--kubeconfig", kubeconfig}, &out); err != nil || !strings.Contains(out.String(), tc.want) {
+			t.Fatalf("%s: acknowledge = %v\n%s\nwant %q", tc.name, err, out.String(), tc.want)
+		}
 	}
 }
