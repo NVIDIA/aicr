@@ -15,6 +15,8 @@
 package ctrf
 
 import (
+	"encoding/json"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -49,6 +51,45 @@ var platformPattern = regexp.MustCompile(`^[a-z0-9_]{1,32}/[a-z0-9_]{1,32}(/[a-z
 func ValidPlatform(s string) bool {
 	return platformPattern.MatchString(s)
 }
+
+// PlatformLines folds the PlatformLinePrefix payloads of one process's output.
+// A process reports one platform, so lines naming two different platforms are
+// a conflict and leave the platform unknown. The zero value has seen no line.
+type PlatformLines struct {
+	platform string
+	conflict bool
+}
+
+// Add folds the payload of one PlatformLinePrefix line. A payload that is not
+// a JSON string with the os/arch form is logged and ignored. Every line after
+// a conflict is ignored.
+func (p *PlatformLines) Add(payload string) {
+	if p.conflict {
+		return
+	}
+	var got string
+	if err := json.Unmarshal([]byte(payload), &got); err != nil {
+		slog.Warn("dropping malformed validator platform sentinel", "error", err)
+		return
+	}
+	if !ValidPlatform(got) {
+		slog.Warn("dropping validator platform sentinel without the os/arch form", "platform", got)
+		return
+	}
+	switch p.platform {
+	case "":
+		p.platform = got
+	case got:
+	default:
+		slog.Warn("validator reported conflicting platforms; recording none",
+			"first", p.platform, "second", got)
+		p.platform, p.conflict = "", true
+	}
+}
+
+// Platform returns the platform every valid line named, or "" when there was
+// none or the lines conflicted.
+func (p *PlatformLines) Platform() string { return p.platform }
 
 // Valid reports whether r.Image parses as an image reference, r.Digest is
 // empty or a well-formed sha256 digest, and r.Platform is empty or has the

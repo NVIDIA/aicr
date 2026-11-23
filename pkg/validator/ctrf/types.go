@@ -51,6 +51,16 @@ const (
 	// RuntimeProvenance record. Every such line is stripped from Stdout, and
 	// the last valid one wins.
 	ProvenanceLinePrefix = "##AICR-PROVENANCE## "
+
+	// ImageLinePrefix marks a stdout line carrying one JSON PodImage record.
+	// Every such line is stripped from Stdout, and each valid one is appended
+	// to TestResult.Images, up to defaults.ValidatorMaxImageRecords per result.
+	ImageLinePrefix = "##AICR-IMAGE## "
+
+	// PlatformLinePrefix marks a stdout line carrying, as one JSON string,
+	// the os/arch the image's process runs as. Every such line is stripped
+	// from Stdout and folded with PlatformLines.
+	PlatformLinePrefix = "##AICR-PLATFORM## "
 )
 
 // RuntimeProvenance is the bounded, digest-bound evidence carrier for a

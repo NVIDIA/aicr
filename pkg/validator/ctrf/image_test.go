@@ -55,6 +55,32 @@ func TestPodImageValid(t *testing.T) {
 	}
 }
 
+func TestPlatformLines(t *testing.T) {
+	tests := []struct {
+		name     string
+		payloads []string
+		want     string
+	}{
+		{"no line", nil, ""},
+		{"one line", []string{`"linux/arm64"`}, "linux/arm64"},
+		{"repeated line", []string{`"linux/arm64"`, `"linux/arm64"`}, "linux/arm64"},
+		{"malformed line ignored", []string{`linux/arm64`, `"node gpu-0"`, `"linux/arm64"`}, "linux/arm64"},
+		{"conflicting lines", []string{`"linux/arm64"`, `"linux/amd64"`}, ""},
+		{"agreement after a conflict", []string{`"linux/arm64"`, `"linux/amd64"`, `"linux/arm64"`}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var p PlatformLines
+			for _, payload := range tt.payloads {
+				p.Add(payload)
+			}
+			if got := p.Platform(); got != tt.want {
+				t.Errorf("Platform() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRegistryDigest(t *testing.T) {
 	const image = "ghcr.io/x/y:v1"
 	tests := []struct {

@@ -731,22 +731,39 @@ lines** — stdout lines with a reserved prefix that a specific parser recognize
 and pulls out. Plain (non-prefixed) stdout is unaffected and flows into the CTRF
 `stdout` array as before.
 
-Three sentinels exist today, with deliberately different lifecycles:
+For structured CTRF metadata, these markers supersede the log-parsing
+restriction in ADR-002's
+[Result Protocol](https://github.com/NVIDIA/aicr/blob/main/docs/design/002-validatorv2-adr.md#result-protocol).
+
+Five sentinels exist today, with deliberately different lifecycles:
 
 | Prefix | Emitted by | Parsed by | Payload | Kept in CTRF `stdout`? | Survives minimal redaction? |
 |--------|-----------|-----------|---------|------------------------|-----------------------------|
 | `RESULT:` + one space | any check (`fmt.Printf`) | `extractResultSummaries` (`pkg/validator/validator.go`) | free-form human text (throughput, bandwidth, TTFT…) | **yes** — line stays; trailing text is *also* echoed to the live CLI at INFO | **no** — dies with `stdout` under the default policy |
 | `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseSentinels` (`pkg/validator/job/result.go`) | one JSON object, decoded into `TestResult.Extra` (counts and enum codes) | **no**, stripped as transport, not evidence | **yes**, allowlisted keys are published (see below) |
 | `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseSentinels` (same pass) | one JSON object, decoded into `TestResult.RuntimeProvenance` (template digests and key paths) | **no**, stripped as transport | **yes**, bounded by `redact.boundRuntimeProvenance` (see [NCCL benchmark runtime provenance](#nccl-benchmark-runtime-provenance)) |
+| `##AICR-IMAGE##` + one space | `validators.EmitImage` | `parseSentinels` (same pass) | one `ctrf.PodImage` (image, digest and platform), appended to `TestResult.Images` | **no**, stripped as transport | **yes**, unaliased, up to `defaults.ValidatorMaxImageRecords` valid records |
+| `##AICR-PLATFORM##` + one space | `validators.Run` | `parseSentinels` (same pass) | one JSON string, the image's `os/arch`, set on the validator's image record | **no**, stripped as transport | **yes**, in that record |
 
-The runner (`validators.Run`) emits one `##AICR-EXTRA##` line before the check
-starts, `resultSchema: "1"` (`ctrf.ResultSchemaVersion`): the result-contract
-version this image speaks. The stamp is written before anything else, so a
-result carries it whenever the stamp write succeeded, a skip, a failure or a
-context-load failure included; a stamp that cannot be written fails the check
-(exit 1, no marker), and a pod whose logs the orchestrator could not read
-carries no markers at all and is reported `other`. A `passed` result read
-from its logs therefore carries the stamp unless the image predates it.
+The orchestrator lists the validator container's own image first in
+`TestResult.Images`. Its digest comes from the container status `imageID` when
+that names the spec image's repository. Runtimes report either the index or the
+platform manifest digest, so a digest identifies an image only together with
+its platform. A record has no digest when the runtime reports none for that
+repository or the pod could not be read. The platform comes only from the
+image's `##AICR-PLATFORM##` lines. Conflicting lines leave it empty, and an
+image that prints none records none.
+
+The runner (`validators.Run`) writes two stamps before anything else. One is an
+`##AICR-EXTRA##` line with `resultSchema: "1"` (`ctrf.ResultSchemaVersion`),
+the result-contract version this image speaks. The other is an
+`##AICR-PLATFORM##` line with the binary's `GOOS/GOARCH`, which is the image's
+platform because the validator Dockerfiles copy the binary built for it. A
+result carries both on a pass, a skip, a failure or a context-load failure. If
+a write fails, the check exits 1 without the remaining stamps. A pod whose
+logs the orchestrator could not read carries no markers and is reported
+`other`. A `passed` result read from its logs therefore carries the
+`resultSchema` stamp unless the image predates it.
 `pkg/evidence/cncf` reads the stamp to word the reason when a check known to
 be observation-only passed without its marker: no stamp, the image predates
 the marker; the known version, the marker line was dropped; an unknown
@@ -765,6 +782,8 @@ template key paths — under its own bounding rule rather than the `Extra`
 allowlist. Do not route structured outcome data through
 `RESULT:` (it would not survive publication) or human prose through
 `##AICR-EXTRA##` (it would be dropped by the allowlist or leak identifiers).
+`##AICR-IMAGE##` carries image records and `##AICR-PLATFORM##` the platform
+set on one, both bounded by `PodImage.Valid` and a record cap.
 
 ### Structured evidence that survives redaction
 
