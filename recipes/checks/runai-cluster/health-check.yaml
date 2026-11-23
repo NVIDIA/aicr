@@ -34,7 +34,7 @@
 #    container-waiting state.
 #
 # Condition names come from the RunaiConfig type in the Run:ai cluster SDK and
-# the Deployment names from the rendered chart (verified against chart 3.0.24;
+# the Deployment names from the rendered chart (verified against chart 3.0.26;
 # re-verify both on every pin bump). On a cluster with nothing installed every
 # step fails, so the check cannot pass vacuously.
 apiVersion: chainsaw.kyverno.io/v1alpha1
