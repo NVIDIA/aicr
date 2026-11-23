@@ -374,11 +374,13 @@ components:
       - nodeproblemdetector
     healthCheck:
       assertFile: checks/node-problem-detector/health-check.yaml
+    upgrades:
+      file: components/node-problem-detector/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/deliveryhero/helm-charts
       defaultChart: node-problem-detector
       # renovate: datasource=docker depName=ghcr.io/deliveryhero/helm-charts/node-problem-detector
-      defaultVersion: "2.4.1"
+      defaultVersion: "2.4.2"
       defaultNamespace: node-problem-detector
     # No nodeScheduling block on purpose. The only toleration path this chart
     # exposes is `tolerations`, which components/node-problem-detector/
