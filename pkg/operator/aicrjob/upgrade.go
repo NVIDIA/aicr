@@ -16,6 +16,7 @@ package aicrjob
 
 import (
 	"encoding/json"
+	"slices"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 )
@@ -47,10 +48,14 @@ type ComponentChange struct {
 	Notes       string `json:"notes,omitempty"`
 	Reason      string `json:"reason,omitempty"`
 	Explanation string `json:"explanation,omitempty"`
-	Breaking    bool   `json:"breaking"`
-	Downgrade   bool   `json:"downgrade"`
-	FailsRun    bool   `json:"failsRun"`
-	StoppedAt   string `json:"stoppedAt,omitempty"`
+	// Breaking reports a version boundary semver makes no stability promise
+	// across: a major, a minor below 1.0, or a prerelease of the same version.
+	// It is descriptive: it changes neither the verdict nor whether a rollout
+	// step needs approval.
+	Breaking  bool   `json:"breaking"`
+	Downgrade bool   `json:"downgrade"`
+	FailsRun  bool   `json:"failsRun"`
+	StoppedAt string `json:"stoppedAt,omitempty"`
 	// Summary, Precondition and Steps are the transition record's
 	// instructions for the assessed deployer. The operator performs only the
 	// apply; approving takes on the rest.
@@ -62,6 +67,46 @@ type ComponentChange struct {
 // ApplyStepID is the ID of a manual record's step where the deployer applies
 // the regenerated bundle: the one step the operator performs.
 const ApplyStepID = "apply"
+
+// HeldSteps is the IDs of a manual transition record's steps that a rollout
+// holds for acknowledgement: those after its apply step, the one step the
+// operator performs. A record that names no apply step cannot say which of
+// its steps follow the apply, so all of them are held and every is true.
+func HeldSteps(steps []UpgradeStep) (ids []string, every bool) {
+	i := slices.IndexFunc(steps, func(s UpgradeStep) bool { return s.ID == ApplyStepID })
+	if len(steps) == 0 || i == len(steps)-1 {
+		return nil, false
+	}
+	ids = make([]string, 0, len(steps)-i-1)
+	for _, s := range steps[i+1:] {
+		ids = append(ids, s.ID)
+	}
+	return ids, i < 0
+}
+
+// HoldsEveryStep reports whether held, the steps a rollout holds for
+// component, are all of the steps of its manual version record, which names
+// no apply step, rather than those after the apply. ok is false unless the
+// record's held steps are exactly held: steps carried from an earlier rollout
+// can come from another report. The last record for component counts, as it
+// does when the steps are assessed.
+func (r *UpgradeReport) HoldsEveryStep(component string, held []string) (every, ok bool) {
+	for i := len(r.Components) - 1; i >= 0; i-- {
+		c := &r.Components[i]
+		if c.Component != component || c.Change != "version" {
+			continue
+		}
+		if c.Assessment() != v1alpha1.AssessmentManual {
+			return false, false
+		}
+		ids, every := HeldSteps(c.Steps)
+		if len(ids) == 0 || !slices.Equal(ids, held) {
+			return false, false
+		}
+		return every, true
+	}
+	return false, false
+}
 
 // UpgradeStep is one step of a transition record.
 type UpgradeStep struct {

@@ -47,8 +47,8 @@ Commands:
   describe   steps, verdicts, CRD changes, the assessment report, approval and drift
   approve    approve the rollout as yourself (--reason, --expires)
   acknowledge
-             acknowledge, as yourself, that the post-apply steps of the
-             release the rollout waits on are done
+             acknowledge, as yourself, that the recorded steps the rollout
+             waits on are done
   revoke     revoke its approval as yourself (--reason)
   reproduce  write a plan's recipe and print the AICR CLI command that renders
              the same bundle (PLAN: name or digest; default the active plan)
@@ -56,7 +56,7 @@ Commands:
 Flags:
   --kubeconfig PATH            kubeconfig file (default: $KUBECONFIG or ~/.kube/config)
   --context NAME               kubeconfig context
-  --operator-namespace NAME    where assessment reports live (default aicr-system)
+  --operator-namespace NAME    where assessment reports and plans live (default aicr-system)
   --reason TEXT                why (approve, revoke; required)
   --expires DURATION           how long the approval stays valid (approve; default: until
                                the rollout's deadline)
@@ -142,8 +142,16 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 		if aErr != nil {
 			return aErr
 		}
-		_, err = fmt.Fprintf(out, "rollout %s: %s acknowledged the post-apply steps of %s (%s); the rollout continues\n",
-			ro.Name, user, step.Release, strings.Join(step.PostApplySteps, ", "))
+		// The acknowledgement has landed; when the record behind the steps
+		// cannot be told, the wording is true either way.
+		what, note := "the post-apply steps of "+step.Release, ""
+		if every, hErr := lifecycle.HoldsEveryStep(ctx, c, *namespace, ro, step); hErr != nil {
+			what = "the steps " + step.Release + "'s record holds"
+		} else if every {
+			what, note = "all steps of "+step.Release+"'s record", ", which names no apply step"
+		}
+		_, err = fmt.Fprintf(out, "rollout %s: %s acknowledged %s (%s)%s; the rollout continues\n",
+			ro.Name, user, what, strings.Join(step.PostApplySteps, ", "), note)
 		return err
 	}
 	if command == commandApprove {
