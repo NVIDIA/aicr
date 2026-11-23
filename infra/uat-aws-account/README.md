@@ -50,7 +50,7 @@ terraform apply -var="aws_region=us-west-2"
 - **STS**: `GetCallerIdentity`, `AssumeRole`, `TagSession`
 - **SSM**: read-only (`GetParameter*`)
 - **KMS**: EKS envelope encryption (`CreateGrant`, `DescribeKey`, `CreateAlias`, `DeleteAlias`)
-- **CloudWatch Logs**: EKS control plane logging
+- **CloudWatch Logs**: EKS control plane logging and VPC flow logs; before Bringup, the AWS UAT workflow also describes log groups and flow logs and deletes an orphaned flow-logs log group a re-run would collide with ([#3006](https://github.com/NVIDIA/aicr/issues/3006))
 
 **Privilege escalation explicitly denied**: `iam:CreateUser`, `iam:CreateLoginProfile`, `iam:AttachUserPolicy`, `iam:PutUserPolicy`, `iam:CreateAccessKey`.
 
