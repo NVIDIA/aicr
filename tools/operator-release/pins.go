@@ -95,6 +95,11 @@ func (p *pins) check() error {
 	case len(o.AICRValidatorImages) == 0:
 		return errors.New("operator.aicr_validator_images is empty")
 	}
+	for _, key := range slices.Sorted(maps.Keys(o.AICRValidatorImages)) {
+		if ref := o.AICRValidatorImages[key]; !pinnedRef.MatchString(ref) {
+			return fmt.Errorf("operator.aicr_validator_images.%s %q is not one image, repository:tag@sha256:<digest>", key, ref)
+		}
+	}
 	pinned, err := release("operator.aicr_*", o.AICRVersion, o.AICRImage, slices.Collect(maps.Values(o.AICRValidatorImages)))
 	if err != nil {
 		return err

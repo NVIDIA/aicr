@@ -101,6 +101,11 @@ func TestPinsCheck(t *testing.T) {
 			v := p.Operator.AICRValidatorImages
 			v["deployment"], v["conformance"] = v["conformance"], v["deployment"]
 		}, "operator.aicr_validator_images.conformance pins"},
+		"two validators in one value": {func(p *pins) {
+			v := p.Operator.AICRValidatorImages
+			v["deployment"] += "," + v["performance"]
+			delete(v, "performance")
+		}, `operator.aicr_validator_images.deployment "`},
 		"validator pinned twice": {func(p *pins) {
 			p.Operator.AICRValidatorImages["extra"] = redigest(p.Operator.AICRValidatorImages["deployment"])
 		}, "operator.aicr_* pins the deployment validator twice"},
