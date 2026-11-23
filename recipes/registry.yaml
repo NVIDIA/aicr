@@ -1698,7 +1698,12 @@ components:
       defaultChart: runai-cluster
       # A chart in the repository index is not proof its images exist: NGC
       # serves chart 3.0.24 without the images it references. Before moving
-      # this pin, check that every image the chart renders can be pulled.
+      # this pin, check that two sets of images can be pulled at the new
+      # version: every image the chart renders, and every operand image
+      # runai-operator deploys (agent, cluster-sync and the other
+      # nvcr.io/nvidia/runai-oss images it runs). The chart does not render
+      # the operands, so the BOM does not list them, and NGC tags the two
+      # sets independently.
       # renovate: datasource=helm depName=runai-cluster registryUrl=https://helm.ngc.nvidia.com/nvidia/runai-oss
       defaultVersion: "3.0.26"
       # SHA-256 of runai-cluster-3.0.26.tgz as served by NGC (matches the
