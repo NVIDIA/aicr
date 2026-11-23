@@ -219,7 +219,7 @@ if [[ -z "${DRY_RUN_FLAG:-}" && -f "${SCRIPT_DIR}/.aicr-chart.tgz" ]]; then
 fi
 
 helm upgrade --install ${FORCE_CONFLICTS_FLAG} 'nfd' "${CHART_REF}" \
-  ${REPO:+--repo "${REPO}"} "${CHART_VERSION_ARGS[@]}" \
+  ${REPO:+--repo "${REPO}"} ${CHART_VERSION_ARGS[@]+"${CHART_VERSION_ARGS[@]}"} \
   --namespace 'node-feature-discovery' --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${HELM_CONN[@]+"${HELM_CONN[@]}"} ${HELM_DEBUG_FLAG:-}
