@@ -80,7 +80,7 @@
       "verdict": "manual",
       "notes": "1 minor, 1 step, manual across 3 minors, namespace tau-system -\u003e nvidia-tau-system",
       "reason": "recorded",
-      "explanation": "recorded manual: the record covering 0.18.0 describes the move from 0.17.2 to 0.18.1. Follow the steps below, then apply",
+      "explanation": "recorded manual: the record covering 0.18.0 describes the move from 0.17.2 to 0.18.1. Follow the steps below in order. The apply step is where the bundle is applied; a record without one does not mark when to apply, so check the component's own upgrade guidance",
       "jump": "1 minor",
       "covers": "3 minors",
       "breaking": true,

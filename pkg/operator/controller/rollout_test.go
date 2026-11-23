@@ -64,6 +64,7 @@ type fakeEngine struct {
 	drifted       map[string]bool   // release -> Observe reports SpecDrifted
 	missing       map[string]bool   // release -> Observe reports Missing
 	priorFailed   map[string]bool   // release -> Observe reports PriorSyncFailed until a Verify
+	verifyIdle    bool              // Verify writes nothing, as the adapter does while an earlier sync is pending or running
 	unhealthy     map[string]string // release -> Observe reports Progressing with this reason at its written plan
 	detail        map[string]string // release -> the Argo CD error text Observe carries with that reason
 	observeErr    error             // Observe fails with it
@@ -113,11 +114,17 @@ func (f *fakeEngine) Ensure(_ context.Context, p *plan.Document, r *plan.Release
 
 // Verify writes the Application with a sync, as the adapter does.
 func (f *fakeEngine) Verify(_ context.Context, p *plan.Document, r *plan.Release, _ []byte) error {
+	if err := f.inject("Verify "+r.ID, false); err != nil {
+		return err
+	}
+	if f.verifyIdle {
+		return nil
+	}
 	f.ensured[r.ID] = p.DesiredStateDigest
 	f.verified[r.ID]++
 	f.order = append(f.order, "Verify "+r.ID)
 	f.track(r.ID, p.DesiredStateDigest)
-	return nil
+	return f.inject("Verify "+r.ID, true)
 }
 
 func (f *fakeEngine) inject(op string, landed bool) error {
@@ -177,12 +184,15 @@ func (f *fakeEngine) Observe(_ context.Context, p *plan.Document, r *plan.Releas
 }
 
 func (f *fakeEngine) Remove(_ context.Context, _, name, uid, _ string) error {
+	if err := f.inject("Remove "+name, false); err != nil {
+		return err
+	}
 	f.order = append(f.order, "Remove "+name)
 	if err := f.removeRefused[name]; err != nil {
 		return err
 	}
 	f.removed[name] = uid
-	return nil
+	return f.inject("Remove "+name, true)
 }
 
 func (f *fakeEngine) Retired(_ context.Context, name, uid string) (argocd.Observation, error) {
@@ -193,7 +203,9 @@ func (f *fakeEngine) Retired(_ context.Context, name, uid string) (argocd.Observ
 		f.inventory = slices.DeleteFunc(f.inventory, func(i argocd.InventoryItem) bool { return i.ReleaseID == name })
 		return argocd.Observation{State: argocd.StateReady, Reason: argocd.ReasonRetired}, nil
 	}
-	if f.deletePending[name] {
+	if f.deletePending[name] || f.removed[name] != uid {
+		// As the adapter reports an Application without a deletion
+		// timestamp: its delete never landed.
 		return argocd.Observation{State: argocd.StateProgressing, Reason: "DeletePending"}, nil
 	}
 	return argocd.Observation{State: argocd.StateProgressing, Reason: "Deleting"}, nil
@@ -1126,6 +1138,80 @@ func TestRolloutVerifiesAndRemoves(t *testing.T) {
 	}
 	if got := getRuntime(t, ctx); got.Status.ActivePlanDigest != target || cond(got, v1alpha1.ConditionReady).Status != metav1.ConditionTrue {
 		t.Fatalf("runtime = %+v", got.Status)
+	}
+}
+
+// A syncing step whose write does not land is written again, but only
+// within its action timeout: while an earlier sync of the release is still
+// pending or running, the adapter's Verify writes nothing, and the step
+// fails at its action timeout as before, naming the spec it never saw.
+func TestSyncingStepWrittenAgainWithinItsActionTimeout(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	gate := testRelease("gpu-operator-readiness", plan.PhaseReadiness, "gpu-operator", `{}`)
+	active := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":1}`), gate)
+	succeedTo(t, ctx, rt, active)
+	target := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":2}`), gate)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.verifyIdle = true
+	r, clk := newRollout(t, engine, true)
+	clk.now = time.Now().Add(2 * time.Second)
+	for range 6 {
+		reconcileRollout(t, ctx, r)
+	}
+	ros := rolloutsTo(t, ctx, target)
+	if len(ros) != 1 || ros[0].Labels[v1alpha1.LabelOutcome] != "" {
+		t.Fatalf("rollout before its action timeout = %+v", ros)
+	}
+	clk.now = clk.now.Add(defaults.RolloutActionTimeout + time.Minute)
+	for range 3 {
+		reconcileRollout(t, ctx, r)
+	}
+	ros = rolloutsTo(t, ctx, target)
+	if len(ros) != 1 || ros[0].Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseFailed) ||
+		!strings.Contains(ros[0].Status.Message, "not ready within") || !strings.Contains(ros[0].Status.Message, argocd.ReasonSpecNotWritten) {
+
+		t.Fatalf("rollout past its action timeout = %s %q, want Failed naming %s", ros[0].Status.Phase, ros[0].Status.Message, argocd.ReasonSpecNotWritten)
+	}
+}
+
+// A revoked approval stops a recorded syncing step whose write never
+// landed: the step is not written after the revocation.
+func TestRevokedSyncingStepIsNotWrittenAgain(t *testing.T) {
+	ctx := testContext(t)
+	rt := freshRuntime(t, ctx, func(rt *v1alpha1.ClusterRuntime) {
+		rt.Spec.Rollout.StabilizationWindow = &metav1.Duration{Duration: time.Millisecond}
+	})
+	gate := testRelease("gpu-operator-readiness", plan.PhaseReadiness, "gpu-operator", `{}`)
+	active := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":1}`), gate)
+	succeedTo(t, ctx, rt, active)
+	target := putReleases(t, ctx, rt, testRelease("gpu-operator", plan.PhasePrimary, "", `{"v":2}`), gate)
+	resolved(t, ctx, target)
+	engine := newEngine()
+	engine.verifyIdle = true
+	r, clk := newRollout(t, engine, false)
+	clk.now = time.Now().Add(2 * time.Second)
+	reconcileRollout(t, ctx, r)
+	ro := onlyRollout(t, ctx, target)
+	approve(t, ctx, ro.Name, clk.now.Add(time.Hour))
+	for range 4 {
+		reconcileRollout(t, ctx, r)
+	}
+	if ro = onlyRollout(t, ctx, target); ro.Status.Current == nil || ro.Status.Current.Release != gate.ID {
+		t.Fatalf("the gate's step is not recorded: %+v", ro.Status.Current)
+	}
+	revoke(t, ctx, ro.Name)
+	engine.verifyIdle = false
+	reconcileRollout(t, ctx, r)
+	reconcileRollout(t, ctx, r)
+	if ro = onlyRollout(t, ctx, target); ro.Labels[v1alpha1.LabelOutcome] != string(v1alpha1.PhaseRevoked) {
+		t.Fatalf("after the revocation: %v %+v", ro.Labels, ro.Status)
+	}
+	if slices.Contains(engine.order, "Verify "+gate.ID) {
+		t.Fatalf("the gate was written after the revocation: %v", engine.order)
 	}
 }
 

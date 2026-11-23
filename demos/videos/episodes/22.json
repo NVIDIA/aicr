@@ -1,0 +1,81 @@
+{
+  "id": 22,
+  "slug": "who-tested-this-recipe",
+  "title": "Who tested this recipe?",
+  "track": "Validation, evidence, and trust",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/evidence-dashboard.md",
+  "scenes": [
+    {
+      "heading": "You found a recipe. Who tested it?",
+      "sub": "Look beyond the presence of a recipe file.",
+      "visual": "probe",
+      "items": [
+        "Candidate recipe",
+        "What ran?",
+        "Who ran it?"
+      ],
+      "voice": [
+        "A recipe fits the cluster you want to build.",
+        "Before relying on it, look for what has been tested and which environments supplied those results."
+      ],
+      "result": "Find the evidence behind the recipe"
+    },
+    {
+      "heading": "Separate simulation and real hardware",
+      "sub": "Match each check to what it can show.",
+      "visual": "compare",
+      "items": [
+        "KWOK simulation",
+        "Real GPU test",
+        "Different coverage"
+      ],
+      "voice": [
+        "KWOK can exercise Kubernetes deployment flows with simulated nodes.",
+        "GPU acceptance tests run selected workflows on real hardware, where checks can exercise capabilities the simulator cannot measure."
+      ],
+      "result": "See which checks used real GPUs"
+    },
+    {
+      "heading": "Count distinct signers",
+      "sub": "Repeat runs still come from one source.",
+      "visual": "trace",
+      "items": [
+        "Signer A, run one",
+        "Signer A, run two",
+        "Signer B, run one"
+      ],
+      "voice": [
+        "The evidence dashboard groups signed results by recipe and counts distinct allowlisted signers.",
+        "Two runs from the first team still count as one source, alongside results from another signer."
+      ],
+      "detail": "Illustrative signer history",
+      "result": "Three runs, two independent sources"
+    },
+    {
+      "heading": "Read disagreement and gaps",
+      "sub": "Filter to the AICR release you use.",
+      "visual": "dashboard",
+      "items": [
+        "Confirmed",
+        "Contested",
+        "Untested"
+      ],
+      "voice": [
+        "Choose a release in the dashboard to compare same-version results.",
+        "A contested row exposes disagreement, and an untested row shows that no allowlisted source ran that check."
+      ],
+      "detail": "Illustrative evidence dashboard",
+      "result": "Disagreement remains visible"
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    25,
+    39,
+    53
+  ],
+  "viewer": "Engineers evaluating recipe coverage",
+  "payoff": "Distinguish simulation, hardware testing, and independent evidence for one AICR version."
+}

@@ -26,6 +26,7 @@ ifeq ($(LINT_TIMEOUT),)
 LINT_TIMEOUT       := 5m
 endif
 TEST_TIMEOUT       ?= $(shell yq -r '.quality.test_timeout' .settings.yaml 2>/dev/null)
+SETUP_ENVTEST_VERSION ?= $(shell yq -r '.testing_tools.setup_envtest' .settings.yaml 2>/dev/null)
 ifeq ($(TEST_TIMEOUT),)
 TEST_TIMEOUT       := 10m
 endif
@@ -381,7 +382,14 @@ test-go:
 	@set -e; \
 	echo "Running tests with race detector..."; \
 	packages=$$($(MAKE) --no-print-directory test-packages); \
-	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
+	assets=$$(setup-envtest use -p path || true); \
+	if [ -z "$$assets" ]; then \
+		echo "make test runs the envtest suites, which need setup-envtest and its binaries:" >&2; \
+		echo "  go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)" >&2; \
+		echo "  setup-envtest use -p path" >&2; \
+		exit 1; \
+	fi; \
+	KUBEBUILDER_ASSETS=$$assets \
 	AICR_CRITERIA_STRICT=1 \
 	$(GO_TEST_COMMAND) -coverprofile=coverage.full.out $$packages || exit 1; \
 	grep -v '^aicr.run/validators/' coverage.full.out > coverage.out; \
@@ -1255,6 +1263,10 @@ operator-candidate: ## Builds an operator candidate into dist/candidate (CANDIDA
 operator-candidate-verify: ## Builds the operator candidate twice and requires identical bytes
 	@./tools/operator-candidate verify
 
+.PHONY: operator-aicr-pins
+operator-aicr-pins: ## Checks the operator's AICR pins agree and that each pinned image is its published release's, with provenance (gh signed in)
+	@GOFLAGS="-mod=readonly" go run ./tools/operator-release pins -settings .settings.yaml -attestations
+
 .PHONY: operator-e2e
 operator-e2e: ## Runs the pinned AICR images as operator-built Jobs on the operator's kind cluster
 	@AICR_OPERATOR_E2E_KUBECONFIG=$(OPERATOR_E2E_KUBECONFIG) \
@@ -1263,6 +1275,18 @@ operator-e2e: ## Runs the pinned AICR images as operator-built Jobs on the opera
 	AICR_OPERATOR_E2E_AICR_VERSION=$(AICR_E2E_VERSION) \
 	AICR_OPERATOR_E2E_VALIDATOR_IMAGES=$(AICR_E2E_VALIDATOR_IMAGES) \
 	GOFLAGS="-mod=readonly" go test -count=1 -v -timeout=30m ./tests/operator/e2e/...
+
+.PHONY: operator-e2e-commit
+operator-e2e-commit: ## Runs operator-e2e against AICR built from the commit, on the operator's kind cluster
+	@./tools/operator-e2e-commit
+
+.PHONY: operator-main-aicr-e2e
+operator-main-aicr-e2e: ## Runs operator-e2e against AICR built from main with main's validators, validation test included
+	@./tools/operator-main-aicr e2e
+
+.PHONY: operator-main-aicr-qualify
+operator-main-aicr-qualify: ## Qualifies the upgrade from the newest published release to a candidate running AICR built from main
+	@./tools/operator-main-aicr qualify
 
 .PHONY: operator-skeleton
 operator-skeleton: ## Runs the operator with the pinned Argo CD on its kind cluster, one release end to end

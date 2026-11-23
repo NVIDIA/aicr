@@ -1,0 +1,113 @@
+{
+  "id": 43,
+  "slug": "serve-a-model-with-nvidia-nim",
+  "title": "The NIM Operator is ready. Where is the model?",
+  "track": "Reference cuts",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/demos/workloads/inference/nimservice-llama-3-2-1b.yaml",
+  "renderer": "nim_reference",
+  "scenes": [
+    {
+      "voice": [
+        "The NVIDIA NIM Operator is ready. Where is the model?",
+        "The AICR NIM recipe and deployment bundle install the Operator.",
+        "Serving a model starts with its own workload."
+      ]
+    },
+    {
+      "voice": [
+        "Apply a NIMService for Llama 3.2 in the workload namespace.",
+        "It references one secret for pulling the image and another for accessing the model assets.",
+        "Both secrets live alongside the workload."
+      ]
+    },
+    {
+      "voice": [
+        "The Operator reconciles the NIMService.",
+        "Kubernetes makes the image available, then starts a model server on one GPU.",
+        "Wait for the workload to be ready before calling the service."
+      ]
+    },
+    {
+      "voice": [
+        "Port-forward the service and call the models endpoint.",
+        "This example response lists the Llama model ID.",
+        "Now you have an endpoint where you can try a completion."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    27,
+    40,
+    53
+  ],
+  "captions": [
+    {
+      "start": 0.27,
+      "end": 3.85,
+      "text": "The NVIDIA NIM Operator is ready. Where is the model?"
+    },
+    {
+      "start": 4.3,
+      "end": 8.37,
+      "text": "The AICR NIM recipe and deployment bundle install the Operator."
+    },
+    {
+      "start": 8.82,
+      "end": 11.41,
+      "text": "Serving a model starts with its own workload."
+    },
+    {
+      "start": 12.27,
+      "end": 16.49,
+      "text": "Apply a NIMService for Llama 3.2 in the workload namespace."
+    },
+    {
+      "start": 16.94,
+      "end": 22.12,
+      "text": "It references one secret for pulling the image and another for accessing the model assets."
+    },
+    {
+      "start": 22.57,
+      "end": 25.21,
+      "text": "Both secrets live alongside the workload."
+    },
+    {
+      "start": 27.27,
+      "end": 29.86,
+      "text": "The Operator reconciles the NIMService."
+    },
+    {
+      "start": 30.31,
+      "end": 35.4,
+      "text": "Kubernetes makes the image available, then starts a model server on one GPU."
+    },
+    {
+      "start": 35.85,
+      "end": 39.08,
+      "text": "Wait for the workload to be ready before calling the service."
+    },
+    {
+      "start": 40.27,
+      "end": 43.28,
+      "text": "Port-forward the service and call the models endpoint."
+    },
+    {
+      "start": 43.73,
+      "end": 46.98,
+      "text": "This example response lists the Llama model ID."
+    },
+    {
+      "start": 47.43,
+      "end": 50.4,
+      "text": "Now you have an endpoint where you can try a completion."
+    },
+    {
+      "start": 54.3,
+      "end": 56.65,
+      "text": "Explore AICR at aicr.run."
+    }
+  ]
+}

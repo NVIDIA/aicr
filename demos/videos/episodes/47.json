@@ -1,0 +1,83 @@
+{
+  "id": 47,
+  "slug": "dgx-spark-training-on-nvke",
+  "title": "DGX Spark training on NVKE",
+  "track": "Unreleased",
+  "status": "main",
+  "source": "https://github.com/NVIDIA/aicr/pull/3942",
+  "scenes": [
+    {
+      "heading": "Bring up one DGX Spark",
+      "sub": "Unreleased NVKE recipe on main",
+      "visual": "probe",
+      "items": [
+        "DGX Spark",
+        "GB10 accelerator",
+        "NVKE training"
+      ],
+      "detail": "main branch preview",
+      "result": "Single-node target",
+      "voice": [
+        "You have one DGX Spark and want a training stack.",
+        "A preview on the AICR main branch targets that GB10 device."
+      ]
+    },
+    {
+      "heading": "Make the runtime usable by Kubernetes",
+      "sub": "Check the DGX OS container runtime",
+      "visual": "gate",
+      "items": [
+        "Host NVIDIA driver",
+        "containerd",
+        "CRI enabled"
+      ],
+      "detail": "Enable the CRI plugin first",
+      "result": "Runtime ready for Kubernetes",
+      "voice": [
+        "The recipe expects the host driver already supplied by DGX OS.",
+        "Before deploying, use a containerd configuration with the Container Runtime Interface enabled."
+      ]
+    },
+    {
+      "heading": "Choose a compatible training image",
+      "sub": "Use the Kubeflow variant for the Trainer",
+      "visual": "layers",
+      "items": [
+        "GB10 training recipe",
+        "Kubeflow Trainer",
+        "Arm64 trainer image"
+      ],
+      "detail": "spec.trainer.image",
+      "result": "Arm64 image selected",
+      "voice": [
+        "Resolve the NVKE training recipe for GB10 and Ubuntu with Kubeflow selected.",
+        "That choice adds Trainer to the bundle, and your TrainJob should specify an Arm64 image that suits Spark."
+      ]
+    },
+    {
+      "heading": "Validate the one-node installation",
+      "sub": "Focus on deployment and conformance",
+      "visual": "inspect",
+      "items": [
+        "Applied bundle",
+        "Deployment checks",
+        "Conformance checks"
+      ],
+      "detail": "aicr validate",
+      "result": "Single-Spark preview scope",
+      "voice": [
+        "After deploying the bundle, run the deployment and conformance checks.",
+        "This example focuses on bringing up one Spark and getting usable validation results for that node."
+      ]
+    }
+  ],
+  "viewer": "Developer preparing a single DGX Spark for training",
+  "payoff": "Verify CRI and Arm64 workload compatibility before deploying and validating the single-node GB10 preview on NVKE.",
+  "edges": [
+    0,
+    10,
+    24,
+    40,
+    53
+  ]
+}

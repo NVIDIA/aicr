@@ -15,13 +15,15 @@
 // Command operator-release completes a qualification candidate that
 // tools/operator-candidate built: it packages the chart
 // deterministically and records the candidate's identity in
-// candidate.json, with its deployment inputs in candidate-values.yaml.
+// candidate.json, with its deployment inputs in candidate-values.yaml. It
+// also checks the operator's AICR pins in .settings.yaml.
 //
 //	operator-release build   -dir dist/candidate -version v0.1.0-rc.1 -repository R -commit C -commit-date D -go-version G
 //	operator-release extract -dir dist/candidate -platform linux/amd64 -out bin
 //	operator-release refuses -dir dist/candidate
 //	operator-release push    -dir dist/candidate
 //	operator-release pull    -dir dist/published -version latest -below <candidate version>
+//	operator-release pins    -settings .settings.yaml -attestations
 package main
 
 import (
@@ -50,7 +52,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: operator-release build|extract|refuses|push|pull [flags]")
+		return errors.New("usage: operator-release build|extract|refuses|push|pull|pins [flags]")
 	}
 	switch args[0] {
 	case "build":
@@ -63,6 +65,8 @@ func run(args []string, out io.Writer) error {
 		return push(args[1:], out)
 	case "pull":
 		return pull(args[1:], out)
+	case "pins":
+		return pinsCmd(args[1:], out, network)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -83,7 +87,7 @@ func build(args []string, out io.Writer) error {
 	goSum := fs.String("go-sum", "go.sum", "Module checksums.")
 	aicrVersion := fs.String("aicr-version", "", "AICR release the chart defaults to; with -aicr-image and -aicr-validator-images. Default: .settings.yaml's pins.")
 	aicrImage := fs.String("aicr-image", "", "AICR CLI image for -aicr-version, as repository:tag@sha256:<digest>.")
-	aicrValidators := fs.String("aicr-validator-images", "", "Comma-separated AICR validator images for -aicr-version, each repository:tag@sha256:<digest>.")
+	aicrValidators := fs.String("aicr-validator-images", "", "Comma-separated AICR validator images for -aicr-version, each repository:tag@sha256:<digest>; tagged sha-<commit> for a <tag>-next build from a commit.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -198,9 +202,15 @@ func extract(args []string) error {
 // pinnedRef is an image reference with a tag and a sha256 digest.
 var pinnedRef = regexp.MustCompile(`^[^\s@]+/[^\s@/:]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}@sha256:[a-f0-9]{64}$`)
 
+// commitValidatorTag is the tag on-push.yaml publishes a main commit's
+// validator images under, and the one AICR built from that commit names.
+var commitValidatorTag = regexp.MustCompile(`^sha-[0-9a-f]{40}$`)
+
 // aicrFlags is the AICR release given on the command line, such as the one a
-// release tag built: all three flags, each image pinned by digest and tagged
-// with the version.
+// release tag built, or pinned in .settings.yaml: all three flags, each image
+// pinned by digest and tagged with the version. A build from a commit, stamped as a goreleaser snapshot
+// (<tag>-next), names its validators by that commit instead, so they are
+// tagged sha-<commit>, one commit for all.
 func aicrFlags(ver, image, validators string) (AICR, error) {
 	if ver == "" || image == "" || validators == "" {
 		return AICR{}, errors.New("-aicr-version, -aicr-image and -aicr-validator-images are set together")
@@ -208,14 +218,23 @@ func aicrFlags(ver, image, validators string) (AICR, error) {
 	if !semver.IsValid(ver) || semver.Canonical(ver) != ver {
 		return AICR{}, fmt.Errorf("-aicr-version %q is not vX.Y.Z with an optional prerelease", ver)
 	}
+	snapshot := strings.HasSuffix(ver, "-next")
 	refs := strings.Split(validators, ",")
 	sort.Strings(refs)
-	for _, ref := range append([]string{image}, refs...) {
+	commit := ""
+	for i, ref := range append([]string{image}, refs...) {
 		if !pinnedRef.MatchString(ref) {
 			return AICR{}, fmt.Errorf("AICR image %q is not repository:tag@sha256:<digest>", ref)
 		}
 		name := ref[:strings.IndexByte(ref, '@')]
-		if tag := name[strings.LastIndexByte(name, ':')+1:]; tag != ver {
+		tag := name[strings.LastIndexByte(name, ':')+1:]
+		switch {
+		case i > 0 && snapshot:
+			if !commitValidatorTag.MatchString(tag) || (commit != "" && tag != commit) {
+				return AICR{}, fmt.Errorf("AICR validator image %q has tag %q, want sha-<commit>, one commit for every validator of %s", ref, tag, ver)
+			}
+			commit = tag
+		case tag != ver:
 			return AICR{}, fmt.Errorf("AICR image %q has tag %q, want %q", ref, tag, ver)
 		}
 	}

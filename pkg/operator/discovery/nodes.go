@@ -18,11 +18,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 	operrors "aicr.run/pkg/operator/errors"
@@ -210,43 +211,60 @@ func list(names []string) string {
 	return fmt.Sprintf("%s and %d more", strings.Join(names[:5], ", "), len(names)-5)
 }
 
-// TransformNode strips what discovery never reads from cached Nodes: images,
-// managed fields, annotations, addresses, volumes and every condition but
-// Ready.
+// TransformNode caches a Node as what discovery reads and nothing else: its
+// name, labels and the node info fields of its tuple, plus the UID and
+// resource version that identify it. Label keys are stored once for all Nodes.
 func TransformNode(obj any) (any, error) { //nolint:unparam // implements cache.TransformFunc
 	n, ok := obj.(*corev1.Node)
 	if !ok {
 		return obj, nil
 	}
-	n.ManagedFields = nil
-	n.Annotations = nil
-	n.Status.Images = nil
-	n.Status.Addresses = nil
-	n.Status.VolumesAttached = nil
-	n.Status.VolumesInUse = nil
-	n.Status.Conditions = slices.DeleteFunc(n.Status.Conditions, func(c corev1.NodeCondition) bool {
-		return c.Type != corev1.NodeReady
-	})
-	for i := range n.Status.Conditions {
-		n.Status.Conditions[i].LastHeartbeatTime = n.Status.Conditions[i].LastTransitionTime
+	info := n.Status.NodeInfo
+	return &corev1.Node{
+		TypeMeta:   n.TypeMeta,
+		ObjectMeta: metav1.ObjectMeta{Name: n.Name, UID: n.UID, ResourceVersion: n.ResourceVersion, Labels: labelKeys.share(n.Labels)},
+		Status: corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{
+			Architecture: info.Architecture, OSImage: info.OSImage, KernelVersion: info.KernelVersion,
+			ContainerRuntimeVersion: info.ContainerRuntimeVersion, KubeletVersion: info.KubeletVersion,
+		}},
+	}, nil
+}
+
+// labelKeys stores each label key once for all cached Nodes: the nodes of a
+// cluster repeat the same keys. Values, which can be unique to a node and
+// change, such as a discovery timestamp, are stored per Node.
+var labelKeys = &keyTable{keys: map[string]string{}, limit: 4096}
+
+// keyTable stores up to limit label keys once; keys beyond it are stored
+// with each Node.
+type keyTable struct {
+	mu    sync.Mutex
+	keys  map[string]string
+	limit int
+}
+
+// share copies labels, with each key the table holds replaced by its stored
+// copy.
+func (t *keyTable) share(labels map[string]string) map[string]string {
+	if labels == nil {
+		return nil
 	}
-	return n, nil
+	out := make(map[string]string, len(labels))
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for k, v := range labels {
+		if stored, ok := t.keys[k]; ok {
+			k = stored
+		} else if len(t.keys) < t.limit {
+			t.keys[k] = k
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // Relevant reports whether a Node update changes anything discovery reads:
-// labels, taints, provider ID, the node info fields of its tuple or
-// readiness. Heartbeats do not, nor does node info discovery never reads,
-// such as swap status.
+// its labels or the node info fields of its tuple.
 func Relevant(old, updated *corev1.Node) bool {
-	ready := func(n *corev1.Node) corev1.ConditionStatus {
-		for _, c := range n.Status.Conditions {
-			if c.Type == corev1.NodeReady {
-				return c.Status
-			}
-		}
-		return corev1.ConditionUnknown
-	}
-	return !reflect.DeepEqual(old.Labels, updated.Labels) || !reflect.DeepEqual(old.Spec.Taints, updated.Spec.Taints) ||
-		old.Spec.ProviderID != updated.Spec.ProviderID || tupleOf(old) != tupleOf(updated) ||
-		ready(old) != ready(updated)
+	return !reflect.DeepEqual(old.Labels, updated.Labels) || tupleOf(old) != tupleOf(updated)
 }

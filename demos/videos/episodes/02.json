@@ -1,0 +1,177 @@
+{
+  "id": 2,
+  "slug": "recipes-you-can-trust",
+  "title": "Recipes You Can Trust",
+  "track": "Opening episodes",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/artifact-verification.md",
+  "renderer": "trust",
+  "scenes": [
+    {
+      "voice": [
+        "A GPU cluster has many components.",
+        "Some bring their own dependencies.",
+        "Each has configuration files.",
+        "Recipes pin versions for reproducibility.",
+        "Some artifacts use digest pins.",
+        "How do you know which recipes you can trust?"
+      ]
+    },
+    {
+      "voice": [
+        "AICR helps answer two questions.",
+        "Where did these components come from?",
+        "Did they work together on real hardware?"
+      ]
+    },
+    {
+      "voice": [
+        "The AICR release workflow signs build provenance for AICR,",
+        "which ships with its recipes."
+      ]
+    },
+    {
+      "voice": [
+        "Verify who built the deployment bundle,",
+        "and trace that trust back to the AICR release.",
+        "Change a single character in the bundle and verification fails."
+      ]
+    },
+    {
+      "voice": [
+        "Contributors test recipes on real GPU clusters",
+        "and publish signed results."
+      ]
+    },
+    {
+      "voice": [
+        "Verify downloaded evidence offline,",
+        "then run the checks on your own cluster."
+      ]
+    },
+    {
+      "voice": [
+        "AICR.",
+        "Recipes you can trust.",
+        "Explore the project at aicr.run."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    16,
+    23,
+    30.5,
+    42,
+    48.5,
+    54,
+    60
+  ],
+  "captions": [
+    {
+      "start": 0.2,
+      "end": 2.77,
+      "text": "A GPU cluster has many components."
+    },
+    {
+      "start": 2.82,
+      "end": 4.97,
+      "text": "Some bring their own dependencies."
+    },
+    {
+      "start": 5.02,
+      "end": 7.19,
+      "text": "Each has configuration files."
+    },
+    {
+      "start": 7.29,
+      "end": 10.07,
+      "text": "Recipes pin versions for reproducibility."
+    },
+    {
+      "start": 10.12,
+      "end": 12.46,
+      "text": "Some artifacts use digest pins."
+    },
+    {
+      "start": 12.62,
+      "end": 15.06,
+      "text": "How do you know which recipes you can trust?"
+    },
+    {
+      "start": 16.2,
+      "end": 18.28,
+      "text": "AICR helps answer two questions."
+    },
+    {
+      "start": 18.42,
+      "end": 20.36,
+      "text": "Where did these components come from?"
+    },
+    {
+      "start": 20.49,
+      "end": 22.68,
+      "text": "Did they work together on real hardware?"
+    },
+    {
+      "start": 23.2,
+      "end": 26.91,
+      "text": "The AICR release workflow signs build provenance for AICR,"
+    },
+    {
+      "start": 26.93,
+      "end": 29.17,
+      "text": "which ships with its recipes."
+    },
+    {
+      "start": 30.7,
+      "end": 33.35,
+      "text": "Verify who built the deployment bundle,"
+    },
+    {
+      "start": 33.35,
+      "end": 36.06,
+      "text": "and trace that trust back to the AICR release."
+    },
+    {
+      "start": 36.3,
+      "end": 40.22,
+      "text": "Change a single character in the bundle and verification fails."
+    },
+    {
+      "start": 42.2,
+      "end": 45.72,
+      "text": "Contributors test recipes on real GPU clusters"
+    },
+    {
+      "start": 45.72,
+      "end": 47.65,
+      "text": "and publish signed results."
+    },
+    {
+      "start": 48.7,
+      "end": 51.23,
+      "text": "Verify downloaded evidence offline,"
+    },
+    {
+      "start": 51.27,
+      "end": 53.61,
+      "text": "then run the checks on your own cluster."
+    },
+    {
+      "start": 54.2,
+      "end": 55.03,
+      "text": "AICR."
+    },
+    {
+      "start": 55.11,
+      "end": 56.99,
+      "text": "Recipes you can trust."
+    },
+    {
+      "start": 57.12,
+      "end": 59.56,
+      "text": "Explore the project at aicr.run."
+    }
+  ]
+}

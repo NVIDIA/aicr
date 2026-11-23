@@ -1,0 +1,342 @@
+{
+  "01": [
+    "README.md",
+    "pkg/cli/snapshot.go",
+    "pkg/cli/recipe.go",
+    "pkg/cli/bundle.go",
+    "pkg/cli/validate.go",
+    "docs/integrator/data-flow.md"
+  ],
+  "02": [
+    "docs/user/artifact-verification.md",
+    "pkg/bundler/verifier/",
+    "pkg/bundler/attestation/",
+    "pkg/bundler/checksum/",
+    "pkg/evidence/verifier/",
+    ".github/workflows/on-tag.yaml"
+  ],
+  "03": [
+    "docs/user/agent-deployment.md",
+    "pkg/cli/snapshot.go",
+    "pkg/snapshotter/",
+    "pkg/client/v1/snapshot.go",
+    "api/aicr/v1/schemas/Snapshot.schema.json"
+  ],
+  "04": [
+    "docs/integrator/data-flow.md",
+    "pkg/cli/recipe.go",
+    "pkg/recipe/criteria.go",
+    "pkg/recipe/builder.go",
+    "recipes/overlays/h100-eks-ubuntu-training-kubeflow.yaml",
+    "recipes/overlays/h100-eks-ubuntu-inference-nim.yaml"
+  ],
+  "05": [
+    "demos/query.md",
+    "pkg/cli/query.go",
+    "pkg/recipe/query.go",
+    "recipes/overlays/h100-eks-ubuntu-training.yaml",
+    "recipes/overlays/gb200-eks-ubuntu-training.yaml",
+    "recipes/components/gpu-operator/values.yaml"
+  ],
+  "06": [
+    "docs/user/bundling.md",
+    "pkg/cli/bundle.go",
+    "pkg/bundler/deployer/",
+    "pkg/bundler/types/types.go",
+    "pkg/bundler/registry/registry.go"
+  ],
+  "07": [
+    "docs/user/validation.md",
+    "pkg/cli/validate.go",
+    "pkg/constraints/",
+    "pkg/validator/v1/validation_input.go",
+    "recipes/validators/catalog.yaml"
+  ],
+  "08": [
+    "docs/operator/index.md",
+    "api/operator/v1alpha1/clusterruntime_types.go",
+    "pkg/operator/controller/resolver.go",
+    "pkg/operator/controller/rollout.go",
+    "pkg/operator/controller/validation.go",
+    "pkg/operator/engine/argocd/adapter.go"
+  ],
+  "09": [
+    "docs/integrator/go-library.md",
+    "pkg/client/v1/aicr.go",
+    "pkg/client/v1/bundle.go",
+    "pkg/client/v1/types.go",
+    "pkg/client/v1/options.go"
+  ],
+  "10": [
+    "docs/user/cli-reference.md",
+    "pkg/cli/diff.go",
+    "pkg/client/v1/diff.go",
+    "pkg/diff/",
+    "api/aicr/v1/schemas/Snapshot.schema.json"
+  ],
+  "11": [
+    "docs/user/upgrading.md",
+    "pkg/cli/upgrade_check.go",
+    "pkg/client/v1/upgrade.go",
+    "pkg/upgrade/",
+    "docs/design/021-component-upgrade-safety.md"
+  ],
+  "12": [
+    "docs/conformance/cncf/index.md",
+    "pkg/client/v1/cncf_submission.go",
+    "pkg/evidence/cncf/",
+    "docs/conformance/cncf/",
+    "validators/conformance/"
+  ],
+  "13": [
+    "docs/integrator/recipe-development.md",
+    "pkg/recipe/builder.go",
+    "pkg/recipe/loader.go",
+    "pkg/recipe/metadata.go",
+    "api/aicr/v1/schemas/RecipeMixin.schema.json",
+    "docs/design/005-overlay-refactoring.md",
+    "recipes/overlays/base.yaml",
+    "recipes/overlays/eks.yaml",
+    "recipes/overlays/eks-training.yaml",
+    "recipes/mixins/os-ubuntu.yaml"
+  ],
+  "14": [
+    "docs/integrator/gke-gpu-setup.md",
+    "pkg/recipe/profile_resolution.go",
+    "pkg/bundler/config/driver_ownership.go",
+    "pkg/bundler/allocation_policy.go",
+    "recipes/overlays/gke-cos.yaml",
+    "docs/design/015-recipe-configuration-profiles.md"
+  ],
+  "15": [
+    "docs/integrator/data-extension.md",
+    "pkg/recipe/provider.go",
+    "pkg/recipe/catalog.go",
+    "pkg/recipe/static_validate.go",
+    "pkg/cli/recipe_validate.go",
+    "pkg/recipe/ocisource/"
+  ],
+  "16": [
+    "docs/user/artifact-inventory.md",
+    "pkg/recipe/artifact_compose.go",
+    "pkg/recipe/artifact_snapshot.go",
+    "pkg/artifact/provenance.go",
+    "api/aicr/v1/schemas/ArtifactBindings.schema.json",
+    "api/aicr/v1/schemas/ArtifactInventory.schema.json"
+  ],
+  "17": [
+    "docs/user/bundling.md",
+    "pkg/bundler/split.go",
+    "pkg/bundler/verifier/verifier.go",
+    "recipes/registry.yaml",
+    "docs/design/018-class-partitioned-bundles.md"
+  ],
+  "18": [
+    "docs/user/bundling.md",
+    "pkg/bundler/required_values.go",
+    "pkg/bundler/deployer/required_dynamic.go",
+    "docs/design/029-bundle-required-and-secret-inputs.md"
+  ],
+  "19": [
+    "docs/user/air-gap-mirror.md",
+    "pkg/cli/mirror.go",
+    "pkg/mirror/discover.go",
+    "pkg/mirror/mirror.go",
+    "pkg/bundler/deployer/localformat/vendor.go",
+    "pkg/bundler/deployer/crds_vendor.go"
+  ],
+  "20": [
+    "docs/user/validation.md",
+    "validators/performance/nccl_all_reduce_bw.go",
+    "validators/performance/nccl_preflight.go",
+    "validators/performance/nccl_tcpxo_transport.go",
+    "recipes/validators/catalog.yaml",
+    ".github/workflows/gpu-h100-training-test.yaml"
+  ],
+  "21": [
+    "docs/user/validation.md",
+    "validators/performance/aiperf_entrypoint.py",
+    "validators/performance/inference_perf.go",
+    "validators/performance/inference_perf_constraint.go",
+    ".github/workflows/gpu-h100-inference-test.yaml",
+    "recipes/validators/catalog.yaml"
+  ],
+  "22": [
+    "docs/user/evidence-dashboard.md",
+    ".github/workflows/kwok-recipes.yaml",
+    ".github/workflows/uat-run.yaml",
+    ".github/workflows/recipe-evidence.yaml",
+    ".github/workflows/evidence-dashboard-publish.yaml",
+    "pkg/corroborate/"
+  ],
+  "23": [
+    "docs/contributor/evidence-publishing.md",
+    "pkg/cli/evidence_publish.go",
+    "pkg/cli/evidence_sign.go",
+    "pkg/evidence/attestation/pointer.go",
+    "pkg/evidence/attestation/publish.go",
+    ".github/workflows/evidence-publish.yaml"
+  ],
+  "24": [
+    "docs/user/artifact-verification.md",
+    "pkg/cli/bundle_verify.go",
+    "pkg/client/v1/verify.go",
+    "pkg/bundler/verifier/trust.go",
+    "pkg/bundler/verifier/verifier.go"
+  ],
+  "25": [
+    "docs/integrator/supply-chain-verification.md",
+    ".github/workflows/on-tag.yaml",
+    ".github/workflows/release-reverify.yaml",
+    "pkg/bundler/attestation/binary.go",
+    "pkg/bom/driver.go"
+  ],
+  "26": [
+    "docs/integrator/validator-extension.md",
+    "pkg/validator/catalog/catalog.go",
+    "pkg/validator/v1/catalog.go",
+    "pkg/validator/v1/validation_input.go",
+    "pkg/recipe/validation.go",
+    "recipes/validators/catalog.yaml"
+  ],
+  "27": [
+    "docs/operator/argocd.md",
+    "pkg/operator/engine/argocd/adapter.go",
+    "pkg/operator/engine/argocd/application.go",
+    "pkg/operator/controller/rollout.go"
+  ],
+  "28": [
+    "docs/operator/operations.md",
+    "api/operator/v1alpha1/runtimerollout_types.go",
+    "pkg/operator/controller/approval.go",
+    "pkg/operator/controller/assessment.go",
+    "pkg/operator/controller/rollout.go",
+    "charts/aicr-operator/templates/admission-state.yaml"
+  ],
+  "29": [
+    "docs/operator/operations.md",
+    "api/operator/v1alpha1/clusterruntime_types.go",
+    "pkg/operator/controller/rollout.go",
+    "pkg/operator/controller/approval.go",
+    "pkg/operator/engine/argocd/adapter.go"
+  ],
+  "30": [
+    "docs/operator/operations.md",
+    "api/operator/v1alpha1/clusterruntime_types.go",
+    "pkg/operator/plan/digest.go",
+    "pkg/operator/plan/content.go",
+    "pkg/operator/controller/assessment.go",
+    "pkg/operator/controller/rollout.go"
+  ],
+  "31": [
+    "docs/operator/cli-reference.md",
+    "cmd/kubectl-aicr/main.go",
+    "pkg/operator/plan/content.go",
+    "pkg/operator/registry/bundle.go",
+    "pkg/operator/evidence/binding.go",
+    "pkg/operator/controller/validation.go"
+  ],
+  "32": [
+    "docs/operator/lifecycle.md",
+    "pkg/operator/controller/adoption.go",
+    "pkg/operator/controller/deletion.go",
+    "pkg/operator/engine/argocd/rebuild.go",
+    "docs/operator/operations.md"
+  ],
+  "33": [
+    "docs/operator/index.md",
+    "pkg/operator/registry/mirror.go",
+    "pkg/operator/registry/bundle.go",
+    "pkg/operator/engine/argocd/application.go",
+    "charts/aicr-operator/values.yaml"
+  ],
+  "34": [
+    "docs/user/api-reference.md",
+    "api/aicr/v1/server.yaml",
+    "pkg/server/recipe_handler.go",
+    "pkg/server/bundle_handler.go"
+  ],
+  "35": [
+    "docs/integrator/go-library.md",
+    "pkg/client/v1/aicr.go",
+    "pkg/validator/v1/",
+    "pkg/client/v1/types.go",
+    "pkg/validator/v1/validation_input.go"
+  ],
+  "36": [
+    "docs/integrator/go-library.md",
+    "pkg/client/v1/options.go",
+    "pkg/recipe/provider.go",
+    "pkg/recipe/ocisource/",
+    "pkg/recipe/catalog_resolve.go"
+  ],
+  "37": [
+    "docs/integrator/go-library.md",
+    "pkg/config/",
+    "pkg/client/v1/config.go",
+    "pkg/cli/bundle_config.go",
+    "docs/user/cli-config.md"
+  ],
+  "38": [
+    "docs/integrator/automation.md",
+    "pkg/cli/bundle.go",
+    "pkg/cli/bundle_verify.go",
+    "pkg/cli/validate.go",
+    "pkg/bundler/bundleinfo/bundleinfo.go",
+    "docs/user/bundling.md"
+  ],
+  "39": [
+    "demos/query.md",
+    "pkg/cli/skill.go",
+    "pkg/cli/skill_generator.go",
+    "pkg/cli/skill_codex.go",
+    "pkg/cli/query.go"
+  ],
+  "40": [
+    "demos/cuj1-training.md",
+    ".github/workflows/gpu-h100-training-test.yaml",
+    "recipes/overlays/h100-eks-ubuntu-training-kubeflow.yaml",
+    "recipes/mixins/platform-kubeflow.yaml"
+  ],
+  "41": [
+    "demos/cuj1-slinky-slurm.md",
+    "recipes/overlays/h100-eks-ubuntu-training-slurm.yaml",
+    "recipes/components/slinky-slurm/values.yaml",
+    "validators/conformance/slinky_slurm_gpu_access_check.go"
+  ],
+  "42": [
+    "demos/cuj2-inference.md",
+    "demos/workloads/inference/nimservice-llama-3-2-1b.yaml",
+    "recipes/overlays/h100-eks-ubuntu-inference-dynamo.yaml",
+    "recipes/overlays/h100-eks-ubuntu-inference-nim.yaml",
+    "recipes/components/dynamo-platform/values.yaml",
+    "recipes/components/k8s-nim-operator/values.yaml",
+    "demos/workloads/inference/vllm-agg.yaml"
+  ],
+  "44": [
+    "docs/user/component-catalog.md",
+    "recipes/mixins/nvsentinel-observe.yaml",
+    "recipes/mixins/nvsentinel-quarantine.yaml",
+    "recipes/components/nvsentinel/values.yaml",
+    ".github/workflows/nvsentinel-remediation-e2e.yaml"
+  ],
+  "45": [
+    "docs/design/026-nktp-telemetry-collection.md",
+    "recipes/components/nktp/values.yaml",
+    "pkg/bundler/config/runtime_metrics.go",
+    "pkg/bundler/promql_scope.go",
+    "pkg/bundler/validations/nktp_backend.go"
+  ],
+  "46": [
+    "docs/user/cli-reference.md",
+    "pkg/cli/sweep.go",
+    "pkg/client/v1/sweep.go",
+    "pkg/validator/sweep/"
+  ],
+  "47": [
+    "recipes/overlays/gb10-nvke-ubuntu-training.yaml",
+    "recipes/overlays/gb10-nvke-ubuntu-training-kubeflow.yaml",
+    "recipes/overlays/nvke.yaml",
+    "docs/integrator/recipe-development.md"
+  ]
+}

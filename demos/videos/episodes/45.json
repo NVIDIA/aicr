@@ -1,0 +1,83 @@
+{
+  "id": 45,
+  "slug": "where-do-the-metrics-go",
+  "title": "Where do the metrics go?",
+  "track": "Workloads",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/design/026-nktp-telemetry-collection.md",
+  "scenes": [
+    {
+      "heading": "Where does this metric belong?",
+      "sub": "An inference cluster needs two paths",
+      "visual": "fork",
+      "items": [
+        "Workload metrics",
+        "Operations dashboard",
+        "Autoscaling query"
+      ],
+      "detail": "Illustrative: inference cluster",
+      "result": "Telemetry and runtime queries",
+      "voice": [
+        "Your inference team wants dashboards and autoscaling.",
+        "Both use metrics, so it helps to know which path each one will take."
+      ]
+    },
+    {
+      "heading": "Send signals to your backend",
+      "sub": "Replace the default evaluation sink",
+      "visual": "trace",
+      "items": [
+        "Metrics, logs, traces",
+        "NKTP collectors",
+        "Production backend"
+      ],
+      "detail": "NKTP exporter configuration",
+      "result": "Signals arrive at your backend",
+      "voice": [
+        "Most stock AICR recipes include the NVKE Telemetry Pipeline to collect cluster signals.",
+        "Point its exporters at your production backend and configure the access, retention, and alerts your team needs."
+      ]
+    },
+    {
+      "heading": "Follow the runtime query separately",
+      "sub": "Keep the autoscaling metrics path visible",
+      "visual": "plot",
+      "items": [
+        "Declared series",
+        "Runtime Prometheus",
+        "Prometheus adapter"
+      ],
+      "detail": "runtimeMetrics.series",
+      "result": "Only required series retained",
+      "voice": [
+        "The separate runtime Prometheus server keeps series that enabled components declare.",
+        "For a workload-specific series, you can extend the series list in the bundle configuration."
+      ]
+    },
+    {
+      "heading": "Trace a query to its consumer",
+      "sub": "Keep both destinations in view",
+      "visual": "dashboard",
+      "items": [
+        "Operator dashboard",
+        "Autoscaling adapter",
+        "Workload query"
+      ],
+      "detail": "Add an adapter rule if needed",
+      "result": "The two paths serve their readers",
+      "voice": [
+        "The backend receives telemetry for operators to explore.",
+        "When wiring up autoscaling, the adapter can read a retained runtime series through its configured rule."
+      ]
+    }
+  ],
+  "viewer": "Platform engineer configuring a production metrics backend",
+  "payoff": "The episode separates NKTP’s observability export from the runtime Prometheus queries used by components such as the autoscaling adapter.",
+  "edges": [
+    0,
+    10,
+    26,
+    39,
+    53
+  ]
+}

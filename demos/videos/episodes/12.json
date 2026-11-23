@@ -1,0 +1,83 @@
+{
+  "id": 12,
+  "slug": "cncf-conformance-submission",
+  "title": "From cluster checks to a CNCF submission",
+  "track": "Core workflow",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/conformance/cncf/index.md",
+  "scenes": [
+    {
+      "heading": "Preparing a CNCF submission?",
+      "sub": "Anchor it to the Kubernetes minor",
+      "visual": "gate",
+      "items": [
+        "Product and cluster",
+        "Kubernetes version",
+        "Selected checklist"
+      ],
+      "detail": "Match the submission checklist",
+      "result": "One version-specific evidence package",
+      "voice": [
+        "Your team wants to submit an AI platform for CNCF conformance.",
+        "Start with the specific cluster and Kubernetes version, then match the required checklist for that submission."
+      ]
+    },
+    {
+      "heading": "Exercise the required capabilities",
+      "sub": "Run conformance against the live cluster",
+      "visual": "probe",
+      "items": [
+        "Accelerator access",
+        "Gang scheduling",
+        "Metrics exposure"
+      ],
+      "detail": "aicr validate --phase conformance",
+      "result": "Results from workload checks",
+      "voice": [
+        "Select a recipe with the required proof paths and run conformance validation.",
+        "Examples include checks for accelerator access, gang scheduling, and metrics on the running cluster."
+      ]
+    },
+    {
+      "heading": "Collect proof for reviewers",
+      "sub": "Enable submission directory output",
+      "visual": "compile",
+      "items": [
+        "Check results",
+        "Requirement outcomes",
+        "Supporting files"
+      ],
+      "detail": "--cncf-submission --evidence-dir …",
+      "result": "Generated CNCF submission directory",
+      "voice": [
+        "Enable submission output so AICR writes the files reviewers need.",
+        "The package maps the check results and supporting evidence to the selected version of the upstream requirements."
+      ]
+    },
+    {
+      "heading": "Review gaps before submitting",
+      "sub": "Keep the check results with the package",
+      "visual": "dashboard",
+      "items": [
+        "Evidence directory",
+        "Requirement review",
+        "Submission"
+      ],
+      "detail": "Review failed or missing evidence",
+      "result": "A package reviewers can inspect",
+      "voice": [
+        "Read the requirement outcomes and investigate any gaps.",
+        "Submit the resulting package so reviewers can see exactly which capabilities your platform demonstrated on this Kubernetes version."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    25,
+    40,
+    53
+  ],
+  "viewer": "AI platform conformance owner",
+  "payoff": "Run version-matched conformance checks and review the generated package for a specific cluster submission."
+}

@@ -178,10 +178,10 @@ func awaiting(ro *v1alpha1.RuntimeRollout) (v1alpha1.RolloutStep, bool) {
 	return v1alpha1.RolloutStep{}, false
 }
 
-// Describe writes what an approver decides on: the transition, its steps// Describe writes what an approver decides on: the transition, its steps
-// with their verdicts and CRD changes, the assessment report with the
-// recorded steps an approval takes on, the approval and why the rollout is
-// where it is, including inventory drift.
+// Describe writes what an approver decides on: the transition, its steps
+// with their verdicts and CRD changes, the assessment report with each
+// record's summary and the recorded steps an approval takes on, the approval
+// and why the rollout is where it is, including inventory drift.
 func Describe(ctx context.Context, c client.Reader, operatorNamespace, name string, w io.Writer) error {
 	ro, err := get(ctx, c, name)
 	if err != nil {
@@ -229,21 +229,71 @@ func Describe(ctx context.Context, c client.Reader, operatorNamespace, name stri
 	return nil
 }
 
-func describeReport(ctx context.Context, c client.Reader, namespace string, ref *v1alpha1.DigestedConfigMapRef, w io.Writer) error {
+// readReport reads the assessment report a rollout records, verified
+// against the recorded digest.
+func readReport(ctx context.Context, c client.Reader, namespace string, ref *v1alpha1.DigestedConfigMapRef) (*aicrjob.UpgradeReport, error) {
 	cm := &corev1.ConfigMap{}
 	if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.ConfigMap}, cm); err != nil {
-		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read assessment report "+ref.ConfigMap)
+		return nil, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read assessment report "+ref.ConfigMap)
 	}
 	data, err := plan.ReadContent(cm, plan.AssessmentDataKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if plan.DigestOf(data) != ref.Digest {
-		return operrors.New(operrors.ErrCodeConflict, "assessment report "+ref.ConfigMap+" does not match the digest the rollout records")
+		return nil, operrors.New(operrors.ErrCodeConflict, "assessment report "+ref.ConfigMap+" does not match the digest the rollout records")
 	}
 	report := &aicrjob.UpgradeReport{}
 	if err = json.Unmarshal(data, report); err != nil {
-		return operrors.Wrap(operrors.ErrCodeInvalidRequest, "parse assessment report "+ref.ConfigMap, err)
+		return nil, operrors.Wrap(operrors.ErrCodeInvalidRequest, "parse assessment report "+ref.ConfigMap, err)
+	}
+	return report, nil
+}
+
+// HoldsEveryStep reports whether step holds all of its record's steps for
+// acknowledgement, because the record names no apply step, rather than those
+// after the apply. It reads the rollout's target plan, whose release IDs need
+// not be component names, and the assessment report the rollout records.
+// Steps carried from an earlier rollout can come from another report: when
+// the rollout records none, or its record for the component does not hold
+// exactly step's steps, it cannot tell and returns ErrCodeNotFound.
+func HoldsEveryStep(ctx context.Context, c client.Reader, namespace string, ro *v1alpha1.RuntimeRollout, step v1alpha1.RolloutStep) (bool, error) {
+	if ro.Spec.AssessmentRef == nil {
+		return false, operrors.New(operrors.ErrCodeNotFound, "rollout "+ro.Name+" records no assessment report")
+	}
+	name, err := plan.Name(ro.Spec.ToPlanDigest)
+	if err != nil {
+		return false, err
+	}
+	cm := &corev1.ConfigMap{}
+	if err = c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, cm); err != nil {
+		return false, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read plan "+name)
+	}
+	doc, err := plan.FromConfigMap(cm)
+	if err != nil {
+		return false, err
+	}
+	i := slices.IndexFunc(doc.Releases, func(r plan.Release) bool { return r.ID == step.Release })
+	if i < 0 {
+		return false, operrors.New(operrors.ErrCodeNotFound, "plan "+name+" has no release "+step.Release)
+	}
+	report, err := readReport(ctx, c, namespace, ro.Spec.AssessmentRef)
+	if err != nil {
+		return false, err
+	}
+	component := doc.Releases[i].Component
+	every, ok := report.HoldsEveryStep(component, step.PostApplySteps)
+	if !ok {
+		return false, operrors.New(operrors.ErrCodeNotFound,
+			"assessment report "+ro.Spec.AssessmentRef.ConfigMap+" has no manual record for "+component+" that holds "+strings.Join(step.PostApplySteps, ", "))
+	}
+	return every, nil
+}
+
+func describeReport(ctx context.Context, c client.Reader, namespace string, ref *v1alpha1.DigestedConfigMapRef, w io.Writer) error {
+	report, err := readReport(ctx, c, namespace, ref)
+	if err != nil {
+		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "  COMPONENT\tCHANGE\tFROM\tTO\tVERDICT\tNOTES")
@@ -258,13 +308,20 @@ func describeReport(ctx context.Context, c client.Reader, namespace string, ref 
 	return nil
 }
 
-// describeRecordedSteps lists each transition record's precondition and
-// steps. The operator performs only the apply; approving the rollout takes
-// on the precondition and every other step.
+// noApplyStepNote follows a manual record that names no apply step, whose
+// steps the rollout holds for acknowledgement after the apply, all of them.
+const noApplyStepNote = "(this record names no apply step: do the steps meant for before the upgrade before approving; " +
+	"once the release is applied the rollout waits for `kubectl aicr acknowledge` of all of them)"
+
+// describeRecordedSteps lists each transition record's summary (a safe
+// record can name a pre-upgrade check there alone), precondition and steps,
+// marking a transition across a breaking version boundary. The operator
+// performs only the apply; approving the rollout takes on the precondition
+// and every other step.
 func describeRecordedSteps(report *aicrjob.UpgradeReport, w io.Writer) {
 	header := false
 	for _, ch := range report.Components {
-		if ch.Precondition == "" && len(ch.Steps) == 0 {
+		if ch.Summary == "" && ch.Precondition == "" && len(ch.Steps) == 0 {
 			continue
 		}
 		if !header {
@@ -272,12 +329,22 @@ func describeRecordedSteps(report *aicrjob.UpgradeReport, w io.Writer) {
 			fmt.Fprintln(w, "release is applied the rollout waits for `kubectl aicr acknowledge` of the steps after it):")
 			header = true
 		}
-		fmt.Fprintf(w, "  %s %s -> %s (%s)\n", ch.Component, or(ch.From, "-"), or(ch.To, "-"), or(ch.Verdict, "-"))
+		verdict := or(ch.Verdict, "-")
+		if ch.Breaking {
+			verdict += ", breaking"
+		}
+		fmt.Fprintf(w, "  %s %s -> %s (%s)\n", ch.Component, or(ch.From, "-"), or(ch.To, "-"), verdict)
+		if ch.Summary != "" {
+			fmt.Fprintf(w, "    summary: %s\n", ch.Summary)
+		}
 		if ch.Precondition != "" {
 			fmt.Fprintf(w, "    before: %s\n", ch.Precondition)
 		}
 		for _, s := range ch.Steps {
 			fmt.Fprintf(w, "    %s: %s\n", s.ID, s.Description)
+		}
+		if _, every := aicrjob.HeldSteps(ch.Steps); every && ch.Change == "version" && ch.Assessment() == v1alpha1.AssessmentManual {
+			fmt.Fprintf(w, "    %s\n", noApplyStepNote)
 		}
 	}
 }

@@ -115,10 +115,16 @@ transitions:
               operator is left mid-rollout on a failed revision. Applying
               the v1.5.1 CRDs first makes the identical upgrade succeed and
               store the field.
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves k8s-aibom to the new version.
           - id: verify-crd-update
             description: >-
-              After the manual apply, confirm the new schema actually landed
-              by looking for the field the v1.5.1 CRDs add: kubectl get crd
+              Only if apply-new-crds applied the v1.5.1 CRDs, confirm the new
+              schema actually landed by looking for the field they add:
+              kubectl get crd
               aibomcontrollerconfigs.aibom.k8saibom.dev -o
               jsonpath='{.spec.versions[?(@.name=="v1beta1")].schema.openAPIV3Schema.properties.spec.properties.verification.type}'
               and expect "object". An empty result means the v1.3.0 schema
@@ -147,6 +153,11 @@ transitions:
               stays Ready while ignoring the config. Read the CR's conditions
               rather than inferring acceptance from pod health.
       - steps:
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves k8s-aibom to the new version.
           - id: verify-crd-update
             description: >-
               After the automated CRD update (flux's spec.upgrade.crds
@@ -272,10 +283,15 @@ transitions:
               config.verification: a cluster that took that transition with
               default values may still serve the 1.3.0 schema, and the 1.6
               controller reports Degraded against it until the CRDs move.
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves k8s-aibom to the new version.
           - id: verify-crd-update
             description: >-
-              After the manual apply, confirm the new schema landed by
-              looking for the field the v1.6 CRDs add: kubectl get crd
+              After apply-new-crds, confirm the new schema landed by looking
+              for the field the v1.6 CRDs add: kubectl get crd
               aibomcontrollerconfigs.aibom.k8saibom.dev -o
               jsonpath='{.spec.versions[?(@.name=="v1beta1")].schema.openAPIV3Schema.properties.spec.properties.discovery.properties.workloadKinds.type}'
               and expect "array". An empty result means an older schema is
@@ -301,6 +317,11 @@ transitions:
               RunningOnLastKnownGood, ThirdPartyWatchUnhealthy), which this
               step does not ask you to clear.
       - steps:
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves k8s-aibom to the new version.
           - id: verify-crd-update
             description: >-
               After the automated CRD update (flux's spec.upgrade.crds

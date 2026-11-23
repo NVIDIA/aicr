@@ -149,7 +149,7 @@ func TestOperatorPublishDigestsPassAttestValidation(t *testing.T) {
 }
 
 // The weekly scan reads each operator image once per architecture, as the
-// release's operator-scan does, and keeps the two results apart, so a finding
+// release's operator checks do, and keeps the two results apart, so a finding
 // in either platform's image reaches the run's artifacts and the summary.
 func TestWeeklyScanCoversOperatorImagesPerArch(t *testing.T) {
 	t.Parallel()

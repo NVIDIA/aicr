@@ -1,0 +1,83 @@
+{
+  "id": 8,
+  "slug": "aicr-operator-overview",
+  "title": "What does the AICR Operator do?",
+  "track": "Core workflow",
+  "status": "preview",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/operator/index.md",
+  "scenes": [
+    {
+      "heading": "Who coordinates the next change?",
+      "sub": "AICR Operator preview",
+      "visual": "incident",
+      "items": [
+        "Running GPU stack",
+        "Proposed change",
+        "Operator preview"
+      ],
+      "detail": "ClusterRuntime",
+      "result": "Capture the intended change",
+      "voice": [
+        "Your GPU stack is running, and the platform team needs a controlled change.",
+        "In preview, the AICR Operator reads the intended configuration from a ClusterRuntime object."
+      ]
+    },
+    {
+      "heading": "Get a rollout plan",
+      "sub": "A pinned AICR release generates it",
+      "visual": "compile",
+      "items": [
+        "Discover cluster",
+        "Resolve recipe",
+        "Generate bundle"
+      ],
+      "detail": "Pinned AICR image",
+      "result": "Candidate rollout plan",
+      "voice": [
+        "The Operator invokes a pinned AICR release to discover the cluster, resolve a recipe, and generate its bundle.",
+        "The candidate rollout plan records what the Operator intends to change."
+      ]
+    },
+    {
+      "heading": "Wait for ready, then continue",
+      "sub": "Argo CD applies each planned release",
+      "visual": "queue",
+      "items": [
+        "Argo CD applies",
+        "Current revision ready",
+        "Next dependency"
+      ],
+      "detail": "Risky changes can need approval",
+      "result": "Dependencies advance in order",
+      "voice": [
+        "After any required approval, Argo CD applies the releases.",
+        "The Operator advances them in dependency order, using readiness at the revision it just requested before moving to the next step."
+      ]
+    },
+    {
+      "heading": "Verify the deployed plan",
+      "sub": "Tie deployment results to the rollout",
+      "visual": "dashboard",
+      "items": [
+        "Deployment checks",
+        "Rolled-out plan",
+        "Evidence"
+      ],
+      "detail": "Deployment validation enabled",
+      "result": "Evidence tied to the plan",
+      "voice": [
+        "With deployment validation enabled, AICR checks the running stack and ties evidence to the plan.",
+        "The preview uses Argo CD and one accelerator and operating system profile per cluster."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    25,
+    39,
+    53
+  ],
+  "viewer": "GPU platform operator",
+  "payoff": "Trace ClusterRuntime intent through a pinned AICR release, an ordered Argo CD rollout, and deployment evidence."
+}

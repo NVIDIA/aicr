@@ -1,0 +1,83 @@
+{
+  "id": 14,
+  "slug": "gpu-driver-ownership",
+  "title": "Who owns the GPU driver?",
+  "track": "Recipes and deployment",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/integrator/gke-gpu-setup.md",
+  "scenes": [
+    {
+      "heading": "Who owns the GPU driver?",
+      "sub": "Suppose GKE already provides the stack",
+      "visual": "fork",
+      "items": [
+        "GPU pool",
+        "Driver install",
+        "GPU advertising"
+      ],
+      "detail": "--profile gpuStack=…",
+      "result": "One ownership choice",
+      "voice": [
+        "On GKE, find out who installs the driver and advertises GPUs before deploying a stack.",
+        "The AICR configuration profile makes those ownership choices explicit."
+      ]
+    },
+    {
+      "heading": "Keep GKE in charge",
+      "sub": "The gke-default example",
+      "visual": "layers",
+      "items": [
+        "Provider driver",
+        "Provider device plugin",
+        "Existing GPU pool"
+      ],
+      "detail": "gpuStack=gke-default",
+      "result": "Provider-managed GPU stack",
+      "voice": [
+        "The default GKE profile expects the platform to manage the driver and its device plugin.",
+        "The resolved settings preserve that ownership of the GPU stack."
+      ]
+    },
+    {
+      "heading": "Choose an alternative profile",
+      "sub": "Use the right pool prerequisites",
+      "visual": "compare",
+      "items": [
+        "Bundle installer",
+        "Experimental DRA",
+        "GPU pool metadata"
+      ],
+      "detail": "gpuStack=bundle-installer or gpuStack=dra",
+      "result": "Driver and advertiser selected",
+      "voice": [
+        "With compatible pools, bundle installer uses the driver installer supplied by the bundle.",
+        "The experimental DRA profile uses that pool shape and shifts whole GPU advertising to the NVIDIA DRA driver."
+      ]
+    },
+    {
+      "heading": "Check the choice before deployment",
+      "sub": "Match the profile to the pool you have",
+      "visual": "gate",
+      "items": [
+        "Selected profile",
+        "Observed pool data",
+        "Recipe readiness"
+      ],
+      "detail": "Evaluate against the actual GPU pools",
+      "result": "Bring a matching bundle",
+      "voice": [
+        "Check the selected profile against the actual pool settings and metadata.",
+        "Generate the matching bundle, then let your deployment tooling apply the parts chosen for that ownership model."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    24,
+    39,
+    53
+  ],
+  "viewer": "GKE GPU platform operator",
+  "payoff": "Choose a GKE GPU stack profile by identifying who provides the driver and who advertises whole GPUs."
+}

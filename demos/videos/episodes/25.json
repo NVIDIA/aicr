@@ -1,0 +1,81 @@
+{
+  "id": 25,
+  "slug": "inside-the-release",
+  "title": "What’s inside the release?",
+  "track": "Validation, evidence, and trust",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/integrator/supply-chain-verification.md#unified-metadata-retrieval",
+  "scenes": [
+    {
+      "heading": "One tag, more than one platform",
+      "sub": "Begin with the release image digest.",
+      "visual": "fork",
+      "items": [
+        "Image index",
+        "Linux amd64",
+        "Linux arm64"
+      ],
+      "voice": [
+        "You need to inspect an AICR container image before approving it.",
+        "A multi-platform release has an index and individual platform manifests, each identified by its own digest."
+      ],
+      "result": "Pick the manifest for your platform"
+    },
+    {
+      "heading": "Check where the image came from",
+      "sub": "Read signed SLSA provenance.",
+      "visual": "trace",
+      "items": [
+        "Release digest",
+        "Source revision",
+        "Build workflow"
+      ],
+      "voice": [
+        "Provenance describes the source revision and workflow that built the image.",
+        "Verify the signed statement for your digest, which ties that claim to the release you're checking."
+      ],
+      "detail": "SLSA build provenance",
+      "result": "Provenance binds to a digest"
+    },
+    {
+      "heading": "Open the platform records",
+      "sub": "Inspect software and triaged CVEs.",
+      "visual": "inspect",
+      "items": [
+        "Platform manifest",
+        "CycloneDX SBOM",
+        "OpenVEX"
+      ],
+      "voice": [
+        "The software bill of materials lists the components inside that platform's image.",
+        "OpenVEX records the project's triage for the vulnerabilities named in its document, alongside that inventory."
+      ],
+      "detail": "CycloneDX SBOM and OpenVEX",
+      "result": "Software inventory and CVE triage"
+    },
+    {
+      "heading": "Retrieve the right attestations",
+      "sub": "Index and platform digests differ.",
+      "visual": "terminal",
+      "items": [
+        "Index provenance",
+        "Platform provenance",
+        "Platform SBOM and VEX"
+      ],
+      "voice": [
+        "You can find build provenance on the index or a platform manifest.",
+        "Look up the bill of materials and OpenVEX on the platform digest and verify their attestations there."
+      ],
+      "result": "Platform digest leads to both records"
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    24,
+    39,
+    53
+  ],
+  "viewer": "Container security engineers",
+  "payoff": "Follow one image index into an architecture-specific manifest to find the right signed records."
+}

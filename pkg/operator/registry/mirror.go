@@ -99,7 +99,7 @@ func (c *Client) MirrorHTTPChart(ctx context.Context, up UpstreamChart, target R
 		return nil, invalid("archive holds chart %s %s, want %s %s", meta.Name, meta.Version, up.Chart, up.Version)
 	}
 	repo := target.Child(up.Chart)
-	digest, err := c.PushChart(ctx, repo, archive)
+	digest, err := c.pushChart(ctx, repo, archive, meta, meta.Tag())
 	if err != nil {
 		return nil, err
 	}

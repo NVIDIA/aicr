@@ -504,6 +504,8 @@ land later; none is implied by Preview alone.
 | `nvke / gb300 / ubuntu / inference / dynamo` | [NVKE GB300 Setup](nvke-gb300-setup.md) | pending: validated on hardware from this leaf's own bundle; signed evidence to follow |
 | `nvke / gb10 / ubuntu / training` | [DGX OS containerd prerequisite](../user/cli-reference.md#query-mode) | pending: deployment and conformance validated on one DGX Spark; no performance phase until two Sparks are linked over ConnectX-7 |
 | `nvke / gb10 / ubuntu / training / kubeflow` | [DGX OS containerd prerequisite](../user/cli-reference.md#query-mode) | pending: adds Kubeflow Trainer to the training leaf; validated in the same run. The default `torch-distributed` runtime image is amd64-only, so set `spec.trainer.image` to an arm64 image such as NGC PyTorch 25.11 |
+| `nvke / gb10 / ubuntu / inference` | [DGX OS containerd prerequisite](../user/cli-reference.md#query-mode) | pending: deployment and conformance validated on one DGX Spark. No `pod-autoscaling` check, which needs two GPUs; no external LoadBalancer, so the gateway is in-cluster only |
+| `nvke / gb10 / ubuntu / inference / dynamo` | [DGX OS containerd prerequisite](../user/cli-reference.md#query-mode) | pending: adds the Dynamo platform to the inference leaf; validated in the same run |
 | `eks / h100 / ubuntu / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 | `gke / h100 / cos / training / runai` | [Run:ai cluster](../user/component-catalog.md#runai-cluster) | pending: live qualification against a Run:ai control plane tracked in [#3302](https://github.com/NVIDIA/aicr/issues/3302) |
 

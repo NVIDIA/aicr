@@ -47,7 +47,8 @@ code and the end of its error output: `aicr render exited 3: …`.
 target plan (first 16 hex characters) and deadline. The phases are
 `AwaitingApproval`, `Progressing`, `AwaitingAcknowledgement` (a `manual`
 release is applied and waits for `kubectl aicr acknowledge` of its post-apply
-steps), `Stalled` and `Validating`, and the terminal
+steps, or of all its record's steps when the record names no `apply` step),
+`Stalled` and `Validating`, and the terminal
 `Succeeded`, `Failed`, `Expired`, `Revoked`, `Superseded` and `Orphaned`. A
 rollout that has not started shows no phase (`kubectl aicr describe` prints
 `Pending`). The terminal outcome is also set once as the
@@ -107,7 +108,7 @@ scrape the operator from your own. Otherwise scrape the pod, or port-forward
 | `aicr_operator_runtime_stalled{reason}` | `1` while the runtime is `Stalled=True` with this reason, else `0`; the reasons are the [troubleshooting](troubleshooting.md) ones |
 | `aicr_operator_rollout_approval_wait_seconds` | How long the rollout in progress has waited for approval, including while the engine is unavailable; `0` while none waits |
 | `aicr_operator_runtime_resolved_timestamp_seconds` | When the operator last saw the runtime resolved for its current inputs, as a Unix time, checked every 30 seconds. It stops while a resolution runs or retries, including one that keeps an already resolved runtime `Resolved=True`, such as a snapshot refresh; `0` until it has seen one since the operator started |
-| `aicr_operator_registry_failures_total{operation,code}` | Failed runtime registry and chart delivery operations (`resolve`, `pull_bundle`, `push_chart`, `reuse_chart`, `mirror_oci_chart`, `mirror_http_chart`, `push_wrapper`, `sigstore_bundles`, `describe`, `push_statement`, `pull_statement`), by error code. `reuse_chart` with `NOT_FOUND` is a chart the operator mirrors again, not an outage |
+| `aicr_operator_registry_failures_total{operation,code}` | Failed runtime registry and chart delivery operations (`resolve`, `pull_bundle`, `reuse_chart`, `mirror_oci_chart`, `mirror_http_chart`, `push_wrapper`, `sigstore_bundles`, `describe`, `push_statement`, `pull_statement`), by error code. `reuse_chart` with `NOT_FOUND` is a chart the operator mirrors again, not an outage |
 
 Every outcome, result, stage, retry class, stall reason, registry operation
 and error code is exported at zero from startup, so a rate reads zero rather
@@ -157,6 +158,18 @@ groups:
           summary: "AICR registry operation {{ $labels.operation }} keeps failing with {{ $labels.code }}"
 ```
 
+### Liveness
+
+The liveness probe (`/healthz` on port 8081) fails while a rollout reconcile
+has run longer than 32 minutes: its 30-minute timeout plus 2 minutes to
+return once canceled. The chart leaves the probe at the Kubernetes defaults,
+so the kubelet restarts the operator container after three failed probes,
+10 seconds apart; a standby replica, or the restarted operator, then takes
+the lease. Reconciles that fail and retry, as through a registry outage, end
+each time and never fail the probe. With leader election, the default, only
+the leader reconciles, so a standby passes. The resolver has no reconcile
+timeout and is not checked.
+
 ## How a change reaches the cluster
 
 1. **An input changes.** The runtime's `spec` (intent, platform, profile,
@@ -175,10 +188,11 @@ groups:
 3. **The candidate stabilizes** for `spec.rollout.stabilizationWindow`
    (default 10 minutes) from its creation (`Reconciling=True`, `Stabilizing`).
 4. **The transition is assessed.** An `aicr upgrade-check` Job compares the
-   active plan's recipe with the target's (`Assessing`). A blocked verdict, or
-   a release that changes namespace or chart name, stops here with
-   `TransitionBlocked`. A renamed release is a `Remove` of the old and an
-   `Install` of the new.
+   active plan's recipe with the target's (`Assessing`). A blocked verdict, a
+   release that changes namespace or chart name, or a `manual` record that
+   holds more steps, or a longer step id, for acknowledgement than a rollout
+   records stops here with `TransitionBlocked`. A renamed release is a
+   `Remove` of the old and an `Install` of the new.
 5. **A rollout is created** from the assessment and the live Applications
    (`RolloutCreated`). Its steps, deadline and starting inventory are fixed.
 6. **It waits for approval** when any step needs it (below).
@@ -186,9 +200,12 @@ groups:
    Argo CD, and each must be ready at its current revision within
    `spec.rollout.actionTimeout` (default 30 minutes). Removals run last,
    dependents first as the Applications' `depends-on` and `readiness-for`
-   annotations record them. A `manual` release with recorded steps after the
-   apply stops the rollout in `AwaitingAcknowledgement` until those steps are
-   done and an approver runs `kubectl aicr acknowledge`.
+   annotations record them. A `manual` release with recorded steps after its
+   `apply` step stops the rollout in `AwaitingAcknowledgement` until those
+   steps are done and an approver runs `kubectl aicr acknowledge`. A record
+   that names no `apply` step, as most do in AICR v1.3.0 and earlier, stops it
+   there for all of its steps, since the operator cannot tell which follow the
+   apply.
 8. **Deployment validation** runs when `spec.validation.deployment` is
    `Required`, against a new snapshot taken after every step is ready. It is
    run again, at most three times in all, only when AICR could not finish a
@@ -215,12 +232,26 @@ A rollout needs approval when any step does:
 | Remove, adoption and runtime removal | Required |
 | Verify (re-run a readiness gate) | Not required |
 
+A chart owns CRDs when it, or a subchart it packages, has a `crds/`
+directory or a template or other file that declares one. A chart the
+operator cannot scan in full counts as owning them: one with a template or
+other file over 8 MiB, or with subcharts packaged more than two levels deep.
+A component's chart too large for the operator to read at all stops
+resolution instead; see [Render and registry
+content](troubleshooting.md#render-and-registry-content).
+
 AICR has transition records for few components, so most upgrades need
 approval. Approval is the approver's statement that workloads are prepared:
 the operator never drains nodes, and GPU Operator owns driver-upgrade drains.
 For an upgrade AICR assesses `manual`, approving also takes on the record's
 precondition and every step but the apply, which is the only one the operator
-performs; `kubectl aicr describe` lists them under "Recorded steps".
+performs; `kubectl aicr describe` lists them under "Recorded steps". It
+lists each `safe` record's summary there too: a `safe` upgrade with no CRD
+change needs no approval of its own, but when it shares a rollout with one
+that does, its summary can name a check to make before approving. `breaking`
+beside a verdict means the versions cross a major, a minor below 1.0, or a
+prerelease of the same version; it does not change whether a step needs
+approval.
 
 Approvers are the users and groups in the chart's `approvers` value. They hold
 the `aicr-operator-approver` roles, which grant no `ClusterRuntime` edits, so
@@ -381,26 +412,41 @@ aicr:
     - ghcr.io/nvidia/aicr-validators/performance:v1.x.y@sha256:<digest>
 ```
 
-For example, from v1.1.2 to v1.2.0, the newest release tested in CI:
+For example, from v1.2.0 to v1.3.0, the newest release tested in CI:
 
 ```yaml
 aicr:
-  version: v1.2.0
-  image: ghcr.io/nvidia/aicr:v1.2.0@sha256:5ef145efe98ede9f4da7be3a66304f5fdc95dd31f825295d6a608a39feb0cac9
+  version: v1.3.0
+  image: ghcr.io/nvidia/aicr:v1.3.0@sha256:4c7ac0f9461c14b7d9a4e86d7742b968a25149ed83bcbc52cd87e11d22871304
   validatorImages:
-    - ghcr.io/nvidia/aicr-validators/deployment:v1.2.0@sha256:0e697d829916b20698488666d44ecde9429c7d1c6063c5ade425d2f27845ca95
-    - ghcr.io/nvidia/aicr-validators/conformance:v1.2.0@sha256:8930d96f5bf6cd72058d4496558963a9b67383d4ceb776f44cafd1a7f3259913
-    - ghcr.io/nvidia/aicr-validators/performance:v1.2.0@sha256:35f45febe754141b3f9154fc0af3273c5de6c4a9d68da154d4477ef3dd2f4722
+    - ghcr.io/nvidia/aicr-validators/deployment:v1.3.0@sha256:46f13d013f73280f216c531d6cb758ec15442aa832310635a0d62f81c7c50b51
+    - ghcr.io/nvidia/aicr-validators/conformance:v1.3.0@sha256:1f40feb5e8be3f86dd9cf21cdda7701cf552bb915b8687c952de7604c9446e5a
+    - ghcr.io/nvidia/aicr-validators/performance:v1.3.0@sha256:3e6377cffd2f640c7e201cadd1f18d6a87bcdcb38b1672c4626a89e0dacef98e
 ```
 
-For `h100-eks-ubuntu-training-kubeflow` the new recipe moves
-nvidia-dra-driver-gpu, which AICR assesses `safe`, and nfd, which it assesses
-`manual` with recorded steps, so the rollout needs approval. Its RBAC steps
-apply only when the topology-updater RBAC is managed outside the chart
-(`topologyUpdater.rbac.create=false`). AICR v1.2.0's nfd record has no `apply`
-step, so the rollout does not pause for acknowledgement after nfd is applied:
-if you widened the RBAC, do `narrow-nrt-rbac` yourself once every
-topology-updater Pod runs 0.20.x and you no longer need a rollback path.
+For `h100-eks-ubuntu-training-kubeflow` the new recipe adds nktp, in its own
+`nktp` namespace: add `{name: nktp, podSecurity: privileged}` to
+`namespaces.components` in the same chart upgrade, or the operator refuses the
+plan (`NamespaceNotAllowed`) before any rollout. nktp also runs its own
+metrics-server, which registers the cluster-wide
+`v1beta1.metrics.k8s.io` APIService. If
+`kubectl get apiservice v1beta1.metrics.k8s.io` shows that another provider
+already serves it, such as the EKS metrics-server add-on, resolve that before
+approving: either add a `spec.overrides` entry that turns nktp's off
+(`component: nktp`, `path: metrics-server.enabled`, `value: false`), or remove
+the other provider. The recipe also moves
+nodewright-operator, which AICR assesses `safe`, and kube-prometheus-stack and
+nvsentinel, which it assesses `manual` with recorded steps, so the rollout
+needs approval. nodewright-operator's upgrade is `safe` but crosses a
+breaking boundary, and its record's summary, which `kubectl aicr describe`
+shows, names a check: its drains now evict kube-system pods, so before
+approving confirm
+`kubectl get pdb -n kube-system` shows ALLOWED DISRUPTIONS of at least 1 for
+workloads on nodes NodeWright interrupts. Do nvsentinel's checks before
+approving too; its record ends with its `apply` step, so nothing waits after
+it. AICR v1.3.0's kube-prometheus-stack record names no `apply` step, so after
+it is applied the rollout pauses for acknowledgement of all three steps. Do
+`export` before approving; after the pause, do `clean-up`, then acknowledge.
 
 From v1.0.x, the same chart upgrade also moves validation to the v1.1
 identities: the launcher loses `cluster-admin`, the `aicr-validator`

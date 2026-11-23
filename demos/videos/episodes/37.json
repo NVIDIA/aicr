@@ -1,0 +1,83 @@
+{
+  "id": 37,
+  "slug": "one-config-two-entry-points",
+  "title": "One checked-in config, two entry points",
+  "track": "SDK, API, and automation",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/integrator/go-library.md#using-a-committed-aicrconfig",
+  "scenes": [
+    {
+      "heading": "One setting changed in two places",
+      "sub": "Keep the workstation and portal aligned",
+      "visual": "incident",
+      "items": [
+        "Workstation CLI",
+        "Production portal",
+        "Two config copies"
+      ],
+      "detail": "Illustrative: H100 training",
+      "result": "The two copies can drift",
+      "voice": [
+        "The portal changed GPU targets, but your workstation still uses yesterday’s criteria.",
+        "Both tools need one shared configuration."
+      ]
+    },
+    {
+      "heading": "Review changes in Git",
+      "sub": "Put the target into AICRConfig",
+      "visual": "layers",
+      "items": [
+        "AICRConfig",
+        "Target criteria",
+        "Catalog source"
+      ],
+      "detail": "spec.recipe.criteria",
+      "result": "One reviewed target definition",
+      "voice": [
+        "Put the target criteria in an AICRConfig file and commit it to Git.",
+        "The team can then review a change to the target in one place."
+      ]
+    },
+    {
+      "heading": "Load the same file twice",
+      "sub": "CLI flags and Go SDK options stay explicit",
+      "visual": "fork",
+      "items": [
+        "CLI reads config",
+        "Go calls LoadConfig",
+        "Catalog and criteria"
+      ],
+      "detail": "aicr recipe --config aicr-config.yaml",
+      "result": "Two entry points, one file",
+      "voice": [
+        "An operator gives the CLI that file through the config flag.",
+        "In Go, call LoadConfig, load the chosen catalog, and derive the recipe criteria and options from the file."
+      ]
+    },
+    {
+      "heading": "Make the change visible",
+      "sub": "Both tools resolve the revised target",
+      "visual": "compare",
+      "items": [
+        "Reviewed Git change",
+        "CLI recipe",
+        "Go recipe"
+      ],
+      "detail": "Illustrative: training target updated",
+      "result": "Matching criteria on both paths",
+      "voice": [
+        "After the review, both tools read the new settings.",
+        "Comparing their resolved criteria gives the team a way to check that they agree."
+      ]
+    }
+  ],
+  "viewer": "Maintainer sharing configuration between CLI and Go",
+  "payoff": "One reviewed AICRConfig change supplies matching criteria and catalog choices to both callers.",
+  "edges": [
+    0,
+    11,
+    24,
+    40,
+    53
+  ]
+}

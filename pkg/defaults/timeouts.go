@@ -1187,6 +1187,12 @@ const (
 	// os.ReadFile would allocate the whole file into memory.
 	MaxOpenVEXBytes int64 = 1 * 1024 * 1024 // 1 MiB
 
+	// MaxImageMetadataBytes caps one OCI index, manifest or image config blob
+	// that tools/image-unpack reads from a local layout. Release image
+	// manifests and configs are a few KiB; 4 MiB bounds a corrupt or hostile
+	// layout before the blob is decoded.
+	MaxImageMetadataBytes int64 = 4 * 1024 * 1024 // 4 MiB
+
 	// MaxConfigBytes caps the size of a user-supplied --config file. Real
 	// configs are well under 100 KiB; 1 MiB is generous headroom while
 	// preventing a hostile symlink (/proc, FUSE, NFS) from forcing the CLI

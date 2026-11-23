@@ -17,6 +17,7 @@ package aicrjob
 import (
 	"encoding/json"
 	"maps"
+	"slices"
 	"testing"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
@@ -127,6 +128,52 @@ func TestParseUpgradeReportV120(t *testing.T) {
 	}
 }
 
+// The v1.2.0 -> v1.3.0 transition from AICR v1.3.0, on both lanes, records
+// two manual verdicts, a safe one and an added component, so it needs
+// approval. kube-prometheus-stack's record names no apply step;
+// nvsentinel's ends with it.
+func TestParseUpgradeReportV130(t *testing.T) {
+	t.Parallel()
+	for _, lane := range []string{"eks", "gke"} {
+		t.Run(lane, func(t *testing.T) {
+			t.Parallel()
+			r, err := ParseUpgradeReport(fixtureAt(t, "v1.3.0", "upgrade-check-v1.2.0-to-v1.3.0-"+lane+".json"), "argocd")
+			if err != nil {
+				t.Fatalf("ParseUpgradeReport() = %v", err)
+			}
+			got := map[string]v1alpha1.Assessment{}
+			steps := map[string][]string{}
+			for i := range r.Components {
+				c := &r.Components[i]
+				got[c.Component] = c.Assessment()
+				for _, st := range c.Steps {
+					steps[c.Component] = append(steps[c.Component], st.ID)
+				}
+			}
+			want := map[string]v1alpha1.Assessment{
+				"kube-prometheus-stack": v1alpha1.AssessmentManual, "nodewright-operator": v1alpha1.AssessmentSafe,
+				"nvsentinel": v1alpha1.AssessmentManual, "nktp": v1alpha1.AssessmentNotApplicable,
+			}
+			if !maps.Equal(got, want) || r.Summary.Failing != 2 {
+				t.Fatalf("assessments = %v, failing = %d; want %v, 2", got, r.Summary.Failing, want)
+			}
+			if kps := steps["kube-prometheus-stack"]; !slices.Equal(kps, []string{"export", "upgrade", "clean-up"}) {
+				t.Errorf("kube-prometheus-stack steps = %v", kps)
+			}
+			if nvs := steps["nvsentinel"]; len(nvs) == 0 || nvs[len(nvs)-1] != ApplyStepID {
+				t.Errorf("nvsentinel steps = %v, want the apply step last", nvs)
+			}
+		})
+	}
+	added, err := ParseUpgradeReport(fixtureAt(t, "v1.3.0", "upgrade-check-eks-training-to-kubeflow.json"), "argocd")
+	if err != nil {
+		t.Fatalf("ParseUpgradeReport(added) = %v", err)
+	}
+	if c := added.Components[0]; c.Component != "kubeflow-trainer" || c.Change != "added" || c.Assessment() != v1alpha1.AssessmentNotApplicable {
+		t.Fatalf("added component = %+v", c)
+	}
+}
+
 func TestParseUpgradeReportRejects(t *testing.T) {
 	t.Parallel()
 	base := fixture(t, "upgrade-check-v0.22.0-to-v1.0.0-eks.json")
@@ -189,6 +236,78 @@ func TestAssessmentMapping(t *testing.T) {
 		c := ComponentChange{Change: change}
 		if got := c.Assessment(); got != want {
 			t.Errorf("a %s change without a verdict -> %s, want %s", change, got, want)
+		}
+	}
+}
+
+// Only a manual version change whose record has steps and names no apply
+// step holds every step for acknowledgement; a component the report does not
+// list holds nothing.
+// A manual record's steps after its apply step wait for an acknowledgement.
+// A record that names no apply step cannot say which steps follow the apply,
+// so every step waits.
+func TestHeldSteps(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		ids   []string
+		want  []string
+		every bool
+	}{
+		{"steps after the apply", []string{"check-host-port", ApplyStepID, "reset-breaker", "verify"}, []string{"reset-breaker", "verify"}, false},
+		{"apply is the last step", []string{"check-aws-replace-vm", ApplyStepID}, nil, false},
+		{"no apply step", []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}, []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}, true},
+		{"no steps", nil, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var steps []UpgradeStep
+			for _, id := range tt.ids {
+				steps = append(steps, UpgradeStep{ID: id})
+			}
+			if got, every := HeldSteps(steps); !slices.Equal(got, tt.want) || every != tt.every {
+				t.Errorf("HeldSteps(%v) = %v, %t; want %v, %t", tt.ids, got, every, tt.want, tt.every)
+			}
+		})
+	}
+}
+
+func TestUpgradeReportHoldsEveryStep(t *testing.T) {
+	t.Parallel()
+	steps := func(ids ...string) []UpgradeStep {
+		out := make([]UpgradeStep, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, UpgradeStep{ID: id, Description: id})
+		}
+		return out
+	}
+	report := &UpgradeReport{Components: []ComponentChange{
+		{Component: "nfd", Change: "version", Verdict: "manual", Steps: steps("widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac")},
+		{Component: "nvsentinel", Change: "version", Verdict: "manual", Steps: steps("check", ApplyStepID, "verify")},
+		{Component: "kube-prometheus-stack", Change: "version", Verdict: "safe", Steps: steps("export")},
+		{Component: "kai-scheduler", Change: "replaced", Verdict: "manual", Steps: steps("migrate-queues")},
+		{Component: "dynamo-platform", Change: "version", Verdict: "manual"},
+	}}
+	nfd := []string{"widen-nrt-rbac", "sync-nfd", "narrow-nrt-rbac"}
+	tests := []struct {
+		component string
+		held      []string
+		every, ok bool
+	}{
+		{"nfd", nfd, true, true},
+		{"nvsentinel", []string{"verify"}, false, true},
+		// Steps carried from an earlier rollout need not be this record's.
+		{"nfd", []string{"widen-nrt-rbac"}, false, false},
+		{"nvsentinel", []string{"check", ApplyStepID, "verify"}, false, false},
+		{"kube-prometheus-stack", []string{"export"}, false, false},
+		{"kai-scheduler", []string{"migrate-queues"}, false, false},
+		{"dynamo-platform", nil, false, false},
+		{"absent", nfd, false, false},
+	}
+	for _, tt := range tests {
+		if every, ok := report.HoldsEveryStep(tt.component, tt.held); every != tt.every || ok != tt.ok {
+			t.Errorf("HoldsEveryStep(%q, %v) = %t, %t; want %t, %t", tt.component, tt.held, every, ok, tt.every, tt.ok)
 		}
 	}
 }

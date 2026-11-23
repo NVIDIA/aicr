@@ -1,0 +1,202 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AICR Operator (ADR-027) lanes against AICR built from main, nightly
+# (tools/operator-main-aicr): the e2e suite with main's validators, whose
+# evidence-binding test operator-e2e-commit.yaml cannot run on a pull request,
+# and the upgrade from the newest published release to a candidate running
+# main's AICR. That upgrade resolves, renders and assesses main's whole kind
+# recipe from the published one and rolls out cert-manager, so main's AICR
+# failing on the recipe, an upgrade-check failure or a blocked add or removal
+# fails here the next morning, not on a release candidate. It syncs no other
+# component and resolves no other recipe. Pull requests that change the lane
+# run it too. A failed scheduled run posts to Slack (main-red-notify.yaml);
+# merge-gate.yaml's gate does not include it.
+
+name: Operator Nightly (main AICR)
+
+on:
+  schedule:
+    - cron: '23 9 * * *'  # daily, offset from the UAT, GPU and release crons
+  workflow_dispatch: {}
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/operator-main-aicr.yaml'
+      - 'tools/operator-main-aicr'
+      - 'tools/operator-lib.sh'
+      - 'tools/operator-qualify'
+      - 'tools/operator-candidate'
+      - 'tools/operator-kind'
+      - 'tools/operator-release/**'
+      - 'tests/operator/e2e/**'
+      - 'tests/operator/qualify/**'
+      - 'Makefile'
+      - '.settings.yaml'
+      - '.github/actions/operator-kind/**'
+      - '.github/actions/load-versions/**'
+      - '.github/actions/prep-kind-runner/**'
+      - '.github/actions/setup-build-tools/**'
+      - 'kwok/scripts/lib/image-cache.sh'
+      - 'kwok/scripts/lib/preload-image.sh'
+
+permissions:
+  contents: read
+
+# Keyed by event too, so a dispatch never replaces a pending scheduled run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # One commit for both lanes: the newest main commit whose validator images
+  # on-push.yaml published. The full history carries the tags its version is
+  # stamped from.
+  resolve:
+    name: Resolve main's AICR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      commit: ${{ steps.aicr.outputs.commit }}
+      version: ${{ steps.aicr.outputs.version }}
+      validator_images: ${{ steps.aicr.outputs.validator_images }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      - name: Resolve the commit and its validator images
+        id: aicr
+        run: |
+          set -euo pipefail
+          tools/operator-main-aicr resolve | tee -a "$GITHUB_OUTPUT"
+
+  # Pulls the ECR Public images the kind clusters need once, into the cache
+  # the KWOK and operator lanes share (kwok/scripts/lib/image-cache.sh). A
+  # cache hit pulls nothing.
+  prime-images:
+    name: Prime image cache (${{ matrix.image }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [registry, argocd_redis]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve image pins and cache keys
+        id: images
+        run: |
+          set -euo pipefail
+          bash kwok/scripts/lib/image-cache.sh settings .settings.yaml | tee -a "$GITHUB_OUTPUT"
+
+      - name: Cache image tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: /tmp/kwok-image-cache/${{ matrix.image }}
+          key: ${{ steps.images.outputs[format('{0}_key', matrix.image)] }}
+
+      - name: Prime image
+        env:
+          IMAGE: ${{ steps.images.outputs[format('{0}_image', matrix.image)] }}
+          CACHE_DIR: /tmp/kwok-image-cache/${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          bash kwok/scripts/lib/image-cache.sh save "${CACHE_DIR}" "${IMAGE}"
+
+  # Job timeouts exceed the suites' own bounds plus kind setup and the builds,
+  # so a hung suite fails with Go's goroutine dump and the cleanup still runs.
+  e2e:
+    name: E2E with main's AICR and validators on Kubernetes newest
+    needs: [resolve, prime-images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up the kind cluster
+        uses: ./.github/actions/operator-kind
+        with:
+          kubernetes: newest
+
+      - name: Run the e2e suite against main's AICR
+        env:
+          OPERATOR_E2E_REQUIRED: '1'
+          AICR_MAIN_COMMIT: ${{ needs.resolve.outputs.commit }}
+          AICR_MAIN_VERSION: ${{ needs.resolve.outputs.version }}
+          AICR_MAIN_VALIDATOR_IMAGES: ${{ needs.resolve.outputs.validator_images }}
+        run: make operator-main-aicr-e2e
+
+      - name: Delete kind cluster
+        if: ${{ always() }}
+        run: make operator-kind-down
+
+  qualify-published:
+    name: Qualify an upgrade from the published release to main's AICR on Kubernetes newest
+    needs: [resolve, prime-images]
+    runs-on: ubuntu-24.04
+    # Above the 45m test timeout make operator-qualify-published sets, plus
+    # kind setup and the AICR and candidate builds.
+    timeout-minutes: 80
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up the kind cluster
+        uses: ./.github/actions/operator-kind
+        with:
+          kubernetes: newest
+
+      - name: Qualify the upgrade to a candidate running main's AICR
+        env:
+          OPERATOR_E2E_REQUIRED: '1'
+          OPERATOR_KIND_IMAGE_CACHE: ${{ runner.temp }}/kind-images
+          GH_TOKEN: ${{ github.token }}
+          AICR_MAIN_COMMIT: ${{ needs.resolve.outputs.commit }}
+          AICR_MAIN_VERSION: ${{ needs.resolve.outputs.version }}
+          AICR_MAIN_VALIDATOR_IMAGES: ${{ needs.resolve.outputs.validator_images }}
+        run: make operator-main-aicr-qualify
+
+      - name: Operator logs
+        if: ${{ failure() || cancelled() }}
+        run: |
+          kubectl --kubeconfig .operator-e2e/kubeconfig -n aicr-system logs deployment/aicr-operator --tail=300 || true
+          kubectl --kubeconfig .operator-e2e/kubeconfig get clusterruntimes,runtimerollouts -o yaml || true
+
+      - name: Delete kind cluster
+        if: ${{ always() }}
+        run: make operator-kind-down

@@ -1,0 +1,83 @@
+{
+  "id": 15,
+  "slug": "use-your-own-catalog",
+  "title": "Use your own catalog",
+  "track": "Recipes and deployment",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/integrator/data-extension.md",
+  "scenes": [
+    {
+      "heading": "Your component belongs in the recipe",
+      "sub": "Add your private configuration as data",
+      "visual": "portal",
+      "items": [
+        "Internal service",
+        "Private component",
+        "Recipe catalog"
+      ],
+      "detail": "Example: in-house GPU component",
+      "result": "Resolve it with AICR",
+      "voice": [
+        "Your internal Kubernetes service needs a component your team maintains.",
+        "Put its registry entry and an overlay in a catalog directory so AICR can resolve it."
+      ]
+    },
+    {
+      "heading": "Choose how the catalog is loaded",
+      "sub": "Layer it or supply the entire catalog",
+      "visual": "layers",
+      "items": [
+        "Embedded catalog",
+        "External directory",
+        "Private overlay"
+      ],
+      "detail": "--data ./catalog",
+      "result": "Private files participate in resolution",
+      "voice": [
+        "Point the data flag at your directory to layer it over the embedded catalog.",
+        "If you supply a complete catalog, external only chooses that data by itself."
+      ]
+    },
+    {
+      "heading": "Catch mistakes while they are cheap",
+      "sub": "Validate the catalog before deploying",
+      "visual": "gate",
+      "items": [
+        "Required files",
+        "Registry references",
+        "Diagnostics"
+      ],
+      "detail": "aicr recipe validate --data ./catalog",
+      "result": "Missing reference caught before resolve",
+      "voice": [
+        "Run recipe validate against the catalog.",
+        "For example, a reference to an absent component gives you a diagnostic while you are still working on the data."
+      ]
+    },
+    {
+      "heading": "Render the component into the bundle",
+      "sub": "Reuse the validated catalog directory",
+      "visual": "compile",
+      "items": [
+        "Selected catalog",
+        "Resolved recipe",
+        "Custom component"
+      ],
+      "detail": "Supply the same data when bundling",
+      "result": "Private component in generated output",
+      "voice": [
+        "Select the catalog when you resolve the recipe and again when you bundle it.",
+        "The generated files now describe the private component your deployment tool needs to apply."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    12,
+    25,
+    39,
+    53
+  ],
+  "viewer": "Integrator with a private Kubernetes service",
+  "payoff": "Validate a private catalog and carry one custom runtime component from an overlay into the generated bundle."
+}

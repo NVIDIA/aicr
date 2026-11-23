@@ -39,13 +39,16 @@ fi
 TOOLS=(
   update-addlicense-checksums
   update-chainsaw-checksums
+  update-clamav-checksums
+  update-gitleaks-checksums
+  update-grype-checksums
   update-helm-diff-checksums
   update-helmfile-checksums
   update-oasdiff-checksums
   update-oras-checksums
   update-setup-envtest-checksums
 )
-KEYS=(addlicense chainsaw helm_diff helmfile oasdiff oras setup_envtest)
+KEYS=(addlicense chainsaw clamav gitleaks grype helm_diff helmfile oasdiff oras setup_envtest)
 
 failures=0
 fail() {

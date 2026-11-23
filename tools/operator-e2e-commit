@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Runs the operator e2e suite (make operator-e2e) against AICR built from the
+# checkout instead of a pinned release, stamped <operator.aicr_version>-next
+# (the shape of a goreleaser snapshot) and imported by digest into the nodes
+# of the operator's kind cluster (make operator-kind-up); see import_aicr in
+# tools/operator-lib.sh.
+#
+# The deployment-validation test that binds evidence to the validator images
+# is skipped. AICR built from a commit names its validators
+# ghcr.io/nvidia/aicr-validators/<phase>:sha-<commit>, which differ from the
+# release validators the suite pins, and only main commits have them
+# published; tools/operator-main-aicr runs it against a main commit's.
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+work="$(mktemp -d)"
+trap 'rm -rf "${work}"' EXIT
+
+export KUBECONFIG="${OPERATOR_E2E_KUBECONFIG:-${repo_root}/.operator-e2e/kubeconfig}"
+# shellcheck source=tools/operator-lib.sh
+source tools/operator-lib.sh
+
+version="$(setting '.operator.aicr_version')-next"
+import_aicr "" "${version}" "${work}"
+
+AICR_E2E_IMAGE="${AICR_IMPORTED_IMAGE}" AICR_E2E_VERSION="${version}" \
+  AICR_OPERATOR_E2E_SKIP_VALIDATION="AICR built from a commit names validator images other than the pinned release validators" \
+  make operator-e2e

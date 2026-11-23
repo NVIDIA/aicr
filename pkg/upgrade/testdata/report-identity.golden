@@ -16,7 +16,9 @@ tau-operator 0.17.2 -> 0.18.1  (manual)
   objects.
 
   recorded manual: the record covering 0.18.0 describes the move from 0.17.2
-  to 0.18.1. Follow the steps below, then apply
+  to 0.18.1. Follow the steps below in order. The apply step is where the
+  bundle is applied; a record without one does not mark when to apply, so
+  check the component's own upgrade guidance
 
   This hop also carries a relocation: namespace tau-system ->
   nvidia-tau-system. No record assesses it, and the steps below neither

@@ -1,0 +1,83 @@
+{
+  "id": 7,
+  "slug": "cluster-readiness-and-validation",
+  "title": "Will this cluster run my recipe?",
+  "track": "Core workflow",
+  "status": "stable",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/user/validation.md#when-to-validate",
+  "scenes": [
+    {
+      "heading": "Ready to install? Check first.",
+      "sub": "Show one failed prerequisite early",
+      "visual": "gate",
+      "items": [
+        "Cluster snapshot",
+        "Selected recipe",
+        "Readiness check"
+      ],
+      "detail": "Pre-deploy observed state",
+      "result": "Check before live validation",
+      "voice": [
+        "The cluster has GPUs, but the recipe also has prerequisites.",
+        "Compare the cluster snapshot with the recipe requirements before trying to run the live checks."
+      ]
+    },
+    {
+      "heading": "The kernel misses the minimum",
+      "sub": "Illustrative readiness result",
+      "visual": "compare",
+      "items": [
+        "Observed kernel 6.1",
+        "Required 6.8 or newer",
+        "Readiness failed"
+      ],
+      "detail": "Example: 6.1 < 6.8",
+      "result": "No validator Jobs start",
+      "voice": [
+        "In this example, the observed kernel is six point one and the recipe requires at least six point eight.",
+        "Readiness stops the run before any validator Jobs start."
+      ]
+    },
+    {
+      "heading": "Check the installed stack",
+      "sub": "Run the phases you need",
+      "visual": "inspect",
+      "items": [
+        "Deployment health",
+        "Workload capabilities",
+        "Performance"
+      ],
+      "detail": "aicr validate --phase deployment",
+      "result": "Component findings",
+      "voice": [
+        "Once the prerequisite is addressed and the bundle is deployed, choose which phases to run.",
+        "Deployment checks component health, conformance tests workload capabilities, and performance compares measurements with recipe thresholds."
+      ]
+    },
+    {
+      "heading": "Act on the specific result",
+      "sub": "Use the report to decide what to rerun",
+      "visual": "dashboard",
+      "items": [
+        "Passed",
+        "Failed",
+        "Skipped"
+      ],
+      "detail": "Read individual check results",
+      "result": "Identify what to fix or rerun",
+      "voice": [
+        "The validation report shows which checks passed, failed, or were skipped.",
+        "Read the individual finding, address the affected component or prerequisite, and rerun the checks relevant to that change."
+      ]
+    }
+  ],
+  "edges": [
+    0,
+    11,
+    24,
+    38,
+    53
+  ],
+  "viewer": "Cluster operator",
+  "payoff": "Watch an illustrative kernel prerequisite fail before validator Jobs run, then read a phase-specific result after deployment."
+}

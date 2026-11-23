@@ -1,0 +1,82 @@
+{
+  "id": 29,
+  "slug": "pause-suspend-or-revoke",
+  "title": "Pause, suspend, or revoke?",
+  "track": "Operator",
+  "status": "preview",
+  "source": "https://github.com/NVIDIA/aicr/blob/v1.3.0/docs/operator/operations.md#pausing-versus-suspending-the-engine",
+  "scenes": [
+    {
+      "heading": "An incident starts during a rollout",
+      "sub": "What changes need to stop?",
+      "visual": "incident",
+      "items": [
+        "Rollout active",
+        "Sync in flight",
+        "Incident declared"
+      ],
+      "voice": [
+        "An incident starts while Argo CD is applying a GPU stack change.",
+        "Decide whether to hold new rollout steps, suspend automated sync, or end the rollout."
+      ],
+      "result": "Choose the scope of the freeze"
+    },
+    {
+      "heading": "Pause holds new Operator steps",
+      "sub": "Automated Argo CD repair keeps running.",
+      "visual": "queue",
+      "items": [
+        "Pause requested",
+        "New step held",
+        "Argo CD repair on"
+      ],
+      "voice": [
+        "Pause holds the Operator at the next step boundary.",
+        "Argo CD can finish an in-flight sync and continues automated sync and drift repair, so a pause fits a rollout maintenance freeze."
+      ],
+      "detail": "spec.paused: true",
+      "result": "New Operator step waits"
+    },
+    {
+      "heading": "Suspend the deployment engine",
+      "sub": "Automated sync and drift repair stop.",
+      "visual": "gate",
+      "items": [
+        "Engine suspended",
+        "Automated sync off",
+        "Existing sync finishes"
+      ],
+      "voice": [
+        "Suspend the engine when you need to hold automated sync and drift repair too.",
+        "The Operator disables automated sync for its Applications, while a sync that already started can finish."
+      ],
+      "detail": "spec.suspendEngine: true",
+      "result": "Argo CD automated sync disabled"
+    },
+    {
+      "heading": "Revoke to withdraw approval",
+      "sub": "The rollout ends after its current step.",
+      "visual": "trace",
+      "items": [
+        "Approval revoked",
+        "Current step ends",
+        "Fresh approval needed"
+      ],
+      "voice": [
+        "Revoking approval lets the current step finish and ends the rollout.",
+        "Starting again takes a new rollout and fresh approval, so the team can review the state first."
+      ],
+      "detail": "kubectl aicr revoke rollout …",
+      "result": "Rollout ends as Revoked"
+    }
+  ],
+  "edges": [
+    0,
+    10,
+    25,
+    40,
+    53
+  ],
+  "viewer": "On-call GPU platform operators",
+  "payoff": "Choose between holding new Operator steps, stopping automated Argo CD sync, and ending the rollout."
+}

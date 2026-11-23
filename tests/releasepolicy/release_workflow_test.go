@@ -88,12 +88,19 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 		t.Error("resolve-candidates must expose one digest_map output")
 	}
 
-	scanText := marshalYAML(t, mapValue(t, jobs, "image-vuln-scan"))
-	if !strings.Contains(scanText, "fromJSON(needs.resolve-candidates.outputs.digest_map)[matrix.image.key]") {
-		t.Error("scanner must bind every image to the authoritative digest map")
+	checks := mapValue(t, jobs, "image-checks")
+	if fmt.Sprint(checks["uses"]) != "./.github/workflows/check-images.yaml" ||
+		fmt.Sprint(mapValue(t, checks, "with")["digest_map"]) != "${{ needs.resolve-candidates.outputs.digest_map }}" {
+
+		t.Error("image checks must receive the authoritative digest map")
 	}
-	if !strings.Contains(scanText, "@${{") {
-		t.Error("scanner must scan image@digest rather than a mutable tag")
+	checkJob := mapValue(t, mapValue(t, loadYAML(t, ".github/workflows/check-images.yaml"), "jobs"), "check")
+	checkText := marshalYAML(t, checkJob)
+	if strings.Count(checkText, "fromJSON(needs.validate-inputs.outputs.digest_map)[matrix.image.key]") != 2 {
+		t.Error("image checks must pull, and verify, every image by the validated digest map")
+	}
+	if !strings.Contains(checkText, `"${IMAGE}@${DIGEST}"`) {
+		t.Error("image checks must pull image@digest rather than a mutable tag")
 	}
 
 	attest := mapValue(t, jobs, "attest")
@@ -118,11 +125,13 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 	gateRun := fmt.Sprint(gateStep["run"])
 	for gate, variable := range map[string]string{
 		"resolve-candidates":    "RESOLVE_RESULT",
-		"image-vuln-scan":       "SCAN_RESULT",
+		"image-checks":          "IMAGE_CHECKS_RESULT",
 		"attest":                "ATTEST_RESULT",
+		"license-check":         "LICENSE_CHECK_RESULT",
+		"codeql":                "CODEQL_RESULT",
 		"promote-versions":      "PROMOTE_VERSIONS_RESULT",
 		"operator-candidate":    "OPERATOR_CANDIDATE_RESULT",
-		"operator-scan":         "OPERATOR_SCAN_RESULT",
+		"operator-checks":       "OPERATOR_CHECKS_RESULT",
 		"operator-reproducible": "OPERATOR_REPRODUCIBLE_RESULT",
 		"operator-lifecycle":    "OPERATOR_LIFECYCLE_RESULT",
 		"operator-validation":   "OPERATOR_VALIDATION_RESULT",
@@ -157,14 +166,14 @@ func TestReleaseUsesSingleDigestMap(t *testing.T) {
 	}
 }
 
-func TestReleaseScansResolvedDigestsOnBothPlatforms(t *testing.T) {
-	doc := loadYAML(t, ".github/workflows/on-tag.yaml")
-	scan := mapValue(t, mapValue(t, doc, "jobs"), "image-vuln-scan")
+func TestReleaseChecksResolvedDigestsOnBothPlatforms(t *testing.T) {
+	doc := loadYAML(t, ".github/workflows/check-images.yaml")
+	scan := mapValue(t, mapValue(t, doc, "jobs"), "check")
 	matrix := mapValue(t, mapValue(t, scan, "strategy"), "matrix")
 	images := sliceValue(t, matrix, "image")
 	platforms := sliceValue(t, matrix, "platform")
 	if len(images) != len(releaseImages) || len(platforms) != 2 {
-		t.Fatalf("scan matrix is %dx%d, want 7x2", len(images), len(platforms))
+		t.Fatalf("check matrix is %dx%d, want 7x2", len(images), len(platforms))
 	}
 	gotImages := make(map[string]string, len(images))
 	for _, raw := range images {
@@ -173,7 +182,7 @@ func TestReleaseScansResolvedDigestsOnBothPlatforms(t *testing.T) {
 	}
 	for key, image := range releaseImages {
 		if gotImages[key] != image {
-			t.Errorf("scan image %s = %q, want %q", key, gotImages[key], image)
+			t.Errorf("check image %s = %q, want %q", key, gotImages[key], image)
 		}
 	}
 	gotPlatforms := make([]string, 0, len(platforms))
@@ -182,11 +191,11 @@ func TestReleaseScansResolvedDigestsOnBothPlatforms(t *testing.T) {
 	}
 	sort.Strings(gotPlatforms)
 	if strings.Join(gotPlatforms, ",") != "linux/amd64,linux/arm64" {
-		t.Errorf("scan platforms = %v, want both release platforms", gotPlatforms)
+		t.Errorf("check platforms = %v, want both release platforms", gotPlatforms)
 	}
-	text := marshalYAML(t, scan)
-	if !strings.Contains(text, "GRYPE_PLATFORM: ${{ matrix.platform.name }}") {
-		t.Error("each scan must explicitly select its matrix platform")
+	steps := jobUses(t, scan, "./.github/actions/image-checks")
+	if len(steps) != 1 || fmt.Sprint(mapValue(t, steps[0], "with")["platform"]) != "${{ matrix.platform.name }}" {
+		t.Error("each image check must explicitly select its matrix platform")
 	}
 }
 
@@ -1313,8 +1322,10 @@ func TestReleaseAICRCheckFailsClosed(t *testing.T) {
 	gateRun := fmt.Sprint(gateStep["run"])
 	for gate, variable := range map[string]string{
 		"resolve-candidates": "RESOLVE_RESULT",
-		"image-vuln-scan":    "SCAN_RESULT",
+		"image-checks":       "IMAGE_CHECKS_RESULT",
 		"attest":             "ATTEST_RESULT",
+		"license-check":      "LICENSE_CHECK_RESULT",
+		"codeql":             "CODEQL_RESULT",
 	} {
 		if !containsString(stringSlice(check["needs"]), gate) ||
 			fmt.Sprint(gateEnv[variable]) != "${{ needs."+gate+".result }}" ||
@@ -1777,6 +1788,8 @@ func TestReleaseRunnableJobsHaveTimeouts(t *testing.T) {
 	for _, path := range []string{
 		".github/workflows/on-tag.yaml",
 		".github/workflows/attest-images.yaml",
+		".github/workflows/check-images.yaml",
+		".github/workflows/check-operator.yaml",
 		".github/workflows/build-attested.yaml",
 		".github/workflows/packaging.yaml",
 		".github/workflows/release-reverify.yaml",
