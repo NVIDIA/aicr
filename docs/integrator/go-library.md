@@ -1062,10 +1062,13 @@ result, err := client.ApplyValidationSweep(ctx, plan)
   when zero; negative is rejected. The floor outlasts the facade's whole-run
   cap and the largest embedded single-check envelope (which bounds a test
   namespace's life), not a whole uncapped CLI run; a `--data` catalog that
-  raises a check's `timeout` needs `OlderThan` above that timeout plus 4m5s; the liveness guards
+  raises a check's `timeout` keeps the default unless that timeout plus 4m5s
+  exceeds it, and then needs `OlderThan` above that sum; the liveness guards
   (below the default floor, no non-terminal pods in a test namespace — at
   or above the floor an aged namespace cannot belong to a live check and
-  leaked workloads never go terminal, so it is deleted with its pods; no
+  leaked workloads never go terminal, so it is deleted with its pods; below
+  the floor, no non-terminal gang pod for a Run:ai residue object's run
+  token; no
   validator Job carrying the
   run's `aicr.run/run-id` label in any namespace) plus the settle
   observation cover run-scoped objects.

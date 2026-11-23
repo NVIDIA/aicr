@@ -23,8 +23,9 @@ import (
 // NCCL bandwidth on a CRE Certification. Only the kubeflow leaf does. It lists
 // the CRE checks next to the inherited TrainJob checks, because an overlay
 // cannot drop an inherited check; the validator skips the nvls and net
-// TrainJob checks as superseded. The net floor is lower on CRE (30) than on
-// TrainJob (40) while the new nccl-tests image's EFA regression is open. The kubeflow leaf already
+// TrainJob checks as superseded. The net floor is 40 on both backends: the CRE
+// net entry sets NCCL_ALGO=Tree to work around the new nccl-tests image's EFA
+// regression (NVIDIA/nccl#2630). The kubeflow leaf already
 // carries kubeflow-trainer through the platform-kubeflow mixin that nvcre
 // needs. Attaching CRE to a shared base would install nvcre's CRDs and
 // cluster-scoped RBAC for every consumer of that base, including the Slurm and
@@ -117,7 +118,7 @@ func TestGB300EKSTrainingCREAdoption(t *testing.T) {
 				value string
 			}{
 				{creCheck, tt.wantCRE, ">= 700"},
-				{creNetCheck, tt.wantCRE, ">= 30"},
+				{creNetCheck, tt.wantCRE, ">= 40"},
 				{netCheck, tt.wantTrainJob, ">= 40"},
 				{nvlsCheck, tt.wantTrainJob, ">= 700"},
 			}
