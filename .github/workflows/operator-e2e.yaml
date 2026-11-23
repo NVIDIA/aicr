@@ -93,6 +93,37 @@ jobs:
           fi
           echo "releases=$(yq -o=json -I=0 '.operator.aicr_e2e' .settings.yaml)" >> "$GITHUB_OUTPUT"
 
+  # Each pinned AICR image must be its published release's, with provenance
+  # from attest-images.yaml at the release's tag. `make test` checks that the
+  # pins agree.
+  aicr-pins:
+    name: AICR pin provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5  # v7.1.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      - name: Verify the pinned AICR images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make operator-aicr-pins
+
   # Pulls the ECR Public images every kind job needs once, into the cache the
   # KWOK lanes share (kwok/scripts/lib/image-cache.sh, #2483), so the matrix
   # does not hit the per-IP anonymous pull limit. A cache hit pulls nothing.
