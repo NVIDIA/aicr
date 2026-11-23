@@ -57,8 +57,8 @@ func toSingleton(context.Context, client.Object) []reconcile.Request {
 }
 
 // relevantNode passes Node events that change what discovery reads: a node
-// added or removed, or a change of labels, taints, provider ID, node info or
-// readiness. Heartbeats do not reconcile anything.
+// added or removed, or a change of its labels or the node info of its tuple.
+// Heartbeats, taints and readiness do not reconcile anything.
 var relevantNode = predicate.Funcs{
 	UpdateFunc: func(e event.UpdateEvent) bool {
 		old, okOld := e.ObjectOld.(*corev1.Node)
@@ -207,7 +207,7 @@ func (w *engineWatch) Start(ctx context.Context) error {
 
 // CacheOptions scopes the manager's caches to what the operator's RBAC lets
 // it read: its ConfigMaps in the operator namespace, its AICR Jobs
-// in the Job namespaces, and Nodes stripped by the discovery transform. The
+// in the Job namespaces, and Nodes projected to what discovery reads. The
 // engine's objects have their own cache (engineCacheOptions). Everything else
 // is read uncached.
 func CacheOptions(operatorNamespace string, jobNamespaces ...string) cache.Options {
