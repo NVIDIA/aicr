@@ -41,7 +41,8 @@ jobs:
     uses: NVIDIA/security-workflows/.github/workflows/security-suite.yml@d8189f3176942de7ffe2c48bcd7bb5fbdee2dd15  # v0.6.0
     with:
       suite-runs-on: ubuntu-24.04
-      nspect-id: ${{ vars.NSPECT_ID }}
+      # aicr's nSpect ID; the NSPECT_ID repository variable overrides it once set.
+      nspect-id: ${{ vars.NSPECT_ID || 'NSPECT-L0D3-4EOL' }}
 
       enable-secret-scan: true
       secret-runs-on: linux-amd64-cpu4
