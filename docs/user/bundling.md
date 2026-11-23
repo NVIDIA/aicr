@@ -1192,6 +1192,15 @@ before installing it:
 cd bundles && aicr verify . && chmod +x deploy.sh && ./deploy.sh
 ```
 
+`deploy.sh` needs `helm` and `kubectl` on `PATH`. A bundle with a component
+that owns its CRDs also needs `timeout` from GNU coreutils (or `gtimeout`):
+that component's `apply-crds.sh` bounds the CRD step with it and refuses to
+run without it. Stock macOS ships neither, so install coreutils first
+(`brew install coreutils`); `deploy.sh`'s pre-flight checks for it before
+installing anything. In a bundle set, each class directory's `deploy.sh`
+checks only its own components, so a set can install `core/` before `ops/`
+stops on it.
+
 For a bundle set generated with `--split`, verify at the set root, then run
 each class's own `deploy.sh` in the order `split.yaml` lists under
 `classOrder`. A set contains a directory only for classes that have an

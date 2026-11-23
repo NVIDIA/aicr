@@ -16,6 +16,9 @@ lists, see the [CLI Reference](cli-reference.md).
   local Kind/KWOK cluster for a dry run). `kubectl` configured to reach it.
 - The `helm` binary on your `PATH` (the default `helm` deployer emits Helm
   commands).
+- `timeout` from GNU coreutils (or `gtimeout`) on your `PATH`: components that
+  own their CRDs bound that step with it. Stock macOS ships neither; install
+  them with `brew install coreutils`.
 - On EKS, an AWS credential path for the EBS CSI driver. The bundle installs
   the driver but not its credentials, and without them no volume can be
   provisioned — see

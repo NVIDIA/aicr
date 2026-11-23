@@ -93,7 +93,7 @@ if [[ -z "${DRY_RUN_FLAG:-}" ]]; then
 fi
 
 {{ end }}helm upgrade --install ${FORCE_CONFLICTS_FLAG} {{ .Name | shq }} "${CHART_REF}" \
-  ${REPO:+--repo "${REPO}"} "${CHART_VERSION_ARGS[@]}" \
+  ${REPO:+--repo "${REPO}"} ${CHART_VERSION_ARGS[@]+"${CHART_VERSION_ARGS[@]}"} \
   --namespace {{ .Namespace | shq }} --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${HELM_CONN[@]+"${HELM_CONN[@]}"} ${HELM_DEBUG_FLAG:-}
