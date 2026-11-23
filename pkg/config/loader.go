@@ -139,7 +139,7 @@ func readFile(ctx context.Context, path string) ([]byte, error) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		data, err := readFileBounded(path)
+		data, err := readLocal(path)
 		done <- result{data: data, err: err}
 	}()
 	select {
@@ -150,6 +150,9 @@ func readFile(ctx context.Context, path string) ([]byte, error) {
 			fmt.Sprintf("stopped reading config file %q", path))
 	}
 }
+
+// readLocal is readFileBounded; tests wrap it to see when a read has started.
+var readLocal = readFileBounded
 
 func readFileBounded(path string) ([]byte, error) {
 	// Stream the read through io.LimitReader rather than os.ReadFile so a

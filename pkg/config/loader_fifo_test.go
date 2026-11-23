@@ -45,12 +45,30 @@ func fifo(t *testing.T) string {
 	return path
 }
 
+// waitFor polls cond until it holds, failing the test after 5s.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out after 5s waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // A FIFO with no writer blocks the open in the kernel. Ctrl-C cancels the
 // command's context, and the read must return at once rather than hang. The
 // abandoned read's goroutine ends once a writer releases it, so a canceled
 // read leaks nothing in a long-lived caller.
 func TestReadFileReturnsWhenCanceledOnAFIFOWithoutAWriter(t *testing.T) {
 	path := fifo(t)
+	started := make(chan struct{})
+	t.Cleanup(func() { readLocal = readFileBounded })
+	readLocal = func(p string) ([]byte, error) {
+		close(started)
+		return readFileBounded(p)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	before := runtime.NumGoroutine()
@@ -59,8 +77,11 @@ func TestReadFileReturnsWhenCanceledOnAFIFOWithoutAWriter(t *testing.T) {
 		_, err := readFile(ctx, path)
 		done <- err
 	}()
-	// Let the read reach the blocking open before the cancellation.
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("readFile did not start its read within 5s")
+	}
 	cancel()
 	select {
 	case err := <-done:
@@ -69,19 +90,19 @@ func TestReadFileReturnsWhenCanceledOnAFIFOWithoutAWriter(t *testing.T) {
 		t.Fatal("readFile still blocked 5s after its context was canceled")
 	}
 
-	w, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		t.Fatalf("open the FIFO for writing: %v", err)
-	}
-	_ = w.Close()
-	deadline := time.Now().Add(5 * time.Second)
-	for runtime.NumGoroutine() > before {
-		if time.Now().After(deadline) {
-			t.Fatalf("the canceled read's goroutine did not exit after a writer released it: %d goroutines, %d before",
-				runtime.NumGoroutine(), before)
+	// A writer can open the FIFO only once the read is blocked in its open,
+	// so the open is retried until it is.
+	waitFor(t, "a writer to open the FIFO and release the read", func() bool {
+		w, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+		if err != nil {
+			return false
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		_ = w.Close()
+		return true
+	})
+	waitFor(t, "the canceled read's goroutine to exit", func() bool {
+		return runtime.NumGoroutine() <= before
+	})
 }
 
 // A context canceled before the read starts, as when Ctrl-C lands first,
