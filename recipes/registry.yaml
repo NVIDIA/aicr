@@ -1696,12 +1696,15 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/runai-oss
       defaultChart: runai-cluster
+      # A chart in the repository index is not proof its images exist: NGC
+      # serves chart 3.0.24 without the images it references. Before moving
+      # this pin, check that every image the chart renders can be pulled.
       # renovate: datasource=helm depName=runai-cluster registryUrl=https://helm.ngc.nvidia.com/nvidia/runai-oss
-      defaultVersion: "3.0.24"
-      # SHA-256 of runai-cluster-3.0.24.tgz as served by NGC (matches the
+      defaultVersion: "3.0.26"
+      # SHA-256 of runai-cluster-3.0.26.tgz as served by NGC (matches the
       # repository index). The repo publishes no .prov file, so this is the
       # only integrity anchor --vendor-charts has.
-      defaultDigest: sha256:bc7e19a9a02ad012cc426e0e7c4f062b62a88d4e9a00e719ad31887890e2700c
+      defaultDigest: sha256:7cff4219036645668f9b0488e1e7a4e70e663fe6e03e5d013b3050cfa7782723
       # The chart's templates name this namespace outright, so the release
       # cannot live anywhere else. Its pre-install hook labels the namespace
       # pod-security.kubernetes.io/enforce=privileged itself.
@@ -1709,7 +1712,7 @@ components:
     # global.tolerations reaches the operator, the hook Jobs and the KAI
     # operator and KRM subcharts; karta and gpu-fractioning read only their
     # own tolerations value, so all three paths are needed to cover every
-    # pod the chart renders (verified by render at 3.0.24). global.nodeSelector
+    # pod the chart renders (verified by render at 3.0.26). global.nodeSelector
     # reaches only the KAI subcharts, so no nodeSelector path is mapped until
     # the chart threads one through.
     nodeScheduling:

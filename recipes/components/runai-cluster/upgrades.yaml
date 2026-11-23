@@ -16,14 +16,20 @@ apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: runai-cluster
 transitions:
-  # from starts at 3.0.20, the release AICR pinned before 3.0.24 and the only
-  # one assessed here; an origin below it resolves to blocked. The chart
-  # change itself is fix-only (upstream 3.0.21-3.0.23 notes; 3.0.24 adds no
-  # commit over 3.0.23); the RunaiConfig CRD gains one optional field, and
-  # helm template with AICR's values renders the same Deployments and hook
+  # from starts at 3.0.20, the last release before 3.0.26 that AICR pinned and
+  # NGC serves images for; an origin below it resolves to blocked. The boundary
+  # is 3.0.26 and not the 3.0.24 AICR pinned in between: NGC serves chart
+  # 3.0.24 without the images it references and no 3.0.25 chart, so a record
+  # ending at 3.0.24 would route a 3.0.20 cluster through a release that cannot
+  # install. Both stay in from so that no version below the pin matches
+  # nothing. The chart change itself is fix-only (upstream 3.0.21-3.0.23 notes;
+  # 3.0.24 adds no commit over 3.0.23, and 3.0.25 and 3.0.26 change only Go
+  # module files on the cluster side); chart 3.0.26 differs from 3.0.24 in its
+  # version and image tags alone. The RunaiConfig CRD gains one optional field,
+  # and helm template with AICR's values renders the same Deployments and hook
   # Jobs. The verdict is manual because of how every upgrade is driven.
-  - from: ">=3.0.20 <3.0.24"
-    to: "3.0.24"
+  - from: ">=3.0.20 <3.0.26"
+    to: "3.0.26"
     verdict: manual
     summary: >-
       Every runai-cluster upgrade needs a bootstrap token freshly issued by the
@@ -31,8 +37,8 @@ transitions:
       it is issued, so the install's token no longer works, and install.sh
       refuses to run Helm while it is empty. Upstream also requires the control
       plane chart to be upgraded before the cluster chart. The chart change
-      itself is fix-only; the embedded KAI resource-management moves from
-      v0.18.3 to v0.18.8.
+      itself is fix-only; from 3.0.20 the embedded KAI resource-management
+      moves from v0.18.3 to v0.18.8.
     precondition: >-
       Access to the Run:ai control plane this cluster registers with, to
       upgrade it and to issue a new bootstrap token. AICR bundles runai-cluster
@@ -43,7 +49,7 @@ transitions:
         steps:
           - id: upgrade-control-plane
             description: >-
-              Upgrade the Run:ai control plane Helm chart to 3.0.24 or later,
+              Upgrade the Run:ai control plane Helm chart to 3.0.26 or later,
               and wait for that upgrade to complete.
             reason: >-
               Upstream supports upgrading the cluster chart only after the
@@ -66,7 +72,7 @@ transitions:
               Re-run deploy.sh, or the runai-cluster install.sh, within two
               hours of issuing the token.
             reason: >-
-              Moves runai-cluster to 3.0.24.
+              Moves runai-cluster to 3.0.26.
           - id: clear-token
             description: >-
               Clear the token from cluster-values.yaml.
@@ -83,6 +89,8 @@ transitions:
               --dynamic value on the helm deployer, so no other deployer can
               carry the upgrade.
     references:
-      - https://github.com/dsx-ai-factory/run-ai/blob/3.0.24/docs/installation-and-configuration/upgrade/plan-the-upgrade.md
+      - https://github.com/dsx-ai-factory/run-ai/blob/3.0.26/docs/installation-and-configuration/upgrade/plan-the-upgrade.md
       - https://github.com/dsx-ai-factory/run-ai/releases/tag/3.0.23
       - https://github.com/dsx-ai-factory/run-ai/releases/tag/3.0.24
+      - https://github.com/dsx-ai-factory/run-ai/releases/tag/3.0.25
+      - https://github.com/dsx-ai-factory/run-ai/releases/tag/3.0.26
