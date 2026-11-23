@@ -4424,13 +4424,13 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   016-nvsentinel-mongodb/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel-mongodb/install.sh: a5e42338d334c4cf95cd52a11c0e95a5b1968a297410438b4e8ceb350d911360
   016-nvsentinel-mongodb/upstream.env: 13d69c43b9838f0696ff4147a0bf0ad558ccade8044e530c3a6c906e3e5391fe
-  016-nvsentinel-mongodb/values.yaml: 5c678796364f12e63342fafdb5fa6bb6636dd083d130563291bab1096c18b4a9
+  016-nvsentinel-mongodb/values.yaml: a3806dbd57419af5a85a192c7cfa6fde25ed1c3ab478ea8ccde2b09f391ebd6f
   017-nvsentinel-mongodb-post/Chart.yaml: 4b2c16ce61ea600f15205931307484310c6e7152bc94865c00eb84e7ea18d989
   017-nvsentinel-mongodb-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvsentinel-mongodb-post/install.sh: ba394a2f72fc022673b0b854b76e5a5232eb9dd72b118ef4785de1f873d3b5c4
   017-nvsentinel-mongodb-post/templates/client-certificate.yaml: 9262bfd83508a30382c87d07871b0744e43bbd37bd34e0f9666ff47f312912d9
   017-nvsentinel-mongodb-post/templates/connection.yaml: 4797542712c21ab2b8da3d786bd063d29bc1bcc3653b03ad484051a1253ac7a9
-  017-nvsentinel-mongodb-post/values.yaml: 5c678796364f12e63342fafdb5fa6bb6636dd083d130563291bab1096c18b4a9
+  017-nvsentinel-mongodb-post/values.yaml: a3806dbd57419af5a85a192c7cfa6fde25ed1c3ab478ea8ccde2b09f391ebd6f
   018-slinky-drainer-crds/Chart.yaml: 69af9ba1e9687c19a73ad71a0ac1bce5fb07ba922e8ef835208d56ec8d3b8057
   018-slinky-drainer-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-drainer-crds/install.sh: ad754dece702e4bfca1dd40e4a100e8c945728e2350e8445f8dca041d5023c0a
@@ -4446,7 +4446,7 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   020-nvsentinel/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-nvsentinel/install.sh: 290c0907c263ac3c1a976be76da13528e36fe7f1db79945783b6ac7da4588857
   020-nvsentinel/upstream.env: a6151216963428877050a229dad68ce7e65a872fd7522cecc50172cd5609f3a7
-  020-nvsentinel/values.yaml: 0f0f32c26d9e8dda24ecde9b2d0f45bfb1323b73705afa316eabba6a2e74d2c8
+  020-nvsentinel/values.yaml: b496bdb51deca16f57fc853648b57a95d742a660127d3a61ad8656f9c0a576e1
   021-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   021-slinky-slurm-operator-crds/install.sh: b763afb19a730721e43f3a5be956d4ff183eb0623c8e3c168544ad26e8fbb46f
   021-slinky-slurm-operator-crds/upstream.env: 8e5d5bb8937b1af2120817e7bbe90c07284fc602be78898031dd4ba8928b0612
@@ -4465,13 +4465,13 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   024-slinky-slurm/upstream.env: 2a86c45383aaed8aae07bdc46abae8cb0212215e3ad8027436fcfd632286fc44
   024-slinky-slurm/values.yaml: 24b4418eae1e7dec15ae641661f5a21b925dd268b28304b18ad7639269e288a2
   README.md: 839b3194acb993051cbf92e1cb7bca8805b76c960bf4c3f32276362414f37424
-  UPGRADING.md: eabfefdd9595ad13c2b953599b5de5c3bdfc9281b0bc49739bc5f415b959c90e
-  bundle-info.yaml: f5a1c9c1a8f5e0ac10f48de4ff9b9bc8f8646b9d0f12443b44d8f041abab6806
-  checksums.txt: df6d6fe0495c1e9965e95f848c9247ec0275f913c25bcdcebdcdc66f80062f68
+  UPGRADING.md: 1d0dc5aa594389487c1b803b9f9510f3e1e0ffa98890a586a65963978460f7a2
+  bundle-info.yaml: 48601941ee6f4849c25813dc2849ea4988616b8af12cdf9ffb5b8cd447acf8f3
+  checksums.txt: 31c27f52e5f08337a7d1514a0a503c2219e20e1fc11398a141b840d621288ac5
   data/overlays/stock-render-opt-in.yaml: 328e7217055d4c00c950d690a1579830a95456e9953214a1ec0803416edaaaf3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: a1caa602f37efd2f1d9109d1de28f7642b5bcfbfff3396fdc6e274a14f224411
-  recipe.yaml: 98a92880b03c1ebbfd3545c07304400c1d6551ffac33997b6f9093975fc436b8
+  recipe.yaml: b3d4b5f9b0696e0cc4a7c043349f9d718acd837b1936c94397e0d23d4483c081
 h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 00574b8307fa54f90f18cd999a2b175a75a547942fd18cb242bd83b7af836d5a

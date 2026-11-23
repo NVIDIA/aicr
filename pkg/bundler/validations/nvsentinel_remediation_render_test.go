@@ -86,7 +86,7 @@ var renderedSetupJob = regexp.MustCompile(`^release-nvsentinel-external-mongodb-
 
 // perconaSetupImage runs NVSentinel's external-datastore setup Job: the
 // mongod image, which ships mongosh.
-const perconaSetupImage = "docker.io/percona/percona-server-mongodb:8.0.32-14@sha256:5ba5f240d2dc98bc6236ab1d79c0862c4b62dba9d98cd0ffdf716c30473d2d11"
+const perconaSetupImage = "docker.io/percona/percona-server-mongodb:8.0.38-16@sha256:60ec65283ad2108622762910fc964ed4a2617efd05301c691dcb203a04566d97"
 
 // perconaImages are every image the separately bundled datastore renders,
 // pinned in recipes/components/{psmdb-operator,nvsentinel-mongodb}.
