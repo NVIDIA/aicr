@@ -329,6 +329,32 @@ func TestChartBudgetBounds(t *testing.T) {
 	}
 }
 
+// The two zero blocks that end a tar archive are read like any other bytes:
+// a chart whose budget runs out on the last of them was not read within it.
+func TestChartScansCountTheArchiveEnd(t *testing.T) {
+	t.Parallel()
+	archive := registrytest.TarGz(t, templateChart(t, 1))
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, err := io.Copy(io.Discard, gz)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Room for the content and the first zero block, but not the second.
+	short := func() *chartBudget { return &chartBudget{bytes: size - 2*512 + 600, entries: maxChartScanEntries} }
+	if owns, err := chartOwnsCRDs(archive, short()); !owns || err != nil {
+		t.Errorf("chartOwnsCRDs() = %v, %v; want true, failing closed", owns, err)
+	}
+	if _, err := chartDefaults(archive, short()); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		t.Errorf("chartDefaults() = %v, want the budget spent", err)
+	}
+	if owns, err := chartOwnsCRDs(archive, &chartBudget{bytes: size, entries: maxChartScanEntries}); owns || err != nil {
+		t.Errorf("chartOwnsCRDs() within the budget = %v, %v", owns, err)
+	}
+}
+
 // A metered reader fails once its budget is spent, so a chain of headers no
 // entry declares stops decompressing there.
 func TestMeteredReaderStopsAtItsBudget(t *testing.T) {

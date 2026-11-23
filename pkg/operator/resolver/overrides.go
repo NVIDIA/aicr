@@ -198,6 +198,9 @@ func readArchive(archive []byte, b *chartBudget) (map[string][]byte, error) {
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
+			if b.spent() {
+				return nil, errChartBudget()
+			}
 			return files, nil
 		}
 		if err != nil {

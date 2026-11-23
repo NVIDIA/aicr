@@ -460,7 +460,7 @@ func scanCRDs(archive []byte, depth int, b *chartBudget) (bool, error) {
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return false, nil
+			return b.spent(), nil
 		}
 		if err != nil {
 			if b.spent() {
