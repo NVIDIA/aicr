@@ -1273,7 +1273,7 @@ components:
       defaultRepository: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
       defaultChart: aws-ebs-csi-driver/aws-ebs-csi-driver
       # renovate: datasource=helm depName=aws-ebs-csi-driver registryUrl=https://kubernetes-sigs.github.io/aws-ebs-csi-driver
-      defaultVersion: 2.68.0
+      defaultVersion: 2.68.1
       defaultNamespace: kube-system
     nodeScheduling:
       system:
