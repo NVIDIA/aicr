@@ -24,6 +24,8 @@ import (
 	"testing"
 
 	"aicr.run/pkg/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 )
 
 const validYAML = `kind: AICRConfig
@@ -147,9 +149,7 @@ func TestLoad_EmptySource(t *testing.T) {
 
 func TestLoad_FileNotFound(t *testing.T) {
 	_, err := config.Load(context.Background(), "/nonexistent/path/config.yaml")
-	if err == nil {
-		t.Fatal("expected error for missing file, got nil")
-	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeNotFound)
 }
 
 func TestLoad_InvalidYAML(t *testing.T) {
