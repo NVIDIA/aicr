@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"aicr.run/pkg/defaults"
 	aicrErrors "aicr.run/pkg/errors"
@@ -26,6 +27,7 @@ import (
 	"aicr.run/validators"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 )
 
 // creNCCLCheckNames are the CRE-driven NCCL checks. They share one
@@ -126,53 +128,94 @@ func validateCRENcclAllReduceBw(
 	if err != nil {
 		return "", false, err
 	}
-	reading, err := readCREBandwidth(ctx.Ctx, dyn, ctx.Namespace, workflowName, run.GetCreationTimestamp())
+	return judgeCRENCCLRun(ctx, dyn, workflowName, run.GetCreationTimestamp(), threshold)
+}
+
+// judgeCRENCCLRun reads a completed run's final measurements, asserts the
+// transport that carried it, and judges its peak bus bandwidth against
+// threshold.
+func judgeCRENCCLRun(
+	ctx *validators.Context,
+	dyn dynamic.Interface,
+	workflowName string,
+	createdAt metav1.Time,
+	threshold float64,
+) (actual string, passed bool, err error) {
+
+	reading, err := readCREBandwidth(ctx.Ctx, dyn, ctx.Namespace, workflowName, createdAt)
 	if err != nil {
 		return "", false, err
 	}
-	bw := reading.MaxBusGBps
+	emitCREBandwidthExtras(reading.MaxBusGBps, threshold)
 
-	emitCREBandwidthExtras(bw, threshold)
-
-	logs, logErr := creLauncherLogs(ctx, workflowName, run.GetCreationTimestamp())
-	if err := verifyCRETransport(logs, logErr, reading.Transports); err != nil {
+	logs, logErr := creLauncherLogs(ctx, workflowName, createdAt)
+	evidence, err := verifyCRETransport(logs, logErr, reading.Transports)
+	if err != nil {
 		return "", false, err
 	}
+	fmt.Printf("NCCL transport asserted from %s: %s\n", evidence.Source, strings.Join(evidence.Transports, ", "))
 
-	actual, passed = creNCCLVerdict(bw, threshold)
+	actual, passed = creNCCLVerdict(reading.MaxBusGBps, threshold)
 	return actual, passed, nil
 }
 
+// creTransportEvidence is the transport a run's assertion accepted and the
+// record it was read from.
+type creTransportEvidence struct {
+	Source     string
+	Transports []string
+}
+
+const (
+	creTransportSourceLauncherLog = "launcher log"
+	creTransportSourceMeasurement = "BandwidthMeasurement status.transport"
+)
+
 // verifyCRETransport asserts that a network transport, not Socket, carried the
 // run. The launcher log's "Using network" banner is the authority when it is
-// there. It is printed once at initialization, so a long launcher log that
-// kubelet rotates, as the TCPXO teardown output does on GKE, can lose it from
-// the one segment the logs API returns. In that case, and when the log cannot
-// be read at all, the assertion falls back to the transport CRE recorded on the
-// BandwidthMeasurement from the same banner. Neither source present is a
-// failure, and a recorded Socket is a failure, so the fallback never passes a
-// run the log would have failed.
-func verifyCRETransport(logs string, logErr error, recorded []string) error {
-	if logErr == nil && ncclUsingNetRe.MatchString(logs) {
-		return verifyTransportFromLogs(logs, variantNET)
+// there. It is printed once at initialization, so kubelet rotating a long
+// launcher log, as the TCPXO teardown output does on GKE, can drop it from the
+// one segment the logs API returns. That only reaches this assertion when
+// rotation keeps the results table: when the table goes too, CRE completes the
+// measurement NoDataCollected and readCREBandwidth fails first (#3590).
+//
+// When the banner is missing, or the log cannot be read, the assertion falls
+// back to status.transport, which CRE records from the same banner only while
+// the nccl-bandwidth LogProfile defines networkTransport; a profile without
+// that pattern leaves nothing recorded, and the run fails as it would without
+// the fallback. Nothing recorded is a failure, and on the fallback a recorded
+// Socket is always a failure.
+func verifyCRETransport(logs string, logErr error, recorded []string) (creTransportEvidence, error) {
+	if logErr == nil {
+		if m := ncclUsingNetRe.FindStringSubmatch(logs); m != nil {
+			if err := verifyTransportFromLogs(logs, variantNET); err != nil {
+				return creTransportEvidence{}, err
+			}
+			return creTransportEvidence{Source: creTransportSourceLauncherLog, Transports: []string{m[1]}}, nil
+		}
 	}
 	if len(recorded) == 0 {
 		if logErr != nil {
-			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+			return creTransportEvidence{}, aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
 				"CRE launcher logs required for transport assertion", logErr)
 		}
-		return verifyTransportFromLogs(logs, variantNET)
+		return creTransportEvidence{}, verifyTransportFromLogs(logs, variantNET)
 	}
 	for _, name := range recorded {
 		if name == "Socket" {
-			return aicrErrors.New(aicrErrors.ErrCodeInternal,
+			return creTransportEvidence{}, aicrErrors.New(aicrErrors.ErrCodeInternal,
 				"NET variant selected but CRE recorded 'Using network Socket' — "+
 					"provider plugin (e.g. AWS Libfabric) did not load")
 		}
 	}
-	slog.Info("transport asserted from BandwidthMeasurement status; launcher log has no network banner",
-		"transport", recorded)
-	return nil
+	if logErr != nil {
+		slog.Warn("CRE launcher log unreadable; transport asserted from BandwidthMeasurement status",
+			"error", logErr, "transport", recorded)
+	} else {
+		slog.Info("CRE launcher log has no network banner; transport asserted from BandwidthMeasurement status",
+			"transport", recorded)
+	}
+	return creTransportEvidence{Source: creTransportSourceMeasurement, Transports: recorded}, nil
 }
 
 // creNCCLVerdict judges bw with the verdict the TrainJob check uses, so one

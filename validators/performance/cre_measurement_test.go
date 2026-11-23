@@ -160,7 +160,7 @@ func maxBusBandwidth(t *testing.T, client dynamic.Interface, createdAt metav1.Ti
 	return reading.MaxBusGBps, err
 }
 
-func TestListMaxBusBandwidth(t *testing.T) {
+func TestReadCREBandwidth(t *testing.T) {
 	createdAt := metav1.NewTime(time.Now())
 
 	tests := []struct {
@@ -234,12 +234,12 @@ func TestListMaxBusBandwidth(t *testing.T) {
 	}
 }
 
-// TestListMaxBusBandwidthRejectsCorruptBusBW separates absence from
+// TestReadCREBandwidthRejectsCorruptBusBW separates absence from
 // corruption. An empty sweep is a skip (covered above); a busBW CRE wrote that
 // will not parse, or is not finite, has to reach the caller naming the value —
 // dropped silently it either lowers the peak or, with one measurement,
 // resurfaces as a NotFound that explains nothing.
-func TestListMaxBusBandwidthRejectsCorruptBusBW(t *testing.T) {
+func TestReadCREBandwidthRejectsCorruptBusBW(t *testing.T) {
 	createdAt := metav1.NewTime(time.Now())
 
 	tests := []struct {
@@ -371,7 +371,7 @@ func TestGetGoodputStatus(t *testing.T) {
 // reading them judges a cluster on a partial sweep. Only Complete=True with
 // reason JobSucceeded means final; LogsUnavailable completes while leaving the
 // provisional results in place, and NoDataCollected has none at all.
-func TestListMaxBusBandwidthRequiresFinalResults(t *testing.T) {
+func TestReadCREBandwidthRequiresFinalResults(t *testing.T) {
 	createdAt := metav1.NewTime(time.Now())
 
 	tests := []struct {
@@ -437,7 +437,7 @@ func TestListMaxBusBandwidthRequiresFinalResults(t *testing.T) {
 // A run whose measurements have not all settled is not yet readable: taking
 // the peak over the finalized subset would report a number that the pending
 // one could still beat.
-func TestListMaxBusBandwidthWaitsForEveryMeasurement(t *testing.T) {
+func TestReadCREBandwidthWaitsForEveryMeasurement(t *testing.T) {
 	client := fake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(), creMeasurementListKinds(),
 		creMeasurement("BandwidthMeasurement", "m-final", creTestWorkflow, time.Minute, final(busBWStatus("300"))),
@@ -649,6 +649,14 @@ func TestReadCREBandwidthTransports(t *testing.T) {
 					final(withTransport(busBWStatus("300"), "FasTrak"))),
 			},
 			want: []string{},
+		},
+		{
+			name: "empty and non-string elements are dropped",
+			objects: []runtime.Object{
+				creMeasurement("BandwidthMeasurement", "m", creTestWorkflow, time.Minute,
+					final(withTransport(busBWStatus("300"), []any{"", int64(7), "FasTrak"}))),
+			},
+			want: []string{"FasTrak"},
 		},
 		{
 			name: "another workflow's transport is ignored",
