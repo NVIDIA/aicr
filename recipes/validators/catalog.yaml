@@ -401,8 +401,10 @@ validators:
   # superseded-by-cre). Measured on CRE v0.12.0 on 2026-11-18 (2×
   # p6e-gb300.36xlarge, spec.fabric efa): about 31 GB/s on NCCL 2.31.2 and
   # aws-ofi-nccl 1.21.1, against about 45 GB/s on the 2.27.7 and 1.16.3 image
-  # the TrainJob check uses. The recipe floor is set below the new image's
-  # figure while the regression is open with the NVCRE team.
+  # the TrainJob check uses, because 2.31.2's tuner picks Ring over Tree. The
+  # qualified entry sets NCCL_ALGO=Tree until NVIDIA/nccl#2630 is fixed, so the
+  # recipe floor is 40. Tree measured about 46 GB/s in the #3911 diagnostic
+  # run; a run through this check with the override is pending.
   - name: nccl-cre-all-reduce-bw-net
     phase: performance
     description: "Verify NCCL All Reduce Bus Bandwidth on the EFA/NET path via a Cluster Readiness Engine Certification with NVLS disabled"
