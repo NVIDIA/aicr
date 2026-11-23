@@ -187,10 +187,11 @@ timeout and is not checked.
 3. **The candidate stabilizes** for `spec.rollout.stabilizationWindow`
    (default 10 minutes) from its creation (`Reconciling=True`, `Stabilizing`).
 4. **The transition is assessed.** An `aicr upgrade-check` Job compares the
-   active plan's recipe with the target's (`Assessing`). A blocked verdict, or
-   a release that changes namespace or chart name, stops here with
-   `TransitionBlocked`. A renamed release is a `Remove` of the old and an
-   `Install` of the new.
+   active plan's recipe with the target's (`Assessing`). A blocked verdict, a
+   release that changes namespace or chart name, or a `manual` record that
+   holds more steps, or a longer step id, for acknowledgement than a rollout
+   records stops here with `TransitionBlocked`. A renamed release is a
+   `Remove` of the old and an `Install` of the new.
 5. **A rollout is created** from the assessment and the live Applications
    (`RolloutCreated`). Its steps, deadline and starting inventory are fixed.
 6. **It waits for approval** when any step needs it (below).

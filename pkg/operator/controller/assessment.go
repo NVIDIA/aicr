@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -43,8 +44,16 @@ const (
 	// ReasonAssessing: AICR's upgrade-check runs before the rollout exists.
 	ReasonAssessing = "Assessing"
 	// ReasonTransitionBlocked: a blocked verdict or an identity change needs
-	// a separately qualified migration.
+	// a separately qualified migration, or a manual record holds more steps,
+	// or a longer step id, for acknowledgement than a rollout records.
 	ReasonTransitionBlocked = "TransitionBlocked"
+)
+
+// The RuntimeRollout CRD's bounds on a step's postApplySteps (maxItems and
+// items.maxLength), which TestHeldStepLimitsMatchTheCRD holds these to.
+const (
+	maxHeldSteps        = 16
+	maxHeldStepIDLength = 63
 )
 
 // deployers maps the engine onto AICR's upgrade-check deployer.
@@ -289,10 +298,11 @@ func afterApply(steps []aicrjob.UpgradeStep) []string {
 //   - an upgrade that changes only values is Unknown: AICR assesses versions,
 //     not values;
 //   - a Blocked verdict, or a release whose namespace or chart name changes,
-//     blocks the transition.
+//     blocks the transition, and so does a manual record whose steps held for
+//     acknowledgement exceed the RuntimeRollout CRD's bounds.
 func assessSteps(steps []v1alpha1.RolloutStep, from, to *plan.Document, report *aicrjob.UpgradeReport) (bool, error) {
 	verdicts, postApply := map[string]v1alpha1.Assessment{}, map[string][]string{}
-	var blocked []string
+	var blocked, overflow []string
 	if report != nil {
 		for i := range report.Components {
 			c := &report.Components[i]
@@ -331,6 +341,9 @@ func assessSteps(steps []v1alpha1.RolloutStep, from, to *plan.Document, report *
 				s.Assessment = v1alpha1.AssessmentUnknown
 				if v, ok := verdicts[b.Component]; ok {
 					s.Assessment, s.PostApplySteps = v, postApply[b.Component]
+					if why := unheld(s.Release, s.PostApplySteps); why != "" {
+						overflow = append(overflow, why)
+					}
 				}
 				s.CRDChange = a.OwnsCRDs || b.OwnsCRDs
 			}
@@ -348,7 +361,26 @@ func assessSteps(steps []v1alpha1.RolloutStep, from, to *plan.Document, report *
 		return approval, operrors.New(operrors.ErrCodeInvalidRequest,
 			"the transition needs a separately qualified migration: "+strings.Join(blocked, "; ")).WithReason(ReasonTransitionBlocked)
 	}
+	if len(overflow) > 0 {
+		sort.Strings(overflow)
+		return approval, operrors.New(operrors.ErrCodeInvalidRequest,
+			"a rollout cannot record the steps to acknowledge: "+strings.Join(overflow, "; ")).WithReason(ReasonTransitionBlocked)
+	}
 	return approval, nil
+}
+
+// unheld says why a rollout cannot record a release's steps held for
+// acknowledgement within the CRD's bounds, or returns "".
+func unheld(release string, ids []string) string {
+	if len(ids) > maxHeldSteps {
+		return fmt.Sprintf("%s holds %d steps, more than %d", release, len(ids), maxHeldSteps)
+	}
+	for _, id := range ids {
+		if n := utf8.RuneCountInString(id); n > maxHeldStepIDLength {
+			return fmt.Sprintf("%s's step id %q is %d characters, more than %d", release, id, n, maxHeldStepIDLength)
+		}
+	}
+	return ""
 }
 
 // unfinished returns the rollouts to target that ended without succeeding

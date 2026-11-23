@@ -290,6 +290,13 @@ groups only redirect to it and apply nothing, is listed with that deployer in
 `applyStepExempt` in `pkg/recipe/upgrade_records_test.go`; only the group for
 that deployer is checked.
 
+**Keep a `manual` group's held steps within the operator's bounds.** The
+operator records at most 16 held steps per group (the steps after `apply`, or
+every step when there is none), each id at most 63 characters, and stalls an
+upgrade past either with `TransitionBlocked`.
+`TestManualRecordsFitTheOperatorsHold` checks every group, exempt ones
+included.
+
 The remainder is a convenience, not a default. A step written for Flux or Argo
 CD reads wrong under `terraform`, which also lands there unless a group names
 it. For an `ownsCRDs` component, a `manual` or `blocked` record must give
@@ -471,8 +478,9 @@ aicr upgrade-check --from "${OLD_RECIPE}" --to "${NEW_RECIPE}" --deployer helm
 ```
 
 The gate runs every well-formedness rule over every record the registry
-references, checks each `manual` group's `apply` step, then both coverage
-checks above against the merge base with
+references, checks each `manual` group's `apply` step and that its held steps
+fit the operator's bounds, then both coverage checks above against the merge
+base with
 `upstream/main` when your clone has that remote, else `origin/main`; set
 `AICR_UPGRADE_BASE_REF` to compare against another ref, and fetch the base
 first, since a stale one reports moves that are already on `main`. CI runs it
