@@ -148,7 +148,7 @@ _No images extracted._
 
 ### dra-node-labeler
 
-- `docker.io/alpine/kubectl:1.37.2@sha256:02791a008d526a0b2ca9edc9692d86933b4a164e64d1c012eb46e30fca18d818`
+- `docker.io/alpine/kubectl:1.37.2@sha256:06c6e028a77b54849182acb93e77f91f6312db02c6232e053212add91309349a`
 
 ### dranet
 
@@ -442,7 +442,7 @@ _No images extracted._
 
 ### slurm-accounting-mariadb
 
-- `mariadb:11.8.9@sha256:d36f18d65a0459510b8b0f643b226a6d299e3206486e2b64ff20754a6d291707`
+- `mariadb:11.8.9@sha256:e1d5495f445654134f226f55a41ce0da227116f6f27f283101f405c794d841fc`
 
 ### sriov-ib-networks
 
