@@ -18,13 +18,18 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"slices"
 	stdsort "sort"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"unicode/utf8"
+
+	"gopkg.in/yaml.v3"
 
 	"aicr.run/pkg/recipe/providertest"
 	"aicr.run/pkg/upgrade"
@@ -167,12 +172,6 @@ func TestManualRecordsNameTheirApplyStep(t *testing.T) {
 // of a manual transition or replacement in set that does not hold exactly one
 // apply step, and the number of groups it checked.
 func applyStepViolations(set upgrade.Set) ([]string, int) {
-	names := make([]string, 0, len(set))
-	for name := range set {
-		names = append(names, name)
-	}
-	stdsort.Strings(names)
-
 	var violations []string
 	checked := 0
 	check := func(component, where string, groups []upgrade.StepGroup) {
@@ -197,19 +196,30 @@ func applyStepViolations(set upgrade.Set) ([]string, int) {
 			}
 		}
 	}
+	eachManualRecord(set, check)
+	return violations, checked
+}
+
+// eachManualRecord calls fn, in component order, with the step groups of
+// each manual transition and replacement in set.
+func eachManualRecord(set upgrade.Set, fn func(component, where string, groups []upgrade.StepGroup)) {
+	names := make([]string, 0, len(set))
+	for name := range set {
+		names = append(names, name)
+	}
+	stdsort.Strings(names)
 	for _, name := range names {
 		rec := set[name]
 		for i := range rec.Transitions {
 			tr := &rec.Transitions[i]
 			if tr.Verdict == upgrade.VerdictManual {
-				check(name, "transition "+tr.From+" -> "+tr.To, tr.StepsByDeployer)
+				fn(name, "transition "+tr.From+" -> "+tr.To, tr.StepsByDeployer)
 			}
 		}
 		if r := rec.Replaces; r != nil && r.Verdict == upgrade.VerdictManual {
-			check(name, "replaces "+r.Component, r.StepsByDeployer)
+			fn(name, "replaces "+r.Component, r.StepsByDeployer)
 		}
 	}
-	return violations, checked
 }
 
 // The apply-step rule flags a manual group with no apply step or more than
@@ -264,6 +274,151 @@ func TestApplyStepViolations(t *testing.T) {
 			got, _ := applyStepViolations(tt.set)
 			if len(got) != len(tt.want) {
 				t.Fatalf("applyStepViolations() = %q, want %d violation(s) containing %q", got, len(tt.want), tt.want)
+			}
+			for i := range got {
+				if !strings.Contains(got[i], tt.want[i]) {
+					t.Errorf("violation %d = %q, want it to contain %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// The RuntimeRollout CRD's bounds on the steps the AICR Operator holds for
+// acknowledgement (RolloutStep.PostApplySteps in api/operator/v1alpha1),
+// which the operator checks an assessed record against before it creates a
+// rollout.
+const (
+	operatorHeldSteps        = 16
+	operatorHeldStepIDLength = 63
+)
+
+// operatorHeldSteps and operatorHeldStepIDLength are the bounds the chart's
+// RuntimeRollout CRD puts on a step's postApplySteps, in every version.
+func TestOperatorHoldBoundsMatchTheCRD(t *testing.T) {
+	crdPath := filepath.Join("..", "..", "charts", "aicr-operator", "files", "crds", "operator.aicr.run_runtimerollouts.yaml")
+	data, err := os.ReadFile(crdPath) //nolint:gosec // fixed in-repo CRD path
+	if err != nil {
+		t.Fatalf("read %s: %v", crdPath, err)
+	}
+	var crd map[string]any
+	if err = yaml.Unmarshal(data, &crd); err != nil {
+		t.Fatalf("parse %s: %v", crdPath, err)
+	}
+	dig := func(node any, keys ...string) map[string]any {
+		t.Helper()
+		m, ok := node.(map[string]any)
+		for _, k := range keys {
+			if !ok {
+				break
+			}
+			m, ok = m[k].(map[string]any)
+		}
+		if !ok {
+			t.Fatalf("%s has no %v", crdPath, keys)
+		}
+		return m
+	}
+	versions, _ := dig(crd, "spec")["versions"].([]any)
+	if len(versions) == 0 {
+		t.Fatalf("%s has no versions", crdPath)
+	}
+	for _, v := range versions {
+		held := dig(v, "schema", "openAPIV3Schema", "properties", "spec", "properties", "steps", "items", "properties", "postApplySteps")
+		if held["maxItems"] != operatorHeldSteps || dig(held, "items")["maxLength"] != operatorHeldStepIDLength {
+			t.Errorf("postApplySteps maxItems %v, items.maxLength %v; the record gate checks %d and %d",
+				held["maxItems"], dig(held, "items")["maxLength"], operatorHeldSteps, operatorHeldStepIDLength)
+		}
+	}
+}
+
+// TestManualRecordsFitTheOperatorsHold checks that no group of a manual
+// transition or replacement holds more steps after its apply step (or steps
+// in all, when it names none) than the AICR Operator records for
+// acknowledgement, nor a longer held step id. Past either, an operator
+// upgrade stalls with TransitionBlocked.
+func TestManualRecordsFitTheOperatorsHold(t *testing.T) {
+	set, _, err := LoadUpgradeRecords(context.Background(), defaultEmbeddedProvider)
+	if err != nil {
+		t.Fatalf("loading upgrade records: %v", err)
+	}
+	for _, v := range holdViolations(set) {
+		t.Error(v)
+	}
+}
+
+// holdViolations returns, in component order, a message for each group of a
+// manual transition or replacement in set whose held steps exceed what the
+// AICR Operator records.
+func holdViolations(set upgrade.Set) []string {
+	var violations []string
+	eachManualRecord(set, func(component, where string, groups []upgrade.StepGroup) {
+		for gi, g := range groups {
+			held := g.Steps
+			if i := slices.IndexFunc(g.Steps, func(s upgrade.Step) bool { return s.ID == applyStepID }); i >= 0 {
+				held = g.Steps[i+1:]
+			}
+			if len(held) > operatorHeldSteps {
+				violations = append(violations, fmt.Sprintf("%s %s group %d holds %d steps for the AICR Operator to acknowledge, more than %d; "+
+					"see docs/contributor/upgrade-records.md", component, where, gi, len(held), operatorHeldSteps))
+			}
+			for _, step := range held {
+				if n := utf8.RuneCountInString(step.ID); n > operatorHeldStepIDLength {
+					violations = append(violations, fmt.Sprintf("%s %s group %d holds step id %q of %d characters, more than %d; "+
+						"see docs/contributor/upgrade-records.md", component, where, gi, step.ID, n, operatorHeldStepIDLength))
+				}
+			}
+		}
+	})
+	return violations
+}
+
+// The hold rule counts the steps after the apply step, or every step when
+// there is none, checks only held step ids, and leaves safe records alone.
+func TestHoldViolations(t *testing.T) {
+	steps := func(ids ...string) []upgrade.Step {
+		out := make([]upgrade.Step, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, upgrade.Step{ID: id, Description: id})
+		}
+		return out
+	}
+	ids := func(n int) []string {
+		out := make([]string, 0, n)
+		for i := range n {
+			out = append(out, fmt.Sprintf("step-%d", i))
+		}
+		return out
+	}
+	long := strings.Repeat("x", operatorHeldStepIDLength+1)
+	record := func(verdict upgrade.Verdict, s []upgrade.Step) upgrade.Set {
+		return upgrade.Set{"nfd": {Component: "nfd", Transitions: []upgrade.Transition{
+			{From: "<1.0.0", To: "1.0.0", Verdict: verdict, StepsByDeployer: []upgrade.StepGroup{{Steps: s}}}}}}
+	}
+	tests := []struct {
+		name string
+		set  upgrade.Set
+		want []string
+	}{
+		{"at the limit after the apply", record(upgrade.VerdictManual, steps(append([]string{"before", "apply"}, ids(operatorHeldSteps)...)...)), nil},
+		{"one too many after the apply", record(upgrade.VerdictManual, steps(append([]string{"apply"}, ids(operatorHeldSteps+1)...)...)),
+			[]string{fmt.Sprintf("holds %d steps", operatorHeldSteps+1)}},
+		{"no apply step holds every step", record(upgrade.VerdictManual, steps(ids(operatorHeldSteps+1)...)),
+			[]string{fmt.Sprintf("holds %d steps", operatorHeldSteps+1)}},
+		{"a held id at the limit", record(upgrade.VerdictManual, steps("apply", strings.Repeat("x", operatorHeldStepIDLength))), nil},
+		{"a long held id", record(upgrade.VerdictManual, steps("apply", long)), []string{fmt.Sprintf("of %d characters", len(long))}},
+		// Characters, not bytes, as the API server counts them.
+		{"a multibyte held id at the limit", record(upgrade.VerdictManual, steps("apply", strings.Repeat("é", operatorHeldStepIDLength))), nil},
+		{"a multibyte held id too long", record(upgrade.VerdictManual, steps("apply", strings.Repeat("é", operatorHeldStepIDLength+1))),
+			[]string{fmt.Sprintf("of %d characters", operatorHeldStepIDLength+1)}},
+		{"a long id before the apply", record(upgrade.VerdictManual, steps(long, "apply")), nil},
+		{"a safe record", record(upgrade.VerdictSafe, steps(ids(operatorHeldSteps+1)...)), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := holdViolations(tt.set)
+			if len(got) != len(tt.want) {
+				t.Fatalf("holdViolations() = %q, want %d violation(s) containing %q", got, len(tt.want), tt.want)
 			}
 			for i := range got {
 				if !strings.Contains(got[i], tt.want[i]) {
