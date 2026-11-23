@@ -16,7 +16,7 @@ reason and message.
 | Reason | Runbook |
 | --- | --- |
 | `NodeGroupEmpty`, `PlacementOverlap`, `AcceleratedGroupHeterogeneous`, `SnapshotIncomplete`, `CriteriaConflict` | [Discovery](#discovery) |
-| `OverridePathUnknown`, `InvalidOverride`, `InvalidPlacement`, `NamespaceNotAllowed`, `ChartSourceUnsupported`, `ContentTooLarge`, `Conflict` | [Render and registry content](#render-and-registry-content) |
+| `OverridePathUnknown`, `InvalidOverride`, `InvalidPlacement`, `NamespaceNotAllowed`, `ChartSourceUnsupported`, `ContentTooLarge`, `Conflict`; `InvalidRequest` with `chart of release` in the `Resolved` message | [Render and registry content](#render-and-registry-content) |
 | `AICRInvalidRequest`, `AICRNotFound`, `AICRUnauthorized`, `AICRInternal`, `AICRTimeout` | [AICR Job failures](#aicr-job-failures) |
 | `retrying after a transient failure` or `[SERVICE_UNAVAILABLE]` in the `Resolved` message, `RegistryCredentialsUnavailable`, `Unauthorized` on `Resolved`, `RegistryCredentialsStale` | [Registry and credential outages](#registry-and-credential-outages) |
 | `AICRVersionMismatch`, `AICRArtifactUnsupported` | [AICR version mismatch](#aicr-version-mismatch) |
@@ -65,6 +65,7 @@ kubectl annotate clusterruntime cluster operator.aicr.run/resnapshot="$(date +%s
 | `NamespaceNotAllowed` | The recipe renders a release into a namespace missing from the chart's `namespaces.components`; the message names each release | Add the namespace to `namespaces.components` with its Pod Security level and `helm upgrade` |
 | `ChartSourceUnsupported` | A bundle release names no chart the operator can serve | A recipe the operator does not support yet; report it |
 | `ContentTooLarge` | A values or recipe document exceeds a ConfigMap (1 MiB) | Reduce the overrides |
+| `InvalidRequest` with `chart of release <name>` in the message | The named release's chart cannot be read: it is not a gzip tar archive, its values do not parse, or it exceeds one of the operator's read limits. The largest is 64 MiB decompressed or 4,096 files and directories over the operator's two reads of a component's chart, for its CRDs and its default values, packaged subcharts included | A recipe the operator does not support yet; report it with the release name |
 | `Conflict` | A chart tag in your registry already holds different bytes, or an upstream archive does not match its index digest | Upstream content changed after it was mirrored, or the registry was modified. Find out which before deleting the tag; the operator never overwrites it |
 
 Fixing the runtime's `spec` starts a new resolution.
@@ -233,9 +234,17 @@ Nothing is written to Argo CD while the engine is unavailable. See
 ## Waiting for approval
 
 `Stalled=True` with `AwaitingAcknowledgement` means a `manual` release is
-applied and its record has steps after the apply: do them (`kubectl aicr
-describe` lists them under "Recorded steps"), then `kubectl aicr acknowledge`
-the rollout. Nothing further starts until then.
+applied and its record has steps after its `apply` step: do them
+(`kubectl aicr describe` lists them under "Recorded steps"), then
+`kubectl aicr acknowledge` the rollout. Nothing further starts until then. A
+record that names no `apply` step holds all of its steps, since the operator
+cannot tell which follow the apply, and the message says
+`its record names no apply step, so acknowledge all of its steps`; confirm the
+earlier ones were done too. A message that says
+`acknowledge the steps its record holds` means the operator could not tell
+which: it could not read the rollout's plan or assessment report, or the steps
+came from an earlier rollout that did not finish. `kubectl aicr describe` lists
+the record the rollout was assessed with.
 
 `Stalled=True` with `AwaitingApproval` means a rollout needs an approver.
 Nothing has been written. Approve it with `kubectl aicr approve`
@@ -254,11 +263,21 @@ If approval is refused, the message says why:
 
 ## Transition blocked
 
-`TransitionBlocked` means the move from the active plan to the target needs a
-migration the operator does not perform: AICR assessed a component `blocked`,
-or a release would change namespace or chart name. No rollout is created. Return to a plan without that change (revert the input, or
-[pin](operations.md#rolling-back-by-pinning) the active plan); a supported
-migration is a separate procedure, outside the operator.
+`TransitionBlocked` means the operator will not start the move from the active
+plan to the target, and creates no rollout for it. Either the move needs a
+migration the operator does not perform, or a `manual` record holds more for
+acknowledgement than a rollout records.
+
+A migration is needed when AICR assessed a component `blocked`, or a release
+would change namespace or chart name. Return to a plan without that change
+(revert the input, or [pin](operations.md#rolling-back-by-pinning) the active
+plan); a supported migration is a separate procedure, outside the operator.
+
+A rollout records at most 16 steps for acknowledgement per release, each step
+id at most 63 characters. The message names the release past either bound.
+AICR's released records stay within both, so this takes an AICR image built
+with other records. Run an AICR whose records fit, or return to a plan without
+that upgrade as above.
 
 ## Application name taken
 

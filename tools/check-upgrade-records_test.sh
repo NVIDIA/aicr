@@ -34,6 +34,8 @@ readonly TESTS=(
 	TestRecordedComponentsCoverTheirPins
 	TestBaseCoverageViewMatchesEmbedded
 	TestChangedPinsHaveUpgradeRecords
+	TestManualRecordsNameTheirApplyStep
+	TestManualRecordsFitTheOperatorsHold
 )
 
 mkdir -p "${TMP}/bin" "${TMP}/fixture/recipes"

@@ -591,6 +591,41 @@ func TestAICRFlags(t *testing.T) {
 		"an empty validator entry":     {"v1.3.0-rc.1", image, deployment + ","},
 		"image of another release":     {"v1.3.0-rc.1", "ghcr.io/nvidia/aicr:v1.2.0" + digest, deployment},
 		"validator of another release": {"v1.3.0-rc.1", image, deployment + ",ghcr.io/nvidia/aicr-validators/performance:v1.3.0" + digest},
+		"a commit's validator for a release": {"v1.3.0-rc.1", image,
+			"ghcr.io/nvidia/aicr-validators/deployment:sha-" + strings.Repeat("1", 40) + digest},
+	} {
+		if _, err := aicrFlags(args[0], args[1], args[2]); err == nil {
+			t.Errorf("%s: aicrFlags(%q) accepted", name, args)
+		}
+	}
+}
+
+// A build from a commit is stamped like a goreleaser snapshot and names its
+// validators by the commit, as on-push.yaml publishes them.
+func TestAICRFlagsCommitBuild(t *testing.T) {
+	t.Parallel()
+	digest := "@sha256:" + strings.Repeat("a", 64)
+	commit := "sha-" + strings.Repeat("1", 40)
+	image := "ghcr.io/nvidia/aicr:v1.3.0-next" + digest
+	deployment := "ghcr.io/nvidia/aicr-validators/deployment:" + commit + digest
+	conformance := "ghcr.io/nvidia/aicr-validators/conformance:" + commit + digest
+	got, err := aicrFlags("v1.3.0-next", image, deployment+","+conformance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != "v1.3.0-next" || got.Image != image || !slices.Equal(got.ValidatorImages, []string{conformance, deployment}) {
+		t.Errorf("aicrFlags() = %+v, want the version, the image and the sorted validator images", got)
+	}
+	if _, err = aicrFlags("v1.4.0-rc.1-next", "ghcr.io/nvidia/aicr:v1.4.0-rc.1-next"+digest, deployment); err != nil {
+		t.Errorf("a snapshot of a release candidate: %v", err)
+	}
+	for name, args := range map[string][3]string{
+		"two commits": {"v1.3.0-next", image,
+			deployment + ",ghcr.io/nvidia/aicr-validators/conformance:sha-" + strings.Repeat("2", 40) + digest},
+		"a short commit":          {"v1.3.0-next", image, "ghcr.io/nvidia/aicr-validators/deployment:sha-1111111" + digest},
+		"validators by version":   {"v1.3.0-next", image, "ghcr.io/nvidia/aicr-validators/deployment:v1.3.0-next" + digest},
+		"image by commit":         {"v1.3.0-next", "ghcr.io/nvidia/aicr:" + commit + digest, deployment},
+		"a prerelease named next": {"v1.3.0-nextgen", "ghcr.io/nvidia/aicr:v1.3.0-nextgen" + digest, deployment},
 	} {
 		if _, err := aicrFlags(args[0], args[1], args[2]); err == nil {
 			t.Errorf("%s: aicrFlags(%q) accepted", name, args)

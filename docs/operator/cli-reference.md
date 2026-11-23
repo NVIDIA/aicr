@@ -35,7 +35,7 @@ Flags may come before or after the name. Every command accepts every flag:
 | --- | --- | --- |
 | `--kubeconfig PATH` | `$KUBECONFIG`, then `~/.kube/config` | All |
 | `--context NAME` | The current context | All |
-| `--operator-namespace NAME` | `aicr-system` | `describe`, `reproduce`: where assessment reports and plans live |
+| `--operator-namespace NAME` | `aicr-system` | `describe`, `acknowledge`, `reproduce`: where assessment reports and plans live |
 | `--reason TEXT` | none; required | `approve`, `revoke`; at most 1024 characters |
 | `--expires DURATION` | the rollout's deadline | `approve`: how long the approval stays valid; must not be negative |
 | `--dir PATH` | `aicr-reproduce` | `reproduce`: where the recipe is written |
@@ -67,9 +67,13 @@ Prints what an approver decides on:
 - AICR's `upgrade-check` report from the operator namespace, verified against
   the digest the rollout records: each component's change, versions, verdict
   and notes. Without one it prints `Assessment: none`;
-- under "Recorded steps", each transition record's precondition (`before:`)
-  and steps. The operator performs only the apply; approving acknowledges the
-  steps before it, and `acknowledge` the steps after it;
+- under "Recorded steps", each transition record's summary, precondition
+  (`before:`) and steps, with `breaking` beside the verdict when the versions
+  cross a boundary semver makes no stability promise across (a major, a
+  minor below 1.0, or a prerelease of the same version). A `safe` record is listed too: its summary can name what
+  to check before approving. The operator performs only the `apply` step; approving
+  acknowledges the steps before it, and `acknowledge` the steps after it, or
+  every step when the record names no `apply` step;
 - each acknowledgement already given (`Acknowledged: <release> by <user>`).
 
 ## acknowledge
@@ -81,6 +85,9 @@ kubectl aicr acknowledge rollout-3f9a1c0d2b7e4a51-1
 For a rollout waiting in `AwaitingAcknowledgement`: records, as you, that the
 post-apply steps of the release it waits on are done (for NVSentinel, a
 tripped circuit breaker reset and the CRD verified), and the rollout continues.
+When that release's record names no `apply` step, the rollout holds all of
+its steps, since the operator cannot tell which follow the apply; the
+`Stalled` message and the output say so.
 It refuses a rollout that is not waiting. Approvers only; the username is the
 one the API server reports.
 
@@ -138,7 +145,7 @@ recipe whose content does not match its recorded digest.
 | Command | Needs |
 | --- | --- |
 | `describe` | `get` on `runtimerollouts`; `get` on ConfigMaps in the operator namespace for the assessment report |
-| `approve`, `revoke` | `get` and `patch` on `runtimerollouts`, and `update` on the virtual subresource `runtimerollouts/approve`; `create` on `selfsubjectreviews`, which Kubernetes grants every authenticated user |
+| `approve`, `revoke`, `acknowledge` | `get` and `patch` on `runtimerollouts`, and `update` on the virtual subresource `runtimerollouts/approve`; `create` on `selfsubjectreviews`, which Kubernetes grants every authenticated user. `acknowledge` also reads the plan and assessment report from ConfigMaps in the operator namespace to say whether the record names an `apply` step; without `get` there, its output does not say |
 | `reproduce` | `get` on `clusterruntimes` (without a PLAN argument) and on ConfigMaps in the operator namespace |
 | The printed in-cluster pull | `get` on Secret `aicr-registry-login` and Service `aicr-registry`, `get`, `list` and `watch` on pods (`kubectl port-forward` resolves the Service to a pod), and `create` on `pods/portforward`, in the operator namespace |
 

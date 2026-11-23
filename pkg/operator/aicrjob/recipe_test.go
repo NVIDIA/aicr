@@ -28,9 +28,18 @@ import (
 
 // Golden fixtures were produced by each supported AICR minor's pinned image
 // for the lane criteria (see testdata/<version>/README.md): the lowest
-// supported release, the newest, and v1.1.2, the release the newest's
+// supported release, the newest, and the releases each newer release's
 // upgrade-check fixtures start from.
-var fixtureVersions = []string{"v1.0.0", "v1.1.2", "v1.2.0"}
+var fixtureVersions = []string{"v1.0.0", "v1.1.2", "v1.2.0", "v1.3.0"}
+
+// laneComponents is the number of components the lane recipes resolve in
+// version: v1.3.0 adds nktp.
+func laneComponents(version string) int {
+	if version == "v1.3.0" {
+		return 17
+	}
+	return 16
+}
 
 // Lane recipe fixtures, the same for every fixture version.
 var laneFixtures = map[string]struct {
@@ -81,8 +90,8 @@ func parseLaneFixture(t *testing.T, version, file, apiVersion string, criteria C
 	if r.APIVersion != apiVersion || *r.Criteria != criteria {
 		t.Errorf("apiVersion=%s criteria=%+v", r.APIVersion, *r.Criteria)
 	}
-	if len(r.ComponentRefs) != 16 {
-		t.Errorf("components = %d, want 16", len(r.ComponentRefs))
+	if want := laneComponents(version); len(r.ComponentRefs) != want {
+		t.Errorf("components = %d, want %d", len(r.ComponentRefs), want)
 	}
 	var gpu *ComponentRef
 	for i := range r.ComponentRefs {

@@ -31,7 +31,7 @@ transitions:
     precondition: >-
       Know whether any NIMService or NIMPipeline uses DRA claim creation with
       attributeSelectors, or autoscaling with more than five metrics. AICR ships
-      none, so a default install needs only the bundle apply. The apply-bundle
+      none, so a default install needs only the bundle apply. The apply
       step relies on the chart default operator.upgradeCRD: true, which AICR
       does not override; if your values set it false, apply the 3.1.4 CRDs
       yourself first.
@@ -56,7 +56,7 @@ transitions:
             reason: >-
               The 3.1.4 CRDs enforce both, so a resource outside them is
               rejected the next time it is updated.
-          - id: apply-bundle
+          - id: apply
             description: >-
               Apply the regenerated bundle with your deployer. The chart's
               pre-upgrade hook (operator.upgradeCRD, on by default) updates

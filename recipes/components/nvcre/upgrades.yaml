@@ -125,6 +125,11 @@ transitions:
               the controller advances to v0.6.0 while the new transition rules
               never exist — the upgrade is reported successful and the
               behavior it was for is absent.
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves nvcre to the new version.
           - id: verify-crd-rules-landed
             description: >-
               Confirm the new rules are present by querying for one of them:
@@ -141,6 +146,25 @@ transitions:
               cannot be used as the signal either. The rule text is the only
               thing that differs.
       - steps:
+          - id: check-live-objects-for-rejected-patches
+            description: >-
+              Before upgrading, list any Job or Workflow that automation
+              patches in place, and confirm nothing adds or removes
+              nodeHealthMonitor, goodputMeasurement, bandwidthMeasurement, or
+              workloadMetadata on an existing object. Move that automation to
+              create-and-replace, or set the field at creation time.
+            reason: >-
+              These four fields were already immutable once set; v0.6.0 closes
+              the absent-to-present and present-to-absent gap. A controller or
+              script that has been toggling one of them on a live object keeps
+              working right up to the CRD update and then starts failing at
+              admission, which surfaces as a rejected patch rather than as
+              anything attributable to the upgrade.
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves nvcre to the new version.
           - id: verify-crd-rules-landed
             description: >-
               After the deployer's own CRD update (flux's spec.upgrade.crds
@@ -159,20 +183,6 @@ transitions:
               admission rules still in force. Since the API version and its
               served and storage flags are unchanged, the rule text is the
               only observable difference.
-          - id: check-live-objects-for-rejected-patches
-            description: >-
-              Before upgrading, list any Job or Workflow that automation
-              patches in place, and confirm nothing adds or removes
-              nodeHealthMonitor, goodputMeasurement, bandwidthMeasurement, or
-              workloadMetadata on an existing object. Move that automation to
-              create-and-replace, or set the field at creation time.
-            reason: >-
-              These four fields were already immutable once set; v0.6.0 closes
-              the absent-to-present and present-to-absent gap. A controller or
-              script that has been toggling one of them on a live object keeps
-              working right up to the CRD update and then starts failing at
-              admission, which surfaces as a rejected patch rather than as
-              anything attributable to the upgrade.
     references:
       - https://github.com/NVIDIA/cluster-readiness-engine/releases/tag/v0.6.0
       - https://github.com/NVIDIA/cluster-readiness-engine/releases/tag/v0.4.0
@@ -269,6 +279,11 @@ transitions:
               Skipping this leaves the v0.6.0 CRDs in place, so the controller
               advances while the new fields are pruned on write and the
               upgrade is reported successful.
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves nvcre to the new version.
           - id: verify-new-fields-landed
             description: >-
               Confirm the new schema is present: kubectl get crd
@@ -281,6 +296,11 @@ transitions:
               every release, so the presence of a v0.8.2-only field is the
               only signal.
       - steps:
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves nvcre to the new version.
           - id: verify-new-fields-landed
             description: >-
               After the deployer's own CRD update (flux's spec.upgrade.crds
@@ -424,6 +444,11 @@ transitions:
               Skipping this leaves the v0.8.2 CRDs in place, so the controller
               advances while the new fields are pruned on write and the
               upgrade is reported successful.
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves nvcre to the new version.
           - id: verify-new-fields-landed
             description: >-
               Confirm the new schema is present: kubectl get crd
@@ -436,6 +461,11 @@ transitions:
               every release, so the presence of a v0.12.0-only field is the
               only signal.
       - steps:
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves nvcre to the new version.
           - id: verify-new-fields-landed
             description: >-
               After the deployer's own CRD update (flux's spec.upgrade.crds

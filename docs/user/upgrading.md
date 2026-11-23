@@ -89,7 +89,7 @@ Full flag and verdict reference lives in the [CLI reference](cli-reference.md#ai
 
 **`safe`:** nothing. Apply the new bundle.
 
-**`manual`:** read the steps under the table. They are scoped to the deployer you named, and they are ordered. Check the `PRECONDITION` line first: it states a cluster state that must hold before you start, and it is prose for you to verify, not something the tool evaluates. Run the steps, then apply the bundle.
+**`manual`:** read the steps under the table. They are scoped to the deployer you named, and they are ordered. Check the `PRECONDITION` line first: it states a cluster state that must hold before you start, and it is prose for you to verify, not something the tool evaluates. Run the steps in order: the step named `apply` is where that component is applied. When several rows are `manual`, check each one's `PRECONDITION` and do each one's steps before `apply` first, then do every row's `apply` step, then each one's steps after `apply`. Before a row's steps after `apply`, confirm its component runs the new version: one command or sync does not always cover every component. A record without an `apply` step does not mark when to apply, so check the component's own upgrade guidance.
 
 **`blocked`:** do not make this jump in one step. The report always names the boundary it stops at, and the detail block under the row says which of four things happened. The first of them comes with instructions; the other three deliberately do not.
 

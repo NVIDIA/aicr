@@ -72,7 +72,7 @@ transitions:
               0.20.x pods write NodeResourceTopology with server-side apply
               and crash-loop without patch. 0.19.0 pods still running during
               the DaemonSet rollout, or after a rollback, need get and update.
-          - id: upgrade-nfd
+          - id: apply
             description: >-
               Re-run install.sh (helm), helmfile apply (helmfile), or
               terraform apply on the regenerated bundle (terraform).
@@ -98,7 +98,7 @@ transitions:
               0.20.x pods write NodeResourceTopology with server-side apply
               and crash-loop without patch. 0.19.0 pods still running during
               the DaemonSet rollout, or after a rollback, need get and update.
-          - id: sync-nfd
+          - id: apply
             description: >-
               Sync or reconcile the nfd release.
             reason: >-

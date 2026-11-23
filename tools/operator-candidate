@@ -39,7 +39,8 @@
 # The chart defaults to the AICR release .settings.yaml pins, or, when all
 # three are set, to CANDIDATE_AICR_VERSION, CANDIDATE_AICR_IMAGE and the
 # comma-separated CANDIDATE_AICR_VALIDATOR_IMAGES: the release workflow sets
-# them to the AICR images its own tag built.
+# them to the AICR images its own tag built, and tools/operator-main-aicr to
+# an AICR built from a main commit (validators tagged sha-<commit>).
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"

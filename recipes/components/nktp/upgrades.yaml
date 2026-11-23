@@ -68,6 +68,11 @@ transitions:
               None of these deployers applies a changed crds/ directory.
               0.2.0 ships the same opentelemetry.io CRDs as 0.1.1-rc.3, so this
               is a no-op from rc.3, but an earlier build may carry older ones.
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves nktp to the new version.
       - steps:
           - id: rename-exporter-overrides
             description: >-
@@ -90,6 +95,11 @@ transitions:
               the evaluation backend, and the chart's hook Jobs pull these
               images. Without them the release fails to fetch or its pods
               stay in ImagePullBackOff.
+          - id: apply
+            description: >-
+              Apply the regenerated bundle with your deployer.
+            reason: >-
+              Moves nktp to the new version.
     references:
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#nktp-telemetry-pipeline
       - https://github.com/dsx-ai-factory/nvke-telemetry-pipeline/tree/main/nktp

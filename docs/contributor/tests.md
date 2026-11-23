@@ -621,6 +621,25 @@ CI runs the equivalent, plus a few checks that exist only there — the lychee
 link check on `docs/**`, CodeQL, and the GPU test lanes — so a green local
 `make qualify` makes CI likely to pass, not certain.
 
+`.github/workflows/operator-e2e-commit.yaml` runs the operator's kind e2e
+suite (`make operator-e2e-commit`) against `aicr` built from the commit, on
+pull requests that change AICR or the operator. It extends the operator
+contract check above to the Jobs the operator runs, and is informational, not
+part of `gate`. It skips the deployment-validation test, which binds evidence
+to the pinned release validators; AICR built from a commit names its own.
+
+`.github/workflows/operator-main-aicr.yaml` runs nightly against `aicr` built
+from the newest `main` commit whose validator images `on-push.yaml` published
+(`tools/operator-main-aicr`): the e2e suite with those validators, the
+deployment-validation test included, and the upgrade from the newest published
+release to a candidate running that `aicr` (`make operator-qualify-published`).
+The upgrade resolves, renders and assesses `main`'s whole kind recipe from the
+published one and rolls out cert-manager, so `main`'s `aicr` failing on the
+recipe, an `upgrade-check` failure or a blocked addition or removal fails
+there before a release candidate does. It syncs no other component and
+resolves no other recipe. A failed scheduled run posts to Slack, as a red
+`main` does; it is not part of `gate`.
+
 **Branch lint gate for Go changes.** If a PR changes any `.go` file,
 you must also run:
 

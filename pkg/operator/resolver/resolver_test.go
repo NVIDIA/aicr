@@ -15,12 +15,16 @@
 package resolver
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -291,13 +295,206 @@ func TestChartOwnsCRDs(t *testing.T) {
 		"nested deeper than scanned": {nestedCharts(t, maxNestedCharts+1), true},
 	}
 	for name, tt := range tests {
-		got, err := chartOwnsCRDs(registrytest.TarGz(t, tt.files))
+		got, err := chartOwnsCRDs(registrytest.TarGz(t, tt.files), newChartBudget())
 		if err != nil || got != tt.want {
 			t.Errorf("%s: chartOwnsCRDs() = %v, %v; want %v", name, got, err, tt.want)
 		}
 	}
-	if _, err := chartOwnsCRDs([]byte("plain")); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+	if _, err := chartOwnsCRDs([]byte("plain"), newChartBudget()); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
 		t.Errorf("chartOwnsCRDs(plain) = %v", err)
+	}
+}
+
+// The budget covers exactly its bounds: the last entry and byte it allows
+// leave it unspent, and one more of either spends it.
+func TestChartBudgetBounds(t *testing.T) {
+	t.Parallel()
+	b := &chartBudget{bytes: 10, entries: 1}
+	if !b.admit(&tar.Header{Size: 10}) {
+		t.Fatal("an entry that declares the bytes left is refused")
+	}
+	if n, err := io.Copy(io.Discard, &meteredReader{r: strings.NewReader("0123456789"), b: b}); err != nil || n != 10 || b.spent() {
+		t.Fatalf("reading the last 10 bytes = %d, %v; spent %v", n, err, b.spent())
+	}
+	if b.admit(&tar.Header{}) || !b.spent() {
+		t.Error("an entry past the last allowed is admitted")
+	}
+	b = &chartBudget{bytes: 10, entries: 5}
+	if b.admit(&tar.Header{Size: 11}) {
+		t.Error("an entry that declares more bytes than remain is admitted")
+	}
+	b = &chartBudget{bytes: 10, entries: 5}
+	if n, err := io.Copy(io.Discard, &meteredReader{r: strings.NewReader("0123456789x"), b: b}); err == nil || n != 11 || !b.spent() {
+		t.Errorf("reading one byte past the budget = %d, %v; spent %v", n, err, b.spent())
+	}
+}
+
+// The two zero blocks that end a tar archive are read like any other bytes:
+// a chart whose budget runs out on the last of them was not read within it.
+func TestChartScansCountTheArchiveEnd(t *testing.T) {
+	t.Parallel()
+	archive := registrytest.TarGz(t, templateChart(t, 1))
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	size, err := io.Copy(io.Discard, gz)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Room for the content and the first zero block, but not the second.
+	short := func() *chartBudget { return &chartBudget{bytes: size - 2*512 + 600, entries: maxChartScanEntries} }
+	if owns, err := chartOwnsCRDs(archive, short()); !owns || err != nil {
+		t.Errorf("chartOwnsCRDs() = %v, %v; want true, failing closed", owns, err)
+	}
+	if _, err := chartDefaults(archive, short()); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		t.Errorf("chartDefaults() = %v, want the budget spent", err)
+	}
+	if owns, err := chartOwnsCRDs(archive, &chartBudget{bytes: size, entries: maxChartScanEntries}); owns || err != nil {
+		t.Errorf("chartOwnsCRDs() within the budget = %v, %v", owns, err)
+	}
+}
+
+// A metered reader fails once its budget is spent, so a chain of headers no
+// entry declares stops decompressing there.
+func TestMeteredReaderStopsAtItsBudget(t *testing.T) {
+	t.Parallel()
+	b := &chartBudget{bytes: 1000, entries: 1}
+	n, err := io.Copy(io.Discard, &meteredReader{r: strings.NewReader(strings.Repeat("x", 1<<20)), b: b})
+	if operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest || n > 1000+32<<10 || !b.spent() {
+		t.Errorf("read %d bytes with a 1000-byte budget, err = %v", n, err)
+	}
+}
+
+// templateChart is a chart of n small templates and no CRDs.
+func templateChart(t *testing.T, n int) map[string]string {
+	t.Helper()
+	files := map[string]string{"c/Chart.yaml": "name: c"}
+	for i := range n {
+		files[fmt.Sprintf("c/templates/t%d.yaml", i)] = "kind: ConfigMap"
+	}
+	return files
+}
+
+// One budget bounds both scans of a chart archive and every packaged
+// subchart they follow: the entries, and the bytes each entry declares,
+// whether a scan reads or skips it. A chart each scan reads within the
+// budget alone can exceed it when both read it.
+func TestChartScansShareOneBudget(t *testing.T) {
+	t.Parallel()
+	half := registrytest.TarGz(t, templateChart(t, maxChartScanEntries/2))
+	if owns, err := chartOwnsCRDs(half, newChartBudget()); owns || err != nil {
+		t.Fatalf("CRD scan alone = %v, %v", owns, err)
+	}
+	if _, err := chartDefaults(half, newChartBudget()); err != nil {
+		t.Fatalf("chart defaults alone = %v", err)
+	}
+	shared := newChartBudget()
+	if owns, err := chartOwnsCRDs(half, shared); owns || err != nil {
+		t.Fatalf("CRD scan first = %v, %v", owns, err)
+	}
+	if _, err := chartDefaults(half, shared); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		t.Errorf("chart defaults after the CRD scan = %v, want the budget spent", err)
+	}
+
+	// A spent budget stays spent, however large the sizes entries declare.
+	huge := rawTar(t, func(tw *tar.Writer) {
+		header(t, tw, &tar.Header{Name: "c/d/", Typeflag: tar.TypeDir, Size: math.MaxInt64, Format: tar.FormatGNU})
+		header(t, tw, &tar.Header{Name: "c/values.yaml", Typeflag: tar.TypeReg, Size: 5})
+		if _, err := tw.Write([]byte("a: 1\n")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	shared = newChartBudget()
+	if owns, err := chartOwnsCRDs(huge, shared); !owns || err != nil {
+		t.Fatalf("CRD scan of a huge declared size = %v, %v; want true, failing closed", owns, err)
+	}
+	if _, err := chartDefaults(huge, shared); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		t.Errorf("chart defaults after a huge declared size = %v, want the budget spent", err)
+	}
+
+	// Files both scans skip, so their bytes are decompressed but never read.
+	large := strings.Repeat("#", maxTemplateBytes)
+	declared := map[string]string{"c/Chart.yaml": "name: c"}
+	for i := range maxChartScanBytes/maxTemplateBytes + 1 {
+		declared[fmt.Sprintf("c/charts/s%d/values.schema.json", i)] = large
+	}
+	for name, archive := range map[string][]byte{
+		"declared bytes": registrytest.TarGz(t, declared),
+		"entries of a packaged subchart": registrytest.TarGz(t, map[string]string{
+			"c/Chart.yaml": "name: c", "c/charts/s-1.0.0.tgz": string(registrytest.TarGz(t, templateChart(t, maxChartScanEntries))),
+		}),
+		"directory entries": directories(t, maxChartScanEntries+1),
+		"a chart and its packaged subchart together": registrytest.TarGz(t, func() map[string]string {
+			files := templateChart(t, maxChartScanEntries/2)
+			files["c/charts/s-1.0.0.tgz"] = string(registrytest.TarGz(t, templateChart(t, maxChartScanEntries/2)))
+			return files
+		}()),
+		// Headers decompress like data, though no entry declares their size.
+		"extended headers": rawTar(t, func(tw *tar.Writer) {
+			for i := range maxChartScanBytes/(1000*1000) + 2 {
+				header(t, tw, &tar.Header{Name: fmt.Sprintf("c/templates/t%d.yaml", i), Typeflag: tar.TypeReg,
+					PAXRecords: map[string]string{"comment": strings.Repeat("x", 1000*1000)}})
+			}
+		}),
+	} {
+		if owns, err := chartOwnsCRDs(archive, newChartBudget()); !owns || err != nil {
+			t.Errorf("%s: chartOwnsCRDs() = %v, %v; want true, failing closed", name, owns, err)
+		}
+		if _, err := chartDefaults(archive, newChartBudget()); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+			t.Errorf("%s: chartDefaults() = %v", name, err)
+		}
+	}
+}
+
+// directories is a chart archive of n directory entries and nothing else.
+func directories(t *testing.T, n int) []byte {
+	t.Helper()
+	return rawTar(t, func(tw *tar.Writer) {
+		for i := range n {
+			header(t, tw, &tar.Header{Name: fmt.Sprintf("c/d%d/", i), Mode: 0o755, Typeflag: tar.TypeDir})
+		}
+	})
+}
+
+// rawTar is a gzipped tar archive of the entries write writes.
+func rawTar(t *testing.T, write func(*tar.Writer)) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	write(tw)
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func header(t *testing.T, tw *tar.Writer, h *tar.Header) {
+	t.Helper()
+	if err := tw.WriteHeader(h); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A build reads each chart within one budget for both of its scans, and an
+// error reading a chart names its release.
+func TestBuildReadsAChartWithinOneBudget(t *testing.T) {
+	t.Parallel()
+	files := templateChart(t, maxChartScanEntries/2)
+	files["cert-manager/Chart.yaml"] = "name: cert-manager"
+	_, err := Build(context.Background(), &fakeDelivery{archive: registrytest.TarGz(t, files)}, buildInput(t))
+	if operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest || !strings.Contains(err.Error(), "entries") ||
+		!strings.Contains(err.Error(), "release cert-manager") {
+
+		t.Errorf("Build() = %v, want the read budget of release cert-manager's chart spent", err)
+	}
+	_, err = Build(context.Background(), &fakeDelivery{archive: []byte("plain")}, buildInput(t))
+	if operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest || !strings.Contains(err.Error(), "release cert-manager") {
+		t.Errorf("Build() of an unreadable chart = %v, want it to name release cert-manager", err)
 	}
 }
 
@@ -658,7 +855,8 @@ func TestBuildLaneBundle(t *testing.T) {
 // the plan's recipe for upgrade-check and reproduce.
 func TestBuildRecordsTheBundleRecipeForValidation(t *testing.T) {
 	t.Parallel()
-	for _, version := range []string{"v1.0.0", "v1.1.2", "v1.2.0"} {
+	// v1.3.0 adds nktp to the lane bundle.
+	for version, components := range map[string]int{"v1.0.0": 15, "v1.1.2": 15, "v1.2.0": 15, "v1.3.0": 16} {
 		t.Run(version, func(t *testing.T) {
 			t.Parallel()
 			in := buildInput(t)
@@ -690,7 +888,7 @@ func TestBuildRecordsTheBundleRecipeForValidation(t *testing.T) {
 			for _, c := range recipe.ComponentRefs {
 				names = append(names, c.Name)
 			}
-			if len(names) != 15 || slices.Contains(names, "dra-node-labeler") || !slices.Contains(names, "gpu-operator") {
+			if len(names) != components || slices.Contains(names, "dra-node-labeler") || !slices.Contains(names, "gpu-operator") {
 				t.Fatalf("validation recipe components = %v", names)
 			}
 		})

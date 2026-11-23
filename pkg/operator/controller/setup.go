@@ -57,8 +57,8 @@ func toSingleton(context.Context, client.Object) []reconcile.Request {
 }
 
 // relevantNode passes Node events that change what discovery reads: a node
-// added or removed, or a change of labels, taints, provider ID, node info or
-// readiness. Heartbeats do not reconcile anything.
+// added or removed, or a change of its labels or the node info of its tuple.
+// Heartbeats, taints and readiness do not reconcile anything.
 var relevantNode = predicate.Funcs{
 	UpdateFunc: func(e event.UpdateEvent) bool {
 		old, okOld := e.ObjectOld.(*corev1.Node)
@@ -78,10 +78,13 @@ var relevantApplication = predicate.Funcs{
 }
 
 // withoutRefresh is a copy of an Application without what a refresh
-// rewrites.
+// rewrites. The Application CRD has no status subresource, so the API
+// server moves metadata.generation on a refresh's status write as well; a
+// spec change still differs in the spec.
 func withoutRefresh(app *unstructured.Unstructured) map[string]any {
 	c := app.DeepCopy()
 	c.SetResourceVersion("")
+	c.SetGeneration(0)
 	c.SetManagedFields(nil)
 	unstructured.RemoveNestedField(c.Object, "status", "reconciledAt")
 	unstructured.RemoveNestedField(c.Object, "status", "observedAt")
@@ -111,8 +114,11 @@ func (r *ResolverReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if !r.Config.SkipDiscovery {
 		b = b.Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(toSingleton), builder.WithPredicates(relevantNode))
 	}
-	err := b.Complete(r)
-	if err != nil {
+	var rec reconcile.Reconciler = r
+	if r.wrap != nil {
+		rec = r.wrap(rec)
+	}
+	if err := b.Complete(rec); err != nil {
 		return operrors.Wrap(operrors.ErrCodeInternal, "register the resolver", err)
 	}
 	return nil
@@ -129,6 +135,9 @@ func (r *RolloutReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		if err := mgr.AddHealthzCheck("rollout-reconcile", r.Liveness.Check); err != nil {
 			return operrors.Wrap(operrors.ErrCodeInternal, "register the rollout liveness check", err)
 		}
+	}
+	if r.wrap != nil {
+		rec = r.wrap(rec)
 	}
 	c, err := ctrl.NewControllerManagedBy(mgr).
 		Named("rollout").
@@ -204,7 +213,7 @@ func (w *engineWatch) Start(ctx context.Context) error {
 
 // CacheOptions scopes the manager's caches to what the operator's RBAC lets
 // it read: its ConfigMaps in the operator namespace, its AICR Jobs
-// in the Job namespaces, and Nodes stripped by the discovery transform. The
+// in the Job namespaces, and Nodes projected to what discovery reads. The
 // engine's objects have their own cache (engineCacheOptions). Everything else
 // is read uncached.
 func CacheOptions(operatorNamespace string, jobNamespaces ...string) cache.Options {

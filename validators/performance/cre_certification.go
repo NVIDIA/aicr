@@ -110,7 +110,8 @@ func uniqueCREResourceName(prefix string) (string, error) {
 // combination whose detection is not known to resolve names it.
 //
 // Env, when set, is submitted as spec.env, which CRE passes to every workload
-// pod of the run. It is how the net check disables NVLS and MNNVL.
+// pod of the run. It is how the net check disables NVLS and MNNVL and forces
+// NCCL_ALGO=Tree.
 //
 // MaxBytes, when set, is submitted as spec.maxBytes, the largest message size
 // of the sweep. CRE defaults it to 32G on GB200 and GB300, and a sweep that

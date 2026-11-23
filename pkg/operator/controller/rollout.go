@@ -36,6 +36,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "aicr.run/api/operator/v1alpha1"
 	"aicr.run/pkg/operator/aicrjob"
@@ -44,6 +45,7 @@ import (
 	"aicr.run/pkg/operator/engine/argocd"
 	operrors "aicr.run/pkg/operator/errors"
 	"aicr.run/pkg/operator/evidence"
+	"aicr.run/pkg/operator/lifecycle"
 	"aicr.run/pkg/operator/plan"
 	"aicr.run/pkg/operator/registry"
 )
@@ -183,6 +185,11 @@ type RolloutReconciler struct {
 
 	// steps holds the step Events of transitions not yet stored.
 	steps pendingEvents
+	// plans holds the content each plan references, for retention.
+	plans planRefs
+	// wrap, when set, wraps the reconciler SetupWithManager registers, so a
+	// test can see each request a watch enqueues.
+	wrap func(reconcile.Reconciler) reconcile.Reconciler
 }
 
 // pendingEvents are step Events held until the status that records their
@@ -1102,16 +1109,20 @@ func (r *RolloutReconciler) step(ctx context.Context, p *plan.Document, ro *v1al
 	if err == nil {
 		err = r.prompt(ctx, p, rel, values, verify, obs.Reason)
 	}
-	if err == nil && !verify && (obs.State == argocd.StateMissing || obs.Reason == argocd.ReasonSpecNotWritten) {
+	if err == nil && (obs.State == argocd.StateMissing || obs.Reason == argocd.ReasonSpecNotWritten) &&
+		now.Sub(timeoutFrom(cur)) <= ro.Spec.ActionTimeout.Duration {
 		// The step was recorded, then the operator stopped before its write
 		// landed: make it now, unless the approval ended since,
-		// which no landed mutation outlives.
+		// which no landed mutation outlives. A step that syncs writes its
+		// spec and its sync together, but the engine writes neither while
+		// an earlier sync of the release is pending or running, so the
+		// write is asked for again only within the action timeout.
 		if stop != nil {
 			return false, r.finish(ctx, ro, stop.phase, stop.message)
 		}
 		if err = r.mutate(ctx, p, rel, step, values); err == nil {
 			v.requeue = pollInterval
-			return false, r.saveStatus(ctx, ro, "release "+step.Release+": written again after an interrupted step")
+			return false, r.saveStatus(ctx, ro, "release "+step.Release+": its write did not land; asked for it again")
 		}
 	}
 	if err != nil {
@@ -1211,10 +1222,27 @@ func (r *RolloutReconciler) awaitAcknowledgement(ctx context.Context, ro *v1alph
 	if stop != nil {
 		return r.finish(ctx, ro, stop.phase, stop.message)
 	}
-	message := "release " + step.Release + " is applied; acknowledge its post-apply steps: " + strings.Join(step.PostApplySteps, ", ")
+	message := "release " + step.Release + " is applied; " + r.heldSteps(ctx, ro, step) + ": " + strings.Join(step.PostApplySteps, ", ")
 	ro.Status.Phase = v1alpha1.PhaseAwaitingAcknowledgement
 	v.stalled, v.stalledReason, v.stalledMsg = true, ReasonAwaitingAcknowledgement, "rollout "+ro.Name+": "+message
 	return r.saveStatus(ctx, ro, message)
+}
+
+// heldSteps says what the approver acknowledges for step: its record's steps
+// after the apply, or all of them when the record names no apply step. When
+// it cannot tell, as for a plan or report it cannot read or steps carried
+// from an earlier rollout, the wording is true either way.
+func (r *RolloutReconciler) heldSteps(ctx context.Context, ro *v1alpha1.RuntimeRollout, step v1alpha1.RolloutStep) string {
+	every, err := lifecycle.HoldsEveryStep(ctx, r.Reader, r.Config.OperatorNamespace, ro, step)
+	switch {
+	case err != nil:
+		log.FromContext(ctx).Info("cannot tell whether a record names an apply step", "release", step.Release, "error", err.Error())
+		return "acknowledge the steps its record holds"
+	case every:
+		return "its record names no apply step, so acknowledge all of its steps"
+	default:
+		return "acknowledge its post-apply steps"
+	}
 }
 
 // timeoutFrom is when the step's action timeout started: the step's start,
