@@ -449,6 +449,7 @@ Generate recipes using an `AICRConfig` document. The same file format also drive
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--external-only` | | bool | Use only `--data`, without embedded catalog merging or fallback |
+| `--with` | | string | Compose catalogs by graph union; repeatable. Each is `nvidia` or a catalog directory declaring `metadata.name` (see [Composing catalogs](../integrator/data-extension.md#composing-catalogs)). Not with `--external-only` |
 
 The config file uses a Kubernetes-style envelope:
 
@@ -531,6 +532,7 @@ Generate recipes using direct system parameters:
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--external-only` | | bool | Use only `--data`, without embedded catalog merging or fallback |
+| `--with` | | string | Compose catalogs by graph union; repeatable. Each is `nvidia` or a catalog directory declaring `metadata.name` (see [Composing catalogs](../integrator/data-extension.md#composing-catalogs)). Not with `--external-only` |
 | `--criteria-strict` | | bool | Reject criteria values not in the embedded OSS catalog; ignores values registered from `--data`. Also honored via `AICR_CRITERIA_STRICT=1` or `spec.recipe.criteriaStrict: true` in `--config`. Intended for OSS CI gates. |
 | `--require-evidence` | | bool | Fail when the resolved recipe has no committed evidence pointer. The check is offline presence for the resolved id, including the selected profile value. It does not verify a signature or contact a registry. A pointer on a base id does not cover a profiled resolve. Resolving with external data (`--data` or `spec.recipe.data`) fails, even when the leaf overlay is still the embedded one. Also honored via `AICR_REQUIRE_EVIDENCE` (`1`, `true`, `yes`, `on`) or `spec.recipe.requireEvidence: true` in `--config`. Any one of the three enables it. An explicit false does not turn off an environment value that is already on. Applies to `aicr recipe` and `aicr query`; `aicr query --recipe` is rejected while it is on. |
 
@@ -851,6 +853,7 @@ aicr recipe list [flags]
 | `--config` | | string | | AICRConfig path or URL; `spec.recipe.data` and `spec.recipe.externalOnly` select the catalog |
 | `--data` | | string | | External data directory to include alongside embedded overlays |
 | `--external-only` | | bool | false | Use only `--data`, without embedded catalog merging or fallback |
+| `--with` | | string | | Compose catalogs by graph union; repeatable. Each is `nvidia` or a catalog directory declaring `metadata.name` (see [Composing catalogs](../integrator/data-extension.md#composing-catalogs)). Not with `--external-only` |
 | `--no-health` | `--skip-health` | bool | false | Skip per-leaf structural-health computation; render only the enumeration columns/fields |
 
 Filter flags narrow the output to overlays whose criteria carry that exact value.
@@ -1296,6 +1299,7 @@ aicr validate [flags]
 | `--yes` | `--assume-yes` | bool | false | Skip the interactive confirmation shown before keyless signing publishes your OIDC identity (browser/device-code paths only; the banner is still printed). Reads `AICR_ASSUME_YES`. See [Privacy: identity in keyless signatures](#privacy-identity-in-keyless-signatures). |
 | `--data` | | string | | External data directory to overlay on embedded data |
 | `--external-only` | | bool | false | Use only `--data`, without embedded catalog merging or fallback |
+| `--with` | | string | | Compose catalogs by graph union; repeatable. Each is `nvidia` or a catalog directory declaring `metadata.name` (see [Composing catalogs](../integrator/data-extension.md#composing-catalogs)). Not with `--external-only` |
 
 **Input Sources:**
 - **File**: Local file path (`./recipe.yaml`, `./snapshot.yaml`)
@@ -2036,6 +2040,7 @@ aicr bundle [flags]
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, `helmfile`, `terraform`, and `fleet` deployers. A declaration on a manifest-only or Kustomize component is rejected, because its templates are rendered when the bundle is built, except a manifest-only component under `flux`, which Flux renders at reconcile time (`flux` does not support Kustomize components); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). A declaration whose component is absent from the generated bundle is rejected (no path is exempt — a dynamic path is never a removal idiom); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). Certain gate- or contract-owned paths on **present** components cannot be declared dynamic either — driver-ownership paths (e.g. `gpuoperator:driver.enabled`), GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled **and** the eviction contract is opted into with `--dra-eviction-node-label`, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths — because an install-time edit there would undo what AICR verified or made consistent; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Dynamic Install-Time Values](#dynamic-install-time-values). A path the registry lists in `requiredValues` counts as supplied when declared here; a path in `installTimeSecretPaths` may only be supplied this way, and only with the `helm` deployer. See [Required and install-time secret inputs](bundling.md#required-and-install-time-secret-inputs). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--external-only` | | bool | Use only `--data`, without embedded catalog merging or fallback |
+| `--with` | | string | Compose catalogs by graph union; repeatable. Each is `nvidia` or a catalog directory declaring `metadata.name` (see [Composing catalogs](../integrator/data-extension.md#composing-catalogs)). Not with `--external-only` |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable). Optional in general, but some components (e.g. `slinky-slurm`, `slurm-accounting-mariadb`) declare `requireNodeSelector` in the registry and fail the bundle if this is omitted and no overlay opts their paths out. A component that declares the conditional `requireNodeSelectorIfStorageClassSet` instead (none in the stock registry today) only fails once it ends up with a non-empty value at a declared `storageClassPaths`/`sharedStorageClassPaths` entry, whether from `--storage-class`, a per-component `--set` override, or an overlay's own `storageClassName` default. See [`nodeScheduling.system` vs `accelerated`](../contributor/component.md#nodeschedulingsystem-vs-accelerated). |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable). With `--readiness-hooks`, this (keyed tolerations only) and `--system-node-selector` also place the readiness gate Jobs; see [Readiness Gates](#readiness-gates). |
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable). Same `requireNodeSelector` caveat as `--system-node-selector` above applies to components that declare it on their accelerated paths. |
@@ -3833,6 +3838,7 @@ aicr mirror list [flags]
 | `--set` | | string[] | | Override values that affect image discovery (format: `component:path.to.field=value`). Repeatable. |
 | `--data` | | string | | External data directory to overlay on embedded data. Overlay-provided component values and manifests both feed image discovery (see [External Data](#external-data-directory)). |
 | `--external-only` | | bool | false | Use only `--data`, without embedded catalog merging or fallback |
+| `--with` | | string | | Compose catalogs by graph union; repeatable. Each is `nvidia` or a catalog directory declaring `metadata.name` (see [Composing catalogs](../integrator/data-extension.md#composing-catalogs)). Not with `--external-only` |
 | `--format` | `-f` | string | `yaml` | Output format: `yaml`, `json`, `hauler`, `zarf` |
 | `--output` | `-o` | string | stdout | Output file path |
 

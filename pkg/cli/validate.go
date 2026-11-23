@@ -1064,6 +1064,7 @@ func validateCmdFlags() []cli.Flag {
 		configFlag(),
 		dataFlag(),
 		externalOnlyFlag(),
+		withFlag(),
 		outputFlag(),
 		kubeconfigFlag(),
 	)

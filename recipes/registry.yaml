@@ -56,6 +56,10 @@
 #
 apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
+# The catalog's declared name. The built-in catalog is "nvidia"; the name is
+# reserved for it. A catalog passed to --with must declare its own.
+metadata:
+  name: nvidia
 
 components:
   - name: nfd

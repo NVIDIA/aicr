@@ -17,6 +17,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/header"
@@ -128,6 +129,16 @@ func (r *RecipeSpec) validate() error {
 	if r.Criteria != nil && r.Criteria.Nodes < 0 {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("spec.recipe.criteria.nodes must be >= 0, got %d", r.Criteria.Nodes))
+	}
+	for i, catalog := range r.Catalogs {
+		if strings.TrimSpace(catalog) == "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("spec.recipe.catalogs[%d] is empty; use \"nvidia\" or a catalog directory", i))
+		}
+	}
+	if len(r.Catalogs) > 0 && r.ExternalOnly {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"spec.recipe.catalogs and spec.recipe.externalOnly are mutually exclusive: externalOnly composes nothing")
 	}
 	if _, err := recipe.ParseProfileSelection(r.Profile); err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,

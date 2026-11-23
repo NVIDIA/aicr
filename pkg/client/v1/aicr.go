@@ -1606,11 +1606,60 @@ func buildDataProvider(
 		return layered, nil
 	case sourceKindEmbedded:
 		return recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "."), nil
+	case sourceKindComposed:
+		return buildComposedDataProvider(ctx, s)
 	case sourceKindOCI:
 		return buildOCIDataProvider(ctx, s, sourceConfig, deps)
 	default:
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "unknown recipe source kind")
 	}
+}
+
+// buildComposedDataProvider unions the catalogs of a ComposedSource and, when
+// an override directory is set, layers it over the union with last-wins
+// precedence. The embedded catalog is read only when the composition names it.
+func buildComposedDataProvider(ctx context.Context, s recipeSource) (recipe.DataProvider, error) {
+	if s.composed == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "composed source has no catalogs")
+	}
+	inputs := make([]recipe.CatalogInput, 0, len(s.composed.children))
+	for _, child := range s.composed.children {
+		switch child.kind {
+		case sourceKindEmbedded:
+			inputs = append(inputs, recipe.CatalogInput{
+				Provider: recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "."),
+				Label:    recipe.CatalogSourceEmbedded,
+				Embedded: true,
+			})
+		case sourceKindFilesystem:
+			dir, err := recipe.NewLayeredDataProvider(nil, recipe.LayeredProviderConfig{
+				ExternalDir:  child.path,
+				ExternalOnly: true,
+			})
+			if err != nil {
+				return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("construct catalog provider for %q", child.path))
+			}
+			inputs = append(inputs, recipe.CatalogInput{Provider: dir, Label: child.path})
+		default:
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"only EmbeddedSource and filesystem sources can be composed")
+		}
+	}
+	composed, err := recipe.NewComposedDataProvider(ctx, inputs)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "compose catalogs")
+	}
+	override := s.composed.override
+	if override == "" {
+		return composed, nil
+	}
+	layered, err := recipe.NewLayeredDataProviderOver(composed, recipe.LayeredProviderConfig{ExternalDir: override})
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("layer %q over the composed catalogs", override))
+	}
+	return layered, nil
 }
 
 func buildOCIDataProvider(

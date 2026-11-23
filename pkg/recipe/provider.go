@@ -247,8 +247,11 @@ func (p *EmbeddedDataProvider) Source(path string) string {
 // ExternalOnly disables all embedded reads and merges.
 type LayeredDataProvider struct {
 	externalOnly bool
-	embedded     *EmbeddedDataProvider
-	externalDir  string
+	// embedded is the base the external directory is layered over: the
+	// embedded catalog for --data, or a ComposedDataProvider for --with
+	// plus --data. Nil only when externalOnly is set.
+	embedded    DataProvider
+	externalDir string
 
 	// maxFileSize bounds read-time loads against the same limit the walk-time
 	// check uses, so a TOCTOU swap on a network mount cannot bypass a
@@ -330,6 +333,23 @@ const (
 // - Path traversal is detected
 // - File size exceeds limits
 func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProviderConfig) (*LayeredDataProvider, error) {
+	// Keep a nil *EmbeddedDataProvider a nil interface, not a non-nil
+	// interface holding a nil pointer.
+	var base DataProvider
+	if embedded != nil {
+		base = embedded
+	}
+	return NewLayeredDataProviderOver(base, config)
+}
+
+// NewLayeredDataProviderOver layers the external directory in config over
+// base, which is any DataProvider (the embedded catalog, or a composition of
+// catalogs). The external directory is the last override layer: it wins over
+// base file by file, exactly as it does over the embedded catalog.
+//
+// base may be nil only when config.ExternalOnly is set; a nil base otherwise
+// fails on the first read that falls through to it.
+func NewLayeredDataProviderOver(base DataProvider, config LayeredProviderConfig) (*LayeredDataProvider, error) {
 	slog.Debug("creating layered data provider",
 		"external_dir", config.ExternalDir,
 		"max_file_size", config.MaxFileSize,
@@ -339,7 +359,7 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "external-only catalog requires an external data directory")
 	}
 	if config.ExternalOnly {
-		embedded = nil
+		base = nil
 	}
 
 	if config.MaxFileSize == 0 {
@@ -440,7 +460,7 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 
 	return &LayeredDataProvider{
 		externalOnly:  config.ExternalOnly,
-		embedded:      embedded,
+		embedded:      base,
 		externalDir:   config.ExternalDir,
 		maxFileSize:   config.MaxFileSize,
 		allowSymlinks: config.AllowSymlinks,
@@ -797,6 +817,7 @@ func mergeRegistries(embedded, external *ComponentRegistry) *ComponentRegistry {
 	return &ComponentRegistry{
 		APIVersion: embedded.APIVersion,
 		Kind:       embedded.Kind,
+		Metadata:   embedded.Metadata,
 		Components: mergeByName(embedded.Components, external.Components,
 			func(c ComponentConfig) string { return c.Name }),
 	}

@@ -51,6 +51,76 @@ passed to these images, in either layered or external-only mode.
 Artifact-signing commands that specifically sign the shipped
 catalog do not accept `--data` or `--external-only`.
 
+## Composing catalogs
+
+`--data` layers one directory over the embedded catalog. To bring in several
+catalogs, each published by whoever owns it (a cloud provider, an ISV, a
+partner), compose them with the repeatable `--with`:
+
+```bash
+# the built-in catalog plus a partner catalog
+aicr recipe --with nvidia --with ./partner-catalog --service my-cloud --accelerator h100 --intent inference
+
+# two catalogs and no built-in catalog at all
+aicr recipe list --with ./base-catalog --with ./partner-catalog
+```
+
+Each value is `nvidia`, the built-in catalog, or the path of a catalog
+directory. `--with` is available wherever `--external-only` is, except
+`recipe validate`, which checks one directory. In an `AICRConfig`, list them
+under `spec.recipe.catalogs`; `--with` on the command line replaces that list.
+With no `--with`, nothing changes: the built-in catalog is used, and `--data`
+and `--external-only` behave as described above.
+
+**A catalog has a name.** Every catalog passed to `--with` declares it in its
+`registry.yaml`:
+
+```yaml
+apiVersion: aicr.run/v1beta1
+kind: ComponentRegistry
+metadata:
+  name: partner
+components: []
+```
+
+The built-in catalog declares `nvidia`, and the name is reserved: no other
+catalog may declare it. Two catalogs in one composition may not share a name.
+A catalog without `metadata.name` is rejected. The field is optional for a
+`--data` directory.
+
+**Composition is a union of graphs, not a stack of layers.** The catalogs are
+sorted by declared name, so the result is the same whatever order they are
+given in. A catalog's overlays and mixins can reference the other catalogs':
+a partner overlay can name an `nvidia` overlay as its `spec.base`. A reference
+that no composed catalog defines fails when the composition is built, naming
+the missing overlay or mixin and the catalog and file that referenced it:
+
+```text
+catalog "partner": overlays/partner-leaf.yaml references overlay "h100-eks-ubuntu-training",
+which no composed catalog defines (composed: partner); add the catalog that provides it with --with
+```
+
+**Every collision fails.** Two catalogs that define the same node are an
+error that names both, never a silent override:
+
+| Collision | Where it is found |
+|---|---|
+| The same component name | `registry.yaml` |
+| The same validator name | `validators/catalog.yaml` |
+| The same overlay name, or the same mixin name, in any file | `overlays/`, `mixins/` |
+| The same file path (values, manifests, health checks, upgrade records) | any |
+
+Because the same path is a collision, only one catalog in a composition can
+supply `overlays/base.yaml`, the resolution root.
+
+**`--data` stays the override.** `--data <dir>` is still one override
+directory applied last, with last-wins precedence, now on top of the composed
+catalogs. `--with` and `--external-only` cannot be combined: external-only
+composes nothing.
+
+When `nvidia` is not selected, no embedded catalog file is read.
+`--debug` logs the catalog that owns each file read through the composition.
+
 ## Use cases
 
 | Need | How `--data` helps |

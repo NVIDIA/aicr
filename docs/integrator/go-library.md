@@ -740,7 +740,7 @@ or earlier either; `RenderCNCFEvidenceWithResult`,
 
 ## Recipe sources
 
-AICR exposes three production recipe sources; pick one via
+AICR exposes four production recipe sources; pick one via
 `aicr.WithRecipeSource`:
 
 | Source | Constructor | Status |
@@ -748,12 +748,42 @@ AICR exposes three production recipe sources; pick one via
 | Embedded | `aicr.EmbeddedSource()` | Production. Uses only AICR's built-in recipe data with no external overlay. |
 | Local filesystem | `aicr.FilesystemSource(path)` | Production. Use a directory containing a `registry.yaml` (layered over the embedded recipe data). |
 | OCI registry | `aicr.OCISource(repository, digest)` | Production. Pulls one immutable, digest-pinned recipe catalog into a private per-Client workspace. |
+| Composed catalogs | `aicr.ComposedSource(catalogs...)` | Production. Unions several named catalogs by graph; see below. |
 
 `EmbeddedSource` resolves against the recipe data compiled into the
 AICR binary — no filesystem path required. Use it when you want AICR's
 bundled recipe data and no local overrides. `FilesystemSource`
 layers an external directory over that same embedded data, so files in
 the directory override their embedded equivalents.
+
+### Composed catalogs
+
+`ComposedSource` unions several named catalogs, the SDK form of the repeatable
+`--with` flag. Each argument is one catalog: `aicr.EmbeddedSource()` is the
+built-in catalog, named `nvidia`, and `aicr.ExternalFilesystemSource(dir)` is a
+directory catalog whose `registry.yaml` declares `metadata.name`.
+`aicr.CatalogSource(ref)` maps a `--with` value (`"nvidia"` or a directory) to
+the right source.
+
+```go
+client, err := aicr.NewClientContext(ctx,
+	aicr.WithRecipeSource(aicr.ComposedSource(
+		aicr.EmbeddedSource(),
+		aicr.ExternalFilesystemSource("/etc/aicr/partner-catalog"),
+	)),
+)
+```
+
+The result does not depend on argument order. Two catalogs that declare the
+same name, or define the same component, validator, overlay, mixin or file,
+fail `NewClientContext` with an error naming both; so does an overlay whose
+`spec.base` or `spec.mixins` entry no composed catalog defines. Leave
+`EmbeddedSource` out to compose only directory catalogs, in which case no
+embedded file is read. `ComposedSource(...).WithOverride(dir)` layers one more
+directory over the composition with last-wins precedence, as `--data` does.
+Only the embedded and filesystem sources can be composed in this release.
+`Config.RecipeSource` returns a `ComposedSource` when `spec.recipe.catalogs` is
+set. See [Composing catalogs](data-extension.md#composing-catalogs).
 
 ### Digest-pinned OCI recipe sources
 

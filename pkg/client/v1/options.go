@@ -406,7 +406,8 @@ type RecipeSourceOption struct {
 }
 
 // WithRecipeSource sets the recipe source on the Client. Construct the
-// argument with EmbeddedSource, FilesystemSource, ExternalFilesystemSource, or OCISource.
+// argument with EmbeddedSource, FilesystemSource, ExternalFilesystemSource,
+// ComposedSource, or OCISource.
 func WithRecipeSource(s RecipeSourceOption) Option {
 	return func(c *Client) {
 		c.source = s.internal
@@ -494,6 +495,56 @@ func ExternalFilesystemSource(path string) RecipeSourceOption {
 	return source
 }
 
+// ComposedSource composes several catalogs by graph union. Each argument is
+// one catalog: EmbeddedSource is the built-in catalog, named "nvidia", and a
+// FilesystemSource or ExternalFilesystemSource is a directory catalog. A
+// directory catalog is always read on its own, never layered over the
+// built-in one, and must declare metadata.name in its registry.yaml. In this
+// release only those two kinds can be composed.
+//
+// The result does not depend on argument order. Two catalogs that declare the
+// same name, or that define the same component, validator, overlay, mixin or
+// file, fail Client construction with an error naming both. Leaving
+// EmbeddedSource out composes only the directories given, and no embedded
+// byte is read.
+//
+// Use WithOverride to layer one more directory over the composition with
+// last-wins precedence, which is what --data does.
+func ComposedSource(catalogs ...RecipeSourceOption) RecipeSourceOption {
+	children := make([]recipeSource, 0, len(catalogs))
+	for _, c := range catalogs {
+		children = append(children, c.internal)
+	}
+	return RecipeSourceOption{internal: recipeSource{
+		kind:     sourceKindComposed,
+		composed: &composedSpec{children: children},
+	}}
+}
+
+// CatalogSource turns one catalog reference, as given to --with or listed in
+// spec.recipe.catalogs, into a source for ComposedSource: "nvidia" is the
+// built-in catalog and anything else is the path of a catalog directory.
+func CatalogSource(ref string) RecipeSourceOption {
+	if ref == recipe.NvidiaCatalogName {
+		return EmbeddedSource()
+	}
+	return ExternalFilesystemSource(ref)
+}
+
+// WithOverride returns a copy of a ComposedSource that also layers the
+// directory at path over the composition. The directory wins over the
+// composed catalogs file by file, as --data wins over the embedded catalog.
+// It has no effect on other source kinds.
+func (s RecipeSourceOption) WithOverride(path string) RecipeSourceOption {
+	if s.internal.composed == nil {
+		return s
+	}
+	spec := *s.internal.composed
+	spec.override = path
+	s.internal.composed = &spec
+	return s
+}
+
 // sourceKind is an unexported enum for recipe source variants.
 type sourceKind int
 
@@ -502,6 +553,7 @@ const (
 	sourceKindOCI
 	sourceKindFilesystem
 	sourceKindEmbedded
+	sourceKindComposed
 )
 
 // recipeSource is the internal representation passed to the Client.
@@ -511,6 +563,18 @@ type recipeSource struct {
 	registry     string
 	selector     string
 	path         string
+
+	// composed is set only for sourceKindComposed. It is a pointer because
+	// Client must stay comparable (see TestStability_Client): a slice field
+	// here would take that away.
+	composed *composedSpec
+}
+
+// composedSpec is the catalogs of a ComposedSource and its optional override
+// directory.
+type composedSpec struct {
+	children []recipeSource
+	override string
 }
 
 type ociSourceConfig struct {

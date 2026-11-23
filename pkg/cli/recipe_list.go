@@ -112,6 +112,7 @@ Include overlays from an external data directory:
 			dataFlag(),
 			configFlag(),
 			externalOnlyFlag(),
+			withFlag(),
 			withCompletions(&cli.StringFlag{
 				Name:     flagFormat,
 				Aliases:  []string{"t"},

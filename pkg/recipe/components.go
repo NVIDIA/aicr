@@ -38,11 +38,22 @@ const ComponentRegistryKind = "ComponentRegistry"
 // header.GroupVersionV1Beta1.
 const ComponentRegistryAPIVersion = header.AuthoringGroupVersion
 
+// RegistryMetadata identifies a catalog. Name is declared by the catalog
+// itself, so it means the same thing on every machine whatever storage the
+// catalog is loaded from.
+type RegistryMetadata struct {
+	Name string `yaml:"name,omitempty"`
+}
+
 // ComponentRegistry holds the declarative configuration for all components.
 // This is loaded from embedded recipe data (recipes/registry.yaml) at startup.
 type ComponentRegistry struct {
-	APIVersion string            `yaml:"apiVersion"`
-	Kind       string            `yaml:"kind"`
+	APIVersion string `yaml:"apiVersion"`
+	Kind       string `yaml:"kind"`
+
+	// Metadata carries the catalog's declared name. It is optional for a
+	// catalog loaded through --data and required for one passed to --with.
+	Metadata   RegistryMetadata  `yaml:"metadata,omitempty"`
 	Components []ComponentConfig `yaml:"components"`
 
 	// Index for fast lookup by name (populated after loading)

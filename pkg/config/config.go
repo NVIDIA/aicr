@@ -121,6 +121,12 @@ type RecipeSpec struct {
 	Data          string                   `yaml:"data,omitempty" json:"data,omitempty"`
 	Profile       string                   `yaml:"profile,omitempty" json:"profile,omitempty"`
 
+	// Catalogs lists the catalogs composed by graph union, the config
+	// equivalent of the repeatable --with flag. Each entry is "nvidia" (the
+	// built-in catalog) or a local directory whose registry.yaml declares
+	// metadata.name. A --with on the command line replaces this list.
+	Catalogs []string `yaml:"catalogs,omitempty" json:"catalogs,omitempty"`
+
 	// CriteriaStrict, when true, rejects criteria values not in the
 	// embedded OSS catalog (i.e., hides registry entries contributed by
 	// `--data` overlays). Mirrors the `--criteria-strict` CLI flag and

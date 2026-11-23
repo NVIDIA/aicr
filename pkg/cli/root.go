@@ -110,6 +110,19 @@ var (
 		}
 	}
 
+	withFlag = func() cli.Flag {
+		return &cli.StringSliceFlag{
+			Name: "with",
+			Usage: `Compose catalogs by graph union (repeatable). Each value is "nvidia" (the
+	built-in catalog) or the path of a catalog directory whose registry.yaml declares
+	metadata.name. The result does not depend on the order given. Two catalogs that
+	define the same component, validator, overlay, mixin or file fail with an error
+	naming both. Without --with the built-in catalog is used. --data still layers one
+	override directory over the composition, last wins. Not compatible with --external-only.`,
+			Category: catInput,
+		}
+	}
+
 	externalOnlyFlag = func() cli.Flag {
 		return &cli.BoolFlag{
 			Name:     "external-only",
@@ -427,8 +440,24 @@ func recipeClientFromCmd(
 	if err != nil {
 		return nil, err
 	}
+	refs, err := catalogRefsFromCmd(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if len(refs) > 0 && externalOnly {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--with (spec.recipe.catalogs) cannot be combined with --external-only (spec.recipe.externalOnly): external-only composes nothing")
+	}
 	source := aicr.EmbeddedSource()
-	if dataDir != "" {
+	switch {
+	case len(refs) > 0:
+		slog.Info("composing catalogs", "catalogs", refs, "override_directory", dataDir)
+		catalogs := make([]aicr.RecipeSourceOption, 0, len(refs))
+		for _, ref := range refs {
+			catalogs = append(catalogs, aicr.CatalogSource(ref))
+		}
+		source = aicr.ComposedSource(catalogs...).WithOverride(dataDir)
+	case dataDir != "":
 		slog.Info("initializing external data provider", "directory", dataDir, "external_only", externalOnly)
 		source = aicr.FilesystemSource(dataDir)
 		if externalOnly {
@@ -445,6 +474,30 @@ func recipeClientFromCmd(
 			"failed to initialize data provider")
 	}
 	return client, nil
+}
+
+// catalogRefsFromCmd returns the catalogs to compose: the values of the
+// repeatable --with flag, or spec.recipe.catalogs when the flag is not set.
+// Each is "nvidia" or a catalog directory. It returns nil when none is set,
+// which leaves the built-in catalog (and --data) behaving exactly as before.
+func catalogRefsFromCmd(cmd *cli.Command, cfg *aicr.Config) ([]string, error) {
+	refs := cmd.StringSlice("with")
+	if len(refs) == 0 && cfg.Unwrap() != nil {
+		refs = cfg.Unwrap().Recipe().CatalogList()
+	}
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				`--with (spec.recipe.catalogs) needs "nvidia" or a catalog directory, got an empty value`)
+		}
+		out = append(out, ref)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 func catalogInputsFromCmd(cmd *cli.Command, cfg *aicr.Config) (string, bool, error) {
