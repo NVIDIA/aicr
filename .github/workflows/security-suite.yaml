@@ -1,0 +1,66 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Security Suite (Secret, Vulnerability, Malware)
+
+on:
+  push:
+    branches:
+      - main
+      - "pull-request/[0-9]+"
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-on-${{ github.event_name }}-from-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  security-suite:
+    name: Security Suite
+    # Pulse needs nv-gha-runners + Vault/nvcr vars; skip on forks.
+    if: github.repository == 'NVIDIA/aicr'
+    permissions:
+      actions: read
+      contents: read
+      id-token: write  # OIDC -> Vault -> nvcr.io image pull
+      security-events: write  # publish redacted SARIF to code scanning
+    uses: NVIDIA/security-workflows/.github/workflows/security-suite.yml@d8189f3176942de7ffe2c48bcd7bb5fbdee2dd15  # v0.6.0
+    with:
+      suite-runs-on: ubuntu-24.04
+      nspect-id: ${{ vars.NSPECT_ID }}
+
+      enable-secret-scan: true
+      secret-runs-on: linux-amd64-cpu4
+      secret-failure-policy: unverified
+
+      # The Charon tenant authorizes only these refs; workflow_dispatch has no branch filter.
+      enable-vuln-scan: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/pull-request/') }}
+      vuln-runs-on: linux-amd64-cpu4
+      # Go dependency graphs resolve only through a build, which runs repository code,
+      # so build only on post-merge main, never on pull-request mirrors.
+      vuln-build: ${{ github.ref == 'refs/heads/main' }}
+      # No persistent nSpect state until aicr's main-branch registration is confirmed.
+      vuln-scan-mode: rapid
+      vuln-failure-policy: report-only
+      vuln-upload-report: true
+
+      enable-malware-scan: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/pull-request/') }}
+      malware-runs-on: linux-amd64-cpu4
+      malware-failure-policy: strict
+
+      # CodeQL stays in codeql.yaml (Advanced setup, Go).
+      enable-sast-scan: false
