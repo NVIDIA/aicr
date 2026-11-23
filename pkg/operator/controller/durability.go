@@ -16,11 +16,15 @@ package controller
 
 import (
 	"context"
+	"maps"
 	"sort"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -202,7 +206,8 @@ func (r *RolloutReconciler) restorePlan(ctx context.Context, rt *v1alpha1.Cluste
 // recipe, values and assessment content nothing retained references, once
 // older than a grace period that covers a resolution in flight. The
 // assessment report of a blocked transition, which no rollout references,
-// is kept.
+// is kept. It lists ConfigMaps without their data and reads a plan's data
+// only when that plan is new or has changed.
 func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRuntime, active, target, blockedReport string) error {
 	rollouts, err := r.rollouts(ctx, rt)
 	if err != nil {
@@ -215,7 +220,8 @@ func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRunt
 		}
 	}
 
-	cms := &corev1.ConfigMapList{}
+	cms := &metav1.PartialObjectMetadataList{}
+	cms.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("ConfigMapList"))
 	if err = r.Reader.List(ctx, cms, client.InNamespace(r.Config.OperatorNamespace),
 		client.MatchingLabels{v1alpha1.LabelManagedBy: v1alpha1.ManagedByValue, v1alpha1.LabelRuntime: rt.Name}); err != nil {
 		return operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "list ConfigMaps")
@@ -228,7 +234,7 @@ func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRunt
 			keepContent[ref.ConfigMap] = true
 		}
 	}
-	var plans []corev1.ConfigMap
+	var plans []metav1.PartialObjectMetadata
 	for _, cm := range cms.Items {
 		if cm.Labels[v1alpha1.LabelRole] == v1alpha1.RolePlan {
 			plans = append(plans, cm)
@@ -236,6 +242,7 @@ func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRunt
 	}
 	sort.Slice(plans, func(i, j int) bool { return plans[j].CreationTimestamp.Before(&plans[i].CreationTimestamp) })
 	others := 0
+	read := map[planVersion]bool{}
 	for i := range plans {
 		cm := &plans[i]
 		digest := cm.Annotations[v1alpha1.AnnotationPlanDigest]
@@ -248,18 +255,16 @@ func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRunt
 			}
 			others++
 		}
-		doc, docErr := plan.FromConfigMap(cm)
-		if docErr != nil {
-			continue
+		version, refs, refsErr := r.planContent(ctx, cm)
+		if refsErr != nil {
+			return refsErr
 		}
-		if doc.Recipe != nil {
-			keepContent[doc.Recipe.ConfigMapRef.ConfigMap] = true
-			keepContent[doc.Recipe.Validation().ConfigMap] = true
-		}
-		for _, rel := range doc.Releases {
-			keepContent[rel.Values.ConfigMap] = true
+		read[version] = true
+		for _, name := range refs {
+			keepContent[name] = true
 		}
 	}
+	r.plans.retain(read)
 	cutoff := r.Now().Add(-defaults.ContentGracePeriod)
 	for i := range cms.Items {
 		cm := &cms.Items[i]
@@ -276,6 +281,70 @@ func (r *RolloutReconciler) retain(ctx context.Context, rt *v1alpha1.ClusterRunt
 		}
 	}
 	return nil
+}
+
+// planContent returns the recipe and values ConfigMaps a plan references,
+// reading the plan's data only for a version of its ConfigMap not read
+// before. A plan that no longer exists or does not parse references none.
+func (r *RolloutReconciler) planContent(ctx context.Context, meta *metav1.PartialObjectMetadata) (planVersion, []string, error) {
+	version := planVersion{uid: meta.UID, resourceVersion: meta.ResourceVersion}
+	if refs, ok := r.plans.get(version); ok {
+		return version, refs, nil
+	}
+	cm := &corev1.ConfigMap{}
+	if err := r.Reader.Get(ctx, client.ObjectKeyFromObject(meta), cm); err != nil {
+		if apierrors.IsNotFound(err) {
+			return version, nil, nil
+		}
+		return version, nil, operrors.WrapCtxErr(err, operrors.ErrCodeUnavailable, "read plan "+meta.Name)
+	}
+	var refs []string
+	if doc, err := plan.FromConfigMap(cm); err == nil {
+		if doc.Recipe != nil {
+			refs = append(refs, doc.Recipe.ConfigMapRef.ConfigMap, doc.Recipe.Validation().ConfigMap)
+		}
+		for _, rel := range doc.Releases {
+			refs = append(refs, rel.Values.ConfigMap)
+		}
+	}
+	r.plans.put(version, refs)
+	return version, refs, nil
+}
+
+// planVersion identifies one version of a plan ConfigMap.
+type planVersion struct {
+	uid             types.UID
+	resourceVersion string
+}
+
+// planRefs holds the content ConfigMaps each plan version references, for
+// the plans the last retention pass kept.
+type planRefs struct {
+	mu   sync.Mutex
+	refs map[planVersion][]string
+}
+
+func (p *planRefs) get(v planVersion) ([]string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	refs, ok := p.refs[v]
+	return refs, ok
+}
+
+func (p *planRefs) put(v planVersion, refs []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.refs == nil {
+		p.refs = map[planVersion][]string{}
+	}
+	p.refs[v] = refs
+}
+
+// retain drops every plan version but those given.
+func (p *planRefs) retain(keep map[planVersion]bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	maps.DeleteFunc(p.refs, func(v planVersion, _ []string) bool { return !keep[v] })
 }
 
 // retainedRollouts splits a runtime's rollouts, newest first, into those

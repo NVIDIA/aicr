@@ -184,6 +184,8 @@ type RolloutReconciler struct {
 
 	// steps holds the step Events of transitions not yet stored.
 	steps pendingEvents
+	// plans holds the content each plan references, for retention.
+	plans planRefs
 }
 
 // pendingEvents are step Events held until the status that records their

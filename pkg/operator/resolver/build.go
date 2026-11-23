@@ -141,11 +141,15 @@ func Build(ctx context.Context, delivery ChartDelivery, in *BuildInput) (*Built,
 		if relErr != nil {
 			return nil, relErr
 		}
+		budget := newChartBudget()
+		if rel.OwnsCRDs, err = chartOwnsCRDs(archive, budget); err != nil {
+			return nil, operrors.Wrap(operrors.ErrCodeInvalidRequest, "chart of release "+rel.ID, err)
+		}
 		built.Plan.Releases = append(built.Plan.Releases, *rel)
 		built.Values = append(built.Values, values)
 		if rel.Phase == plan.PhasePrimary {
-			if built.ChartDefaults[rel.Component], err = chartDefaults(archive); err != nil {
-				return nil, err
+			if built.ChartDefaults[rel.Component], err = chartDefaults(archive, budget); err != nil {
+				return nil, operrors.Wrap(operrors.ErrCodeInvalidRequest, "chart of release "+rel.ID, err)
 			}
 		}
 	}
@@ -209,9 +213,6 @@ func buildRelease(ctx context.Context, delivery ChartDelivery, in *BuildInput, b
 		rel.Chart = plan.Chart{Source: plan.ChartWrapper, Repository: m.Repository.URI(), Version: meta.Version, Digest: m.Digest}
 	default:
 		return nil, nil, nil, unsupportedChart(br, "its directory holds neither upstream.env nor Chart.yaml")
-	}
-	if rel.OwnsCRDs, err = chartOwnsCRDs(m.Archive); err != nil {
-		return nil, nil, nil, err
 	}
 	return rel, values, m.Archive, nil
 }
@@ -345,6 +346,74 @@ const maxTemplateBytes = 8 << 20
 // maxNestedCharts bounds how deep the CRD scan follows packaged subcharts.
 const maxNestedCharts = 2
 
+// Bounds on reading one chart archive and the packaged subcharts it holds,
+// shared by the CRD scan and the chart defaults: the bytes decompressed,
+// whether a scan reads or skips them, and the number of entries. When these
+// were set, no chart AICR pins needed more than 8.6 MiB or 603 entries over
+// both reads.
+const (
+	maxChartScanBytes   = 64 << 20
+	maxChartScanEntries = 4096
+)
+
+// chartBudget is what remains of those bounds for one chart archive.
+type chartBudget struct {
+	bytes   int64
+	entries int
+}
+
+func newChartBudget() *chartBudget {
+	return &chartBudget{bytes: maxChartScanBytes, entries: maxChartScanEntries}
+}
+
+// spent reports whether reading the archive needed more than the budget.
+// Nothing returns bytes or entries to a budget, so it stays spent.
+func (b *chartBudget) spent() bool {
+	return b.bytes < 0 || b.entries < 0
+}
+
+// admit charges one entry. It refuses the entry once the budget is spent, or
+// when the entry declares more bytes than remain, before any is decompressed.
+func (b *chartBudget) admit(h *tar.Header) bool {
+	b.entries--
+	if h.Size > b.bytes {
+		b.bytes = -1
+	}
+	return !b.spent()
+}
+
+// open decompresses a chart archive, charging every byte it inflates: entry
+// data, read or skipped, and the headers and padding no entry declares.
+func (b *chartBudget) open(archive []byte) (*tar.Reader, io.Closer, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		return nil, nil, operrors.New(operrors.ErrCodeInvalidRequest, "chart archive is not gzip")
+	}
+	return tar.NewReader(&meteredReader{r: gz, b: b}), gz, nil
+}
+
+// meteredReader charges each byte it reads to a chart budget, and fails once
+// the budget is spent.
+type meteredReader struct {
+	r io.Reader
+	b *chartBudget
+}
+
+func (m *meteredReader) Read(p []byte) (int, error) {
+	if m.b.spent() {
+		return 0, errChartBudget()
+	}
+	n, err := m.r.Read(p)
+	m.b.bytes -= int64(n)
+	return n, err
+}
+
+// errChartBudget is why a chart was not read in full.
+func errChartBudget() error {
+	return operrors.New(operrors.ErrCodeInvalidRequest, fmt.Sprintf(
+		"chart archive and its packaged subcharts exceed %d bytes or %d entries", maxChartScanBytes, maxChartScanEntries))
+}
+
 // subchartsDir holds a chart's subcharts, as directories or archives.
 const subchartsDir = "charts"
 
@@ -357,8 +426,8 @@ var crdKind = regexp.MustCompile(`"?kind"?\s*:\s*["']?CustomResourceDefinition\b
 // crds/ directory, any file but a chart's own values that declares one (a
 // template, or a file a template includes), a packaged subchart that does,
 // and anything the scan cannot read in full all count.
-func chartOwnsCRDs(archive []byte) (bool, error) {
-	return scanCRDs(archive, 0)
+func chartOwnsCRDs(archive []byte, b *chartBudget) (bool, error) {
+	return scanCRDs(archive, 0, b)
 }
 
 // valuesFile reports whether an archive path is a values file of a chart:
@@ -382,20 +451,25 @@ func valuesFile(name string) bool {
 	return true
 }
 
-func scanCRDs(archive []byte, depth int) (bool, error) {
-	gz, err := gzip.NewReader(bytes.NewReader(archive))
+func scanCRDs(archive []byte, depth int, b *chartBudget) (bool, error) {
+	tr, gz, err := b.open(archive)
 	if err != nil {
-		return false, operrors.New(operrors.ErrCodeInvalidRequest, "chart archive is not gzip")
+		return false, err
 	}
 	defer gz.Close()
-	tr := tar.NewReader(gz)
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			return false, nil
+			return b.spent(), nil
 		}
 		if err != nil {
+			if b.spent() {
+				return true, nil
+			}
 			return false, operrors.New(operrors.ErrCodeInvalidRequest, "chart archive is not a tar archive")
+		}
+		if !b.admit(h) {
+			return true, nil
 		}
 		if h.Typeflag != tar.TypeReg {
 			continue
@@ -415,7 +489,7 @@ func scanCRDs(archive []byte, depth int) (bool, error) {
 			if depth >= maxNestedCharts {
 				return true, nil
 			}
-			if owns, nestedErr := scanCRDs(data, depth+1); owns || nestedErr != nil {
+			if owns, nestedErr := scanCRDs(data, depth+1, b); owns || nestedErr != nil {
 				return true, nil
 			}
 			continue

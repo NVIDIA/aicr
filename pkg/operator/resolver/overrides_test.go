@@ -134,7 +134,7 @@ func TestChartDefaults(t *testing.T) {
 		"c/templates/deployment.yaml":  "kind: Deployment",
 		"c/charts/sub/templates/x.yml": "kind: ConfigMap",
 	})
-	got, err := chartDefaults(archive)
+	got, err := chartDefaults(archive, newChartBudget())
 	if err != nil {
 		t.Fatalf("chartDefaults() = %v", err)
 	}
@@ -160,7 +160,7 @@ func TestChartDefaults(t *testing.T) {
 		"too many files":  registrytest.TarGz(t, numerous),
 		"repeated file":   repeatedEntry(t, maxChartDefaultsEntries+1),
 	} {
-		if _, err := chartDefaults(bad); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		if _, err := chartDefaults(bad, newChartBudget()); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
 			t.Errorf("%s: chartDefaults() = %v", name, err)
 		}
 	}
@@ -179,7 +179,7 @@ func TestChartDefaultsStopsAtTheNestingBound(t *testing.T) {
 			fmt.Sprintf("%s/charts/l%d-1.0.0.tgz", name, level+1): string(archive),
 		})
 	}
-	got, err := chartDefaults(archive)
+	got, err := chartDefaults(archive, newChartBudget())
 	if err != nil {
 		t.Fatalf("chartDefaults() = %v", err)
 	}
