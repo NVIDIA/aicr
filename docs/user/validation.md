@@ -1324,7 +1324,10 @@ CTRF reports omit per-test stdout/message. Each test's CTRF `extra` keeps only
 allowlisted counts, measurements, thresholds, versions, allocation modes,
 transport, fabric, and runtime-source codes, the `nodeLocal` and
 `versionSatisfied` booleans, and skip-reason codes, never node names or IPs, and
-is omitted when none remain. The signed predicate records the applied policy in
+is omitted when none remain. Each test's `images` keeps up to 16 well-formed
+image records, unaliased, including any mirror registry host. A record with no digest does
+not prove the image ran, and a digest identifies an image only together with
+its platform. The signed predicate records the applied policy in
 a `redaction` block, and the bundle self-verifies exactly like a full one. Pass
 `--full` to publish the raw payloads instead.
 

@@ -1533,6 +1533,10 @@ const (
 	// inline JSON payloads (e.g., Prometheus metric scrapes).
 	ValidatorMaxStdoutLineLength = 512
 
+	// ValidatorMaxImageRecords is the maximum number of image records kept
+	// per validator result. Records past it are dropped.
+	ValidatorMaxImageRecords = 16
+
 	// ValidatorMaxTerminationMsgBytes bounds the container termination message
 	// copied into a validator result. kubelet caps the message at 4 KiB
 	// upstream, but the result flows into ConfigMaps and rendered reports, so

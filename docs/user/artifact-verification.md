@@ -319,8 +319,11 @@ thresholds, versions, allocation modes, transport, fabric, and runtime-source
 codes, the `nodeLocal` and `versionSatisfied` booleans, and skip-reason codes,
 never node names or IPs, and is omitted when none remain. See [Structured
 evidence that survives redaction](../contributor/validator.md#structured-evidence-that-survives-redaction)
-for the keys. The predicate records the applied policy in a `redaction` block,
-which `aicr evidence verify` surfaces. Minimal bundles self-verify exactly like
+for the keys. Each test's `images` keeps up to 16 well-formed image records,
+unaliased, including any mirror registry host. A record with no digest does not prove the
+image ran, and a digest identifies an image only together with its platform.
+The predicate records the applied policy in a `redaction` block, which
+`aicr evidence verify` surfaces. Minimal bundles self-verify exactly like
 full ones, because the digests cover whatever bytes shipped. Pass `--full` to
 `aicr validate --emit-attestation` to publish the raw payloads instead.
 
