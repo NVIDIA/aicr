@@ -34,5 +34,5 @@ charts:
       - restapis.slinky.slurm.net
       - tokens.slinky.slurm.net
     repository: oci://ghcr.io/slinkyproject/charts
-    sourceVersion: 1.2.4
+    sourceVersion: 1.2.5
 component: slinky-slurm-operator-crds

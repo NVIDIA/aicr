@@ -3160,7 +3160,7 @@ New components are added declaratively in `recipes/registry.yaml` — no Go code
 
 ## Topology-aware scheduling with Kueue and Topograph
 
-Kueue topology-aware scheduling (TAS) is on by default in the shipped Kueue (0.19.13) but only reads node labels; it does not create them. The `platform=kueue` leaves install [Topograph](https://github.com/dsx-ai-factory/topograph) with the `k8s` engine to write the labels, and wire Kueue's `Topology` and `ResourceFlavor` to them. Recipes without `--platform kueue` are unchanged. `platform` takes a single value, so these leaves cannot be combined with `--platform kubeflow`: there is no recipe that installs Kubeflow Trainer together with Kueue TAS. Kueue itself can queue `TrainJob`s (Trainer v2.0.0 or later, `trainer.kubeflow.org/trainjob` is already enabled in the shipped Kueue config), but topology-aware placement of `TrainJob`s is not covered by Kueue's TrainJob documentation and has not been verified here.
+Kueue topology-aware scheduling (TAS) is on by default in the shipped Kueue (0.19.14) but only reads node labels; it does not create them. The `platform=kueue` leaves install [Topograph](https://github.com/dsx-ai-factory/topograph) with the `k8s` engine to write the labels, and wire Kueue's `Topology` and `ResourceFlavor` to them. Recipes without `--platform kueue` are unchanged. `platform` takes a single value, so these leaves cannot be combined with `--platform kubeflow`: there is no recipe that installs Kubeflow Trainer together with Kueue TAS. Kueue itself can queue `TrainJob`s (Trainer v2.0.0 or later, `trainer.kubeflow.org/trainjob` is already enabled in the shipped Kueue config), but topology-aware placement of `TrainJob`s is not covered by Kueue's TrainJob documentation and has not been verified here.
 
 | Leaf | Provider | Topology levels (widest first) |
 |------|----------|--------------------------------|
@@ -4187,7 +4187,7 @@ default since 0.15, fails on its own with `cannot use a TAS profile with TAS
 disabled`. The manager reached `1/1 Running` only with all nine set false
 together.
 
-From 0.19.6 (AICR pins 0.19.13) there is a tenth: `TASPartialSlices` is new in 0.19.6,
+From 0.19.6 (AICR pins 0.19.14) there is a tenth: `TASPartialSlices` is new in 0.19.6,
 defaults on, and requires TAS, so at 0.19.6 the nine above still fail with
 `TASPartialSlices requires TopologyAwareScheduling to be enabled`. Checked
 against 0.19.6 by running kueue's own feature-gate validation:
