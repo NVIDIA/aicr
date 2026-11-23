@@ -961,11 +961,13 @@ components:
       - nvsentinelmongodb
     healthCheck:
       assertFile: checks/nvsentinel-mongodb/health-check.yaml
+    upgrades:
+      file: components/nvsentinel-mongodb/upgrades.yaml
     helm:
       defaultRepository: https://percona.github.io/percona-helm-charts/
       defaultChart: psmdb-db
       # renovate: datasource=helm depName=psmdb-db registryUrl=https://percona.github.io/percona-helm-charts/
-      defaultVersion: "1.23.3"
+      defaultVersion: "1.23.4"
       defaultNamespace: nvsentinel
     manifestFiles:
       - components/nvsentinel-mongodb/manifests/client-certificate.yaml
