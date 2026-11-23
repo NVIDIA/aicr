@@ -28,65 +28,269 @@
 #     revisit_when: an upgrade record exists for v1.20 -> v1.23
 
 reviews:
+  # Report run 45129434286 (2026-11-23) reviewed against main 81480ae97;
+  # tracked in #4009.
   - component: agentgateway
     from: v1.5.0
-    to: v2.2.1
-    verdict: hold
-    reviewed: 2026-09-28
+    to: v1.7.0
+    candidates:
+      - minor v1.7.0
+    verdict: take
+    reviewed: 2026-11-23
     reason: >-
-      Upstream has no v2.x; latest release is v1.5.0. The v2.2.x tags in
-      cr.agentgateway.dev are the kgateway lineage. Same regression #1476 fixed.
-    revisit_when: agentgateway/agentgateway actually cuts a v2.x release
+      v1.6.0 and v1.7.0 are genuine agentgateway releases (the OCI source
+      annotation points at agentgateway/agentgateway; no v2.x tags remain).
+      Values paths and the 4 CRDs' served versions are unchanged, but the
+      release changes behavior: Messages requests convert via Responses,
+      provider base URLs without a path mean `/`, guards scan tool output by
+      default, dynamic backends cannot reach loopback, and CRD defaults are
+      no longer stored. Needs a manual record.
+    revisit_when: "the v1.7.0 PR tracked in #4009 lands"
   - component: agentgateway-crds
     from: v1.5.0
-    to: v2.2.1
-    verdict: hold
-    reviewed: 2026-09-28
-    reason: Lockstep with agentgateway; same wrong-lineage tag.
-    revisit_when: agentgateway/agentgateway actually cuts a v2.x release
-  - component: kai-scheduler
-    from: v0.16.9
-    to: v0.20.1
-    verdict: hold
-    reviewed: 2026-09-28
+    to: v1.7.0
+    candidates:
+      - minor v1.7.0
+    verdict: take
+    reviewed: 2026-11-23
+    reason: Lockstep with agentgateway; same 4 CRDs and served versions.
+    revisit_when: "the v1.7.0 PR tracked in #4009 lands"
+  - component: aws-ebs-csi-driver
+    from: 2.68.0
+    to: 2.68.1
+    candidates:
+      - patch 2.68.1
+    verdict: take
+    reviewed: 2026-11-23
     reason: >-
-      v0.20.1 is retracted upstream. The max-semver pick also hides the real
-      candidates: v0.16.10 (same-line patch, 2026-09-28) and v0.18.0 (Latest,
-      2026-09-23).
-    revisit_when: >-
-      someone evaluates v0.16.10 or v0.18.0 on their own merits; the digest's
-      v0.20.1 never becomes correct
-  - component: grove
-    from: v0.1.0-alpha.12
-    to: v0.1.0-alpha.13
-    verdict: hold
-    reviewed: 2026-09-28
-    reason: >-
-      upgrades.yaml holds one transition (<0.1.0-alpha.12 -> 0.1.0-alpha.12,
-      manual). Bumping to alpha.13 leaves a hole below the pin, so
-      check-upgrade-records in `make lint` fails.
-    revisit_when: >-
-      an alpha.12 -> alpha.13 transition is authored with real evidence; the
-      prior hop was manual for a dropped CRD, so safe is not assumable
-  - component: kube-prometheus-stack
-    from: 84.4.0
-    to: 91.5.2
+      CVE image rebuilds and a Windows-only template fix; with AICR's values
+      the render differs only in image tags and labels. Safe record.
+    revisit_when: "the patch-tier PR tracked in #4009 lands"
+  - component: aws-efa
+    from: v0.5.29
+    to: v0.5.35
+    candidates:
+      - patch v0.5.35
     verdict: defer
-    reviewed: 2026-09-28
+    reviewed: 2026-11-23
     reason: >-
-      appVersion lockstep with prometheus-operator-crds is clean (both v0.90.1
-      -> v0.94.1), but this is a 7-chart-version major colliding with the
-      aks.yaml 83.7.0 pin exemption (#700).
-    revisit_when: after the v1.0.0 tag, and with the AKS exemption addressed
+      AICR pins the device-plugin image to the pinned chart's appVersion
+      (v0.5.20); v0.5.35 defaults to v0.5.22-eksbuild.9. The image is in
+      Renovate ignoreDeps and must match an EKS add-on release, which is
+      unconfirmed, and the plugin publishes no release notes.
+    revisit_when: an EKS add-on release carrying v0.5.22-eksbuild.9 is confirmed
+  - component: cert-manager
+    from: v1.20.5
+    to: v1.21.3
+    candidates:
+      - predating minor v1.21.3
+    verdict: hold
+    reviewed: 2026-11-23
+    reason: >-
+      Withheld by the report. Both lines are supported and v1.21.3 is marked
+      Latest, but it predates the pin and lags it on the go-jose and x/net
+      CVE fixes. 1.21 also raises the minimum Kubernetes to 1.33, renames the
+      metrics port to http-metrics and removes the tokenrequest RBAC.
+    revisit_when: v1.21.4 ships with those fixes
+  - component: grove
+    from: v0.1.0-alpha.14
+    to: v0.1.0-alpha.17
+    candidates:
+      - patch v0.1.0-alpha.17
+    verdict: take
+    reviewed: 2026-11-23
+    reason: >-
+      Same 6 v1alpha1 CRDs, only an additive status field; every grove
+      overlay already requires Kubernetes 1.34, the new documented minimum.
+      alpha.17 is the last alpha: v0.2.0-beta1 moves storage to
+      grove.io/v1beta1, so the next hop is a migration.
+    revisit_when: "the minor-tier PR tracked in #4009 lands"
+  - component: k8s-ephemeral-storage-metrics
+    from: 1.19.2
+    to: 1.21.3
+    candidates:
+      - minor 1.21.3
+    verdict: take
+    reviewed: 2026-11-23
+    reason: >-
+      gc_* values removed (AICR sets none), readiness probe moves to /health,
+      new rootfs and logs metrics on by default, series evicted after two
+      missed scrapes. No values path AICR sets is lost.
+    revisit_when: "the minor-tier PR tracked in #4009 lands"
+  - component: kai-scheduler
+    from: v0.18.8
+    to: 0.19.0
+    candidates:
+      - minor 0.19.0
+      - predating minor v0.20.1
+    verdict: hold
+    reviewed: 2026-11-23
+    reason: >-
+      0.19.0 is genuine (same digest as v0.19.0), but pods tolerating
+      unschedulable can now land on cordoned nodes and the eviction metrics
+      were replaced. 0.18.x is maintained: v0.18.9 shipped 2026-11-23, inside
+      the cooldown. v0.20.1 stays retracted.
+    revisit_when: >-
+      a report offers v0.18.9, or someone evaluates the 0.19 cordoned-node
+      change on its own merits
+  - component: kube-prometheus-stack
+    from: 84.5.0
+    to: 93.4.1
+    candidates:
+      - major 93.4.1
+    verdict: hold
+    reviewed: 2026-11-23
+    reason: >-
+      In flight in #3730 (to 88.6.5, with prometheus-operator-crds). 88.x is
+      frozen; 88.6.5 pairs with prometheus-operator-crds 31.0.1 and 93.4.1
+      with 33.0.2. From 90.x AICR's values make the chart create a
+      non-expiring service-account token Secret.
+    revisit_when: "#3730 merges"
+  - component: kubeflow-trainer
+    from: 2.2.1
+    to: 2.4.0
+    candidates:
+      - minor 2.4.0
+    verdict: hold
+    reviewed: 2026-11-23
+    reason: "In flight in #3959; kueue 0.20 waits on it."
+    revisit_when: "#3959 merges"
+  - component: kueue
+    from: 0.19.13
+    to: 0.20.7
+    candidates:
+      - minor 0.20.7
+      - patch 0.19.14
+    recommends: "0.19.14"
+    verdict: take
+    reviewed: 2026-11-23
+    reason: >-
+      0.20 stops serving v1beta1 and its TrainJob integration needs Kubeflow
+      Trainer 2.3 or later; AICR enables trainer.kubeflow.org/trainjob with
+      trainer 2.2.1. 0.19.14 is fixes, but turns on the
+      WorkloadPriorityClassWatchesWorkloads gate by default, so its record is
+      manual.
+    revisit_when: >-
+      #3959 merges; then 0.20.x with a manual record for the v1beta1
+      migration
+  - component: network-operator
+    from: 26.7.1
+    to: 26.10.0
+    candidates:
+      - minor 26.10.0
+    verdict: defer
+    reviewed: 2026-11-23
+    reason: >-
+      No values path lost and the 9 CRDs keep their served versions, but
+      26.10.1-rc.1 is already out and NVIDIA's docs report a GB200 (NVLink 5)
+      issue where GPU driver pods block DOCA-OFED driver updates; the GitHub
+      release body does not mention it, so it is unconfirmed.
+    revisit_when: 26.10.1 is released, with the GB200 note checked
+  - component: nktp
+    from: 0.2.0
+    to: 0.3.0
+    candidates:
+      - minor 0.3.0
+    verdict: defer
+    reviewed: 2026-11-23
+    reason: >-
+      Upstream (dsx-ai-factory/nvke-telemetry-pipeline) requires applying the
+      OTel CRDs before helm upgrade, and every node now needs a writable
+      hostPath at /var/lib/nktp/log-checkpoints (on by default). A manual
+      record with steps for all five deployers.
+    revisit_when: the nktp owner confirms the CRD ordering and hostPath for NVKE
+  - component: node-problem-detector
+    from: 2.4.1
+    to: 2.4.2
+    candidates:
+      - patch 2.4.2
+    verdict: take
+    reviewed: 2026-11-23
+    reason: Optional probe values, empty by default. Safe record.
+    revisit_when: "the patch-tier PR tracked in #4009 lands"
+  - component: nvsentinel-mongodb
+    from: 1.23.3
+    to: 1.23.4
+    candidates:
+      - patch 1.23.4
+    verdict: take
+    reviewed: 2026-11-23
+    reason: >-
+      Chart defaults move to operator v1.23.1, already shipped; AICR pins
+      crVersion and every image, so the rendered cluster object is unchanged.
+      Safe record.
+    revisit_when: "the patch-tier PR tracked in #4009 lands"
+  - component: prometheus-adapter
+    from: 5.3.0
+    to: 5.4.2
+    candidates:
+      - minor 5.4.2
+    verdict: take
+    reviewed: 2026-11-23
+    reason: >-
+      appVersion stays v0.12.0; the PDB template now renders minAvailable 0,
+      and AICR sets no PDB. One report row covers prometheus-adapter-ocp too.
+    revisit_when: "the minor-tier PR tracked in #4009 lands"
+  - component: prometheus-adapter-ocp
+    from: 5.3.0
+    to: 5.4.2
+    candidates:
+      - minor 5.4.2
+    verdict: take
+    reviewed: 2026-11-23
+    reason: Lockstep with prometheus-adapter; same chart and row.
+    revisit_when: "the minor-tier PR tracked in #4009 lands"
   - component: prometheus-operator-crds
     from: 28.0.1
-    to: 32.0.1
-    verdict: defer
-    reviewed: 2026-09-28
+    to: 33.0.2
+    candidates:
+      - major 33.0.2
+    verdict: hold
+    reviewed: 2026-11-23
     reason: >-
-      Must move with kube-prometheus-stack (appVersion v0.90.1 -> v0.94.1). A
-      lagging CRDs pin also breaks nvsentinel and k8s-ephemeral-storage-metrics.
-    revisit_when: taken together with kube-prometheus-stack
+      Moves with kube-prometheus-stack in #3730 (appVersion lockstep).
+      Stricter validation in the newer CRDs can reject updates to existing
+      objects.
+    revisit_when: "#3730 merges"
+  - component: slinky-slurm-operator-crds
+    from: 1.2.4
+    to: 1.3.0
+    candidates:
+      - minor 1.3.0
+      - patch 1.2.5
+    recommends: "1.2.5"
+    verdict: take
+    reviewed: 2026-11-23
+    reason: >-
+      1.3.0 moves the top-level sssd.conf that AICR's slurm values set into
+      the LoginSet config, removes taintKubeNodes, enforces HTTPS for
+      --metrics-secure, and its support matrix starts at Kubernetes 1.35.
+      1.2.5 is fixes; the family takes it together.
+    revisit_when: AICR's sssd config is ported to the LoginSet shape
+  - component: slinky-slurm-operator
+    from: 1.2.4
+    to: 1.3.0
+    candidates:
+      - minor 1.3.0
+      - patch 1.2.5
+    recommends: "1.2.5"
+    verdict: take
+    reviewed: 2026-11-23
+    reason: Lockstep with slinky-slurm-operator-crds.
+    revisit_when: AICR's sssd config is ported to the LoginSet shape
+  - component: slinky-slurm
+    from: 1.2.4
+    to: 1.3.0
+    candidates:
+      - minor 1.3.0
+      - patch 1.2.5
+    recommends: "1.2.5"
+    verdict: take
+    reviewed: 2026-11-23
+    reason: >-
+      Lockstep with slinky-slurm-operator-crds. 1.3.0 removes the sssd.conf
+      values path AICR sets.
+    revisit_when: AICR's sssd config is ported to the LoginSet shape
   - component: nvsentinel
     from: v1.20.0
     to: v1.25.0
@@ -102,15 +306,6 @@ reviews:
     revisit_when: >-
       #2711 merges; settle the target there against whatever is current that
       day rather than against a digest row
-  - component: aws-efa
-    from: v0.5.29
-    to: v0.5.32
-    verdict: defer
-    reviewed: 2026-09-28
-    reason: >-
-      Chart is tracked but the device-plugin image is in Renovate ignoreDeps and
-      must be coordinated with EKS add-on releases.
-    revisit_when: a matching EKS add-on release is confirmed
   - component: k8s-aibom
     from: "1.5.1"
     to: "1.6.1"
