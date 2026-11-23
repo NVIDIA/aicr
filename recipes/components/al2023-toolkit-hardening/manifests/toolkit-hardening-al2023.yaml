@@ -13,7 +13,9 @@
 # limitations under the License.
 
 # NVIDIA container toolkit device-isolation hardening for EKS AL2023 GPU nodes
-# (h100/gb200/gb300/rtx-pro-6000-eks-amazonlinux-inference, issue #3272).
+# (h100/gb200/gb300/rtx-pro-6000-eks-amazonlinux-inference and
+# h100-eks-amazonlinux-inference-dynamo, which inherits from the h100 leaf;
+# issue #3272).
 #
 # nodewright-customizations is disabled wholesale on these leaves (the
 # inherited tuning manifests are not validated on AL2023),
@@ -66,7 +68,7 @@ spec:
       version: "1.1.1"
       containerSHA: sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf
       configMap:
-        apply.sh: |
+        apply.sh: |-
           #!/bin/bash
           set -euo pipefail
           CONFIG=/etc/nvidia-container-runtime/config.toml
@@ -75,14 +77,23 @@ spec:
             exit 0
           fi
           if ! command -v nvidia-ctk >/dev/null 2>&1; then
-            echo "nvidia-ctk not found on this node, skipping"
-            exit 0
+            echo "nvidia-ctk not found on this node but $CONFIG exists, failing"
+            exit 1
           fi
           nvidia-ctk config --in-place \
             --set accept-nvidia-visible-devices-envvar-when-unprivileged=false \
             --set accept-nvidia-visible-devices-as-volume-mounts=true
           echo "nvidia-container-runtime hardened at config.toml root"
-        config.sh: |
+        apply_check.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          CONFIG=/etc/nvidia-container-runtime/config.toml
+          if [ ! -f "$CONFIG" ]; then
+            exit 0
+          fi
+          grep -qE '^\s*accept-nvidia-visible-devices-envvar-when-unprivileged\s*=\s*false' "$CONFIG"
+          grep -qE '^\s*accept-nvidia-visible-devices-as-volume-mounts\s*=\s*true' "$CONFIG"
+        config.sh: |-
           #!/bin/bash
           set -euo pipefail
           CONFIG=/etc/nvidia-container-runtime/config.toml
@@ -91,13 +102,22 @@ spec:
             exit 0
           fi
           if ! command -v nvidia-ctk >/dev/null 2>&1; then
-            echo "nvidia-ctk not found on this node, skipping"
-            exit 0
+            echo "nvidia-ctk not found on this node but $CONFIG exists, failing"
+            exit 1
           fi
           nvidia-ctk config --in-place \
             --set accept-nvidia-visible-devices-envvar-when-unprivileged=false \
             --set accept-nvidia-visible-devices-as-volume-mounts=true
           echo "nvidia-container-runtime hardened at config.toml root"
+        config_check.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          CONFIG=/etc/nvidia-container-runtime/config.toml
+          if [ ! -f "$CONFIG" ]; then
+            exit 0
+          fi
+          grep -qE '^\s*accept-nvidia-visible-devices-envvar-when-unprivileged\s*=\s*false' "$CONFIG"
+          grep -qE '^\s*accept-nvidia-visible-devices-as-volume-mounts\s*=\s*true' "$CONFIG"
       resources:
         cpuLimit: 1
         cpuRequest: 100m

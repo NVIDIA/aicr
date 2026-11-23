@@ -32,6 +32,7 @@ var untrackedComponents = map[string]string{
 	"dranet":                     "manifest-only: in-tree manifests, no upstream chart",
 	"dra-node-labeler":           "manifest-only: in-tree manifests, no upstream chart",
 	"gcp-driver-installer":       "manifest-only: in-tree manifests, no upstream chart",
+	"al2023-toolkit-hardening":   "manifest-only: in-tree NodeWright CR, no upstream chart",
 	"nodewright-customizations":  "manifest-only: in-tree customization manifests",
 	"rdma-modules":               "manifest-only: in-tree NodeWright CR, no upstream chart",
 	"sriov-ib-networks":          "manifest-only: in-tree SR-IOV objects, no upstream chart",
