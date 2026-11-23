@@ -158,3 +158,55 @@ transitions:
       - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.9
       - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.12
       - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.13
+  - from: ">=0.19.13 <0.19.14"
+    to: "0.19.14"
+    verdict: manual
+    summary: >-
+      0.19.14 enables the Beta feature gate WorkloadPriorityClassWatchesWorkloads
+      by default, so a priority set directly on a Workload that references a
+      WorkloadPriorityClass is put back to the class value, where 0.19.13
+      kept it; that can change preemption order. Admission also tightens: a
+      Workload whose Pods' summed limits exceed a type Pod LimitRange max is
+      held inadmissible instead of admitted, and a ResourceFlavor nodeLabels
+      entry with an empty value matches only nodes that carry the label. AICR
+      sets no kueue feature gate and its flavors use no empty label value, so
+      a default install needs only the apply.
+    precondition: >-
+      Know whether anything on the cluster patches spec.priority on Workloads
+      directly and relies on it sticking, whether a type Pod LimitRange max
+      applies in namespaces that submit to kueue, and whether a ResourceFlavor
+      you created has a nodeLabels entry with an empty value. If none holds,
+      the keep-direct-priority step does not apply.
+    stepsByDeployer:
+      - deployers: [helm, helmfile, terraform]
+        steps:
+          - id: keep-direct-priority
+            description: >-
+              Only if Workload priorities are set directly and must be kept:
+              add {name: WorkloadPriorityClassWatchesWorkloads, enabled: false}
+              to controllerManager.featureGates in your kueue values override
+              before applying.
+            reason: >-
+              With the gate on, kueue resets such a priority to the
+              WorkloadPriorityClass value on its next reconcile.
+          - id: apply
+            description: >-
+              Re-run install.sh (helm), helmfile apply (helmfile), or
+              terraform apply on the regenerated bundle (terraform).
+            reason: Moves kueue to 0.19.14.
+      - steps:
+          - id: keep-direct-priority
+            description: >-
+              Only if Workload priorities are set directly and must be kept:
+              add {name: WorkloadPriorityClassWatchesWorkloads, enabled: false}
+              to controllerManager.featureGates in your kueue values override,
+              in the same commit that moves the kueue release to 0.19.14.
+            reason: >-
+              With the gate on, kueue resets such a priority to the
+              WorkloadPriorityClass value on its next reconcile.
+          - id: apply
+            description: >-
+              Sync or reconcile the kueue release.
+            reason: Moves kueue to 0.19.14.
+    references:
+      - https://github.com/kubernetes-sigs/kueue/releases/tag/v0.19.14
