@@ -168,15 +168,22 @@ transitions:
       kept it; that can change preemption order. Admission also tightens: a
       Workload whose Pods' summed limits exceed a type Pod LimitRange max is
       held inadmissible instead of admitted, and a ResourceFlavor nodeLabels
-      entry with an empty value matches only nodes that carry the label. AICR
-      sets no kueue feature gate and its flavors use no empty label value, so
-      a default install needs only the apply.
+      entry with an empty value matches only nodes that carry the label.
+      0.19.14 also rejects, at startup, a resources.deviceClassMappings entry
+      with two counter or capacity sources for the same driver and name, so
+      such a configuration crash-loops after the upgrade. AICR sets no kueue
+      feature gate and no deviceClassMappings, and its flavors use no empty
+      label value, so a default install needs only the apply.
     precondition: >-
       Know whether anything on the cluster patches spec.priority on Workloads
-      directly and relies on it sticking, whether a type Pod LimitRange max
-      applies in namespaces that submit to kueue, and whether a ResourceFlavor
-      you created has a nodeLabels entry with an empty value. If none holds,
-      the keep-direct-priority step does not apply.
+      directly and relies on it sticking; if not, the keep-direct-priority
+      step does not apply. Know whether your kueue override sets
+      resources.deviceClassMappings in
+      managerConfig.controllerManagerConfigYaml; if not, the
+      fix-device-class-mappings step does not apply. A type Pod LimitRange
+      max in a namespace that submits to kueue, or a ResourceFlavor you
+      created with an empty nodeLabels value, needs no step but changes which
+      Workloads are admitted.
     stepsByDeployer:
       - deployers: [helm, helmfile, terraform]
         steps:
@@ -184,11 +191,22 @@ transitions:
             description: >-
               Only if Workload priorities are set directly and must be kept:
               add {name: WorkloadPriorityClassWatchesWorkloads, enabled: false}
-              to controllerManager.featureGates in your kueue values override
-              before applying.
+              where your kueue override already sets feature gates, either
+              controllerManager.featureGates or the featureGates block of
+              managerConfig.controllerManagerConfigYaml, or in
+              controllerManager.featureGates if it sets none, before applying.
             reason: >-
               With the gate on, kueue resets such a priority to the
-              WorkloadPriorityClass value on its next reconcile.
+              WorkloadPriorityClass value on its next reconcile. kueue refuses
+              to start when feature gates are set in both places.
+          - id: fix-device-class-mappings
+            description: >-
+              Only if your override sets resources.deviceClassMappings: make
+              sure no entry names two counter or capacity sources for the
+              same driver and name, before applying.
+            reason: >-
+              0.19.14 rejects such an entry at configuration validation and
+              does not start.
           - id: apply
             description: >-
               Re-run install.sh (helm), helmfile apply (helmfile), or
@@ -199,11 +217,24 @@ transitions:
             description: >-
               Only if Workload priorities are set directly and must be kept:
               add {name: WorkloadPriorityClassWatchesWorkloads, enabled: false}
-              to controllerManager.featureGates in your kueue values override,
-              in the same commit that moves the kueue release to 0.19.14.
+              where your kueue override already sets feature gates, either
+              controllerManager.featureGates or the featureGates block of
+              managerConfig.controllerManagerConfigYaml, or in
+              controllerManager.featureGates if it sets none, in the same
+              commit that moves the kueue release to 0.19.14.
             reason: >-
               With the gate on, kueue resets such a priority to the
-              WorkloadPriorityClass value on its next reconcile.
+              WorkloadPriorityClass value on its next reconcile. kueue refuses
+              to start when feature gates are set in both places.
+          - id: fix-device-class-mappings
+            description: >-
+              Only if your override sets resources.deviceClassMappings: make
+              sure no entry names two counter or capacity sources for the
+              same driver and name, in the same commit that moves the kueue
+              release to 0.19.14.
+            reason: >-
+              0.19.14 rejects such an entry at configuration validation and
+              does not start.
           - id: apply
             description: >-
               Sync or reconcile the kueue release.

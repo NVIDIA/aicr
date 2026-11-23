@@ -96,8 +96,15 @@ transitions:
       accounting pod template metadata is respected) plus Go CVE updates,
       with no action required. helm template of 1.2.4 and 1.2.5 with AICR's
       values renders the same 16 objects, differing only in the operator and
-      webhook image tags and the version labels.
+      webhook image tags and the version labels. The accounting builder now
+      merges the Accounting object's spec.template.metadata into the
+      slurmdbd pod (internal/builder/accountingbuilder/accounting_app.go,
+      v1.2.4..v1.2.5).
     summary: >-
-      Patch release of fixes. Nothing to change on upgrade.
+      Patch release of fixes. When accounting is enabled, the slurm chart
+      fills the Accounting template's metadata with its own labels, which the
+      operator now copies onto the slurmdbd pod, so that pod is replaced once
+      on upgrade. Nothing to change on upgrade.
     references:
       - https://github.com/SlinkyProject/slurm-operator/blob/v1.2.5/CHANGELOG/CHANGELOG-1.2.md
+      - https://github.com/SlinkyProject/slurm-operator/compare/v1.2.4...v1.2.5

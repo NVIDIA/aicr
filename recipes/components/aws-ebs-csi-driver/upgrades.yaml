@@ -80,14 +80,14 @@ transitions:
     to: "2.68.1"
     verdict: safe
     verifiedBy: >-
-      Upstream CHANGELOG.md (kubernetes-sigs/aws-ebs-csi-driver) at v1.68.1:
-      chart 2.68.1 and driver v1.68.1 fix the Helm template for alpha Windows
-      hostprocess nodes and rebuild the images for glibc, xfsprogs and Go
-      net/http CVEs, moving every sidecar one eksbuild revision, with no CRD
-      change. helm template of 2.68.0 and 2.68.1 with AICR's values renders
-      the same 33 objects, differing only in image tags and the chart and
-      version labels.
+      The v1.68.1 entry of CHANGELOG.md (kubernetes-sigs/aws-ebs-csi-driver)
+      at tag helm-chart-aws-ebs-csi-driver-2.68.1: a fix for alpha Windows
+      hostprocess support when deployed with Helm, and image rebuilds for
+      glibc, xfsprogs and Go net/http CVEs, with no CRD change. helm template
+      of 2.68.0 and 2.68.1 with AICR's values renders the same 33 objects,
+      differing only in image tags (the driver at v1.68.1, each sidecar one
+      eksbuild revision up) and the chart and version labels.
     summary: >-
       Patch release of rebuilt images. Nothing to change on upgrade.
     references:
-      - https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/v1.68.1/CHANGELOG.md
+      - https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/helm-chart-aws-ebs-csi-driver-2.68.1/CHANGELOG.md
