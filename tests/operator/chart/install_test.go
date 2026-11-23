@@ -845,7 +845,7 @@ func pluginCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err = run("acknowledge", manual.Name, "--kubeconfig", bob)
-	if err != nil || !strings.Contains(out, "bob acknowledged the post-apply steps of gpu-operator (reset-breaker, verify)") {
+	if err != nil || !strings.Contains(out, "bob acknowledged the steps gpu-operator's record holds (reset-breaker, verify)") {
 		t.Fatalf("acknowledge: %v\n%s", err, out)
 	}
 	if out, err = run("describe", manual.Name, "--kubeconfig", alice); err != nil || !strings.Contains(out, "gpu-operator by bob") {
