@@ -15,13 +15,15 @@
 // Command operator-release completes a qualification candidate that
 // tools/operator-candidate built: it packages the chart
 // deterministically and records the candidate's identity in
-// candidate.json, with its deployment inputs in candidate-values.yaml.
+// candidate.json, with its deployment inputs in candidate-values.yaml. It
+// also checks the operator's AICR pins in .settings.yaml.
 //
 //	operator-release build   -dir dist/candidate -version v0.1.0-rc.1 -repository R -commit C -commit-date D -go-version G
 //	operator-release extract -dir dist/candidate -platform linux/amd64 -out bin
 //	operator-release refuses -dir dist/candidate
 //	operator-release push    -dir dist/candidate
 //	operator-release pull    -dir dist/published -version latest -below <candidate version>
+//	operator-release pins    -settings .settings.yaml -attestations
 package main
 
 import (
@@ -50,7 +52,7 @@ func main() {
 
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: operator-release build|extract|refuses|push|pull [flags]")
+		return errors.New("usage: operator-release build|extract|refuses|push|pull|pins [flags]")
 	}
 	switch args[0] {
 	case "build":
@@ -63,6 +65,8 @@ func run(args []string, out io.Writer) error {
 		return push(args[1:], out)
 	case "pull":
 		return pull(args[1:], out)
+	case "pins":
+		return pinsCmd(args[1:], out, network)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -203,8 +207,8 @@ var pinnedRef = regexp.MustCompile(`^[^\s@]+/[^\s@/:]+:[A-Za-z0-9_][A-Za-z0-9_.-
 var commitValidatorTag = regexp.MustCompile(`^sha-[0-9a-f]{40}$`)
 
 // aicrFlags is the AICR release given on the command line, such as the one a
-// release tag built: all three flags, each image pinned by digest and tagged
-// with the version. A build from a commit, stamped as a goreleaser snapshot
+// release tag built, or pinned in .settings.yaml: all three flags, each image
+// pinned by digest and tagged with the version. A build from a commit, stamped as a goreleaser snapshot
 // (<tag>-next), names its validators by that commit instead, so they are
 // tagged sha-<commit>, one commit for all.
 func aicrFlags(ver, image, validators string) (AICR, error) {
