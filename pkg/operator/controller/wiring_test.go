@@ -127,7 +127,7 @@ func TestControllerWiring(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			_ = k8s.Delete(context.Background(), obj, client.PropagationPolicy(metav1.DeletePropagationBackground))
+			_ = k8s.Delete(context.WithoutCancel(ctx), obj, client.PropagationPolicy(metav1.DeletePropagationBackground))
 		})
 	}
 
