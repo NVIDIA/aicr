@@ -1349,8 +1349,9 @@ A candidate must be older than the age floor
 (`defaults.ValidationSweepMinAge`, 2h — above `ValidationOperationTimeout` and
 every embedded catalog wait envelope, pinned in `pkg/defaults/timeouts_test.go`
 and `pkg/validator/catalog/catalog_test.go`; a `--data` catalog that raises a
-check's `timeout` past it needs an `--older-than` above `v1.WaitEnvelopeFor`
-of that timeout, i.e. the timeout plus 4m5s) and pass a liveness guard: below the
+check's `timeout` keeps the default unless `v1.WaitEnvelopeFor` of that
+timeout, i.e. the timeout plus 4m5s, exceeds it, and then needs an
+`--older-than` above that envelope) and pass a liveness guard: below the
 default floor, no non-terminal pods in a test namespace, and no validator Job
 carrying the run's
 `aicr.run/run-id` label in any namespace for run-scoped objects (a run started
@@ -1358,7 +1359,9 @@ with `-n another-ns` still owns cluster-scoped agent RBAC). The namespace pod
 guard applies only below the floor: at or above it an aged namespace cannot
 belong to a live check, and the workloads a killed run leaks never go
 terminal (a RestartPolicyAlways Deployment's pods keep Running, gang members
-the scheduler holds Pending), so the namespace is deleted with its pods. The floor bounds a
+the scheduler holds Pending), so the namespace is deleted with its pods. Run:ai
+gang residue follows the same rule: below the floor a residue pod or PodGroup
+is kept while any gang pod of its run token is non-terminal. The floor bounds a
 test namespace's life, not a whole `aicr validate` — the CLI uncaps the
 facade timeout, so an all-phase run can outlive 2h. And Job existence is a
 point-in-time signal: with cleanup on, the validator deletes each Job right
