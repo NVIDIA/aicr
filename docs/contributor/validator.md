@@ -743,7 +743,7 @@ Five sentinels exist today, with deliberately different lifecycles:
 | `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseSentinels` (`pkg/validator/job/result.go`) | one JSON object, decoded into `TestResult.Extra` (counts and enum codes) | **no**, stripped as transport, not evidence | **yes**, allowlisted keys are published (see below) |
 | `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseSentinels` (same pass) | one JSON object, decoded into `TestResult.RuntimeProvenance` (template digests and key paths) | **no**, stripped as transport | **yes**, bounded by `redact.boundRuntimeProvenance` (see [NCCL benchmark runtime provenance](#nccl-benchmark-runtime-provenance)) |
 | `##AICR-IMAGE##` + one space | `validators.EmitImage` | `parseSentinels` (same pass) | one `ctrf.PodImage` (image, digest and platform), appended to `TestResult.Images` | **no**, stripped as transport | **yes**, unaliased, up to `defaults.ValidatorMaxImageRecords` valid records |
-| `##AICR-PLATFORM##` + one space | `validators.Run` | `parseSentinels` (same pass) | one JSON string, the image's `os/arch`, set on the validator's image record | **no**, stripped as transport | **yes**, in that record |
+| `##AICR-PLATFORM##` + one space | `validators.Run`, `aiperf_entrypoint.py` | `parseSentinels` (same pass), `ctrf.ReportedPlatform` | one JSON string, the image's `os/arch`, set on that image's record | **no**, stripped as transport | **yes**, in that record |
 
 The orchestrator lists the validator container's own image first in
 `TestResult.Images`. Its digest comes from the container status `imageID` when
@@ -751,8 +751,10 @@ that names the spec image's repository. Runtimes report either the index or the
 platform manifest digest, so a digest identifies an image only together with
 its platform. A record has no digest when the runtime reports none for that
 repository or the pod could not be read. The platform comes only from the
-image's `##AICR-PLATFORM##` lines. Conflicting lines leave it empty, and an
-image that prints none records none.
+image's `##AICR-PLATFORM##` lines, and is empty when they were not read, are
+missing, or conflict. The inference performance check reports
+its aiperf-bench pod's image the same way, with the platform from the line
+`aiperf_entrypoint.py` prints.
 
 The runner (`validators.Run`) writes two stamps before anything else. One is an
 `##AICR-EXTRA##` line with `resultSchema: "1"` (`ctrf.ResultSchemaVersion`),

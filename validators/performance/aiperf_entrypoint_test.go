@@ -23,9 +23,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // The benchmark pod's runtime contract lives in aiperf_entrypoint.py, outside
@@ -334,6 +337,17 @@ func TestAIPerfEntrypointFramingFeedsParser(t *testing.T) {
 	}
 	if result.ttftP99Ms != 84.1 {
 		t.Errorf("ttftP99Ms = %v, want 84.1", result.ttftP99Ms)
+	}
+
+	platform := ctrf.ReportedPlatform(got.stdout)
+	if !ctrf.ValidPlatform(platform) {
+		t.Errorf("reported platform = %q, want the os/arch form", platform)
+	}
+	// The wrapper reports the platform of the python3 running it. A dev machine
+	// can run python3 and the test binary as different architectures, as under
+	// Rosetta, so only CI runners pin it to the test binary's platform.
+	if want := runtime.GOOS + "/" + runtime.GOARCH; os.Getenv("CI") != "" && platform != want {
+		t.Errorf("reported platform = %q, want %q", platform, want)
 	}
 }
 

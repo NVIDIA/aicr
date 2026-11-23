@@ -69,11 +69,11 @@ func (p *PlatformLines) Add(payload string) {
 	}
 	var got string
 	if err := json.Unmarshal([]byte(payload), &got); err != nil {
-		slog.Warn("dropping malformed validator platform sentinel", "error", err)
+		slog.Warn("dropping malformed platform sentinel", "error", err)
 		return
 	}
 	if !ValidPlatform(got) {
-		slog.Warn("dropping validator platform sentinel without the os/arch form", "platform", got)
+		slog.Warn("dropping platform sentinel without the os/arch form", "platform", got)
 		return
 	}
 	switch p.platform {
@@ -81,7 +81,7 @@ func (p *PlatformLines) Add(payload string) {
 		p.platform = got
 	case got:
 	default:
-		slog.Warn("validator reported conflicting platforms; recording none",
+		slog.Warn("image process reported conflicting platforms; recording none",
 			"first", p.platform, "second", got)
 		p.platform, p.conflict = "", true
 	}
@@ -90,6 +90,18 @@ func (p *PlatformLines) Add(payload string) {
 // Platform returns the platform every valid line named, or "" when there was
 // none or the lines conflicted.
 func (p *PlatformLines) Platform() string { return p.platform }
+
+// ReportedPlatform returns the platform the PlatformLinePrefix lines in logs
+// agree on, or "" when there are none or they conflict.
+func ReportedPlatform(logs string) string {
+	var p PlatformLines
+	for line := range strings.SplitSeq(logs, "\n") {
+		if payload, ok := strings.CutPrefix(line, PlatformLinePrefix); ok {
+			p.Add(payload)
+		}
+	}
+	return p.Platform()
+}
 
 // Valid reports whether r.Image parses as an image reference, r.Digest is
 // empty or a well-formed sha256 digest, and r.Platform is empty or has the

@@ -81,6 +81,25 @@ func TestPlatformLines(t *testing.T) {
 	}
 }
 
+func TestReportedPlatform(t *testing.T) {
+	tests := []struct {
+		name string
+		logs string
+		want string
+	}{
+		{"no line", "work\ndone", ""},
+		{"line among output", "work\n" + PlatformLinePrefix + `"linux/arm64"` + "\ndone", "linux/arm64"},
+		{"prefix mid-line ignored", "work " + PlatformLinePrefix + `"linux/arm64"`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ReportedPlatform(tt.logs); got != tt.want {
+				t.Errorf("ReportedPlatform() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRegistryDigest(t *testing.T) {
 	const image = "ghcr.io/x/y:v1"
 	tests := []struct {
