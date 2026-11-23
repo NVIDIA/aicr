@@ -778,6 +778,42 @@ jobs:
           yq -i '.deployment.id = strenv(DEPLOYMENT_ID)' "$CLUSTER_CONFIG"
           cat "$CLUSTER_CONFIG"
 
+      # A re-run attempt reuses the run ID, so DEPLOYMENT_ID and the VPC
+      # flow-logs log group name repeat. A flow-log delivery still in flight
+      # when the previous attempt was destroyed recreates the group behind the
+      # destroy, with no flow log attached, and Bringup's create of the same
+      # group then fails minutes in. Delete that orphan. A group a flow log
+      # still uses belongs to the previous attempt's deployment, which
+      # Terraform's state still holds, so it is left for Bringup to converge on
+      # and for teardown to remove. Flow logs are matched by group name or by
+      # destination ARN, since one created with a destination ARN may not
+      # report a group name. Guarded by
+      # tests/uat/lib/aws-flow-logs-preflight_test.sh.
+      - name: Clear an orphaned flow-logs log group
+        if: inputs.lifecycle != 'daytime-down'
+        run: |
+          set -euo pipefail
+          group="/aws/vpc/${DEPLOYMENT_ID}-flow-logs"
+          found=$(aws logs describe-log-groups --region "${AWS_REGION}" \
+            --log-group-name-prefix "${group}" --output json \
+            | jq -r --arg g "${group}" '.logGroups[] | select(.logGroupName == $g) | .logGroupName')
+          if [[ -z "${found}" ]]; then
+            echo "No log group ${group}."
+            exit 0
+          fi
+          used=$(aws ec2 describe-flow-logs --region "${AWS_REGION}" --output json \
+            | jq -r --arg g "${group}" '.FlowLogs[]
+                | select(.LogGroupName == $g
+                    or ((.LogDestination // "") | endswith(":log-group:" + $g))
+                    or ((.LogDestination // "") | endswith(":log-group:" + $g + ":*")))
+                | .FlowLogId')
+          if [[ -n "${used}" ]]; then
+            echo "::notice::Log group ${group} is still used by flow logs ${used//$'\n'/, } of an earlier attempt; Terraform's state holds it, so Bringup proceeds and teardown removes it."
+            exit 0
+          fi
+          aws logs delete-log-group --region "${AWS_REGION}" --log-group-name "${group}"
+          echo "Deleted the orphaned log group ${group}."
+
       # Bringup — skipped for daytime-down (teardown-only; nothing to provision).
       - name: Bringup Infra
         id: infra
