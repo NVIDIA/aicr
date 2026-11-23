@@ -986,6 +986,23 @@ generate_bundle() {
     #   plus the ValidatingWebhookConfiguration. Disabling them skips
     #   admission entirely; harmless under KWOK since no real Slurm CRs
     #   are reconciled.
+    # - nktp's OpenTelemetry operator admission webhooks: same failure mode.
+    #   The operator pod lands on a KWOK node, so its mutating and validating
+    #   webhooks have endpoints nothing serves, and every admission call they
+    #   match waits out its 10s timeout (failurePolicy Ignore, so it then
+    #   passes). The chart puts the OpenTelemetry CRDs and its seven
+    #   OpenTelemetryCollector resources in one Argo CD sync. The first
+    #   attempts fail the collectors before Argo CD knows their CRD; the one
+    #   that succeeds then applies them one at a time, each waiting out both
+    #   webhooks (2 x 10s, about 140s in all), and the read-back's 180s runs
+    #   out with nktp still in its first sync (#3843). The pod webhook also
+    #   matches every Pod CREATE in the cluster, so it delayed each pod by 10s.
+    #   `admissionWebhooks.create=false` drops both webhook configurations
+    #   and their serving certificate, and keeps the CRDs and collectors. Do
+    #   NOT carry this to a real cluster: the operator keeps ENABLE_WEBHOOKS
+    #   on with no serving certificate mounted, which only a container that
+    #   never runs tolerates. verify_kwok_overrides fails the lane if the
+    #   webhooks are installed anyway.
     # - slinky-slurm controller persistence: the chart provisions a PVC
     #   via the cluster's default StorageClass. Kind's local-path provisioner
     #   binds with WaitForFirstConsumer, so the PVC is pinned to whichever
@@ -1022,6 +1039,9 @@ generate_bundle() {
     fi
     if grep -qx "nodewright-operator" <<< "$bundled_components"; then
         conditional_sets+=(--set "nodewright:webhook.enable=false")
+    fi
+    if grep -qx "nktp" <<< "$bundled_components"; then
+        conditional_sets+=(--set "nktp:opentelemetry-kube-stack.opentelemetry-operator.admissionWebhooks.create=false")
     fi
     if grep -qx "slinky-slurm-operator" <<< "$bundled_components"; then
         conditional_sets+=(
@@ -1962,6 +1982,35 @@ wait_for_flux_sync() {
 
 
 # Verify pod scheduling
+# verify_kwok_overrides fails the lane when an override generate_bundle passes
+# did not take effect. A chart that moves a value path turns the override into
+# an unused value with no other signal; for nktp's webhooks the only symptom
+# would be a first-sync timeout in about 1% of Argo CD cells on main (#3843).
+verify_kwok_overrides() {
+    local components
+    if ! components=$(yq eval '.deploymentOrder[]' "${WORK_DIR}/recipe.yaml"); then
+        log_error "could not read the bundled components from ${WORK_DIR}/recipe.yaml"
+        return 1
+    fi
+    if ! grep -qx "nktp" <<< "${components}"; then
+        return 0
+    fi
+    local webhooks
+    if ! webhooks=$(kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations \
+        -l app.kubernetes.io/name=opentelemetry-operator,app.kubernetes.io/component=webhook \
+        -o name 2>&1); then
+        log_error "could not list the OpenTelemetry operator webhooks: ${webhooks}"
+        return 1
+    fi
+    if [[ -n "${webhooks}" ]]; then
+        log_error "nktp's OpenTelemetry operator webhooks are installed although the KWOK override disables them;"
+        log_error "check opentelemetry-kube-stack.opentelemetry-operator.admissionWebhooks.create in the nktp chart:"
+        log_error "${webhooks}"
+        return 1
+    fi
+    log_info "nktp's OpenTelemetry operator webhooks are off, as the KWOK override intends"
+}
+
 verify_pods() {
     log_info "Verifying pod scheduling..."
 
@@ -2509,6 +2558,9 @@ main() {
 
     log_debug "Step 5: Deploying bundle..."
     deploy_bundle
+
+    log_debug "Step 5b: Verifying the KWOK overrides took effect..."
+    verify_kwok_overrides
 
     log_debug "Step 6: Verifying pod scheduling..."
     verify_pods
