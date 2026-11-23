@@ -149,6 +149,8 @@ spec:
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-headless-oidc-ci"
 
+              IDENTITY_REGEXP="${AICR_IDENTITY_REGEXP:-https://github.com/NVIDIA/aicr/.github/workflows/.*}"
+
               # Ambient env must be empty for the device-flow branch to run.
               unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
 
@@ -159,6 +161,7 @@ spec:
               set +e
               timeout 30 ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" \
                 -o "${WORK}/b-device" --attest --oidc-device-flow \
+                --certificate-identity-regexp "${IDENTITY_REGEXP}" \
                 >"${WORK}/device.out" 2>"${WORK}/device.err"
               rc=$?
               set -e
@@ -171,8 +174,11 @@ spec:
               # oauth2.sigstore.dev being reachable in the runner. (We
               # deliberately do not assert the prompt URL: that would couple
               # the smoke test to live Sigstore availability and turn issuer
-              # outages into spurious CI failures.)
-              grep -q "device-code" "${WORK}/device.err"
+              # outages into spurious CI failures.) The message is logged only
+              # after the binary attestation verifies; the signing disclosure
+              # banner also says "device-code", so a looser grep would pass
+              # without the device flow ever starting.
+              grep -q "starting Sigstore OIDC device-code authentication" "${WORK}/device.err"
             check:
               ($error == null): true
 
@@ -185,17 +191,19 @@ spec:
               set -eu
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-headless-oidc-ci"
+              IDENTITY_REGEXP="${AICR_IDENTITY_REGEXP:-https://github.com/NVIDIA/aicr/.github/workflows/.*}"
               unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
 
               set +e
               AICR_OIDC_DEVICE_FLOW=1 timeout 30 ${AICR_BIN} bundle \
                 -r "${WORK}/recipe.yaml" -o "${WORK}/b-device-env" --attest \
+                --certificate-identity-regexp "${IDENTITY_REGEXP}" \
                 >"${WORK}/device-env.out" 2>"${WORK}/device-env.err"
               rc=$?
               set -e
               cat "${WORK}/device-env.out" "${WORK}/device-env.err"
               test "${rc}" -eq 124 -o "${rc}" -eq 143
-              grep -q "device-code" "${WORK}/device-env.err"
+              grep -q "starting Sigstore OIDC device-code authentication" "${WORK}/device-env.err"
             check:
               ($error == null): true
 

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
 	stderrors "errors"
 	"fmt"
 	"io/fs"
@@ -56,6 +57,11 @@ import (
 type closedWorldTestDeployer struct {
 	writeUnmanaged bool
 }
+
+// preVerifiedBinaryAttestation stands in for the binary attestation a caller
+// verified before injecting it, for tests that sign with --attest but are not
+// about the binary attestation.
+var preVerifiedBinaryAttestation = []byte(`{"pre-verified":"binary-attestation"}`)
 
 type closedWorldTestAttester struct {
 	called        int
@@ -261,7 +267,7 @@ func TestRunDeployer_ClosedWorld(t *testing.T) {
 			config.WithAttest(true),
 		)
 		attester := &closedWorldTestAttester{writeMetadata: true}
-		b := &DefaultBundler{Config: cfg, Attester: attester}
+		b := &DefaultBundler{Config: cfg, Attester: attester, verifiedBinaryAttestation: preVerifiedBinaryAttestation}
 		dir := t.TempDir()
 		r := &bundleRun{DefaultBundler: b}
 		output, _, err := r.runDeployer(
@@ -334,7 +340,8 @@ func TestAttestBundle_PropagatesCancellation(t *testing.T) {
 				config.WithIncludeChecksums(true),
 				config.WithAttest(true),
 			),
-			Attester: attester,
+			Attester:                  attester,
+			verifiedBinaryAttestation: preVerifiedBinaryAttestation,
 		}
 	}
 
@@ -390,6 +397,104 @@ func TestAttestBundle_RequiresChecksums(t *testing.T) {
 	}
 	if attester.called != 0 {
 		t.Errorf("Attest() calls = %d, want 0", attester.called)
+	}
+}
+
+// A binary attestation that does not verify for the running binary, such as
+// a sidecar left from another build, stops --attest before the bundle is
+// signed: no OIDC login and no transparency-log entry for a bundle that is
+// then discarded.
+func TestAttestBundle_VerifiesBinaryAttestationBeforeSigning(t *testing.T) {
+	dir := t.TempDir()
+	payloadPath := filepath.Join(dir, "payload.txt")
+	if err := os.WriteFile(payloadPath, []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := checksum.GenerateChecksums(context.Background(), dir, []string{payloadPath}); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(t.TempDir(), "aicr")
+	if err := os.WriteFile(binary, []byte("this build"), 0700); err != nil { //nolint:gosec // test binary stand-in
+		t.Fatal(err)
+	}
+	stale := []byte(`{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}`)
+	if err := os.WriteFile(binary+attestation.AttestationFileSuffix, stale, 0600); err != nil {
+		t.Fatal(err)
+	}
+	attester := &closedWorldTestAttester{}
+	b := &DefaultBundler{
+		Config: config.NewConfig(
+			config.WithIncludeChecksums(true),
+			config.WithAttest(true),
+		),
+		Attester:   attester,
+		executable: func() (string, error) { return binary, nil },
+	}
+
+	files, err := b.attestBundleAt(context.Background(), dir, dir, nil, closedWorldRecipeResult())
+	errorstest.WantReportedCode(t, err, errors.ErrCodeUnauthorized)
+	if attester.called != 0 {
+		t.Errorf("Attest() calls = %d, want 0: the bundle was signed before its binary attestation was checked", attester.called)
+	}
+	if len(files) != 0 {
+		t.Errorf("attestBundle() files = %v, want none", files)
+	}
+}
+
+// The sidecar that verifies, against this binary's digest, is the exact
+// content written into the signed bundle.
+func TestAttestBundle_WritesTheVerifiedSidecar(t *testing.T) {
+	dir := t.TempDir()
+	payloadPath := filepath.Join(dir, "payload.txt")
+	if err := os.WriteFile(payloadPath, []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := checksum.GenerateChecksums(context.Background(), dir, []string{payloadPath}); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(t.TempDir(), "aicr")
+	if err := os.WriteFile(binary, []byte("this build"), 0700); err != nil { //nolint:gosec // test binary stand-in
+		t.Fatal(err)
+	}
+	sidecar := []byte(`{"verified":"sidecar"}`)
+	if err := os.WriteFile(binary+attestation.AttestationFileSuffix, sidecar, 0600); err != nil {
+		t.Fatal(err)
+	}
+	wantDigest := sha256.Sum256([]byte("this build"))
+	var verified, verifiedDigest []byte
+	b := &DefaultBundler{
+		Config: config.NewConfig(
+			config.WithIncludeChecksums(true),
+			config.WithAttest(true),
+		),
+		Attester:   &fixtureBinaryAttester{bundleJSON: []byte(`{"bundle":true}`)},
+		executable: func() (string, error) { return binary, nil },
+		verifyBinary: func(_ context.Context, data []byte, _ string, digest []byte) (string, error) {
+			verified = append([]byte(nil), data...)
+			verifiedDigest = append([]byte(nil), digest...)
+			return "test-builder", nil
+		},
+	}
+
+	files, err := b.attestBundleAt(context.Background(), dir, dir, nil, closedWorldRecipeResult())
+	if err != nil {
+		t.Fatalf("attestBundle() error = %v", err)
+	}
+	if !bytes.Equal(verified, sidecar) {
+		t.Errorf("verified %q, want the sidecar %q", verified, sidecar)
+	}
+	if !bytes.Equal(verifiedDigest, wantDigest[:]) {
+		t.Errorf("verified against digest %x, want this binary's %x", verifiedDigest, wantDigest)
+	}
+	written, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(attestation.BinaryAttestationFile)))
+	if err != nil {
+		t.Fatalf("read the bundle's binary attestation: %v", err)
+	}
+	if !bytes.Equal(written, sidecar) {
+		t.Errorf("bundle carries %q, want the verified sidecar %q", written, sidecar)
+	}
+	if !slices.Contains(files, attestation.BinaryAttestationFile) {
+		t.Errorf("attestBundle() files = %v, want %s", files, attestation.BinaryAttestationFile)
 	}
 }
 
@@ -1426,8 +1531,8 @@ func TestNew_AttestWithInjectedBinaryAttestation(t *testing.T) {
 }
 
 // fixtureBinaryAttester returns fixed bundle JSON from Attest so tests reach
-// verifyAndCopyBinaryAttestation (closedWorldTestAttester returns nil, which
-// short-circuits attestBundle before the binary attestation is embedded).
+// the binary attestation's write into the bundle (closedWorldTestAttester
+// returns nil, which short-circuits attestBundle before that write).
 type fixtureBinaryAttester struct {
 	bundleJSON []byte
 }
