@@ -198,12 +198,17 @@ func validatorJob(namespace, runID string) *batchv1.Job {
 	}}
 }
 
+// gangPod builds a Failed gang member: terminal, so below the floor it does
+// not trip the residue liveness guard for its token.
 func gangPod(namespace, name, token string, age time.Duration) *corev1.Pod {
-	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-		Name: name, Namespace: namespace, UID: types.UID("uid-" + namespace + "-" + name),
-		CreationTimestamp: created(age),
-		Labels:            map[string]string{labels.GPUTestRun: token, labels.GangSchedulingPhase: "negative"},
-	}}
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: namespace, UID: types.UID("uid-" + namespace + "-" + name),
+			CreationTimestamp: created(age),
+			Labels:            map[string]string{labels.GPUTestRun: token, labels.GangSchedulingPhase: "negative"},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodFailed},
+	}
 }
 
 // podGroup builds the one Run:ai PodGroup the residue tests exercise: the
@@ -927,6 +932,50 @@ func TestPlanRunAIResidueNameShapes(t *testing.T) {
 			}
 			report, _ := planWith(t, testOptions(), typed, groups...)
 			wantStatus(t, report, tt.kind, tt.objName, tt.wantStatus, tt.reasonFragment)
+		})
+	}
+}
+
+// TestPlanRunAIResidueLivenessGuard pins the residue liveness guard: below
+// the default floor a non-terminal gang pod keeps every residue object of its
+// token; at the floor gang members held Pending never go terminal, so the
+// guard does not apply.
+func TestPlanRunAIResidueLivenessGuard(t *testing.T) {
+	belowFloor := Options{Namespace: testNamespace, OlderThan: 5 * time.Minute}
+	agedPod := "gang-neg-worker-" + hexToken32a + "-0"
+	siblingPod := "gang-neg-worker-" + hexToken32a + "-1"
+	groupName := "gang-neg-group-" + hexToken32a
+
+	withPhase := func(p *corev1.Pod, phase corev1.PodPhase) *corev1.Pod {
+		p.Status.Phase = phase
+		return p
+	}
+
+	tests := []struct {
+		name           string
+		options        Options
+		siblingName    string
+		siblingPhase   corev1.PodPhase
+		wantStatus     Status
+		reasonFragment string
+	}{
+		{"below the floor, a Running sibling keeps the run", belowFloor, siblingPod, corev1.PodRunning, StatusSkipped, "non-terminal gang pod"},
+		{"below the floor, a Pending sibling keeps the run", belowFloor, siblingPod, corev1.PodPending, StatusSkipped, "non-terminal gang pod"},
+		{"below the floor, all pods terminal is swept", belowFloor, siblingPod, corev1.PodSucceeded, StatusWouldDelete, ""},
+		{"at the floor, a Pending sibling does not keep the run", floorOptions(), siblingPod, corev1.PodPending, StatusWouldDelete, ""},
+		// Labels alone prove nothing: only a pod named as the check names
+		// this token's members is a live member.
+		{"below the floor, a Running pod not named like a gang member does not keep the run", belowFloor, "user-pod-" + hexToken32a, corev1.PodRunning, StatusWouldDelete, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			typed := []runtime.Object{
+				gangPod("runai-team-a", agedPod, hexToken32a, old),
+				withPhase(gangPod("runai-team-a", tt.siblingName, hexToken32a, time.Minute), tt.siblingPhase),
+			}
+			report, _ := planWith(t, tt.options, typed, podGroup())
+			wantStatus(t, report, kindPod, agedPod, tt.wantStatus, tt.reasonFragment)
+			wantStatus(t, report, kindPodGroup, groupName, tt.wantStatus, tt.reasonFragment)
 		})
 	}
 }

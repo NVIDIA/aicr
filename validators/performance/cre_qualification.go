@@ -57,9 +57,11 @@ type creCombination struct {
 // entry with NVLS and MNNVL disabled through spec.env, so the peak is the EFA
 // path alone, and it supersedes the net variant. On the NCCL 2.31.2 and
 // aws-ofi-nccl 1.21.1 image the catalog selects it measures about 31 GB/s,
-// against about 45 GB/s on the 2.27.7 and 1.16.3 image the TrainJob check uses.
-// The cause is open with the NVCRE team, so the recipe floor sits below the new
-// image's figure rather than at the old one.
+// against about 45 GB/s on the 2.27.7 and 1.16.3 image the TrainJob check uses:
+// 2.31.2's tuner picks Ring over Tree for AllReduce from 16M up. The entry also
+// sets NCCL_ALGO=Tree until NVIDIA/nccl#2630 is fixed (#3911). Tree measured
+// about 46 GB/s in the #3911 diagnostic run; a run through this check with the
+// override is pending.
 //
 // cre-training-goodput is qualified on eks x h100 with training/nemotron5-8b,
 // measured on the same v0.8.2 run, also not re-measured on v0.12.0: goodput 0.5723, 462.05 TFLOPS per GPU, 0.914
@@ -108,8 +110,12 @@ var creQualifiedEntries = map[string]map[creCombination]creCatalogEntry{
 			MaxNodes: 2,
 			Image: "public.ecr.aws/hpc-cloud/nccl-tests:cuda13.1.2-efa1.50.0-ofiv1.21.1-ncclv2.31.2-1-testsv2.20.0" +
 				"@sha256:d6e0dfcb291f8c931a7c38420a13667ae0d9b83a32e667a91ec768e96dc4a4bb",
-			Fabric:     creFabricEFA,
-			Env:        []creEnvVar{{Name: "NCCL_NVLS_ENABLE", Value: "0"}, {Name: "NCCL_MNNVL_ENABLE", Value: "0"}},
+			Fabric: creFabricEFA,
+			Env: []creEnvVar{
+				{Name: "NCCL_NVLS_ENABLE", Value: "0"},
+				{Name: "NCCL_MNNVL_ENABLE", Value: "0"},
+				{Name: "NCCL_ALGO", Value: "Tree"},
+			},
 			MaxBytes:   creNetMaxBytes,
 			Supersedes: variantNET,
 		},
