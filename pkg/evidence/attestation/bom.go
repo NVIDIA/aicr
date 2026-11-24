@@ -144,37 +144,22 @@ func BuildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, validato
 	return buf.Bytes(), nil
 }
 
-// bomValidatorRefs returns the distinct non-empty refs of images, in order.
+// bomValidatorRefs returns one ref per distinct image and digest in images,
+// in order. A recorded digest replaces any digest in the ref, so the ref
+// names what ran.
 func bomValidatorRefs(images []ValidatorImage) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, img := range images {
-		if img.Image != "" && !seen[img.Image] {
-			seen[img.Image] = true
-			out = append(out, img.Image)
+		ref := img.Image
+		if img.Digest != "" {
+			name, _, _ := strings.Cut(ref, "@")
+			ref = name + "@" + img.Digest
 		}
-	}
-	return out
-}
-
-// DedupValidatorImages returns validator catalog image refs deduplicated
-// by image string, preserving discovery order. Multiple checks share an
-// image; collapsing keeps the BOM and predicate from duplicating refs.
-func DedupValidatorImages(cat *catalog.ValidatorCatalog) []string {
-	if cat == nil || len(cat.Validators) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(cat.Validators))
-	out := make([]string, 0, len(cat.Validators))
-	for _, v := range cat.Validators {
-		if v.Image == "" {
-			continue
+		if ref != "" && !seen[ref] {
+			seen[ref] = true
+			out = append(out, ref)
 		}
-		if _, dup := seen[v.Image]; dup {
-			continue
-		}
-		seen[v.Image] = struct{}{}
-		out = append(out, v.Image)
 	}
 	return out
 }

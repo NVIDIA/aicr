@@ -740,9 +740,9 @@ func (c *Config) ValidateInputOptions() (ValidateInputOptions, error) {
 // Five fields project (out, bom, push, plainHTTP, insecureTLS). The rest of
 // EvidenceOptions is deliberately caller-owned:
 //
-//   - Commit has no spec counterpart. It selects the validator catalog the
-//     bundle's BOM is built against, and it is a property of the running
-//     binary rather than of the document. Set it after deriving.
+//   - Commit has no spec counterpart. It is stamped into the predicate as
+//     aicrCommit, and it is a property of the running binary rather than of
+//     the document. Set it after deriving.
 //   - OIDCResolve is excluded by the spec itself: a keyless-signing identity
 //     token is a short-lived secret and must not live in a version-controlled
 //     file, and the signing mode it selects (a KMS SigningKey, private

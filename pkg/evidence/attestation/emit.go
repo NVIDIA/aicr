@@ -71,8 +71,8 @@ type EmitOptions struct {
 	Snapshot     *snapshotter.Snapshot
 	PhaseResults []*validator.PhaseResult
 
-	// Catalog supplies the auto-BOM's validator images and the predicate's
-	// validatorCatalogVersion.
+	// Catalog supplies the predicate's validatorCatalogVersion. A nil Catalog
+	// records an empty version.
 	Catalog *catalog.ValidatorCatalog
 
 	// AllowMutableValidatorTags lets Emit proceed when a validator image
