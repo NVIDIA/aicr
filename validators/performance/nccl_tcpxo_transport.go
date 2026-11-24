@@ -251,7 +251,7 @@ func (w *tcpxoWorkerWatcher) record(pod *v1.Pod) {
 		rec.daemonStarted = true
 	}
 	// Key the per-worker slot on the job-completion-index, NOT the JobSet
-	// job-index: Trainer v2.2.0 runs the node job as one replica with
+	// job-index: Trainer v2.2.0 through v2.4.0 run the node job as one replica with
 	// parallelism=numNodes, so every worker carries job-index=0 and only the
 	// completion index distinguishes worker 0..N-1.
 	if idx := pod.Labels[gkeTCXOWorkerIndexLabel]; idx != "" {
