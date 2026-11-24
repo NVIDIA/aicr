@@ -52,7 +52,8 @@ func PublicGoodTrustedRoot(context.Context) (root.TrustedMaterial, error) {
 
 // NewUnionTrustedRoot loads the private trusted_root.json at path and returns a
 // TrustedRootSource that unions it with AICR's public-good root. The public-good
-// half keeps NVIDIA-signed artifacts verifiable; the private half admits
+// half keeps artifacts signed through public Sigstore (including AICR releases)
+// verifiable; the private half admits
 // artifacts signed against a private Fulcio/Rekor. The file is loaded eagerly so
 // a bad path (missing, oversized, malformed) fails fast with the loader's
 // ErrCodeInvalidRequest, rather than being deferred into the lazy source where

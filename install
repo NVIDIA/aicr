@@ -365,7 +365,7 @@ main() {
       info "Update cosign to verify provenance: https://docs.sigstore.dev/cosign/system_config/installation/"
     else
       step "Verifying provenance attestation (Sigstore cosign)..."
-      info "Confirms this binary was built by NVIDIA/aicr CI — not a third-party rebuild"
+      info "Confirms this binary was built by the AICR release workflow in NVIDIA/aicr, not a third-party rebuild"
       cosign_stderr=$(mktemp)
       if cosign verify-blob-attestation \
         --bundle "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" \
@@ -373,7 +373,7 @@ main() {
         --certificate-oidc-issuer https://token.actions.githubusercontent.com \
         --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' \
         "${temp_dir}/${BIN_NAME}" 2>"${cosign_stderr}"; then
-        ok "Provenance verified — binary built by github.com/NVIDIA/aicr CI pipeline"
+        ok "Provenance verified — binary built by the AICR release workflow in NVIDIA/aicr"
       else
         warn "Attestation verification failed — cannot confirm binary provenance"
         info "The binary may still be valid, but its build origin could not be cryptographically verified"

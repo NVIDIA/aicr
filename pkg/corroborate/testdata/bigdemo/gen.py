@@ -39,7 +39,7 @@ def H(*parts):
 
 # --- signer roster (class + allowlisted are pre-derived by GP2 at ingest) ----
 SIGNERS = {
-    "nvidia":    dict(label="NVIDIA UAT",   cls="first-party", allow=True,
+    "nvidia":    dict(label="AICR UAT",     cls="first-party", allow=True,
                       # matches the firstParty regex in testdata/allowlist.yaml (uat-(aws|gcp).yaml)
                       identity="https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main",
                       issuer="https://token.actions.githubusercontent.com"),

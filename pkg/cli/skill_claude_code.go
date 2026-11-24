@@ -53,7 +53,7 @@ func writeSkillFrontmatter(buf *bytes.Buffer, userInvocable bool) {
 	fmt.Fprintf(buf, "---\n")
 	fmt.Fprintf(buf, "name: aicr\n")
 	fmt.Fprintf(buf, "description: |\n")
-	fmt.Fprintf(buf, "  NVIDIA AI Cluster Runtime (AICR) CLI skill.\n")
+	fmt.Fprintf(buf, "  AI Cluster Runtime (AICR) CLI skill.\n")
 	fmt.Fprintf(buf, "  Use when the user asks to generate a GPU recipe,\n")
 	fmt.Fprintf(buf, "  snapshot a cluster, bundle Helm values, validate a recipe,\n")
 	fmt.Fprintf(buf, "  query AICR configuration, or verify bundle provenance.\n")

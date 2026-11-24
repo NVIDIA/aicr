@@ -1,6 +1,6 @@
 # Validator Extension Guide
 
-Learn how to add custom validators and override embedded ones using the `--data` flag.
+Learn how to add custom validators and override embedded ones using the `--data` flag. For where validators fit among the other parts of an integration, see [Authoring an integration](recipe-development.md#authoring-an-integration).
 
 ## Overview
 

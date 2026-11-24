@@ -21,7 +21,8 @@
 //
 //   - verified: The exact bundle inventory and checksums are valid, the bundle
 //     attestation is verified, the binary attestation is verified and
-//     identity-pinned to NVIDIA CI, and there is no external data.
+//     identity-pinned to a workflow in NVIDIA/aicr (the AICR release workflow
+//     by default), and there is no external data.
 //   - attested: Full chain verified but external data (--data) was used, capping
 //     trust because the data's own provenance is unknown.
 //   - unverified: The exact bundle inventory and checksums are valid but no
@@ -38,17 +39,18 @@
 //  3. Verify bundle attestation against trusted root, binding to checksums.txt
 //     digest and requiring a valid OIDC-issued certificate
 //  4. Check for binary attestation file
-//  5. Verify binary attestation with identity pinning to NVIDIA CI and binding
-//     to the binary digest recorded in the verified bundle attestation
+//  5. Verify binary attestation with identity pinning to the AICR release
+//     workflow and binding to the binary digest recorded in the verified
+//     bundle attestation
 //
 // All verification is fully offline using the locally cached or embedded
 // Sigstore trusted root. No network calls are made during verification.
 //
 // # Identity Pinning
 //
-// Binary attestation verification pins to NVIDIA's GitHub Actions OIDC issuer
-// and a repository pattern matching NVIDIA/aicr workflows. This ensures the
-// binary was built by NVIDIA CI. The pattern can be overridden via
-// VerifyOptions.CertificateIdentityRegexp but must always contain the
-// github.com/NVIDIA/aicr/ prefix. // module-rename:keep
+// Binary attestation verification pins to the GitHub Actions OIDC issuer and a
+// repository pattern matching NVIDIA/aicr workflows. This ensures the binary
+// was built by the AICR release workflow (on-tag.yaml) in NVIDIA/aicr. The
+// pattern can be overridden via VerifyOptions.CertificateIdentityRegexp but
+// must always begin with the https://github.com/NVIDIA/aicr/ prefix. // module-rename:keep
 package verifier

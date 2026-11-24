@@ -3,7 +3,7 @@
 Recipe Version: v0.1.0
 Bundler Version: v1.0.0
 
-Per-component bundle for deploying NVIDIA AI Cluster Runtime components
+Per-component bundle for deploying AI Cluster Runtime (AICR) components
 for GPU-accelerated Kubernetes workloads.
 
 ## Configuration

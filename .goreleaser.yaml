@@ -322,7 +322,7 @@ brews:
     commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
     directory: Formula
     homepage: "https://github.com/NVIDIA/aicr"
-    description: "Tooling for deploying optimized, validated, and reproducible GPU-accelerated AI runtime in Kubernetes."
+    description: "Discover, configure, and validate AI infrastructure on Kubernetes"
     license: "Apache-2.0"
     install: |
       bin.install "aicr"

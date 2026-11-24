@@ -29,8 +29,8 @@
 # plain HTTP with a known root token, so no TLS setup is needed (unlike the
 # awskms MiniStack runner).
 #
-# NOTE: The chainsaw "--attest" steps only pass with a binary that carries an
-# NVIDIA-CI attestation; a local goreleaser --snapshot build does not. So with
+# NOTE: The chainsaw "--attest" steps only pass with a binary attested by a
+# workflow in NVIDIA/aicr; a local goreleaser --snapshot build is not. So with
 # no attested binary this runner enters SMOKE MODE: it validates the Vault and
 # Transit plumbing (container, engine, key provisioning, PEM export, recipe +
 # bundle) and exits 0 with a clear message, instead of running the full suite

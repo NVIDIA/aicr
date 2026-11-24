@@ -234,7 +234,7 @@ if [[ -f "$ATTEST_SRC" ]]; then
         --certificate-oidc-issuer https://token.actions.githubusercontent.com \
         --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' \
         "$BIN_SRC"; then
-        log_success "Provenance verified — binary built by NVIDIA/aicr CI"
+        log_success "Provenance verified — binary built by the AICR release workflow in NVIDIA/aicr"
       else
         log_warning "Attestation verification failed — cannot confirm binary provenance"
       fi

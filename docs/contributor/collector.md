@@ -35,6 +35,9 @@ collector.
 This page is for contributors adding a new collector. End-user
 snapshot semantics live in
 [docs/user/cli-reference.md](../user/cli-reference.md#aicr-snapshot).
+A collector is the discovery part of an integration: snapshot detection of
+new hardware or a new platform needs one in addition to recipe data. See
+[Authoring an integration](../integrator/recipe-development.md#authoring-an-integration).
 
 ## Where Collectors Live
 

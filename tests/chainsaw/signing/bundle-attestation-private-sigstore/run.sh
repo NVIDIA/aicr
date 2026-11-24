@@ -44,10 +44,11 @@
 # scaffold-values.yaml and oidc-discovery-rbac.yaml for the supporting config.
 #
 # ATTESTED BINARY:
-# `aicr bundle --attest` refuses to run unless the binary carries an NVIDIA-CI
-# attestation (a co-located <binary>-attestation.sigstore.json, verified against
-# PUBLIC Sigstore). Provide one via AICR_BIN (e.g. the build-attested.yaml
-# artifact) together with a matching AICR_IDENTITY_REGEXP. A plain goreleaser
+# `aicr bundle --attest` refuses to run unless the binary carries an attestation
+# from a workflow in NVIDIA/aicr that matches AICR_IDENTITY_REGEXP (a co-located
+# <binary>-attestation.sigstore.json, verified against PUBLIC Sigstore). Provide
+# one via AICR_BIN (e.g. the build-attested.yaml artifact) together with a
+# matching AICR_IDENTITY_REGEXP. A plain goreleaser
 # --snapshot build is NOT attested and will stop at the bundle step.
 #
 # PREREQUISITES: kind, kubectl, helm, mkcert, chainsaw, cosign, go, yq, docker
@@ -200,7 +201,7 @@ resolve_binary() {
   fi
 
   log_warning "AICR_BIN not set; building an unattested snapshot. 'aicr bundle --attest'"
-  log_warning "requires an NVIDIA-CI-attested binary, so the bundle step will fail."
+  log_warning "requires a binary attested by a workflow in NVIDIA/aicr, so the bundle step will fail."
   log_warning "Provide AICR_BIN (e.g. the build-attested.yaml artifact) + AICR_IDENTITY_REGEXP."
   cd "${ROOT}"
   goreleaser build --clean --single-target --snapshot --timeout 10m

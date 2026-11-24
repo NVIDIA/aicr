@@ -31,7 +31,8 @@ func recipeVerifyCatalogCmd() *cli.Command {
 		ArgsUsage: "<bundle-path>",
 		Description: `Recomputes the deterministic SHA-256 over the embedded registry.yaml and
 validators/catalog.yaml, then verifies the digest against the provided
-Sigstore bundle (.sigstore.json) using NVIDIA CI identity pinning.
+Sigstore bundle (.sigstore.json), pinned to the identity of the AICR release
+workflow in NVIDIA/aicr.
 
 The bundle is distributed as a release asset (recipe-catalog.sigstore.json)
 alongside each tagged aicr binary. Download it from the GitHub Releases page
@@ -46,7 +47,7 @@ Exit code is 0 on success, non-zero on any verification failure.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "identity-pattern",
-				Usage:   "Override the NVIDIA CI certificate identity regexp. Must contain 'NVIDIA/aicr'.",
+				Usage:   "Override the AICR release workflow certificate identity regexp. Must begin with https://github.com/NVIDIA/aicr/ (a leading ^ is allowed; github\\.com also accepted) and must not use top-level alternation.",
 				Sources: cli.EnvVars("AICR_CATALOG_IDENTITY_PATTERN"),
 			},
 		},

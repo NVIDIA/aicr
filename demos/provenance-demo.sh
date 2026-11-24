@@ -24,8 +24,9 @@
 #   Use       — vulnerability scan + license query off the SBOM
 #   Audit     — Rekor transparency-log lookup
 #
-# All attestations are produced upstream by NVIDIA CI on tag release
-# (.github/workflows/on-tag.yaml) — there is no producer step here.
+# All attestations are produced upstream on tag release by the AICR release
+# workflow in NVIDIA/aicr (.github/workflows/on-tag.yaml) — there is no
+# producer step here.
 # Everything is consumer-side and anchored to a content digest, so
 # the demo runs against whatever release is currently latest.
 #

@@ -1,6 +1,8 @@
 # User Documentation
 
-Documentation for platform operators deploying and operating GPU-accelerated Kubernetes clusters using AI Cluster Runtime (AICR).
+Documentation for platform operators deploying and operating GPU-accelerated Kubernetes clusters using AI Cluster Runtime (AICR). AICR gives you one workflow to discover what a cluster has, select a recipe, generate deployment artifacts for your deployment tool, and validate the result.
+
+You can run the whole workflow with the `aicr` CLI (start with [Installation](installation.md)) or the Go SDK; the `aicrd` API server serves recipe selection and artifact generation. The [AICR Operator](../operator/index.md) runs it continuously inside a cluster; it is in Preview, its API may change, and no hardware profile is qualified for it yet.
 
 ## Audience
 
@@ -36,7 +38,7 @@ This section is for users who:
 | [Component Version Matrix](component-version-matrix.md) | Which component version shipped in each AICR release, and what changed (generated) |
 | [Recipe Health](recipe-health.md) | Per-recipe health and validation status tracking |
 | [TestGrid](testgrid.md) | Planned per-recipe validation pass/fail board (not shipped yet) and its coordinate scheme |
-| [Evidence Dashboard](evidence-dashboard.md) | Signed third-party recipe evidence, consensus model, and deep links |
+| [Evidence Dashboard](evidence-dashboard.md) | Signed recipe evidence from AICR project UAT workflows and contributors, consensus model, and deep links |
 | [Coverage Matrix](coverage-matrix.md) | Which CUJs and CLI verbs are exercised, on what hardware, at what cadence (generated) |
 | [Air-Gap Mirror](air-gap-mirror.md) | Mirror images and charts for air-gapped deployment |
 

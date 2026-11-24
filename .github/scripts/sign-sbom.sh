@@ -31,8 +31,8 @@
 # guards. Passing argv to a script keeps the shell syntax intact.
 #
 # The subject is the SBOM document itself and the predicate is the run's SLSA
-# provenance, so the attestation asserts "NVIDIA CI run <id> produced this
-# SBOM from commit <sha>": the same claim the sibling aicr/aicrd binary
+# provenance, so the attestation asserts "AICR release workflow run <id> in
+# NVIDIA/aicr produced this SBOM from commit <sha>": the same claim the sibling aicr/aicrd binary
 # attestations make about the binaries, verified the same way:
 #
 #   cosign verify-blob-attestation \

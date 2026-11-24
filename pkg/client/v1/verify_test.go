@@ -419,7 +419,7 @@ func TestRecipeDigest_Guards(t *testing.T) {
 }
 
 // TestVerifyBinaryAttestation_Guards covers the package-level entry point's
-// rejections. A successful verify needs an NVIDIA-CI-signed attestation over a
+// rejections. A successful verify needs an attestation signed by the AICR release workflow over a
 // real binary digest, which a `go test` executable cannot satisfy.
 func TestVerifyBinaryAttestation_Guards(t *testing.T) {
 	t.Parallel()

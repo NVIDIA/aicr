@@ -1,4 +1,4 @@
-# Contributing to NVIDIA AI Cluster Runtime (AICR)
+# Contributing to AICR
 
 We welcome contributions from developers of all backgrounds and experience levels.
 
@@ -15,6 +15,13 @@ Before contributing:
 3. Review the [security policy](SECURITY.md) for security-related contributions
 4. Set up your development environment following [DEVELOPMENT.md](DEVELOPMENT.md)
 5. If using coding assistants, review [AGENTS.md](AGENTS.md) for project rules and workflows
+
+You don't need write access to `NVIDIA/aicr` or a GPU to contribute. Fork the
+repository, push branches to your fork, and open pull requests from it
+([DEVELOPMENT.md](DEVELOPMENT.md#quick-start) shows the setup). Building,
+testing, linting, and generating deployment artifacts need no GPU or cloud
+credentials, and [KWOK simulated clusters](kwok/README.md) test recipe
+deployments without GPU hardware.
 
 ## How to Contribute
 
@@ -44,6 +51,40 @@ Before contributing:
 
 - GPU providers and operators can contribute capacity for AICR's real-hardware validation runs
 - See [Contributing Validation Capacity](docs/integrator/validation-capacity.md) for requirements, access, and onboarding
+
+### Contributing an Integration
+
+An integration brings an environment you know (a cloud service, an
+accelerator, an OS, or a workload platform) into AICR's catalog. It moves
+through these steps:
+
+1. **Propose it.** Open a [feature request](https://github.com/NVIDIA/aicr/issues/new?template=feature_request.yml)
+   that names the recipe criteria (service, accelerator, OS, intent, platform),
+   the components the environment needs, and the hardware you can test on.
+2. **Author it.** Add overlays, mixins, and component values as described in
+   the [recipe development guide](docs/integrator/recipe-development.md). If
+   snapshots should detect the new hardware automatically, that can also need a
+   [collector](docs/contributor/collector.md), not only recipe data.
+   Environment-specific checks go through the
+   [validator extension](docs/integrator/validator-extension.md) path.
+3. **Pass the static checks.** `aicr recipe validate` checks catalog files
+   without a cluster, `make test` and `make qualify` run the repository gates,
+   and `make kwok-e2e RECIPE=<name>` deploys the recipe on simulated nodes.
+4. **Validate on real hardware.** Deploy the bundle and run
+   [`aicr validate`](docs/user/validation.md) on a cluster with the target
+   hardware.
+5. **Publish signed evidence.** Sign the validation result and submit it as
+   described in [Publishing Recipe Evidence](docs/contributor/evidence-publishing.md),
+   including your signer's allowlist entry.
+6. **Keep it current.** Re-run validation and publish fresh evidence when
+   pinned components move, and answer issues about your environment. The
+   [maturity policy](ROADMAP.md#maturity) defines when a coordinate counts as
+   Supported or Preview.
+
+[ADR-032](docs/design/032-portable-integrations.md) (Proposed) and epic
+[#3920](https://github.com/NVIDIA/aicr/issues/3920) track common contracts for
+catalogs, discovery, and validation, so platform teams and community
+contributors can maintain integrations for the environments they know.
 
 ### Contributing Code
 
@@ -184,6 +225,12 @@ Trust is established through evidence, not assertions. Every released artifact c
 
 1. **Automated Checks** run via GitHub Actions — the same gate `make qualify` runs locally. See [Full Qualification](DEVELOPMENT.md#7-full-qualification) and the [Make Targets Reference](DEVELOPMENT.md#make-targets-reference) in the development guide.
 
+   On a pull request from a fork, GitHub holds these workflows until someone
+   with write access to the repository approves them, and each new push needs another
+   approval. Maintainers get a reminder for pull requests that are waiting, so
+   you don't need to ask. Draft pull requests are left out of the reminder until
+   you mark them ready for review.
+
 2. **Maintainer Review** covers:
    - Correctness and functionality
    - Code style and Go idioms
@@ -253,19 +300,20 @@ exempts pull requests.
 #### Issue Priority
 
 Maintainers and triagers with field edit access set the native GitHub **Priority**
-field in the issue sidebar. NVIDIA currently restricts field visibility to
-organization members and repository collaborators. Everyone can browse the
+field in the issue sidebar. Only members of the `NVIDIA` GitHub organization and
+repository collaborators can see that field. Everyone else sees the tier as a
+public label, and everyone can browse the
 [repository’s shared issue views](https://github.com/NVIDIA/aicr/issues/views).
 
-| GitHub Priority | NVIDIA priority | Applies to | Target from issue creation |
-|-----------------|-----------------|------------|----------------------------|
-| `Urgent` or `High` | P0 | Major functionality is broken, with significant impact and no workaround | Fix within 1 month |
-| `Medium` | P1 | Functionality falls short of expected behavior, with limited impact and a workaround | Fix within 6 months |
-| `Low` | P2 | Minor impact on users, tenants, or performance | No fix commitment |
-| Blank | Unprioritized | Awaiting a priority decision | Review within 7 days |
+| GitHub Priority | Public label | Applies to | Target from issue creation |
+|-----------------|--------------|------------|----------------------------|
+| `Urgent` or `High` | `priority/P0` | Major functionality is broken, with significant impact and no workaround | Fix within 1 month |
+| `Medium` | `priority/P1` | Functionality falls short of expected behavior, with limited impact and a workaround | Fix within 6 months |
+| `Low` | `priority/P2` | Minor impact on users, tenants, or performance | No fix commitment |
+| Blank | None | Awaiting a priority decision | Review within 7 days |
 
-Issue Triage mirrors the tier in one public label (`priority/P0`, `priority/P1`,
-or `priority/P2`). Clearing the native field removes the public label. To
+Issue Triage keeps the public label in sync with the field. Clearing the native
+field removes the public label. To
 resync an existing issue, maintainers can run Issue Triage with its issue number.
 
 The feature and documentation request templates ask how important the change is

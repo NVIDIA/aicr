@@ -15,9 +15,9 @@
 name: Install released aicr
 description: >-
   Download a released aicr binary, verify its integrity (checksum) and
-  provenance (SLSA Build Provenance v1 attestation, keyless-signed by NVIDIA's
-  on-tag.yaml release workflow), and install it to ./aicr for a UAT release
-  cell. Fails closed if the binary is unattested or the attestation does not
+  provenance (SLSA Build Provenance v1 attestation, keyless-signed by the AICR
+  release workflow (on-tag.yaml) in NVIDIA/aicr), and install it to ./aicr for
+  a UAT release cell. Fails closed if the binary is unattested or the attestation does not
   verify — a release cell never runs an unverified binary. The released binary
   self-resolves its own version's validator images (pkg/validator/catalog
   rewrites :latest -> :<version>) and snapshot-agent (ghcr.io/nvidia/aicr:<version>),
@@ -66,8 +66,8 @@ runs:
         gh release download "$AICR_VERSION" --repo "$REPO" \
           --pattern 'aicr_*_linux_amd64.tar.gz' --pattern 'aicr_checksums.txt' --dir ./_rel
 
-        # Pin provenance to NVIDIA CI's release workflow AND the exact requested
-        # tag. The signer SAN is the on-tag.yaml workflow that ran `cosign
+        # Pin provenance to the AICR release workflow in NVIDIA/aicr AND the
+        # exact requested tag. The signer SAN is the on-tag.yaml workflow that ran `cosign
         # attest-blob` at that tag; binding the specific tag (not refs/tags/.*)
         # stops a binary attested for one release from satisfying a different
         # one. Validate the tag first (also rejects injection into the regex),
@@ -95,7 +95,7 @@ runs:
           tar -xzf "${asset}" aicr
           tar -xzf "${asset}" aicr-attestation.sigstore.json 2>/dev/null || true
 
-          # (2) Provenance: the exact binary bytes were built by NVIDIA's release
+          # (2) Provenance: the exact binary bytes were built by the AICR release
           # workflow. cosign attest-blob's subject is the binary digest, so this
           # binds authenticity to the installed artifact — not to the checksums
           # manifest. Fail closed: a UAT release cell must not run an unattested

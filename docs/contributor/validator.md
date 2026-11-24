@@ -3,7 +3,9 @@
 AICR has **four** distinct validation surfaces. Picking the wrong one
 is the single most common source of wasted PRs. Read the table first,
 then jump to the matching section. The rest of this page is the
-contributor view for all four.
+contributor view for all four. For where validation fits among the other
+parts of an integration, see
+[Authoring an integration](../integrator/recipe-development.md#authoring-an-integration).
 
 | Surface | When it runs | Where it lives | Mechanism |
 |---------|-------------|----------------|-----------|

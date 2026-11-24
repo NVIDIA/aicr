@@ -1,14 +1,25 @@
 # AI Cluster Runtime (AICR)
 
-NVIDIA AI Cluster Runtime (AICR) generates validated, reproducible
-configuration artifacts for GPU-accelerated Kubernetes clusters.
+AI Cluster Runtime (AICR) is an open source project created by NVIDIA.
+It provides a common workflow for discovering cluster capabilities,
+selecting a recipe, generating deployment artifacts, and validating AI
+infrastructure on Kubernetes.
+
+The built-in catalog covers NVIDIA accelerators across several
+Kubernetes environments. Platform teams and community contributors can
+bring their own catalogs, add validation checks, and publish signed
+results from the environments they know. See the
+[recipe catalog](user/recipe-health.md) and
+[validation dashboard](https://validation.aicr.run/) for coverage and
+evidence for specific configurations.
+
 Given a description of your environment — cloud, accelerator, OS,
 intent — AICR emits the Helm, Argo CD, Flux, Helmfile, Terraform, or Fleet artifacts
 your deployment tool consumes. The output is hardware-aware,
 version-locked, and backed by SLSA Build Level 3 image provenance.
 
-For the project pitch, supported environments, and a feature
-overview, see the [repository README](https://github.com/NVIDIA/aicr).
+For built-in recipe coverage and a feature overview, see the
+[repository README](https://github.com/NVIDIA/aicr).
 
 ## Find Your Path
 
@@ -17,6 +28,7 @@ overview, see the [repository README](https://github.com/NVIDIA/aicr).
 | **User** — operator deploying AICR to provision or validate a cluster | [User Guide](https://github.com/NVIDIA/aicr/blob/main/docs/user/index.md) |
 | **Integrator** — engineer embedding AICR in a CI/CD pipeline, GitOps flow, or larger platform | [Integrator Guide](https://github.com/NVIDIA/aicr/blob/main/docs/integrator/index.md) |
 | **Contributor** — developer extending AICR or shipping recipes | [Contributor Guide](contributor/index.md) |
+| **Platform team** running AICR continuously inside a cluster (Preview) | [AICR Operator](operator/index.md) |
 
 ### User Guide
 

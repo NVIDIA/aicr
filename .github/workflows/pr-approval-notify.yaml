@@ -14,12 +14,13 @@
 
 # Reminds maintainers of pull requests whose CI waits for workflow approval.
 #
-# The repository requires approval for every external contributor, so a fork
-# PR's `pull_request` workflows, the Merge Gate included, wait until a
-# maintainer clicks "Approve and run workflows", and each new push needs
-# another click. Bot PRs (Renovate) can wait the same way and are listed too. Drafts are left out until their authors ask for
-# review. `/ok-to-test` and copy-pr-bot's `/ok to test` leave no pending
-# state to query, so they are not covered.
+# The repository requires approval for every external contributor, so GitHub
+# holds a fork PR's `pull_request` workflows, the Merge Gate included, until
+# someone with write access to the repository clicks "Approve and run
+# workflows", and each new push needs another click. Bot PRs (Renovate) can
+# wait the same way and are listed too. Drafts are left out until their
+# authors ask for review. `/ok-to-test` and copy-pr-bot's `/ok to test`
+# leave no pending state to query, so they are not covered.
 #
 # Read-only on purpose: the job never checks out PR code and never approves a
 # run. Approving is the supply-chain gate this reminder exists to support, so

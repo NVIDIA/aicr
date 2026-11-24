@@ -130,7 +130,7 @@ func splitTab(tab string) (intent, platform string, err error) {
 // (falling back to the IDHash when the identity yields no host).
 func labelFor(m RunMeta, class Class) string {
 	if class == ClassFirstParty {
-		return "NVIDIA UAT"
+		return "AICR UAT"
 	}
 	id := m.Signer.Identity
 	if i := strings.Index(id, "://"); i >= 0 {

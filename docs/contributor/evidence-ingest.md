@@ -65,7 +65,8 @@ The Go pieces:
    lie about who signed.
 2. **`workflow_call` / `workflow_dispatch` with `bundle_ref`** — a
    first-party UAT run ingests its bundle directly, by ref, with no repo
-   commit. The signature is pinned to the NVIDIA/aicr Actions identity.
+   commit. The signature is pinned to the AICR project's UAT workflow
+   identity in `NVIDIA/aicr`.
    `uat-aws.yaml`, `uat-gcp.yaml`, `uat-azure.yaml`, and — for real-silicon
    `service: kind` recipes on the self-hosted GPU runners — `uat-kind.yaml`
    (DC5 #1278) call this workflow as a dependent `ingest-evidence` job on a
@@ -98,9 +99,9 @@ TestGrid treats every dispatch as a hint, not as proof of provenance. Before it
 exchanges GCP credentials, it independently pulls the immutable bundle, verifies
 its signature, and derives trust from the checked-in signer allowlist:
 
-- a verified NVIDIA UAT identity on `main` or `release/*` becomes
+- a verified AICR project UAT workflow identity on `main` or `release/*` becomes
   `source_class=uat`;
-- a verified, allowlisted community or partner identity becomes
+- a verified, allowlisted individual contributor or partner identity becomes
   `source_class=community`; and
 - unsigned, unallowlisted, untrusted-registry, feature-branch first-party, or
   unexpected-class bundles fail closed.
@@ -203,7 +204,7 @@ consumer.
    Reported, but never counted toward consensus.
 
 The canonical `recipes/evidence/allowlist.yaml` keys first-party CI signers
-by an anchored `identityPattern` and external contributors/partners by a
+by an anchored `identityPattern` and individual contributors and partners by a
 one-way `source` slug — it deliberately does **not** store a cleartext
 `identity` field (the loader rejects one, to keep personal emails out of the
 repo):

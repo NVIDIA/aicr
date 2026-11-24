@@ -16,7 +16,7 @@ instances:
   - url: aicr.docs.buildwithfern.com/aicr
     custom-domain: docs.nvidia.com/aicr
     multi-source: true
-title: NVIDIA AI Cluster Runtime
+title: AI Cluster Runtime
 global-theme: nvidia
 metadata:
   canonical-host: "docs.nvidia.com/aicr"
