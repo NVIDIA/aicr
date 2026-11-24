@@ -104,8 +104,10 @@ func runNamespaceSelector(runID string) string {
 // so a namespace recreated under the same name is not touched or waited for.
 // Transient API failures are retried within the caller's context. A refused
 // List, Delete or Watch is returned as an error naming the namespaces still
-// present; a wait cut short by the deadline after every delete was accepted
-// is not an error, and returns those namespaces in Terminating.
+// present, and so is a context that ends before every delete was sent, naming
+// the namespaces whose deletion was never attempted. A wait cut short by the
+// deadline after every delete was accepted is not an error, and returns those
+// namespaces in Terminating.
 func (v *Validator) cleanupRunNamespaces(ctx context.Context, clientset kubernetes.Interface) (runNamespaceCleanup, error) {
 	var res runNamespaceCleanup
 	if v.RunID == "" {
@@ -134,14 +136,24 @@ func (v *Validator) cleanupRunNamespaces(ctx context.Context, clientset kubernet
 
 	var undeleted []string
 	var deleteErr error
+	// requested holds the namespaces whose deletion the apiserver accepted,
+	// or that were already terminating: only those can be reported as
+	// terminating when the wait runs out.
+	requested := make(map[string]bool, len(pending))
+	stopped := false
 	background := metav1.DeletePropagationBackground
 	for i := range list.Items {
 		ns := &list.Items[i]
-		if ctx.Err() != nil {
-			break // the wait below reports the expiry
-		}
-		if _, owned := pending[ns.Name]; !owned || ns.DeletionTimestamp != nil {
+		if _, owned := pending[ns.Name]; !owned {
 			continue
+		}
+		if ns.DeletionTimestamp != nil {
+			requested[ns.Name] = true
+			continue
+		}
+		if ctx.Err() != nil {
+			stopped = true
+			break
 		}
 		slog.Info("deleting workload namespace of abandoned check", "namespace", ns.Name, "runID", v.RunID)
 		uid := ns.UID
@@ -151,6 +163,7 @@ func (v *Validator) cleanupRunNamespaces(ctx context.Context, clientset kubernet
 		})
 		switch {
 		case delErr == nil:
+			requested[ns.Name] = true
 		case apierrors.IsNotFound(delErr), apierrors.IsConflict(delErr):
 			// Gone, or the name now holds a namespace this run did not list.
 			delete(pending, ns.Name)
@@ -161,6 +174,21 @@ func (v *Validator) cleanupRunNamespaces(ctx context.Context, clientset kubernet
 				deleteErr = delErr
 			}
 		}
+	}
+
+	if stopped {
+		var notAttempted []string
+		for name := range pending {
+			if !requested[name] {
+				notAttempted = append(notAttempted, name)
+			}
+		}
+		slices.Sort(notAttempted)
+		remaining := append(slices.Sorted(maps.Keys(pending)), undeleted...)
+		slices.Sort(remaining)
+		return res, errors.WrapCtxErrWithContext(ctx.Err(), errors.ErrCodeTimeout,
+			"deletion not attempted: "+strings.Join(notAttempted, ", "),
+			map[string]any{keyRunID: v.RunID, "namespaces": remaining})
 	}
 
 	waitErr := waitForNamespacesGone(ctx, client, selector, pending)

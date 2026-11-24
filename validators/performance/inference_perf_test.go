@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -47,6 +48,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
@@ -2121,6 +2123,47 @@ func TestApplyInferenceWorkerScheduling_NoPullSecrets(t *testing.T) {
 // ownership labels, and a create-race winner (AlreadyExists) is read back
 // and held to the same ownership check, including waiting out a winner
 // that's already terminating.
+// ensureNamespaceTestTimeout bounds an ensureNamespace call in a test, so a
+// broken synchronization fails fast instead of waiting out
+// defaults.InferenceNamespaceTerminationWait.
+const ensureNamespaceTestTimeout = 30 * time.Second
+
+func boundedTestContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), ensureNamespaceTestTimeout)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// deleteWhenWatched deletes the terminating namespace name once
+// ensureNamespace starts watching for it to go, which it does only after
+// reading it. waitForNamespaceGone re-reads the namespace after opening its
+// watch, so a delete landing at any point from then on is seen, with no
+// timing assumption.
+func deleteWhenWatched(t *testing.T, client *fake.Clientset, name string) {
+	t.Helper()
+	watching := make(chan struct{})
+	var once sync.Once
+	client.PrependWatchReactor("namespaces", func(k8stesting.Action) (bool, watch.Interface, error) {
+		once.Do(func() { close(watching) })
+		return false, nil, nil
+	})
+	ctx := t.Context()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case <-watching:
+		case <-ctx.Done():
+			return
+		}
+		if err := client.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+			t.Errorf("delete namespace %s: %v", name, err)
+		}
+	}()
+	t.Cleanup(func() { <-done })
+}
+
 func TestEnsureNamespace(t *testing.T) {
 	const ns = "aicr-inference-perf-deadbeef"
 	const component = labels.ValueInferencePerf
@@ -2175,12 +2218,9 @@ func TestEnsureNamespace(t *testing.T) {
 						}
 						return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
 					})
-					go func() {
-						time.Sleep(50 * time.Millisecond)
-						_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
-					}()
+					deleteWhenWatched(t, client, ns)
 				}
-				ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+				ctx := &validators.Context{Ctx: boundedTestContext(t), Clientset: client}
 				got, created, err := ensureNamespace(ctx, ns, component)
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -2315,12 +2355,9 @@ func TestEnsureNamespace(t *testing.T) {
 			}
 			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
 		})
-		go func() {
-			time.Sleep(50 * time.Millisecond)
-			_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
-		}()
+		deleteWhenWatched(t, client, ns)
 
-		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		ctx := &validators.Context{Ctx: boundedTestContext(t), Clientset: client}
 		got, created, err := ensureNamespace(ctx, ns, component)
 		if err != nil {
 			t.Fatalf("expected the retry to succeed once the winner finished terminating, got: %v", err)
@@ -2339,12 +2376,9 @@ func TestEnsureNamespace(t *testing.T) {
 			Name: ns, DeletionTimestamp: &now, Finalizers: []string{"kubernetes"},
 		}}
 		client := fake.NewClientset(terminating)
-		go func() {
-			time.Sleep(50 * time.Millisecond)
-			_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
-		}()
+		deleteWhenWatched(t, client, ns)
 
-		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		ctx := &validators.Context{Ctx: boundedTestContext(t), Clientset: client}
 		got, created, err := ensureNamespace(ctx, ns, component)
 		if err != nil {
 			t.Fatalf("expected creation to succeed once the terminating namespace finished deleting, got: %v", err)

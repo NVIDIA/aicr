@@ -1591,7 +1591,10 @@ aicr validate \
   List is refused (`Forbidden`) before anything is deleted, the namespaces stay
   until you delete them, and `workload namespace cleanup failed: <cause>` is
   appended to the check's message. The message never changes the check's
-  status, and cannot name the namespaces it could not list.
+  status, and cannot name the namespaces it could not list. The cleanup does
+  not run at all when the run is interrupted (canceled) or `--no-cleanup` is
+  set: the namespaces then stay, and the check's message says nothing about
+  them.
 - This changes who grants the validators' access, and when. It does not make
   the caller less powerful: an identity that can create Jobs in the validation
   namespace can run any image as that ServiceAccount, and one that can write

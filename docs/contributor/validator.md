@@ -1295,8 +1295,9 @@ when all of these hold:
 
 A namespace that carries the labels but not such a name is left in place and
 named in the check's message. Each delete is pinned to the listed UID, and
-transient API failures are retried within the 3m. The step is skipped with
-`--no-cleanup` and on the interrupted paths. When
+transient API failures are retried within the 3m. The step does not run with
+`--no-cleanup` or on the interrupted (canceled) paths; the namespaces then stay,
+and the check's message says nothing about them. When
 `AICR_INFERENCE_PERF_NO_CLEANUP` keeps the `inference-perf` workload for
 inspection, its namespace is created without the run-ID label, so no abandoned
 check in the same run deletes it.

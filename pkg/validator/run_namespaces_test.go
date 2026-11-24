@@ -422,7 +422,29 @@ func TestCleanupAbandonedCheckMessages(t *testing.T) {
 		reactor func(*testing.T, *fake.Clientset)
 		want    string
 		notWant string
+		// wantNoDelete asserts that no namespace delete was sent.
+		wantNoDelete bool
 	}{
+		{
+			// The budget runs out between the List and the first Delete: a
+			// namespace whose deletion was never sent is a failure, not one
+			// "still terminating".
+			name: "budget ending before the deletes is a cleanup failure",
+			seed: []runtime.Object{inferenceNS(), ncclNS(testRunID)},
+			reactor: func(_ *testing.T, cs *fake.Clientset) {
+				var listed atomic.Bool
+				cs.PrependReactor("list", "namespaces", func(clienttesting.Action) (bool, runtime.Object, error) {
+					if !listed.Swap(true) {
+						time.Sleep(defaults.ValidatorWorkloadNamespaceCleanupTimeout + time.Second)
+					}
+					return false, nil, nil
+				})
+			},
+			want: "workload namespace cleanup failed: [TIMEOUT] deletion not attempted: " +
+				inferenceNS().Name + ", " + ncclNS(testRunID).Name,
+			notWant:      "deletion requested",
+			wantNoDelete: true,
+		},
 		{
 			name: "refused delete is a cleanup failure",
 			seed: []runtime.Object{inferenceNS()},
@@ -488,6 +510,9 @@ func TestCleanupAbandonedCheckMessages(t *testing.T) {
 				}
 				if got.Status != ctrf.StatusOther {
 					t.Errorf("status = %s, want %s unchanged", got.Status, ctrf.StatusOther)
+				}
+				if tt.wantNoDelete && namespaceDeleted(cs) {
+					t.Error("sent a namespace delete after the budget ran out")
 				}
 			})
 		})

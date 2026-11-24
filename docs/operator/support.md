@@ -77,8 +77,11 @@ published evidence.
 
 With `spec.validation.deployment: Required`, each rollout runs AICR's
 deployment validation and, when it passes, records the evidence reference on
-the rollout. A run AICR could not finish, and that pushed no evidence of a
-failed or unfinished (`other`) check, is run again; only the last run's
+the rollout. A run that ends on a transient AICR exit (5, 6, 7 or 9) is run
+again, up to three runs in all, unless the evidence it pushed records failed or
+unfinished (`other`) checks or otherwise does not record a pass. Any other
+failed run, or a third transient exit, ends the rollout `Failed`
+([troubleshooting](troubleshooting.md#validation)). Only the last run's
 evidence is recorded:
 
 ```shell
