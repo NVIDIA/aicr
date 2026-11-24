@@ -26,8 +26,8 @@ transitions:
       and finalTransformations lists become maps keyed by field, so an
       AgentgatewayPolicy (spec.backend.ai) or AgentgatewayBackend
       (spec.policies.ai, and each provider's policies.ai under
-      spec.ai.groups) that repeats a field value fails when it is next
-      applied. The other validation rules change only in ways an object valid
+      spec.ai.groups) that repeats a field value is rejected on create and on
+      server-side apply. The other validation rules change only in ways an object valid
       at 1.5.0 still passes, or test fields 1.7.0 adds. The schemas also stop
       persisting default values such as action Allow; the controller applies
       the same defaults at runtime. The chart ships the CRDs as templates, so
@@ -44,8 +44,8 @@ transitions:
             description: >-
               Only if an AgentgatewayPolicy or AgentgatewayBackend repeats a
               field value in an ai.transformations or ai.finalTransformations
-              list: keep one entry per field, in the source you apply it
-              from, before applying.
+              list: keep one entry per field, the one you want applied, in
+              the source you apply it from, before applying.
             reason: >-
               The 1.7.0 schema rejects the duplicate, so the object can no
               longer be updated until it is fixed.

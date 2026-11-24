@@ -22,46 +22,54 @@ transitions:
     to: "1.7.0"
     verdict: manual
     summary: >-
-      1.6 and 1.7 change how configured LLM backends and policies behave.
-      An explicit provider base URL without a path now means /, where 1.5
-      appended /v1 for custom and Ollama providers. Prompt guards other than
-      webhooks now also inspect tool outputs, which can reject or mask
-      requests that passed before. Dynamic backends refuse loopback and
-      link-local destinations. A built-in model catalog now prices requests,
-      so USD budgets and cost-based limits start counting. Anthropic Messages
-      requests prefer the OpenAI Responses format, failover evicts failing
-      targets by default, external authorization calls time out after 2
-      seconds and rate limit or processing calls after 10, and the LLM
-      request buffer grows from 2 MiB to 32 MiB. The controller also turns on
-      the AgentgatewayModel API. AICR configures no LLM backend, policy or
-      guard, so a default install needs only the apply.
+      The controller now serves the AgentgatewayModel API, which AICR's values
+      left off at 1.5.0, so existing AgentgatewayModel objects start routing,
+      and a model spec.baseURL without a path now means /, where 1.5
+      appended /v1 for custom and Ollama providers. Configured LLM traffic also changes: prompt guards
+      inspect tool output and reject when a streamed-response check fails,
+      CEL lookups of a repeated header return a list, models attached
+      directly to a Gateway or ListenerSet serve only exact LLM paths,
+      Anthropic Messages requests convert through the Responses API (dropping
+      extended-thinking history), and dynamic backends refuse loopback and
+      link-local addresses. AICR creates no AgentgatewayModel, guard, policy
+      or dynamic backend, so a default install needs only the apply.
     precondition: >-
-      Know whether your AgentgatewayBackend objects set a provider base URL,
-      whether any policy configures prompt guards, and whether a dynamic
-      backend targets a loopback or link-local address. If none does, only
-      the apply step applies.
+      Know whether the cluster has AgentgatewayModel objects, whether any
+      policy configures prompt guards or reads request headers in CEL, and
+      whether a dynamic backend targets a loopback or link-local address. If
+      none does, only the apply step applies.
     stepsByDeployer:
       - steps:
-          - id: add-base-url-paths
+          - id: review-models
             description: >-
-              Only if a provider base URL has no path: add the provider API
-              path, for example https://api.openai.com/v1 instead of
-              https://api.openai.com, before applying.
+              Only if AgentgatewayModel objects exist: confirm each one should
+              serve traffic, and add the provider API path to any
+              spec.baseURL that has none, for example
+              https://api.openai.com/v1, before applying.
             reason: >-
-              From 1.6 the configured URL is the complete base path, so a URL
-              without one sends requests to / and the provider rejects them.
-          - id: keep-guard-scope
+              From 1.7 the controller serves the kind by default, and a base
+              URL without a path sends requests to /, which providers reject.
+          - id: keep-guard-behavior
             description: >-
-              Only if prompt guards must not inspect tool outputs: set each
-              guard's scope to [SystemPrompt, Messages] before applying.
+              Only if prompt guards are configured: to keep the 1.5 behavior,
+              set each guard's scope to [SystemPrompt, Messages] before
+              applying, and its failureMode to failOpen after applying, once
+              the 1.7 schema accepts it.
             reason: >-
-              1.7 adds ToolOutput to the default scope, which can reject or
-              mask requests and sends more content to vendor guardrail APIs.
+              1.7 adds ToolOutput to the default scope, and a guard failure on
+              a streamed response now rejects the content.
+          - id: check-header-expressions
+            description: >-
+              Only if CEL expressions read request headers that can repeat:
+              make them accept a list value, before applying.
+            reason: >-
+              A header that appears more than once now evaluates to a list.
           - id: allow-dynamic-loopback
             description: >-
               Only if a dynamic backend must reach a loopback or link-local
               address: set config.backend.allowDynamicLoopback to true in the
-              proxy configuration.
+              spec.rawConfig of an AgentgatewayParameters you manage; AICR
+              re-creates its own system-proxy parameters on every upgrade.
             reason: >-
               1.7 rejects those destinations by default, including cloud
               metadata servers.
