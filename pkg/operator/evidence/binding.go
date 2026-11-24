@@ -63,11 +63,14 @@ type ValidatorImage struct {
 	Digest string `json:"digest,omitempty"`
 }
 
-// PhaseResult counts a validation phase's checks.
+// PhaseResult counts a validation phase's checks. Other counts checks that
+// ended without a verdict; AICR records it from predicate schema 1.1.0 and
+// omits it when zero.
 type PhaseResult struct {
 	Passed  int `json:"passed"`
 	Failed  int `json:"failed"`
 	Skipped int `json:"skipped"`
+	Other   int `json:"other,omitempty"`
 }
 
 // ParseAICRStatement reads the summary of AICR's evidence statement.
@@ -97,13 +100,14 @@ func ParseAICRStatement(data []byte) (*AICRSummary, error) {
 	}, nil
 }
 
-// Passed reports whether every phase that ran passed with no failure.
+// Passed reports whether every phase that ran passed with no failed check and
+// no check left without a verdict.
 func (s *AICRSummary) Passed() bool {
 	if len(s.Phases) == 0 {
 		return false
 	}
 	for _, p := range s.Phases {
-		if p.Failed > 0 || p.Passed == 0 {
+		if p.Failed > 0 || p.Other > 0 || p.Passed == 0 {
 			return false
 		}
 	}

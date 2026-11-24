@@ -35,11 +35,14 @@ import (
 // per-check envelope stays below the facade-level ValidationOperationTimeout:
 // the orchestrator wait (v1.WaitEnvelopeFor, which already covers the Job
 // deadline and the SIGTERM window), the post-wait result capture
-// (K8sCleanupTimeout) and the pod termination wait
-// (K8sPodTerminationWaitTimeout). Otherwise a controller/library caller (which
-// gets that facade deadline when no explicit timeout is set) could hit the
-// top-level "context deadline exceeded" before the per-check Job reaches its
-// own verdict.
+// (K8sCleanupTimeout), the pod termination wait
+// (K8sPodTerminationWaitTimeout) and, when the wait failed, the cleanup of
+// the run's workload namespaces (ValidatorWorkloadNamespaceCleanupTimeout).
+// Otherwise a controller/library caller (which gets that facade deadline when
+// no explicit timeout is set) could hit the top-level "context deadline
+// exceeded" before the per-check Job reaches its own verdict or, on the
+// abandon path, after the verdict is recorded but while the namespace
+// cleanup is still running, ending the run with a deadline error.
 func TestCatalogTimeoutsFitFacadeBudget(t *testing.T) {
 	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
@@ -50,9 +53,10 @@ func TestCatalogTimeoutsFitFacadeBudget(t *testing.T) {
 		if timeout == 0 {
 			timeout = defaults.ValidatorDefaultTimeout
 		}
-		envelope := v1.WaitEnvelopeFor(timeout) + defaults.K8sCleanupTimeout + defaults.K8sPodTerminationWaitTimeout
+		envelope := v1.WaitEnvelopeFor(timeout) + defaults.K8sCleanupTimeout + defaults.K8sPodTerminationWaitTimeout +
+			defaults.ValidatorWorkloadNamespaceCleanupTimeout
 		if envelope >= defaults.ValidationOperationTimeout {
-			t.Errorf("%s: per-check envelope %v (wait + capture + termination wait) must stay under ValidationOperationTimeout (%v)",
+			t.Errorf("%s: per-check envelope %v (wait + capture + termination wait + namespace cleanup) must stay under ValidationOperationTimeout (%v)",
 				v.Name, envelope, defaults.ValidationOperationTimeout)
 		}
 	}

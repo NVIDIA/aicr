@@ -172,11 +172,12 @@ const (
 	// deadline-exceeded. The largest is the inference-perf catalog timeout
 	// (65m, which covers the model-cache populate + cold-start benchmark
 	// phases): 65m + 3m headroom + 60s grace + 5s margin + 30s capture + 90s
-	// termination wait = 71m05s — not CheckExecutionTimeout (55m, the
-	// fallback when no catalog timeout is set). 75m keeps margin above that
-	// for orchestration overhead (snapshot agent, RBAC, namespace setup). The
-	// catalog-vs-facade relationship is asserted in
-	// pkg/validator/catalog/catalog_test.go.
+	// termination wait = 71m05s, plus 3m of workload-namespace cleanup
+	// (ValidatorWorkloadNamespaceCleanupTimeout) when the wait failed =
+	// 74m05s — not CheckExecutionTimeout (55m, the fallback when no catalog
+	// timeout is set). 75m keeps margin above that for orchestration overhead
+	// (snapshot agent, RBAC, namespace setup). The catalog-vs-facade
+	// relationship is asserted in pkg/validator/catalog/catalog_test.go.
 	ValidationOperationTimeout = 75 * time.Minute
 
 	// VerifyOperationTimeout is the facade-level upper bound for a single
@@ -231,9 +232,11 @@ const (
 	// a foreground delete, so the Job stays visible, with a deletion
 	// timestamp, while its pods terminate — and the next check's Job appears
 	// only after the remaining pod-termination wait
-	// (K8sPodTerminationWaitTimeout) plus, between phases, the result
-	// ConfigMap write, the dependency-affinity scan and the Job apply. Not
-	// all of those carry a hard budget, so the between-checks gap has no
+	// (K8sPodTerminationWaitTimeout), the workload-namespace cleanup that
+	// follows a check whose wait failed
+	// (ValidatorWorkloadNamespaceCleanupTimeout) and, between phases, the
+	// result ConfigMap write, the dependency-affinity scan and the Job apply.
+	// Not all of those carry a hard budget, so the between-checks gap has no
 	// proven bound: the window is a conservative margin over the usual gap,
 	// and a run stalled between checks for longer cannot be told from a
 	// dead one. The observation lists the run-labeled Jobs once and then
@@ -241,7 +244,8 @@ const (
 	// the apiserver ends early is an anomaly (routine watch timeouts are
 	// 30+ minutes), so it aborts the apply with nothing deleted rather than
 	// re-watching.
-	ValidationSweepSettleWindow = K8sPodTerminationWaitTimeout + 2*K8sCleanupTimeout
+	ValidationSweepSettleWindow = K8sPodTerminationWaitTimeout + 2*K8sCleanupTimeout +
+		ValidatorWorkloadNamespaceCleanupTimeout
 )
 
 // StaticValidationTimeout bounds a complete static recipe validation run.
@@ -1521,6 +1525,17 @@ const (
 	// A Job running the CLI needs terminationGracePeriodSeconds above it.
 	ValidationCancellationBudget = 2*K8sCleanupTimeout +
 		ValidatorTerminationGracePeriod + ValidatorTerminationWaitMargin
+
+	// ValidatorWorkloadNamespaceCleanupTimeout bounds the orchestrator's
+	// deletion of, and wait for, the namespaces labeled with a run's ID after
+	// it abandons a check whose wait failed: the check's pod is killed with
+	// its Job, so its own namespace cleanup never runs. It covers the 2-3
+	// minute Dynamo finalizer cascade InferenceNamespaceTerminationWait
+	// allows for, but stays shorter so the longest embedded check's
+	// abandon-path envelope fits under ValidationOperationTimeout (asserted
+	// in pkg/validator/catalog). Expiry stops only the wait, not the deletion,
+	// and is reported on the check's result.
+	ValidatorWorkloadNamespaceCleanupTimeout = 3 * time.Minute
 
 	// ValidatorMaxStdoutLines is the maximum number of stdout lines captured
 	// per validator. Lines beyond this are truncated (keeping the last N lines)

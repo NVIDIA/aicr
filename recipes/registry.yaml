@@ -1098,11 +1098,13 @@ components:
     # now ships with `crds.enabled: false` and depends on this chart
     # via DependencyRefs, so the DAG-stratified helmfile layout
     # installs CRDs first automatically. Issue #914.
+    upgrades:
+      file: components/prometheus-operator-crds/upgrades.yaml
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/prometheus-operator-crds
       # renovate: datasource=helm depName=prometheus-operator-crds registryUrl=https://prometheus-community.github.io/helm-charts
-      defaultVersion: 28.0.1
+      defaultVersion: 31.0.1
       defaultNamespace: monitoring
 
   - name: kube-prometheus-stack
@@ -1124,7 +1126,7 @@ components:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/kube-prometheus-stack
       # renovate: datasource=helm depName=kube-prometheus-stack registryUrl=https://prometheus-community.github.io/helm-charts
-      defaultVersion: 84.5.0
+      defaultVersion: 88.6.5
       defaultNamespace: monitoring
     # Prometheus stores to an emptyDir, so there are no storageClassPaths.
     nodeScheduling:

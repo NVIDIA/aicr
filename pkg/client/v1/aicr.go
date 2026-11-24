@@ -2656,7 +2656,8 @@ func (c *Client) ValidateState(
 	// per-check envelope: the 65m inference-perf catalog timeout plus the 3m
 	// ValidatorJobDeadlineHeadroom, the 60s SIGTERM window and 5s margin
 	// (v1.WaitEnvelopeFor, 69m05s), the 30s result capture and the 90s pod
-	// termination wait, i.e. 71m05s; the CheckExecutionTimeout fallback is
+	// termination wait, i.e. 71m05s, plus the 3m workload-namespace cleanup
+	// after a failed wait (74m05s); the CheckExecutionTimeout fallback is
 	// 55m. A single hung check therefore reaches its own verdict first and
 	// surfaces as a structured check failure
 	// rather than a wrapping deadline-exceeded that loses the per-check signal —
