@@ -90,10 +90,16 @@ type attachmentCheckConfig struct {
 	reportReserve time.Duration
 	concurrency   int
 	podLogs       podLogsFunc
+	nodeRequests  nodeRequestsFunc
 }
 
 // podLogsFunc reads one container's log.
 type podLogsFunc func(ctx context.Context, client kubernetes.Interface, namespace, pod, container string) (string, error)
+
+// nodeRequestsFunc reads what a node's unfinished pods request, own pods
+// apart, as helper.NodeResourceRequestsSplit does.
+type nodeRequestsFunc func(ctx context.Context, client kubernetes.Interface, nodeName string,
+	own func(*corev1.Pod) bool) (others, owned corev1.ResourceList, err error)
 
 // attachmentStatus is one network's verdict.
 type attachmentStatus int
@@ -195,6 +201,7 @@ func defaultAttachmentCheckConfig() attachmentCheckConfig {
 		reportReserve: defaults.SecondaryNetworkProbeReportReserve,
 		concurrency:   defaults.SecondaryNetworkProbeConcurrency,
 		podLogs:       k8spod.GetPodLogs,
+		nodeRequests:  helper.NodeResourceRequestsSplit,
 	}
 }
 
@@ -236,7 +243,7 @@ func runSecondaryNetworkAttachment(ctx *validators.Context, cfg attachmentCheckC
 		printLines("Pod network CIDRs: " + formatPrefixes(podCIDRs))
 	}
 
-	plan, err := planAttachmentProbes(ctx, nodes, declared.networks, "")
+	plan, err := planAttachmentProbes(ctx, nodes, declared.networks, "", cfg.nodeRequests)
 	if err != nil {
 		return err
 	}
@@ -273,26 +280,60 @@ func probeNetworks(ctx *validators.Context, cfg attachmentCheckConfig, ns *probe
 		if len(deferred) == 0 {
 			break
 		}
-		if !time.Now().Before(deadline) {
-			outcomes = append(outcomes, heldByRunOutcomes(deferred, "the probe budget ran out before it was released")...)
-			break
-		}
-		next, err := planAttachmentProbes(ctx, nodes, deferred, ns.name)
-		if err != nil {
-			for _, network := range deferred {
-				outcomes = append(outcomes, attachmentOutcome{network: network}.failed(
-					fmt.Sprintf("the network could not be planned again after this run's other probes: %v", err)))
-			}
-			break
-		}
-		outcomes = append(outcomes, next.resolved...)
-		if len(next.probes) == 0 {
-			outcomes = append(outcomes, heldByRunOutcomes(next.deferred, "those probes did not finish and release it")...)
+		next, settled, done := replanDeferred(ctx, cfg, nodes, deferred, ns.name, deadline)
+		outcomes = append(outcomes, settled...)
+		if done {
 			break
 		}
 		probes, deferred = next.probes, next.deferred
 	}
 	return reportAttachmentOutcomes(outcomes)
+}
+
+// replanDeferred plans the networks deferred behind this run's own probes
+// again, after a wave, with every read bounded by the probe deadline so that
+// planning never spends the report reserve. settled holds the verdicts
+// planning reached; done reports that no further wave runs, every deferred
+// network then being settled. A deadline reached before, during or right
+// after planning leaves the networks it stopped as held by this run; any
+// other planning error fails them.
+func replanDeferred(ctx *validators.Context, cfg attachmentCheckConfig, nodes []corev1.Node, deferred []secondaryNetwork,
+	ownNamespace string, deadline time.Time) (next attachmentPlan, settled []attachmentOutcome, done bool) {
+
+	if !time.Now().Before(deadline) {
+		return attachmentPlan{}, heldByRunOutcomes(deferred, "the probe budget ran out before it was released"), true
+	}
+	planCtx, cancel := context.WithDeadline(ctx.Ctx, deadline)
+	defer cancel()
+	bounded := *ctx
+	bounded.Ctx = planCtx
+	next, err := planAttachmentProbes(&bounded, nodes, deferred, ownNamespace, cfg.nodeRequests)
+	if err != nil {
+		if stderrors.Is(planCtx.Err(), context.DeadlineExceeded) && ctx.Ctx.Err() == nil &&
+			stderrors.Is(err, context.DeadlineExceeded) {
+
+			return attachmentPlan{}, heldByRunOutcomes(deferred, "the probe budget ran out while it was being planned again"), true
+		}
+		settled = make([]attachmentOutcome, 0, len(deferred))
+		for _, network := range deferred {
+			settled = append(settled, attachmentOutcome{network: network}.failed(
+				fmt.Sprintf("the network could not be planned again after this run's other probes: %v", err)))
+		}
+		return attachmentPlan{}, settled, true
+	}
+	switch {
+	case len(next.probes) > 0 && !time.Now().Before(deadline):
+		unprobed := next.deferred
+		for _, p := range next.probes {
+			unprobed = append(unprobed, p.network)
+		}
+		return attachmentPlan{}, append(next.resolved,
+			heldByRunOutcomes(unprobed, "the probe budget ran out before it could be probed")...), true
+	case len(next.probes) == 0:
+		return attachmentPlan{}, append(next.resolved,
+			heldByRunOutcomes(next.deferred, "those probes did not finish and release it")...), true
+	}
+	return next, next.resolved, false
 }
 
 // heldByRunOutcomes reports networks that were not probed because every unit
@@ -497,7 +538,8 @@ type attachmentPlan struct {
 // requests. Units are reserved as they are assigned, so two
 // networks sharing a resource never count the same free unit. ownNamespace is
 // the probe namespace, whose unfinished pods are this run's own; "" before it
-// exists.
+// exists. readRequests reads each node's pod requests; nil reads them with
+// helper.NodeResourceRequestsSplit.
 //
 // A network no node advertises fails. When no candidate is Ready and
 // uncordoned, a NotReady uncordoned candidate fails the network, since a node
@@ -508,11 +550,15 @@ type attachmentPlan struct {
 // skipped as busy; one that waits only on units this run holds is deferred.
 // Reading a node's pod requests failing is an error, never "busy".
 func planAttachmentProbes(ctx *validators.Context, nodes []corev1.Node, networks []secondaryNetwork,
-	ownNamespace string) (attachmentPlan, error) {
+	ownNamespace string, readRequests nodeRequestsFunc) (attachmentPlan, error) {
 
+	if readRequests == nil {
+		readRequests = helper.NodeResourceRequestsSplit
+	}
 	sorted := append([]corev1.Node(nil), nodes...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
-	picker := freeUnitPicker{ctx: ctx, ownNamespace: ownNamespace, usage: map[string]nodeUsage{}, reserved: map[string]int64{}}
+	picker := freeUnitPicker{ctx: ctx, read: readRequests, ownNamespace: ownNamespace,
+		usage: map[string]nodeUsage{}, reserved: map[string]int64{}}
 
 	var plan attachmentPlan
 	for _, network := range networks {
@@ -574,6 +620,7 @@ func notAdvertisedDetail(network secondaryNetwork) string {
 // node's pod requests once.
 type freeUnitPicker struct {
 	ctx          *validators.Context
+	read         nodeRequestsFunc
 	ownNamespace string
 	usage        map[string]nodeUsage
 	reserved     map[string]int64 // key: node + "/" + resource
@@ -601,7 +648,7 @@ func (p *freeUnitPicker) pick(ready []*corev1.Node, resourceName string) (node s
 		usage, ok := p.usage[n.Name]
 		if !ok {
 			listCtx, cancel := p.ctx.Timeout(defaults.ResourceVerificationTimeout)
-			others, own, readErr := helper.NodeResourceRequestsSplit(listCtx, p.ctx.Clientset, n.Name, inNamespace(p.ownNamespace))
+			others, own, readErr := p.read(listCtx, p.ctx.Clientset, n.Name, inNamespace(p.ownNamespace))
 			cancel()
 			if readErr != nil {
 				return "", false, errors.PropagateOrWrap(readErr, errors.ErrCodeInternal,

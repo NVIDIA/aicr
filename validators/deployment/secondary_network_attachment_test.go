@@ -751,9 +751,9 @@ func TestCheckSecondaryNetworkAttachment_EntryPoints(t *testing.T) {
 		got := defaultAttachmentCheckConfig()
 		if got.probeTimeout != defaults.SecondaryNetworkProbeTimeout ||
 			got.reportReserve != defaults.SecondaryNetworkProbeReportReserve ||
-			got.concurrency != defaults.SecondaryNetworkProbeConcurrency || got.podLogs == nil {
+			got.concurrency != defaults.SecondaryNetworkProbeConcurrency || got.podLogs == nil || got.nodeRequests == nil {
 
-			t.Errorf("defaultAttachmentCheckConfig() = %+v, want the pkg/defaults budget and a pod-log reader", got)
+			t.Errorf("defaultAttachmentCheckConfig() = %+v, want the pkg/defaults budget, a pod-log reader and a request reader", got)
 		}
 	})
 }
@@ -1050,7 +1050,7 @@ func TestPlanAttachmentProbes(t *testing.T) {
 			objects = append(objects, tt.ownPods...)
 			ctx := attachmentContext(t, k8sfake.NewClientset(objects...), nil)
 			ctx.Tolerations = tt.tolerations
-			plan, err := planAttachmentProbes(ctx, nodes, tt.networks, testOwnNamespace)
+			plan, err := planAttachmentProbes(ctx, nodes, tt.networks, testOwnNamespace, nil)
 			if err != nil {
 				t.Fatalf("planAttachmentProbes() error = %v", err)
 			}
@@ -1112,7 +1112,7 @@ func TestPlanAttachmentProbes_OccupancyErrorFailsClosed(t *testing.T) {
 	ctx := attachmentContext(t, client, nil)
 	_, err := planAttachmentProbes(ctx,
 		[]corev1.Node{*attachmentNode("a", map[string]int64{testMlnxNICs: 1})},
-		[]secondaryNetwork{{Namespace: "ns", Name: "n", Resource: testMlnxNICs}}, "")
+		[]secondaryNetwork{{Namespace: "ns", Name: "n", Resource: testMlnxNICs}}, "", nil)
 	if err == nil || validators.IsSkip(err) || !strings.Contains(err.Error(), "failed to list pods on node a") {
 		t.Fatalf("planAttachmentProbes() error = %v, want the occupancy failure", err)
 	}
@@ -1443,7 +1443,7 @@ func TestProbeNetworksProbesDeferredNetworkAfterOwnRelease(t *testing.T) {
 	ctx := attachmentContext(t, cluster.client, nil)
 	networks := []secondaryNetwork{shared("n1"), shared("n2")}
 
-	plan, err := planAttachmentProbes(ctx, []corev1.Node{*node}, networks, "")
+	plan, err := planAttachmentProbes(ctx, []corev1.Node{*node}, networks, "", nil)
 	if err != nil {
 		t.Fatalf("planAttachmentProbes() error = %v", err)
 	}
@@ -1462,6 +1462,164 @@ func TestProbeNetworksProbesDeferredNetworkAfterOwnRelease(t *testing.T) {
 	assertExtraSubset(t, extra, map[string]string{validators.ExtraKeyNodesValidated: "2", validators.ExtraKeyNodesSkipped: "0"})
 	if got := len(cluster.createdProbes()); got != 2 {
 		t.Errorf("created %d probe pods, want one per network across two waves", got)
+	}
+}
+
+// boundedReads wraps read, recording a failure on t for any read whose
+// context outlives deadline and counting the reads.
+type boundedReads struct {
+	t        *testing.T
+	deadline time.Time
+	read     nodeRequestsFunc
+	mu       sync.Mutex
+	count    int
+}
+
+func (b *boundedReads) fn(ctx context.Context, client kubernetes.Interface, node string,
+	own func(*corev1.Pod) bool) (corev1.ResourceList, corev1.ResourceList, error) {
+
+	b.mu.Lock()
+	b.count++
+	b.mu.Unlock()
+	if dl, ok := ctx.Deadline(); !ok || dl.After(b.deadline) {
+		b.t.Errorf("occupancy read context deadline = %v (set %v), want no later than the probe deadline %v", dl, ok, b.deadline)
+	}
+	return b.read(ctx, client, node, own)
+}
+
+func (b *boundedReads) reads() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.count
+}
+
+func readUntilDone(ctx context.Context, _ kubernetes.Interface, _ string,
+	_ func(*corev1.Pod) bool) (corev1.ResourceList, corev1.ResourceList, error) {
+
+	<-ctx.Done()
+	return nil, nil, ctx.Err()
+}
+
+func readFree(context.Context, kubernetes.Interface, string,
+	func(*corev1.Pod) bool) (corev1.ResourceList, corev1.ResourceList, error) {
+
+	return corev1.ResourceList{}, corev1.ResourceList{}, nil
+}
+
+// TestReplanDeferredWithinDeadline pins that planning the networks deferred
+// behind this run's own probes stays inside the probe deadline, so it never
+// spends the report reserve: a deadline reached before, during or right after
+// planning leaves them held by this run with that cause, a failed read still
+// fails them, and a plan made in time runs the next wave.
+func TestReplanDeferredWithinDeadline(t *testing.T) {
+	t.Parallel()
+	node := attachmentNode("gpu-a", map[string]int64{testMlnxNICs: 1})
+	deferred := []secondaryNetwork{{Namespace: "ns", Name: "n2", Resource: testMlnxNICs, Kind: attachmentKindNAD}}
+	freeAfterDeadline := func(ctx context.Context, c kubernetes.Interface, n string,
+		own func(*corev1.Pod) bool) (corev1.ResourceList, corev1.ResourceList, error) {
+
+		<-ctx.Done()
+		return readFree(ctx, c, n, own)
+	}
+	readFails := func(context.Context, kubernetes.Interface, string,
+		func(*corev1.Pod) bool) (corev1.ResourceList, corev1.ResourceList, error) {
+
+		return nil, nil, k8serrors.NewInternalError(fmt.Errorf("etcd unavailable"))
+	}
+
+	tests := []struct {
+		name       string
+		budget     time.Duration
+		read       nodeRequestsFunc
+		wantProbes int
+		wantReads  int
+		wantStatus attachmentStatus
+		wantDetail string
+	}{
+		{"deadline passed before planning", -time.Second, readFree, 0, 0,
+			attachmentSkippedBusy, "the probe budget ran out before it was released"},
+		{"slow read stopped at the deadline", 200 * time.Millisecond, readUntilDone, 0, 1,
+			attachmentSkippedBusy, "the probe budget ran out while it was being planned again"},
+		{"plan finished past the deadline", 200 * time.Millisecond, freeAfterDeadline, 0, 1,
+			attachmentSkippedBusy, "the probe budget ran out before it could be probed"},
+		{"occupancy read failure fails", time.Minute, readFails, 0, 1,
+			attachmentFailed, "could not be planned again after this run's other probes"},
+		{"plan in time runs the next wave", time.Minute, readFree, 1, 1, 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := attachmentContextWithin(t, k8sfake.NewClientset(), nil, 2*time.Minute)
+			deadline := time.Now().Add(tt.budget)
+			reads := &boundedReads{t: t, deadline: deadline, read: tt.read}
+			cfg := testAttachmentConfig
+			cfg.nodeRequests = reads.fn
+
+			start := time.Now()
+			next, settled, done := replanDeferred(ctx, cfg, []corev1.Node{*node}, deferred, testOwnNamespace, deadline)
+			if late := time.Since(start) - max(tt.budget, 0); late > 2*time.Second {
+				t.Errorf("replanDeferred() returned %v after the deadline", late)
+			}
+			if got := reads.reads(); got != tt.wantReads {
+				t.Errorf("occupancy reads = %d, want %d", got, tt.wantReads)
+			}
+			if len(next.probes) != tt.wantProbes || done != (tt.wantProbes == 0) {
+				t.Fatalf("replanDeferred() = %d probe(s), done %v; want %d", len(next.probes), done, tt.wantProbes)
+			}
+			if tt.wantProbes > 0 {
+				if len(settled) != 0 {
+					t.Errorf("settled = %+v, want none when the next wave runs", settled)
+				}
+				return
+			}
+			if len(settled) != 1 || settled[0].status != tt.wantStatus || !strings.Contains(settled[0].detail, tt.wantDetail) {
+				t.Errorf("settled = %+v, want status %v naming %q", settled, tt.wantStatus, tt.wantDetail)
+			}
+		})
+	}
+}
+
+// TestProbeNetworksReplanStopsAtProbeDeadline runs a wave that finishes
+// before the probe deadline and then plans the deferred network with a read
+// that hangs: the read is cut at the probe deadline, the network is reported
+// held by this run with that cause, and the check returns before its own
+// deadline, inside the report reserve.
+func TestProbeNetworksReplanStopsAtProbeDeadline(t *testing.T) {
+	shared := func(name string) secondaryNetwork {
+		return secondaryNetwork{Namespace: "ns", Name: name, Resource: testMlnxNICs, Kind: attachmentKindNAD}
+	}
+	node := attachmentNode("gpu-a", map[string]int64{testMlnxNICs: 1})
+	cluster := newAttachmentCluster(t, attachedStatus(""), node)
+	ctx := attachmentContextWithin(t, cluster.client, nil, 4*time.Second)
+	checkDeadline, _ := ctx.Ctx.Deadline()
+	cfg := cluster.config(attachmentCheckConfig{probeTimeout: time.Minute, reportReserve: 2 * time.Second, concurrency: 1})
+	reads := &boundedReads{t: t, deadline: checkDeadline.Add(-cfg.reportReserve), read: readUntilDone}
+	cfg.nodeRequests = reads.fn
+
+	plan, err := planAttachmentProbes(ctx, []corev1.Node{*node}, []secondaryNetwork{shared("n1"), shared("n2")}, "", nil)
+	if err != nil {
+		t.Fatalf("planAttachmentProbes() error = %v", err)
+	}
+	ns := testProbeNamespace(t)
+	t.Cleanup(func() { _ = ns.delete(cluster.client) })
+
+	out, _, err := captureOutput(t, func() error {
+		return probeNetworks(ctx, cfg, ns, []corev1.Node{*node}, plan, nil, nil)
+	})
+	if ctx.Ctx.Err() != nil {
+		t.Fatalf("probeNetworks() returned after the check deadline: %v", ctx.Ctx.Err())
+	}
+	if err != nil {
+		t.Fatalf("probeNetworks() error = %v, want n1 attached and n2 held by this run", err)
+	}
+	if reads.reads() != 1 {
+		t.Errorf("occupancy reads = %d, want 1 (the replan)", reads.reads())
+	}
+	if !strings.Contains(out, "the probe budget ran out while it was being planned again") {
+		t.Errorf("output does not name the spent budget for n2:\n%s", out)
+	}
+	if got := len(cluster.createdProbes()); got != 1 {
+		t.Errorf("created %d probe pods, want only n1's", got)
 	}
 }
 
