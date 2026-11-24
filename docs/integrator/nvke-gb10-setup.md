@@ -81,18 +81,25 @@ workers, one GB10 each, each requesting `rdma/hca_shared_devices_a`. Before it
 creates the TrainJob, a preflight fails when that resource is not allocatable,
 in the same positive count, on both Sparks. In each rank, a precheck pins NCCL
 to the ACTIVE RoCE devices and their RoCE v2 IPv4 GID, and fails with the cause
-when either is missing. It uses every ACTIVE RoCE device, so a second cabled
-port needs addresses in subnets the peer shares, or must stay down.
+when either is missing, or when only one RoCE device is ACTIVE, as when one of
+the linked port's two PCIe functions is down. It uses every ACTIVE RoCE device,
+so a second cabled port needs addresses in subnets the peer shares, or must stay
+down.
 
 The `>= 20` GB/s floor comes from a run on two Sparks with NGC PyTorch 25.11:
 24.11 GB/s busbw at 16 GiB, with NCCL using both PCIe functions.
 
 On one Spark, the training leaves cannot run the performance phase: the NCCL
 check needs two GPU nodes. Validate with `--phase deployment --phase
-conformance`. If DGX OS has removed the ConnectX-7, no node carries the
-ConnectX-7 label, so the NicClusterPolicy never reports ready and
-`expected-resources` fails on the missing RDMA fabric. Build that bundle without
-`--readiness-hooks`, and validate with `--skip-check expected-resources`.
+conformance`, with the ConnectX-7 kept powered as in step 2 under
+[Linking two Sparks](#linking-two-sparks). The RDMA shared device plugin
+advertises `rdma/hca_shared_devices_a` without a cable, so `expected-resources`
+finds the RDMA fabric. To confirm, check that `kubectl describe node` shows
+`rdma/hca_shared_devices_a` under `Allocatable` with a non-zero count. If DGX OS
+has removed the ConnectX-7, no node carries the ConnectX-7 label, so the
+NicClusterPolicy never reports ready and `expected-resources` fails on the
+missing RDMA fabric. In that case, build the bundle without `--readiness-hooks`,
+and validate with `--skip-check expected-resources`.
 
 ## A control plane that sees a GPU
 

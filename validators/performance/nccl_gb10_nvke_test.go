@@ -136,8 +136,8 @@ func TestGB10NVKENetRuntimePrecheckMarkerMatchesRegex(t *testing.T) {
 			t.Errorf("runtimePrecheckFailure(%q) = %q, want %q", out, got, printed)
 		}
 	}
-	if checks != 4 {
-		t.Errorf("found %d %q lines in %s, want 4 (missing uverbs node, no IPv4 GID, mismatched GID index, no active device)", checks, echoMarker, path)
+	if checks != 5 {
+		t.Errorf("found %d %q lines in %s, want 5 (missing uverbs node, no IPv4 GID, mismatched GID index, no active device, one active device)", checks, echoMarker, path)
 	}
 }
 
@@ -162,10 +162,10 @@ func gb10NVKENetRankScript(t *testing.T) string {
 // /sys/class/infiniband and /dev/infiniband laid out like a DGX Spark: port 0's
 // two functions DOWN, port 1's two ACTIVE, each with RoCE v1 and v2 GIDs for
 // two link-local IPv6 addresses below the IPv4-mapped pair at index 4 and 5,
-// and a second IPv4-mapped v2 GID at index 12, which sorts before 5 in a glob.
-// An ACTIVE InfiniBand device must be ignored. The good layout must pin NCCL
-// to the two ACTIVE functions at index 5; each broken layout must exit
-// non-zero with a marker naming the cause.
+// and extra IPv4-mapped v2 GIDs at index 12 and 9, which sort before and after
+// 5 in a glob. An ACTIVE InfiniBand device must be ignored. The good layout
+// must pin NCCL to the two ACTIVE functions at index 5; each broken layout
+// must exit non-zero with a marker naming the cause.
 func TestGB10NVKENetRankPrecheck(t *testing.T) {
 	script := gb10NVKENetRankScript(t)
 	type fn struct {
@@ -184,19 +184,23 @@ func TestGB10NVKENetRankPrecheck(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		noUverbs  string
-		noIPv4    string
-		v2At7     string
-		allDown   bool
-		wantErr   string
-		wantHCAs  []string
-		wantIndex string
+		name         string
+		noUverbs     string
+		noVerbsEntry string
+		noIPv4       string
+		v2At7        string
+		down         string
+		allDown      bool
+		wantErr      string
+		wantHCAs     []string
+		wantIndex    string
 	}{
 		{name: "two active functions", wantHCAs: []string{"roceP2p1s0f1", "rocep1s0f1"}, wantIndex: "5"},
 		{name: "active function without its uverbs node in the pod", noUverbs: "rocep1s0f1", wantErr: "AICR_PRECHECK_FAILED: active RoCE device rocep1s0f1 has no /dev/infiniband node in the pod"},
+		{name: "active function without an infiniband_verbs entry", noVerbsEntry: "rocep1s0f1", wantErr: "AICR_PRECHECK_FAILED: active RoCE device rocep1s0f1 has no /dev/infiniband node in the pod"},
 		{name: "active function without an IPv4 address", noIPv4: "roceP2p1s0f1", wantErr: "AICR_PRECHECK_FAILED: RoCE device roceP2p1s0f1 has no RoCE v2 IPv4 GID"},
 		{name: "IPv4 GIDs at different indexes", v2At7: "roceP2p1s0f1", wantErr: "has its RoCE v2 IPv4 GID at index"},
+		{name: "one active function", down: "roceP2p1s0f1", wantErr: "AICR_PRECHECK_FAILED: rocep1s0f1 is the only ACTIVE RoCE device"},
 		{name: "no active function", allDown: true, wantErr: "AICR_PRECHECK_FAILED: no ACTIVE RoCE device"},
 	}
 	for _, tt := range tests {
@@ -209,17 +213,21 @@ func TestGB10NVKENetRankPrecheck(t *testing.T) {
 			}
 			for _, d := range devices {
 				port := filepath.Join(sysIB, d.name, "ports", "1")
+				verbs := filepath.Join(sysIB, d.name, "device", "infiniband_verbs", d.uverbs)
+				if d.name == tt.noVerbsEntry {
+					verbs = filepath.Join(sysIB, d.name, "device")
+				}
 				for _, dir := range []string{
 					filepath.Join(port, "gid_attrs", "types"),
 					filepath.Join(port, "gids"),
-					filepath.Join(sysIB, d.name, "device", "infiniband_verbs", d.uverbs),
+					verbs,
 				} {
 					if err := os.MkdirAll(dir, 0o755); err != nil {
 						t.Fatal(err)
 					}
 				}
 				state := "1: DOWN"
-				if d.active && !tt.allDown {
+				if d.active && !tt.allDown && d.name != tt.down {
 					state = "4: ACTIVE"
 				}
 				gids := map[string][2]string{
@@ -238,6 +246,7 @@ func TestGB10NVKENetRankPrecheck(t *testing.T) {
 						gids["5"] = [2]string{"RoCE v2", mapped}
 					}
 					gids["12"] = [2]string{"RoCE v2", "0000:0000:0000:0000:0000:ffff:0a63:0001"}
+					gids["9"] = [2]string{"RoCE v2", "0000:0000:0000:0000:0000:ffff:0a63:0002"}
 				}
 				linkLayer := d.linkLayer
 				if linkLayer == "" {

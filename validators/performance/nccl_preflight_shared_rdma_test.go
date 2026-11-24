@@ -23,6 +23,7 @@ import (
 	aicrErrors "aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/recipe"
+	"aicr.run/validators"
 	"aicr.run/validators/helper"
 )
 
@@ -83,6 +84,41 @@ func TestPreflightSharedRDMAResource(t *testing.T) {
 				t.Fatal("preflightSharedRDMAResource() = nil, want an error")
 			}
 			errorstest.WantReportedCode(t, err, tt.wantCode)
+		})
+	}
+}
+
+func TestRunNCCLPreflightsSharedRDMA(t *testing.T) {
+	gb10 := ncclBenchmarkTarget{accelerator: recipe.CriteriaAcceleratorGB10, service: recipe.CriteriaServiceNVKE}
+	tests := []struct {
+		name          string
+		nodes         []corev1.Node
+		customRuntime string
+		wantErr       bool
+	}{
+		{name: "baked-in runtime, no node advertises the pool", nodes: []corev1.Node{rdmaNode(""), rdmaNode("")}, wantErr: true},
+		{name: "recipe-supplied runtime skips the check", nodes: []corev1.Node{rdmaNode(""), rdmaNode("")}, customRuntime: "kind: ClusterTrainingRuntime"},
+		{name: "baked-in runtime, both Sparks advertise the pool", nodes: []corev1.Node{rdmaNode("64"), rdmaNode("64")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := &benchmarkRuntimePlan{source: runtimeSourceCapability}
+			if tt.customRuntime != "" {
+				plan = &benchmarkRuntimePlan{carrier: tt.customRuntime, source: runtimeSourceRecipeSupplied}
+			}
+			// No clientset: for GB10/NVKE NET only the shared-RDMA branch can
+			// run, and it reads gpuConfig.Nodes alone.
+			err := runNCCLPreflights(&validators.Context{}, &gpuConfiguration{Nodes: tt.nodes}, gb10, variantNET, tt.customRuntime, plan)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("runNCCLPreflights() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("runNCCLPreflights() = nil, want an error")
+			}
+			errorstest.WantReportedCode(t, err, aicrErrors.ErrCodeNotFound)
 		})
 	}
 }

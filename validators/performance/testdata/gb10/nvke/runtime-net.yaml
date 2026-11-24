@@ -239,12 +239,14 @@ spec:
                   - NCCL_CROSS_NIC=0
                   # Per rank: every ACTIVE Ethernet RDMA device must have its
                   # uverbs node in the pod and a RoCE v2 IPv4 GID, at one table
-                  # index across devices; then pin NCCL to those devices and
-                  # that index.
+                  # index across devices, and at least two must be ACTIVE: the
+                  # linked port's two PCIe functions. Then pin NCCL to those
+                  # devices and that index.
                   - /bin/sh
                   - -c
                   - |
                     hcas=""
+                    nhca=0
                     gidx=""
                     for d in /sys/class/infiniband/*; do
                       [ -d "$d" ] || continue
@@ -275,9 +277,14 @@ spec:
                       fi
                       gidx=$idx
                       hcas="$hcas,$hca"
+                      nhca=$((nhca + 1))
                     done
                     if [ -z "$hcas" ]; then
                       echo "AICR_PRECHECK_FAILED: no ACTIVE RoCE device on $(hostname); check the ConnectX-7 link and the RDMA shared device plugin" >&2
+                      exit 1
+                    fi
+                    if [ "$nhca" -lt 2 ]; then
+                      echo "AICR_PRECHECK_FAILED: ${hcas#,} is the only ACTIVE RoCE device on $(hostname); both PCIe functions of the linked ConnectX-7 port must be ACTIVE" >&2
                       exit 1
                     fi
                     export NCCL_IB_HCA="=${hcas#,}"

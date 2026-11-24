@@ -148,13 +148,14 @@ spec:
       #
       # One Spark cannot run this check: it fails with fewer than two GPU
       # nodes. Validate one Spark with `--phase deployment --phase
-      # conformance` instead.
+      # conformance` instead, with its ConnectX-7 kept powered (NVKE GB10
+      # Setup, step 2) so that expected-resources finds the RDMA fabric.
       checks:
         - nccl-all-reduce-bw-net
       constraints:
         # Floor from the validated baseline: 24.11 GB/s busbw at the 16 GiB
-        # message size over both PCIe functions. A link that loses one
-        # function measures about 12 GB/s and fails.
+        # message size over both PCIe functions. NCCL over one function
+        # alone would carry about half that, 12 GB/s, and fail.
         - name: nccl-all-reduce-bw-net
           value: ">= 20"
     deployment:

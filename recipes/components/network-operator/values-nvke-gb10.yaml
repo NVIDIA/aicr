@@ -14,12 +14,12 @@
 
 # network-operator Helm values for DGX Spark (GB10) on NVKE.
 #
-# The operator reconciles only the RDMA shared device plugin, from
-# manifests/nic-cluster-policy-nvke-gb10.yaml, so deployCR is off and that
-# manifest is the only policy. No ofedDriver: DGX OS runs RoCE on the inbox
-# mlx5_core. Pods keep OVN-Kubernetes as their only network, so nv-ipam and
-# multus stay off. The standalone nfd component labels ConnectX-7 nodes
-# (components/nfd/values-nvidia-nics.yaml).
+# The chart templates no NicClusterPolicy: the only policy is
+# manifests/nic-cluster-policy-nvke-gb10.yaml, and it runs only the RDMA
+# shared device plugin. It sets no ofedDriver, because DGX OS runs RoCE on the
+# inbox mlx5_core, and no nvIpam or secondaryNetwork, because pods keep
+# OVN-Kubernetes as their only network. The standalone nfd component labels
+# ConnectX-7 nodes (components/nfd/values-nvidia-nics.yaml).
 deployCR: false
 nvIpam:
   enabled: false
