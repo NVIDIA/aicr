@@ -217,9 +217,12 @@ type TestResult struct {
 	// shape and key-collapsing rules in pkg/evidence/redact; nil otherwise.
 	RuntimeProvenance *RuntimeProvenance `json:"runtimeProvenance,omitempty"`
 
-	// Images lists the images the check's pods ran (see PodImage). A record
-	// with no digest can name the planned image of a pod that never started
-	// or could not be read.
+	// Images lists the validator container's image, then each image the
+	// check reports with validators.EmitImage (see PodImage). Other pods a
+	// check launches are not listed. It is empty for a test that never had
+	// a validator Job, such as a check skipped before its Job was created or
+	// one whose Job failed to deploy. A record with no digest can name the
+	// planned image of a pod that never started or could not be read.
 	Images []PodImage `json:"images,omitempty"`
 }
 

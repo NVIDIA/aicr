@@ -46,7 +46,8 @@ type ValidatorResult struct {
 	// container's ProvenanceLinePrefix sentinel line; nil when none was emitted.
 	RuntimeProvenance *RuntimeProvenance
 
-	// Images lists the images the check's pods ran (see TestResult.Images).
+	// Images lists the validator image and the images the check reports
+	// (see TestResult.Images).
 	Images []PodImage
 
 	// Duration is the wall-clock execution time.
