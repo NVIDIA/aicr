@@ -2550,6 +2550,59 @@ func TestAIPerfRunResult(t *testing.T) {
 	}
 }
 
+// TestRunAIPerfJobReportsPodImage is not parallel because captureStdout
+// swaps os.Stdout.
+func TestRunAIPerfJobReportsPodImage(t *testing.T) {
+	const (
+		ns      = "ns"
+		jobName = "aiperf-run"
+		ranAs   = "nvcr.io/nvidia/aiperf-bench:v1"
+	)
+	t.Setenv("HOSTNAME", "")
+	t.Setenv("AICR_INFERENCE_PERF_NO_CLEANUP", "")
+	digest := "sha256:" + strings.Repeat("a", 64)
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: jobName + "-0", Namespace: ns, Labels: map[string]string{"job-name": jobName}},
+		Spec:       v1.PodSpec{Containers: []v1.Container{{Name: aiperfContainerName, Image: ranAs}}},
+		Status: v1.PodStatus{
+			Phase:             v1.PodSucceeded,
+			ContainerStatuses: []v1.ContainerStatus{{Name: aiperfContainerName, ImageID: ranAs + "@" + digest}},
+		},
+	}
+	client := fake.NewClientset(pod)
+	// The selector wait skips terminal pods, so it sees the pod still running.
+	client.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+		running := pod.DeepCopy()
+		running.Status.Phase = v1.PodRunning
+		w := watch.NewFakeWithChanSize(1, false)
+		w.Add(running)
+		return true, w, nil
+	})
+	runCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	ctx := &validators.Context{Ctx: runCtx, Clientset: client, Namespace: ns}
+
+	var err error
+	out := captureStdout(t, func() { _, err = runAIPerfJob(ctx, "http://frontend:8000", "model", 1, jobName) })
+	if err != nil {
+		t.Fatalf("runAIPerfJob() error = %v", err)
+	}
+
+	var images []ctrf.PodImage
+	for line := range strings.SplitSeq(out, "\n") {
+		if payload, ok := strings.CutPrefix(line, ctrf.ImageLinePrefix); ok {
+			var img ctrf.PodImage
+			if jerr := json.Unmarshal([]byte(payload), &img); jerr != nil {
+				t.Fatalf("image line %q: %v", line, jerr)
+			}
+			images = append(images, img)
+		}
+	}
+	if want := (ctrf.PodImage{Image: ranAs, Digest: digest}); len(images) != 1 || images[0] != want {
+		t.Errorf("image lines = %+v, want exactly %+v", images, want)
+	}
+}
+
 func TestResolveAiperfImage(t *testing.T) {
 	tests := []struct {
 		name    string
