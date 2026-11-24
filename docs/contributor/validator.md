@@ -91,12 +91,13 @@ which does not establish a MUST (`StatusObserved`) unless
 `spec.validate.evidence.cncf.documented` attests it. A check the aggregation
 knows to be observation-only (`v1.IsObservationOnlyCheck`, today
 `cluster-autoscaling`) is observed too when its `passed` result carries no
-marker, whatever its `resultSchema` stamp says: no stamp means the image
-predates the marker, the known version means the marker line was dropped, an
-unknown version means this reader cannot interpret its markers; none of them
-is a demonstration, and `CheckResult.Reason` records which. `Aggregate.Passed` is
-scoped by level: every applicable MUST established (passed, or observed and
-documented), SHOULDs excluded; `NOT APPLICABLE` comes only from
+marker, whatever its `resultSchema` stamp says. No stamp means the image
+predates the marker or the kubelet rotated the log past the stamp. A known
+version means the marker line was dropped, and an unknown version means this
+reader cannot interpret its markers. None of them is a demonstration, and
+`CheckResult.Reason` records which. `Aggregate.Passed` is scoped by level. It
+requires every applicable MUST to be established (passed, or observed and
+documented) and excludes SHOULDs. `NOT APPLICABLE` comes only from
 `spec.validate.evidence.cncf.notApplicable` and only for the conditional
 MUSTs in `conditionalMusts` (`ValidateNotApplicable`). The requirement set it
 aggregates is the upstream checklist for the selected version
@@ -768,24 +769,35 @@ missing, or conflict. The inference performance check reports
 its aiperf-bench pod's image the same way, with the platform from the line
 `aiperf_entrypoint.py` prints.
 
-The runner (`validators.Run`) sets up its output filter, then writes two
-stamps before the check starts. One is an
-`##AICR-EXTRA##` line with `resultSchema: "1"` (`ctrf.ResultSchemaVersion`),
-the result-contract version this image speaks. The other is an
-`##AICR-PLATFORM##` line with the binary's `GOOS/GOARCH`, which is the image's
-platform because the validator Dockerfiles copy the binary built for it. A
-result carries both on a pass, a skip, a failure or a context-load failure. If
-the filter cannot be set up, the check exits 1 before either stamp. If a write
-fails, the check exits 1 without the remaining stamps. A passed check
-whose logs the orchestrator could not read carries no markers and is reported
-`other`. A `passed` result read from its logs therefore carries the
-`resultSchema` stamp unless the image predates it.
-`pkg/evidence/cncf` reads the stamp to word the reason when a check known to
-be observation-only passed without its marker: no stamp, the image predates
-the marker; the known version, the marker line was dropped; an unknown
-version, this reader cannot interpret its markers. In every one of these
-cases the pass is read as an observation, never a demonstration (see
-[Structured evidence that survives redaction](#structured-evidence-that-survives-redaction)).
+The runner (`validators.Run`) sets up its output filter, then writes two stamps
+before the check starts. One is an `##AICR-EXTRA##` line with
+`resultSchema: "2"` (`ctrf.ResultSchemaVersion`), the result-contract version
+this image speaks. The other is an `##AICR-PLATFORM##` line with the binary's
+`GOOS/GOARCH`, which is the image's platform because the validator Dockerfiles
+copy the binary built for it. A result carries both on a pass, a skip, a failure
+or a context-load failure. If the filter cannot be set up, the check exits 1
+before either stamp. If a write fails, the check exits 1 without the remaining
+stamps. A passed check whose logs the orchestrator could not read carries no
+markers and is reported `other`. A `passed` result read from its logs therefore
+carries the `resultSchema` stamp unless the image predates it or the kubelet
+rotated the log past it. `pkg/evidence/cncf` reads the stamp to word the reason
+when a check known to be observation-only passed without its marker. No stamp
+means the image predates the marker or the kubelet rotated the log past the
+stamp. A known version means the marker line was dropped, and an unknown version
+means this reader cannot interpret its markers. In every one of these cases the
+pass is read as an observation, never a demonstration (see [Structured evidence
+that survives redaction](#structured-evidence-that-survives-redaction)).
+
+Version 2 images neutralize relayed output, so the orchestrator records
+`##AICR-IMAGE##` and `##AICR-PLATFORM##` lines only when the first
+`##AICR-EXTRA##` line that parses, which the runner writes before the check
+runs, is stamped 2 or later (`ctrf.TrustsReportedImages`). It reads
+`resultSchema` from that line only, so output a version 1 image relays after
+its stamp cannot raise it, and the orchestrator keeps only the validator image
+and digest it read from the pod. The gate depends on reading the stamp. When
+the logs it reads lack one, as for an image that predates the stamp or a log
+the kubelet rotated past its first lines, a relayed first `##AICR-EXTRA##`
+line can claim version 2.
 
 All are parsed with `strings.CutPrefix` and the parsers are pure, unit-tested
 functions. They are separate channels on purpose: `RESULT:` surfaces live
@@ -834,7 +846,9 @@ code and termination log. Provenance travels the same way as
 `stdout`.
 
 - `Extra` lines merge key-wise, a later value winning per key, so a check can
-  publish its scope before a run and its measurement after.
+  publish its scope before a run and its measurement after. `resultSchema` is
+  the exception. It comes from the first `Extra` line that parses, the
+  runner's own stamp.
 - Provenance is last valid wins.
 - A malformed line is logged and skipped. It never discards an earlier
   payload or changes the verdict.
@@ -862,7 +876,7 @@ fails its key's shape (an IP under `nodesTotal`, `305.44` under
 | signed decimal (`+1.8`, `-12.3`) | `passMargin` (percent above or below `thresholdGbps`) |
 | `true` or `false` | `nodeLocal`, `versionSatisfied`, `observationOnly` |
 | `v` plus one to three numeric parts, optional `-alpha`, `-beta`, or `-rc` suffix (`v25.3.0-rc.1`) | `detectedVersion` |
-| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`), `resultSchema` (the versions a reader knows, today `1`) |
+| closed set | `skipReason` (below), `runtimeSource` (`delivered-artifact`, `recipe-supplied-runtime`, `cluster-capability`), `transport` (`default`, `net`, `nvls`), `fabric` (`efa`), `configuredPolicy` (every GPU allocation policy), `resolvedMode` (`device-plugin-extended-resource`, `dra-resource-claim`), `resultSchema` (the versions a reader knows, today `1` and `2`) |
 
 Codes are closed sets rather than a shape regex, because a kebab-case regex
 would still pass an identifier like `customer-prod-cluster`. The `skipReason`

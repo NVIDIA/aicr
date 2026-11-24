@@ -83,7 +83,8 @@ const (
 	//     validator image spoke.
 	//   - v11 added the no-metrics-backend skipReason code.
 	//   - v12 added the superseded-by-cre skipReason code.
-	//   - v13 added the per-test images carrier (boundImages).
+	//   - v13 added the per-test images carrier (boundImages) and resultSchema
+	//     version 2.
 	PolicyVersion = "v13"
 )
 
@@ -341,7 +342,7 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	// the CNCF aggregation reads an unmarked pass of an observation-only
 	// check as observed either way and uses it only to word the reason. Only
 	// the versions a reader knows are publishable.
-	ctrf.ExtraKeyResultSchema: closedSet(ctrf.ResultSchemaVersion),
+	ctrf.ExtraKeyResultSchema: closedSet(ctrf.ResultSchemaVersions()...),
 }
 
 // ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.

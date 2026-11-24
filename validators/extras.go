@@ -41,8 +41,9 @@ func sentinelOut() io.Writer {
 // EmitExtra writes extra to stdout as one ctrf.ExtraLinePrefix line, which the
 // orchestrator parses into ctrf.TestResult.Extra. Keys are the ExtraKey*
 // constants, and values must take the shapes documented on
-// ctrf.TestResult.Extra. Calls merge, a later value winning per key. An empty
-// extra writes nothing.
+// ctrf.TestResult.Extra. Calls merge, a later value winning per key, except
+// ExtraKeyResultSchema, which the orchestrator reads from the runner's own
+// stamp only. An empty extra writes nothing.
 func EmitExtra(extra map[string]string) error {
 	return emitSentinel(ctrf.ExtraLinePrefix, extra, len(extra) == 0, "extra")
 }
@@ -57,8 +58,10 @@ func EmitRuntimeProvenance(p *ctrf.RuntimeProvenance) error {
 }
 
 // EmitImage writes img to stdout as one ctrf.ImageLinePrefix line, which the
-// orchestrator appends to ctrf.TestResult.Images. Call it once for each pod the
-// validator launched whose image produced the check's result.
+// orchestrator appends to ctrf.TestResult.Images when img passes
+// ctrf.PodImage.Valid, fits under defaults.ValidatorMaxImageRecords, and the
+// result's resultSchema stamp passes ctrf.TrustsReportedImages. Call it once
+// for each pod the validator launched whose image produced the check's result.
 func EmitImage(img ctrf.PodImage) error {
 	return emitSentinel(ctrf.ImageLinePrefix, img, false, "image")
 }

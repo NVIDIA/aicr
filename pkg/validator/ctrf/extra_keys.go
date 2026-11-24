@@ -14,6 +14,8 @@
 
 package ctrf
 
+import "strconv"
+
 // TestResult.Extra keys that both ends of the result contract read: the
 // validator images publish them (validators.EmitExtra) and the evidence
 // readers consume them (pkg/evidence/cncf, pkg/evidence/redact). They live
@@ -28,11 +30,13 @@ const (
 	ExtraKeyObservationOnly = "observationOnly"
 
 	// ExtraKeyResultSchema is the result-contract version the validator image
-	// spoke, stamped on every result before the check runs; the value is
-	// ResultSchemaVersion. A reader that knows a check to be observation-only
-	// reads its unmarked pass as an observation whether or not this key is
-	// present; the key only tells the reader whether the image predates
-	// ExtraKeyObservationOnly or dropped the marker.
+	// spoke, stamped on every result before the check runs. The value is one
+	// of ResultSchemaVersions. A reader that knows a check to be
+	// observation-only reads its unmarked pass as an observation whether or
+	// not this key is present, and uses the key to tell whether the image
+	// predates ExtraKeyObservationOnly or dropped the marker. The orchestrator
+	// also records a result's image and platform lines only when
+	// TrustsReportedImages accepts the key.
 	ExtraKeyResultSchema = "resultSchema"
 
 	// ExtraValueTrue is the published form of a true boolean extra.
@@ -43,5 +47,25 @@ const (
 	// image generation from another:
 	//   - 1: every result carries this key; an observation-only pass carries
 	//     ExtraKeyObservationOnly.
-	ResultSchemaVersion = "1"
+	//   - 2: the image breaks every ReservedLinePrefix, at any offset, in
+	//     output written to os.Stdout and os.Stderr, so relayed output written
+	//     there cannot supply its ImageLinePrefix and PlatformLinePrefix lines.
+	ResultSchemaVersion = "2"
 )
+
+// ResultSchemaVersions returns every ExtraKeyResultSchema value this reader
+// knows, oldest first.
+func ResultSchemaVersions() []string {
+	return []string{"1", ResultSchemaVersion}
+}
+
+// TrustsReportedImages reports whether a result stamped with schema, its
+// ExtraKeyResultSchema value, came from an image that neutralizes relayed
+// output, so its ImageLinePrefix and PlatformLinePrefix lines can be
+// recorded. It reports true for version 2, the first image generation that
+// neutralizes relayed output, and for any later version. A value that is not
+// a canonical decimal is not trusted.
+func TrustsReportedImages(schema string) bool {
+	v, err := strconv.Atoi(schema)
+	return err == nil && v >= 2 && strconv.Itoa(v) == schema
+}

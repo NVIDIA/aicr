@@ -128,11 +128,13 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 // output the orchestrator actually read. Every structured marker a check
 // emits (skipReason, coverage counts, observationOnly, resultSchema, images)
 // rides stdout, so an exit-0 result whose logs could not be read is a pass
-// the orchestrator cannot vouch for; it is reported as `other` with the read
+// the orchestrator cannot vouch for. It is reported as `other` with the read
 // error, in the shape missingPodOutcome uses for a vanished pod, never as a
 // clean pass. A result that already failed keeps its exit code and
-// termination message, since the verdict does not depend on the output; the
-// read error is logged.
+// termination message, since the verdict does not depend on the output. The
+// read error is logged. Image and platform lines are recorded only when the
+// resultSchema stamp on the first Extra line that parses passes
+// ctrf.TrustsReportedImages.
 func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, result *ctrf.ValidatorResult) {
 	logs, attempts, logErr := d.readValidatorLogs(ctx, podName)
 	switch {
@@ -147,6 +149,13 @@ func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, r
 		var s sentinels
 		s, result.Stdout = processValidatorLogs(logs)
 		result.Extra, result.RuntimeProvenance = s.extra, s.prov
+		if !ctrf.TrustsReportedImages(s.schema) {
+			if len(s.images) > 0 || s.platform != "" {
+				slog.Warn("ignoring image and platform lines from a validator image that does not neutralize relayed output",
+					"pod", podName, "resultSchema", s.schema)
+			}
+			s.images, s.platform = nil, ""
+		}
 		if len(result.Images) == 1 {
 			result.Images[0].Platform = s.platform
 		}
@@ -385,9 +394,16 @@ var sentinelPrefixes = []string{
 // sentinels holds the payloads parseSentinels reads from a validator's
 // sentinel lines.
 type sentinels struct {
-	// extra merges the Extra payloads, a later value winning per key. It is
+	// extra merges the Extra payloads, a later value winning per key. Its
+	// ctrf.ExtraKeyResultSchema value is schema, never a later line's. It is
 	// nil unless some line parsed to a non-empty object.
 	extra map[string]string
+	// schema is the ctrf.ExtraKeyResultSchema value of the first Extra line
+	// that parsed. A validators.Run that stamps writes that line before the
+	// check runs, so output the check relays cannot supply it unless the
+	// logs lack the stamp, as for an image that predates it or a log rotated
+	// past it. Empty when that line has none.
+	schema string
 	// prov is the last provenance record carrying both digests, or nil.
 	prov *ctrf.RuntimeProvenance
 	// images holds, in order, every record that passes ctrf.PodImage.Valid.
@@ -413,12 +429,14 @@ func processValidatorLogs(logs string) (s sentinels, stdout []string) {
 // parseSentinels returns logs as cleaned, with every ctrf.ExtraLinePrefix,
 // ctrf.ProvenanceLinePrefix, ctrf.ImageLinePrefix and ctrf.PlatformLinePrefix
 // line removed, and the payloads of those lines. A malformed line is logged
-// and skipped without discarding earlier payloads.
+// and skipped without discarding earlier payloads. ctrf.ExtraKeyResultSchema
+// is read only from the first Extra line that parses.
 func parseSentinels(logs string) (cleaned string, s sentinels) {
 	if !slices.ContainsFunc(sentinelPrefixes, func(p string) bool { return strings.Contains(logs, p) }) {
 		return logs, sentinels{}
 	}
 	var platforms ctrf.PlatformLines
+	sawExtra := false
 	lines := strings.Split(logs, "\n")
 	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -427,7 +445,13 @@ func parseSentinels(logs string) (cleaned string, s sentinels) {
 			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 				// Logged, not returned, because the exit code is the verdict.
 				slog.Warn("failed to parse validator extra sentinel; dropping", "error", err)
-			} else if len(parsed) > 0 {
+				continue
+			}
+			if !sawExtra {
+				sawExtra, s.schema = true, parsed[ctrf.ExtraKeyResultSchema]
+			}
+			delete(parsed, ctrf.ExtraKeyResultSchema)
+			if len(parsed) > 0 {
 				if s.extra == nil {
 					s.extra = make(map[string]string, len(parsed))
 				}
@@ -464,6 +488,12 @@ func parseSentinels(logs string) (cleaned string, s sentinels) {
 		kept = append(kept, line)
 	}
 	s.platform = platforms.Platform()
+	if s.schema != "" {
+		if s.extra == nil {
+			s.extra = make(map[string]string, 1)
+		}
+		s.extra[ctrf.ExtraKeyResultSchema] = s.schema
+	}
 	return strings.Join(kept, "\n"), s
 }
 

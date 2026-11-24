@@ -45,7 +45,8 @@ const (
 
 	// ExtraLinePrefix marks a stdout line carrying one JSON object for
 	// TestResult.Extra. pkg/validator/job.ExtractResult merges every such line,
-	// a later value winning per key, and strips them from Stdout.
+	// a later value winning per key except ExtraKeyResultSchema, which comes
+	// from the first such line that parses, and strips them from Stdout.
 	//
 	// The prefix lives here (not in validators/ or pkg/validator/job) because it
 	// is the shared contract between the in-pod producer and the orchestrator
@@ -58,13 +59,16 @@ const (
 	ProvenanceLinePrefix = "##AICR-PROVENANCE## "
 
 	// ImageLinePrefix marks a stdout line carrying one JSON PodImage record.
-	// Every such line is stripped from Stdout, and each valid one is appended
-	// to TestResult.Images, up to defaults.ValidatorMaxImageRecords per result.
+	// Every such line is stripped from Stdout. When the result's
+	// ExtraKeyResultSchema stamp passes TrustsReportedImages, each valid one
+	// is appended to TestResult.Images, up to defaults.ValidatorMaxImageRecords
+	// per result.
 	ImageLinePrefix = "##AICR-IMAGE## "
 
 	// PlatformLinePrefix marks a stdout line carrying, as one JSON string,
 	// the os/arch the image's process runs as. Every such line is stripped
-	// from Stdout and folded with PlatformLines.
+	// from Stdout. When the result's ExtraKeyResultSchema stamp passes
+	// TrustsReportedImages, the lines are folded with PlatformLines.
 	PlatformLinePrefix = "##AICR-PLATFORM## "
 )
 

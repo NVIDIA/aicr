@@ -175,7 +175,7 @@ func TestExtractResultLogReadRetried(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	logs := scriptedLogs(
 		logResponse{err: errLogsUnavailable},
-		logResponse{logs: "work\n" + ctrf.ExtraLinePrefix + `{"resultSchema":"1","observationOnly":"true"}` + "\n"},
+		logResponse{logs: "work\n" + ctrf.ExtraLinePrefix + `{"resultSchema":"` + ctrf.ResultSchemaVersion + `","observationOnly":"true"}` + "\n"},
 	)
 	d := deployTestJobWithLogs(t, ns, testEntry(), logs)
 	createPassedPod(t, ns, d.JobName(), "all checks passed")
@@ -1530,6 +1530,10 @@ var (
 	testDigestB = "sha256:" + strings.Repeat("b", 64)
 )
 
+// schemaStamp is the resultSchema stamp validators.Run writes, without which
+// captureValidatorOutput drops image and platform lines.
+var schemaStamp = ctrf.ExtraLinePrefix + `{"resultSchema":"` + ctrf.ResultSchemaVersion + `"}`
+
 // neutralized returns line as validators.Run's output filter relays it.
 func neutralized(line string) string {
 	return strings.ReplaceAll(line, ctrf.ReservedLinePrefix, "# #AICR-")
@@ -1655,6 +1659,7 @@ func TestExtractResultRecordsImages(t *testing.T) {
 			for _, platform := range tt.platforms {
 				logs = ctrf.PlatformLinePrefix + strconv.Quote(platform) + "\n" + logs
 			}
+			logs = schemaStamp + "\n" + logs
 			ns := createUniqueNamespace(t)
 			d := deployTestJobWithLogs(t, ns, testEntry(), scriptedLogs(logResponse{logs: logs}))
 			now := metav1.Now()
@@ -1762,7 +1767,7 @@ func TestResultRecordsReadablePodImage(t *testing.T) {
 				ImageID: image[:strings.LastIndex(image, ":")] + "@" + testDigestA,
 				State:   corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
 			},
-			logs: platformLine + "\nwork",
+			logs: schemaStamp + "\n" + platformLine + "\nwork",
 			extract: func(d *Deployer) *ctrf.ValidatorResult {
 				return d.HandleTimeout(t.Context(), context.DeadlineExceeded)
 			},
@@ -1804,6 +1809,7 @@ func TestResultRecordsReadablePodImage(t *testing.T) {
 // defaults.ValidatorMaxImageRecords image records, the validator's own first.
 func TestCaptureValidatorOutputCapsImages(t *testing.T) {
 	var logs strings.Builder
+	logs.WriteString(schemaStamp + "\n")
 	for i := range defaults.ValidatorMaxImageRecords + 4 {
 		logs.WriteString(imageSentinel(t, ctrf.PodImage{Image: "example.com/bench:v" + strconv.Itoa(i)}) + "\n")
 	}
@@ -1818,5 +1824,42 @@ func TestCaptureValidatorOutputCapsImages(t *testing.T) {
 	}
 	if result.Images[0].Image != testEntry().Image || result.Images[1].Image != "example.com/bench:v0" {
 		t.Errorf("Images = %+v, want the validator image, then the first reported", result.Images)
+	}
+}
+
+// TestCaptureValidatorOutputGatesImagesOnSchema verifies image and platform
+// lines are recorded only from an image whose stamp says it neutralizes
+// relayed output.
+func TestCaptureValidatorOutputGatesImagesOnSchema(t *testing.T) {
+	reported := ctrf.PodImage{Image: "example.com/bench:v1", Digest: testDigestB}
+	lines := ctrf.PlatformLinePrefix + strconv.Quote("linux/arm64") + "\n" + imageSentinel(t, reported) + "\n"
+	stamp := func(v string) string { return ctrf.ExtraLinePrefix + `{"resultSchema":"` + v + `"}` + "\n" }
+	tests := []struct {
+		name       string
+		logs       string
+		want       []ctrf.PodImage
+		wantSchema string
+	}{
+		{"no stamp", lines, []ctrf.PodImage{{Image: testEntry().Image}}, ""},
+		{"version 1", stamp("1") + lines, []ctrf.PodImage{{Image: testEntry().Image}}, "1"},
+		{"current version", stamp(ctrf.ResultSchemaVersion) + lines, []ctrf.PodImage{{Image: testEntry().Image, Platform: "linux/arm64"}, reported}, ctrf.ResultSchemaVersion},
+		{"relayed stamp after version 1", stamp("1") + stamp(ctrf.ResultSchemaVersion) + lines, []ctrf.PodImage{{Image: testEntry().Image}}, "1"},
+		{"relayed stamp after an unstamped extra", ctrf.ExtraLinePrefix + `{"nodesTotal":"2"}` + "\n" + stamp(ctrf.ResultSchemaVersion) + lines, []ctrf.PodImage{{Image: testEntry().Image}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := NewDeployer(Config{Namespace: "ns", Entry: testEntry(),
+				LogReader: scriptedLogs(logResponse{logs: tt.logs}).read})
+			result := d.newResult()
+
+			d.captureValidatorOutput(t.Context(), "pod", result)
+
+			if !slices.Equal(result.Images, tt.want) {
+				t.Errorf("Images = %+v, want %+v", result.Images, tt.want)
+			}
+			if got := result.Extra[ctrf.ExtraKeyResultSchema]; got != tt.wantSchema {
+				t.Errorf("published resultSchema = %q, want %q", got, tt.wantSchema)
+			}
+		})
 	}
 }

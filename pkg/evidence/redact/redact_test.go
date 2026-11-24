@@ -460,6 +460,11 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			want: map[string]string{"resultSchema": "1"},
 		},
 		{
+			name: "current result schema stamp survives",
+			in:   map[string]string{"resultSchema": "2"},
+			want: map[string]string{"resultSchema": "2"},
+		},
+		{
 			name: "result schema stamp of an unknown version is dropped",
 			in:   map[string]string{"resultSchema": "2-dev on aks-prod-cluster"},
 			want: nil,
