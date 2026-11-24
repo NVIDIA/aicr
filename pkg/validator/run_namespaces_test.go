@@ -317,6 +317,71 @@ func TestCleanupRunNamespacesDeleteAndSelector(t *testing.T) {
 	}
 }
 
+// TestCleanupRunNamespacesRetriesTransientDelete pins that a Delete refused
+// for a transient reason is retried within the budget, pinned to the listed
+// UID on every attempt, and that one still refused when the budget runs out
+// is a failure naming the namespace, never one reported as terminating.
+func TestCleanupRunNamespacesRetriesTransientDelete(t *testing.T) {
+	old := runNamespaceRetryBackoff
+	runNamespaceRetryBackoff = time.Millisecond
+	t.Cleanup(func() { runNamespaceRetryBackoff = old })
+
+	tests := []struct {
+		name string
+		// failures is how many Deletes answer 503 before one goes through;
+		// negative answers 503 until the deadline.
+		failures int
+		wantErr  bool
+	}{
+		{name: "503 then accepted", failures: 1},
+		{name: "503 until the deadline", failures: -1, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := inferenceNS()
+			cs := fake.NewSimpleClientset(ns)
+			var attempts atomic.Int32
+			cs.PrependReactor("delete", "namespaces", func(a clienttesting.Action) (bool, runtime.Object, error) {
+				n := attempts.Add(1)
+				if pre := a.(clienttesting.DeleteAction).GetDeleteOptions().Preconditions; pre == nil || pre.UID == nil || *pre.UID != ns.UID {
+					t.Errorf("delete attempt %d preconditions = %+v, want UID %s", n, pre, ns.UID)
+				}
+				if tt.failures < 0 || int(n) <= tt.failures {
+					return true, nil, apierrors.NewServiceUnavailable("apiserver restarting")
+				}
+				return false, nil, nil
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+			defer cancel()
+
+			res, err := New(WithRunID(testRunID)).cleanupRunNamespaces(ctx, cs)
+
+			if len(res.Terminating) != 0 {
+				t.Errorf("terminating = %v, want none: the delete was never accepted", res.Terminating)
+			}
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got := attempts.Load(); got != int32(tt.failures+1) {
+					t.Errorf("delete attempts = %d, want %d", got, tt.failures+1)
+				}
+				if namespaceExists(t, cs, ns.Name) {
+					t.Errorf("namespace %s survived", ns.Name)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeTimeout)
+			if !strings.Contains(err.Error(), "deletion not accepted: "+ns.Name) {
+				t.Errorf("error %q, want the namespace named as not accepted", err)
+			}
+			if attempts.Load() < 2 || !namespaceExists(t, cs, ns.Name) {
+				t.Errorf("attempts=%d exists=%v, want retries and the namespace kept", attempts.Load(), namespaceExists(t, cs, ns.Name))
+			}
+		})
+	}
+}
+
 // TestCleanupRunNamespacesWaitsForTermination covers a namespace still
 // terminating after its delete was accepted: the cleanup waits on the watch
 // until it is gone, re-lists when the watch closes or expires without

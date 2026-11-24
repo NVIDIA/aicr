@@ -102,12 +102,12 @@ func runNamespaceSelector(runID string) string {
 // (v1.IsRunWorkloadNamespace); a labeled namespace with any other name is
 // left alone and returned in Skipped. Deletes are pinned to the listed UID,
 // so a namespace recreated under the same name is not touched or waited for.
-// Transient API failures are retried within the caller's context. A refused
-// List, Delete or Watch is returned as an error naming the namespaces still
-// present, and so is a context that ends before every delete was sent, naming
-// the namespaces whose deletion was never attempted. A wait cut short by the
-// deadline after every delete was accepted is not an error, and returns those
-// namespaces in Terminating.
+// Transient API failures, Delete included, are retried within the caller's
+// context. A refused List, Delete or Watch is returned as an error naming the
+// namespaces still present, and so is a context that ends before every delete
+// was accepted, naming the namespaces whose deletion was not accepted or never
+// attempted. A wait cut short by the deadline after every delete was accepted
+// is not an error, and returns those namespaces in Terminating.
 func (v *Validator) cleanupRunNamespaces(ctx context.Context, clientset kubernetes.Interface) (runNamespaceCleanup, error) {
 	var res runNamespaceCleanup
 	if v.RunID == "" {
@@ -138,10 +138,11 @@ func (v *Validator) cleanupRunNamespaces(ctx context.Context, clientset kubernet
 	var deleteErr error
 	// requested holds the namespaces whose deletion the apiserver accepted,
 	// or that were already terminating: only those can be reported as
-	// terminating when the wait runs out.
+	// terminating when the wait runs out. unaccepted is the namespace whose
+	// delete was still failing transiently when the budget ran out.
 	requested := make(map[string]bool, len(pending))
+	var unaccepted string
 	stopped := false
-	background := metav1.DeletePropagationBackground
 	for i := range list.Items {
 		ns := &list.Items[i]
 		if _, owned := pending[ns.Name]; !owned {
@@ -156,17 +157,16 @@ func (v *Validator) cleanupRunNamespaces(ctx context.Context, clientset kubernet
 			break
 		}
 		slog.Info("deleting workload namespace of abandoned check", "namespace", ns.Name, "runID", v.RunID)
-		uid := ns.UID
-		delErr := client.Delete(ctx, ns.Name, metav1.DeleteOptions{
-			Preconditions:     &metav1.Preconditions{UID: &uid},
-			PropagationPolicy: &background,
-		})
+		delErr := deleteRunNamespace(ctx, client, ns)
 		switch {
 		case delErr == nil:
 			requested[ns.Name] = true
 		case apierrors.IsNotFound(delErr), apierrors.IsConflict(delErr):
 			// Gone, or the name now holds a namespace this run did not list.
 			delete(pending, ns.Name)
+		case ctx.Err() != nil:
+			unaccepted = ns.Name
+			stopped = true
 		default:
 			delete(pending, ns.Name)
 			undeleted = append(undeleted, ns.Name)
@@ -174,21 +174,13 @@ func (v *Validator) cleanupRunNamespaces(ctx context.Context, clientset kubernet
 				deleteErr = delErr
 			}
 		}
+		if stopped {
+			break
+		}
 	}
 
 	if stopped {
-		var notAttempted []string
-		for name := range pending {
-			if !requested[name] {
-				notAttempted = append(notAttempted, name)
-			}
-		}
-		slices.Sort(notAttempted)
-		remaining := append(slices.Sorted(maps.Keys(pending)), undeleted...)
-		slices.Sort(remaining)
-		return res, errors.WrapCtxErrWithContext(ctx.Err(), errors.ErrCodeTimeout,
-			"deletion not attempted: "+strings.Join(notAttempted, ", "),
-			map[string]any{keyRunID: v.RunID, "namespaces": remaining})
+		return res, v.unsentDeletesError(ctx, pending, requested, unaccepted, undeleted)
 	}
 
 	waitErr := waitForNamespacesGone(ctx, client, selector, pending)
@@ -208,6 +200,61 @@ func (v *Validator) cleanupRunNamespaces(ctx context.Context, clientset kubernet
 		return res, errors.WrapWithContext(apiErrorCode(ctx, deleteErr), msg, deleteErr, errCtx)
 	}
 	return res, errors.WrapWithContext(reportedCode(waitErr), msg, waitErr, errCtx)
+}
+
+// unsentDeletesError is cleanupRunNamespaces' error when ctx ended before
+// every delete was accepted: it names unaccepted, whose delete was still
+// failing transiently, and every pending namespace whose delete was never
+// sent, as opposed to those in requested, whose deletion was accepted.
+func (v *Validator) unsentDeletesError(
+	ctx context.Context,
+	pending map[string]types.UID,
+	requested map[string]bool,
+	unaccepted string,
+	undeleted []string,
+) error {
+
+	var problems, notAttempted []string
+	if unaccepted != "" {
+		problems = append(problems, "deletion not accepted: "+unaccepted)
+	}
+	for name := range pending {
+		if !requested[name] && name != unaccepted {
+			notAttempted = append(notAttempted, name)
+		}
+	}
+	if len(notAttempted) > 0 {
+		slices.Sort(notAttempted)
+		problems = append(problems, "deletion not attempted: "+strings.Join(notAttempted, ", "))
+	}
+	remaining := append(slices.Sorted(maps.Keys(pending)), undeleted...)
+	slices.Sort(remaining)
+	return errors.WrapCtxErrWithContext(ctx.Err(), errors.ErrCodeTimeout,
+		strings.Join(problems, "; "),
+		map[string]any{keyRunID: v.RunID, "namespaces": remaining})
+}
+
+// deleteRunNamespace deletes ns in the background, pinned to its listed UID
+// on every attempt, retrying transient API failures until ctx ends. It
+// returns nil once the apiserver accepts the delete and otherwise the last
+// error, NotFound and Conflict included.
+func deleteRunNamespace(ctx context.Context, client typedcorev1.NamespaceInterface, ns *corev1.Namespace) error {
+	uid := ns.UID
+	background := metav1.DeletePropagationBackground
+	opts := metav1.DeleteOptions{
+		Preconditions:     &metav1.Preconditions{UID: &uid},
+		PropagationPolicy: &background,
+	}
+	for {
+		err := client.Delete(ctx, ns.Name, opts)
+		if err == nil || !isTransientAPIError(err) || ctx.Err() != nil {
+			return err
+		}
+		slog.Debug("retrying workload namespace delete after a transient failure", "namespace", ns.Name, "error", err)
+		if waitErr := pauseBeforeRetry(ctx); waitErr != nil {
+			return waitErr
+		}
+	}
 }
 
 // reportedCode is err's outermost structured code, so wrapping it to add
