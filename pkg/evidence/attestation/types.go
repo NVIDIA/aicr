@@ -59,7 +59,8 @@ const (
 	PredicateTypeV3 = "https://" + header.Domain + "/recipe-evidence/v3"
 
 	// PredicateSchemaVersion is the recipe-evidence predicate schema version.
-	PredicateSchemaVersion = "1.0.0"
+	// 1.1.0 added PhaseSummary.Other; verifiers accept 1.0.0 predicates too.
+	PredicateSchemaVersion = "1.1.0"
 
 	// PointerSchemaVersion is the on-disk pointer file schema version.
 	PointerSchemaVersion = "1.0.0"
@@ -231,10 +232,17 @@ type ValidatorImage struct {
 // CTRFDigest is the sha256 of the corresponding ctrf/<phase>.json file
 // in the bundle, providing a hash-based binding from the signed
 // predicate to the unsigned but pre-committed phase report.
+//
+// Other counts checks that ended without a verdict (CTRF status "other":
+// crash, timeout, an abandoned wait), which block like Failed. It is omitted
+// when zero, so a predicate with none serializes as it did before schema
+// 1.1.0; a predicate from before 1.1.0 decodes with Other zero, which says
+// nothing about whether such checks occurred.
 type PhaseSummary struct {
 	Passed     int    `json:"passed" yaml:"passed"`
 	Failed     int    `json:"failed" yaml:"failed"`
 	Skipped    int    `json:"skipped" yaml:"skipped"`
+	Other      int    `json:"other,omitempty" yaml:"other,omitempty"`
 	CTRFDigest string `json:"ctrfDigest" yaml:"ctrfDigest"`
 }
 

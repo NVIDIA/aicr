@@ -78,6 +78,58 @@ func TestParseAICRStatement(t *testing.T) {
 	}
 }
 
+// A check AICR left without a verdict blocks a pass like a failed one. AICR
+// records the other count from predicate schema 1.1.0; earlier statements
+// carry none and parse as zero.
+func TestAICRSummaryPassedCountsOther(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		phases map[string]PhaseResult
+		want   bool
+	}{
+		{"all passed", map[string]PhaseResult{"deployment": {Passed: 3}, "performance": {Passed: 1, Skipped: 1}}, true},
+		{"one other", map[string]PhaseResult{"deployment": {Passed: 3}, "performance": {Passed: 1, Other: 1}}, false},
+		{"only other", map[string]PhaseResult{"performance": {Other: 1}}, false},
+		{"failed", map[string]PhaseResult{"deployment": {Passed: 2, Failed: 1}}, false},
+		{"no phases", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := (&AICRSummary{Phases: tt.phases}).Passed(); got != tt.want {
+				t.Errorf("Passed() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	const statement = `{"_type":"https://in-toto.io/Statement/v1","predicateType":"https://aicr.run/recipe-evidence/v3",` +
+		`"predicate":{"schemaVersion":"1.1.0","phases":{"performance":{"passed":2,"failed":0,"skipped":0,"other":1,"ctrfDigest":"sha256:x"}}}}`
+	s, err := ParseAICRStatement([]byte(statement))
+	if err != nil {
+		t.Fatalf("ParseAICRStatement() = %v", err)
+	}
+	if s.Phases["performance"].Other != 1 || s.Passed() {
+		t.Errorf("summary = %+v, want other=1 and not Passed", s)
+	}
+	old, err := ParseAICRStatement(readStatement(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, p := range old.Phases {
+		if p.Other != 0 {
+			t.Errorf("v1.0.0 phase %s parsed other=%d, want 0", name, p.Other)
+		}
+	}
+	binding, err := NewBinding("registry.test/aicr/evidence@"+evidenceDig, evidenceDig, old, Predicate{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(binding, []byte(`"other"`)) {
+		t.Errorf("binding of evidence with no other result carries an other count: %s", binding)
+	}
+}
+
 // A validator AICR names must be pinned, at the pinned tag, and at the
 // pinned digest when AICR records one.
 func TestCheckValidators(t *testing.T) {

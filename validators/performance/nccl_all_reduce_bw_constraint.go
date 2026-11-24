@@ -38,6 +38,7 @@ import (
 	k8spod "aicr.run/pkg/k8s/pod"
 	"aicr.run/pkg/recipe"
 	"aicr.run/pkg/validator/labels"
+	validatorv1 "aicr.run/pkg/validator/v1"
 	"aicr.run/validators"
 	"aicr.run/validators/helper"
 	"aicr.run/validators/internal/gkenet"
@@ -71,26 +72,22 @@ const (
 	// ncclTrainingRuntimeName is the name of the TrainingRuntime resource.
 	// Must stay in sync with runtime.yaml.
 	ncclTrainingRuntimeName = "nccl-all-reduce-runtime"
-
-	// ncclWorkloadNamespacePrefix is the base for the per-run, per-variant
-	// benchmark namespace (see ncclRunNamespace), the same isolation pattern
-	// inferenceWorkloadNamespacePrefix uses so fixed resource names never
-	// collide across concurrent or crashed runs, and cleanup is one
-	// namespace delete instead of per-resource tracking.
-	ncclWorkloadNamespacePrefix = "aicr-nccl-perf"
 )
 
-// ncclRunNamespace derives the per-run, per-variant benchmark namespace.
-// All three catalog checks share one AICR_RUN_ID per invocation, so folding
-// the variant into the name keeps each check's namespace, and its fixed
-// resource names, unique from its siblings once they can run concurrently
-// (see pkg/validator's TODO(perf)).
+// ncclRunNamespace derives the per-run, per-variant benchmark namespace,
+// with the naming the orchestrator reconstructs (validatorv1.NCCLPerfNamespace),
+// so fixed resource names never collide across concurrent or crashed runs and
+// cleanup is one namespace delete instead of per-resource tracking. All three
+// catalog checks share one AICR_RUN_ID per invocation, so folding the variant
+// into the name keeps each check's namespace, and its fixed resource names,
+// unique from its siblings once they can run concurrently (see pkg/validator's
+// TODO(perf)).
 func ncclRunNamespace(variant ncclVariant) string {
 	variantLabel := string(variant)
 	if variantLabel == "" {
 		variantLabel = variantDefaultLabel
 	}
-	return fmt.Sprintf("%s-%s-%s", ncclWorkloadNamespacePrefix, variantLabel, deriveRunID())
+	return validatorv1.NCCLPerfNamespace(variantLabel, deriveRunID())
 }
 
 // skipMsg* are the constraint-result strings returned when the NCCL check cannot
@@ -809,7 +806,7 @@ func ncclExecutionLockHeldBy(ctx context.Context, clientset kubernetes.Interface
 //
 // Scoped server-side to labels.ManagedBy and labels.Component, so this only
 // sees namespaces this package created, decoupled from
-// ncclWorkloadNamespacePrefix staying in sync with the naming logic.
+// validatorv1.NCCLPerfNamespacePrefix staying in sync with the naming logic.
 // currentNamespace, anything too young, and anything still live are left
 // alone (see the checks below). Fire-and-forget: it deletes and moves on
 // without waiting for termination, and failures are logged and ignored,
@@ -1057,7 +1054,7 @@ type gpuConfiguration struct {
 	TotalGPUCount   int
 	// Namespace is the per-run benchmark namespace. Unset by
 	// determineGPUConfig, and filled in by runNCCLTrainJob once it derives
-	// one (see ncclWorkloadNamespacePrefix).
+	// one (see ncclRunNamespace).
 	Namespace string
 	Nodes     []v1.Node
 }

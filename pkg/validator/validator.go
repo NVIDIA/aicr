@@ -47,6 +47,9 @@ import (
 // namespace, RBAC, and Job objects share a single conflict domain.
 const validatorFieldManager = "aicr"
 
+// keyRunID is the structured error context key carrying the run ID.
+const keyRunID = "runID"
+
 // checkReadiness evaluates the recipe's readiness constraints against the
 // snapshot: the top-level constraint set plus the readiness phase's own
 // constraints (validation.readiness.constraints — declared for recipes whose
@@ -232,7 +235,7 @@ func (v *Validator) prepareCluster(
 				err = errors.WrapWithContext(errors.ErrCodeInternal,
 					"preparation failed and RBAC rollback failed; cluster-admin binding may be orphaned",
 					stderrors.Join(err, rollbackErr),
-					map[string]any{"runID": v.RunID, "namespace": v.Namespace})
+					map[string]any{keyRunID: v.RunID, "namespace": v.Namespace})
 			}
 		}
 	}()
@@ -299,7 +302,7 @@ func (v *Validator) clusterCleanupError(runErr, cleanupErr error) error {
 		return errors.WrapWithContext(errors.ErrCodeInternal,
 			"validation canceled and privileged RBAC revocation failed; cluster-admin binding may be orphaned",
 			stderrors.Join(runErr, cleanupErr),
-			map[string]any{"runID": v.RunID, "namespace": v.Namespace})
+			map[string]any{keyRunID: v.RunID, "namespace": v.Namespace})
 	}
 	return runErr
 }
@@ -741,6 +744,7 @@ func (v *Validator) runPhase(
 			// (infra/unavailable vs a genuine deadline), not always the
 			// configured catalog timeout (issue #1966).
 			result = deployer.HandleTimeout(captureCtx, waitErr)
+			slog.Warn("validator wait failed", "name", entry.Name, "phase", phase, "runID", v.RunID, "error", waitErr)
 		} else {
 			// Normal completion — extract exit code, termination msg, stdout
 			result = deployer.ExtractResult(captureCtx)
@@ -798,6 +802,14 @@ func (v *Validator) runPhase(
 				slog.Warn("failed to wait for pod termination", "name", entry.Name, "error", termErr)
 			}
 			termCancel()
+		}
+
+		// An abandoned check's pod died with its Job before its own cleanup
+		// ran, so its workload namespace would keep holding GPUs. Runs after
+		// the verdict is recorded, and not on the interrupted paths, which
+		// have no budget for it.
+		if waitErr != nil && v.Cleanup && ctx.Err() == nil && !v1.RetainsWorkloadNamespace(entry) {
+			v.cleanupAbandonedCheck(ctx, clientset, builder, result)
 		}
 
 		if ctx.Err() != nil {

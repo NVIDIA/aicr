@@ -185,6 +185,16 @@ func ValidateForwardedEnv(entry ValidatorEntry) error {
 	return nil
 }
 
+// RetainsWorkloadNamespace reports whether entry's Job is told to leave its
+// workload namespace in place for inspection: buildEnv forwards
+// AICR_INFERENCE_PERF_NO_CLEANUP to exactly the entries it returns true for,
+// so an orchestrator that skips its own namespace cleanup on this answer
+// cannot disagree with what the check was told.
+func RetainsWorkloadNamespace(entry ValidatorEntry) bool {
+	on, _ := strconv.ParseBool(os.Getenv(inferencePerfNoCleanupEnv))
+	return on && entry.Name == InferencePerfCheckName
+}
+
 // hfTokenEnvVar is the environment variable name used to forward the
 // Hugging Face API token to the inference performance validator.
 const hfTokenEnvVar = "HF_TOKEN" //nolint:gosec // G101: env var name, not a hardcoded credential
@@ -314,7 +324,7 @@ func buildEnv(
 	// canonical "1" so the pod-side check is unambiguous. When set, a
 	// failed/anomalous run leaves the namespace, DGD, workers, frontend, and
 	// AIPerf Job in place for inspection.
-	if on, _ := strconv.ParseBool(os.Getenv(inferencePerfNoCleanupEnv)); on && entry.Name == InferencePerfCheckName {
+	if RetainsWorkloadNamespace(entry) {
 		env = append(env, corev1.EnvVar{Name: inferencePerfNoCleanupEnv, Value: "1"})
 	}
 

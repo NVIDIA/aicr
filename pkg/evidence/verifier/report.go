@@ -164,11 +164,16 @@ func writePhases(b *strings.Builder, p *attestation.Predicate) {
 			continue
 		}
 		marker := "✓"
-		if s.Failed > 0 {
+		if s.Failed > 0 || s.Other > 0 {
 			marker = "✗"
 		}
-		fmt.Fprintf(b, "- %s **%s** passed=%d failed=%d skipped=%d\n",
+		fmt.Fprintf(b, "- %s **%s** passed=%d failed=%d skipped=%d",
 			marker, ph, s.Passed, s.Failed, s.Skipped)
+		// Absent from predicates before schema 1.1.0, so not shown as zero.
+		if s.Other > 0 {
+			fmt.Fprintf(b, " other=%d", s.Other)
+		}
+		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 }
