@@ -114,7 +114,7 @@ bundle with `--set agentgateway:serviceType=ClusterIP`. The controller then
 programs the Gateway onto a ClusterIP Service, the shape the NVKE GB200
 cluster runs, and the conformance check records "No LoadBalancer Service".
 The knob is not what makes the health check pass: as noted above, agentgateway
-v1.5.0 reports `Programmed=True` without an address. It avoids a Service that
+v1.7.0 reports `Programmed=True` without an address. It avoids a Service that
 sits at `EXTERNAL-IP <pending>` forever and a LoadBalancer-only field the
 cluster cannot honor; with `ClusterIP` the rendered Service carries no
 `loadBalancerSourceRanges`. Never edit the generated bundle to get there;
