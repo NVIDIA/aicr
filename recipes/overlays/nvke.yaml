@@ -15,7 +15,8 @@
 # NVKE (NVIDIA Kubernetes Engine): bare-metal Grace-Blackwell trays provisioned
 # by Forge/NICo, Ubuntu with NVIDIA's -nvidia-64k kernel, OVN-Kubernetes as the
 # primary CNI on BlueField-3, and east-west InfiniBand on ConnectX-7. Nodes
-# carry providerID nico://<uuid>, which the fingerprint maps to nvke.
+# carry providerID nico://<uuid>, or vxnip://<machine-uid> on hosts the VXNIP
+# Cluster API provider brings into NVKE; the fingerprint maps both to nvke.
 kind: RecipeMetadata
 apiVersion: aicr.run/v1beta1
 metadata:
