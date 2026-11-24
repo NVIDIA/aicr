@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -474,8 +475,10 @@ func parseSentinels(logs string) (cleaned string, s sentinels) {
 			case err != nil:
 				slog.Warn("dropping malformed validator image sentinel", "error", err)
 			case !parsed.Valid():
+				// Quoted and capped, since a relayed line can carry
+				// control bytes and any length to the operator's terminal.
 				slog.Warn("dropping invalid validator image record",
-					"image", parsed.Image, "digest", parsed.Digest, "platform", parsed.Platform)
+					"record", strconv.Quote(payload[:min(len(payload), defaults.ValidatorMaxStdoutLineLength)]))
 			default:
 				s.images = append(s.images, parsed)
 			}

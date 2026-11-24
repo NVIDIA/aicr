@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"aicr.run/pkg/defaults"
@@ -74,7 +75,10 @@ func (p *PlatformLines) Add(payload string) {
 		return
 	}
 	if !ValidPlatform(got) {
-		slog.Warn("dropping platform sentinel without the os/arch form", "platform", got)
+		// Quoted and capped, since a relayed line can carry control bytes
+		// and any length to the operator's terminal.
+		slog.Warn("dropping platform sentinel without the os/arch form",
+			"platform", strconv.Quote(got[:min(len(got), defaults.ValidatorMaxStdoutLineLength)]))
 		return
 	}
 	switch p.platform {

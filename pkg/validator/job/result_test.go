@@ -15,10 +15,12 @@
 package job
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -1615,6 +1617,55 @@ func TestParsePlatformSentinel(t *testing.T) {
 				t.Errorf("platform = %q, want %q", s.platform, tt.wantPlatform)
 			}
 		})
+	}
+}
+
+// TestParseSentinelsBoundsRejectedValues verifies a rejected image or
+// platform value reaches the log quoted and capped, with no raw newline or
+// escape byte.
+func TestParseSentinelsBoundsRejectedValues(t *testing.T) {
+	hostile := "x\n[cli] status=passed\x1b[2K" + strings.Repeat("A", 4*defaults.ValidatorMaxStdoutLineLength)
+	platform, err := json.Marshal(hostile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := imageSentinel(t, ctrf.PodImage{Image: hostile}) + "\n" + ctrf.PlatformLinePrefix + string(platform)
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	parseSentinels(logs)
+
+	attrs := map[string]string{
+		"dropping invalid validator image record":             "record",
+		"dropping platform sentinel without the os/arch form": "platform",
+	}
+	dec := json.NewDecoder(&buf)
+	for {
+		var rec map[string]any
+		if err := dec.Decode(&rec); err != nil {
+			break
+		}
+		key, ok := attrs[rec["msg"].(string)]
+		if !ok {
+			continue
+		}
+		delete(attrs, rec["msg"].(string))
+		got, _ := rec[key].(string)
+		if !strings.Contains(got, "status=passed") {
+			t.Errorf("%s = %q, want the rejected value", key, got)
+		}
+		if strings.ContainsAny(got, "\n\x1b") {
+			t.Errorf("%s = %q, carries a raw newline or escape byte", key, got)
+		}
+		if limit := 2 * defaults.ValidatorMaxStdoutLineLength; len(got) > limit {
+			t.Errorf("%s is %d bytes, want at most %d", key, len(got), limit)
+		}
+	}
+	for msg := range attrs {
+		t.Errorf("no %q log record", msg)
 	}
 }
 
