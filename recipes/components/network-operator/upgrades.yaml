@@ -77,13 +77,27 @@ transitions:
               The chart's CRD-upgrade hook updates the CRDs before the operator
               rolls, so the post-install NicClusterPolicy's new fields, such as
               deploymentType, are not pruned.
+          - id: recreate-unattached-pods
+            description: >-
+              Once kube-multus-ds has finished rolling out on every node, find
+              the pods that request secondary networks (the
+              k8s.v1.cni.cncf.io/networks annotation) and were created during
+              the rollout, and delete each one whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network it requests, so its controller recreates it.
+            reason: >-
+              A pod created while its node's multus pod was being replaced can
+              start without its secondary networks and keeps running that way;
+              nothing re-attaches it.
           - id: verify
             description: >-
               kubectl get nicclusterpolicy nic-cluster-policy reports ready and
               the operand pods in nvidia-network-operator are Ready. Where the
               policy sets secondaryNetwork.multus.deploymentType: thick, the
-              kube-multus-ds pods also run multus-daemon, and a pod created on
-              a GPU node more than an hour after the rollout starts.
+              kube-multus-ds pods also run multus-daemon, and a new pod created
+              on a GPU node more than an hour after the rollout starts. That
+              check covers new pods only; recreate-unattached-pods covers the
+              ones admitted during the rollout.
             reason: >-
               Ready means the 26.10.0 operator reconciled the policy. On a
               thick-multus cluster, a pod that fails sandbox creation with
@@ -117,13 +131,27 @@ transitions:
               The chart's CRD-upgrade hook updates the CRDs before the operator
               rolls, so the post-install NicClusterPolicy's new fields, such as
               deploymentType, are not pruned.
+          - id: recreate-unattached-pods
+            description: >-
+              Once kube-multus-ds has finished rolling out on every node, find
+              the pods that request secondary networks (the
+              k8s.v1.cni.cncf.io/networks annotation) and were created during
+              the rollout, and delete each one whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network it requests, so its controller recreates it.
+            reason: >-
+              A pod created while its node's multus pod was being replaced can
+              start without its secondary networks and keeps running that way;
+              nothing re-attaches it.
           - id: verify
             description: >-
               kubectl get nicclusterpolicy nic-cluster-policy reports ready and
               the operand pods in nvidia-network-operator are Ready. Where the
               policy sets secondaryNetwork.multus.deploymentType: thick, the
-              kube-multus-ds pods also run multus-daemon, and a pod created on
-              a GPU node more than an hour after the rollout starts.
+              kube-multus-ds pods also run multus-daemon, and a new pod created
+              on a GPU node more than an hour after the rollout starts. That
+              check covers new pods only; recreate-unattached-pods covers the
+              ones admitted during the rollout.
             reason: >-
               Ready means the 26.10.0 operator reconciled the policy. On a
               thick-multus cluster, a pod that fails sandbox creation with
@@ -158,13 +186,27 @@ transitions:
               The chart's CRD-upgrade hook updates the CRDs before the operator
               rolls, so the post-install NicClusterPolicy's new fields, such as
               deploymentType, are not pruned.
+          - id: recreate-unattached-pods
+            description: >-
+              Once kube-multus-ds has finished rolling out on every node, find
+              the pods that request secondary networks (the
+              k8s.v1.cni.cncf.io/networks annotation) and were created during
+              the rollout, and delete each one whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network it requests, so its controller recreates it.
+            reason: >-
+              A pod created while its node's multus pod was being replaced can
+              start without its secondary networks and keeps running that way;
+              nothing re-attaches it.
           - id: verify
             description: >-
               kubectl get nicclusterpolicy nic-cluster-policy reports ready and
               the operand pods in nvidia-network-operator are Ready. Where the
               policy sets secondaryNetwork.multus.deploymentType: thick, the
-              kube-multus-ds pods also run multus-daemon, and a pod created on
-              a GPU node more than an hour after the rollout starts.
+              kube-multus-ds pods also run multus-daemon, and a new pod created
+              on a GPU node more than an hour after the rollout starts. That
+              check covers new pods only; recreate-unattached-pods covers the
+              ones admitted during the rollout.
             reason: >-
               Ready means the 26.10.0 operator reconciled the policy. On a
               thick-multus cluster, a pod that fails sandbox creation with
@@ -196,13 +238,27 @@ transitions:
               The chart's CRD-upgrade hook updates the CRDs before the operator
               rolls, so the post-install NicClusterPolicy's new fields, such as
               deploymentType, are not pruned.
+          - id: recreate-unattached-pods
+            description: >-
+              Once kube-multus-ds has finished rolling out on every node, find
+              the pods that request secondary networks (the
+              k8s.v1.cni.cncf.io/networks annotation) and were created during
+              the rollout, and delete each one whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network it requests, so its controller recreates it.
+            reason: >-
+              A pod created while its node's multus pod was being replaced can
+              start without its secondary networks and keeps running that way;
+              nothing re-attaches it.
           - id: verify
             description: >-
               kubectl get nicclusterpolicy nic-cluster-policy reports ready and
               the operand pods in nvidia-network-operator are Ready. Where the
               policy sets secondaryNetwork.multus.deploymentType: thick, the
-              kube-multus-ds pods also run multus-daemon, and a pod created on
-              a GPU node more than an hour after the rollout starts.
+              kube-multus-ds pods also run multus-daemon, and a new pod created
+              on a GPU node more than an hour after the rollout starts. That
+              check covers new pods only; recreate-unattached-pods covers the
+              ones admitted during the rollout.
             reason: >-
               Ready means the 26.10.0 operator reconciled the policy. On a
               thick-multus cluster, a pod that fails sandbox creation with

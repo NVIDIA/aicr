@@ -1963,9 +1963,9 @@ gb200-nvke-ubuntu-training-kubeflow:
   019-sriov-ib-networks/templates/nvke-gb200.yaml: 1d78efb71cf8ecff1e40e37775d37270e9a3d9515fc23c5686ba590d611a454f
   019-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: 8e6e8f7e2b9ebfd07892afd9fa62021e806fd4d3108b12e29e294540389e4bbd
-  UPGRADING.md: a7e3a943cc40796966171783a7c60991c07e20f626abbc19fdbc731b5bbd0b68
+  UPGRADING.md: 9ebf75b491a127c1fa143e5ae87709d5da0ea4a43c96a29697bbdcd7f8f059a1
   bundle-info.yaml: 3a823650ee294af78b69b1865e63bb40f10f13cbb53e5fe6aea6ab12fcfc953c
-  checksums.txt: b3f4a52c94590185f09ab3eea4d4de2a1bcddbebe9dd66ee873598ae38ca5c9d
+  checksums.txt: 331705da6972fd2071a416c976b9f396acec2b673026cea9c6097924936fb3f1
   deploy.sh: d53f0dd9aeba38cd386e164d6f4e11d741c5d0571b046de9f754e1b1dd55eee4
   recipe.yaml: a8118f8dfeb27b381f03c9b734830daa87fd3e571de93f703ea9a2e376ad22d7
 gb200-oke-ubuntu-inference-dynamo:
@@ -7141,9 +7141,9 @@ vr200-nvke-ubuntu-training-kubeflow:
   017-sriov-ib-networks/templates/nvke-vr200.yaml: f1f98e74ff094c8a3ff6a5a501bfef10207ff92694ee9698f23a1b5f2088aba3
   017-sriov-ib-networks/values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   README.md: 42bb253980bbe7e649ba192211fb421ded83f2ffe82b0c4956b0262d7c305720
-  UPGRADING.md: 9384a184b6b64c33a5940811ff6fa34407a7c594819bb0bdd7b00d9a48ebd789
+  UPGRADING.md: 24b8689f52bd6e5db15ee1f33a8bb1a2868c3059ada320e48039231ba62d7d7e
   bundle-info.yaml: 55ec5490c4428f0d41b1de303fa27dfaacd242538efbc6e93d33e5fc3e933c3b
-  checksums.txt: ff33a618d49afa73b32c3802f8d76e53033044153c1b0388648e591e78ebeff4
+  checksums.txt: 1e498585a7f3c0ad0d93bedadcfcbea23398126b60e3fdf9795fba41931a4baf
   deploy.sh: d55b51ae7dbf0f34bd6f5376d9c948715c726e8ff2b9517c6e9e077143300c55
   recipe.yaml: b94b619f3f0e630c1dfe1eba4f3ef5ee2d9451872f5c64e28fedc3bec3720a48
 vr200-rke2-ubuntu-inference-dynamo:
