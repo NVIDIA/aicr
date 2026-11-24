@@ -351,6 +351,50 @@ func TestAIPerfEntrypointFramingFeedsParser(t *testing.T) {
 	}
 }
 
+// reportPlatformProgram imports the wrapper, reports platform.machine() as
+// its first argument on linux, and prints the wrapper's platform line.
+const reportPlatformProgram = `import platform, sys
+import aiperf_entrypoint
+platform.machine = lambda: sys.argv[1]
+sys.platform = "linux"
+aiperf_entrypoint._report_platform()
+`
+
+// TestAIPerfEntrypointReportsGoPlatform verifies the wrapper reports each
+// machine name as its Go GOARCH, whatever architecture the test runs on, and
+// reports nothing for a machine with no Go name.
+func TestAIPerfEntrypointReportsGoPlatform(t *testing.T) {
+	python := requirePython3(t)
+	tests := []struct {
+		machine string
+		want    string
+	}{
+		{"x86_64", "linux/amd64"},
+		{"AMD64", "linux/amd64"},
+		{"aarch64", "linux/arm64"},
+		{"arm64", "linux/arm64"},
+		{"riscv64", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.machine, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), wrapperRunTimeout)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, python, "-B", "-c", reportPlatformProgram, tt.machine)
+			cmd.Env = []string{}
+			out, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("report platform for %q: %v", tt.machine, err)
+			}
+			if got := ctrf.ReportedPlatform(string(out)); got != tt.want {
+				t.Errorf("reported platform = %q, want %q (stdout %q)", got, tt.want, out)
+			}
+			if tt.want == "" && len(out) != 0 {
+				t.Errorf("stdout = %q, want nothing for a machine with no Go name", out)
+			}
+		})
+	}
+}
+
 // TestAIPerfEntrypointPathsMatchDockerfile binds the Go path constants to the
 // image layout. buildAIPerfJob builds container.Command from these same
 // constants, so asserting Command against them is constant-vs-constant and

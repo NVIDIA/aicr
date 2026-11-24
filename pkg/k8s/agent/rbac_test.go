@@ -15,7 +15,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	stderrors "errors"
 	"log/slog"
@@ -27,6 +26,7 @@ import (
 	aicrerrors "aicr.run/pkg/errors"
 
 	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/logging/loggingtest"
 	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -40,17 +40,6 @@ import (
 // testNamespace is the namespace every ServiceAccount-resolution test
 // deploys into.
 const testNamespace = "test-ns"
-
-// captureLogs redirects the default slog logger into a buffer at debug level
-// for the duration of the test and returns the buffer.
-func captureLogs(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	original := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(original) })
-	return &buf
-}
 
 // TestResolveServiceAccount covers every branch of the exact-if-exists
 // resolution of Config.ServiceAccountName: whether the run adopts an
@@ -124,7 +113,7 @@ func TestResolveServiceAccount(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			buf := captureLogs(t)
+			buf := loggingtest.CaptureText(t, slog.LevelDebug)
 
 			clientset := fake.NewClientset()
 			if tt.seeded != "" {
@@ -192,7 +181,7 @@ func TestResolveServiceAccount(t *testing.T) {
 // no such branch in Cleanup, and the point is that none is needed.
 func TestDeploy_ExistingServiceAccountCreatesAndDeletesNoRBAC(t *testing.T) {
 	ctx := context.Background()
-	captureLogs(t)
+	loggingtest.CaptureText(t, slog.LevelDebug)
 
 	const saName = "irsa-snapshotter"
 	const roleARN = "arn:aws:iam::123456789012:role/aicr-snapshot"
@@ -266,7 +255,7 @@ func TestDeploy_ExistingServiceAccountCreatesAndDeletesNoRBAC(t *testing.T) {
 // exactly as it did before.
 func TestDeploy_AbsentServiceAccountKeepsPrefixBehavior(t *testing.T) {
 	ctx := context.Background()
-	captureLogs(t)
+	loggingtest.CaptureText(t, slog.LevelDebug)
 
 	clientset := fake.NewClientset()
 	allowAllPermissionChecks(clientset)
@@ -383,7 +372,7 @@ func allowAllPermissionChecks(clientset *fake.Clientset) {
 // ServiceAccountName is set because the Get is issued only when it is.
 func TestDeploy_FailsWhenServiceAccountGetForbidden(t *testing.T) {
 	ctx := context.Background()
-	captureLogs(t)
+	loggingtest.CaptureText(t, slog.LevelDebug)
 
 	clientset := fake.NewClientset()
 	allowAllPermissionChecks(clientset)
@@ -479,7 +468,7 @@ func trackedNamespace(t *testing.T, clientset *fake.Clientset, name string) *cor
 // completes Deploy.
 func TestDeploy_ExistingServiceAccountLeavesNamespaceAlone(t *testing.T) {
 	ctx := context.Background()
-	captureLogs(t)
+	loggingtest.CaptureText(t, slog.LevelDebug)
 
 	const saName = "snapshot-agent"
 	provisioned := map[string]string{labelAppManagedBy: "Helm", "team": "platform"}
@@ -517,7 +506,7 @@ func TestDeploy_ExistingServiceAccountLeavesNamespaceAlone(t *testing.T) {
 // and is labeled, because a create-first flow would be refused Forbidden.
 func TestDeploy_PrefixModeUsesExistingNamespaceWithoutCreate(t *testing.T) {
 	ctx := context.Background()
-	captureLogs(t)
+	loggingtest.CaptureText(t, slog.LevelDebug)
 
 	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name:   testNamespace,
@@ -548,7 +537,7 @@ func TestDeploy_PrefixModeUsesExistingNamespaceWithoutCreate(t *testing.T) {
 // it: a permission error, not an internal one, and nothing created after it.
 func TestDeploy_PrefixModeMissingNamespaceNotCreatable(t *testing.T) {
 	ctx := context.Background()
-	captureLogs(t)
+	loggingtest.CaptureText(t, slog.LevelDebug)
 
 	clientset := fake.NewClientset()
 	allowAllPermissionChecks(clientset)

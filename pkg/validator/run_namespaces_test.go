@@ -15,6 +15,8 @@
 package validator
 
 import (
+	"log/slog"
+
 	"context"
 	"encoding/json"
 	"slices"
@@ -27,6 +29,7 @@ import (
 	"aicr.run/pkg/defaults"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/logging/loggingtest"
 	"aicr.run/pkg/validator/catalog"
 	"aicr.run/pkg/validator/ctrf"
 	"aicr.run/pkg/validator/labels"
@@ -651,7 +654,7 @@ func TestRunPhaseAbandonCleansRunNamespaces(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("AICR_INFERENCE_PERF_NO_CLEANUP", tt.retain)
-			logs := captureSlog(t)
+			logs := loggingtest.CaptureJSON(t, slog.LevelInfo)
 			ours := ncclNS(testRunID)
 			otherRun := ncclNS("another-run")
 			unlabeled := testNamespace("unlabeled", nil, false)
@@ -679,7 +682,7 @@ func TestRunPhaseAbandonCleansRunNamespaces(t *testing.T) {
 				if !strings.Contains(result.Message, "injected wait failure") {
 					t.Errorf("message=%q, want the wait cause", result.Message)
 				}
-				if rec := findLogRecord(t, logs.Bytes(), "validator wait failed"); rec["runID"] != testRunID || rec["name"] != tt.check {
+				if rec := loggingtest.FindRecord(t, logs.Bytes(), "validator wait failed"); rec["runID"] != testRunID || rec["name"] != tt.check {
 					t.Errorf("wait failure log = %v, want runID %s and name %s", rec, testRunID, tt.check)
 				}
 			}
@@ -690,7 +693,7 @@ func TestRunPhaseAbandonCleansRunNamespaces(t *testing.T) {
 				t.Errorf("message=%q, cleanup failure recorded = %v, want %v", result.Message, has, tt.wantCleanupMsg)
 			}
 			if tt.wantCleanupMsg {
-				rec := findLogRecord(t, logs.Bytes(), "failed to clean up workload namespaces of abandoned validator")
+				rec := loggingtest.FindRecord(t, logs.Bytes(), "failed to clean up workload namespaces of abandoned validator")
 				if rec["runID"] != testRunID {
 					t.Errorf("cleanup failure log = %v, want runID %s", rec, testRunID)
 				}

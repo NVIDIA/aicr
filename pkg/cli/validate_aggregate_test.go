@@ -29,6 +29,7 @@ import (
 	aicr "aicr.run/pkg/client/v1"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
+	"aicr.run/pkg/logging/loggingtest"
 	"aicr.run/pkg/serializer"
 	"aicr.run/pkg/validator"
 	"aicr.run/pkg/validator/ctrf"
@@ -314,7 +315,7 @@ func TestLogSubmissionFailure(t *testing.T) {
 	if got := stagedSubmissionDir(errors.New(errors.ErrCodeInternal, "write failed")); got != "" {
 		t.Errorf("stagedSubmissionDir() = %q for an error without a staged copy", got)
 	}
-	logs := captureJSONLogs(t)
+	logs := loggingtest.CaptureJSON(t, slog.LevelInfo)
 	logSubmissionFailure(kept, "/out/submission")
 	logSubmissionFailure(errors.New(errors.ErrCodeInternal, "write failed"), "/out/submission")
 	out := logs.String()
@@ -358,7 +359,7 @@ func TestRunValidationSubmissionVerdict(t *testing.T) {
 				// checklist certifies; the explicit version is the override.
 				cfg.cncfConformanceVersion = "v1.37"
 			}
-			logs := captureJSONLogs(t)
+			logs := loggingtest.CaptureJSON(t, slog.LevelInfo)
 			err := runValidation(t.Context(), client, rec, snap, cfg)
 			if !submission {
 				if err != nil {
@@ -460,11 +461,11 @@ func TestRunValidationRefusesRecipeCoverageGap(t *testing.T) {
 
 	t.Run("plain conformance run warns and proceeds", func(t *testing.T) {
 		dir := t.TempDir()
-		logs := captureJSONLogs(t)
+		logs := loggingtest.CaptureJSON(t, slog.LevelInfo)
 		if err := runValidation(t.Context(), client, rec, snap, base(dir)); err != nil {
 			t.Fatalf("runValidation: %v", err)
 		}
-		rec := findJSONLogRecord(t, logs.Bytes(), "the recipe's conformance checks would not establish every applicable MUST of the CNCF checklist; this run is not a submission, so it proceeds")
+		rec := loggingtest.FindRecord(t, logs.Bytes(), "the recipe's conformance checks would not establish every applicable MUST of the CNCF checklist; this run is not a submission, so it proceeds")
 		if msg, _ := rec["error"].(string); !strings.Contains(msg, "gang_scheduling: missing gang-scheduling") {
 			t.Errorf("warning error = %q, want the gap named", msg)
 		}

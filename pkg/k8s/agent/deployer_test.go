@@ -15,6 +15,8 @@
 package agent
 
 import (
+	"log/slog"
+
 	"bytes"
 	"context"
 	"errors"
@@ -31,6 +33,7 @@ import (
 	"aicr.run/pkg/header"
 	"aicr.run/pkg/k8s/labels"
 	"aicr.run/pkg/k8s/pod"
+	"aicr.run/pkg/logging/loggingtest"
 	authv1 "k8s.io/api/authorization/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -1067,7 +1070,7 @@ func TestCleanupResolvesUnconfirmedEntryBeforeDeleting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			logs := captureLogs(t)
+			logs := loggingtest.CaptureText(t, slog.LevelDebug)
 			client := fake.NewClientset()
 
 			runID := testRunID
@@ -1682,7 +1685,7 @@ func TestCleanupSweepKeepsForeignConfigMapAtStagingName(t *testing.T) {
 	ctx := context.Background()
 	const ns = "test-namespace"
 	name := StagingConfigMapName(testRunID)
-	logs := captureLogs(t)
+	logs := loggingtest.CaptureText(t, slog.LevelDebug)
 
 	client := fake.NewClientset(&corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{

@@ -15,7 +15,6 @@
 package job
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	stderrors "errors"
@@ -30,6 +29,7 @@ import (
 
 	"aicr.run/pkg/defaults"
 	"aicr.run/pkg/errors"
+	"aicr.run/pkg/logging/loggingtest"
 	"aicr.run/pkg/validator/catalog"
 	"aicr.run/pkg/validator/ctrf"
 	v1 "aicr.run/pkg/validator/v1"
@@ -1638,10 +1638,7 @@ func TestParseSentinelsBoundsRejectedValues(t *testing.T) {
 		ctrf.PlatformLinePrefix + string(platform) + "\n" +
 		imageSentinel(t, ctrf.PodImage{Image: "example.com/bench:v1"})
 
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	captured := loggingtest.CaptureJSON(t, slog.LevelInfo)
 
 	d := NewDeployer(Config{Namespace: "ns", Entry: testEntry(),
 		LogReader: scriptedLogs(logResponse{logs: logs}).read})
@@ -1652,20 +1649,13 @@ func TestParseSentinelsBoundsRejectedValues(t *testing.T) {
 		"dropping platform sentinel without the os/arch form":                                              "platform",
 		"ignoring image and platform lines from a validator image that does not neutralize relayed output": "resultSchema",
 	}
-	dec := json.NewDecoder(&buf)
-	for {
-		var rec map[string]any
-		if err := dec.Decode(&rec); err != nil {
-			break
-		}
-		key, ok := attrs[rec["msg"].(string)]
-		if !ok {
-			continue
-		}
-		delete(attrs, rec["msg"].(string))
-		got, _ := rec[key].(string)
+	for msg, key := range attrs {
+		got, _ := loggingtest.FindRecord(t, captured.Bytes(), msg)[key].(string)
 		if !strings.Contains(got, "status=passed") {
 			t.Errorf("%s = %q, want the rejected value", key, got)
+		}
+		if _, unquoteErr := strconv.Unquote(got); unquoteErr != nil {
+			t.Errorf("%s = %q, want a quoted string", key, got)
 		}
 		if strings.ContainsAny(got, "\n\x1b") {
 			t.Errorf("%s = %q, carries a raw newline or escape byte", key, got)
@@ -1673,9 +1663,6 @@ func TestParseSentinelsBoundsRejectedValues(t *testing.T) {
 		if limit := 2 * defaults.ValidatorMaxStdoutLineLength; len(got) > limit {
 			t.Errorf("%s is %d bytes, want at most %d", key, len(got), limit)
 		}
-	}
-	for msg := range attrs {
-		t.Errorf("no %q log record", msg)
 	}
 }
 

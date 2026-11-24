@@ -15,10 +15,6 @@
 package cli
 
 import (
-	"bytes"
-	"encoding/json"
-	stderrors "errors"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -28,6 +24,7 @@ import (
 
 	aicr "aicr.run/pkg/client/v1"
 	"aicr.run/pkg/header"
+	"aicr.run/pkg/logging/loggingtest"
 	"aicr.run/pkg/measurement"
 	"aicr.run/pkg/serializer"
 	"aicr.run/pkg/snapshotter"
@@ -84,7 +81,7 @@ func TestRunValidationLogsSkippedCountPerPhase(t *testing.T) {
 	for _, phase := range []validator.Phase{validator.PhaseDeployment, validator.PhaseConformance} {
 		out := filepath.Join(dir, string(phase)+".yaml")
 
-		logs := captureJSONLogs(t)
+		logs := loggingtest.CaptureJSON(t, slog.LevelInfo)
 		err := runValidation(t.Context(), client, rec, snap, validationConfig{
 			phases:              []validator.Phase{phase},
 			runID:               "20260908-000000-0123456789abcdef",
@@ -104,11 +101,11 @@ func TestRunValidationLogsSkippedCountPerPhase(t *testing.T) {
 				"tell a reported count from an absent one", phase)
 		}
 
-		rec := findJSONLogRecord(t, logs.Bytes(), "phase result")
+		rec := loggingtest.FindRecord(t, logs.Bytes(), "phase result")
 		if got, _ := rec["phase"].(string); got != string(phase) {
 			t.Fatalf("phase result record is for %q, want %q", got, phase)
 		}
-		assertJSONLogInt(t, rec, "phase result", "skipped", want)
+		loggingtest.WantIntAttr(t, rec, "skipped", want)
 		counts[phase] = want
 	}
 
@@ -181,59 +178,4 @@ func countSkippedTests(t *testing.T, path string) int64 {
 		}
 	}
 	return skipped
-}
-
-// captureJSONLogs redirects the default logger into a buffer of JSON records
-// for the duration of the test. JSON rather than text so an attribute is read
-// by name and compared as a number, instead of substring-matching "skipped=5"
-// out of a line that prints several values side by side.
-func captureJSONLogs(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	buf := &bytes.Buffer{}
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-	return buf
-}
-
-// findJSONLogRecord returns the first captured record whose msg is want,
-// failing the test when no record carries it.
-func findJSONLogRecord(t *testing.T, logs []byte, want string) map[string]any {
-	t.Helper()
-	dec := json.NewDecoder(bytes.NewReader(logs))
-	dec.UseNumber()
-	for {
-		var rec map[string]any
-		switch err := dec.Decode(&rec); {
-		case stderrors.Is(err, io.EOF):
-			t.Fatalf("no log record with msg %q; captured:\n%s", want, logs)
-		case err != nil:
-			t.Fatalf("decoding captured log: %v; captured:\n%s", err, logs)
-		}
-		if msg, ok := rec["msg"].(string); ok && msg == want {
-			return rec
-		}
-	}
-}
-
-// assertJSONLogInt asserts the record carries key with exactly want. A missing
-// key is reported distinctly from a wrong value, so deleting an attribute and
-// mis-sourcing one are not confusable failures.
-func assertJSONLogInt(t *testing.T, rec map[string]any, msg, key string, want int64) {
-	t.Helper()
-	raw, ok := rec[key]
-	if !ok {
-		t.Fatalf("%q record has no %q attribute; record = %v", msg, key, rec)
-	}
-	num, ok := raw.(json.Number)
-	if !ok {
-		t.Fatalf("%q record %q = %v (%T), want a number", msg, key, raw, raw)
-	}
-	got, err := num.Int64()
-	if err != nil {
-		t.Fatalf("%q record %q = %v, not an integer: %v", msg, key, raw, err)
-	}
-	if got != want {
-		t.Errorf("%q record %q = %d, want %d", msg, key, got, want)
-	}
 }

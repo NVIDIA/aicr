@@ -17,6 +17,7 @@ package validators
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"time"
 
 	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/logging/loggingtest"
 	"aicr.run/pkg/validator/ctrf"
 )
 
@@ -161,6 +163,7 @@ func TestRunCheckWithoutSIGTERM(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fakeSIGTERM(t)
 			path := withTempTerminationLog(t)
+			logs := loggingtest.CaptureJSON(t, slog.LevelInfo)
 			ctx, cancel := newCheckContext(tt.timeout)
 			defer cancel()
 			code := runCheckWithContext(&Context{Ctx: ctx, Cancel: cancel}, func(*Context) error {
@@ -172,8 +175,14 @@ func TestRunCheckWithoutSIGTERM(t *testing.T) {
 			if code != tt.want {
 				t.Errorf("code=%d want %d", code, tt.want)
 			}
-			if tt.panicWith != nil && ctrf.ExitCodeToCTRFStatus(int32(code)) != ctrf.StatusOther {
-				t.Errorf("status=%s, want %s", ctrf.ExitCodeToCTRFStatus(int32(code)), ctrf.StatusOther)
+			if tt.panicWith != nil {
+				if ctrf.ExitCodeToCTRFStatus(int32(code)) != ctrf.StatusOther {
+					t.Errorf("status=%s, want %s", ctrf.ExitCodeToCTRFStatus(int32(code)), ctrf.StatusOther)
+				}
+				rec := loggingtest.FindRecord(t, logs.Bytes(), "check panicked")
+				if stack, _ := rec["stack"].(string); !strings.Contains(stack, "callCheck") {
+					t.Errorf("logged panic stack = %q, want the stack at the panic", stack)
+				}
 			}
 			if tt.message != "" {
 				data, err := os.ReadFile(filepath.Clean(path))
