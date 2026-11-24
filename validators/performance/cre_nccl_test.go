@@ -15,8 +15,11 @@
 package main
 
 import (
+	"bytes"
 	stderrors "errors"
+	"log/slog"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +32,10 @@ import (
 	"aicr.run/validators"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic/fake"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
 func TestCheckCRENCCLSkipsWithoutConstraint(t *testing.T) {
@@ -330,5 +337,159 @@ func TestEmitCREBandwidthExtras(t *testing.T) {
 	}
 	if !maps.Equal(got, want) {
 		t.Errorf("extras = %v, want %v", got, want)
+	}
+}
+
+func TestVerifyCRETransport(t *testing.T) {
+	const (
+		libfabricLog = "NCCL INFO Using network Libfabric\n"
+		socketLog    = "NCCL INFO Using network Socket\n"
+		noBannerLog  = "NCCL INFO NET/FasTrak ... SCTP Closed\n"
+	)
+	logReadFailed := errors.New(errors.ErrCodeNotFound, "no CRE launcher pods found")
+
+	tests := []struct {
+		name       string
+		logs       string
+		logErr     error
+		recorded   []string
+		wantErr    bool
+		wantSource string
+		wantNames  []string
+	}{
+		{"log banner names a transport", libfabricLog, nil, nil, false,
+			creTransportSourceLauncherLog, []string{"Libfabric"}},
+		{"log banner wins over a clean record", socketLog, nil, []string{"FasTrak"}, true, "", nil},
+		{"log banner passing wins over a Socket record", libfabricLog, nil, []string{"Socket"}, false,
+			creTransportSourceLauncherLog, []string{"Libfabric"}},
+		{"banner rotated out, record names a transport", noBannerLog, nil, []string{"FasTrak"}, false,
+			creTransportSourceMeasurement, []string{"FasTrak"}},
+		{"banner rotated out, record is Socket", noBannerLog, nil, []string{"Socket"}, true, "", nil},
+		{"banner rotated out, record mixes Socket in", noBannerLog, nil, []string{"FasTrak", "Socket"}, true, "", nil},
+		{"banner rotated out, nothing recorded", noBannerLog, nil, nil, true, "", nil},
+		{"log unreadable, record names a transport", "", logReadFailed, []string{"FasTrak"}, false,
+			creTransportSourceMeasurement, []string{"FasTrak"}},
+		{"log unreadable, nothing recorded", "", logReadFailed, nil, true, "", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := verifyCRETransport(tt.logs, tt.logErr, tt.recorded)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("verifyCRETransport() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got.Source != tt.wantSource || !slices.Equal(got.Transports, tt.wantNames) {
+				t.Errorf("evidence = %+v, want source %q transports %v", got, tt.wantSource, tt.wantNames)
+			}
+		})
+	}
+}
+
+// judgeCRENCCLRun is the only caller that hands verifyCRETransport the
+// transports CRE recorded, so dropping them there, or failing on an unreadable
+// log before the fallback, has to fail a case here and not only in the unit
+// test of verifyCRETransport. The fake clientset serves "fake logs" for every
+// pod, which is a launcher log with no network banner.
+func TestJudgeCRENCCLRunFallsBackToRecordedTransport(t *testing.T) {
+	createdAt := metav1.NewTime(time.Now())
+	launcher := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name:      "launcher-0",
+		Namespace: creTestNamespace,
+		Labels: map[string]string{
+			"jobset.sigs.k8s.io/jobset-name":        creTestWorkflow + "-job-workload",
+			"jobset.sigs.k8s.io/replicatedjob-name": "launcher",
+		},
+		CreationTimestamp: metav1.NewTime(createdAt.Add(time.Minute)),
+	}}
+	measurement := func(transport any) *unstructured.Unstructured {
+		status := busBWStatus("337.9")
+		status["transport"] = transport
+		return creMeasurement("BandwidthMeasurement", "m", creTestWorkflow, time.Minute, final(status))
+	}
+
+	tests := []struct {
+		name       string
+		transport  any
+		pods       []runtime.Object
+		wantErr    bool
+		wantSource string
+	}{
+		{"bannerless log, recorded transport passes", []any{"FasTrak"},
+			[]runtime.Object{launcher}, false, "from " + creTransportSourceMeasurement + ": FasTrak"},
+		{"bannerless log, recorded Socket fails", []any{"Socket"}, []runtime.Object{launcher}, true, ""},
+		{"bannerless log, malformed record is no evidence", []any{"", int64(7)}, []runtime.Object{launcher}, true, ""},
+		{"no launcher pod, recorded transport passes", []any{"FasTrak"},
+			nil, false, "from " + creTransportSourceMeasurement + ": FasTrak"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dyn := fake.NewSimpleDynamicClientWithCustomListKinds(
+				runtime.NewScheme(), creMeasurementListKinds(), measurement(tt.transport))
+			ctx := &validators.Context{
+				Ctx:       creMeasurementCtx(t),
+				Clientset: k8sfake.NewSimpleClientset(tt.pods...),
+				Namespace: creTestNamespace,
+			}
+
+			var passed bool
+			var err error
+			out := captureStdout(t, func() {
+				_, passed, err = judgeCRENCCLRun(ctx, dyn, creTestWorkflow, createdAt, 300)
+			})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("judgeCRENCCLRun() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if !passed {
+				t.Error("passed = false, want true for 337.9 GB/s against >= 300")
+			}
+			if !strings.Contains(out, "NCCL transport asserted "+tt.wantSource) {
+				t.Errorf("stdout = %q, want the transport evidence line %q", out, tt.wantSource)
+			}
+		})
+	}
+}
+
+func TestVerifyCRETransportKeepsLogReadError(t *testing.T) {
+	logReadFailed := errors.New(errors.ErrCodeNotFound, "no CRE launcher pods found")
+	_, err := verifyCRETransport("", logReadFailed, nil)
+	if err == nil || !strings.Contains(err.Error(), "CRE launcher logs required for transport assertion") {
+		t.Fatalf("error = %v, want the launcher-logs-required message", err)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+}
+
+func TestVerifyCRETransportWarnsOnlyWhenLogUnreadable(t *testing.T) {
+	logReadFailed := errors.New(errors.ErrCodeNotFound, "no CRE launcher pods found")
+	tests := []struct {
+		name     string
+		logErr   error
+		wantWarn bool
+	}{
+		{"unreadable log warns with the read error", logReadFailed, true},
+		{"bannerless log does not warn", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			defer slog.SetDefault(prev)
+
+			if _, err := verifyCRETransport("no banner here", tt.logErr, []string{"FasTrak"}); err != nil {
+				t.Fatalf("verifyCRETransport() error = %v", err)
+			}
+
+			out := buf.String()
+			if got := strings.Contains(out, "level=WARN"); got != tt.wantWarn {
+				t.Fatalf("WARN emitted = %v, want %v\noutput:\n%s", got, tt.wantWarn, out)
+			}
+			if tt.wantWarn && !strings.Contains(out, "no CRE launcher pods found") {
+				t.Errorf("WARN record missing the read error\noutput:\n%s", out)
+			}
+		})
 	}
 }

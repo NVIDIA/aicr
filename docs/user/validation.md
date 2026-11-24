@@ -682,7 +682,7 @@ percentage (`>= 50`) can never be satisfied.
 
 | Check | What it measures | Qualified combinations |
 |---|---|---|
-| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs | `eks` x `h100`, `eks` x `gb300` |
+| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs, falling back to the `status.transport` CRE recorded when the log has no `Using network` banner or cannot be read | `eks` x `h100`, `eks` x `gb300` |
 | `nccl-cre-all-reduce-bw-net` | The same run with `NCCL_NVLS_ENABLE=0` and `NCCL_MNNVL_ENABLE=0` set through `spec.env`, so the peak is the EFA/NET path, plus `NCCL_ALGO=Tree` until NVIDIA/nccl#2630 is fixed | `eks` x `gb300` |
 | `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` | `eks` x `h100` |
 
@@ -721,7 +721,8 @@ reads 1.65 GB/s (0.34%) higher than `nccl-all-reduce-bw` on the same two nodes:
 six back-to-back pairs on NVCRE v0.8.2 gave 486.76 to 489.01 GB/s for the
 TrainJob check and 489.63 to 490.03 GB/s for the CRE check, with a per-pair
 offset of 0.92 to 3.14 GB/s. Both ran over `Using network Libfabric`; the CRE
-check asserts that from its launcher log, and the TrainJob check's default
+check asserts that from its launcher log (or, when the log has no banner or
+cannot be read, from the `status.transport` CRE recorded), and the TrainJob check's default
 template logs at `NCCL_DEBUG=WARN` so it cannot show it. That is the one
 difference in what the two checks demand: the CRE check fails a run that fell
 back to Socket, and the TrainJob check does not look. Both pass at 90% of the
