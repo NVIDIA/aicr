@@ -183,10 +183,10 @@ func (d *Deployer) newResult() *ctrf.ValidatorResult {
 	return result
 }
 
-// recordValidatorImage sets result.Images to the image p's validator
-// container ran, and leaves result unchanged when p has none. Call it before
-// captureValidatorOutput, which sets that image's platform and appends the
-// images the validator reports.
+// recordValidatorImage sets result.Images to the image p's spec names for the
+// validator container, and leaves result unchanged when p has none. Call it
+// before captureValidatorOutput, which sets that image's platform and appends
+// the images the validator reports.
 func (d *Deployer) recordValidatorImage(p *corev1.Pod, result *ctrf.ValidatorResult) {
 	if img, ok := ctrf.ContainerImage(p, ValidatorContainerName); ok {
 		result.Images = []ctrf.PodImage{img}
