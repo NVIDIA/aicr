@@ -36,6 +36,15 @@ spec:
             value: "true"
 
   componentRefs:
+    - name: nodewright-operator
+      type: Helm
+      overrides:
+        controllerManager:
+          manager:
+            env:
+              # CKS workers with RAM-backed roots lose host changes when they reboot.
+              reapplyOnReboot: "true"
+
     # CoreWeave owns these controllers and their operands.
     - name: gpu-operator
       type: Helm

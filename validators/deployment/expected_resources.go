@@ -1177,7 +1177,7 @@ func taintStrings(taints []corev1.Taint) string {
 // newly-joined node — the taint is applied once and removed once as the
 // monotone terminal step, so "taint absent" is a durable "done, won't reboot
 // again" signal (see issue #1775). The operator re-applies it across reboots
-// only under REAPPLY_ON_REBOOT (the gke-cos and bcm overlays); there the taint
+// only under REAPPLY_ON_REBOOT; there the taint
 // flaps like the status and the stability window rides through it, so gating
 // on the taint is never weaker than gating on the status.
 //

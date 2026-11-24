@@ -6,6 +6,8 @@ The registry default namespace is `nodewright`. A deployment made before that mo
 1. Optimize a node for inference or training workloads via grub, sysctl and systemd service settings.
 2. Be able to install all of the necessary software to bring a vanilla Kubernetes node to the AICR spec.
 
+On CoreWeave Kubernetes Service (CKS), a worker with a RAM-backed root can lose installed packages and host configuration on reboot. The CKS recipes enable `controllerManager.manager.env.reapplyOnReboot` so NodeWright reapplies the packages that select the rebooted worker.
+
 ## References
 
 1. [Nodewright documentation](https://github.com/NVIDIA/nodewright/blob/main/docs)
