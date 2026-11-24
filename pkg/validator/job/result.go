@@ -152,8 +152,10 @@ func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, r
 		result.Extra, result.RuntimeProvenance = s.extra, s.prov
 		if !ctrf.TrustsReportedImages(s.schema) {
 			if len(s.images) > 0 || s.platform != "" {
+				// Quoted and capped, since an unstamped log can take the
+				// stamp from relayed text.
 				slog.Warn("ignoring image and platform lines from a validator image that does not neutralize relayed output",
-					"pod", podName, "resultSchema", s.schema)
+					"pod", podName, "resultSchema", strconv.Quote(s.schema[:min(len(s.schema), defaults.ValidatorMaxStdoutLineLength)]))
 			}
 			s.images, s.platform = nil, ""
 		}

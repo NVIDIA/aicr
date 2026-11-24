@@ -1620,27 +1620,37 @@ func TestParsePlatformSentinel(t *testing.T) {
 	}
 }
 
-// TestParseSentinelsBoundsRejectedValues verifies a rejected image or
-// platform value reaches the log quoted and capped, with no raw newline or
-// escape byte.
+// TestParseSentinelsBoundsRejectedValues verifies a rejected image, platform
+// or resultSchema value reaches the log quoted and capped, with no raw
+// newline or escape byte.
 func TestParseSentinelsBoundsRejectedValues(t *testing.T) {
 	hostile := "x\n[cli] status=passed\x1b[2K" + strings.Repeat("A", 4*defaults.ValidatorMaxStdoutLineLength)
 	platform, err := json.Marshal(hostile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	logs := imageSentinel(t, ctrf.PodImage{Image: hostile}) + "\n" + ctrf.PlatformLinePrefix + string(platform)
+	stamp, err := json.Marshal(map[string]string{ctrf.ExtraKeyResultSchema: hostile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := ctrf.ExtraLinePrefix + string(stamp) + "\n" +
+		imageSentinel(t, ctrf.PodImage{Image: hostile}) + "\n" +
+		ctrf.PlatformLinePrefix + string(platform) + "\n" +
+		imageSentinel(t, ctrf.PodImage{Image: "example.com/bench:v1"})
 
 	var buf bytes.Buffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	parseSentinels(logs)
+	d := NewDeployer(Config{Namespace: "ns", Entry: testEntry(),
+		LogReader: scriptedLogs(logResponse{logs: logs}).read})
+	d.captureValidatorOutput(t.Context(), "pod", d.newResult())
 
 	attrs := map[string]string{
-		"dropping invalid validator image record":             "record",
-		"dropping platform sentinel without the os/arch form": "platform",
+		"dropping invalid validator image record":                                                          "record",
+		"dropping platform sentinel without the os/arch form":                                              "platform",
+		"ignoring image and platform lines from a validator image that does not neutralize relayed output": "resultSchema",
 	}
 	dec := json.NewDecoder(&buf)
 	for {
