@@ -279,21 +279,25 @@ transitions:
     references:
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#grove-v010-alpha13-to-v010-alpha14
       - https://github.com/ai-dynamo/grove/releases/tag/v0.1.0-alpha.14
-  - from: ">=0.1.0-alpha.14 <0.1.0-alpha.17"
+  # from starts at alpha.13, the release every shipped AICR version pins, and
+  # skips alpha.14: the alpha.17 CRD apply below also carries the alpha.14
+  # schema, so one step serves a jump from either.
+  - from: ">=0.1.0-alpha.13 <0.1.0-alpha.17"
     to: "0.1.0-alpha.17"
+    skips: ["0.1.0-alpha.14"]
     verdict: manual
     summary: >-
-      alpha.17 adds status.scalingProgress to the podcliquesets CRD, where
-      the operator records which replica indices a scale-in or scale-out has
+      alpha.17 adds status.scalingProgress to the podcliquesets CRD, where the
+      operator records the replica indices a scale-in or scale-out has
       selected. helm upgrade never applies changed crds/, so a plain chart
-      bump leaves the alpha.14 schema in place and the API server silently
-      prunes that field: availability-aware scale-in then loses its persisted
-      selection and can reuse a replica index before its resources are gone.
-      The 6 CRDs keep v1alpha1 and gain nothing else. A PodCliqueSet
-      scheduled through grove's kueue backend must now carry
-      kueue.x-k8s.io/queue-name and cannot change it; without the label it
-      already failed to sync. alpha.17 is the last alpha: v0.2.0-beta1 moves
-      CRD storage to grove.io/v1beta1.
+      bump keeps the old schema and the API server prunes that field:
+      availability-aware scale-in then loses its persisted selection and can
+      reuse a replica index before its resources are gone. From alpha.13 the
+      jump also crosses alpha.14, whose CRDs drop the CEL rule that rejects
+      every Anchor PodGangMap write from the new operator, and dynamo-platform
+      1.6 refuses to install or upgrade until a grove-operator at alpha.14 or
+      later has finished rolling out. The operator ClusterRole gains get,
+      list, watch and delete on resource.nvidia.com computedomains.
     stepsByDeployer:
       - deployers: [helm, helmfile]
         steps:
@@ -352,4 +356,5 @@ transitions:
       - https://github.com/ai-dynamo/grove/releases/tag/v0.1.0-alpha.15
       - https://github.com/ai-dynamo/grove/releases/tag/v0.1.0-alpha.16
       - https://github.com/ai-dynamo/grove/releases/tag/v0.1.0-alpha.17
-      - https://github.com/ai-dynamo/grove/pull/896
+      - https://github.com/ai-dynamo/grove/pull/918
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#grove-v010-alpha13-or-v010-alpha14-to-v010-alpha17
