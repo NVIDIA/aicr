@@ -24,8 +24,9 @@ spec:
   base: base
   criteria:
     service: nvke
-  # Tray leaves compose nvsentinel-nic-health-monitor; DGX Spark (gb10) has
-  # no ConnectX-7 rails for it to watch.
+  # Tray leaves compose nvsentinel-nic-health-monitor; DGX Spark (gb10) does
+  # not: the monitor needs the ConnectX-7 in `nvidia-smi topo -m`, and DGX OS
+  # power saving removes the card when no cable is attached.
   constraints:
     - name: K8s.server.version
       value: ">= 1.34"

@@ -99,7 +99,7 @@ func listRunJobs(ctx context.Context, kube kubernetes.Interface) (*batchv1.JobLi
 	return jobs, nil
 }
 
-// planCheckNamespaces selects the per-run conformance test namespaces. It
+// planCheckNamespaces selects the per-run check test namespaces. It
 // also returns the names accepted as validator-owned (whether or not they are
 // old enough to delete), which the Run:ai residue pass needs: objects inside
 // an accepted namespace are the namespace delete's business, not the object

@@ -102,7 +102,7 @@ func rdmaFabricResources(goCtx context.Context, ncpRef recipe.ComponentRef, refs
 		if !strings.Contains(path, nicClusterPolicyManifestMarker) {
 			continue
 		}
-		rendered, err := renderComponentManifest(goCtx, ncpRef, path, "NicClusterPolicy")
+		rendered, err := renderComponentManifest(goCtx, nil, ncpRef, path, "NicClusterPolicy")
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +121,7 @@ func rdmaFabricResources(goCtx context.Context, ncpRef recipe.ComponentRef, refs
 			if !strings.Contains(path, sriovNodePolicyManifestMarker) {
 				continue
 			}
-			rendered, err := renderComponentManifest(goCtx, ref, path, "SriovNetworkNodePolicy")
+			rendered, err := renderComponentManifest(goCtx, nil, ref, path, "SriovNetworkNodePolicy")
 			if err != nil {
 				return nil, err
 			}
@@ -150,17 +150,17 @@ func rdmaFabricResources(goCtx context.Context, ncpRef recipe.ComponentRef, refs
 	return out, nil
 }
 
-// renderComponentManifest loads one of ref's manifest files from the embedded
-// data provider and renders it with the component's effective values. kind
-// names the expected document in error messages only.
-func renderComponentManifest(goCtx context.Context, ref recipe.ComponentRef, path, kind string) ([]byte, error) {
+// renderComponentManifest loads one of ref's manifest files from dp (nil
+// reads the embedded catalog) and renders it with the component's effective
+// values. kind names the expected document in error messages only.
+func renderComponentManifest(goCtx context.Context, dp recipe.DataProvider, ref recipe.ComponentRef, path, kind string) ([]byte, error) {
 	select {
 	case <-goCtx.Done():
 		return nil, errors.Wrap(errors.ErrCodeTimeout,
-			"deployment validation canceled while deriving the RDMA fabric resource", goCtx.Err())
+			fmt.Sprintf("deployment validation canceled while rendering %s manifest %s", kind, path), goCtx.Err())
 	default:
 	}
-	values, err := recipe.GetComponentValuesWithContext(goCtx, nil, &ref)
+	values, err := recipe.GetComponentValuesWithContext(goCtx, dp, &ref)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to resolve effective values for component %s", ref.Name), err)
@@ -169,7 +169,7 @@ func renderComponentManifest(goCtx context.Context, ref recipe.ComponentRef, pat
 	if chartName == "" {
 		chartName = ref.Name
 	}
-	content, err := recipe.GetManifestContentWithContext(goCtx, nil, path)
+	content, err := recipe.GetManifestContentWithContext(goCtx, dp, path)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to load %s manifest %s for component %s", kind, path, ref.Name), err)

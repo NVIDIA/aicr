@@ -375,8 +375,8 @@ segment, so `ghcr.io/nvidia/aicr-validators/conformance` resolves to
 `${REGISTRY}/aicr-validators/conformance`. If your mirroring tool keeps the
 source path (`${REGISTRY}/nvidia/aicr-validators/...`), set the variable to
 `${REGISTRY}/nvidia` instead. Add `--image-pull-secret` when the registry needs
-credentials; the conformance checks that create a per-run namespace copy the
-named Secrets into it for their probe pods, and the copies are deleted with the
+credentials; the deployment and conformance checks that create a per-run
+namespace copy the named Secrets into it for their probe pods, and the copies are deleted with the
 namespace. Some benchmark checks pin workload images the variable does not
 rewrite, such as the NCCL runtime image (override it with
 `AICR_NCCL_RUNTIME_IMAGE`) and the vanilla `docker.io/library/ubuntu:22.04`

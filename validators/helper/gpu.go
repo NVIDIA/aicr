@@ -31,7 +31,7 @@ const GpuResourceName = "nvidia.com/gpu"
 // AKSRdmaSharedResource is the extended resource the network operator's
 // rdma-shared-device-plugin publishes on Mellanox RDMA nodes. Its name is pinned
 // by recipes/components/network-operator/manifests/nic-cluster-policy-aks.yaml
-// (resourceName hca_shared_devices_a). The resource is transport-agnostic — the
+// and nic-cluster-policy-nvke-gb10.yaml (resourceName hca_shared_devices_a). The resource is transport-agnostic — the
 // same pool backs InfiniBand and RoCE — so nothing keyed off it is IB-specific.
 // Both the deployment-phase RDMA fabric readiness gate and the NCCL performance
 // consumer key off this exact resource, so it lives here as the single source of

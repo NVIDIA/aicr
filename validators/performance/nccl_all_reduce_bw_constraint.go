@@ -309,8 +309,10 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		// GB200 is IB east-west over per-rail SR-IOV VFs attached through
 		// SriovIBNetworks, VR200 is RoCE v2 over the same SR-IOV shape with
 		// SriovNetworks, since every mlx5 port on a VR tray reports
-		// link_layer Ethernet — see testdata/{gb200,vr200}/nvke/runtime-net.yaml.
-		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorVR200},
+		// link_layer Ethernet. GB10 (DGX Spark) is RoCE v2 over the inbox
+		// mlx5 through the RDMA shared device plugin, with no SR-IOV — see
+		// testdata/{gb200,vr200,gb10}/nvke/runtime-net.yaml.
+		recipe.CriteriaServiceNVKE: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorVR200, recipe.CriteriaAcceleratorGB10},
 	},
 	variantNVLS: {
 		// GB300 EKS shares GB200's NVL72 MNNVL/IMEX topology — see
@@ -369,6 +371,11 @@ func resolveRuntimeImageForBakedInPath(customRuntime string) (string, error) {
 // unready nodes instead. Applies to both the embedded capability fixture and
 // a derived/delivered runtime (plan.source.runsGKETCPXOChecks()), never to a
 // recipe-supplied runtime.
+//
+// GB10/NVKE NET preflight: each worker requests one unit of the RDMA shared
+// device plugin's resource, so the target nodes must all advertise the same
+// positive count; otherwise the workers sit Pending until the launcher times
+// out. Skipped for a recipe-supplied runtime.
 func runNCCLPreflights(ctx *validators.Context, gpuConfig *gpuConfiguration, target ncclBenchmarkTarget,
 	variant ncclVariant, customRuntime string, plan *benchmarkRuntimePlan) error {
 
@@ -380,6 +387,12 @@ func runNCCLPreflights(ctx *validators.Context, gpuConfig *gpuConfiguration, tar
 
 	if plan.source.runsGKETCPXOChecks() && gkeTCPXOPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGKETCPXOReady(ctx, gpuConfig.Nodes); pfErr != nil {
+			return pfErr
+		}
+	}
+
+	if customRuntime == "" && sharedRDMANetPreflightApplies(variant, target.accelerator, target.service) {
+		if pfErr := preflightSharedRDMAResource(gpuConfig.Nodes); pfErr != nil {
 			return pfErr
 		}
 	}

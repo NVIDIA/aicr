@@ -166,6 +166,34 @@ func TestExpectedResourcesCatalogEnvelope(t *testing.T) {
 	}
 }
 
+// TestSecondaryNetworkAttachmentCatalogEnvelope asserts the
+// secondary-network-attachment timeout (its AICR_CHECK_TIMEOUT) exceeds the
+// probe wait plus the reserve the wait leaves for the report, so the probe
+// wait is not cut short by the check's own deadline before discovery and
+// setup have even run.
+func TestSecondaryNetworkAttachmentCatalogEnvelope(t *testing.T) {
+	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	required := defaults.SecondaryNetworkProbeTimeout + defaults.SecondaryNetworkProbeReportReserve
+	for _, v := range catalog.Validators {
+		if v.Name != "secondary-network-attachment" {
+			continue
+		}
+		if v.Phase != string(v1.PhaseDeployment) {
+			t.Errorf("secondary-network-attachment phase = %q, want %q", v.Phase, v1.PhaseDeployment)
+		}
+		if v.Timeout <= required {
+			t.Errorf("secondary-network-attachment timeout %v must be > SecondaryNetworkProbeTimeout (%v) + "+
+				"SecondaryNetworkProbeReportReserve (%v) = %v", v.Timeout, defaults.SecondaryNetworkProbeTimeout,
+				defaults.SecondaryNetworkProbeReportReserve, required)
+		}
+		return
+	}
+	t.Fatal("secondary-network-attachment validator missing from catalog; invariant cannot be verified")
+}
+
 // TestOrchestratorWaitCoversJobDeadlineAndGrace pins the clock ordering for
 // every catalog entry: the check's own context expires first, the Job's
 // activeDeadlineSeconds is the backstop that SIGTERMs a stuck pod, and the

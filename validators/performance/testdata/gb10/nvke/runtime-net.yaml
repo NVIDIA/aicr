@@ -1,0 +1,317 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NCCL all-reduce TrainingRuntime for GB10 (DGX Spark) on NVKE, NET/RoCE
+# variant.
+#
+# Measures the link the gb10-nvke training leaves expect: two DGX Sparks, one
+# GB10 each, cabled ConnectX-7 port to ConnectX-7 port. That port shows as two
+# PCIe functions, each with its own netdev and RDMA device, and the host gives
+# each function an IPv4 address in its own subnet. There are no VFs and no
+# secondary pod networks: a worker requests one unit of
+# rdma/hca_shared_devices_a, the network-operator RDMA shared device plugin
+# mounts the node's CX-7 uverbs devices, and NCCL uses the host's RoCE v2 GIDs
+# while its bootstrap and MPI stay on eth0.
+#
+# Passed on two Sparks with NGC PyTorch 25.11 (NCCL 2.28.8): NET/IB over both
+# functions with GDR off, 24.11 GB/s busbw at 16 GiB.
+#
+# Differences from the VR200 NET runtime, all forced by the hardware:
+#
+#   One GPU and one RDMA request per worker, no multus annotation. The rank
+#   precheck discovers the devices from sysfs instead of walking net1..netN,
+#   and keeps only ACTIVE Ethernet ports, which drops the uncabled port.
+#
+#   The RoCE v2 GID must be the IPv4-mapped one, and the precheck pins its
+#   index rather than leave it to NCCL's auto-selection, so each rank proves
+#   the index NCCL uses holds one. A link-local IPv6 v2 GID can sit below it,
+#   so "lowest non-zero v2" (VR200) is not enough.
+#
+#   NCCL_CROSS_NIC=0. The two functions sit in different subnets with no route
+#   between them, so a QP from one function to the other function on the peer
+#   cannot connect.
+#
+#   NGC PyTorch 25.11, not 25.06: GB10 is compute capability 12.1, and 25.11
+#   (CUDA 13.0, NCCL 2.28) is the tag measured on one GB10. Override with
+#   AICR_NCCL_RUNTIME_IMAGE.
+#
+# As on VR200, a rank that fails the precheck exits with an
+# AICR_PRECHECK_FAILED line, which the validator reports as the failure
+# reason, so the check never passes on a pod-network fallback.
+
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: nccl-all-reduce-runtime
+  namespace: ${NAMESPACE}
+  labels:
+    trainer.kubeflow.org/framework: mpi
+spec:
+  mlPolicy:
+    mpi:
+      mpiImplementation: OpenMPI
+      numProcPerNode: ${GPU_COUNT_PER_NODE}
+      runLauncherAsNode: false
+      sshAuthMountPath: /tmp/mpi-keys
+  template:
+    spec:
+      network:
+        enableDNSHostnames: true
+        publishNotReadyAddresses: true
+      replicatedJobs:
+      - name: node
+        template:
+          spec:
+            template:
+              spec:
+                tolerations:
+                - operator: Exists
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:25.11-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.11-py3
+                  command: ["sh", "-c"]
+                  args:
+                  # sshd is installed at runtime. HTTPS and the main component
+                  # only: plain-HTTP fetches from ports.ubuntu.com were observed
+                  # to stall for minutes (#3109). ca-certificates ships in the
+                  # image. Skipped for an AICR_NCCL_RUNTIME_IMAGE override without
+                  # a deb822 sources file.
+                  - |
+                    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+                      sed -i -e 's|http://ports.ubuntu.com|https://ports.ubuntu.com|g' \
+                             -e 's|^Components:.*|Components: main|' /etc/apt/sources.list.d/ubuntu.sources
+                    fi &&
+                    apt-get update &&
+                    apt-get install -y --no-install-recommends openssh-server &&
+                    mkdir -p /var/run/sshd &&
+                    chmod 0755 /var/run/sshd &&
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/* /root/.ssh/ &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys &&
+                    /usr/sbin/sshd -De
+                  # Ready only once sshd listens; the launcher's dependsOn
+                  # waits on it, so mpirun never races the install.
+                  readinessProbe:
+                    tcpSocket:
+                      port: 22
+                    periodSeconds: 5
+                    failureThreshold: 120
+                  resources:
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                      rdma/hca_shared_devices_a: "1"
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                      rdma/hca_shared_devices_a: "1"
+                  securityContext:
+                    capabilities:
+                      add: ["IPC_LOCK"]
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                  - name: dshm
+                    mountPath: /dev/shm
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+      # Listed after "node": JobSet requires a dependsOn target to precede
+      # the job that depends on it.
+      - name: launcher
+        replicas: 1
+        dependsOn:
+        - name: node
+          status: Ready
+        template:
+          spec:
+            template:
+              spec:
+                # A failed rank precheck is a cluster condition a restart cannot
+                # fix. Fail the pod once so the validator reads its logs and the
+                # AICR_PRECHECK_FAILED reason, instead of waiting through
+                # restart backoff until the pod is deleted.
+                restartPolicy: Never
+                tolerations:
+                - operator: Exists
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:25.11-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh
+                    cp /tmp/mpi-keys/id_rsa /root/.ssh/id_rsa
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys
+                    chmod 700 /root/.ssh
+                    chmod 600 /root/.ssh/id_rsa /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.11-py3
+                  # Keeps the log tail, including any AICR_PRECHECK_FAILED line,
+                  # in pod status for the validator's fallback when the launcher
+                  # logs are already gone.
+                  terminationMessagePolicy: FallbackToLogsOnError
+                  env:
+                  - name: LD_LIBRARY_PATH
+                    value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+                  command:
+                  - /usr/local/mpi/bin/mpirun
+                  args:
+                  - -np
+                  - "${GPU_COUNT}"
+                  - --allow-run-as-root
+                  - --mca
+                  - plm_rsh_args
+                  - -o StrictHostKeyChecking=no -o ConnectionAttempts=10
+                  # Keep MPI's own traffic on eth0, off the RDMA devices.
+                  - --mca
+                  - pml
+                  - ob1
+                  - --mca
+                  - btl
+                  - self,tcp
+                  - --mca
+                  - coll
+                  - ^ucc,hcoll
+                  - --mca
+                  - btl_tcp_if_include
+                  - eth0
+                  - --mca
+                  - oob_tcp_if_include
+                  - eth0
+                  - -x
+                  - LD_LIBRARY_PATH
+                  - -x
+                  - NCCL_DEBUG=INFO
+                  # Force NCCL onto the NET/RoCE transport: NVLS and MNNVL off,
+                  # and NCCL_NET_PLUGIN=none selects the built-in IB verbs
+                  # transport. NCCL_IB_HCA and NCCL_IB_GID_INDEX are set per
+                  # rank below.
+                  - -x
+                  - NCCL_NVLS_ENABLE=0
+                  - -x
+                  - NCCL_MNNVL_ENABLE=0
+                  - -x
+                  - NCCL_NET_PLUGIN=none
+                  - -x
+                  - NCCL_SOCKET_IFNAME=eth0
+                  - -x
+                  - NCCL_IGNORE_DISABLED_P2P=1
+                  - -x
+                  - NCCL_CROSS_NIC=0
+                  # Per rank: every ACTIVE Ethernet RDMA device must have its
+                  # uverbs node in the pod and a RoCE v2 IPv4 GID, at one table
+                  # index across devices, and at least two must be ACTIVE: the
+                  # linked port's two PCIe functions. Then pin NCCL to those
+                  # devices and that index.
+                  - /bin/sh
+                  - -c
+                  - |
+                    hcas=""
+                    nhca=0
+                    gidx=""
+                    for d in /sys/class/infiniband/*; do
+                      [ -d "$d" ] || continue
+                      hca=${d##*/}
+                      case "$(cat "$d/ports/1/state" 2>/dev/null)" in *ACTIVE*) ;; *) continue ;; esac
+                      [ "$(cat "$d/ports/1/link_layer" 2>/dev/null)" = "Ethernet" ] || continue
+                      uv=$(ls "$d/device/infiniband_verbs" 2>/dev/null | head -n 1)
+                      if [ -z "$uv" ] || [ ! -e "/dev/infiniband/$uv" ]; then
+                        echo "AICR_PRECHECK_FAILED: active RoCE device $hca has no /dev/infiniband node in the pod on $(hostname); the worker needs rdma/hca_shared_devices_a" >&2
+                        exit 1
+                      fi
+                      # Lowest RoCE v2 GID table index holding an IPv4-mapped
+                      # GID.
+                      idx=""
+                      for t in "$d"/ports/1/gid_attrs/types/*; do
+                        n=${t##*/}
+                        case "$(cat "$t" 2>/dev/null)" in *"RoCE v2"*) ;; *) continue ;; esac
+                        case "$(cat "$d/ports/1/gids/$n" 2>/dev/null)" in 0000:0000:0000:0000:0000:ffff:*) ;; *) continue ;; esac
+                        if [ -z "$idx" ] || [ "$n" -lt "$idx" ]; then idx=$n; fi
+                      done
+                      if [ -z "$idx" ]; then
+                        echo "AICR_PRECHECK_FAILED: RoCE device $hca has no RoCE v2 IPv4 GID on $(hostname); give its netdev an IPv4 address" >&2
+                        exit 1
+                      fi
+                      if [ -n "$gidx" ] && [ "$idx" != "$gidx" ]; then
+                        echo "AICR_PRECHECK_FAILED: RoCE device $hca has its RoCE v2 IPv4 GID at index $idx, other devices at $gidx, on $(hostname); NCCL_IB_GID_INDEX takes one index" >&2
+                        exit 1
+                      fi
+                      gidx=$idx
+                      hcas="$hcas,$hca"
+                      nhca=$((nhca + 1))
+                    done
+                    if [ -z "$hcas" ]; then
+                      echo "AICR_PRECHECK_FAILED: no ACTIVE RoCE device on $(hostname); check the ConnectX-7 link and the RDMA shared device plugin" >&2
+                      exit 1
+                    fi
+                    if [ "$nhca" -lt 2 ]; then
+                      echo "AICR_PRECHECK_FAILED: ${hcas#,} is the only ACTIVE RoCE device on $(hostname); both PCIe functions of the linked ConnectX-7 port must be ACTIVE" >&2
+                      exit 1
+                    fi
+                    export NCCL_IB_HCA="=${hcas#,}"
+                    export NCCL_IB_GID_INDEX="$gidx"
+                    echo "rank $(hostname): NCCL_IB_HCA=$NCCL_IB_HCA NCCL_IB_GID_INDEX=$gidx memlock=$(ulimit -l)" >&2
+                    exec "$@"
+                  - nccl-rank
+                  - /usr/local/bin/${TEST_TYPE}_mpi
+                  - -b
+                  - ${MIN_MESSAGE_SIZE}
+                  - -e
+                  - ${MAX_MESSAGE_SIZE}
+                  - -f
+                  - "2"
+                  - -g
+                  - "1"
+                  resources:
+                    limits:
+                      cpu: "2"
+                      memory: 128Mi
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+      successPolicy:
+        operator: All
+        targetReplicatedJobs:
+        - launcher

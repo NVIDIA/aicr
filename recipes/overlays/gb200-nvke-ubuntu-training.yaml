@@ -146,8 +146,12 @@ spec:
       dependencyRefs:
         - nodewright-operator
 
-  # Deployment checks come from the gb200-any criteria-wildcard overlay.
+  # The deployment-phase floor comes from the gb200-any criteria-wildcard
+  # overlay; this leaf adds the attachment probe for its SR-IOV IB rails.
   validation:
+    deployment:
+      checks:
+        - secondary-network-attachment
     performance:
       checks:
         - nccl-all-reduce-bw-net
