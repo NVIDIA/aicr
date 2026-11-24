@@ -43,6 +43,7 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `check-nvidia-smi` | Verify nvidia-smi works on every schedulable GPU node that is not busy (busy and cordoned nodes are reported as skipped, per node) | 10m |
 | `gke-gpu-nic-networks` | Verify the GKE cluster has the GPU NIC networks GPUDirect TCPXO requires, and that each is Ready with an intact GKENetworkParamSet binding (skipped unless the recipe declares `gke-nccl-tcpxo`) | 2m |
 | `gke-gpu-nic-topology` | Verify each a3 GPU node maps all 8 GPU NIC PCI slots to eth1..eth8 with no gVNIC displacement (skipped unless the recipe declares `gke-nccl-tcpxo`) | 2m |
+| `snapshot-requirements` | Verify the cluster meets Snapshot's prerequisites: kernel, runtime, GPU Operator, driver, MIG, checkpoint store, privileged namespace (skipped unless the recipe declares `snapshot`) | 1m |
 
 ### Performance Phase
 

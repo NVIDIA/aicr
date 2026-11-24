@@ -86,6 +86,13 @@ validators:
     timeout: 2m
     args: ["gke-gpu-nic-topology"]
     env: []
+  - name: snapshot-requirements
+    phase: deployment
+    description: "Verify the cluster meets Snapshot's prerequisites: kernel, runtime, GPU Operator, driver, MIG, checkpoint store, privileged namespace (skipped unless the recipe declares snapshot)"
+    image: ghcr.io/nvidia/aicr-validators/deployment:latest
+    timeout: 1m
+    args: ["snapshot-requirements"]
+    env: []
   # Performance phase
   #
   # The NCCL checks (nccl-all-reduce-bw and the -net/-nvls variants at the
