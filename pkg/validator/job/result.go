@@ -23,6 +23,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -72,14 +73,16 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		// activeDeadlineSeconds expiry. The Job object still records why,
 		// so classify from its Failed condition instead of reporting a bare
 		// "pod not found" (see issue #2186).
-		// A failed List says nothing about the pod, so skip a second one.
-		termPod := d.lastTerminated
-		if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
-			termPod = d.terminatedPod(ctx)
-		}
+		termPod := sync.OnceValue(func() *corev1.Pod {
+			// A failed List says nothing about the pod, so skip a second one.
+			if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+				return d.lastTerminated
+			}
+			return d.terminatedPod(ctx)
+		})
 		result.ExitCode, result.TerminationMsg = d.missingPodOutcome(ctx, err, termPod)
-		if termPod != nil {
-			d.recordValidatorImage(termPod, result)
+		if p := termPod(); p != nil {
+			d.recordValidatorImage(p, result)
 		}
 		return result
 	}
@@ -213,8 +216,9 @@ func (d *Deployer) readValidatorLogs(ctx context.Context, podName string) (logs 
 }
 
 // missingPodOutcome classifies an ExtractResult run whose Job pod could not be
-// found, returning the exit code and termination message to report. termPod is
-// the validator's last known terminated pod, and may be nil.
+// found, returning the exit code and termination message to report. termPod
+// returns the validator's last known terminated pod, or nil. It is called only
+// after the Job's condition is read.
 //
 // The dominant cause is not a vanished pod but a deadline: when a validator Job
 // exceeds its activeDeadlineSeconds, the Job controller kills the pod AND
@@ -242,7 +246,7 @@ func (d *Deployer) readValidatorLogs(ctx context.Context, podName string) (logs 
 //
 // Both branches remain blocking (ctrf.IsFailingStatus covers failed and other), so
 // this changes only diagnostic fidelity, never whether the phase fails.
-func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error, termPod *corev1.Pod) (exitCode int32, msg string) {
+func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error, termPod func() *corev1.Pod) (exitCode int32, msg string) {
 	notFound := fmt.Sprintf("pod not found for Job %s: %v", d.jobName, findErr)
 
 	// Only a CONFIRMED absence licenses a Job-condition diagnosis.
@@ -278,7 +282,7 @@ func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error, termPod
 		// still readable while the pod terminates, or from the last status the
 		// deployer observed. Keep the failed verdict and attach what the check
 		// reported instead of discarding it behind a generic message.
-		if reported, ok := reportedTermination(termPod); ok {
+		if reported, ok := reportedTermination(termPod()); ok {
 			return validatorExitFailed, boundTerminationMsg(fmt.Sprintf(
 				"validator Job did not complete within its %s Job deadline (check budget %s) (Job condition Failed/%s: %s); check reported: %s",
 				enforcedDeadline(job, d.config.Entry.Timeout), truncateToSeconds(effectiveTimeout(d.config.Entry.Timeout)),

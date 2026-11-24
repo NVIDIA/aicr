@@ -181,13 +181,20 @@ func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
 			result := d.ExtractResult(t.Context())
 
 			var podLists int
+			jobReadFirst := false
 			for _, a := range cs.Actions() {
-				if a.GetVerb() == "list" && a.GetResource().Resource == "pods" {
+				switch {
+				case a.GetVerb() == "list" && a.GetResource().Resource == "pods":
 					podLists++
+				case a.GetVerb() == "get" && a.GetResource().Resource == "jobs":
+					jobReadFirst = podLists == 1
 				}
 			}
 			if podLists != 2 {
 				t.Errorf("pod lists = %d, want 2", podLists)
+			}
+			if !jobReadFirst {
+				t.Error("Job condition was not read before the terminated-pod lookup")
 			}
 
 			if !slices.Equal(result.Images, tt.wantImages) {
