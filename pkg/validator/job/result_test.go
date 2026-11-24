@@ -1729,16 +1729,19 @@ func TestResultRecordsImageWithoutContainerStatus(t *testing.T) {
 // timed-out pod and of a container that never started.
 func TestResultRecordsReadablePodImage(t *testing.T) {
 	image := testEntry().Image
+	const mirrored = "mirror.example.com/aicr/validator:v2"
 	platformLine := ctrf.PlatformLinePrefix + strconv.Quote("linux/arm64")
 	tests := []struct {
-		name    string
-		status  corev1.ContainerStatus
-		logs    string
-		extract func(*Deployer) *ctrf.ValidatorResult
-		want    []ctrf.PodImage
+		name      string
+		specImage string
+		status    corev1.ContainerStatus
+		logs      string
+		extract   func(*Deployer) *ctrf.ValidatorResult
+		want      []ctrf.PodImage
 	}{
 		{
-			name: "timed out while running",
+			name:      "timed out while running",
+			specImage: image,
 			status: corev1.ContainerStatus{
 				ImageID: image[:strings.LastIndex(image, ":")] + "@" + testDigestA,
 				State:   corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
@@ -1750,12 +1753,13 @@ func TestResultRecordsReadablePodImage(t *testing.T) {
 			want: []ctrf.PodImage{{Image: image, Digest: testDigestA, Platform: "linux/arm64"}},
 		},
 		{
-			name: "image pull failure",
+			name:      "image pull failure records the spec image",
+			specImage: mirrored,
 			status: corev1.ContainerStatus{
 				State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"}},
 			},
 			extract: func(d *Deployer) *ctrf.ValidatorResult { return d.ExtractResult(t.Context()) },
-			want:    []ctrf.PodImage{{Image: image}},
+			want:    []ctrf.PodImage{{Image: mirrored}},
 		},
 	}
 	for _, tt := range tests {
@@ -1763,7 +1767,7 @@ func TestResultRecordsReadablePodImage(t *testing.T) {
 			tt.status.Name = ValidatorContainerName
 			p := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "ns", Labels: map[string]string{"batch.kubernetes.io/job-name": "job"}},
-				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: ValidatorContainerName, Image: image}}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: ValidatorContainerName, Image: tt.specImage}}},
 				Status:     corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{tt.status}},
 			}
 			cs := fake.NewClientset(p)
