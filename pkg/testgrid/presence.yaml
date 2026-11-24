@@ -51,6 +51,8 @@ coordinates:
   - eks/h100-ubuntu/inference-dynamo
   - eks/h100-ubuntu/training-kubeflow
   - k0s/h200-ubuntu/training
+  - nvke/vr200-ubuntu/inference-dynamo
+  - nvke/vr200-ubuntu/training-kubeflow
   - rke2/vr200-ubuntu/inference-dynamo
   - rke2/vr200-ubuntu/training
   - rke2/vr200-ubuntu/training-kubeflow
