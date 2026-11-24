@@ -247,9 +247,8 @@ type ComponentConfig struct {
 	// wrappers keep the mapper check; see issue #929. Canonical
 	// examples: network-operator (the AKS overlay attaches a
 	// NicClusterPolicy CR whose CRD the chart installs) and
-	// kubeflow-trainer (platform-kubeflow attaches a
-	// ClusterTrainingRuntime CR of the CRD shipped in the chart's
-	// crds/).
+	// kubeflow-trainer (its componentRef attaches a
+	// ClusterTrainingRuntime CR whose CRD the chart installs).
 	ManifestsUseChartCRDs bool `yaml:"manifestsUseChartCRDs,omitempty"`
 
 	// MixinSafeOverridePaths declares the exact dotted value paths (e.g.

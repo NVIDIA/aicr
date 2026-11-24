@@ -205,13 +205,15 @@ to list them; ask whoever provisions the cluster for the mapping.
 ### Do not set `resourcesPerNode`
 
 Let the runtime own the resource shape. On the pinned Kubeflow Trainer
-**v2.2.1**, `resourcesPerNode` on a TrainJob is not merged into the runtime's —
-a value carrying `limits` or `requests` **replaces**
-the worker's resource requirements outright, so a job that sets it to ask for
-memory silently loses the runtime's `nvidia.com/gpu: 8` and TCPXO stops working.
+**v2.4.0**, `resourcesPerNode` on a TrainJob merges into the runtime's resource
+requirements one resource at a time, so the runtime's `nvidia.com/gpu: 8`
+survives a job that asks only for memory. Trainer 2.2.x **replaced** the
+worker's requirements outright instead, so on a cluster still running 2.2.x
+that same job silently loses the GPU request and TCPXO stops working.
 
-Setting it at all — even to `{}` — also feeds Torch's process-count inference,
-which prefers the TrainJob's value and can yield `PET_NPROC_PER_NODE=1`.
+On either version, setting it at all, even to `{}`, also feeds Torch's
+process-count inference, which prefers the TrainJob's value and can yield
+`PET_NPROC_PER_NODE=1`.
 
 If you must set it, repeat *every* resource in it, including the GPU request.
 
