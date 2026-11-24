@@ -123,7 +123,8 @@ transitions:
       Upstream requires a 2.2 install to run 2.3.0 before any later release,
       and 2.3.0 is where the Trainer CRDs move into the chart's templates. A
       Helm-driven upgrade from 2.2 fails with "invalid ownership metadata"
-      until those CRDs are marked as belonging to the release.
+      until those CRDs are marked as belonging to the release, and leaves the
+      JobSet CRD at its 2.2 schema unless it is applied by hand.
     stepsByDeployer:
       - deployers: [helm, helmfile, flux, fleet, terraform]
         steps:
@@ -161,6 +162,24 @@ transitions:
               rollback or uninstall there deletes the CRDs and every TrainJob
               with them. Terraform's atomic = true rolls a failed upgrade back
               on its own.
+          - id: apply-jobset-crd
+            description: >-
+              Upgrade the JobSet CRD with the CRD-apply command under
+              "Upgrading components that own CRDs" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/kubeflow/charts/kubeflow-trainer,
+              VERSION=2.4.0, EXCLUDE_SUBCHARTS=lws, and MANAGER set to the
+              field manager that installed it (helm under helm and helmfile,
+              terraform-provider-helm under terraform; that section shows how
+              to check). The lws exclusion leaves out a CRD AICR's values do
+              not install.
+            reason: >-
+              jobsets.jobset.x-k8s.io ships in the JobSet subchart's crds/
+              directory, which Helm installs once and never upgrades, and
+              kubeflow-trainer is not marked ownsCRDs, so no deployer applies
+              it for you. Left at the 0.11.0 schema the 2.2 install created,
+              the API server prunes fields JobSet 0.13.0 writes, such as
+              spec.scheduling and status.executionAttempts.
           - id: apply-this-bundle
             description: >-
               Once no MPI-based TrainJob is suspended and every replicatedJob
@@ -215,7 +234,8 @@ transitions:
       2.4.0 sets new PRTE_MCA_* environment variables on MPI-based TrainJobs
       (DeepSpeed, MLX). A suspended MPI TrainJob created before the upgrade
       cannot take them, because its JobSet is immutable, so it fails to
-      resume.
+      resume. Helm leaves the JobSet CRD at the schema the install created,
+      so it is applied by hand before the upgrade.
     precondition: >-
       No MPI-based TrainJob is suspended. Let running ones finish, or plan to
       delete and recreate any suspended one after the upgrade. Every
@@ -224,6 +244,42 @@ transitions:
       changed. AICR's own runtimes meet both, since they use the torch plugin
       and name their replicatedJob node.
     stepsByDeployer:
+      - deployers: [helm, helmfile, flux, fleet, terraform]
+        steps:
+          - id: drain-suspended-mpi-trainjobs
+            description: >-
+              List suspended TrainJobs and their runtimes with `kubectl get
+              trainjobs -A -o
+              jsonpath='{range .items[?(@.spec.suspend==true)]}{.metadata.namespace}/{.metadata.name}{"\t"}{.spec.runtimeRef.kind}/{.spec.runtimeRef.name}{"\n"}{end}'`
+              and, for any whose runtime uses the MPI plugin, either resume and
+              finish it before upgrading or delete it and recreate it
+              afterwards.
+            reason: >-
+              Upstream's 2.4.0 notes flag this as needing action before the
+              upgrade; the affected TrainJob otherwise stays stuck after it.
+          - id: apply-jobset-crd
+            description: >-
+              Upgrade the JobSet CRD with the CRD-apply command under
+              "Upgrading components that own CRDs" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/kubeflow/charts/kubeflow-trainer,
+              VERSION=2.4.0, EXCLUDE_SUBCHARTS=lws, and MANAGER set to the
+              field manager that installed it (helm under helm and helmfile,
+              terraform-provider-helm under terraform; that section shows how
+              to check). The lws exclusion leaves out a CRD AICR's values do
+              not install.
+            reason: >-
+              jobsets.jobset.x-k8s.io ships in the JobSet subchart's crds/
+              directory, which Helm installs once and never upgrades, and
+              kubeflow-trainer is not marked ownsCRDs, so no deployer applies
+              it for you. Left at the 0.11.0 schema the 2.2 install created,
+              the API server prunes fields JobSet 0.13.0 writes, such as
+              spec.scheduling and status.executionAttempts.
+          - id: apply
+            description: Regenerate the bundle at the new pin and deploy it as usual.
+            reason: >-
+              The JobSet CRD is at the 0.13.0 schema by now, so the new
+              controller's writes are kept.
       - steps:
           - id: drain-suspended-mpi-trainjobs
             description: >-
@@ -237,8 +293,9 @@ transitions:
               Upstream's 2.4.0 notes flag this as needing action before the
               upgrade; the affected TrainJob otherwise stays stuck after it.
           - id: apply
-            description: Regenerate the bundle at the new pin and deploy or sync it as usual.
+            description: Regenerate the bundle at the new pin and sync it as usual.
             reason: >-
+              Argo CD applies the JobSet CRD from the rendered chart itself.
               2.4.0 bundles JobSet 0.13.0, whose webhook certificate Secret no
               longer declares data, which ends the Argo CD selfHeal reset loop
               on it (NVIDIA/aicr#3425). Trainer's own Secret stopped declaring

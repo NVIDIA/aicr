@@ -29,9 +29,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The leaf whose file the probe substitutes. Its criteria already select
-// platform-kubeflow, so a probe built from them resolves the real base, the
-// real mixins, and the real registry — only the one overlay file differs.
+// The leaf whose file the probe substitutes. A probe built from its criteria
+// resolves the real base and registry; the probe drops the leaf's
+// platform-kubeflow mixin, as the fragment instructs, and keeps its others.
 const (
 	nvcreProbeOverlay     = "h100-eks-ubuntu-training-kubeflow"
 	nvcreProbeOverlayPath = "overlays/" + nvcreProbeOverlay + ".yaml"
@@ -140,6 +140,26 @@ func TestNVCREDocumentedWiringResolves(t *testing.T) {
 	if problems := nvcreWiringProblems(ctx, result); len(problems) > 0 {
 		t.Errorf("the Enabling NVCRE fragment in %s does not resolve to a working wiring:\n  - %s",
 			catalogPath, strings.Join(problems, "\n  - "))
+	}
+
+	// The fragment exists to hold a Trainer version, so the resolved recipe
+	// must carry the fragment's version and manifests rather than the
+	// mixin's or the registry's.
+	i := slices.IndexFunc(fragment.ComponentRefs, func(r nvcreFragmentRef) bool { return r.Name == nvcreTrainerComponent })
+	if i < 0 {
+		t.Fatalf("the fragment in %s declares no %s componentRef", catalogPath, nvcreTrainerComponent)
+	}
+	want := fragment.ComponentRefs[i]
+	got := result.GetComponentRef(nvcreTrainerComponent)
+	if got == nil {
+		t.Fatalf("the resolved recipe has no %s componentRef", nvcreTrainerComponent)
+	}
+	if got.Version != want.Version {
+		t.Errorf("resolved %s version = %q, want the fragment's %q", nvcreTrainerComponent, got.Version, want.Version)
+	}
+	if !slices.Equal(got.ManifestFiles, want.ManifestFiles) {
+		t.Errorf("resolved %s manifestFiles = %v, want the fragment's %v",
+			nvcreTrainerComponent, got.ManifestFiles, want.ManifestFiles)
 	}
 }
 
@@ -528,8 +548,25 @@ func TestNVCRETrainerRefDrift(t *testing.T) {
 			catalog: held("2.2.1"),
 			wantMsg: "preManifestFiles",
 		},
+		{
+			name:  "copy-only key",
+			mixin: mixinRef(),
+			leaf: func() map[string]any {
+				ref := held("2.2.1")
+				ref["namespace"] = "trainer"
+				return ref
+			}(),
+			catalog: held("2.2.1"),
+			wantMsg: "namespace",
+		},
 		{"catalog version differs from leaf", mixinRef(), held("2.2.1"), held("2.4.0"), "hold different versions"},
 		{"copy sets no version", mixinRef(), held("2.2.1"), mixinRef(), "sets no version"},
+		{"copy sets a null version", mixinRef(), held("2.2.1"), func() map[string]any {
+			ref := mixinRef()
+			ref["version"] = nil
+			return ref
+		}(), "sets no version"},
+		{"copy sets an empty version", mixinRef(), held("2.2.1"), held(""), "sets no version"},
 	}
 
 	for _, tt := range tests {

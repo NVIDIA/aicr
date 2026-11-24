@@ -792,8 +792,8 @@ func TestBuildHelmfile_DisableValidationVendoredMixed(t *testing.T) {
 
 // TestBuildHelmfile_DisableValidationBothFlags pins the kubeflow-trainer
 // shape: hasSelfRefCRDs covers the primary (its templates create CRs of
-// CRDs in its own crds/, #914) while manifestsUseChartCRDs covers the
-// injected -post wrapper (platform-kubeflow attaches a
+// CRDs its own chart installs, #914) while manifestsUseChartCRDs covers the
+// injected -post wrapper (its componentRef attaches a
 // ClusterTrainingRuntime CR as manifestFiles). Both releases need the
 // helm-diff bypass; each flag stays scoped to its own release.
 func TestBuildHelmfile_DisableValidationBothFlags(t *testing.T) {

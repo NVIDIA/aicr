@@ -23,7 +23,8 @@
 #   - CRDs:            chart templates gated on crds.enabled (2.3+); crds/ before
 #   - service account: always created by the chart
 # The registry pins 2.4.0; gb300-eks-ubuntu-training-kubeflow holds 2.2.1 for
-# NVCRE, so every key here must also mean the same on 2.2.1.
+# NVCRE, and the 2.2 to 2.4 upgrade records bundle 2.3.0 from this file, so
+# every key here must also mean the same on 2.2.1 and 2.3.0.
 # Chart defaults: https://github.com/kubeflow/trainer/blob/v2.4.0/charts/kubeflow-trainer/values.yaml
 
 # Override release name prefix
