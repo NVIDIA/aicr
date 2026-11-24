@@ -51,7 +51,10 @@ const runIDEnv = "AICR_RUN_ID"
 //     which delete must never touch.
 //   - neverCreated: the apiserver definitively rejected the Create.
 //
-// None set means the Create failed ambiguously and may still have persisted.
+// None set means the namespace was never seen with this run's token: the
+// Create failed ambiguously and may still have persisted, or an existing
+// namespace's labels could not be read. delete resolves either by name and
+// token.
 type probeNamespace struct {
 	token        string
 	name         string
@@ -124,7 +127,8 @@ func (p *probeNamespace) create(ctx context.Context, client kubernetes.Interface
 	case k8serrors.IsAlreadyExists(err):
 		existing, getErr := client.CoreV1().Namespaces().Get(opCtx, p.name, metav1.GetOptions{})
 		if getErr != nil {
-			p.foreign = true
+			// Ownership is unknown, not foreign: delete reads the namespace
+			// again and removes it only when it carries this run's token.
 			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
 				"probe namespace %s already exists and its ownership could not be verified", p.name), getErr)
 		}

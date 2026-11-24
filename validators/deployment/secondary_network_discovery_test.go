@@ -28,6 +28,7 @@ import (
 )
 
 const (
+	sriovIBNetworksComponent     = "sriov-ib-networks"
 	testNetworkOperatorNamespace = "nvidia-network-operator"
 	secondaryNetworkCheck        = "secondary-network-attachment"
 )
@@ -189,7 +190,7 @@ func TestDiscoverSecondaryNetworks_FailsClosed(t *testing.T) {
 			name: "missing network-operator manifest",
 			ref: recipe.ComponentRef{Name: networkOperatorComponent, Namespace: testNetworkOperatorNamespace,
 				ManifestFiles: []string{"components/network-operator/manifests/does-not-exist.yaml"}},
-			wantErrSub: "failed to load secondary network manifest",
+			wantErrSub: "failed to load manifest",
 		},
 		{
 			name: "missing manifest of another component",
@@ -658,6 +659,7 @@ spec:
 		name       string
 		refs       []recipe.ComponentRef
 		wantKeys   []string
+		wantPools  map[string]netip.Prefix
 		wantErrSub string
 	}{
 		{name: "quoted kind and JSON form are found", refs: []recipe.ComponentRef{ref("a", "quoted.yaml", "flow.json")},
@@ -667,7 +669,8 @@ spec:
 		{name: "the same NAD with a different CNI config fails",
 			refs:       []recipe.ComponentRef{ref("a", "rail.yaml"), ref("b", "rail-vlan.yaml")},
 			wantErrSub: "apps/rail is declared twice with different content"},
-		{name: "one IPPool name, the same masked subnet, merges", refs: []recipe.ComponentRef{ref("c", "pools-same.yaml")}},
+		{name: "one IPPool name, the same masked subnet, merges", refs: []recipe.ComponentRef{ref("c", "pools-same.yaml")},
+			wantPools: map[string]netip.Prefix{"p": netip.MustParsePrefix("10.0.0.0/24")}},
 		{name: "one IPPool name with two subnets in one file fails", refs: []recipe.ComponentRef{ref("c", "pools-diff.yaml")},
 			wantErrSub: "IPPool p is declared twice with different subnets"},
 	}
@@ -686,6 +689,13 @@ spec:
 			}
 			if keys := networkKeys(got.networks); strings.Join(keys, ",") != strings.Join(tt.wantKeys, ",") {
 				t.Errorf("networks = %v, want %v", keys, tt.wantKeys)
+			}
+			wantPools := tt.wantPools
+			if wantPools == nil {
+				wantPools = map[string]netip.Prefix{}
+			}
+			if !reflect.DeepEqual(got.poolSubnets, wantPools) {
+				t.Errorf("pools = %v, want %v", got.poolSubnets, wantPools)
 			}
 		})
 	}
@@ -733,6 +743,8 @@ func TestParseNADConfig(t *testing.T) {
 			wantUnverified: []string{"static"}},
 		{name: "ib-sriov needs a PCI address", wantPCI: true, config: `{"type":"ib-sriov"}`},
 		{name: "host-device needs none", config: `{"cniVersion":"0.3.1","plugins":[{"type":"host-device","ipam":{}},{"type":"rdma"}]}`},
+		{name: "a conflist's top-level object is not a plugin",
+			config: `{"cniVersion":"0.4.0","type":"sriov","ipam":{"type":"host-local","subnet":"10.9.0.0/24"},"plugins":[{"type":"host-device"}]}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -756,5 +768,52 @@ func TestParseNADConfig(t *testing.T) {
 				t.Errorf("ipam = %+v, want subnets %v pools %v unverified %v", got.ipam, tt.wantSubnets, tt.wantPools, tt.wantUnverified)
 			}
 		})
+	}
+}
+
+// TestDiscoverSecondaryNetworks_Templated covers kinds no raw text names: a
+// templated manifest renders with its component's values, so a kind that
+// only a value supplies is found; an untemplated file without a kind name is
+// skipped without resolving its component's values, while a templated file
+// whose values cannot be resolved fails discovery instead of reading as
+// "no network".
+func TestDiscoverSecondaryNetworks_Templated(t *testing.T) {
+	t.Parallel()
+
+	dp := providertest.NewMap(map[string][]byte{
+		"components/custom-nets/values.yaml": []byte("kind: NetworkAttachmentDefinition\n"),
+		"components/custom-nets/manifests/templated.yaml": []byte(`apiVersion: k8s.cni.cncf.io/v1
+kind: {{ index .Values "custom-nets" "kind" }}
+metadata:
+  name: from-values
+  namespace: {{ .Release.Namespace }}
+spec:
+  config: '{"type":"macvlan"}'
+`),
+		"components/plain/manifests/configmap.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: plain\n"),
+		"components/plain/manifests/templated.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Release.Namespace }}\n"),
+	})
+	custom := recipe.ComponentRef{Name: "custom-nets", Namespace: "apps",
+		ValuesFile: "components/custom-nets/values.yaml", ManifestFiles: []string{"components/custom-nets/manifests/templated.yaml"}}
+
+	got, err := discoverSecondaryNetworks(context.Background(), dp, []recipe.ComponentRef{custom})
+	if err != nil {
+		t.Fatalf("discoverSecondaryNetworks() error = %v", err)
+	}
+	if keys := networkKeys(got.networks); strings.Join(keys, ",") != "apps/from-values" {
+		t.Errorf("networks = %v, want the NAD whose kind comes from values", keys)
+	}
+
+	unresolvable := func(files ...string) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: "plain", Namespace: "plain",
+			ValuesFile: "components/plain/values-only-in-data.yaml", ManifestFiles: files}
+	}
+	if _, err := discoverSecondaryNetworks(context.Background(), dp,
+		[]recipe.ComponentRef{unresolvable("components/plain/manifests/configmap.yaml")}); err != nil {
+		t.Errorf("an untemplated file without a kind name failed discovery: %v", err)
+	}
+	if _, err := discoverSecondaryNetworks(context.Background(), dp,
+		[]recipe.ComponentRef{unresolvable("components/plain/manifests/templated.yaml")}); err == nil {
+		t.Error("a templated file whose values cannot be resolved passed discovery, want an error")
 	}
 }

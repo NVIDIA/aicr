@@ -272,7 +272,9 @@ func evaluateAttachment(network secondaryNetwork, statusAnnotation string, podIn
 // of its nv-ipam pools); when no range of its family is known because a pool
 // is not shipped or the IPAM type's range is not read, that bound is recorded
 // as a note, while a network whose every range is known and none is of the
-// address's family fails. An unknown pod network is a note too.
+// address's family fails. Every family the known ranges cover must have an
+// address, so a dual-stack declaration cannot pass on one family alone. An
+// unknown pod network is a note too.
 func evaluateAttachmentIPs(network secondaryNetwork, ips []string,
 	poolSubnets map[string]netip.Prefix, podCIDRs []netip.Prefix) (problems, notes []string) {
 
@@ -301,12 +303,14 @@ func evaluateAttachmentIPs(network secondaryNetwork, ips []string,
 		notes = append(notes, podCIDRsNotEvaluatedNote)
 	}
 
+	reported := map[bool]bool{}
 	for _, raw := range ips {
 		addr, err := parseStatusIP(raw)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("address %q is not an IP", raw))
 			continue
 		}
+		reported[addr.Is4()] = true
 		family := slices.DeleteFunc(slices.Clone(ranges), func(p netip.Prefix) bool { return p.Addr().Is4() != addr.Is4() })
 		switch {
 		case len(family) > 0:
@@ -326,7 +330,21 @@ func evaluateAttachmentIPs(network secondaryNetwork, ips []string,
 				addr, podCIDRs[i]))
 		}
 	}
+	for _, is4 := range []bool{true, false} {
+		declared := slices.DeleteFunc(slices.Clone(ranges), func(p netip.Prefix) bool { return p.Addr().Is4() != is4 })
+		if len(declared) > 0 && !reported[is4] {
+			problems = append(problems, fmt.Sprintf("the network declares the %s range(s) %s but the attachment has no %s address",
+				familyName(is4), formatPrefixes(declared), familyName(is4)))
+		}
+	}
 	return problems, notes
+}
+
+func familyName(is4 bool) string {
+	if is4 {
+		return "IPv4"
+	}
+	return "IPv6"
 }
 
 // unconfiguredAddresses reports each address network-status gives entry that

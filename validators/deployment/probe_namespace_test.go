@@ -295,3 +295,36 @@ func TestProbeNamespaceCopiesEachPullSecretOnce(t *testing.T) {
 		t.Errorf("imagePullSecretRefs() = %v, want one per distinct Secret", refs)
 	}
 }
+
+// TestProbeNamespaceUnverifiedOwnershipIsResolvedAtDelete proves a create
+// that met AlreadyExists and could not read the namespace leaves ownership
+// open: delete reads it again, and deletes it when it carries this run's
+// token.
+func TestProbeNamespaceUnverifiedOwnershipIsResolvedAtDelete(t *testing.T) {
+	t.Parallel()
+	ns := testProbeNamespace(t)
+	client := k8sfake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: ns.name, Labels: map[string]string{labels.GPUTestRun: ns.token},
+	}})
+	var gets int
+	client.PrependReactor("get", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		gets++
+		if gets == 1 {
+			return true, nil, k8serrors.NewServiceUnavailable("apiserver restarting")
+		}
+		return false, nil, nil
+	})
+
+	if err := ns.create(context.Background(), client); err == nil {
+		t.Fatal("create() error = nil, want the unverified ownership error")
+	}
+	if ns.foreign {
+		t.Fatal("create() marked the namespace foreign after an ownership read failed")
+	}
+	if err := ns.delete(client); err != nil {
+		t.Fatalf("delete() error = %v", err)
+	}
+	if _, err := client.CoreV1().Namespaces().Get(context.Background(), ns.name, metav1.GetOptions{}); !k8serrors.IsNotFound(err) {
+		t.Errorf("namespace still present after delete (get error %v)", err)
+	}
+}

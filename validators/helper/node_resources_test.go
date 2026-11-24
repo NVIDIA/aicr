@@ -133,6 +133,50 @@ func TestNodeResourceRequests(t *testing.T) {
 	}
 }
 
+func TestNodeResourceRequestsSplit(t *testing.T) {
+	t.Parallel()
+
+	own := vfPod("probe", "node-a", v1.PodPending, resourceContainer(1, -1))
+	own.Namespace = "probes"
+	client := k8sfake.NewClientset(
+		own,
+		vfPod("workload", "node-a", v1.PodRunning, resourceContainer(2, -1)),
+		vfPod("done", "node-a", v1.PodSucceeded, resourceContainer(4, -1)),
+	)
+	inProbes := func(p *v1.Pod) bool { return p.Namespace == "probes" }
+
+	tests := []struct {
+		name       string
+		own        func(*v1.Pod) bool
+		wantOthers int64
+		wantOwned  int64
+	}{
+		{"own pods summed apart", inProbes, 2, 1},
+		{"nil selects no pod as own", nil, 3, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			others, owned, err := NodeResourceRequestsSplit(context.Background(), client, "node-a", tt.own)
+			if err != nil {
+				t.Fatalf("NodeResourceRequestsSplit() error = %v", err)
+			}
+			if q := others[testVF]; q.Value() != tt.wantOthers {
+				t.Errorf("others %s = %s, want %d", testVF, q.String(), tt.wantOthers)
+			}
+			if q := owned[testVF]; q.Value() != tt.wantOwned {
+				t.Errorf("owned %s = %s, want %d", testVF, q.String(), tt.wantOwned)
+			}
+		})
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := NodeResourceRequestsSplit(canceled, client, "node-a", inProbes); err == nil {
+		t.Error("NodeResourceRequestsSplit() error = nil with a canceled context, want error")
+	}
+}
+
 // TestPodEffectiveRequestsPodLevel covers the cpu and memory accounting the
 // scheduler applies on top of the containers: pod-level requests replace the
 // containers' sum for the resources they name, and overhead is added after.

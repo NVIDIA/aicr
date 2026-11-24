@@ -1630,22 +1630,28 @@ cluster whose GPU and network nodes are all KWOK skips with
 - A network whose advertising nodes are all cordoned or excluded by the
   run's tolerations, both an operator's deliberate choice, is
   `SKIPPED (unschedulable)`.
-- A network whose Ready nodes have every unit requested is `SKIPPED (busy)`.
-  A VR200 rail has one VF per node, so a training job holding the rails must
-  not fail the check. Two later signals of the same race are busy too, each
-  only with evidence. The scheduler leaving the probe `Unschedulable` with
-  `Insufficient <resource>` is busy only when the wait watched the pod to the
-  end of the probe budget; a wait stopped by an API error fails with that
-  error. The kubelet's device manager rejecting the probe with
-  `UnexpectedAdmissionError` and a message naming
-  `requested number of devices unavailable for <resource>` is busy only when
-  other unfinished pods then request every allocatable unit; otherwise the
-  device manager had fewer healthy units than the node advertises and the
-  network fails as a possibly unhealthy unit. Any other `Unschedulable`
-  message fails with the scheduler's text, and `OutOf<resource>` fails too:
-  the device manager admits a device-plugin resource before the resource
-  predicate runs, so that reason means the plugin is not registered on the
-  node.
+- A network whose Ready nodes have every unit requested by other workloads
+  is `SKIPPED (busy)`. A VR200 rail has one VF per node, so a training job
+  holding the rails must not fail the check. Units held by the check's own
+  probes, in the probe namespace or reserved for another network in the same
+  plan, are not workloads: a network waiting only on them is deferred and
+  planned again once the probes ahead of it finish, within the same probe
+  budget, and one still waiting when the budget runs out is reported with
+  that cause.
+- Two later signals of the same race are busy only with evidence that other
+  workloads request at least one unit and every allocatable unit: the
+  scheduler leaving the probe `Unschedulable` with `Insufficient <resource>`
+  at the end of the probe budget, and the kubelet's device manager rejecting
+  it with `UnexpectedAdmissionError` and a message naming
+  `requested number of devices unavailable for <resource>`. Without that
+  evidence a unit may have turned unhealthy, or allocatable dropped, since
+  planning, and the network fails. The scheduler's verdict is read from a
+  fresh read of the pod at the deadline, never from the last watch event; a
+  wait stopped by an API error, or a fresh read that fails, fails the
+  network. Any other `Unschedulable` message fails with the scheduler's text,
+  and `OutOf<resource>` fails too: the device manager admits a device-plugin
+  resource before the resource predicate runs, so that reason means the
+  plugin is not registered on the node.
 - Any network failing fails the check. At least one passing, with none
   failing, passes, with the skipped networks disclosed. When every network
   is skipped, the check skips with `nodes-busy` if at least one was busy,

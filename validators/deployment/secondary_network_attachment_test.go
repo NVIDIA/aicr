@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/kubernetes"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -164,8 +165,6 @@ func perRailStatus(prefix string) probeStamp {
 }
 
 // probeLogs is the probe's output on a pod that got net1 carrying addrs.
-// The fake log request names no pod, so every probe reads one output; it
-// carries every address any probe was stamped with.
 func probeLogs(addrs []string) string {
 	var b strings.Builder
 	b.WriteString(probeSysNetBegin + "\neth0\nlo\nnet1\n" + probeSysNetEnd + "\n" + probeAddrBegin + "\n")
@@ -193,17 +192,33 @@ func stampedAddrs(pod *corev1.Pod) []string {
 }
 
 // attachmentCluster is a fake apiserver whose created probe pods are stamped
-// at create, as a kubelet and Multus would have left them.
+// at create, as a kubelet and Multus would have left them, each with its own
+// probe output carrying the addresses its network-status reports. The fake
+// log request names no pod, so the output is served through config.
 type attachmentCluster struct {
 	client *k8sfake.Clientset
 	mu     sync.Mutex
 	probes []*corev1.Pod
-	addrs  []string
+	logs   map[string]string
+}
+
+// config returns base reading each probe's own output.
+func (c *attachmentCluster) config(base attachmentCheckConfig) attachmentCheckConfig {
+	base.podLogs = func(_ context.Context, _ kubernetes.Interface, _, pod, _ string) (string, error) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		logs, ok := c.logs[pod]
+		if !ok {
+			return "", fmt.Errorf("no probe output for pod %s", pod)
+		}
+		return logs, nil
+	}
+	return base
 }
 
 func newAttachmentCluster(t *testing.T, stamp probeStamp, objects ...runtime.Object) *attachmentCluster {
 	t.Helper()
-	c := &attachmentCluster{client: k8sfake.NewClientset(objects...)}
+	c := &attachmentCluster{client: k8sfake.NewClientset(objects...), logs: map[string]string{}}
 	c.client.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		pod, ok := action.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
 		if !ok || pod.GenerateName != attachmentProbeGenerateName {
@@ -216,7 +231,7 @@ func newAttachmentCluster(t *testing.T, stamp probeStamp, objects ...runtime.Obj
 		c.mu.Unlock()
 		extra := stamp(cp)
 		c.mu.Lock()
-		c.addrs = append(c.addrs, stampedAddrs(cp)...)
+		c.logs[cp.Name] = probeLogs(stampedAddrs(cp))
 		c.mu.Unlock()
 		if err := c.client.Tracker().Add(cp); err != nil {
 			return true, nil, err
@@ -227,14 +242,6 @@ func newAttachmentCluster(t *testing.T, stamp probeStamp, objects ...runtime.Obj
 			}
 		}
 		return true, cp, nil
-	})
-	c.client.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		if action.GetSubresource() != "log" {
-			return false, nil, nil
-		}
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		return true, &runtime.Unknown{Raw: []byte(probeLogs(c.addrs))}, nil
 	})
 	return c
 }
@@ -326,7 +333,7 @@ func TestCheckSecondaryNetworkAttachment_PassGB200(t *testing.T) {
 		attachmentNode("gpu-a", railAllocatable(4, 16)))
 	ctx := attachmentContext(t, cluster.client, gb200NVKERefs)
 
-	extra, err := captureExtras(t, func() error { return runSecondaryNetworkAttachment(ctx, testAttachmentConfig) })
+	extra, err := captureExtras(t, func() error { return runSecondaryNetworkAttachment(ctx, cluster.config(testAttachmentConfig)) })
 	if err != nil {
 		t.Fatalf("runSecondaryNetworkAttachment() error = %v, want pass", err)
 	}
@@ -409,6 +416,7 @@ func TestCheckSecondaryNetworkAttachment_Outcomes(t *testing.T) {
 			return nil
 		}
 	}
+	const schedulerShortage = "0/2 nodes are available: 1 Insufficient nvidia.com/mlnxnics, 1 node(s) didn't match Pod's node affinity/selector."
 	const devicesUnavailableMessage = "Pod was rejected: Allocate failed due to requested number of devices unavailable " +
 		"for nvidia.com/mlnxnics. Requested: 1, Available: 0, which is unexpected"
 	mlnxNode := func(name string, mutate ...func(*corev1.Node)) *corev1.Node {
@@ -422,6 +430,7 @@ func TestCheckSecondaryNetworkAttachment_Outcomes(t *testing.T) {
 		objects       []runtime.Object
 		stamp         probeStamp
 		setup         func(*k8sfake.Clientset)
+		realLogs      bool
 		wantPass      bool
 		wantSkip      string
 		wantErrSubs   []string
@@ -523,7 +532,7 @@ func TestCheckSecondaryNetworkAttachment_Outcomes(t *testing.T) {
 			refs:        gb300OKERefs,
 			objects:     []runtime.Object{mlnxNode("gpu-a")},
 			stamp:       failedWith(kubeletUnexpectedAdmissionError, devicesUnavailableMessage),
-			wantErrSubs: []string{"other pods request only 0 of 4", "a unit may be unhealthy"},
+			wantErrSubs: []string{"other workloads request only 0 of 4", "a unit may be unhealthy"},
 		},
 		{
 			name:        "the device manager rejecting another resource fails",
@@ -547,11 +556,35 @@ func TestCheckSecondaryNetworkAttachment_Outcomes(t *testing.T) {
 			wantErrSubs: []string{"the probe pod failed: phase Failed, reason Error"},
 		},
 		{
-			name:     "the scheduler finding no free unit is a busy skip",
-			refs:     gb300OKERefs,
-			objects:  []runtime.Object{mlnxNode("gpu-a")},
-			stamp:    unschedulable("0/2 nodes are available: 1 Insufficient nvidia.com/mlnxnics, 1 node(s) didn't match Pod's node affinity/selector."),
+			name:    "the scheduler finding no free unit while workloads hold them all is a busy skip",
+			refs:    gb300OKERefs,
+			objects: []runtime.Object{mlnxNode("gpu-a")},
+			stamp: func(pod *corev1.Pod) []runtime.Object {
+				unschedulable(schedulerShortage)(pod)
+				return []runtime.Object{workloadPod("arrived-after-planning", "gpu-a", testMlnxNICs, 4)}
+			},
 			wantSkip: validators.SkipReasonNodesBusy,
+		},
+		{
+			name:        "the scheduler finding no free unit that no workload holds fails",
+			refs:        gb300OKERefs,
+			objects:     []runtime.Object{mlnxNode("gpu-a")},
+			stamp:       unschedulable(schedulerShortage),
+			wantErrSubs: []string{"other workloads request only 0 of 4", "a unit may be unhealthy"},
+		},
+		{
+			name: "units held only by this run's own probes are not workload contention",
+			refs: gb300OKERefs,
+			objects: []runtime.Object{mlnxNode("gpu-a", func(n *corev1.Node) {
+				n.Status.Allocatable[corev1.ResourceName(testMlnxNICs)] = *resource.NewQuantity(1, resource.DecimalSI)
+			})},
+			stamp: func(pod *corev1.Pod) []runtime.Object {
+				unschedulable(schedulerShortage)(pod)
+				own := workloadPod("own-probe", "gpu-a", testMlnxNICs, 1)
+				own.Namespace = pod.Namespace
+				return []runtime.Object{own}
+			},
+			wantErrSubs: []string{"other workloads request only 0 of 1"},
 		},
 		{
 			name:    "a watch that fails after the scheduler reported a shortage fails, never busy",
@@ -597,6 +630,7 @@ func TestCheckSecondaryNetworkAttachment_Outcomes(t *testing.T) {
 					return true, nil, fmt.Errorf("kubelet unreachable")
 				})
 			},
+			realLogs:    true,
 			wantErrSubs: []string{"the probe's output could not be read"},
 		},
 		{
@@ -656,7 +690,11 @@ func TestCheckSecondaryNetworkAttachment_Outcomes(t *testing.T) {
 				tt.setup(cluster.client)
 			}
 			ctx := attachmentContext(t, cluster.client, tt.refs)
-			extra, err := captureExtras(t, func() error { return runSecondaryNetworkAttachment(ctx, testAttachmentConfig) })
+			cfg := cluster.config(testAttachmentConfig)
+			if tt.realLogs {
+				cfg.podLogs = nil
+			}
+			extra, err := captureExtras(t, func() error { return runSecondaryNetworkAttachment(ctx, cfg) })
 
 			switch {
 			case tt.wantPass:
@@ -710,13 +748,12 @@ func TestCheckSecondaryNetworkAttachment_EntryPoints(t *testing.T) {
 		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 	})
 	t.Run("production config is the pkg/defaults budget", func(t *testing.T) {
-		want := attachmentCheckConfig{
-			probeTimeout:  defaults.SecondaryNetworkProbeTimeout,
-			reportReserve: defaults.SecondaryNetworkProbeReportReserve,
-			concurrency:   defaults.SecondaryNetworkProbeConcurrency,
-		}
-		if got := defaultAttachmentCheckConfig(); got != want {
-			t.Errorf("defaultAttachmentCheckConfig() = %+v, want %+v", got, want)
+		got := defaultAttachmentCheckConfig()
+		if got.probeTimeout != defaults.SecondaryNetworkProbeTimeout ||
+			got.reportReserve != defaults.SecondaryNetworkProbeReportReserve ||
+			got.concurrency != defaults.SecondaryNetworkProbeConcurrency || got.podLogs == nil {
+
+			t.Errorf("defaultAttachmentCheckConfig() = %+v, want the pkg/defaults budget and a pod-log reader", got)
 		}
 	})
 }
@@ -790,7 +827,7 @@ func TestCheckSecondaryNetworkAttachment_CleanupFailureFailsPass(t *testing.T) {
 	})
 	ctx := attachmentContext(t, cluster.client, gb300OKERefs)
 
-	_, err := captureExtras(t, func() error { return runSecondaryNetworkAttachment(ctx, testAttachmentConfig) })
+	_, err := captureExtras(t, func() error { return runSecondaryNetworkAttachment(ctx, cluster.config(testAttachmentConfig)) })
 	if err == nil || validators.IsSkip(err) || !strings.Contains(err.Error(), "CLEANUP FAILED") {
 		t.Fatalf("error = %v, want a CLEANUP FAILED failure", err)
 	}
@@ -807,7 +844,7 @@ func TestCheckSecondaryNetworkAttachment_PartialBusyPasses(t *testing.T) {
 	cluster := newAttachmentCluster(t, perRailStatus("default/roce-network-rail-"), objects...)
 	ctx := attachmentContext(t, cluster.client, vr200NVKERefs)
 
-	out, extra, err := captureOutput(t, func() error { return runSecondaryNetworkAttachment(ctx, testAttachmentConfig) })
+	out, extra, err := captureOutput(t, func() error { return runSecondaryNetworkAttachment(ctx, cluster.config(testAttachmentConfig)) })
 	if err != nil {
 		t.Fatalf("error = %v, want pass", err)
 	}
@@ -859,8 +896,10 @@ func TestPlanAttachmentProbes(t *testing.T) {
 		pods         []runtime.Object
 		networks     []secondaryNetwork
 		tolerations  []corev1.Toleration
+		ownPods      []runtime.Object
 		wantProbes   map[string]string
 		wantResolved map[string]attachmentStatus
+		wantDeferred []string
 	}{
 		{
 			name:       "the default tolerate-all probe may use a tainted node",
@@ -966,11 +1005,29 @@ func TestPlanAttachmentProbes(t *testing.T) {
 			wantResolved: map[string]attachmentStatus{"ns/n1": attachmentFailed},
 		},
 		{
-			name:         "two networks sharing a resource reserve distinct units",
+			name:         "a network waiting only on this run's reservation is deferred, not busy",
 			nodes:        []*corev1.Node{attachmentNode("a", map[string]int64{testMlnxNICs: 1}), attachmentNode("b", map[string]int64{testMlnxNICs: 1})},
 			networks:     []secondaryNetwork{shared("n1"), shared("n2"), shared("n3")},
 			wantProbes:   map[string]string{"ns/n1": "a", "ns/n2": "b"},
-			wantResolved: map[string]attachmentStatus{"ns/n3": attachmentSkippedBusy},
+			wantDeferred: []string{"ns/n3"},
+		},
+		{
+			name:         "a unit held by this run's unfinished probe pod defers the network",
+			nodes:        []*corev1.Node{attachmentNode("a", map[string]int64{testMlnxNICs: 1})},
+			ownPods:      []runtime.Object{ownProbePod("probe-0", "a", testMlnxNICs)},
+			networks:     []secondaryNetwork{shared("n1")},
+			wantDeferred: []string{"ns/n1"},
+		},
+		{
+			name: "units held by workloads and by this run: busy only where workloads hold them all",
+			nodes: []*corev1.Node{
+				attachmentNode("a", map[string]int64{testMlnxNICs: 1}),
+				attachmentNode("b", map[string]int64{testMlnxNICs: 1}),
+			},
+			pods:         []runtime.Object{workloadPod("w", "a", testMlnxNICs, 1)},
+			ownPods:      []runtime.Object{ownProbePod("probe-0", "b", testMlnxNICs)},
+			networks:     []secondaryNetwork{shared("n1")},
+			wantDeferred: []string{"ns/n1"},
 		},
 		{
 			name: "network without a resource goes to a GPU node",
@@ -990,9 +1047,10 @@ func TestPlanAttachmentProbes(t *testing.T) {
 			for _, n := range tt.nodes {
 				nodes = append(nodes, *n)
 			}
+			objects = append(objects, tt.ownPods...)
 			ctx := attachmentContext(t, k8sfake.NewClientset(objects...), nil)
 			ctx.Tolerations = tt.tolerations
-			plan, err := planAttachmentProbes(ctx, nodes, tt.networks)
+			plan, err := planAttachmentProbes(ctx, nodes, tt.networks, testOwnNamespace)
 			if err != nil {
 				t.Fatalf("planAttachmentProbes() error = %v", err)
 			}
@@ -1010,8 +1068,23 @@ func TestPlanAttachmentProbes(t *testing.T) {
 			if fmt.Sprint(gotResolved) != fmt.Sprint(nilIfEmptyStatus(tt.wantResolved)) {
 				t.Errorf("resolved = %v, want %v", gotResolved, tt.wantResolved)
 			}
+			if got := networkKeys(plan.deferred); strings.Join(got, ",") != strings.Join(tt.wantDeferred, ",") {
+				t.Errorf("deferred = %v, want %v", got, tt.wantDeferred)
+			}
 		})
 	}
+}
+
+// testOwnNamespace is the probe namespace the planning tests treat as this
+// run's.
+const testOwnNamespace = "aicr-gpu-test-own"
+
+// ownProbePod is an unfinished probe pod of this run on node holding one unit
+// of resourceName.
+func ownProbePod(name, node, resourceName string) *corev1.Pod {
+	pod := workloadPod(name, node, resourceName, 1)
+	pod.Namespace = testOwnNamespace
+	return pod
 }
 
 func nilIfEmpty(m map[string]string) map[string]string {
@@ -1039,7 +1112,7 @@ func TestPlanAttachmentProbes_OccupancyErrorFailsClosed(t *testing.T) {
 	ctx := attachmentContext(t, client, nil)
 	_, err := planAttachmentProbes(ctx,
 		[]corev1.Node{*attachmentNode("a", map[string]int64{testMlnxNICs: 1})},
-		[]secondaryNetwork{{Namespace: "ns", Name: "n", Resource: testMlnxNICs}})
+		[]secondaryNetwork{{Namespace: "ns", Name: "n", Resource: testMlnxNICs}}, "")
 	if err == nil || validators.IsSkip(err) || !strings.Contains(err.Error(), "failed to list pods on node a") {
 		t.Fatalf("planAttachmentProbes() error = %v, want the occupancy failure", err)
 	}
@@ -1344,7 +1417,7 @@ func TestProbeAttachmentStartingAfterDeadline(t *testing.T) {
 	client := k8sfake.NewClientset()
 	ctx := attachmentContext(t, client, nil)
 	ns := &probeNamespace{token: "tok", name: "aicr-gpu-test-tok"}
-	out := probeAttachment(ctx, ns, probeAssignment{network: rail0, node: "gpu-a"}, time.Now().Add(-time.Second), rail0Pools, nil)
+	out := probeAttachment(ctx, nil, ns, probeAssignment{network: rail0, node: "gpu-a"}, time.Now().Add(-time.Second), rail0Pools, nil)
 	if out.status != attachmentFailed || !strings.Contains(out.detail, "the probe budget ran out before this probe could start") {
 		t.Errorf("outcome = %+v, want a failure naming the spent budget", out)
 	}
@@ -1355,4 +1428,107 @@ func TestProbeAttachmentStartingAfterDeadline(t *testing.T) {
 	if len(pods.Items) != 0 {
 		t.Errorf("created %d probe pod(s) after the deadline, want none", len(pods.Items))
 	}
+}
+
+// TestProbeNetworksProbesDeferredNetworkAfterOwnRelease drives two networks
+// sharing a resource with one unit: the first is probed, the second waits on
+// this run's own reservation, and is probed in the next wave once the first
+// probe has finished, instead of being reported as held by other pods.
+func TestProbeNetworksProbesDeferredNetworkAfterOwnRelease(t *testing.T) {
+	shared := func(name string) secondaryNetwork {
+		return secondaryNetwork{Namespace: "ns", Name: name, Resource: testMlnxNICs, Kind: attachmentKindNAD}
+	}
+	node := attachmentNode("gpu-a", map[string]int64{testMlnxNICs: 1})
+	cluster := newAttachmentCluster(t, attachedStatus(""), node)
+	ctx := attachmentContext(t, cluster.client, nil)
+	networks := []secondaryNetwork{shared("n1"), shared("n2")}
+
+	plan, err := planAttachmentProbes(ctx, []corev1.Node{*node}, networks, "")
+	if err != nil {
+		t.Fatalf("planAttachmentProbes() error = %v", err)
+	}
+	if len(plan.probes) != 1 || len(plan.deferred) != 1 {
+		t.Fatalf("plan = %d probe(s), %d deferred; want 1 and 1", len(plan.probes), len(plan.deferred))
+	}
+	ns := testProbeNamespace(t)
+	t.Cleanup(func() { _ = ns.delete(cluster.client) })
+
+	extra, err := captureExtras(t, func() error {
+		return probeNetworks(ctx, cluster.config(testAttachmentConfig), ns, []corev1.Node{*node}, plan, nil, nil)
+	})
+	if err != nil {
+		t.Fatalf("probeNetworks() error = %v, want both networks attached", err)
+	}
+	assertExtraSubset(t, extra, map[string]string{validators.ExtraKeyNodesValidated: "2", validators.ExtraKeyNodesSkipped: "0"})
+	if got := len(cluster.createdProbes()); got != 2 {
+		t.Errorf("created %d probe pods, want one per network across two waves", got)
+	}
+}
+
+// TestHeldByRunOutcomesNameTheirCause pins that a network left waiting on
+// this run's own probes is never described as held by other pods.
+func TestHeldByRunOutcomesNameTheirCause(t *testing.T) {
+	t.Parallel()
+	out := heldByRunOutcomes([]secondaryNetwork{rail0}, "the probe budget ran out before it was released")
+	if len(out) != 1 || out[0].status != attachmentSkippedBusy ||
+		!strings.Contains(out[0].detail, "held by this run's probe of another network") ||
+		strings.Contains(out[0].detail, "requested by other pods") {
+
+		t.Errorf("heldByRunOutcomes() = %+v", out)
+	}
+}
+
+// TestAwaitProbeRereadsAtDeadline proves the verdict at the probe deadline
+// rests on a fresh read, not on a state a silent watch left stale: a pod last
+// seen Unschedulable that has since finished is judged finished, and a fresh
+// read that fails is a failure, never busy.
+func TestAwaitProbeRereadsAtDeadline(t *testing.T) {
+	t.Parallel()
+	const ns, name = "probe-ns", "probe"
+	stale := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Status: corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{
+			Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: corev1.PodReasonUnschedulable,
+			Message: "0/1 nodes are available: 1 Insufficient " + testMlnxNICs + ".",
+		}}},
+	}
+	finished := stale.DeepCopy()
+	finished.Status = corev1.PodStatus{Phase: corev1.PodSucceeded}
+	out := attachmentOutcome{network: okeRdmaNet, node: "gpu-a"}
+
+	newClient := func(laterGet func() (runtime.Object, error)) *k8sfake.Clientset {
+		client := k8sfake.NewClientset(stale.DeepCopy())
+		client.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+			return true, watch.NewFake(), nil
+		})
+		var gets int
+		client.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+			gets++
+			if gets == 1 {
+				return true, stale.DeepCopy(), nil
+			}
+			obj, err := laterGet()
+			return true, obj, err
+		})
+		return client
+	}
+
+	t.Run("finished since the last event", func(t *testing.T) {
+		t.Parallel()
+		ctx := attachmentContext(t, newClient(func() (runtime.Object, error) { return finished.DeepCopy(), nil }), nil)
+		pod, verdict, decided := awaitProbe(ctx, out, ns, name, time.Now().Add(300*time.Millisecond))
+		if decided || pod == nil || pod.Status.Phase != corev1.PodSucceeded {
+			t.Errorf("awaitProbe() = %v, %+v, %v; want the finished pod to be judged", pod, verdict, decided)
+		}
+	})
+	t.Run("fresh read fails", func(t *testing.T) {
+		t.Parallel()
+		ctx := attachmentContext(t, newClient(func() (runtime.Object, error) {
+			return nil, k8serrors.NewServiceUnavailable("apiserver restarting")
+		}), nil)
+		_, verdict, decided := awaitProbe(ctx, out, ns, name, time.Now().Add(300*time.Millisecond))
+		if !decided || verdict.status != attachmentFailed || !strings.Contains(verdict.detail, "could not be read again") {
+			t.Errorf("awaitProbe() verdict = %+v, decided %v; want a failure, never busy", verdict, decided)
+		}
+	})
 }

@@ -43,6 +43,18 @@ var rail0AddrLines = []string{
 	"3: net1    inet 10.255.0.12/22 scope global net1",
 }
 
+// dualStack is rail0 allocating from an IPv4 and an IPv6 pool.
+var dualStack = func() secondaryNetwork {
+	n := rail0
+	n.IPAMPools = []string{"nv-ipam-pool-rail-0", "nv-ipam-pool-rail-0-v6"}
+	return n
+}()
+
+var dualStackPools = map[string]netip.Prefix{
+	"nv-ipam-pool-rail-0":    netip.MustParsePrefix("10.255.0.0/22"),
+	"nv-ipam-pool-rail-0-v6": netip.MustParsePrefix("fd00:255::/64"),
+}
+
 // hostLocalNet is a shipped NAD whose host-local IPAM declares its range
 // inline.
 var hostLocalNet = secondaryNetwork{
@@ -279,7 +291,7 @@ func TestEvaluateAttachmentIPs(t *testing.T) {
 		},
 		{
 			name: "unparseable address", network: rail0, ips: []string{"ten"}, pools: rail0Pools, podCIDRs: ovnPodCIDRs,
-			wantProblems: []string{`address "ten" is not an IP`},
+			wantProblems: []string{`address "ten" is not an IP`, "declares the IPv4 range(s) [10.255.0.0/22] but the attachment has no IPv4 address"},
 		},
 		{
 			name: "unknown pool and unknown pod network are notes, not failures", network: rail0,
@@ -299,7 +311,17 @@ func TestEvaluateAttachmentIPs(t *testing.T) {
 		{
 			name: "an address of a family no fully known declaration covers fails", network: rail0,
 			ips: []string{"fd00:255::12"}, pools: rail0Pools, podCIDRs: ovnPodCIDRs,
-			wantProblems: []string{"address fd00:255::12 has no declared range of its family; the network declares [10.255.0.0/22]"},
+			wantProblems: []string{"address fd00:255::12 has no declared range of its family; the network declares [10.255.0.0/22]",
+				"declares the IPv4 range(s) [10.255.0.0/22] but the attachment has no IPv4 address"},
+		},
+		{
+			name: "a dual-stack declaration with only its IPv4 address fails", network: dualStack,
+			ips: []string{"10.255.0.12"}, pools: dualStackPools, podCIDRs: ovnPodCIDRs,
+			wantProblems: []string{"declares the IPv6 range(s) [fd00:255::/64] but the attachment has no IPv6 address"},
+		},
+		{
+			name: "a dual-stack declaration with both addresses passes", network: dualStack,
+			ips: []string{"10.255.0.12", "fd00:255::12"}, pools: dualStackPools, podCIDRs: ovnPodCIDRs,
 		},
 		{
 			name: "an IPv4-mapped address is read as IPv4", network: rail0,

@@ -62,37 +62,38 @@ const (
 
 	eventReasonFailedCreatePodSandBox = "FailedCreatePodSandBox"
 
-	// kubeletUnexpectedAdmissionError is the reason the kubelet's device
-	// manager gives a pod it rejects at admission, and
-	// kubeletDevicesUnavailable starts the message naming the resource when
-	// the rejection is that the last unit was taken.
+	// kubeletUnexpectedAdmissionError is the Failed pod reason of a kubelet
+	// admission rejection, and kubeletDevicesUnavailable the start of its
+	// message when no unit of the named resource could be allocated.
 	kubeletUnexpectedAdmissionError = "UnexpectedAdmissionError"
 	kubeletDevicesUnavailable       = "requested number of devices unavailable for "
 
-	// kubeletOutOfResourcePrefix starts the reason the kubelet's resource
-	// predicate gives a pod it rejects ("OutOf<resource>"). The device manager
-	// admits a device-plugin resource first, so for such a resource it means
-	// the plugin is not registered on that kubelet.
+	// kubeletOutOfResourcePrefix starts the Failed pod reason "OutOf<resource>".
 	kubeletOutOfResourcePrefix = "OutOf"
 
-	// schedulerInsufficientPrefix starts the scheduler's reason, inside an
-	// Unschedulable message, that a node lacks a free unit of a resource.
+	// schedulerInsufficientPrefix starts, inside an Unschedulable message, the
+	// resource a node lacks ("Insufficient <resource>").
 	schedulerInsufficientPrefix = "Insufficient "
 
-	// nodeNameField is the only field a node affinity's matchFields accepts.
+	// nodeNameField is the node field a node affinity's matchFields selects on.
 	nodeNameField = "metadata.name"
 
 	// maxProbeDiagnosticBytes caps a kubelet event message quoted in a failure.
 	maxProbeDiagnosticBytes = 1024
 )
 
-// attachmentCheckConfig is the probe budget and fan-out. Production uses the
-// pkg/defaults values; tests shrink the timeout.
+// attachmentCheckConfig is the probe budget and fan-out, and how a probe's
+// output is read. Production uses the pkg/defaults values and the pod log;
+// tests shrink the timeout and serve each probe its own output.
 type attachmentCheckConfig struct {
 	probeTimeout  time.Duration
 	reportReserve time.Duration
 	concurrency   int
+	podLogs       podLogsFunc
 }
+
+// podLogsFunc reads one container's log.
+type podLogsFunc func(ctx context.Context, client kubernetes.Interface, namespace, pod, container string) (string, error)
 
 // attachmentStatus is one network's verdict.
 type attachmentStatus int
@@ -193,6 +194,7 @@ func defaultAttachmentCheckConfig() attachmentCheckConfig {
 		probeTimeout:  defaults.SecondaryNetworkProbeTimeout,
 		reportReserve: defaults.SecondaryNetworkProbeReportReserve,
 		concurrency:   defaults.SecondaryNetworkProbeConcurrency,
+		podLogs:       k8spod.GetPodLogs,
 	}
 }
 
@@ -234,35 +236,87 @@ func runSecondaryNetworkAttachment(ctx *validators.Context, cfg attachmentCheckC
 		printLines("Pod network CIDRs: " + formatPrefixes(podCIDRs))
 	}
 
-	plan, err := planAttachmentProbes(ctx, nodes, declared.networks)
+	plan, err := planAttachmentProbes(ctx, nodes, declared.networks, "")
 	if err != nil {
 		return err
 	}
 	if len(plan.probes) == 0 {
-		return reportAttachmentOutcomes(plan.resolved)
+		return reportAttachmentOutcomes(append(plan.resolved, heldByRunOutcomes(plan.deferred, "no probe ran")...))
 	}
 
 	ns, err := newProbeNamespace()
 	if err != nil {
 		return err
 	}
-	result := probeNetworks(ctx, cfg, ns, plan, declared.poolSubnets, podCIDRs)
+	result := probeNetworks(ctx, cfg, ns, nodes, plan, declared.poolSubnets, podCIDRs)
 	return withProbeCleanup(result, ns.delete(ctx.Clientset)) //nolint:contextcheck // cleanup outlives the check budget
 }
 
 // probeNetworks creates the probe namespace, runs the planned probes in it,
-// and reports every network's outcome.
-func probeNetworks(ctx *validators.Context, cfg attachmentCheckConfig, ns *probeNamespace, plan attachmentPlan,
-	poolSubnets map[string]netip.Prefix, podCIDRs []netip.Prefix) error {
+// and reports every network's outcome. Networks deferred because this run's
+// own probes held the only free units are planned again after each wave, once
+// those probes have finished and released them, within the same probe
+// budget; one still waiting when no probe can run is reported with that
+// cause, never as a workload holding the unit.
+func probeNetworks(ctx *validators.Context, cfg attachmentCheckConfig, ns *probeNamespace, nodes []corev1.Node,
+	plan attachmentPlan, poolSubnets map[string]netip.Prefix, podCIDRs []netip.Prefix) error {
 
 	if err := ns.create(ctx.Ctx, ctx.Clientset); err != nil {
 		return err
 	}
-	printLines(fmt.Sprintf("Probing %d network(s) from namespace %s...", len(plan.probes), ns.name))
-	outcomes := make([]attachmentOutcome, 0, len(plan.resolved)+len(plan.probes))
-	outcomes = append(outcomes, plan.resolved...)
-	outcomes = append(outcomes, runAttachmentProbes(ctx, cfg, ns, plan.probes, poolSubnets, podCIDRs)...)
+	deadline := probeDeadline(ctx, cfg)
+	outcomes := append([]attachmentOutcome(nil), plan.resolved...)
+	probes, deferred := plan.probes, plan.deferred
+	for {
+		printLines(fmt.Sprintf("Probing %d network(s) from namespace %s...", len(probes), ns.name))
+		outcomes = append(outcomes, runAttachmentProbes(ctx, cfg, ns, probes, deadline, poolSubnets, podCIDRs)...)
+		if len(deferred) == 0 {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			outcomes = append(outcomes, heldByRunOutcomes(deferred, "the probe budget ran out before it was released")...)
+			break
+		}
+		next, err := planAttachmentProbes(ctx, nodes, deferred, ns.name)
+		if err != nil {
+			for _, network := range deferred {
+				outcomes = append(outcomes, attachmentOutcome{network: network}.failed(
+					fmt.Sprintf("the network could not be planned again after this run's other probes: %v", err)))
+			}
+			break
+		}
+		outcomes = append(outcomes, next.resolved...)
+		if len(next.probes) == 0 {
+			outcomes = append(outcomes, heldByRunOutcomes(next.deferred, "those probes did not finish and release it")...)
+			break
+		}
+		probes, deferred = next.probes, next.deferred
+	}
 	return reportAttachmentOutcomes(outcomes)
+}
+
+// heldByRunOutcomes reports networks that were not probed because every unit
+// of their resource that no workload holds is held by this run's own probes
+// of other networks. They count as busy, and the detail names the cause.
+func heldByRunOutcomes(networks []secondaryNetwork, why string) []attachmentOutcome {
+	out := make([]attachmentOutcome, 0, len(networks))
+	for _, network := range networks {
+		out = append(out, attachmentOutcome{network: network}.busy(fmt.Sprintf(
+			"every unit of %s that no workload holds is held by this run's probe of another network sharing it, and %s",
+			network.Resource, why)))
+	}
+	return out
+}
+
+// probeDeadline is the wait deadline every probe shares: cfg.probeTimeout
+// from now, cut so that cfg.reportReserve of the check budget remains for the
+// report.
+func probeDeadline(ctx *validators.Context, cfg attachmentCheckConfig) time.Time {
+	deadline := time.Now().Add(cfg.probeTimeout)
+	if checkDeadline, ok := ctx.Ctx.Deadline(); ok && checkDeadline.Add(-cfg.reportReserve).Before(deadline) {
+		deadline = checkDeadline.Add(-cfg.reportReserve)
+	}
+	return deadline
 }
 
 // withProbeCleanup folds the namespace cleanup into the check's result: a
@@ -431,25 +485,34 @@ type probeAssignment struct {
 type attachmentPlan struct {
 	probes   []probeAssignment
 	resolved []attachmentOutcome
+	// deferred are the networks whose only units no workload holds are held
+	// by this run, reserved for another network's probe or requested by one
+	// of its unfinished probe pods.
+	deferred []secondaryNetwork
 }
 
 // planAttachmentProbes picks one node per network: among the Ready,
 // uncordoned candidates whose taints the run's tolerations cover
 // (candidatesFor), the first by name with a unit of the resource no pod
 // requests. Units are reserved as they are assigned, so two
-// networks sharing a resource never count the same free unit.
+// networks sharing a resource never count the same free unit. ownNamespace is
+// the probe namespace, whose unfinished pods are this run's own; "" before it
+// exists.
 //
 // A network no node advertises fails. When no candidate is Ready and
 // uncordoned, a NotReady uncordoned candidate fails the network, since a node
 // that should serve the fabric and cannot is a fault (#2122), while
 // candidates that are all cordoned or excluded by the run's tolerations, an
 // operator's deliberate choices, skip it.
-// A network whose Ready candidates are all fully requested is skipped as
-// busy. Reading a node's pod requests failing is an error, never "busy".
-func planAttachmentProbes(ctx *validators.Context, nodes []corev1.Node, networks []secondaryNetwork) (attachmentPlan, error) {
+// A network whose Ready candidates are all fully requested by other pods is
+// skipped as busy; one that waits only on units this run holds is deferred.
+// Reading a node's pod requests failing is an error, never "busy".
+func planAttachmentProbes(ctx *validators.Context, nodes []corev1.Node, networks []secondaryNetwork,
+	ownNamespace string) (attachmentPlan, error) {
+
 	sorted := append([]corev1.Node(nil), nodes...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
-	picker := freeUnitPicker{ctx: ctx, inUse: map[string]corev1.ResourceList{}, reserved: map[string]int64{}}
+	picker := freeUnitPicker{ctx: ctx, ownNamespace: ownNamespace, usage: map[string]nodeUsage{}, reserved: map[string]int64{}}
 
 	var plan attachmentPlan
 	for _, network := range networks {
@@ -472,11 +535,15 @@ func planAttachmentProbes(ctx *validators.Context, nodes []corev1.Node, networks
 			})
 			continue
 		}
-		node, err := picker.pick(c.ready, network.Resource)
+		node, heldByRun, err := picker.pick(c.ready, network.Resource)
 		if err != nil {
 			return attachmentPlan{}, err
 		}
-		if node == "" {
+		switch {
+		case node == "" && heldByRun:
+			plan.deferred = append(plan.deferred, network)
+			continue
+		case node == "":
 			plan.resolved = append(plan.resolved, attachmentOutcome{network: network}.busy(fmt.Sprintf(
 				"every unit of %s on the %d Ready node(s) advertising it is requested by other pods",
 				network.Resource, len(c.ready))))
@@ -506,62 +573,77 @@ func notAdvertisedDetail(network secondaryNetwork) string {
 // freeUnitPicker finds a node with a free unit of a resource, reading each
 // node's pod requests once.
 type freeUnitPicker struct {
-	ctx      *validators.Context
-	inUse    map[string]corev1.ResourceList
-	reserved map[string]int64 // key: node + "/" + resource
+	ctx          *validators.Context
+	ownNamespace string
+	usage        map[string]nodeUsage
+	reserved     map[string]int64 // key: node + "/" + resource
 }
 
-// pick returns the first node in ready with a free unit of resourceName and
-// reserves it, or "" when every one is fully requested. A network with no
-// resource takes the first node.
-func (p *freeUnitPicker) pick(ready []*corev1.Node, resourceName string) (string, error) {
+// nodeUsage is what a node's unfinished pods request: other workloads', and
+// this run's own probe pods'.
+type nodeUsage struct {
+	others, own corev1.ResourceList
+}
+
+// pick returns the first node in ready with a unit of resourceName that no
+// pod requests and this run has not reserved, and reserves it. With none,
+// heldByRun reports whether some node has a unit no other workload requests,
+// held only by this run. A network with no resource takes the first node.
+func (p *freeUnitPicker) pick(ready []*corev1.Node, resourceName string) (node string, heldByRun bool, err error) {
 	if resourceName == "" {
-		return ready[0].Name, nil
+		return ready[0].Name, false, nil
 	}
 	res := corev1.ResourceName(resourceName)
-	for _, node := range ready {
+	for _, n := range ready {
 		if err := p.ctx.Ctx.Err(); err != nil {
-			return "", errors.WrapCtxErr(err, errors.ErrCodeTimeout, "selecting nodes for the attachment probes")
+			return "", false, errors.WrapCtxErr(err, errors.ErrCodeTimeout, "selecting nodes for the attachment probes")
 		}
-		requests, ok := p.inUse[node.Name]
+		usage, ok := p.usage[n.Name]
 		if !ok {
 			listCtx, cancel := p.ctx.Timeout(defaults.ResourceVerificationTimeout)
-			read, err := helper.NodeResourceRequests(listCtx, p.ctx.Clientset, node.Name)
+			others, own, readErr := helper.NodeResourceRequestsSplit(listCtx, p.ctx.Clientset, n.Name, inNamespace(p.ownNamespace))
 			cancel()
-			if err != nil {
-				return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal,
-					fmt.Sprintf("could not determine how much %s is free on node %s", resourceName, node.Name))
+			if readErr != nil {
+				return "", false, errors.PropagateOrWrap(readErr, errors.ErrCodeInternal,
+					fmt.Sprintf("could not determine how much %s is free on node %s", resourceName, n.Name))
 			}
-			p.inUse[node.Name], requests = read, read
+			usage = nodeUsage{others: others, own: own}
+			p.usage[n.Name] = usage
 		}
-		allocatable := node.Status.Allocatable[res]
-		requested := requests[res]
-		key := node.Name + "/" + resourceName
-		if allocatable.Value()-requested.Value()-p.reserved[key] >= 1 {
+		allocatable := n.Status.Allocatable[res]
+		othersHold, ownHold := usage.others[res], usage.own[res]
+		key := n.Name + "/" + resourceName
+		notOthers := allocatable.Value() - othersHold.Value()
+		if notOthers-ownHold.Value()-p.reserved[key] >= 1 {
 			p.reserved[key]++
-			return node.Name, nil
+			return n.Name, false, nil
+		}
+		if notOthers >= 1 {
+			heldByRun = true
 		}
 	}
-	return "", nil
+	return "", heldByRun, nil
 }
 
-// runAttachmentProbes runs every probe, at most cfg.concurrency at a time.
-// All probes share one wait deadline: cfg.probeTimeout from now, cut so that
-// cfg.reportReserve of the check budget remains for the report.
-func runAttachmentProbes(ctx *validators.Context, cfg attachmentCheckConfig, ns *probeNamespace,
-	probes []probeAssignment, poolSubnets map[string]netip.Prefix, podCIDRs []netip.Prefix) []attachmentOutcome {
-
-	deadline := time.Now().Add(cfg.probeTimeout)
-	if checkDeadline, ok := ctx.Ctx.Deadline(); ok && checkDeadline.Add(-cfg.reportReserve).Before(deadline) {
-		deadline = checkDeadline.Add(-cfg.reportReserve)
+// inNamespace selects the pods of namespace; "" selects none.
+func inNamespace(namespace string) func(*corev1.Pod) bool {
+	if namespace == "" {
+		return nil
 	}
+	return func(pod *corev1.Pod) bool { return pod.Namespace == namespace }
+}
+
+// runAttachmentProbes runs every probe, at most cfg.concurrency at a time,
+// all waiting to the shared deadline (probeDeadline).
+func runAttachmentProbes(ctx *validators.Context, cfg attachmentCheckConfig, ns *probeNamespace, probes []probeAssignment,
+	deadline time.Time, poolSubnets map[string]netip.Prefix, podCIDRs []netip.Prefix) []attachmentOutcome {
 
 	outcomes := make([]attachmentOutcome, len(probes))
 	var g errgroup.Group
 	g.SetLimit(cfg.concurrency)
 	for i, p := range probes {
 		g.Go(func() error {
-			outcomes[i] = probeAttachment(ctx, ns, p, deadline, poolSubnets, podCIDRs)
+			outcomes[i] = probeAttachment(ctx, cfg.podLogs, ns, p, deadline, poolSubnets, podCIDRs)
 			return nil
 		})
 	}
@@ -572,7 +654,7 @@ func runAttachmentProbes(ctx *validators.Context, cfg attachmentCheckConfig, ns 
 
 // probeAttachment runs one network's probe pod and judges its attachment.
 // The pod is deleted with the probe namespace.
-func probeAttachment(ctx *validators.Context, ns *probeNamespace, p probeAssignment, deadline time.Time,
+func probeAttachment(ctx *validators.Context, podLogs podLogsFunc, ns *probeNamespace, p probeAssignment, deadline time.Time,
 	poolSubnets map[string]netip.Prefix, podCIDRs []netip.Prefix) attachmentOutcome {
 
 	out := attachmentOutcome{network: p.network, node: p.node}
@@ -595,22 +677,22 @@ func probeAttachment(ctx *validators.Context, ns *probeNamespace, p probeAssignm
 		return out.failed(fmt.Sprintf("the probe pod was not created: %v", err))
 	}
 
-	waitCtx, cancelWait := context.WithDeadline(ctx.Ctx, deadline)
-	pod, err := waitForProbePod(waitCtx, ctx.Clientset, ns.name, created.Name)
-	reachedDeadline := stderrors.Is(waitCtx.Err(), context.DeadlineExceeded)
-	cancelWait()
-	if err != nil {
-		return unfinishedProbeOutcome(ctx, out, ns.name, created.Name, pod, err, reachedDeadline)
+	pod, verdict, decided := awaitProbe(ctx, out, ns.name, created.Name, deadline)
+	if decided {
+		return verdict
 	}
 	if pod.Status.Phase == corev1.PodFailed {
 		if deviceShortageAtAdmission(pod, p.network.Resource) {
-			return admissionShortageOutcome(ctx, out)
+			return contentionOutcome(ctx, out, ns.name, "the kubelet had no unit at admission")
 		}
 		return failedProbeOutcome(out, pod)
 	}
 
+	if podLogs == nil {
+		podLogs = k8spod.GetPodLogs
+	}
 	logCtx, cancelLogs := ctx.Timeout(defaults.ResourceVerificationTimeout)
-	logs, err := k8spod.GetPodLogs(logCtx, ctx.Clientset, ns.name, created.Name, attachmentProbeContainer)
+	logs, err := podLogs(logCtx, ctx.Clientset, ns.name, created.Name, attachmentProbeContainer)
 	cancelLogs()
 	if err != nil {
 		return out.failed(fmt.Sprintf("the probe's output could not be read: %v", err))
@@ -644,70 +726,91 @@ func probeUnschedulable(pod *corev1.Pod, resourceName string) (insufficient bool
 	return false, "", false
 }
 
-// unfinishedProbeOutcome judges a probe whose wait ended without a terminal
-// phase. Only a wait that observed the pod until the probe deadline may read
-// the scheduler's verdict: Unschedulable for lack of a unit of the network's
-// resource is busy, and any other Unschedulable message fails with it. A wait
-// stopped by an API error, or by the check's own context, fails with that
-// error, never busy.
-func unfinishedProbeOutcome(ctx *validators.Context, out attachmentOutcome, namespace, name string,
-	pod *corev1.Pod, waitErr error, reachedDeadline bool) attachmentOutcome {
+// awaitProbe waits for the probe pod until the deadline. It returns the
+// terminal pod with decided false, or decided true with the verdict on a probe
+// that did not finish. A wait stopped by an API error, or by the check's own
+// context, fails with that error, never busy. At the deadline the pod is read
+// once more, so the verdict never rests on a state a closed watch left stale:
+// a pod that finished meanwhile is judged as finished, an Unschedulable one
+// for lack of a unit of the network's resource is busy only with evidence
+// (contentionOutcome), any other Unschedulable message fails with it, and a
+// pod stuck after scheduling fails with stuckProbeDetail.
+func awaitProbe(ctx *validators.Context, out attachmentOutcome, namespace, name string,
+	deadline time.Time) (pod *corev1.Pod, verdict attachmentOutcome, decided bool) {
 
+	waitCtx, cancelWait := context.WithDeadline(ctx.Ctx, deadline)
+	pod, waitErr := waitForProbePod(waitCtx, ctx.Clientset, namespace, name)
+	reachedDeadline := stderrors.Is(waitCtx.Err(), context.DeadlineExceeded)
+	cancelWait()
+	if waitErr == nil {
+		return pod, attachmentOutcome{}, false
+	}
 	if !reachedDeadline {
-		return out.failed(fmt.Sprintf("the probe pod could not be observed to the end of the probe budget: %v", waitErr))
+		return nil, out.failed(fmt.Sprintf("the probe pod could not be observed to the end of the probe budget: %v", waitErr)), true
 	}
-	if insufficient, message, unscheduled := probeUnschedulable(pod, out.network.Resource); unscheduled {
+
+	readCtx, cancelRead := ctx.Timeout(defaults.ResourceVerificationTimeout)
+	fresh, err := ctx.Clientset.CoreV1().Pods(namespace).Get(readCtx, name, metav1.GetOptions{})
+	cancelRead()
+	if err != nil {
+		return nil, out.failed(fmt.Sprintf("the probe pod did not finish within the probe budget and could not be read again: %v", err)), true
+	}
+	if podTerminal(fresh) {
+		return fresh, attachmentOutcome{}, false
+	}
+	if insufficient, message, unscheduled := probeUnschedulable(fresh, out.network.Resource); unscheduled {
 		if insufficient {
-			return out.busy(fmt.Sprintf("the scheduler found no free %s on %s within the probe budget: %s",
-				out.network.Resource, out.node, message))
+			return nil, contentionOutcome(ctx, out, namespace, "the scheduler found no free unit within the probe budget ("+message+")"), true
 		}
-		return out.failed(fmt.Sprintf("the scheduler could not place the probe on %s: %s", out.node, message))
+		return nil, out.failed(fmt.Sprintf("the scheduler could not place the probe on %s: %s", out.node, message)), true
 	}
-	return out.failed(stuckProbeDetail(ctx, namespace, name, pod, waitErr))
+	return nil, out.failed(stuckProbeDetail(ctx, namespace, name, fresh, waitErr)), true
 }
 
-// deviceShortageAtAdmission reports whether the kubelet's device manager
-// rejected pod because no unit of resourceName was available. That is a busy
-// node only when other pods hold every unit (admissionShortageOutcome); the
-// same message follows a unit turning unhealthy.
+// deviceShortageAtAdmission reports whether the kubelet rejected pod because
+// no unit of resourceName could be allocated (contentionOutcome decides
+// whether that is busy).
 func deviceShortageAtAdmission(pod *corev1.Pod, resourceName string) bool {
 	return resourceName != "" && pod.Status.Reason == kubeletUnexpectedAdmissionError &&
 		strings.Contains(pod.Status.Message, kubeletDevicesUnavailable+resourceName)
 }
 
-// admissionShortageOutcome decides a device-manager shortage by evidence of
-// competing allocation: other unfinished pods on the node requesting every
-// allocatable unit is busy, a race the scheduler lost to a pod bound outside
-// it. Free units by that count mean the device manager had fewer healthy
-// devices than the node advertises, which fails, and so does any error
-// reading the node or its pods.
-func admissionShortageOutcome(ctx *validators.Context, out attachmentOutcome) attachmentOutcome {
+// contentionOutcome decides a shortage of the network's resource on its node
+// (what names the signal) by evidence of competing allocation. It is busy
+// only when pods outside this run's probe namespace request at least one unit
+// and every allocatable unit. Otherwise nothing the check can see holds the
+// missing units: the node's devices may have turned unhealthy after planning,
+// or this run's own probes hold them, and the network fails. An error
+// reading the node or its pods fails too.
+func contentionOutcome(ctx *validators.Context, out attachmentOutcome, ownNamespace, what string) attachmentOutcome {
 	res := out.network.Resource
 	readCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
 	defer cancel()
 	node, err := ctx.Clientset.CoreV1().Nodes().Get(readCtx, out.node, metav1.GetOptions{})
 	if err != nil {
-		return out.failed(fmt.Sprintf("the kubelet on %s had no %s at admission, and the node could not be read to tell contention from an unhealthy unit: %v",
-			out.node, res, err))
+		return out.failed(fmt.Sprintf("%s for %s on %s, and the node could not be read to tell contention from a fault: %v",
+			what, res, out.node, err))
 	}
-	requests, err := helper.NodeResourceRequests(readCtx, ctx.Clientset, out.node)
+	others, _, err := helper.NodeResourceRequestsSplit(readCtx, ctx.Clientset, out.node, inNamespace(ownNamespace))
 	if err != nil {
-		return out.failed(fmt.Sprintf("the kubelet on %s had no %s at admission, and its pods could not be read to tell contention from an unhealthy unit: %v",
-			out.node, res, err))
+		return out.failed(fmt.Sprintf("%s for %s on %s, and its pods could not be read to tell contention from a fault: %v",
+			what, res, out.node, err))
 	}
 	allocatable := node.Status.Allocatable[corev1.ResourceName(res)]
-	requested := requests[corev1.ResourceName(res)]
-	if allocatable.Value()-requested.Value() < 1 {
-		return out.busy(fmt.Sprintf("the kubelet on %s had no free %s at admission; other pods request %d of %d",
-			out.node, res, requested.Value(), allocatable.Value()))
+	requested := others[corev1.ResourceName(res)]
+	if requested.Value() >= 1 && requested.Value() >= allocatable.Value() {
+		return out.busy(fmt.Sprintf("%s on %s; other workloads request %d of %d allocatable %s",
+			what, out.node, requested.Value(), allocatable.Value(), res))
 	}
-	return out.failed(fmt.Sprintf("the kubelet on %s had no healthy %s at admission although other pods request only %d of %d: "+
-		"a unit may be unhealthy (device plugin health), not in use", out.node, res, requested.Value(), allocatable.Value()))
+	return out.failed(fmt.Sprintf("%s on %s although other workloads request only %d of %d allocatable %s: "+
+		"a unit may be unhealthy or allocatable may have dropped since planning", what, out.node, requested.Value(), allocatable.Value(), res))
 }
 
 // failedProbeOutcome judges a probe pod in phase Failed for any reason other
-// than a device-manager shortage. Every such failure is a fault, OutOf<resource>
-// included.
+// than a device-allocation shortage. Every such failure is a fault. For a
+// device-plugin resource, OutOf<resource> means the plugin is not registered
+// on the node: the kubelet admits such a resource through its device manager
+// before the resource predicate that gives this reason runs.
 func failedProbeOutcome(out attachmentOutcome, pod *corev1.Pod) attachmentOutcome {
 	res := out.network.Resource
 	switch {

@@ -44,11 +44,9 @@ const (
 )
 
 const (
-	// nadResourceNameAnnotation names the extended resource whose allocated
-	// device Multus hands to the attachment's CNI.
+	// nadResourceNameAnnotation names the extended resource a pod requests to
+	// get the network's device.
 	nadResourceNameAnnotation = "k8s.v1.cni.cncf.io/resourceName"
-
-	sriovIBNetworksComponent = "sriov-ib-networks"
 )
 
 // The CNI and IPAM plugin types discovery reads. nv-ipam's poolName names the
@@ -63,21 +61,15 @@ const (
 	ibSRIOVCNIType      = "ib-sriov"
 )
 
-// secondaryNetworkKindNames select, from raw manifest content, the files of
-// components outside alwaysRenderedNetworkComponents that discovery renders: a
-// file is rendered when its text contains any of them anywhere, so quoting,
-// flow or JSON style, and comments cannot hide a declaration.
+// secondaryNetworkKindNames are matched anywhere in a manifest's text, so
+// quoting, flow or JSON style, and comments cannot hide a declaration.
 var secondaryNetworkKindNames = [][]byte{
 	[]byte(kindSriovNetwork), []byte(kindSriovIBNetwork), []byte(kindNetworkAttachmentDef), []byte(kindNVIPAMIPPool),
 }
 
-// alwaysRenderedNetworkComponents are the components whose every manifest is
-// rendered by discovery whatever its text: they own the fabric, so a NAD in
-// any of their files must never be missed.
-var alwaysRenderedNetworkComponents = map[string]bool{
-	networkOperatorComponent: true,
-	sriovIBNetworksComponent: true,
-}
+// templateActionOpen starts every action of the manifest template language,
+// so a file without it renders to its own text.
+var templateActionOpen = []byte("{{")
 
 // attachmentKind says how a secondary network reaches the cluster: as a NAD
 // the SR-IOV Network Operator renders from a SriovNetwork or SriovIBNetwork
@@ -146,11 +138,9 @@ func (d declaredSecondaryNetworks) anyIPAM() bool {
 // discoverSecondaryNetworks derives the NADs the recipe ships by rendering its
 // manifests with each component's effective values, as rdmaFabricResources
 // does for the fabric's device-plugin resources. Every ManifestFiles and
-// PreManifestFiles entry of every ref is a candidate; it is rendered when its
-// component is in alwaysRenderedNetworkComponents or its raw text contains one
-// of secondaryNetworkKindNames, so file names play no part. Other files are
-// not rendered, so a component whose values the validator cannot resolve
-// does not fail discovery unless one of its files could declare a network.
+// PreManifestFiles entry of every ref is a candidate (networkManifest), so
+// file names play no part, and a kind that only a template action produces,
+// from values or otherwise, is found in the rendered output.
 //
 // dp is the data provider the manifests and values are read from; nil reads
 // the embedded catalog.
@@ -165,16 +155,12 @@ func discoverSecondaryNetworks(goCtx context.Context, dp recipe.DataProvider, re
 	for _, ref := range refs {
 		paths := append(append([]string(nil), ref.PreManifestFiles...), ref.ManifestFiles...)
 		for _, path := range paths {
-			render, err := manifestMayDeclareSecondaryNetwork(goCtx, dp, ref, path)
+			rendered, candidate, err := networkManifest(goCtx, dp, ref, path)
 			if err != nil {
 				return declaredSecondaryNetworks{}, err
 			}
-			if !render {
+			if !candidate {
 				continue
-			}
-			rendered, err := renderComponentManifest(goCtx, dp, ref, path, "secondary network")
-			if err != nil {
-				return declaredSecondaryNetworks{}, err
 			}
 			networks, pools, err := parseSecondaryNetworkManifest(rendered, ref.Namespace)
 			if err != nil {
@@ -197,22 +183,34 @@ func discoverSecondaryNetworks(goCtx context.Context, dp recipe.DataProvider, re
 	return out, nil
 }
 
-// manifestMayDeclareSecondaryNetwork reports whether discovery renders path.
-func manifestMayDeclareSecondaryNetwork(goCtx context.Context, dp recipe.DataProvider, ref recipe.ComponentRef, path string) (bool, error) {
-	if alwaysRenderedNetworkComponents[ref.Name] {
-		return true, nil
-	}
+// networkManifest returns path rendered, and whether the rendered text names a
+// secondary-network kind. A file is skipped without rendering only when it has
+// no template action, so its text is its rendered output, and that text names
+// no kind. Every templated file is rendered with its component's values, and
+// a render failure is an error.
+func networkManifest(goCtx context.Context, dp recipe.DataProvider, ref recipe.ComponentRef, path string) ([]byte, bool, error) {
 	content, err := recipe.GetManifestContentWithContext(goCtx, dp, path)
 	if err != nil {
-		return false, errors.Wrap(errors.ErrCodeInternal,
+		return nil, false, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to load manifest %s for component %s", path, ref.Name), err)
 	}
+	if !bytes.Contains(content, templateActionOpen) && !namesSecondaryNetworkKind(content) {
+		return nil, false, nil
+	}
+	rendered, err := renderComponentManifest(goCtx, dp, ref, path, "secondary network")
+	if err != nil {
+		return nil, false, err
+	}
+	return rendered, namesSecondaryNetworkKind(rendered), nil
+}
+
+func namesSecondaryNetworkKind(content []byte) bool {
 	for _, kind := range secondaryNetworkKindNames {
 		if bytes.Contains(content, kind) {
-			return true, nil
+			return true
 		}
 	}
-	return false, nil
+	return false
 }
 
 // mergeSecondaryNetworks adds networks to byKey, tagging each with component.
@@ -575,9 +573,9 @@ type nadConfig struct {
 	requiresPCI bool
 }
 
-// parseNADConfig reads a NAD's spec.config, top-level or every plugin of a
-// conflist: its IPAM blocks, and whether a plugin is the sriov or ib-sriov
-// CNI. Empty config means no IPAM.
+// parseNADConfig reads a NAD's spec.config, a single plugin or every plugin
+// of a conflist: its IPAM blocks, and whether a plugin is the sriov or
+// ib-sriov CNI. Empty config means no IPAM.
 func parseNADConfig(config string) (nadConfig, error) {
 	var c nadConfig
 	if strings.TrimSpace(config) == "" {
@@ -587,7 +585,11 @@ func parseNADConfig(config string) (nadConfig, error) {
 	if err := json.Unmarshal([]byte(config), &conf); err != nil {
 		return c, errors.Wrap(errors.ErrCodeInternal, "failed to decode CNI config JSON", err)
 	}
-	plugins := append([]cniPluginConf{conf.cniPluginConf}, conf.Plugins...)
+	// A conflist runs only its plugins; its top-level object is not one.
+	plugins := conf.Plugins
+	if len(plugins) == 0 {
+		plugins = []cniPluginConf{conf.cniPluginConf}
+	}
 	for i := range plugins {
 		if plugins[i].Type == sriovCNIType || plugins[i].Type == ibSRIOVCNIType {
 			c.requiresPCI = true

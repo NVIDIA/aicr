@@ -111,14 +111,18 @@ that:
 
 - the network has an entry whose interface exists in the pod;
 - when the network assigns addresses, each address is configured on that
-  interface, inside the network's declared range, and outside the cluster's
-  pod network. The declared range comes from the network's nv-ipam IPPool, or
-  from a host-local `subnet` or `ranges` or a whereabouts `range` or
+  interface, inside the network's declared range, and outside every pod
+  subnet allocated to a node, and every address family the known ranges cover
+  has an address. The declared range comes from the network's nv-ipam IPPool,
+  or from a host-local `subnet` or `ranges` or a whereabouts `range` or
   `ipRanges` in its CNI config; an IPAM type whose range the check does not
   read, or a pool the recipe does not ship, is reported as not asserted for
-  the addresses of that family. The pod network comes from each node's
+  the addresses of that family. The pod subnets come from each node's
   `spec.podCIDRs` and the OVN-Kubernetes `k8s.ovn.org/node-subnets`
-  annotation. When neither is set, the overlap is reported as not evaluated;
+  annotation. The cluster-wide pod CIDR is not read, so an address inside the
+  cluster's pod range but outside every subnet currently allocated to a node
+  is not reported. When no node has a pod subnet, the overlap is reported as
+  not evaluated;
 - an attachment that uses the `sriov` or `ib-sriov` CNI, which includes every
   `SriovNetwork` and `SriovIBNetwork`, carries the VF's PCI address.
 
@@ -127,9 +131,12 @@ that is the job of the `nccl-all-reduce-bw-net` performance check. A network
 is skipped rather than failed when every unit of its resource is requested by
 running workloads (busy), or when every node that advertises it is cordoned or
 carries a taint the run's `--toleration` does not cover (unschedulable). A
-kubelet that rejects the probe because a unit was unavailable counts as busy
-only when other pods hold every unit; otherwise a unit may be unhealthy, and
-the network fails. When no network passed or failed, the check skips with
+probe the scheduler cannot place for lack of a unit, or the kubelet rejects
+because no unit could be allocated, counts as busy only when other workloads
+hold every unit; otherwise a unit may be unhealthy, and the network fails.
+Units held by the check's own probes are not counted as workloads: two
+networks that share a resource with one free unit are probed one after the
+other. When no network passed or failed, the check skips with
 `nodes-busy` if at least one was busy, and with `no-schedulable-gpu-nodes` if
 all were unschedulable. The failures name their cause:
 

@@ -35,19 +35,29 @@ import (
 // Pods are filtered by node on the client as well as by the field selector,
 // so a pod bound elsewhere is never counted against nodeName.
 func NodeResourceRequests(ctx context.Context, client kubernetes.Interface, nodeName string) (v1.ResourceList, error) {
+	others, _, err := NodeResourceRequestsSplit(ctx, client, nodeName, nil)
+	return others, err
+}
+
+// NodeResourceRequestsSplit is NodeResourceRequests with the pods own selects
+// summed apart from the others, so a check can tell the units its own pods
+// hold from the units other workloads hold. A nil own selects no pod.
+func NodeResourceRequestsSplit(ctx context.Context, client kubernetes.Interface, nodeName string,
+	own func(*v1.Pod) bool) (others, owned v1.ResourceList, err error) {
+
 	podList, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	if err != nil {
-		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+		return nil, nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
 			fmt.Sprintf("failed to list pods on node %s", nodeName), err)
 	}
 
-	total := v1.ResourceList{}
+	others, owned = v1.ResourceList{}, v1.ResourceList{}
 	for i := range podList.Items {
 		select {
 		case <-ctx.Done():
-			return nil, aicrErrors.WrapCtxErr(ctx.Err(), aicrErrors.ErrCodeTimeout,
+			return nil, nil, aicrErrors.WrapCtxErr(ctx.Err(), aicrErrors.ErrCodeTimeout,
 				fmt.Sprintf("summing pod requests on node %s", nodeName))
 		default:
 		}
@@ -55,9 +65,13 @@ func NodeResourceRequests(ctx context.Context, client kubernetes.Interface, node
 		if pod.Spec.NodeName != nodeName || pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
 			continue
 		}
-		addResources(total, PodEffectiveRequests(pod))
+		if own != nil && own(pod) {
+			addResources(owned, PodEffectiveRequests(pod))
+			continue
+		}
+		addResources(others, PodEffectiveRequests(pod))
 	}
-	return total, nil
+	return others, owned, nil
 }
 
 // PodEffectiveRequests returns the pod's effective request per resource, as
