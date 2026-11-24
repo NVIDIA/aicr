@@ -47,7 +47,7 @@ spec:
   componentRefs:
     # recipes/mixins/platform-kubeflow.yaml's ref, held at 2.2.1 because NVCRE
     # v0.12.0 supports no other Trainer version. Return to the mixin once NVCRE
-    # supports the registry pin (#3949). TestNVCRELeafTrainerRefMatchesMixin
+    # supports the registry pin (#3949). TestNVCRETrainerRefMatchesMixin
     # keeps this copy in step with the mixin's.
     - name: kubeflow-trainer
       type: Helm

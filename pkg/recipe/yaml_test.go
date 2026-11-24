@@ -245,8 +245,8 @@ func TestAllValuesFileReferencesExist(t *testing.T) {
 
 // mixinComponentRefs returns the componentRefs contributed by the mixins an
 // overlay declares directly, so a dependencyRef onto a mixin-supplied
-// component (nvcre onto kubeflow-trainer from platform-kubeflow) is not read
-// as dangling by tests that inspect one overlay file at a time.
+// component is not read as dangling by tests that inspect one overlay file
+// at a time.
 func mixinComponentRefs(t *testing.T, spec *RecipeMetadataSpec) []ComponentRef {
 	t.Helper()
 

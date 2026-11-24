@@ -81,28 +81,32 @@ transitions:
               release, so without this the upgrade stops with the 2.2
               controller still running. Upstream documents the same commands
               in its migration guide.
-          - id: upgrade-to-2-3-0
+          - id: apply
             description: >-
               Set the kubeflow-trainer componentRef version to 2.3.0 in the
-              recipe file you generated with aicr recipe (not in an overlay,
-              where platform-kubeflow owns that ref), regenerate the bundle
-              from it, and deploy it as usual.
+              recipe file you generated with aicr recipe, not in an overlay:
+              one that inherits platform-kubeflow cannot set it. Regenerate
+              the bundle from it and deploy it as usual.
             reason: >-
               Upstream requires 2.0 to 2.2 installs to run 2.3 before any
               later release.
       - steps:
-          - id: upgrade-to-2-3-0
+          - id: apply
             description: >-
               Set the kubeflow-trainer componentRef version to 2.3.0 in the
-              recipe file you generated with aicr recipe (not in an overlay,
-              where platform-kubeflow owns that ref), regenerate the bundle
-              from it, and sync it as usual. No CRD
-              preparation is needed.
+              recipe file you generated with aicr recipe, not in an overlay:
+              one that inherits platform-kubeflow cannot set it. Regenerate
+              the bundle from it and sync it as usual. No CRD preparation is
+              needed.
             reason: >-
               Argo CD applies the chart's manifests itself and does not check
               Helm ownership metadata, so it takes over the existing CRDs on
               sync. Upstream requires 2.0 to 2.2 installs to run 2.3 before
-              any later release.
+              any later release. 2.3.0 still bundles JobSet 0.12.0, whose
+              jobset-webhook-server-cert Secret declares data, so selfHeal
+              keeps resetting it, the Application stays OutOfSync, and JobSet
+              webhook calls can fail TLS until 2.4.0 is synced
+              (NVIDIA/aicr#3425).
     references:
       - https://github.com/kubeflow/trainer/releases/tag/v2.3.0
       - https://github.com/kubeflow/trainer/pull/3655#issuecomment-4864247007
@@ -146,9 +150,9 @@ transitions:
           - id: land-on-2-3-0
             description: >-
               Set the kubeflow-trainer componentRef version to 2.3.0 in the
-              recipe file you generated with aicr recipe (not in an overlay,
-              where platform-kubeflow owns that ref), regenerate the bundle
-              from it, deploy it, and wait for the
+              recipe file you generated with aicr recipe, not in an overlay:
+              one that inherits platform-kubeflow cannot set it. Regenerate
+              the bundle from it, deploy it, and wait for the
               kubeflow-trainer-controller-manager Deployment to become
               available. Do not roll back or uninstall while on 2.3.0, and on
               terraform leave atomic off for this apply.
@@ -159,34 +163,46 @@ transitions:
               on its own.
           - id: apply-this-bundle
             description: >-
-              Once no MPI-based TrainJob is suspended, deploy this bundle as
-              usual.
+              Once no MPI-based TrainJob is suspended and every replicatedJob
+              in a runtime you authored has a name of 20 characters or fewer,
+              deploy this bundle as usual.
             reason: >-
               2.4.0 sets new environment variables on MPI-based TrainJobs, and
               a suspended one created earlier cannot take them, so it fails to
-              resume.
+              resume. Its CRDs also reject a longer replicatedJob name when
+              the runtime is created or changed. AICR's own runtimes meet
+              both.
       - steps:
           - id: land-on-2-3-0
             description: >-
               Set the kubeflow-trainer componentRef version to 2.3.0 in the
-              recipe file you generated with aicr recipe (not in an overlay,
-              where platform-kubeflow owns that ref), regenerate the bundle
-              from it, sync it, and wait for the
+              recipe file you generated with aicr recipe, not in an overlay:
+              one that inherits platform-kubeflow cannot set it. Regenerate
+              the bundle from it, sync it, and wait for the
               kubeflow-trainer-controller-manager Deployment to become
-              available. No CRD preparation is needed.
+              available. No CRD preparation is needed. Expect the Application
+              to stay OutOfSync on jobset-webhook-server-cert until the next
+              step.
             reason: >-
               Upstream requires a 2.2 install to run 2.3.0 before any later
               release. Argo CD applies the chart's manifests itself and does
               not check Helm ownership metadata, so it takes over the existing
-              CRDs on sync.
+              CRDs on sync. 2.3.0 still bundles JobSet 0.12.0, whose webhook
+              Secret declares data, so selfHeal keeps resetting it and JobSet
+              webhook calls can fail TLS until this bundle is synced
+              (NVIDIA/aicr#3425).
           - id: apply-this-bundle
             description: >-
-              Once no MPI-based TrainJob is suspended, sync this bundle as
-              usual.
+              Once no MPI-based TrainJob is suspended and every replicatedJob
+              in a runtime you authored has a name of 20 characters or fewer,
+              sync this bundle as usual.
             reason: >-
               2.4.0 sets new environment variables on MPI-based TrainJobs, and
               a suspended one created earlier cannot take them, so it fails to
-              resume.
+              resume. Its CRDs also reject a longer replicatedJob name when
+              the runtime is created or changed. AICR's own runtimes meet
+              both. Syncing 2.4.0 also ends the selfHeal loop on
+              jobset-webhook-server-cert.
     references:
       - https://github.com/kubeflow/trainer/releases/tag/v2.3.0
       - https://github.com/kubeflow/trainer/pull/3655#issuecomment-4864247007
@@ -220,12 +236,13 @@ transitions:
             reason: >-
               Upstream's 2.4.0 notes flag this as needing action before the
               upgrade; the affected TrainJob otherwise stays stuck after it.
-          - id: upgrade
+          - id: apply
             description: Regenerate the bundle at the new pin and deploy or sync it as usual.
             reason: >-
-              The chart also renders its webhook certificate Secrets without
-              a data block, which ends the Argo CD selfHeal reset loop on
-              them (NVIDIA/aicr#3425).
+              2.4.0 bundles JobSet 0.13.0, whose webhook certificate Secret no
+              longer declares data, which ends the Argo CD selfHeal reset loop
+              on it (NVIDIA/aicr#3425). Trainer's own Secret stopped declaring
+              data in 2.3.0.
     references:
       - https://github.com/kubeflow/trainer/releases/tag/v2.4.0
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#kubeflow-trainer-22x-to-240

@@ -16,7 +16,9 @@ package recipe
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -41,8 +43,9 @@ const (
 
 // nvcreWiringProblems reports what a resolved recipe is missing for nvcre to
 // install as documented. It reads the resolved spec rather than overlay
-// source because every requirement can be satisfied indirectly: Trainer
-// arrives by mixin, and values arrive by file reference.
+// source because a requirement can be satisfied indirectly: values arrive
+// by file reference, and Trainer can arrive from a base or mixin as well as
+// from the overlay's own ref.
 //
 // A recipe that does not reference nvcre has nothing to answer for and
 // reports nothing, which is what lets this run over every overlay.
@@ -64,8 +67,9 @@ func nvcreWiringProblems(ctx context.Context, result *RecipeResult) []string {
 	}
 	if !slices.Contains(result.DeploymentOrder, nvcreTrainerComponent) {
 		problems = append(problems, "no "+nvcreTrainerComponent+" in the resolved recipe; nvcre drives "+
-			"its benchmarks through Kubeflow Trainer and the chart does not install it, so a Trainer "+
-			"source such as the platform-kubeflow mixin must supply it")
+			"its benchmarks through Kubeflow Trainer and the chart does not install it, so the overlay "+
+			"must declare it at a version NVCRE supports, as the Enabling NVCRE fragment in "+
+			"docs/user/component-catalog.md does")
 	}
 	if !slices.Contains(ref.DependencyRefs, nvcreTrainerComponent) {
 		problems = append(problems, "componentRef nvcre must list "+nvcreTrainerComponent+
@@ -301,6 +305,23 @@ type nvcreFragmentRef struct {
 func readEnablingNVCREFragment(t *testing.T) nvcreFragmentSpec {
 	t.Helper()
 
+	var doc struct {
+		Spec nvcreFragmentSpec `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(readEnablingNVCREFragmentYAML(t), &doc); err != nil {
+		t.Fatalf("%s: the documented fragment is not valid YAML: %v", catalogPath, err)
+	}
+	if len(doc.Spec.ComponentRefs) == 0 || doc.Spec.ComponentRefs[0].Name != "nvcre" {
+		t.Fatalf("%s: the fragment under %q no longer declares an nvcre componentRef first",
+			catalogPath, catalogHeading)
+	}
+	return doc.Spec
+}
+
+// readEnablingNVCREFragmentYAML returns the raw text of that block.
+func readEnablingNVCREFragmentYAML(t *testing.T) []byte {
+	t.Helper()
+
 	raw, err := os.ReadFile(filepath.Clean(catalogPath))
 	if err != nil {
 		t.Fatalf("read %s: %v", catalogPath, err)
@@ -317,18 +338,7 @@ func readEnablingNVCREFragment(t *testing.T) nvcreFragmentSpec {
 	if !found {
 		t.Fatalf("%s: unterminated YAML block under %q", catalogPath, catalogHeading)
 	}
-
-	var doc struct {
-		Spec nvcreFragmentSpec `yaml:"spec"`
-	}
-	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
-		t.Fatalf("%s: the documented fragment is not valid YAML: %v", catalogPath, err)
-	}
-	if len(doc.Spec.ComponentRefs) == 0 || doc.Spec.ComponentRefs[0].Name != "nvcre" {
-		t.Fatalf("%s: the fragment under %q no longer declares an nvcre componentRef first",
-			catalogPath, catalogHeading)
-	}
-	return doc.Spec
+	return []byte(body)
 }
 
 // buildNVCREProbe resolves the fragment and fails the test if it cannot.
@@ -454,50 +464,159 @@ func (p *fileOverrideProvider) Source(path string) string {
 // TestNVCRETrainerRefMatchesMixin keeps the two copies of platform-kubeflow's
 // kubeflow-trainer ref, in the NVCRE leaf and in the catalog fragment, in step
 // with the mixin. They exist only to hold the Trainer version NVCRE supports
-// (#3949), so the version is the one field allowed to differ: a manifest file
-// or dependency added to the mixin would otherwise skip the NVCRE recipe.
+// (#3949), so the version is the one field allowed to differ from the mixin,
+// and the two copies must hold the same one.
 func TestNVCRETrainerRefMatchesMixin(t *testing.T) {
 	const (
 		mixinPath = "mixins/platform-kubeflow.yaml"
 		leafPath  = "overlays/gb300-eks-ubuntu-training-kubeflow.yaml"
 	)
 
-	trainerRef := func(t *testing.T, what string, refs []nvcreFragmentRef) nvcreFragmentRef {
-		t.Helper()
-		i := slices.IndexFunc(refs, func(r nvcreFragmentRef) bool { return r.Name == nvcreTrainerComponent })
-		if i < 0 {
-			t.Fatalf("%s declares no %s componentRef", what, nvcreTrainerComponent)
-		}
-		return refs[i]
-	}
-	readSpec := func(t *testing.T, path string) nvcreFragmentSpec {
+	embedded := func(t *testing.T, path string) []byte {
 		t.Helper()
 		raw, err := GetEmbeddedFS().ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		var doc struct {
-			Spec nvcreFragmentSpec `yaml:"spec"`
-		}
-		if err := yaml.Unmarshal(raw, &doc); err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		return doc.Spec
+		return raw
 	}
 
-	want := trainerRef(t, mixinPath, readSpec(t, mixinPath).ComponentRefs)
-	copies := map[string]nvcreFragmentRef{
-		leafPath:    trainerRef(t, leafPath, readSpec(t, leafPath).ComponentRefs),
-		catalogPath: trainerRef(t, catalogPath, readEnablingNVCREFragment(t).ComponentRefs),
+	mixin := rawTrainerRef(t, mixinPath, embedded(t, mixinPath))
+	copies := map[string]map[string]any{
+		leafPath:    rawTrainerRef(t, leafPath, embedded(t, leafPath)),
+		catalogPath: rawTrainerRef(t, catalogPath, readEnablingNVCREFragmentYAML(t)),
 	}
-	for where, got := range copies {
-		if got.Version == "" {
-			t.Errorf("%s: the %s ref sets no version; it exists only to hold one", where, nvcreTrainerComponent)
-		}
-		got.Version = want.Version
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("%s: the %s ref differs from %s other than in version:\n got  %+v\n want %+v",
-				where, nvcreTrainerComponent, mixinPath, got, want)
+	for _, p := range nvcreTrainerRefDrift(mixin, copies) {
+		t.Error(p)
+	}
+}
+
+// TestNVCRETrainerRefDrift pins that the comparison sees every key, not only
+// the ones the documented fragment happens to use.
+func TestNVCRETrainerRefDrift(t *testing.T) {
+	mixinRef := func() map[string]any {
+		return map[string]any{
+			"name":           nvcreTrainerComponent,
+			"type":           "Helm",
+			"valuesFile":     "components/kubeflow-trainer/values.yaml",
+			"manifestFiles":  []any{"components/kubeflow-trainer/manifests/runtime.yaml"},
+			"dependencyRefs": []any{"cert-manager"},
 		}
 	}
+	held := func(version string) map[string]any {
+		ref := mixinRef()
+		ref["version"] = version
+		return ref
+	}
+
+	tests := []struct {
+		name    string
+		mixin   map[string]any
+		leaf    map[string]any
+		catalog map[string]any
+		wantMsg string
+	}{
+		{"in step", mixinRef(), held("2.2.1"), held("2.2.1"), ""},
+		{
+			name: "mixin-only preManifestFiles",
+			mixin: func() map[string]any {
+				ref := mixinRef()
+				ref["preManifestFiles"] = []any{"components/kubeflow-trainer/manifests/pre.yaml"}
+				return ref
+			}(),
+			leaf:    held("2.2.1"),
+			catalog: held("2.2.1"),
+			wantMsg: "preManifestFiles",
+		},
+		{"catalog version differs from leaf", mixinRef(), held("2.2.1"), held("2.4.0"), "hold different versions"},
+		{"copy sets no version", mixinRef(), held("2.2.1"), mixinRef(), "sets no version"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			problems := nvcreTrainerRefDrift(tt.mixin, map[string]map[string]any{
+				"leaf": tt.leaf, "catalog": tt.catalog,
+			})
+			if tt.wantMsg == "" {
+				if len(problems) > 0 {
+					t.Errorf("unexpected drift:\n  - %s", strings.Join(problems, "\n  - "))
+				}
+				return
+			}
+			if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, tt.wantMsg) }) {
+				t.Errorf("no problem mentioned %q; got:\n  - %s", tt.wantMsg, strings.Join(problems, "\n  - "))
+			}
+		})
+	}
+}
+
+// rawTrainerRef returns the kubeflow-trainer componentRef of a YAML document
+// with every key it sets, so a field the typed fragment does not model still
+// counts.
+func rawTrainerRef(t *testing.T, where string, raw []byte) map[string]any {
+	t.Helper()
+
+	var doc struct {
+		Spec struct {
+			ComponentRefs []map[string]any `yaml:"componentRefs"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse %s: %v", where, err)
+	}
+	i := slices.IndexFunc(doc.Spec.ComponentRefs, func(r map[string]any) bool { return r["name"] == nvcreTrainerComponent })
+	if i < 0 {
+		t.Fatalf("%s declares no %s componentRef", where, nvcreTrainerComponent)
+	}
+	return doc.Spec.ComponentRefs[i]
+}
+
+// nvcreTrainerRefDrift reports how each copy departs from the mixin's ref: a
+// key other than version that differs, a missing version, or copies that hold
+// different versions.
+func nvcreTrainerRefDrift(mixin map[string]any, copies map[string]map[string]any) []string {
+	var problems []string
+	versions := map[string]string{}
+	for _, where := range slices.Sorted(maps.Keys(copies)) {
+		ref := copies[where]
+		if v, ok := ref["version"]; ok && v != nil && fmt.Sprint(v) != "" {
+			versions[where] = fmt.Sprint(v)
+		} else {
+			problems = append(problems, fmt.Sprintf("%s: the %s ref sets no version; it exists only to hold one",
+				where, nvcreTrainerComponent))
+		}
+
+		keys := map[string]bool{}
+		for k := range mixin {
+			keys[k] = true
+		}
+		for k := range ref {
+			keys[k] = true
+		}
+		delete(keys, "version")
+		var differ []string
+		for _, k := range slices.Sorted(maps.Keys(keys)) {
+			if !reflect.DeepEqual(ref[k], mixin[k]) {
+				differ = append(differ, fmt.Sprintf("%s (got %v, mixin %v)", k, ref[k], mixin[k]))
+			}
+		}
+		if len(differ) > 0 {
+			problems = append(problems, fmt.Sprintf("%s: the %s ref differs from the mixin's other than in version: %s",
+				where, nvcreTrainerComponent, strings.Join(differ, "; ")))
+		}
+	}
+
+	distinct := map[string]bool{}
+	for _, v := range versions {
+		distinct[v] = true
+	}
+	if len(distinct) > 1 {
+		held := make([]string, 0, len(versions))
+		for _, where := range slices.Sorted(maps.Keys(versions)) {
+			held = append(held, where+"="+versions[where])
+		}
+		problems = append(problems, fmt.Sprintf("the %s copies hold different versions: %s",
+			nvcreTrainerComponent, strings.Join(held, ", ")))
+	}
+	return problems
 }

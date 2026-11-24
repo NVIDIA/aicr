@@ -208,8 +208,8 @@ Let the runtime own the resource shape. On the pinned Kubeflow Trainer
 **v2.4.0**, `resourcesPerNode` on a TrainJob merges into the runtime's resource
 requirements one resource at a time, so the runtime's `nvidia.com/gpu: 8`
 survives a job that asks only for memory. Trainer 2.2.x **replaced** the
-worker's requirements outright instead, so on a recipe that holds 2.2.x that
-same job silently loses the GPU request and TCPXO stops working.
+worker's requirements outright instead, so on a cluster still running 2.2.x
+that same job silently loses the GPU request and TCPXO stops working.
 
 On either version, setting it at all, even to `{}`, also feeds Torch's
 process-count inference, which prefers the TrainJob's value and can yield
