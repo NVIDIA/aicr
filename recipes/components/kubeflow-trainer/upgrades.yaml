@@ -151,17 +151,19 @@ transitions:
           - id: land-on-2-3-0
             description: >-
               Set the kubeflow-trainer componentRef version to 2.3.0 in the
-              recipe file you generated with aicr recipe, not in an overlay:
-              one that inherits platform-kubeflow cannot set it. Regenerate
-              the bundle from it, deploy it, and wait for the
-              kubeflow-trainer-controller-manager Deployment to become
-              available. Do not roll back or uninstall while on 2.3.0, and on
-              terraform leave atomic off for this apply.
+              recipe file you generated with aicr recipe, not in an overlay: one
+              that inherits platform-kubeflow cannot set it. Regenerate the
+              bundle from it, deploy it, and wait for `kubectl rollout status
+              deployment/kubeflow-trainer-controller-manager -n kubeflow` (the
+              release namespace) to complete. Do not roll back or uninstall
+              while on 2.3.0, and on terraform leave atomic off for this apply.
             reason: >-
-              2.3.0's CRD templates lack the keep annotation 2.4.0 adds, so a
-              rollback or uninstall there deletes the CRDs and every TrainJob
-              with them. Terraform's atomic = true rolls a failed upgrade back
-              on its own.
+              A Deployment reports available while the 2.2 controller pod still
+              serves mid-rollout, so only a completed rollout shows 2.3.0 is
+              running. 2.3.0's CRD templates lack the keep annotation 2.4.0
+              adds, so a rollback or uninstall there deletes the CRDs and every
+              TrainJob with them. Terraform's atomic = true rolls a failed
+              upgrade back on its own.
           - id: apply-jobset-crd
             description: >-
               Upgrade the JobSet CRD with the CRD-apply command under
@@ -171,8 +173,12 @@ transitions:
               VERSION=2.4.0, EXCLUDE_SUBCHARTS=lws, and MANAGER set to the
               field manager that installed it (helm under helm and helmfile,
               terraform-provider-helm under terraform; that section shows how
-              to check). The lws exclusion leaves out a CRD AICR's values do
-              not install.
+              to check). The lws exclusion leaves out the LeaderWorkerSet CRD,
+              which AICR's values do not install and which has a conversion
+              webhook, the reason kubeflow-trainer is not ownsCRDs; the JobSet
+              CRD has none. Skip this step if you set jobset.install to false
+              to use a separately managed JobSet, and upgrade that release to
+              a version Trainer 2.4.0 supports instead.
             reason: >-
               jobsets.jobset.x-k8s.io ships in the JobSet subchart's crds/
               directory, which Helm installs once and never upgrades, and
@@ -195,21 +201,23 @@ transitions:
           - id: land-on-2-3-0
             description: >-
               Set the kubeflow-trainer componentRef version to 2.3.0 in the
-              recipe file you generated with aicr recipe, not in an overlay:
-              one that inherits platform-kubeflow cannot set it. Regenerate
-              the bundle from it, sync it, and wait for the
-              kubeflow-trainer-controller-manager Deployment to become
-              available. No CRD preparation is needed. Expect the Application
-              to stay OutOfSync on jobset-webhook-server-cert until the next
-              step.
+              recipe file you generated with aicr recipe, not in an overlay: one
+              that inherits platform-kubeflow cannot set it. Regenerate the
+              bundle from it, sync it, and wait for `kubectl rollout status
+              deployment/kubeflow-trainer-controller-manager -n kubeflow` (the
+              release namespace) to complete. No CRD preparation is needed.
+              Expect the Application to stay OutOfSync on
+              jobset-webhook-server-cert until the next step.
             reason: >-
               Upstream requires a 2.2 install to run 2.3.0 before any later
-              release. Argo CD applies the chart's manifests itself and does
-              not check Helm ownership metadata, so it takes over the existing
-              CRDs on sync. 2.3.0 still bundles JobSet 0.12.0, whose webhook
-              Secret declares data, so selfHeal keeps resetting it and JobSet
-              webhook calls can fail TLS until this bundle is synced
-              (NVIDIA/aicr#3425).
+              release, and a Deployment reports available while the 2.2
+              controller pod still serves mid-rollout, so only a completed
+              rollout shows 2.3.0 is running. Argo CD applies the chart's
+              manifests itself and does not check Helm ownership metadata, so it
+              takes over the existing CRDs on sync. 2.3.0 still bundles JobSet
+              0.12.0, whose webhook Secret declares data, so selfHeal keeps
+              resetting it and JobSet webhook calls can fail TLS until this
+              bundle is synced (NVIDIA/aicr#3425).
           - id: apply-this-bundle
             description: >-
               Once no MPI-based TrainJob is suspended and every replicatedJob
@@ -266,8 +274,12 @@ transitions:
               VERSION=2.4.0, EXCLUDE_SUBCHARTS=lws, and MANAGER set to the
               field manager that installed it (helm under helm and helmfile,
               terraform-provider-helm under terraform; that section shows how
-              to check). The lws exclusion leaves out a CRD AICR's values do
-              not install.
+              to check). The lws exclusion leaves out the LeaderWorkerSet CRD,
+              which AICR's values do not install and which has a conversion
+              webhook, the reason kubeflow-trainer is not ownsCRDs; the JobSet
+              CRD has none. Skip this step if you set jobset.install to false
+              to use a separately managed JobSet, and upgrade that release to
+              a version Trainer 2.4.0 supports instead.
             reason: >-
               jobsets.jobset.x-k8s.io ships in the JobSet subchart's crds/
               directory, which Helm installs once and never upgrades, and

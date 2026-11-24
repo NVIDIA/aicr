@@ -15,6 +15,7 @@
 package recipe
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -325,11 +326,18 @@ type nvcreFragmentRef struct {
 func readEnablingNVCREFragment(t *testing.T) nvcreFragmentSpec {
 	t.Helper()
 
+	// Strict, because buildNVCREProbeOrErr re-encodes only the fields
+	// nvcreFragmentRef models: a key the fragment gains, such as one
+	// TestNVCRETrainerRefMatchesMixin makes it copy from the mixin, must fail
+	// here rather than be dropped before the resolver sees it.
 	var doc struct {
 		Spec nvcreFragmentSpec `yaml:"spec"`
 	}
-	if err := yaml.Unmarshal(readEnablingNVCREFragmentYAML(t), &doc); err != nil {
-		t.Fatalf("%s: the documented fragment is not valid YAML: %v", catalogPath, err)
+	dec := yaml.NewDecoder(bytes.NewReader(readEnablingNVCREFragmentYAML(t)))
+	dec.KnownFields(true)
+	if err := dec.Decode(&doc); err != nil {
+		t.Fatalf("%s: the documented fragment does not decode into the shape the probe resolves "+
+			"(add any new field to nvcreFragmentRef and buildNVCREProbeOrErr): %v", catalogPath, err)
 	}
 	if len(doc.Spec.ComponentRefs) == 0 || doc.Spec.ComponentRefs[0].Name != "nvcre" {
 		t.Fatalf("%s: the fragment under %q no longer declares an nvcre componentRef first",
