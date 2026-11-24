@@ -651,11 +651,14 @@ mirror for `gke` x `h100` has to serve that image and tag as well.
 On `eks` x `h100` and `gke` x `h100`, a recipe that runs
 `nccl-cre-all-reduce-bw` skips `nccl-all-reduce-bw` as `superseded-by-cre`, so one validation run reports
 only the CRE result. The comparison below predates that supersession; to
-repeat it, run each check in a separate validation. `nccl-cre-all-reduce-bw`
-reads 1.65 GB/s (0.34%) higher than `nccl-all-reduce-bw` on the same two nodes:
-six back-to-back pairs on NVCRE v0.8.2 gave 486.76 to 489.01 GB/s for the
+repeat it, run each check in a separate validation. On `eks` x `h100`
+(2x p5.48xlarge), `nccl-cre-all-reduce-bw` reads 1.65 GB/s (0.34%) higher than
+`nccl-all-reduce-bw` on the same two nodes: six back-to-back pairs on NVCRE
+v0.8.2 gave 486.76 to 489.01 GB/s for the
 TrainJob check and 489.63 to 490.03 GB/s for the CRE check, with a per-pair
-offset of 0.92 to 3.14 GB/s. Both ran over `Using network Libfabric`; the CRE
+offset of 0.92 to 3.14 GB/s. On `gke` x `h100` (2x a3-megagpu-8g, NVCRE
+v0.12.0) three CRE runs gave 337.06 to 338.09 GB/s against 336.98 GB/s from the
+TrainJob check on the same nodes. On EKS both ran over `Using network Libfabric`; the CRE
 check asserts that from its launcher log, and the TrainJob check's default
 template logs at `NCCL_DEBUG=WARN` so it cannot show it. That is the one
 difference in what the two checks demand: the CRE check fails a run that fell
