@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -172,14 +173,38 @@ func TestPublishStamps(t *testing.T) {
 			t.Errorf("platform = %q, want %q", got, want)
 		}
 	})
-	t.Run("a failed write is an error", func(t *testing.T) {
-		orig := extrasOut
-		extrasOut = errWriter{}
-		t.Cleanup(func() { extrasOut = orig })
+	for _, tt := range []struct {
+		name   string
+		writes int
+	}{
+		{"a failed extra stamp is an error", 0},
+		{"a failed platform stamp is an error", 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := extrasOut
+			w := &failAfterWriter{writes: tt.writes}
+			extrasOut = w
+			t.Cleanup(func() { extrasOut = orig })
 
-		err := publishStamps()
-		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInternal)
-	})
+			err := publishStamps()
+			errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInternal)
+			if w.writes != 0 {
+				t.Errorf("publishStamps() failed with %d successful writes unused, want the failure on write %d", w.writes, tt.writes+1)
+			}
+		})
+	}
+}
+
+// failAfterWriter succeeds for its first writes calls to Write and fails
+// every call after them.
+type failAfterWriter struct{ writes int }
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.writes == 0 {
+		return 0, io.ErrClosedPipe
+	}
+	w.writes--
+	return len(p), nil
 }
 
 func TestHandleCheckResult(t *testing.T) {
