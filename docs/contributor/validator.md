@@ -762,8 +762,8 @@ the result-contract version this image speaks. The other is an
 `##AICR-PLATFORM##` line with the binary's `GOOS/GOARCH`, which is the image's
 platform because the validator Dockerfiles copy the binary built for it. A
 result carries both on a pass, a skip, a failure or a context-load failure. If
-a write fails, the check exits 1 without the remaining stamps. A pod whose
-logs the orchestrator could not read carries no markers and is reported
+a write fails, the check exits 1 without the remaining stamps. A passed check
+whose logs the orchestrator could not read carries no markers and is reported
 `other`. A `passed` result read from its logs therefore carries the
 `resultSchema` stamp unless the image predates it.
 `pkg/evidence/cncf` reads the stamp to word the reason when a check known to
