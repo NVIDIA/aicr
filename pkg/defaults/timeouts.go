@@ -1440,10 +1440,10 @@ const (
 	// EnvBinaryAttestationIdentityRegexp overrides the certificate-identity
 	// pattern the server pins its own binary attestation to. Unset uses the
 	// release-workflow default (verifier.TrustedRepositoryPattern). A custom
-	// value MUST still contain "NVIDIA/aicr" (enforced by
-	// verifier.ValidateIdentityPattern) so it stays pinned to the NVIDIA org;
-	// it retargets WHICH NVIDIA workflow attested the binary (e.g. an e2e
-	// workflow), not the org. Mirrors the CLI's --certificate-identity-regexp.
+	// value MUST still begin with the https://github.com/NVIDIA/aicr/ prefix
+	// (enforced by verifier.ValidateIdentityPattern) so it stays pinned to that
+	// repository; it retargets WHICH NVIDIA/aicr workflow attested the binary
+	// (e.g. an e2e workflow), not the repository. Mirrors the CLI's --certificate-identity-regexp.
 	EnvBinaryAttestationIdentityRegexp = "AICR_BINARY_ATTESTATION_IDENTITY_REGEXP"
 )
 

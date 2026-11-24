@@ -2,7 +2,7 @@
 
 ## Overview
 
-Define the code of conduct followed and enforced for the NVIDIA AI Cluster Runtime (AICR).
+Define the code of conduct followed and enforced for the AI Cluster Runtime (AICR) project.
 
 ### Intended audience
 
@@ -40,7 +40,7 @@ Community leaders have the right and responsibility to remove, edit, or reject c
 
 ## Scope
 
-This Code of Conduct applies within all community spaces, and also applies when an individual is officially representing the community in public spaces. Examples of representing our community include using an official e-mail address, posting via an official social media account, or acting as an appointed representative at an online or offline event.
+This Code of Conduct applies within all community spaces, and also applies when an individual is officially representing the community in public spaces. AICR community spaces include the [NVIDIA/aicr](https://github.com/NVIDIA/aicr) repository (issues, pull requests, and reviews), the [#aicr](https://kubernetes.slack.com/messages/aicr) channel on Kubernetes Slack, and AICR meetings and events. The Kubernetes Slack workspace also has its own community guidelines. Examples of representing our community include using an official e-mail address, posting via an official social media account, or acting as an appointed representative at an online or offline event.
 
 ## Enforcement
 

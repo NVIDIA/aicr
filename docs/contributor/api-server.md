@@ -185,7 +185,7 @@ Environment variables read at startup:
 | `AICR_SIGNING_CONFIG_PATH` | unset | `parseSigningConfig` (both modes; Rekor v2) |
 | `AICR_TLOG_UPLOAD` | `true` | `parseSigningConfig` (Mode A only) |
 | `AICR_BINARY_ATTESTATION_FILE` | unset → `<executable>-attestation.sigstore.json` next to the binary | `resolveBinaryAttestationPath` (override for ko `KO_DATA_PATH` layouts) |
-| `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` | unset → `verifier.TrustedRepositoryPattern` (release `on-tag.yaml`) | `resolveBinaryAttestationIdentityPattern` (must be confined to `NVIDIA/aicr` — begins with the repository prefix, no top-level alternation, and no match against foreign-identity canaries — validated by `verifier.ValidateIdentityPattern`; retargets the attesting NVIDIA workflow, e.g. an e2e build) |
+| `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` | unset → `verifier.TrustedRepositoryPattern` (release `on-tag.yaml`) | `resolveBinaryAttestationIdentityPattern` (must be confined to `NVIDIA/aicr` — begins with the repository prefix, no top-level alternation, and no match against foreign-identity canaries — validated by `verifier.ValidateIdentityPattern`; retargets which `NVIDIA/aicr` workflow attested the binary, e.g. an e2e build) |
 
 See [Server-Side Bundle Signing](#server-side-bundle-signing) for the identity
 model and validation rules behind these variables.
@@ -244,8 +244,9 @@ and Fulcio binds each certificate to a fresh token.
 
 **Binary attestation cached at startup.** Server signing also requires the aicrd
 binary's own attestation (tool provenance): a Sigstore bundle shipped next to the
-executable inside the container image, issued under the NVIDIA-CI identity and
-bound to the binary's digest. `loadBinaryAttestation` verifies it **once** at
+executable inside the container image, issued under the identity of the AICR
+release workflow in `NVIDIA/aicr` and bound to the binary's digest.
+`loadBinaryAttestation` verifies it **once** at
 startup (`Serve` calls it after `parseSigningConfig`) and caches the raw bytes on
 the `signingConfig`; each signed bundle embeds those bytes as
 `attestation/aicr-attestation.sigstore.json`. This is fail-fast too: a signing
@@ -266,8 +267,8 @@ pattern the attestation is verified against: `verifier.TrustedRepositoryPattern`
 `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` override when set. The override is
 validated by `verifier.ValidateIdentityPattern`, which requires it to *begin
 with* `https://github.com/NVIDIA/aicr/` (a leading `^` is allowed) and to avoid
-top-level alternation, so it can only retarget which NVIDIA workflow attested
-the binary (e.g. the server-kms e2e build), never widen the org. Merely
+top-level alternation, so it can only retarget which `NVIDIA/aicr` workflow
+attested the binary (e.g. the server-kms e2e build), never widen the org. Merely
 containing `NVIDIA/aicr` is not enough: a pattern that reaches the repository
 down one branch and something else down another is rejected. A bad override fails
 startup fast. This mirrors the CLI's `--certificate-identity-regexp`, and a
@@ -277,8 +278,8 @@ verifier using the default identity.
 **Injectable seams for tests.** The startup verifier
 (`binaryAttestationVerifier`) and the per-request attester builder
 (`attesterBuilder`) are function-typed fields so tests can inject fixtures: the
-real verifier pins the NVIDIA-CI identity and the running binary's digest, which
-a `go test` executable cannot satisfy.
+real verifier pins the AICR release workflow identity and the running binary's
+digest, which a `go test` executable cannot satisfy.
 
 ## OpenAPI Parity Test
 

@@ -1,5 +1,7 @@
 # Security
 
+This is the AICR security policy. It covers the AI Cluster Runtime (AICR) project in this repository: the `aicr` CLI, the `aicrd` API server, the AICR Operator, the container images and charts the project publishes, and the embedded recipe catalog. AICR is an open source project created by NVIDIA, and NVIDIA PSIRT receives AICR vulnerability reports, coordinates disclosure, and assigns CVEs. Report a vulnerability in AICR through the NVIDIA channels below.
+
 NVIDIA is dedicated to the security and trust of our software products and services, including all source code repositories.
 
 **Please do not report security vulnerabilities through GitHub.**
@@ -193,12 +195,11 @@ with `cosign attest-blob` from the release job (`on-tag.yaml`), which does not
 provide the reusable-workflow isolation.
 
 `aicr verify` reports one of four trust levels for a bundle: `verified`
-(full chain verified, binary identity pinned to NVIDIA CI), `attested`
+(full chain verified, binary identity pinned to the AICR release workflow in `NVIDIA/aicr`), `attested`
 (bundle attestation verified but the chain is incomplete — binary attestation
-missing/unverified or external data used; a binary attestation that *fails*
-verification reports `attested` but makes `aicr verify` exit nonzero),
+missing or external data used),
 `unverified` (checksums valid but no attestation files, e.g. `--attest` was
-not used), and `unknown` (missing/invalid checksums, or a bundle attestation that fails verification).
+not used), and `unknown` (missing/invalid checksums, or a bundle or binary attestation that fails verification).
 
 ### Verify an Artifact (Happy Path)
 

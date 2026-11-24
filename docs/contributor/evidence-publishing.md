@@ -58,7 +58,7 @@ The second half of that is the part worth internalizing: **tag syntax is not
 proof of immutability.** `example.com/validators/performance:v1.0.0` looks
 exactly like a release pin and means nothing — no workflow in this repository
 governs how that registry moves its tags, and it may repoint `:v1.0.0`
-whenever it likes. The same applies to a mirror of NVIDIA's own images reached
+whenever it likes. The same applies to a mirror of AICR's own validator images reached
 via `AICR_VALIDATOR_IMAGE_REGISTRY`, and to any validator supplied by an
 external catalog. Those must be pinned by digest to vouch for provenance.
 

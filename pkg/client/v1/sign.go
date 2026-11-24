@@ -158,7 +158,7 @@ type CatalogSignResult struct {
 // VerifyCatalog verifies against the public-good Sigstore root, requires a
 // transparency-log entry, and pins the certificate to the GitHub Actions OIDC
 // issuer. It exposes no key, no trust-root, and no offline option, because the
-// recipe catalog is a release artifact NVIDIA signs — not something a consumer
+// recipe catalog is a release artifact the AICR release workflow signs — not something a consumer
 // re-signs privately.
 //
 // SignCatalog therefore REJECTS the four OIDCResolve settings that would

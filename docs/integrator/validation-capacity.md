@@ -1,6 +1,9 @@
 # Contributing Validation Capacity
 
-AICR captures the configuration of a GPU-accelerated Kubernetes cluster in version-locked recipes, generates deployment artifacts for tools such as Helm, Argo CD and Flux, and [validates](../user/validation.md) the running cluster against the checks each recipe declares. AICR's user acceptance testing (UAT) pipeline runs those checks on real GPU hardware. This guide shows GPU providers and operators how to contribute capacity to that pipeline: what to offer, how to set up access, and what results to expect.
+AICR captures the configuration of a GPU-accelerated Kubernetes cluster in version-locked recipes, generates deployment artifacts for tools such as Helm, Argo CD and Flux, and [validates](../user/validation.md) the running cluster against the checks each recipe declares. AICR's user acceptance testing (UAT) pipeline runs those checks on real GPU hardware. This guide is for labs, cluster operators, platform teams, and GPU providers who want their environments validated. There are two ways to contribute:
+
+- **Project-operated tests.** AICR's UAT workflows run the checks on infrastructure or cloud credits you contribute. Most of this guide covers this path: what to offer, how to set up access, and what results to expect.
+- **Independently operated tests.** You run validation in your own environment and submit the signed results as evidence. See [Evidence collection and submission](#evidence-collection-and-submission).
 
 Workload teams get a repeatable configuration baseline and a way to check deployment health, workload capabilities, and performance where the recipe declares those checks. Providers and operators can publish and maintain a configuration baseline their users can deploy with existing tooling. New to AICR? Start with the [introduction](../README.md) and the [end-to-end tutorial](../user/tutorial.md).
 
@@ -65,7 +68,7 @@ Enforce the identity and resource boundaries below at your identity provider or 
 | Issuer and validity | `https://token.actions.githubusercontent.com`; verify signature, token validity, and an audience unique to your organization, never GitHub's default and never shared with another contributor. |
 | Repository | Only `NVIDIA/aicr`; bind immutable repository and owner IDs where supported. Maintainers confirm these during onboarding. |
 | Branch | Only `refs/heads/main`. |
-| Pipeline | Only the exact approved workflow path and ref (`workflow_ref`) and the exact workflow that requests the token (`job_workflow_ref`). UAT lanes are reusable workflows called from a shared dispatcher, so bind both. Maintainers supply the final identities. |
+| Pipeline | Only the exact approved workflow path and ref (`workflow_ref`) and the exact workflow that requests the token (`job_workflow_ref`). UAT lanes are reusable workflows called from a shared dispatcher, so bind both: `job_workflow_ref` names the lane (for example `NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main`), and `workflow_ref` names the top-level workflow that started the run. Maintainers supply the final identities. |
 | Trigger | Only the agreed entry points, enforced on the `event_name` claim; maintainers supply the exact values. No pull-request runs, including `pull_request_target`. |
 | Resources and actions | Only the donated allocation and the agreed provisioning, validation, diagnostics, and cleanup actions. No access to other tenants or unrelated infrastructure. |
 | Lifetime | Expiring access with bounded sessions or automatic reauthentication covering setup through cleanup. Revocation must stop new credential issuance and renewal; document the maximum remaining lifetime of already-issued sessions. |

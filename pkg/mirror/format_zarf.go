@@ -108,7 +108,7 @@ func renderZarf(w io.Writer, list *MirrorList) error {
 		Kind:       "ZarfPackageConfig",
 		Metadata: zarfMeta{
 			Name:        "aicr",
-			Description: "NVIDIA AI Cluster Runtime container images and Helm charts for air-gapped deployment",
+			Description: "AI Cluster Runtime (AICR) container images and Helm charts for air-gapped deployment",
 		},
 		Components: []zarfComponent{
 			{

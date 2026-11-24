@@ -53,6 +53,17 @@ with epic [#827](https://github.com/NVIDIA/aicr/issues/827) and initiative
   floors vary by accelerator instead of following one global pin.
 - **VR200 tuning and validation.** Continue tuning and validating the VR200
   recipes on RKE2 beyond their Preview baseline.
+- **Portable integrations.** [ADR-032](docs/design/032-portable-integrations.md)
+  (Proposed) sets the direction: vendor-neutral contracts for the
+  configuration catalog, cluster discovery, and validation and evidence, with
+  hardware- and platform-specific behavior made pluggable, so platform teams
+  and community contributors can maintain integrations for the environments
+  they know ([#3920](https://github.com/NVIDIA/aicr/issues/3920)). AICR
+  maintainers steward the shared contracts and qualification criteria. Each
+  integration's maintainers keep its configurations and evidence current.
+  Project-maintained and community-maintained integrations meet the same bar
+  of real-hardware validation, published evidence, and ongoing maintenance,
+  and reach Supported only through the [maturity](#maturity) criteria.
 
 **Boundaries:** A recognized criteria value does not imply qualified support.
 Structural integration and hardware qualification are separate acceptance
@@ -245,3 +256,5 @@ AICR keeps its user, integrator, and contributor documentation, recipe quality
 checks, KWOK coverage, and community contribution path. Self-service
 contributor checks, such as static recipe validation before a pull request,
 continue under epic [#3155](https://github.com/NVIDIA/aicr/issues/3155).
+[Contributing an Integration](CONTRIBUTING.md#contributing-an-integration)
+describes the path from proposal to signed evidence and maintenance.

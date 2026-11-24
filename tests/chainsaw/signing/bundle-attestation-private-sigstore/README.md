@@ -125,7 +125,8 @@ TLS proxy, extracts the CTLog public key from the in-cluster secret, mints an SA
 OIDC token, runs the chainsaw suite, and tears everything down on exit. Pass
 `KEEP_CLUSTER=true` to leave the cluster running between runs.
 
-`aicr bundle --attest` requires an NVIDIA-CI-attested binary (a co-located
+`aicr bundle --attest` requires a binary attested by a workflow in `NVIDIA/aicr`
+that matches `AICR_IDENTITY_REGEXP` (a co-located
 `<binary>-attestation.sigstore.json`, verified against public Sigstore). Provide
 one via `AICR_BIN` (e.g. the `build-attested.yaml` artifact); `AICR_IDENTITY_REGEXP`
 defaults to the `build-attested.yaml` identity. A plain `goreleaser --snapshot`

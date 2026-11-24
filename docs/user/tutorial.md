@@ -12,8 +12,12 @@ lists, see the [CLI Reference](cli-reference.md).
 
 ## Prerequisites
 
-- A GPU-accelerated Kubernetes cluster you can deploy to (EKS, GKE, AKS, or a
-  local Kind/KWOK cluster for a dry run). `kubectl` configured to reach it.
+- A GPU-accelerated Kubernetes cluster you can deploy to, with `kubectl`
+  configured to reach it. The commands below use the EKS, NVIDIA H100, Ubuntu,
+  training, Kubeflow recipe, so a full deploy and validate needs an EKS cluster
+  with H100 GPU nodes running Ubuntu. For a different cluster, change the
+  criteria in Step 2 to match it. A local Kind or KWOK cluster works for a dry
+  run of the deploy step, but the validate step needs real GPU nodes.
 - The `helm` binary on your `PATH` (the default `helm` deployer emits Helm
   commands).
 - `timeout` from GNU coreutils (or `gtimeout`) on your `PATH`: components that

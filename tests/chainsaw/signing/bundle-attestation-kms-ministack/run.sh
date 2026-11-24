@@ -27,8 +27,8 @@
 # awskms:// signer needs. We use it instead of LocalStack because recent
 # LocalStack images require a paid license token to start.
 #
-# NOTE: The chainsaw "--attest" steps only pass with a binary that carries an
-# NVIDIA-CI attestation; a local goreleaser --snapshot build does not. So with
+# NOTE: The chainsaw "--attest" steps only pass with a binary attested by a
+# workflow in NVIDIA/aicr; a local goreleaser --snapshot build is not. So with
 # no attested binary this runner enters SMOKE MODE: it validates the MiniStack
 # and KMS plumbing (container, key provisioning, PEM export, recipe + bundle)
 # and exits 0 with a clear message, instead of running the full suite and

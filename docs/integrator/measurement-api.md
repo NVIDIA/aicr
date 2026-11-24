@@ -9,7 +9,8 @@ Measurements should follow it exactly.
 
 The Go types are documented in `pkg/measurement/types.go`. This page documents
 the conventions on top of the types (which Type appears how often, which
-Subtype names mean what, which fields live in `Context` vs `Data`).
+Subtype names mean what, which fields live in `Context` vs `Data`). For where
+Measurements fit in an integration, see [Authoring an integration](recipe-development.md#authoring-an-integration).
 
 ## Top-level structure
 

@@ -3871,7 +3871,8 @@ func (b *DefaultBundler) binaryAttestation(ctx context.Context) ([]byte, error) 
 			return nil, verifyErr
 		}
 		return nil, errors.Wrap(errors.ErrCodeUnauthorized,
-			"binary attestation verification failed: it must be NVIDIA CI's attestation of this exact binary; "+
+			"binary attestation verification failed: it must be an attestation of this exact binary from a workflow in NVIDIA/aicr "+
+				"(the AICR release workflow unless --certificate-identity-regexp overrides it); "+
 				"reinstall from a release archive or remove --attest to skip", verifyErr)
 	}
 	slog.Info("binary provenance verified", "builder", binaryBuilder)

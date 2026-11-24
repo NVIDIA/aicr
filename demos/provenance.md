@@ -2,15 +2,17 @@
 
 Every released AICR image carries a signed SLSA Build Provenance v1 attestation
 on its multi-platform index, plus a signed CycloneDX SBOM and a signed OpenVEX
-document on each platform's own manifest, produced by NVIDIA CI on tag and
-recorded in the public Rekor transparency log. Released binaries ship a separate
-SPDX SBOM asset (`*.sbom.json`); only the image SBOM uses the signed OCI
-attestation flow. This demo walks the consumer-side verification chain: what a
-downstream operator runs to confirm an artifact came from NVIDIA, from a known
-commit, and contains a known software bill of materials.
+document on each platform's own manifest, produced on tag by the AICR release
+workflow in `NVIDIA/aicr` and recorded in the public Rekor transparency log.
+Released binaries ship a separate SPDX SBOM asset (`*.sbom.json`); only the
+image SBOM uses the signed OCI attestation flow. This demo walks the
+consumer-side verification chain: what a
+downstream operator runs to confirm an artifact came from the AICR release
+workflow, from a known commit, and contains a known software bill of materials.
 
 The producer side runs in `.github/workflows/on-tag.yaml`; nothing here needs
-NVIDIA credentials or repo access. The companion script is
+project credentials or repo access. Steps 1 to 3 reach the GitHub API and
+`ghcr.io`; step 5 queries the public Rekor log. The companion script is
 [`provenance-demo.sh`](provenance-demo.sh); the slide deck is
 [`provenance-demo-slides.html`](provenance-demo-slides.html).
 
@@ -29,7 +31,7 @@ This walkthrough covers:
 |------|-----|
 | `curl`, `jq` | Resolve the latest release tag from the GitHub API |
 | [`crane`](https://github.com/google/go-containerregistry/tree/main/cmd/crane) | Resolve mutable tags to immutable digests without pulling layers |
-| [`gh`](https://cli.github.com/) | Verifies attestations against NVIDIA's identity (`gh attestation verify`) |
+| [`gh`](https://cli.github.com/) | Verifies attestations against the release workflow's identity (`gh attestation verify`) |
 | [`cosign`](https://github.com/sigstore/cosign) | Verifies SBOM and VEX attestations with an explicit signer policy |
 | `grype` *(optional)* | SBOM-based vulnerability scan |
 | `rekor-cli` *(optional)* | Transparency-log lookup |
@@ -226,7 +228,7 @@ jq -r '.metadata.timestamp' sbom.json
 
 Rekor is the public, append-only transparency log of every Sigstore signature
 ever made. Searching by content digest finds every attestation made against
-that artifact — no NVIDIA contact required.
+that artifact, with no contact with the publisher required.
 
 ```shell
 rekor-cli search --sha "${DIGEST#sha256:}"

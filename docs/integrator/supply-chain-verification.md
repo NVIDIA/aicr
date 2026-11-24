@@ -538,7 +538,8 @@ cat aicr_${VERSION}_${OS}_${ARCH}.sbom.json
 Each binary SBOM ships with its own Sigstore bundle,
 `aicr_${VERSION}_${OS}_${ARCH}.sbom.json.sigstore.json`, carrying the release
 run's SLSA provenance over the SBOM document itself. Download it alongside the
-SBOM and verify that NVIDIA CI produced that exact document:
+SBOM and verify that the AICR release workflow (`on-tag.yaml`) in `NVIDIA/aicr`
+produced that exact document:
 
 ```shell
 curl -LO https://github.com/NVIDIA/aicr/releases/download/${TAG}/aicr_${VERSION}_${OS}_${ARCH}.sbom.json.sigstore.json
@@ -753,8 +754,11 @@ release.
 When `aicr bundle` runs with `--attest`, it signs the bundle using Sigstore
 keyless OIDC, binding the bundle creator's identity to the generated
 closed-world inventory and the binary that produced it (via
-`resolvedDependencies`). Attestation is opt-in; bundles are unsigned by
-default. The bundle output includes
+`resolvedDependencies`). The signer is whoever runs the command: their OIDC
+identity through public Sigstore by default, a private Sigstore with
+`--fulcio-url`/`--rekor-url`, or their own KMS key with `--signing-key`. The
+AICR project does not sign the bundle. Attestation is opt-in; bundles are
+unsigned by default. The bundle output includes
 `attestation/bundle-attestation.sigstore.json` (SLSA Build Provenance v1 for
 the bundle) and `attestation/aicr-attestation.sigstore.json` (the binary
 provenance chain).
@@ -776,10 +780,10 @@ aicr verify ./my-bundle
 This performs full closed-world verification: it validates every manifest
 digest and rejects any additional filesystem entry, then verifies the bundle
 attestation against the Sigstore trusted root and the binary attestation
-provenance chain (identity pinned to NVIDIA CI). Manifest parsing is
-order-independent, but reordering an already signed `checksums.txt` changes
-the signed bytes and invalidates its existing attestation. Enforce a minimum
-trust level:
+provenance chain (identity pinned to the AICR release workflow). Manifest
+parsing is order-independent, but reordering an already signed
+`checksums.txt` changes the signed bytes and invalidates its existing
+attestation. Enforce a minimum trust level:
 
 ```shell
 aicr verify ./my-bundle --min-trust-level verified
@@ -1756,7 +1760,8 @@ the gate itself is the same command in the same place.
 | Air-gapped | `--attest --signing-key <kms-uri> --tlog-upload=false` | `aicr verify <dir> --key ./bundle-signer.pub --insecure-ignore-tlog` |
 
 `--trust-root` is additive to AICR's built-in public-good root, so one command
-verifies both org-signed and NVIDIA-signed bundles.
+verifies both bundles signed against your private Sigstore and bundles signed
+through public Sigstore.
 `--insecure-ignore-tlog` requires `--key`, and a local PEM key keeps the verify
 fully offline where a KMS URI still resolves remotely. Full details for each
 shape are in

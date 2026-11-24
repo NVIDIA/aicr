@@ -593,8 +593,8 @@ func ExampleClient_RecipeDigest() {
 
 // ExampleClient_VerifyCatalog checks the Sigstore signature over this Client's
 // recipe catalog — that the recipe data resolution is about to use was
-// published by NVIDIA CI and has not been altered. The bundle ships as the
-// recipe-catalog.sigstore.json release asset.
+// published by the AICR release workflow and has not been altered. The bundle
+// ships as the recipe-catalog.sigstore.json release asset.
 //
 // The digest is computed over THIS Client's DataProvider. A Client layering
 // external data over the embedded tree is verifying different content, so it
@@ -721,9 +721,9 @@ func ExampleClient_VerifyEvidence() {
 	fmt.Println(aicr.RenderEvidenceMarkdown(verification))
 }
 
-// ExampleVerifyBinaryAttestation proves an aicr binary was built by NVIDIA CI.
-// It is package-level rather than a Client method: verifying a binary needs no
-// recipe data, so it requires no Client.
+// ExampleVerifyBinaryAttestation proves an aicr binary was built by the AICR
+// release workflow. It is package-level rather than a Client method: verifying
+// a binary needs no recipe data, so it requires no Client.
 func ExampleVerifyBinaryAttestation() {
 	ctx := context.Background()
 

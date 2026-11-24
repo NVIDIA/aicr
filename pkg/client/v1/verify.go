@@ -27,8 +27,8 @@ import (
 )
 
 // TrustedIdentityPattern is the default certificate-identity regexp that
-// binary-attestation verification pins to: NVIDIA's release workflow on tag
-// refs.
+// binary-attestation verification pins to: the AICR release workflow in
+// NVIDIA/aicr, on tag refs.
 //
 // Override it only to pin a DIFFERENT WORKFLOW within NVIDIA/aicr — a
 // pre-release or e2e build, say. Verifying a fork is not possible through this
@@ -98,7 +98,8 @@ type BundleVerifyOptions struct {
 
 	// TrustRoot is a path to a private Sigstore trusted_root.json (from a
 	// self-hosted Fulcio/Rekor). ADDITIVE to AICR's built-in public-good
-	// root, so NVIDIA-signed and privately-signed bundles both verify.
+	// root, so bundles signed through public Sigstore and privately-signed
+	// bundles both verify.
 	TrustRoot string
 
 	// MinTrustLevel is the trust floor the verified bundle must reach: one
@@ -213,7 +214,7 @@ func (c *Client) VerifyBundle(ctx context.Context, bundleDir string, opts Bundle
 	}
 	if opts.CertificateIdentityRegexp != "" {
 		// Already coded ErrCodeInvalidRequest; propagating as-is keeps the
-		// "must contain NVIDIA/aicr" message the caller needs.
+		// "must begin with https://github.com/NVIDIA/aicr/" message the caller needs.
 		if err := bundleverifier.ValidateIdentityPattern(opts.CertificateIdentityRegexp); err != nil {
 			return nil, err
 		}
@@ -404,9 +405,9 @@ func (c *Client) VerifyEvidence(ctx context.Context, opts EvidenceVerifyOptions)
 
 // CatalogVerifyOptions configures Client.VerifyCatalog.
 type CatalogVerifyOptions struct {
-	// CertificateIdentityRegexp overrides the NVIDIA CI identity pattern.
-	// Must BEGIN with "https://github.com/NVIDIA/aicr/" (a leading "^" is
-	// allowed) and must not use top-level alternation. Empty uses
+	// CertificateIdentityRegexp overrides the AICR release workflow identity
+	// pattern. Must BEGIN with "https://github.com/NVIDIA/aicr/" (a leading
+	// "^" is allowed) and must not use top-level alternation. Empty uses
 	// TrustedIdentityPattern.
 	CertificateIdentityRegexp string
 
@@ -438,16 +439,17 @@ type CatalogVerification struct {
 
 // VerifyCatalog recomputes the deterministic digest over this Client's recipe
 // catalog (registry.yaml plus validators/catalog.yaml) and verifies it against
-// the Sigstore bundle at bundlePath, pinning to NVIDIA CI identity. The bundle
-// ships as the recipe-catalog.sigstore.json release asset alongside each
-// tagged aicr binary.
+// the Sigstore bundle at bundlePath, pinning to the AICR release workflow
+// identity. The bundle ships as the recipe-catalog.sigstore.json release asset
+// alongside each tagged aicr binary.
 //
 // The digest is computed over THIS Client's DataProvider, not the process-wide
 // embedded catalog — the same binding ComputeHealth uses. A Client built on an
-// EmbeddedSource verifies the catalog NVIDIA signed. A Client whose source
-// layers external data over the embedded tree is verifying different content,
-// so verification will not match the released signature; that is the correct
-// answer to "is the catalog I am resolving against the signed one", not a bug.
+// EmbeddedSource verifies the catalog the AICR release workflow signed. A
+// Client whose source layers external data over the embedded tree is verifying
+// different content, so verification will not match the released signature;
+// that is the correct answer to "is the catalog I am resolving against the
+// signed one", not a bug.
 //
 // A verification failure is returned as an error, not as a report: unlike
 // bundle and evidence verification there is no partial verdict to render.
@@ -590,9 +592,10 @@ type BinaryAttestationVerifyOptions struct {
 // verified certificate subject.
 //
 // Use it to prove the aicr binary being embedded or executed was built by
-// NVIDIA CI, before trusting anything it produces. It is package-level rather
-// than a Client method because it involves no recipe catalog and no
-// configurable policy — there is nothing for a Client to contribute.
+// the AICR release workflow, before trusting anything it produces. It is
+// package-level rather than a Client method because it involves no recipe
+// catalog and no configurable policy — there is nothing for a Client to
+// contribute.
 func VerifyBinaryAttestation(ctx context.Context, opts BinaryAttestationVerifyOptions) (string, error) {
 	if ctx == nil {
 		return "", errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")

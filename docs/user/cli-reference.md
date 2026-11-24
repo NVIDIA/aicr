@@ -353,7 +353,7 @@ aicr recipe [flags]
 
 `aicr recipe` resolves a recipe from **criteria** — `service`, `accelerator`, `os`, `intent`, `platform`. (`nodes` is accepted but is advisory metadata — it does not select or filter overlays.) You can supply those criteria three ways, composed with the precedence **CLI flags > `--config` file > `--snapshot`**:
 
-- **Snapshot** (`--snapshot`) — criteria are auto-detected from a captured cluster snapshot: accelerator from the `nvidia.com/gpu.product` GFD label (primary — cluster-wide, so it surfaces heterogeneous clusters) or the per-node PCI device ID (fallback — maps the device ID to a SKU, e.g. `h100`, with no driver or GFD label required); service from the node's cloud-provider ID; OS from the node's OS release; node count from cluster topology. Use this when you already have a running cluster: you don't hand-specify the hardware, AICR reads it. (A detected SKU fills `criteria.accelerator` only when it's in the supported accelerator set; an unsupported GPU is recorded descriptively but not as a recipe criterion.) On the snapshot path AICR also reads the sampled GPU node's `driver-loaded` reading; on unprofiled/legacy compositions whose resolved values already carry the coordinated preinstalled-driver configuration, it injects `gpu-operator.overrides.driver.enabled=false` into the resolved recipe, while on a profiled AKS composition the snapshot only *qualifies* the explicit-or-default `gpuStack` selection — the injector skips profile-owned paths and never mutates them; the inverse mismatch — a preinstalled-driver overlay resolved against a snapshot with *no* driver loaded — is handled per family: on profiled AKS it either fails closed at the profile constraint (pools not reading `Install`) or records `gpuDriverState: absent` for the bundle-time gate whose remedy is pool repair/recreation + recapture + `--profile`; on non-profiled families and legacy artifacts it warns with the bundle-time override set. See [Component Catalog › GPU Operator Driver Auto-Detect](component-catalog.md#gpu-operator-driver-auto-detect) for the gate, warnings, and the pre-deploy-snapshot requirement.
+- **Snapshot** (`--snapshot`) — criteria are auto-detected from a captured cluster snapshot: accelerator from the `nvidia.com/gpu.product` GFD label (primary — cluster-wide, so it surfaces heterogeneous clusters) or the per-node PCI device ID (fallback — maps the device ID to a SKU, e.g. `h100`, with no driver or GFD label required); service from the node's cloud-provider ID; OS from the node's OS release; node count from cluster topology. Use this when you already have a running cluster: you don't hand-specify the hardware, AICR reads it. (A detected SKU fills `criteria.accelerator` only when it's in the supported accelerator set; an unsupported GPU is recorded descriptively but not as a recipe criterion.) Accelerator auto-detection reads NVIDIA-specific signals today, the GFD `nvidia.com/gpu.product` label and NVIDIA PCI device IDs, so other hardware needs `--accelerator` or a [collector](../contributor/collector.md) that detects it. An explicit `--accelerator` must be a value the catalog defines: the built-in values are NVIDIA SKUs, and a [`--data` catalog](../integrator/data-extension.md) can register others. On the snapshot path AICR also reads the sampled GPU node's `driver-loaded` reading; on unprofiled/legacy compositions whose resolved values already carry the coordinated preinstalled-driver configuration, it injects `gpu-operator.overrides.driver.enabled=false` into the resolved recipe, while on a profiled AKS composition the snapshot only *qualifies* the explicit-or-default `gpuStack` selection — the injector skips profile-owned paths and never mutates them; the inverse mismatch — a preinstalled-driver overlay resolved against a snapshot with *no* driver loaded — is handled per family: on profiled AKS it either fails closed at the profile constraint (pools not reading `Install`) or records `gpuDriverState: absent` for the bundle-time gate whose remedy is pool repair/recreation + recapture + `--profile`; on non-profiled families and legacy artifacts it warns with the bundle-time override set. See [Component Catalog › GPU Operator Driver Auto-Detect](component-catalog.md#gpu-operator-driver-auto-detect) for the gate, warnings, and the pre-deploy-snapshot requirement.
 - **Config file** (`--config`) — criteria (and bundle settings) from an `AICRConfig` document; good for reproducible, version-controlled workflows.
 - **Query flags** (`--service`, `--accelerator`, …) — state the criteria directly. Use this when there is **no cluster to snapshot yet** — the common case when you generate a recipe in order to *provision* a cluster, or build one offline/ahead of time for hardware you can't reach.
 
@@ -958,7 +958,8 @@ release asset alongside each tagged `aicr` binary.
 
 `aicr recipe verify-catalog` recomputes a deterministic SHA-256 over the embedded
 catalog content using a length-prefixed encoding of the two raw files, then
-verifies the digest against the Sigstore bundle using NVIDIA CI identity pinning.
+verifies the digest against the Sigstore bundle, pinned to the identity of the
+AICR release workflow (`on-tag.yaml`) in `NVIDIA/aicr`.
 Exit code is 0 on success, non-zero on any verification failure.
 
 **Synopsis:**
@@ -971,7 +972,7 @@ aicr recipe verify-catalog <bundle-path> [flags]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--identity-pattern` | string | | Override the NVIDIA CI certificate identity regexp. Must *begin with* `https://github.com/NVIDIA/aicr/` (a leading `^` is allowed; `github\.com` also accepted) and must not use top-level alternation, so the pattern stays confined to the repository. Put any alternatives after the prefix, e.g. `.../aicr/\.github/workflows/(on-tag\|release)\.yaml@.*`. Also reads `AICR_CATALOG_IDENTITY_PATTERN`. |
+| `--identity-pattern` | string | | Override the AICR release workflow certificate identity regexp. Must *begin with* `https://github.com/NVIDIA/aicr/` (a leading `^` is allowed; `github\.com` also accepted) and must not use top-level alternation, so the pattern stays confined to the repository. Put any alternatives after the prefix, e.g. `.../aicr/\.github/workflows/(on-tag\|release)\.yaml@.*`. Also reads `AICR_CATALOG_IDENTITY_PATTERN`. |
 
 **Examples:**
 
@@ -3317,16 +3318,16 @@ The generated ArtifactGenerator CRs extract per-component chart directories from
 When `--attest` is passed, the bundle command performs five steps:
 
 1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
-2. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by NVIDIA CI. This ensures only NVIDIA-built binaries can produce attested bundles. An attestation that does not verify, such as one left beside the binary by a different build, stops the command here, before any OIDC login, KMS call or transparency-log entry.
+2. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by the AICR release workflow (`on-tag.yaml`) in `NVIDIA/aicr`, or by the `NVIDIA/aicr` workflow that `--certificate-identity-regexp` names. A released `aicr` therefore signs bundles only when its own attestation verifies. An attestation that does not verify, such as one left beside the binary by a different build, stops the command here, before any OIDC login, KMS call or transparency-log entry.
 3. **Acquires a signing credential** — in the default keyless mode this is an OIDC token (see [OIDC Token Sources](#oidc-token-sources) below); with `--signing-key` this step instead resolves the KMS key and no OIDC token is acquired (see [KMS-Backed Signing](#kms-backed-signing)).
-4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the generated closed-world inventory, including `recipe.yaml`, and the binary that produced it.
+4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the generated closed-world inventory, including `recipe.yaml`, and the binary that produced it. The signature belongs to whoever runs the command: the OIDC identity from step 3, or your KMS key with `--signing-key`. The AICR project does not sign your bundle.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
 Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log) and records the entry in **Rekor v2** (the signing config is fetched from Sigstore's TUF repository, so shard rotation is handled automatically; a cold cache is fetched on demand). Verifying such bundles with `aicr verify` needs only the `aicr` binary; verifying them with `cosign verify-blob-attestation` needs Cosign v3.0.1+. For CI/CD environments without OIDC, pass `--signing-key` to sign with a KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
 
 **Rekor v1 / private Sigstore:** pass `--rekor-url` to sign to Rekor **v1** at a specific URL — a private instance, or the public-good v1 URL — instead of the v2 default. Organizations running their own Fulcio CA can also redirect with `--fulcio-url` (both must be absolute `https://` URLs with no embedded credentials); the two are independent. For a fully custom v2 setup, `--signing-config` takes a Sigstore signing config JSON (mutually exclusive with `--rekor-url`).
 
-> **Verification:** these flags redirect **signing** only. Verify the resulting bundles with `aicr verify --trust-root <trusted_root.json>`, supplying the `trusted_root.json` your self-hosted Fulcio/Rekor emits. That root is unioned with AICR's built-in public-good root, so privately-signed and NVIDIA-signed bundles both verify; see the [`aicr verify`](#aicr-verify) `--trust-root` flag.
+> **Verification:** these flags redirect **signing** only. Verify the resulting bundles with `aicr verify --trust-root <trusted_root.json>`, supplying the `trusted_root.json` your self-hosted Fulcio/Rekor emits. That root is unioned with AICR's built-in public-good root, so privately-signed bundles and bundles signed through public Sigstore both verify; see the [`aicr verify`](#aicr-verify) `--trust-root` flag.
 
 ##### OIDC Token Sources
 
@@ -3886,7 +3887,7 @@ aicr verify <bundle-dir> [flags]
 | `--cli-version-constraint` | string | | Version constraint for the aicr CLI version in the attestation predicate. Supports `>=`, `>`, `<=`, `<`, `==`, `!=`. A bare version (e.g. `"0.8.0"`) defaults to `>=`. |
 | `--certificate-identity-regexp` | string | | Override the certificate identity pattern for binary attestation verification. Must *begin with* `https://github.com/NVIDIA/aicr/` (a leading `^` is allowed) and must not use top-level alternation. For testing only. |
 | `--key` | string | | Verify a key-signed bundle attestation against a KMS key URI (`awskms://` \| `gcpkms://` \| `azurekms://` \| `hashivault://`) or a local PEM public-key file. This is the counterpart to `bundle --signing-key`. It coexists with `--certificate-identity-regexp`, which pins the binary attestation; the two verify different attestations. |
-| `--trust-root` | string | | Verify the bundle attestation against a private Sigstore trusted root (a `trusted_root.json` from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so NVIDIA-signed and privately-signed bundles both verify. Composes with `--key` and `--certificate-identity-regexp`. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`. |
+| `--trust-root` | string | | Verify the bundle attestation against a private Sigstore trusted root (a `trusted_root.json` from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so bundles signed through public Sigstore and privately-signed bundles both verify. Composes with `--key` and `--certificate-identity-regexp`. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`. |
 | `--insecure-ignore-tlog` | bool | `false` | Offline/air-gapped verification: skip the transparency-log (and observer-timestamp) requirement so a bundle signed with `bundle --signing-key ... --tlog-upload=false` verifies against `--key` with no transparency-log network calls. A local PEM `--key` is then fully offline; a KMS `--key` URI still makes a live `GetPublicKey` call to resolve the key (export a PEM with `cosign public-key` for a truly offline verify). Requires `--key`; the air-gapped path is key-based, not keyless. Named "insecure" because, with no transparency log, there is no trusted timestamp proving when the signature was made. Does not affect the binary attestation, which always requires a transparency log. |
 | `--format` | string | `text` | Output format: `text` or `json`. |
 | `--config` | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) supplying verification policy from `spec.verify`. CLI flags override values from this file. See [Verify Config File Mode](#verify-config-file-mode). |
@@ -3951,7 +3952,7 @@ aicr verify ./my-bundle --config aicr-config.yaml --min-trust-level attested
 
 | Level | Name | Criteria |
 |-------|------|----------|
-| 4 | `verified` | Full chain: closed-world inventory + bundle attestation + binary attestation pinned to NVIDIA CI |
+| 4 | `verified` | Full chain: closed-world inventory + bundle attestation + binary attestation pinned to the AICR release workflow |
 | 3 | `attested` | Closed-world inventory and bundle attestation valid; binary attestation missing, or external data (`--data`) used |
 | 2 | `unverified` | Closed-world inventory valid; `--attest` was not used when creating the bundle |
 | 1 | `unknown` | Missing, incomplete, or invalid inventory; or an attestation (bundle or binary) present but failing verification |
@@ -3959,8 +3960,8 @@ aicr verify ./my-bundle --config aicr-config.yaml --min-trust-level attested
 #### Verification steps
 
 1. **Closed-world inventory** — verifies every regular payload file is listed in `checksums.txt`, all listed digests match, required directories are present, and no additional filesystem entries exist beyond the three allowed metadata paths
-2. **Bundle attestation** — cryptographic signature verified against Sigstore trusted root
-3. **Binary attestation** — provenance chain verified with identity pinned to NVIDIA CI (`on-tag.yaml` workflow)
+2. **Bundle attestation** — the bundle creator's signature verified against the Sigstore trusted root (public-good, plus any `--trust-root`) or against `--key`
+3. **Binary attestation** — provenance chain verified with identity pinned to the AICR release workflow (`on-tag.yaml`) in `NVIDIA/aicr`
 
 Inventory validation accepts valid manifest entries in any order, while AICR
 generates canonical slash-relative entries in sorted order. Reordering a

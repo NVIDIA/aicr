@@ -427,6 +427,25 @@ func TestOutputText_Verdict(t *testing.T) {
 			wantAbsent:   "FAILED",
 		},
 		{
+			name: "pinned identity names the repository docs quote",
+			result: &verifier.VerifyResult{
+				ChecksumsPassed: true,
+				BinaryAttested:  true,
+				IdentityPinned:  true,
+				TrustLevel:      verifier.TrustVerified,
+			},
+			wantContains: "✓ Identity pinned to a workflow in NVIDIA/aicr",
+		},
+		{
+			name: "unpinned identity prints no pin line",
+			result: &verifier.VerifyResult{
+				ChecksumsPassed: true,
+				TrustLevel:      verifier.TrustUnverified,
+			},
+			wantContains: "Trust level",
+			wantAbsent:   "Identity pinned",
+		},
+		{
 			name: "trust reason displayed when set",
 			result: &verifier.VerifyResult{
 				ChecksumsPassed: true,

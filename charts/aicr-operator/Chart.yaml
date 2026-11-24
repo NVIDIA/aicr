@@ -15,7 +15,7 @@
 apiVersion: v2
 name: aicr-operator
 description: >-
-  AICR Operator: runs NVIDIA AI Cluster Runtime as pinned-image Jobs and rolls
+  AICR Operator: runs AI Cluster Runtime (AICR) as pinned-image Jobs and rolls
   the GPU stack out through Argo CD.
 type: application
 version: 0.1.0

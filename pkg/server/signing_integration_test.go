@@ -23,7 +23,7 @@
 // attesterBuilder), this test leaves h.newAttester at its DEFAULT
 // (attestation.ResolveAttester), so the server performs REAL hashivault signing
 // via the sigstore KMS provider. Only bundler.New's binary-attestation gate is
-// bypassed with fixture bytes: the real NVIDIA-CI binary attestation cannot
+// bypassed with fixture bytes: the real AICR release workflow binary attestation cannot
 // exist inside a `go test` executable, but the KMS signing over the bundle
 // checksums is genuine and is verified back with the same key.
 //
@@ -84,7 +84,7 @@ func TestServerSigning_KMSBundleEndToEnd(t *testing.T) {
 	kmsURI := "hashivault://" + kmsKeyName
 
 	// Fixture stand-in for the server's pre-verified binary attestation. The real
-	// NVIDIA-CI provenance cannot exist in a `go test` binary, and bundler.New's
+	// AICR release workflow provenance cannot exist in a `go test` binary, and bundler.New's
 	// Config.Attest() gate only requires the bytes to be present (verified once at
 	// startup in production), so arbitrary JSON satisfies the gate. This ONLY
 	// bypasses the binary-attestation gate; the bundle-attestation KMS signing is
@@ -156,7 +156,7 @@ func TestServerSigning_KMSBundleEndToEnd(t *testing.T) {
 	if res.ChecksumFiles == 0 {
 		t.Errorf("expected checksum-verified payload files, got ChecksumFiles=0")
 	}
-	// The binary attestation is a fixture (not NVIDIA-CI signed), so the FULL
+	// The binary attestation is a fixture (not signed by the AICR release workflow), so the FULL
 	// chain caps at TrustUnknown after the binary step fails. That does not
 	// weaken the KMS proof above: BundleAttested is set only after the real
 	// signature-over-checksums verification succeeds. Log for visibility.
