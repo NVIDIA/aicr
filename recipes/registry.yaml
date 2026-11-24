@@ -1465,6 +1465,8 @@ components:
       - agentgatewaycrds
     healthCheck:
       assertFile: checks/agentgateway-crds/health-check.yaml
+    upgrades:
+      file: components/agentgateway-crds/upgrades.yaml
     # CRDs-only chart; agentgateway consumes the kinds it registers
     # via its templates, so agentgateway must declare this chart as a
     # DependencyRef for the DAG-stratified helmfile layout to install
@@ -1480,7 +1482,7 @@ components:
       defaultRepository: oci://cr.agentgateway.dev/charts
       defaultChart: agentgateway-crds
       # renovate: datasource=docker depName=cr.agentgateway.dev/charts/agentgateway-crds
-      defaultVersion: v1.5.0
+      defaultVersion: v1.7.0
       defaultNamespace: agentgateway-system
 
   - name: agentgateway
@@ -1490,13 +1492,15 @@ components:
       - agentgateway
     healthCheck:
       assertFile: checks/agentgateway/health-check.yaml
+    upgrades:
+      file: components/agentgateway/upgrades.yaml
     helm:
       defaultRepository: oci://cr.agentgateway.dev/charts
       defaultChart: agentgateway
       # Keep in lockstep with agentgateway-crds above; see the version floor
       # note there before changing this pin.
       # renovate: datasource=docker depName=cr.agentgateway.dev/charts/agentgateway
-      defaultVersion: v1.5.0
+      defaultVersion: v1.7.0
       defaultNamespace: agentgateway-system
     nodeScheduling:
       system:
