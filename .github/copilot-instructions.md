@@ -1,4 +1,4 @@
-# Copilot Instructions for NVIDIA AI Cluster Runtime (AICR)
+# Copilot Instructions for AI Cluster Runtime (AICR)
 
 GitHub Copilot should follow the project's canonical coding-agent rules. These
 rules — package architecture, required error/context/logging patterns, the

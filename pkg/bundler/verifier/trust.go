@@ -43,8 +43,8 @@ const (
 	TrustAttested TrustLevel = "attested"
 
 	// TrustVerified indicates checksums valid, bundle attestation verified,
-	// binary attestation verified with identity pinned to NVIDIA CI, and no
-	// external data.
+	// binary attestation verified with identity pinned to a workflow in
+	// NVIDIA/aicr (the AICR release workflow by default), and no external data.
 	TrustVerified TrustLevel = "verified"
 )
 
@@ -104,7 +104,8 @@ type VerifyResult struct {
 	// BinaryAttested indicates whether the binary attestation was verified.
 	BinaryAttested bool `json:"binaryAttested"`
 
-	// IdentityPinned indicates whether the binary attestation identity was pinned to NVIDIA CI.
+	// IdentityPinned indicates whether the binary attestation identity was pinned to a workflow in
+	// NVIDIA/aicr: the AICR release workflow by default, or the --certificate-identity-regexp override.
 	IdentityPinned bool `json:"identityPinned"`
 
 	// BundleCreator is the OIDC identity from the bundle attestation signing certificate.

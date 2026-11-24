@@ -13,7 +13,9 @@ For dev-environment setup, run `make tools-setup` and read
 For an optional preconfigured cloud or local container environment, follow
 [GitHub Codespaces and Dev Containers](https://github.com/NVIDIA/aicr/blob/main/DEVELOPMENT.md#github-codespaces-and-dev-containers).
 For contribution mechanics (DCO, CI, signing), see
-[CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md).
+[CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md); for
+the path from proposing an integration to publishing signed evidence, see
+[Contributing an Integration](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md#contributing-an-integration).
 For the coding rules every PR is graded against, see
 [CLAUDE.md](https://github.com/NVIDIA/aicr/blob/main/.claude/CLAUDE.md).
 

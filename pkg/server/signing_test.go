@@ -29,7 +29,7 @@ import (
 )
 
 // TestLoadBinaryAttestation exercises the startup fail-fast loader with an
-// injected verifier seam (the real verify pins NVIDIA-CI identity + the running
+// injected verifier seam (the real verify pins the AICR release workflow identity + the running
 // binary's digest, unsatisfiable in a `go test` executable).
 func TestLoadBinaryAttestation(t *testing.T) {
 	t.Run("disabled is a no-op", func(t *testing.T) {

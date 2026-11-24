@@ -20,11 +20,12 @@
 #   Verify  — aicr verify (with default + min-trust-level + tamper paths)
 #
 # When --attest is passed, the CLI signs `checksums.txt` with SLSA Build
-# Provenance v1 via Sigstore keyless OIDC (Fulcio cert + Rekor log entry).
+# Provenance v1 via Sigstore keyless OIDC (Fulcio cert + Rekor log entry),
+# under the OIDC identity of whoever runs it, not the AICR project's.
 # That manifest inventories every regular payload file, including recipe.yaml;
 # closed-world verification also rejects any additional filesystem entry. The
 # CLI copies its own SLSA attestation into the bundle so the verifier can walk
-# the full chain back to NVIDIA CI.
+# the full chain back to the AICR release workflow in NVIDIA/aicr.
 #
 # Signing requires Fulcio + Rekor egress and an OIDC source — either ambient
 # GitHub Actions OIDC, or an interactive browser sign-in. On hosts where

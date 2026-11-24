@@ -10,9 +10,9 @@ You may obtain a copy of the License at
 
 # Recipe Health
 
-This page reports the **structural health** of every recipe AICR can resolve — one row per leaf criteria combination (service × accelerator × OS × intent × platform), plus any non-leaf coordinate retained because it carries published dashboard evidence (a plain coordinate that gained a platform sibling keeps its row so its Evidence link is never silently dropped). It answers *"across the whole matrix, what is the current structural state of each recipe?"* and is the catalog-wide complement to per-recipe [conformance evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md). For a family carrying an ADR-015 configuration profile (`gpuStack` on AKS, GKE, OKE, and CKS), the row grades the composition resolved at the **declaration default** (`azure-managed` on AKS, `gke-default` on GKE, `oci-managed` on OKE, `coreweave` on CKS); per-profile-value rows are a follow-up.
+This page reports the **structural health** of every recipe in AICR's built-in (embedded) catalog — one row per leaf criteria combination (service × accelerator × OS × intent × platform), plus any non-leaf coordinate retained because it carries published dashboard evidence (a plain coordinate that gained a platform sibling keeps its row so its Evidence link is never silently dropped). It answers *"across the whole matrix, what is the current structural state of each recipe?"* and is the catalog-wide complement to per-recipe [conformance evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md). For a family carrying an ADR-015 configuration profile (`gpuStack` on AKS, GKE, OKE, and CKS), the row grades the composition resolved at the **declaration default** (`azure-managed` on AKS, `gke-default` on GKE, `oci-managed` on OKE, `coreweave` on CKS); per-profile-value rows are a follow-up.
 
-The matrix is computed **hermetically and offline**: every signal is a pure read of the resolved recipe — no Helm render, no GPU, no cluster, no network. It is regenerated from the recipe catalog by `make recipe-health-docs` and is kept current by a weekly bot PR. `make recipe-health-check` is an advisory staleness check (it is **not** wired into `make qualify` or the merge gate). The full design is recorded in [ADR-009](https://github.com/NVIDIA/aicr/blob/main/docs/design/009-recipe-health-tracking.md).
+The matrix is computed **hermetically and offline**: every signal is a pure read of the resolved recipe — no Helm render, no GPU, no cluster, no network. It is regenerated from the embedded recipe catalog by `make recipe-health-docs` and is kept current by a weekly bot PR. `make recipe-health-check` is an advisory staleness check (it is **not** wired into `make qualify` or the merge gate). The full design is recorded in [ADR-009](https://github.com/NVIDIA/aicr/blob/main/docs/design/009-recipe-health-tracking.md).
 
 ## What the columns mean
 
@@ -42,7 +42,7 @@ The deep-link is the current Evidence rendering. It is distinct from, and coexis
 **Signer class** names who signed each recipe's committed evidence pointers under `recipes/evidence/<recipe>/<src>/`. The class is the one [`recipes/evidence/allowlist.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/evidence/allowlist.yaml) assigns to that source slug:
 
 - `first-party` is the project's own UAT workflows.
-- `community` is individual external contributors.
+- `community` is individual contributor signers.
 - `partner` is vetted partner organizations.
 
 Reading the column:

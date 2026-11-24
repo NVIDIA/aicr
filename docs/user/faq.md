@@ -8,7 +8,7 @@ For where to ask a question that is not covered here, see [SUPPORT.md](https://g
 
 **Does `aicr snapshot` need the NVIDIA driver or `nvidia-smi` on the node?**
 
-No. Snapshot GPU detection is driver-free: it enumerates PCI devices through sysfs and resolves the accelerator SKU from the device ID. You can snapshot a freshly provisioned node before any driver is installed. See [GPU Detection Issues](installation.md#gpu-detection-issues).
+No. Snapshot GPU detection is driver-free: it enumerates PCI devices through sysfs and resolves the accelerator SKU from the device ID. You can snapshot a freshly provisioned node before any driver is installed. Detection recognizes NVIDIA GPUs (PCI vendor `10de`) today. For other accelerators, state the criteria with query flags, using an accelerator value a [`--data` catalog](../integrator/data-extension.md) registers (the built-in values are NVIDIA SKUs). See [Collectors](../contributor/collector.md) for adding detection. See [GPU Detection Issues](installation.md#gpu-detection-issues).
 
 **Can I capture a snapshot through the self-hosted `aicrd` API server?**
 

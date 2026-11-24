@@ -4,7 +4,7 @@ Complete reference for using the AICR API Server.
 
 ## Overview
 
-The AICR API Server provides HTTP REST access to recipe generation and bundle creation for GPU-accelerated infrastructure. Use the API for programmatic access to configuration recommendations and deployment artifacts.
+AICR discovers a cluster's capabilities, selects a recipe that fits them, generates deployment artifacts from it, and validates the result. The AICR API Server (`aicrd`) serves the recipe selection and artifact generation steps over HTTP REST (`/v1/recipe`, `/v1/query`, `/v1/bundle`); discovery (`aicr snapshot`) and validation (`aicr validate`) run from the CLI.
 
 > Version numbers in the sample requests and responses below (server version, chart versions, driver versions) are illustrative. The authoritative, current versions are in the [Component Catalog](component-catalog.md) and the [Container Images BOM](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md).
 
@@ -860,15 +860,15 @@ certificate from Fulcio using its own OIDC identity. Operator setup for Mode B:
 | `AICR_SIGNING_CONFIG_PATH` | A, B | Sigstore SigningConfig JSON for Rekor v2 targeting. |
 | `AICR_TLOG_UPLOAD` | A | Set `false` to skip the Rekor upload for air-gapped KMS signing. KMS-only; keyless always uploads. |
 | `AICR_BINARY_ATTESTATION_FILE` | A, B | Absolute path to the aicrd binary attestation. Unset defaults to the conventional `<executable>-attestation.sigstore.json` next to the running binary. Set it when the attestation ships elsewhere in the image, e.g. a ko build stages assets under `KO_DATA_PATH` (`/var/run/ko/aicrd-attestation.sigstore.json`) rather than next to the binary. |
-| `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` | A, B | Certificate-identity pattern the server pins its own binary attestation to. Unset uses the release-workflow default (`on-tag.yaml`). A custom value MUST begin with `https://github.com/NVIDIA/aicr/` (leading `^` allowed) and must not use top-level alternation, so it stays confined to the NVIDIA repository; it retargets which NVIDIA workflow attested the binary (e.g. an e2e workflow), not the org, and a value that is not so pinned fails startup. Mirrors the CLI's `--certificate-identity-regexp`. |
+| `AICR_BINARY_ATTESTATION_IDENTITY_REGEXP` | A, B | Certificate-identity pattern the server pins its own binary attestation to. Unset uses the release-workflow default (`on-tag.yaml`). A custom value MUST begin with `https://github.com/NVIDIA/aicr/` (leading `^` allowed) and must not use top-level alternation, so it stays confined to the `NVIDIA/aicr` repository; it retargets which `NVIDIA/aicr` workflow attested the binary (e.g. an e2e workflow), not the org, and a value that is not so pinned fails startup. Mirrors the CLI's `--certificate-identity-regexp`. |
 
 Setting both `AICR_SIGNING_KEY` and the keyless variables is ambiguous and the
 server refuses to start.
 
 Server signing also requires the aicrd **binary attestation**
-(`aicrd-attestation.sigstore.json`, issued under the NVIDIA-CI identity and
-bound to the aicrd binary digest) to be shipped inside the container image. The
-server verifies it once at startup and embeds it as tool provenance
+(`aicrd-attestation.sigstore.json`, issued under the identity of the AICR
+release workflow in `NVIDIA/aicr` and bound to the aicrd binary digest) to be
+shipped inside the container image. The server verifies it once at startup and embeds it as tool provenance
 (`attestation/aicr-attestation.sigstore.json`) in every signed bundle. If
 signing is enabled but that attestation is missing or invalid, the server fails
 to start. Producing that attestation in the CI/release pipeline is a separate

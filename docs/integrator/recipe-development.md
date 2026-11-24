@@ -79,6 +79,38 @@ identifies who contributed a given source file — an overlay, a mixin, a values
 file — but that describes the layer, not the resolved recipe. See
 [Observable RecipeResult Surfaces](../contributor/recipe.md#observable-reciperesult-surfaces).
 
+### Authoring an integration
+
+An integration for a new environment can touch four mechanisms today. Each
+has its own guide:
+
+| Mechanism | What you add | Guide |
+|-----------|--------------|-------|
+| Recipe data | Overlays, mixins, component values, and registry entries | This guide; [Recipes](../contributor/recipe.md) for resolution internals |
+| Discovery | A collector that emits Measurements, needed when snapshots should detect the new hardware or platform automatically | [Collectors](../contributor/collector.md), [Measurement Schema](measurement-api.md) |
+| Validation | Declarative constraints, or validator checks that probe a live cluster | [Validators](../contributor/validator.md), [Validator Extension](validator-extension.md) |
+| Evidence | A signed record of a validation run on real hardware | [Publishing Recipe Evidence](../contributor/evidence-publishing.md) |
+
+When users state the criteria with query flags, recipe data is the core of the
+work; a `--data` catalog can register new criteria values through its overlays
+(see [Data Extension](data-extension.md)). Snapshot auto-detection reads NVIDIA GPU
+signals today, so detecting other hardware automatically also needs collector
+code.
+
+Hardware-specific components, such as the GPU Operator, Network Operator, or a
+DRA driver, come from their upstream projects. AICR pins the upstream Helm
+chart, or vendors the upstream install manifests as a manifest-only component
+when there is no chart (DraNet, for example). It supplies values and install
+order and can add a health check; it does not fork the component. The
+[Component Catalog](../user/component-catalog.md) names the upstream source
+where there is one.
+
+[ADR-032](https://github.com/NVIDIA/aicr/blob/main/docs/design/032-portable-integrations.md)
+(Proposed) and epic [#3920](https://github.com/NVIDIA/aicr/issues/3920) track
+common contracts for catalogs, discovery, and validation, so platform teams and
+community contributors can maintain integrations for the environments they
+know.
+
 ## Recipe Structure
 
 ### Multi-Level Inheritance

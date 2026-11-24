@@ -242,6 +242,10 @@ registry — `Has(FieldX, ...)` is consulted when a value misses the
 fast-path `switch` in `Parse<X>`. Adding a new value to a Go enum
 (e.g., a new accelerator) is multi-file work; audit
 `CriteriaAccelerator*` callers as listed in CLAUDE.md before merging.
+Detecting new hardware from a snapshot is separate again: it needs a
+[collector](collector.md), not only recipe data. See
+[Authoring an integration](../integrator/recipe-development.md#authoring-an-integration)
+for how the guides fit together.
 
 **Specificity.** Each criteria carries a specificity score equal to
 the count of non-`any`, non-empty fields. The current `Specificity()`

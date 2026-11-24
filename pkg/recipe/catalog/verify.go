@@ -26,8 +26,8 @@ import (
 
 // VerifyOptions configures a Verify call.
 type VerifyOptions struct {
-	// CertificateIdentityRegexp overrides the default NVIDIA CI identity
-	// pinning pattern. Must BEGIN with "https://github.com/NVIDIA/aicr/"
+	// CertificateIdentityRegexp overrides the default AICR release workflow
+	// identity pinning pattern. Must BEGIN with "https://github.com/NVIDIA/aicr/"
 	// (a leading "^" is allowed) and must not use top-level alternation.
 	// Defaults to
 	// verifier.TrustedRepositoryPattern when empty.
@@ -44,7 +44,8 @@ type VerifyResult struct {
 }
 
 // Verify recomputes the catalog digest from provider and verifies it against
-// the Sigstore bundle at bundlePath using identity pinning to NVIDIA CI.
+// the Sigstore bundle at bundlePath using identity pinning to the AICR release
+// workflow.
 func Verify(ctx context.Context, bundlePath string, provider recipe.DataProvider, opts VerifyOptions) (*VerifyResult, error) {
 	if _, err := os.Stat(bundlePath); err != nil {
 		if os.IsNotExist(err) {

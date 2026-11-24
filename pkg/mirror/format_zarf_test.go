@@ -35,7 +35,7 @@ func TestRenderZarf(t *testing.T) {
 				"apiVersion: " + zarfAPIVersion,
 				"kind: ZarfPackageConfig",
 				"name: aicr",
-				"description: NVIDIA AI Cluster Runtime",
+				"description: AI Cluster Runtime (AICR)",
 				"name: aicr-images",
 				"required: true",
 				"nvcr.io/nvidia/gpu-operator:v25.3.0",

@@ -165,7 +165,7 @@ func TestLabelFor(t *testing.T) {
 			name: "first-party fixed label",
 			meta: RunMeta{Signer: RunMetaSigner{Class: string(ClassFirstParty),
 				Identity: "https://github.com/NVIDIA/aicr/.github/workflows/uat-aws.yaml@refs/heads/main"}},
-			want: "NVIDIA UAT",
+			want: "AICR UAT",
 		},
 		{
 			name: "github org/repo",

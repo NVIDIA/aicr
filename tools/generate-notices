@@ -550,7 +550,7 @@ echo "Composing ${OUTPUT}..." >&2
     cat <<EOF
 # Third-Party Notices
 
-NVIDIA AI Cluster Runtime (AICR)
+AI Cluster Runtime (AICR)
 
 This file lists every third-party dependency that AICR redistributes, along
 with the verbatim text of each dependency's license. Two distribution

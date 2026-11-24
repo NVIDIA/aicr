@@ -7,9 +7,11 @@ Documentation for engineers integrating AI Cluster Runtime (AICR) into CI/CD pip
 This section is for integrators who:
 - Build automation pipelines using the AICR API
 - Deploy and operate the AICR API server in Kubernetes
-- Create custom recipes for their environments
+- Create custom recipes for their environments, or maintain a catalog of their own with [`--data`](data-extension.md)
 - Integrate AICR into GitOps workflows (Argo CD, Flux)
 - Contribute GPU capacity to AICR's real-hardware validation
+
+To bring an environment into the built-in catalog, from proposal through signed evidence, follow [Contributing an Integration](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md#contributing-an-integration).
 
 ## Documents
 

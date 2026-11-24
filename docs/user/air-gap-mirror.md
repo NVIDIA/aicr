@@ -203,7 +203,7 @@ components:
     required: true
 kind: ZarfPackageConfig
 metadata:
-  description: NVIDIA AI Cluster Runtime container images and Helm charts for air-gapped deployment
+  description: AI Cluster Runtime (AICR) container images and Helm charts for air-gapped deployment
   name: aicr
 ```
 

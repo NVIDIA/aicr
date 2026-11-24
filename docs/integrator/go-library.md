@@ -50,7 +50,7 @@ than in yours.
 | `ExampleClient_VerifyEvidence` | Evidence verification and exit classes | no |
 | `ExampleClient_VerifyCatalog` / `ExampleClient_SignCatalog` | Checking and producing the catalog signature | no |
 | `ExampleClient_PublishEvidence` | Signing and pushing an evidence bundle | no |
-| `ExampleVerifyBinaryAttestation` | Proving a binary came from NVIDIA CI | no |
+| `ExampleVerifyBinaryAttestation` | Proving a binary came from the AICR release workflow | no |
 
 **What "runs" means, and what it does not.** Examples marked *yes* print an
 `Output:` block, so `go test` executes them and asserts the output. The rest
@@ -2054,16 +2054,16 @@ log.Printf("catalog sha256:%s signed by %s", catalog.Digest, catalog.Identity)
 
 The digest is computed over **this Client's** `DataProvider`, not the
 process-wide embedded catalog. A Client built on `EmbeddedSource()`
-verifies the catalog NVIDIA signed. A Client whose source layers
-external data over the embedded tree is verifying different content, so
+verifies the catalog the AICR release workflow signed. A Client whose source
+layers external data over the embedded tree is verifying different content, so
 verification will not match the released signature — that is the
 correct answer to "is the catalog I am resolving against the signed
 one", not a bug.
 
 ### Verifying the binary
 
-`VerifyBinaryAttestation` proves an `aicr` binary was built by NVIDIA
-CI. It is package-level rather than a `Client` method because it
+`VerifyBinaryAttestation` proves an `aicr` binary was built by the AICR
+release workflow (`on-tag.yaml`) in `NVIDIA/aicr`. It is package-level rather than a `Client` method because it
 involves no recipe catalog and no configurable policy:
 
 ```go
@@ -2080,7 +2080,7 @@ Override the pinned identity with `IdentityRegexp` (defaults to
 pre-validates operator-supplied input against the same rule the verify
 entry points apply internally.
 
-An override must be *confined* to the NVIDIA repository, not merely
+An override must be *confined* to the `NVIDIA/aicr` repository, not merely
 mention it. Two rules enforce that, and they are load-bearing together:
 the pattern must **begin with** `https://github.com/NVIDIA/aicr/` (a
 leading `^` is allowed, and `github\.com` is accepted too), and it must
