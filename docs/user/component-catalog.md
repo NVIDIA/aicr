@@ -1758,11 +1758,13 @@ The release must stay in `lws-system`. The chart does not enforce that: its temp
 
 **Upgrades.** `lws` is not `ownsCRDs`, because the `LeaderWorkerSet` CRD uses webhook conversion. On every deployer except `argocd` and `argocd-helm`, a chart bump leaves the CRDs at their first-install schema. Before upgrading on those deployers, apply the new chart's CRDs with the [CRD-apply command](#upgrading-components-that-own-crds), with `CHART="oci://registry.k8s.io/lws/charts/lws"`. The CRD set also grows across releases: 0.10.0 already ships the two `DisaggregatedSet` CRDs beside `LeaderWorkerSet`.
 
-**Taking over a release installed at 0.7.0 or earlier.** That step is enough only for a release first installed at 0.8.0 or later. An older release is a real case: Run:ai supports LWS 0.7.0 to 0.10.0, and upstream's own instructions install the release as `lws` in `lws-system`, the name and namespace this component uses, so the first AICR deploy on such a cluster upgrades that release in place.
+**Taking over a release installed at 0.7.0 or earlier.** That step is enough only for a release first installed at 0.8.0 or later. An older release is a real case: Run:ai supports LWS 0.7.0 to 0.10.0, and upstream's own instructions install the release as `lws` in `lws-system`. The `helm` and `helmfile` deployers use that same release name and namespace, so their first deploy on such a cluster upgrades that release in place. The rest of this procedure is for those two deployers.
+
+`flux`, `argocd` and `argocd-helm` do not take over an existing `lws` release. Flux names its release `lws-system-lws`: a second release, whose objects have the same names as the ones the `lws` release owns, so Helm refuses to install it. Argo CD runs no Helm upgrade: it renders the chart and applies the objects itself, and leaves the existing release where it is. With those deployers, add `lws` only on a cluster that has no `lws` release, or leave it out of the overlay and keep managing the existing release yourself. The `terraform` and `fleet` deployers also name the release `lws`, but were not tried against a release they did not create.
 
 Chart versions up to 0.7.0 render the `LeaderWorkerSet` CRD from `templates/`, which makes it part of the Helm release. From 0.8.0 the CRD ships under `crds/` and is not. The first `helm upgrade` across that boundary therefore sees the CRD as removed from the release and deletes it, and Kubernetes deletes every `LeaderWorkerSet` in the cluster with it. Applying the new CRDs beforehand does not prevent this.
 
-Before the first AICR deploy over such a release, run upstream's one-time step, which tells Helm to keep the CRD when it leaves the release:
+Before the first `helm` or `helmfile` deploy over such a release, run upstream's one-time step, which tells Helm to keep the CRD when it leaves the release:
 
 ```shell
 kubectl annotate crd leaderworkersets.leaderworkerset.x-k8s.io \
