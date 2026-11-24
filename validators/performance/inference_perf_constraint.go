@@ -3198,32 +3198,48 @@ type aiperfPodRun struct {
 // Errors:
 //   - ErrCodeTimeout when no AIPerf pod was found.
 //   - ErrCodeInternal when the pod did not succeed, returned with its logs,
-//     or when its logs could not be read.
+//     when its logs could not be read, or when the image line could not be
+//     written. An image that cannot be reported fails a run that otherwise
+//     passes, so the result never omits the image that produced it.
 func aiperfRunResult(plannedImage string, findErr error, run *aiperfPodRun) (string, error) {
 	if run == nil {
-		reportAIPerfImage(ctrf.PodImage{Image: plannedImage})
+		logUnreportedImage(reportAIPerfImage(ctrf.PodImage{Image: plannedImage}))
 		return "", errors.Wrap(errors.ErrCodeTimeout, "failed to find AIPerf pod", findErr)
 	}
 	img := run.image
 	img.Platform = ctrf.ReportedPlatform(run.logs)
-	reportAIPerfImage(img)
+	reportErr := reportAIPerfImage(img)
 	if run.waitErr != nil {
+		logUnreportedImage(reportErr)
 		return run.logs, errors.Wrap(errors.ErrCodeInternal, "AIPerf job failed", run.waitErr)
 	}
 	if run.logErr != nil {
+		logUnreportedImage(reportErr)
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to get AIPerf logs", run.logErr)
+	}
+	if reportErr != nil {
+		return "", reportErr
 	}
 	return run.logs, nil
 }
 
+// logUnreportedImage logs err, a reportAIPerfImage failure on a run that
+// already fails for another reason.
+func logUnreportedImage(err error) {
+	if err != nil {
+		slog.Warn("failed to report AIPerf image", "error", err)
+	}
+}
+
 // reportAIPerfImage emits img as the check's AIPerf image.
-func reportAIPerfImage(img ctrf.PodImage) {
+//
+// Errors:
+//   - ErrCodeInternal when the image line cannot be written.
+func reportAIPerfImage(img ctrf.PodImage) error {
 	if img.Digest == "" {
 		slog.Warn("AIPerf image has no recorded registry digest", "image", img.Image)
 	}
-	if err := validators.EmitImage(img); err != nil {
-		slog.Warn("failed to report AIPerf image", "error", err)
-	}
+	return validators.EmitImage(img)
 }
 
 // aiperfPodImage returns the image the benchmark container of the pod named

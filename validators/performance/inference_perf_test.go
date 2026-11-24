@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -2547,6 +2548,29 @@ func TestAIPerfRunResult(t *testing.T) {
 			}
 			errorstest.WantReportedCode(t, err, tt.wantCode)
 		})
+	}
+}
+
+// TestAIPerfRunResultFailsWhenImageUnreported verifies a run that otherwise
+// passes fails when its image line cannot be written, so the result never
+// omits the image. It is not parallel because it swaps os.Stdout.
+func TestAIPerfRunResultFailsWhenImageUnreported(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Close()
+	_ = w.Close()
+	orig := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = orig })
+
+	run := &aiperfPodRun{image: ctrf.PodImage{Image: "nvcr.io/nvidia/aiperf-bench:v1"}, logs: "benchmark output"}
+	logs, err := aiperfRunResult("nvcr.io/nvidia/aiperf-bench:edge", nil, run)
+
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInternal)
+	if logs != "" {
+		t.Errorf("logs = %q, want none from a run whose image was not reported", logs)
 	}
 }
 
