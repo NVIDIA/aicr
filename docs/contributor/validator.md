@@ -639,6 +639,7 @@ validators.Run(map[string]validators.CheckFunc{
 | `1` | failed | `failed` |
 | `2` | skipped | `skipped` — return `validators.Skip(reason)` |
 | `3` | interrupted by SIGTERM | `other` — written by `validators.Run` whenever SIGTERM arrived before the check returned, whatever it returned (see [Cancellation and cleanup lifecycle](#cancellation-and-cleanup-lifecycle)) |
+| `4` | panicked | `other`. `validators.Run` recovers a panic in the check function and writes `check panicked: <value>`, even when SIGTERM arrived first. A panic in a goroutine the check starts is not recovered and exits `2`, which reads as `skipped`. |
 
 Any other exit code also maps to CTRF `other`.
 
@@ -1229,7 +1230,8 @@ type Context struct {
 `ctx.Timeout(d)` returns a child context with a shorter deadline.
 `validators.Run(map)` is the container entry point; it dispatches by
 `os.Args[1]`, maps `Skip` → exit 2, errors → exit 1, nil → exit 0. A check
-interrupted by SIGTERM exits 3 instead, regardless of its result.
+interrupted by SIGTERM exits 3 instead, regardless of its result, and a
+check function that panics exits 4.
 
 **Scheduling overrides.** When creating inner workloads, check
 `ctx.NodeSelector` and `ctx.Tolerations` before applying hardcoded

@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 
 	"aicr.run/pkg/defaults"
 	aicrerrors "aicr.run/pkg/errors"
@@ -41,6 +42,12 @@ const exitCodeSkip = 2
 // CTRF status "other" (indeterminate), because the check never reached a
 // verdict. It still blocks, like "failed".
 const exitCodeTerminated = 3
+
+// exitCodePanicked is the exit code for a check that panicked. It maps to
+// CTRF status "other" because the check reached no verdict. The Go runtime's
+// own exit code for an unrecovered panic is 2, which reads as a skip, and a
+// panic in a goroutine the check starts still exits that way.
+const exitCodePanicked = 4
 
 // errSkip is the sentinel error for skipping a check.
 var errSkip = errors.New("skip")
@@ -120,12 +127,18 @@ func runCheck(checkFn CheckFunc) int {
 }
 
 // runCheckWithContext runs checkFn and maps the outcome to an exit code. A
-// SIGTERM that arrived before checkFn returned always wins over its result:
-// the verdict is incomplete, so a nil return (a check that swallowed the
-// cancellation) must not be reported as a pass.
+// panic in checkFn returns exitCodePanicked. Otherwise a SIGTERM that
+// arrived before checkFn returned always wins over its result. The verdict
+// is incomplete, so a nil return (a check that swallowed the cancellation)
+// must not be reported as a pass.
 func runCheckWithContext(ctx *Context, checkFn CheckFunc) int {
-	err := checkFn(ctx)
+	recovered, stack, err := callCheck(ctx, checkFn)
 	ctx.Cancel()
+	if recovered != nil {
+		slog.Error("check panicked", "panic", fmt.Sprint(recovered), "stack", string(stack))
+		writeTerminationLog("check panicked: %v", recovered)
+		return exitCodePanicked
+	}
 	cause := context.Cause(ctx.Ctx)
 	if checkCtx, ok := ctx.Ctx.(*checkContext); ok {
 		cause = context.Cause(checkCtx.signalCtx)
@@ -134,6 +147,17 @@ func runCheckWithContext(ctx *Context, checkFn CheckFunc) int {
 		return handleTerminated(err)
 	}
 	return handleCheckResult(err)
+}
+
+// callCheck runs checkFn and returns what it panicked with, and the stack at
+// the panic, or its result when it returned.
+func callCheck(ctx *Context, checkFn CheckFunc) (recovered any, stack []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			recovered, stack = r, debug.Stack()
+		}
+	}()
+	return nil, nil, checkFn(ctx)
 }
 
 // handleTerminated records that the check was interrupted by SIGTERM and

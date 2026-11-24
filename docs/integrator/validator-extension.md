@@ -29,14 +29,16 @@ A validator is any container that follows the exit code contract:
 | `1` | Check failed |
 | `2` | Check skipped |
 | `3` | Interrupted by SIGTERM before reaching a verdict (CTRF `other`) |
+| `4` | Panicked before reaching a verdict (CTRF `other`) |
 
 Any other exit code, or a container that never terminates, maps to CTRF `other`
-(indeterminate), which blocks like `failed`. A validator that traps SIGTERM
-(Job deadline, eviction, node drain or operator cancellation) should finish its
-cleanup within the pod's 60s termination grace (30s for cleanup, 30s to write the
-termination message) and exit `3`, not `0`, because
-its verdict is incomplete. Validators built on `validators.Run` do this
-automatically.
+(indeterminate), which blocks like `failed`. A validator that traps SIGTERM (Job
+deadline, eviction, node drain or operator cancellation) should finish its
+cleanup within the pod's 60s termination grace (30s for cleanup, 30s to write
+the termination message) and exit `3`, not `0`, because its verdict is
+incomplete. Validators built on `validators.Run` do this automatically, and exit
+`4` when the check function panics. A Go program that panics without recovering
+exits `2`, which reads as a skip.
 
 The container receives:
 
