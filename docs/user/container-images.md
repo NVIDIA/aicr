@@ -96,10 +96,10 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | slinky-slurm | helm | slurm | 1.2.4 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.4 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.4 | 0 |
-| slinky-topograph | helm | topograph/topograph | 1.1.0 | 1 |
+| slinky-topograph | helm | topograph/topograph | 1.2.0 | 1 |
 | slurm-accounting-mariadb | helm | mariadb-cluster | 26.10.2 | 1 |
 | sriov-ib-networks | manifest | — | — | 0 |
-| topograph | helm | topograph/topograph | 1.1.0 | 1 |
+| topograph | helm | topograph/topograph | 1.2.0 | 1 |
 
 ## Version variants
 
@@ -451,7 +451,7 @@ _No images extracted._
 
 ### slinky-topograph
 
-- `nvcr.io/nvidia/topograph/topograph:v1.1.0`
+- `nvcr.io/nvidia/topograph/topograph:v1.2.0`
 
 ### slurm-accounting-mariadb
 
@@ -463,7 +463,7 @@ _No images extracted._
 
 ### topograph
 
-- `nvcr.io/nvidia/topograph/topograph:v1.1.0`
+- `nvcr.io/nvidia/topograph/topograph:v1.2.0`
 
 ### kubeflow-trainer@2.2.1 (variant)
 
