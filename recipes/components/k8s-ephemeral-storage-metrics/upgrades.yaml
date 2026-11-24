@@ -1,0 +1,44 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: k8s-ephemeral-storage-metrics
+transitions:
+  # from starts at 1.19.2, the release AICR pinned before 1.21.3 and the only
+  # one assessed here; an origin below it resolves to blocked.
+  - from: ">=1.19.2 <1.21.3"
+    to: "1.21.3"
+    verdict: safe
+    verifiedBy: >-
+      Releases 1.20.0 through 1.21.3 of jmcgrath207/k8s-ephemeral-storage-metrics:
+      1.20.0 adds container rootfs and logs usage metrics, and 1.21.0
+      replaces the garbage-collection loop with scrape-driven eviction. helm
+      template of 1.19.2 and 1.21.3 with AICR's values renders the same 6
+      objects, still a Deployment, with these differences: the readiness
+      probe moves from /metrics to /health, the two new metric families are
+      enabled, and GC_INTERVAL and GC_BATCH_SIZE give way to
+      SCRAPE_MISS_TOLERANCE=2. No values path AICR sets is removed.
+    summary: >-
+      Two new metric families, container rootfs and logs usage, are on by
+      default, adding series per container to Prometheus; set
+      metrics.ephemeral_storage_container_rootfs_usage and
+      metrics.ephemeral_storage_container_logs_usage to false in the values
+      override to keep the old set. A series is
+      now dropped after two missed scrapes instead of by a periodic sweep.
+      Nothing to change on upgrade.
+    references:
+      - https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics/releases/tag/1.20.0
+      - https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics/releases/tag/1.21.0
+      - https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics/releases/tag/1.21.3

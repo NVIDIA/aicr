@@ -1297,11 +1297,13 @@ components:
       - k8sephemeralstoragemetrics
     healthCheck:
       assertFile: checks/k8s-ephemeral-storage-metrics/health-check.yaml
+    upgrades:
+      file: components/k8s-ephemeral-storage-metrics/upgrades.yaml
     helm:
       defaultRepository: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
       defaultChart: k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics
       # renovate: datasource=helm depName=k8s-ephemeral-storage-metrics registryUrl=https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
-      defaultVersion: "1.19.2"
+      defaultVersion: "1.21.3"
       defaultNamespace: monitoring
     nodeScheduling:
       system:
