@@ -4,5 +4,9 @@ attestations:
       digest: sha256:3d9ce63aae37273ea6481f5d7030f57884fcf965c1cc22e726fbad01c01a4ba7
       oci: ghcr.io/xdu31/aicr-evidence:gb10-nvke-ubuntu-training-kubeflow-86c25fee6c93
       predicateType: https://aicr.run/recipe-evidence/v3
+    signer:
+      identity: https://github.com/xdu31/aicr/.github/workflows/evidence-publish.yaml@refs/heads/evidence/nvke
+      issuer: https://token.actions.githubusercontent.com
+      rekorLogIndex: 214702550
 recipe: gb10-nvke-ubuntu-training-kubeflow
 schemaVersion: 1.0.0
