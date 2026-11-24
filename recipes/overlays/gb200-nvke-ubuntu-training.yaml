@@ -109,8 +109,14 @@ spec:
     # from nv-ipam, on the inbox driver. NicClusterPolicy is manifest-supplied
     # (chart deployCR off); the per-rail SR-IOV objects follow in
     # sriov-ib-networks.
+    #
+    # Pinned to chart 26.10.0, ahead of the registry default, for thick multus
+    # (the first release with secondaryNetwork.multus.deploymentType): NVKE
+    # disables service-account token extension, so thin multus loses its
+    # token after an hour and pod creation on the node stops (#3482).
     - name: network-operator
       type: Helm
+      version: "26.10.0"
       valuesFile: components/network-operator/values-nvke-gb200.yaml
       manifestFiles:
         - components/network-operator/manifests/nic-cluster-policy-nvke-gb200.yaml
