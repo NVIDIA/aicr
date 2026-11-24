@@ -108,30 +108,34 @@ func Run(checks map[string]CheckFunc) {
 	}
 
 	slog.Info("starting check", "name", checkName)
-
-	stopGuard, err := guardOutput(defaults.ValidatorOutputDrainTimeout)
-	if err != nil {
-		writeTerminationLog("failed to guard check output: %v", err)
-		os.Exit(1) //nolint:gocritic // Intentional exit before any deferred resources
-	}
-	exitCode := runCheck(checkFn)
-	stopGuard()
-	os.Exit(exitCode)
+	os.Exit(runGuarded(checkFn, LoadContext))
 }
 
-// runCheck publishes the result-contract and platform stamps, loads context,
-// runs the check, and returns the exit code. Separated from Run so defer
-// works correctly before os.Exit.
+// runGuarded runs checkFn with a Context from load, with the check's output
+// filtered by guardOutput, and returns the exit code.
+func runGuarded(checkFn CheckFunc, load func() (*Context, error)) int {
+	stop, err := guardOutput(defaults.ValidatorOutputDrainTimeout)
+	if err != nil {
+		writeTerminationLog("failed to guard check output: %v", err)
+		return 1
+	}
+	defer stop()
+	return runCheck(checkFn, load)
+}
+
+// runCheck publishes the result-contract and platform stamps, loads the
+// Context with load, runs the check, and returns the exit code. Separated
+// from Run so defer works correctly before os.Exit.
 //
 // The stamps go out before anything else in runCheck can fail or exit, so
 // every result carries them unless a stamp cannot be written, which fails
 // the check.
-func runCheck(checkFn CheckFunc) int {
+func runCheck(checkFn CheckFunc, load func() (*Context, error)) int {
 	if err := publishStamps(); err != nil {
 		writeTerminationLog("failed to publish result stamps: %v", err)
 		return 1
 	}
-	ctx, err := LoadContext()
+	ctx, err := load()
 	if err != nil {
 		writeTerminationLog("failed to load context: %v", err)
 		return 1

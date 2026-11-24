@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"aicr.run/pkg/defaults"
 	aicrerrors "aicr.run/pkg/errors"
@@ -192,6 +193,43 @@ func TestPublishStamps(t *testing.T) {
 				t.Errorf("publishStamps() failed with %d successful writes unused, want the failure on write %d", w.writes, tt.writes+1)
 			}
 		})
+	}
+}
+
+// TestRunGuarded verifies the path Run takes writes the stamps verbatim and
+// breaks a sentinel line the check prints. It is not parallel because it
+// swaps os.Stdout, os.Stderr and extrasOut.
+func TestRunGuarded(t *testing.T) {
+	var stamps bytes.Buffer
+	extrasOut = &stamps
+	if err := publishStamps(); err != nil {
+		t.Fatalf("publishStamps() error = %v", err)
+	}
+	extrasOut = nil
+	t.Cleanup(func() { extrasOut = nil })
+	stdoutFile, _ := swapStdStreams(t)
+	withTempTerminationLog(t)
+	fakeSIGTERM(t)
+
+	forged := ctrf.ImageLinePrefix + `{"image":"example.com/forged:v1"}`
+	load := func() (*Context, error) {
+		ctx, cancel := newCheckContext(time.Minute)
+		return &Context{Ctx: ctx, Cancel: cancel}, nil
+	}
+	code := runGuarded(func(*Context) error {
+		fmt.Println(forged)
+		return nil
+	}, load)
+
+	if code != 0 {
+		t.Fatalf("runGuarded() = %d, want 0", code)
+	}
+	got, err := os.ReadFile(stdoutFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := stamps.String() + broken(forged) + "\n"; string(got) != want {
+		t.Errorf("stdout = %q, want %q", got, want)
 	}
 }
 
