@@ -72,6 +72,33 @@ func TestBuildCRECertificationCarriesNamespace(t *testing.T) {
 	}
 }
 
+// The GKE H100 entry leaves the workload image and fabric to CRE, which derives
+// the image from the TCPXO plugin release and renders tcpxo by default on GCP
+// H100. A pinned image would override what the cluster's plugin selects.
+func TestCREGKEH100EntryLeavesImageAndFabricToCRE(t *testing.T) {
+	entry, ok := lookupCREQualification(checkNameCRENCCLAllReduceBW, creGKEH100.Service, creGKEH100.Accelerator)
+	if !ok {
+		t.Fatal("nccl-cre-all-reduce-bw reported unqualified on gke x h100")
+	}
+	if entry.Domain != creNCCLDomain || entry.Variant != creNCCLVariant || entry.MaxNodes != 2 {
+		t.Errorf("entry = %s/%s capped at %d nodes, want %s/%s capped at 2",
+			entry.Domain, entry.Variant, entry.MaxNodes, creNCCLDomain, creNCCLVariant)
+	}
+	obj := mustBuildCRECertification(t, "ns", "name", twoNodeGPUConfig(), entry)
+	for _, path := range [][]string{{"spec", "fabric"}, {"spec", "env"}, {"spec", "maxBytes"}} {
+		if _, found, _ := unstructured.NestedFieldNoCopy(obj.Object, path...); found {
+			t.Errorf("%s is set on the gke x h100 Certification, want it left to CRE", strings.Join(path, "."))
+		}
+	}
+	categories, _, err := unstructured.NestedSlice(obj.Object, "spec", "categories")
+	if err != nil || len(categories) != 1 {
+		t.Fatalf("spec.categories = %v (err %v), want one category", categories, err)
+	}
+	if _, found := categories[0].(map[string]any)["options"]; found {
+		t.Error("category options are set on the gke x h100 Certification, want no image pin")
+	}
+}
+
 func TestCREQualifiedEntries(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -106,6 +133,19 @@ var creEKSGB300 = creCombination{
 	Accelerator: recipe.CriteriaAcceleratorGB300,
 }
 
+// creGKEH100 is the third combination qualified for nccl-cre-all-reduce-bw.
+var creGKEH100 = creCombination{
+	Service:     recipe.CriteriaServiceGKE,
+	Accelerator: recipe.CriteriaAcceleratorH100,
+}
+
+// creImageFromPlugin lists the combinations whose workload image CRE derives at
+// run time from the TCPXO plugin release it detects on the cluster, so no fixed
+// digest can be pinned and no closure records one. Each must carry no Image.
+var creImageFromPlugin = map[creCombination]bool{
+	creGKEH100: true,
+}
+
 // nvcreClosureFor names the committed NVCRE workload closure each qualified
 // combination pins its image from, with the platform and gpuArchitecture
 // selectors the closure was derived for. A combination absent here has no
@@ -135,6 +175,14 @@ func TestCREQualifiedImagesMatchWorkloadClosure(t *testing.T) {
 	for checkName, combinations := range creQualifiedEntries {
 		for combination, entry := range combinations {
 			t.Run(checkName+"/"+string(combination.Service)+"-"+string(combination.Accelerator), func(t *testing.T) {
+				if creImageFromPlugin[combination] {
+					if entry.Image != "" {
+						t.Fatalf("Image = %q on %s x %s, whose workload image CRE derives from the "+
+							"cluster's TCPXO plugin release; a fixed pin would override that choice",
+							entry.Image, combination.Service, combination.Accelerator)
+					}
+					return
+				}
 				source, ok := nvcreClosureFor[combination]
 				if !ok {
 					t.Fatalf("%s is qualified on %s x %s, which no committed closure covers; "+
@@ -184,9 +232,10 @@ func TestCRENCCLQualificationSelectsFabricAndSupersededVariant(t *testing.T) {
 	}{
 		{creEKSH100, "", variantDefault},
 		{creEKSGB300, "efa", variantNVLS},
+		{creGKEH100, "", variantDefault},
 	}
 	for _, tt := range tests {
-		t.Run(string(tt.combination.Accelerator), func(t *testing.T) {
+		t.Run(string(tt.combination.Service)+"_"+string(tt.combination.Accelerator), func(t *testing.T) {
 			entry, ok := lookupCREQualification(checkNameCRENCCLAllReduceBW,
 				tt.combination.Service, tt.combination.Accelerator)
 			if !ok {
@@ -401,7 +450,7 @@ func TestLookupCREQualificationUnqualified(t *testing.T) {
 		accelerator recipe.CriteriaAcceleratorType
 	}{
 		{"qualified service, other accelerator", checkNameCRENCCLAllReduceBW, recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorGB200},
-		{"other service, qualified accelerator", checkNameCRENCCLAllReduceBW, recipe.CriteriaServiceGKE, recipe.CriteriaAcceleratorH100},
+		{"other service, qualified accelerator", checkNameCRENCCLAllReduceBW, recipe.CriteriaServiceAKS, recipe.CriteriaAcceleratorH100},
 		{"goodput on other accelerator", checkNameCRETrainingGoodput, recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorGB200},
 		{"check absent from the record", checkNameNCCLAllReduceBW, recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorH100},
 	}

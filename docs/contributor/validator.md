@@ -1639,9 +1639,11 @@ than a new code path. The image is pinned by digest and submitted as the
 category's `options.image`; it must match
 `recipes/components/nvcre/workload-images.yaml`, which
 `TestCREQualifiedImagesMatchWorkloadClosure` enforces, so a chart bump that
-re-derives that file also moves the pins. `nccl-cre-all-reduce-bw` is qualified on `eks` x `h100` with
-`communication/nccl-all-reduce`, and `cre-training-goodput` on the same
-combination with `training/nemotron5-8b`, each capped at two nodes. A
+re-derives that file also moves the pins. `nccl-cre-all-reduce-bw` is qualified on `eks` x `h100`, `eks` x `gb300` and `gke` x `h100` with
+`communication/nccl-all-reduce`; the `gke` x `h100` entry sets no image, because CRE derives it from the
+cluster's TCPXO plugin release, and `TestCREQualifiedImagesMatchWorkloadClosure` requires it to stay
+unpinned. `cre-training-goodput` is qualified on `eks` x `h100` with `training/nemotron5-8b`. Every
+entry is capped at two nodes. A
 combination with no entry skips. Both create the
 CR on an explicitly named set of nodes, wait with a timeout, and tear it down on
 success or failure — deleting the CR and then confirming the `TrainJob`s and

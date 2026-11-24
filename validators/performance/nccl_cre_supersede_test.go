@@ -126,6 +126,12 @@ func TestCRESupersedesTrainJobNCCL(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "gke h100 supersedes the default variant",
+			ctx:     supersedeCtx(recipe.CriteriaServiceGKE, recipe.CriteriaAcceleratorH100, cre),
+			variant: variantDefault,
+			want:    true,
+		},
+		{
 			name: "gb300 CRE constraint without its check keeps the nvls variant on TrainJob",
 			ctx: withoutChecks(supersedeCtx(recipe.CriteriaServiceEKS, recipe.CriteriaAcceleratorGB300, nvls, cre),
 				checkNameCRENCCLAllReduceBW),
