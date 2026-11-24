@@ -81,10 +81,13 @@ transitions:
             description: >-
               Once kube-multus-ds has finished rolling out on every node, find
               the pods that request secondary networks (the
-              k8s.v1.cni.cncf.io/networks annotation) and started during the
-              rollout (status.startTime), whatever their creation time, and
-              whose k8s.v1.cni.cncf.io/network-status annotation has no entry
-              for a network they request. Delete each one that a controller
+              k8s.v1.cni.cncf.io/networks annotation), started during the
+              rollout (status.startTime), whatever their creation time, are
+              still Pending or Running, and whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network they request. Leave Succeeded and Failed pods alone:
+              re-creating one re-runs work that has already finished; review
+              its result instead. Delete each one that a controller
               owns (metadata.ownerReferences), so the controller recreates it.
               For a pod with no owner, save it first (kubectl get pod -o yaml,
               without status, uid, resourceVersion and nodeName), delete it,
@@ -140,10 +143,13 @@ transitions:
             description: >-
               Once kube-multus-ds has finished rolling out on every node, find
               the pods that request secondary networks (the
-              k8s.v1.cni.cncf.io/networks annotation) and started during the
-              rollout (status.startTime), whatever their creation time, and
-              whose k8s.v1.cni.cncf.io/network-status annotation has no entry
-              for a network they request. Delete each one that a controller
+              k8s.v1.cni.cncf.io/networks annotation), started during the
+              rollout (status.startTime), whatever their creation time, are
+              still Pending or Running, and whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network they request. Leave Succeeded and Failed pods alone:
+              re-creating one re-runs work that has already finished; review
+              its result instead. Delete each one that a controller
               owns (metadata.ownerReferences), so the controller recreates it.
               For a pod with no owner, save it first (kubectl get pod -o yaml,
               without status, uid, resourceVersion and nodeName), delete it,
@@ -200,10 +206,13 @@ transitions:
             description: >-
               Once kube-multus-ds has finished rolling out on every node, find
               the pods that request secondary networks (the
-              k8s.v1.cni.cncf.io/networks annotation) and started during the
-              rollout (status.startTime), whatever their creation time, and
-              whose k8s.v1.cni.cncf.io/network-status annotation has no entry
-              for a network they request. Delete each one that a controller
+              k8s.v1.cni.cncf.io/networks annotation), started during the
+              rollout (status.startTime), whatever their creation time, are
+              still Pending or Running, and whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network they request. Leave Succeeded and Failed pods alone:
+              re-creating one re-runs work that has already finished; review
+              its result instead. Delete each one that a controller
               owns (metadata.ownerReferences), so the controller recreates it.
               For a pod with no owner, save it first (kubectl get pod -o yaml,
               without status, uid, resourceVersion and nodeName), delete it,
@@ -257,10 +266,13 @@ transitions:
             description: >-
               Once kube-multus-ds has finished rolling out on every node, find
               the pods that request secondary networks (the
-              k8s.v1.cni.cncf.io/networks annotation) and started during the
-              rollout (status.startTime), whatever their creation time, and
-              whose k8s.v1.cni.cncf.io/network-status annotation has no entry
-              for a network they request. Delete each one that a controller
+              k8s.v1.cni.cncf.io/networks annotation), started during the
+              rollout (status.startTime), whatever their creation time, are
+              still Pending or Running, and whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network they request. Leave Succeeded and Failed pods alone:
+              re-creating one re-runs work that has already finished; review
+              its result instead. Delete each one that a controller
               owns (metadata.ownerReferences), so the controller recreates it.
               For a pod with no owner, save it first (kubectl get pod -o yaml,
               without status, uid, resourceVersion and nodeName), delete it,
