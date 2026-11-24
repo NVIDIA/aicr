@@ -39,6 +39,9 @@ func TestPodImageValid(t *testing.T) {
 		{"ARN", PodImage{Image: "arn:aws:iam::123456789012:role/x"}, false},
 		{"URL with query", PodImage{Image: "https://example.com/x?token=abc"}, false},
 		{"name over the length limit", PodImage{Image: "example.com/" + strings.Repeat("a", 256)}, false},
+		{"registry host over the length limit", PodImage{Image: strings.Repeat("a", 2000) + ".example.com/x:v1"}, false},
+		{"long ref with port, tag and digest", PodImage{Image: strings.Repeat("a", 200) + ".example.com:5000/" +
+			strings.Repeat("b", 200) + ":" + strings.Repeat("c", 128) + "@" + testImageDigest}, true},
 		{"truncated digest", PodImage{Image: "x:v1", Digest: "sha256:aaaa"}, false},
 		{"digest without algorithm", PodImage{Image: "x:v1", Digest: "invalid"}, false},
 		{"uppercase hex", PodImage{Image: "x:v1", Digest: "sha256:" + strings.Repeat("A", 64)}, false},

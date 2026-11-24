@@ -1537,6 +1537,12 @@ const (
 	// per validator result. Records past it are dropped.
 	ValidatorMaxImageRecords = 16
 
+	// ValidatorMaxImageRefLength is the maximum length of an image reference
+	// kept in a validator result. It fits a 253-character registry host with
+	// a port, a 255-character repository path, a 128-character tag and a
+	// digest.
+	ValidatorMaxImageRefLength = 1024
+
 	// ValidatorMaxTerminationMsgBytes bounds the container termination message
 	// copied into a validator result. kubelet caps the message at 4 KiB
 	// upstream, but the result flows into ConfigMaps and rendered reports, so

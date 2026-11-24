@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"strings"
 
+	"aicr.run/pkg/defaults"
 	"aicr.run/pkg/k8s/pod"
 	"github.com/distribution/reference"
 	"github.com/opencontainers/go-digest"
@@ -103,11 +104,14 @@ func ReportedPlatform(logs string) string {
 	return p.Platform()
 }
 
-// Valid reports whether r.Image parses as an image reference, r.Digest is
-// empty or a well-formed sha256 digest, and r.Platform is empty or has the
-// os/arch[/variant] form. The reference grammar bounds the image's length and
-// character set.
+// Valid reports whether r.Image is at most defaults.ValidatorMaxImageRefLength
+// characters and parses as an image reference, r.Digest is empty or a
+// well-formed sha256 digest, and r.Platform is empty or has the
+// os/arch[/variant] form.
 func (r PodImage) Valid() bool {
+	if len(r.Image) > defaults.ValidatorMaxImageRefLength {
+		return false
+	}
 	if _, err := reference.ParseNormalizedNamed(r.Image); err != nil {
 		return false
 	}
