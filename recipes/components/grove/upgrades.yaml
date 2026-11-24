@@ -279,3 +279,77 @@ transitions:
     references:
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#grove-v010-alpha13-to-v010-alpha14
       - https://github.com/ai-dynamo/grove/releases/tag/v0.1.0-alpha.14
+  - from: ">=0.1.0-alpha.14 <0.1.0-alpha.17"
+    to: "0.1.0-alpha.17"
+    verdict: manual
+    summary: >-
+      alpha.17 adds status.scalingProgress to the podcliquesets CRD, where
+      the operator records which replica indices a scale-in or scale-out has
+      selected. helm upgrade never applies changed crds/, so a plain chart
+      bump leaves the alpha.14 schema in place and the API server silently
+      prunes that field: availability-aware scale-in then loses its persisted
+      selection and can reuse a replica index before its resources are gone.
+      The 6 CRDs keep v1alpha1 and gain nothing else. A PodCliqueSet
+      scheduled through grove's kueue backend must now carry
+      kueue.x-k8s.io/queue-name and cannot change it; without the label it
+      already failed to sync. alpha.17 is the last alpha: v0.2.0-beta1 moves
+      CRD storage to grove.io/v1beta1.
+    stepsByDeployer:
+      - deployers: [helm, helmfile]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts
+              --version v0.1.0-alpha.17 | sed -n '/^---$/,$p' |
+              kubectl apply --server-side --force-conflicts -f -
+            reason: >-
+              Installs the alpha.17 CRDs before the operator that writes
+              status.scalingProgress starts.
+          - id: apply
+            description: >-
+              Re-run deploy.sh (helm) or helmfile apply (helmfile). If you
+              re-run per-component install.sh scripts by hand instead, run
+              grove's and wait for the grove-operator rollout to finish before
+              dynamo-platform's.
+            reason: >-
+              Moves grove to alpha.17 once the new CRDs are Established.
+      - deployers: [terraform]
+        steps:
+          - id: apply-new-crds
+            description: >-
+              Apply the alpha.17 CRDs with the CRD-apply command under
+              "Upgrading components that own CRDs" in
+              docs/user/component-catalog.md, with
+              CHART=oci://ghcr.io/ai-dynamo/grove/grove-charts,
+              VERSION=v0.1.0-alpha.17 and MANAGER=terraform-provider-helm.
+            reason: >-
+              Installs the alpha.17 CRDs before the operator that writes
+              status.scalingProgress starts, as the manager the provider
+              installed them under.
+          - id: apply
+            description: >-
+              Regenerate the bundle at the new pin and run terraform apply.
+            reason: >-
+              The release picks the new chart up once the CRDs are
+              Established.
+      - steps:
+          - id: apply-new-crds
+            description: >-
+              helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts
+              --version v0.1.0-alpha.17 | sed -n '/^---$/,$p' |
+              kubectl apply --server-side --force-conflicts -f -
+            reason: >-
+              Neither Flux, Argo CD, nor Fleet applies a changed crds/
+              directory on upgrade, so the CRDs are installed out of band
+              here too.
+          - id: apply
+            description: >-
+              Reconcile or sync grove and wait for the grove-operator rollout
+              to finish before reconciling dynamo-platform.
+            reason: >-
+              Moves grove to alpha.17 once the new CRDs are Established.
+    references:
+      - https://github.com/ai-dynamo/grove/releases/tag/v0.1.0-alpha.15
+      - https://github.com/ai-dynamo/grove/releases/tag/v0.1.0-alpha.16
+      - https://github.com/ai-dynamo/grove/releases/tag/v0.1.0-alpha.17
+      - https://github.com/ai-dynamo/grove/pull/896

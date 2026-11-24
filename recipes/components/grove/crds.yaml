@@ -34,5 +34,5 @@ charts:
       - podgangmaps.grove.io
       - podgangs.scheduler.grove.io
     repository: oci://ghcr.io/ai-dynamo/grove
-    sourceVersion: v0.1.0-alpha.14
+    sourceVersion: v0.1.0-alpha.17
 component: grove
