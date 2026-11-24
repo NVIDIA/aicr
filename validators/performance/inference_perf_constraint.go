@@ -3174,8 +3174,8 @@ func runAIPerfJob(ctx *validators.Context, endpoint, model string, concurrency i
 	slog.Info("Found AIPerf pod", "name", pod.Name)
 
 	run := &aiperfPodRun{waitErr: podHelper.WaitForPodSuccess(ctx.Ctx, pod, defaults.InferencePerfJobTimeout)}
-	run.image = aiperfPodImage(ctx.Ctx, ctx.Clientset, ctx.Namespace, pod.Name, params.image)
 	run.logs, run.logErr = podHelper.GetPodLogs(ctx.Ctx, pod)
+	run.image = aiperfPodImage(ctx.Ctx, ctx.Clientset, ctx.Namespace, pod.Name, params.image)
 	return aiperfRunResult(params.image, nil, run)
 }
 
