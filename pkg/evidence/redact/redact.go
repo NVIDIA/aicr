@@ -743,8 +743,7 @@ func redactHeader(h header.Header) header.Header {
 // CTRF returns a redacted deep copy of in with per-test Stdout and Message
 // omitted, each per-test Extra map rebuilt against ctrfExtraAllowlist and
 // Images bounded by boundImages, plus the sorted list of applied rule
-// identifiers. It never mutates in. Returns
-// (nil, nil) when in is nil.
+// identifiers. It never mutates in. Returns (nil, nil) when in is nil.
 func CTRF(in *ctrf.Report) (*ctrf.Report, []string) {
 	if in == nil {
 		return nil, nil
