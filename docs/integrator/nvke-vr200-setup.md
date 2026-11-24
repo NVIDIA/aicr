@@ -88,7 +88,7 @@ implementation (MetalLB, kube-vip) is what gives it an external address.
 Without one the Service stays at `EXTERNAL-IP <pending>` and the gateway is
 reachable only in-cluster or through its NodePort.
 
-That is a reachability limit, not a conformance one. agentgateway v1.5.0
+That is a reachability limit, not a conformance one. agentgateway v1.7.0
 reports `Programmed=True` when no negative condition is present, regardless of
 address allocation, and `inference_gateway_check.go` gates readiness on ready
 endpoints rather than an external address — its LoadBalancer handling inspects

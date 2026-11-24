@@ -91,7 +91,7 @@ allowedSourceRanges: []
 # (bare-metal NVKE or RKE2 tenants without MetalLB or kube-vip) to avoid a
 # Service that sits at EXTERNAL-IP <pending> forever and a LoadBalancer-only
 # field the cluster cannot honor. The deployment health check passes either
-# way on agentgateway v1.5.0, whose Programmed condition does not wait for an
+# way on agentgateway v1.7.0, whose Programmed condition does not wait for an
 # address. ClusterIP drops allowedSourceRanges from the rendered Service,
 # because loadBalancerSourceRanges is accepted only on a LoadBalancer Service;
 # the gateway is then reachable only from inside the cluster.

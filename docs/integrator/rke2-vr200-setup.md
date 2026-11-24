@@ -73,7 +73,7 @@ the `< 1.36.0` Kubernetes cap and the Gateway API / LoadBalancer prerequisites
   `agentgateway` health check, which asserts
   `agentgateway-system/inference-gateway` exists with `Accepted=True` and
   `Programmed=True` ([#3714](https://github.com/NVIDIA/aicr/issues/3714)):
-  on agentgateway v1.5.0 `Programmed` does not wait for an address. The check
+  on agentgateway v1.7.0 `Programmed` does not wait for an address. The check
   detects a missing or unprogrammed Gateway, not which deployment created it;
   a healthy Gateway left by an earlier deployment satisfies it.
   Never edit the generated bundle to switch the Service type; `aicr verify`
