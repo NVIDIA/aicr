@@ -399,7 +399,9 @@ func parseSentinels(logs string) (cleaned string, extra map[string]string, prov 
 // error) renders "validation failed: <cause>" so a mid-run infra failure is
 // not misreported as the full catalog timeout (see issue #1966). A cause
 // carrying ErrCodeCanceled renders as an interrupted run. A nil waitCause is
-// treated as a timeout for backward compatibility.
+// treated as a timeout for backward compatibility. When no pod can be read,
+// the message says the pod never reached running state only if the lookup
+// confirmed none exists; a failed lookup is reported as such.
 func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.ValidatorResult {
 	result := &ctrf.ValidatorResult{
 		Name:  d.config.Entry.Name,
@@ -418,8 +420,15 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 	}
 	if err != nil {
 		result.ExitCode = -1
-		result.TerminationMsg = fmt.Sprintf("%s (pod never reached running state)",
-			waitFailureMessage(waitCause, effectiveTimeout(d.config.Entry.Timeout)))
+		waitMsg := waitFailureMessage(waitCause, effectiveTimeout(d.config.Entry.Timeout))
+		// Only a confirmed absence says the pod never ran. A failed List is
+		// the same lost API connection that usually failed the wait, while
+		// the pod may still be running.
+		if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+			result.TerminationMsg = waitMsg + " (pod never reached running state)"
+		} else {
+			result.TerminationMsg = fmt.Sprintf("%s (validator pod could not be read: %v)", waitMsg, err)
+		}
 		return result
 	}
 

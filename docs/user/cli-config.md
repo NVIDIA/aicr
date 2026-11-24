@@ -357,7 +357,7 @@ Inputs to `aicr validate`.
 | `execution.failOnError` | bool (tri-state) | Absent = CLI default (`true`); explicit `false` opts out |
 | `execution.failFast` | bool (tri-state) | Stop after the first failed phase |
 | `execution.noCluster` | bool | Test mode: no cluster access, constraints evaluated inline |
-| `execution.noCleanup` | bool | Keep validation Jobs after completion |
+| `execution.noCleanup` | bool | Keep validation Jobs after completion, and the workload namespaces a check leaves behind when the run gives up waiting on it |
 | `execution.timeout` | duration string | `aicr validate`: timeout for the live snapshot-capture agent Job (`--timeout`, default `5m`); inert when `input.snapshot` is set, and validator Jobs keep their per-check timeouts. Go SDK: `Config.ValidateSettings().Timeout` carries the same value for `WithValidationTimeout`, which caps the whole `ValidateState` run (see [Go library](../integrator/go-library.md#what-validatesettings-does-and-does-not-carry)) |
 | `evidence.cncf.dir` | string | CNCF AI Conformance submission evidence directory (`--evidence-dir`). Requires `cncfSubmission`; `dir` alone is rejected with `INVALID_REQUEST` (recorded on [Deprecations](deprecations.md#--evidence-dir-without---cncf-submission)) |
 | `evidence.cncf.cncfSubmission` | bool (tri-state) | Write the submission directory from the conformance run (`--cncf-submission`); requires `dir`, `evidence.cncf.vendor` (a submission run without it is rejected with `INVALID_REQUEST` before any check runs), the conformance phase and a recipe input, and is rejected with `noCluster` or `skipChecks` |

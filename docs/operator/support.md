@@ -77,8 +77,15 @@ published evidence.
 
 With `spec.validation.deployment: Required`, each rollout runs AICR's
 deployment validation and, when it passes, records the evidence reference on
-the rollout. A run AICR could not finish, and that pushed no evidence of a
-failed check, is run again; only the last run's evidence is recorded:
+the rollout. A run that ends on a transient AICR exit (5, 6, 7 or 9) is run
+again, up to three runs in all, when it pushed no evidence, when its evidence
+cannot be read as a verdict, or when its evidence records a pass. Evidence
+that records failed or unfinished (`other`) checks, or a phase in which no
+check passed, ends the rollout `Failed` on that run, as does any other failed
+run or a third transient exit; while the registry cannot be asked for the
+evidence, no new run starts
+([troubleshooting](troubleshooting.md#validation)). Only the last run's
+evidence is recorded:
 
 ```shell
 kubectl get runtimerollouts -l operator.aicr.run/outcome=Succeeded \

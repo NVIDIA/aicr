@@ -432,6 +432,46 @@ func TestBuildJobPlan_ForwardsScopedInferenceGatewayEnv(t *testing.T) {
 	})
 }
 
+// TestRetainsWorkloadNamespace pins RetainsWorkloadNamespace to the entries
+// buildEnv forwards the no-cleanup toggle to, so the orchestrator never reaps a
+// namespace the check was told to keep, nor keeps one the check will not.
+func TestRetainsWorkloadNamespace(t *testing.T) {
+	perf := ValidatorEntry{Name: InferencePerfCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute}
+	nccl := ValidatorEntry{Name: NCCLAllReduceBWCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute}
+	tests := []struct {
+		name  string
+		entry ValidatorEntry
+		value string
+		want  bool
+	}{
+		{"inference-perf with 1", perf, "1", true},
+		{"inference-perf with true", perf, "true", true},
+		{"inference-perf unset", perf, "", false},
+		{"inference-perf with false", perf, "false", false},
+		{"inference-perf with non-bool", perf, "yes", false},
+		{"other check with 1", nccl, "1", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(inferencePerfNoCleanupEnv, tt.value)
+			if got := RetainsWorkloadNamespace(tt.entry); got != tt.want {
+				t.Errorf("RetainsWorkloadNamespace = %v, want %v", got, tt.want)
+			}
+			plan, err := BuildJobPlan(tt.entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+			if err != nil {
+				t.Fatalf("BuildJobPlan error: %v", err)
+			}
+			forwarded := false
+			for _, e := range plan.Env {
+				forwarded = forwarded || e.Name == inferencePerfNoCleanupEnv
+			}
+			if forwarded != tt.want {
+				t.Errorf("%s forwarded = %v, want %v (must match RetainsWorkloadNamespace)", inferencePerfNoCleanupEnv, forwarded, tt.want)
+			}
+		})
+	}
+}
+
 // TestBuildJobPlan_ForwardsInferencePerfNoCleanupEnv verifies the no-cleanup
 // debug toggle is carried from the CLI process into the inference-perf validator
 // Job (where cleanupInferenceWorkload reads it), and only that validator.
