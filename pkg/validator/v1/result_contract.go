@@ -26,8 +26,9 @@ const ClusterAutoscalingCheckName = "cluster-autoscaling"
 // image's tests assert each name is a registered check that emits the marker,
 // and pkg/evidence/cncf reads every unmarked pass from one of them as an
 // observation regardless of the ctrf.ExtraKeyResultSchema stamp; the stamp
-// only decides whether the reason says the image predates the contract or
-// the marker went missing.
+// only decides whether the reason says the stamp is absent, because the
+// image predates the contract or the kubelet rotated the log past it, or the
+// marker went missing.
 var observationOnlyChecks = map[string]bool{
 	ClusterAutoscalingCheckName: true,
 }

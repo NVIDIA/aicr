@@ -918,7 +918,7 @@ page are the contract.
 | `secondary-network-attachment` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped`, counting networks |
 | `cluster-autoscaling`, on every passing path | `observationOnly` |
 | any check, on an in-pod skip | `skipReason` |
-| any check, on every result whose stamp write succeeded (every `passed` and `skipped` result an image that stamps produces) | `resultSchema`, stamped by the runner before the check starts |
+| any check, on every result whose stamp write succeeded and whose log the kubelet did not rotate past the stamp (every `passed` and `skipped` result an image that stamps produces) | `resultSchema`, stamped by the runner before the check starts |
 
 - NCCL publishes `transport`, `workerNodes`, and `gpusInvolved` before the
   benchmark runs, so a failed run still records its scope. `fabric` appears
