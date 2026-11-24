@@ -39,8 +39,8 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 
 | Component | Type | Chart | Pinned Version | Images |
 |-----------|------|-------|----------------|--------|
-| agentgateway | helm | agentgateway | v1.5.0 | 1 |
-| agentgateway-crds | helm | agentgateway-crds | v1.5.0 | 0 |
+| agentgateway | helm | agentgateway | v1.7.0 | 1 |
+| agentgateway-crds | helm | agentgateway-crds | v1.7.0 | 0 |
 | aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.68.0 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.5 | 4 |
@@ -116,7 +116,7 @@ from the component's registry default above.
 
 ### agentgateway
 
-- `cr.agentgateway.dev/controller:v1.5.0`
+- `cr.agentgateway.dev/controller:v1.7.0`
 
 ### agentgateway-crds
 

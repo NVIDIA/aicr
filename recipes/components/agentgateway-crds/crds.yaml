@@ -32,5 +32,5 @@ charts:
       - agentgatewayparameters.agentgateway.dev
       - agentgatewaypolicies.agentgateway.dev
     repository: oci://cr.agentgateway.dev/charts
-    sourceVersion: v1.5.0
+    sourceVersion: v1.7.0
 component: agentgateway-crds
