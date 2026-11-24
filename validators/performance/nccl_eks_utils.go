@@ -74,7 +74,7 @@ func discoverEKSNodeConfig(nodes []v1.Node) (string, int, error) {
 }
 
 // uniformFabricResourceCount returns the allocatable count of an extended
-// fabric resource (EFA on EKS, the shared RDMA pool on AKS) across the full set
+// fabric resource (EFA on EKS, the shared RDMA pool on AKS and on GB10 NVKE) across the full set
 // of resolved target GPU nodes, requiring every node to advertise the SAME
 // count. NCCL sizes every worker identically, so deriving the count from only
 // the first node silently mis-sizes the fabric request during a partial

@@ -15,7 +15,9 @@
 # DGX Spark (one GB10 GPU) on NVKE, at intent training. DGX OS is Ubuntu 24.04
 # with the NVIDIA driver pre-installed.
 #
-# One GPU and no NVLink or InfiniBand: no east-west stack and no NCCL check.
+# One GPU and no NVLink. Two Sparks linked port to port over ConnectX-7 run
+# RoCE v2 on the inbox mlx5_core: network-operator runs only the RDMA shared
+# device plugin, and the performance phase measures NCCL over that link.
 # DCGM does not support GB10: DCGM, dcgm-exporter and NVSentinel's GPU health
 # monitor are off, and no declared check reads DCGM.
 kind: RecipeMetadata
@@ -61,7 +63,8 @@ spec:
         devicePlugin:
           enabled: true
           # Helm replaces lists: the first two entries restate the component
-          # base. No RDMA path, so no /dev/infiniband in GPU pods.
+          # base. MOFED_ENABLED stays off: only pods that request
+          # rdma/hca_shared_devices_a get /dev/infiniband.
           env:
             - name: DP_DISABLE_HEALTHCHECKS
               value: "109"
@@ -114,9 +117,47 @@ spec:
                         enabledValue: "true"
                         disabledValue: "false"
 
+    # nfd-worker labels ConnectX-7 nodes pci-15b3.present, which the
+    # NicClusterPolicy and the RDMA readiness gate select on.
+    - name: nfd
+      type: Helm
+      valuesFile: components/nfd/values-nvidia-nics.yaml
+
+    # RoCE between linked Sparks for NCCL: the RDMA shared device plugin only.
+    # When no Spark has its ConnectX-7 on the PCI bus (DGX OS hotplug power
+    # saving), expected-resources fails and a --readiness-hooks bundle waits on
+    # the NicClusterPolicy until --max-wait. A Spark that loses only its own
+    # card is caught by the NCCL preflight instead.
+    - name: network-operator
+      type: Helm
+      valuesFile: components/network-operator/values-nvke-gb10.yaml
+      manifestFiles:
+        - components/network-operator/manifests/nic-cluster-policy-nvke-gb10.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
+
   validation:
-    # TODO: no performance phase yet. AICR's NCCL checks need two GPU nodes;
-    # add nccl-all-reduce-bw once two Sparks are linked over ConnectX-7.
+    performance:
+      # Two DGX Sparks, one GB10 each, port 1 to port 1 over one QSFP112 DAC:
+      # RoCE v2 over the port's two PCIe functions. The pairing is in the
+      # compiled matrix (supportedNCCLCombinations[variantNET][nvke]) with its
+      # own template, testdata/gb10/nvke/runtime-net.yaml, so no
+      # nccl-benchmark-profile or runtime ref is needed. The -net check fails
+      # if NCCL falls back to sockets.
+      #
+      # One Spark cannot run this check: it fails with fewer than two GPU
+      # nodes. Validate one Spark with `--phase deployment --phase
+      # conformance` instead, with its ConnectX-7 kept powered (NVKE GB10
+      # Setup, step 2) so that expected-resources finds the RDMA fabric.
+      checks:
+        - nccl-all-reduce-bw-net
+      constraints:
+        # Floor from the validated baseline: 24.11 GB/s busbw at the 16 GiB
+        # message size over both PCIe functions. NCCL over one function
+        # alone would carry about half that, 12 GB/s, and fail.
+        - name: nccl-all-reduce-bw-net
+          value: ">= 20"
     deployment:
       checks:
         - operator-health

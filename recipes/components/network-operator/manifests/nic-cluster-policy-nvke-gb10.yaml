@@ -1,0 +1,67 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NicClusterPolicy for DGX Spark (GB10) on NVKE: rdmaSharedDevicePlugin only.
+#
+# One ConnectX-7 (15b3:1021) per Spark, on the inbox mlx5_core (see
+# values-nvke-gb10.yaml). A pod that requests rdma/hca_shared_devices_a gets
+# every CX-7 RDMA device on its node; the NCCL runtime picks the ACTIVE ones.
+# No ofedDriver, nvIpam, secondaryNetwork or sriovDevicePlugin: no driver
+# container, no secondary pod interfaces, no VFs.
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+  annotations:
+    # Long-lived cluster networking, updated in place: a Helm hook would
+    # delete the live policy on every upgrade.
+    aicr/skip-hook-validation: "true"
+    aicr/disable-wait: "true"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  # Only ConnectX nodes (pci-15b3.present, from the nfd-worker rule in
+  # components/nfd/values-nvidia-nics.yaml).
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: feature.node.kubernetes.io/pci-15b3.present
+              operator: In
+              values:
+                - "true"
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin tag=network-operator-v26.7.1
+    version: sha256:842b3816c66623cef061daf9d904c411085c525898e8b95777e531d77b3a7b4e
+    # periodicUpdateInterval rescans if DGX OS hotplug power saving removed
+    # and later restored the CX-7.
+    config: |
+      {
+        "periodicUpdateInterval": 300,
+        "configList": [{
+          "resourceName": "hca_shared_devices_a",
+          "rdmaHcaMax": 64,
+          "selectors": {
+            "vendors": ["15b3"],
+            "deviceIDs": ["1021"]
+          }
+        }]
+      }
+  # Every taint, as on OKE GB300: nodeAffinity already limits the plugin to
+  # ConnectX nodes, and Spark workers are often tainted for GPU work only.
+  tolerations:
+    - operator: Exists

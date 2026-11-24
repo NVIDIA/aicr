@@ -1725,8 +1725,8 @@ Resolution is split across the two-stage design:
   `validateNcclAllReduceBw` bypasses the `ncclCombinationSupported` applicability
   gate entirely (applicability is granted by the recipe's explicit opt-in, keyed
   on its own criteria) and `applyNCCLResources` skips every service-specific step
-  — EFA/TCPXO/RDMA discovery, the GB200-NVreg / GKE-TCPXO preflights, and
-  NVLS/IMEX provisioning — because the supplied runtime owns its
+  — EFA/TCPXO/RDMA discovery, the GB200-NVreg / GKE-TCPXO / GB10 shared-RDMA
+  preflights, and NVLS/IMEX provisioning — because the supplied runtime owns its
   fabric wiring. Transport verification still runs (the `-net` / `-nvls` markers
   are transport-internal and fabric-agnostic), so a runtime paired with a named
   variant must still prove its transport rather than pass on bandwidth alone; the
