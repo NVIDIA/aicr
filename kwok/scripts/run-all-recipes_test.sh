@@ -419,7 +419,7 @@ cat > "${FIXTURE_ROOT}/aicr-args" <<'STUB'
 if [[ "${TEST_BUNDLE_CAPTURE:-}" == true && "$1" == recipe ]]; then
     while [[ $# -gt 0 ]]; do
         if [[ "$1" == --output ]]; then
-            printf 'deploymentOrder: [network-operator, dynamo-platform]\n' > "$2"
+            printf 'deploymentOrder: %s\n' "${TEST_DEPLOYMENT_ORDER:-[network-operator, dynamo-platform]}" > "$2"
             exit 0
         fi
         shift
@@ -473,6 +473,71 @@ CHECK
         check "scheduling-${recipe_name}-${path}-uses-registry" eq 1 "$rc"
     done
 done
+
+# nktp's OpenTelemetry operator webhook override reaches aicr bundle exactly
+# when nktp is bundled (#3843).
+NKTP_SET="nktp:opentelemetry-kube-stack.opentelemetry-operator.admissionWebhooks.create=false"
+for entry in '[nktp, cert-manager]:present' '[network-operator, dynamo-platform]:absent'; do
+    order=${entry%:*}
+    want=${entry##*:}
+    rm -f "${FIXTURE_ROOT}/args"
+    rc=0
+    ARGS_FILE="${FIXTURE_ROOT}/args" TEST_BUNDLE_CAPTURE=true TEST_DEPLOYMENT_ORDER="$order" \
+        bash -s -- "${VALIDATE_SOURCE}" "${FIXTURE_ROOT}" gb200-eks-ubuntu-inference-dynamo >"${LOG_FILE}" 2>&1 <<'CHECK' || rc=$?
+source "$1"
+AICR_BIN="$2/aicr-args"
+WORK_DIR="$2"
+generate_bundle "$3"
+CHECK
+    check "nktp-override-${want}-bundle-stops" eq 1 "$rc"
+    rc=0
+    grep -Fxq -- "$NKTP_SET" "${FIXTURE_ROOT}/args" || rc=1
+    if [[ "$want" == present ]]; then
+        check "nktp-override-passed-when-nktp-is-bundled" eq 0 "$rc"
+    else
+        check "nktp-override-not-passed-without-nktp" eq 1 "$rc"
+    fi
+done
+
+# verify_kwok_overrides fails the lane when nktp's webhooks are installed
+# anyway, or cannot be listed, and asks nothing of a bundle without nktp.
+mkdir -p "${FIXTURE_ROOT}/kubectl-bin"
+cat > "${FIXTURE_ROOT}/kubectl-bin/kubectl" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >> "${KUBECTL_CALLS}"
+if [[ "${STUB_KUBECTL_FAIL:-}" == 1 ]]; then
+    echo "The connection to the server was refused" >&2
+    exit 1
+fi
+printf '%s' "${STUB_WEBHOOKS:-}"
+STUB
+chmod +x "${FIXTURE_ROOT}/kubectl-bin/kubectl"
+run_verify_overrides() {
+    local order="$1"
+    shift
+    printf 'deploymentOrder: %s\n' "$order" > "${FIXTURE_ROOT}/recipe.yaml"
+    : > "${FIXTURE_ROOT}/kubectl-calls"
+    rc=0
+    env PATH="${FIXTURE_ROOT}/kubectl-bin:${PATH}" KUBECTL_CALLS="${FIXTURE_ROOT}/kubectl-calls" "$@" \
+        bash -s -- "${VALIDATE_SOURCE}" "${FIXTURE_ROOT}" >"${LOG_FILE}" 2>&1 <<'CHECK' || rc=$?
+source "$1"
+WORK_DIR="$2"
+verify_kwok_overrides
+CHECK
+}
+run_verify_overrides '[nktp]' \
+    STUB_WEBHOOKS="mutatingwebhookconfiguration.admissionregistration.k8s.io/nktp-operator-mutation"
+check "verify-overrides-fails-when-nktp-webhooks-exist" eq 1 "$rc"
+run_verify_overrides '[nktp]'
+check "verify-overrides-passes-when-nktp-webhooks-are-off" eq 0 "$rc"
+run_verify_overrides '[nktp]' STUB_KUBECTL_FAIL=1
+check "verify-overrides-fails-when-webhooks-cannot-be-listed" eq 1 "$rc"
+run_verify_overrides '[network-operator]' STUB_KUBECTL_FAIL=1
+check "verify-overrides-skips-a-bundle-without-nktp" eq 0 "$rc"
+rc=0
+[[ -s "${FIXTURE_ROOT}/kubectl-calls" ]] && rc=1
+check "verify-overrides-queries-nothing-without-nktp" eq 0 "$rc"
+
 rm -f "${VALIDATE_SOURCE}"
 
 # ── Summary ────────────────────────────────────────────────────────────
