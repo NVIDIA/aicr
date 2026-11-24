@@ -1049,7 +1049,7 @@ result, err := client.ApplyValidationSweep(ctx, plan)
   between plan and apply is left alone and a re-run is idempotent. Before
   deleting run-scoped objects it also lists the run-labeled Jobs and
   watches from the list's ResourceVersion for the
-  `defaults.ValidationSweepSettleWindow` (~2m30s — a conservative margin
+  `defaults.ValidationSweepSettleWindow` (~5m30s — a conservative margin
   over the usual between-checks gap, not a proven bound) for a validator
   Job to appear, because a live run with cleanup on shows no Job between
   its checks; the wait sits between the re-plan's reads and the deletes, so

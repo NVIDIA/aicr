@@ -278,8 +278,9 @@ func (r *RolloutReconciler) validationRun(ro *v1alpha1.RuntimeRollout, repo regi
 }
 
 // recordedFailure is what the evidence a run pushed records when it is not
-// a pass, worded for a status message: failed checks, or no failed check
-// and still no pass. It is empty for a run that pushed none, for evidence
+// a pass, worded for a status message: failed checks, checks that ended
+// without a verdict (AICR's "other" count), both, or neither and still no
+// pass. It is empty for a run that pushed none, for evidence
 // that records a pass, and for evidence that cannot be read as a verdict. A
 // registry that cannot be asked, for now or because it refuses the operator,
 // is an error, so that no run starts until the evidence has been looked for.
@@ -300,12 +301,21 @@ func (r *RolloutReconciler) recordedFailure(ctx context.Context, repo registry.R
 	if err != nil || summary.Passed() {
 		return "", nil
 	}
+	var failed, unfinished bool
 	for _, phase := range summary.Phases {
-		if phase.Failed > 0 {
-			return "records failed checks", nil
-		}
+		failed = failed || phase.Failed > 0
+		unfinished = unfinished || phase.Other > 0
 	}
-	return "records no failed check, but not that validation passed", nil
+	switch {
+	case failed && unfinished:
+		return "records failed checks and checks that ended without a verdict", nil
+	case failed:
+		return "records failed checks", nil
+	case unfinished:
+		return "records checks that ended without a verdict", nil
+	default:
+		return "records no failed check, but not that validation passed", nil
+	}
 }
 
 // unasked is the error of a registry read that did not answer whether a run

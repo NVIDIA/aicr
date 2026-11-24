@@ -1580,6 +1580,21 @@ aicr validate \
   pods, the run lists pods in that component's namespace (for example
   `monitoring`) to warn when the placement selector matches nothing. Without
   `list pods` there, the run logs a lookup-failure warning and continues.
+- When the run gives up waiting on a check (a timeout, or a lost API
+  connection), it records the check as `other`, or with its own verdict if the
+  validator container had already exited, and then tries to delete the
+  workload namespaces the run's performance checks created: those labeled with
+  the run ID and the checks' ownership labels and named for the run
+  (`aicr-inference-perf-<h>` or `aicr-nccl-perf-<variant>-<h>`). That needs
+  `list`, `watch` and `delete` on `namespaces`. Neither the Role above nor the
+  AICR Operator's validation launcher grants them, so under either one the
+  List is refused (`Forbidden`) before anything is deleted, the namespaces stay
+  until you delete them, and `workload namespace cleanup failed: <cause>` is
+  appended to the check's message. The message never changes the check's
+  status, and cannot name the namespaces it could not list. The cleanup does
+  not run at all when the run is interrupted (canceled) or `--no-cleanup` is
+  set: the namespaces then stay, and the check's message says nothing about
+  them.
 - This changes who grants the validators' access, and when. It does not make
   the caller less powerful: an identity that can create Jobs in the validation
   namespace can run any image as that ServiceAccount, and one that can write

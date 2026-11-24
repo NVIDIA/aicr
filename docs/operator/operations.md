@@ -207,10 +207,14 @@ timeout and is not checked.
    there for all of its steps, since the operator cannot tell which follow the
    apply.
 8. **Deployment validation** runs when `spec.validation.deployment` is
-   `Required`, against a new snapshot taken after every step is ready. It is
-   run again, at most three times in all, only when AICR could not finish a
-   run and that run pushed no evidence of a failed check
-   ([troubleshooting](troubleshooting.md#validation)).
+   `Required`, against a new snapshot taken after every step is ready. A run
+   that ends on a transient AICR exit (5, 6, 7 or 9) is run again, up to three
+   runs in all, when it pushed no evidence, when its evidence cannot be read as
+   a verdict, or when its evidence records a pass. Evidence that records
+   failed or unfinished (`other`) checks, or a phase in which no check passed,
+   ends the rollout `Failed` on that run, as does any other failed run or a
+   third transient exit; while the registry cannot be asked for the evidence,
+   no new run starts ([troubleshooting](troubleshooting.md#validation)).
 9. **The rollout succeeds** and its target becomes the active plan. The whole
    rollout must finish within `spec.rollout.deadline` (default 6 hours) of its
    creation.

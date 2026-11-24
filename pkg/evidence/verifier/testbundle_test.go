@@ -32,7 +32,7 @@ import (
 // bundle root (which contains summary-bundle/).
 func buildTestBundle(t *testing.T) string {
 	t.Helper()
-	return buildBundle(t, false)
+	return buildBundle(t, ctrf.StatusPassed)
 }
 
 // buildTestBundleFailedPhase is like buildTestBundle but records a failed
@@ -40,10 +40,18 @@ func buildTestBundle(t *testing.T) string {
 // Verify reports the informational exit-1 (valid bundle, phase failures).
 func buildTestBundleFailedPhase(t *testing.T) string {
 	t.Helper()
-	return buildBundle(t, true)
+	return buildBundle(t, ctrf.StatusFailed)
 }
 
-func buildBundle(t *testing.T, withPhaseFailure bool) string {
+// buildTestBundleOtherPhase is like buildTestBundleFailedPhase but the
+// deployment check ended without a verdict (CTRF status other).
+func buildTestBundleOtherPhase(t *testing.T) string {
+	t.Helper()
+	return buildBundle(t, ctrf.StatusOther)
+}
+
+// buildBundle records one deployment check that ended with status.
+func buildBundle(t *testing.T, status string) string {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -59,11 +67,15 @@ func buildBundle(t *testing.T, withPhaseFailure bool) string {
 	}
 	bom := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"name":"a"},{"name":"b"}]}`)
 	report := &ctrf.Report{}
-	status := "passed"
-	report.Results.Summary = ctrf.Summary{Tests: 1, Passed: 1, Failed: 0, Skipped: 0}
-	if withPhaseFailure {
-		status = "failed"
-		report.Results.Summary = ctrf.Summary{Tests: 1, Passed: 0, Failed: 1, Skipped: 0}
+	switch status {
+	case ctrf.StatusPassed:
+		report.Results.Summary = ctrf.Summary{Tests: 1, Passed: 1}
+	case ctrf.StatusFailed:
+		report.Results.Summary = ctrf.Summary{Tests: 1, Failed: 1}
+	case ctrf.StatusOther:
+		report.Results.Summary = ctrf.Summary{Tests: 1, Other: 1}
+	default:
+		t.Fatalf("buildBundle: unsupported status %q", status)
 	}
 	phaseResults := []*validator.PhaseResult{
 		{Phase: validator.PhaseDeployment, Status: status, Report: report, Duration: time.Second},
