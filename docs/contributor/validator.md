@@ -642,7 +642,7 @@ validators.Run(map[string]validators.CheckFunc{
 | `1` | failed | `failed` |
 | `2` | skipped | `skipped` — return `validators.Skip(reason)` |
 | `3` | interrupted by SIGTERM | `other` — written by `validators.Run` whenever SIGTERM arrived before the check returned, whatever it returned (see [Cancellation and cleanup lifecycle](#cancellation-and-cleanup-lifecycle)) |
-| `4` | panicked | `other`. `validators.Run` recovers a panic in the check function and writes `check panicked: <value>`, even when SIGTERM arrived first. A panic in a goroutine the check starts is not recovered and exits `2`, which reads as `skipped`. |
+| `4` | panicked | `other`. `validators.Run` recovers a panic in the check function and writes `check panicked: <value>`, even when SIGTERM arrived first. At the Job deadline the Job controller deletes the pod, so the result stays `failed` and `check panicked` appears only in its message (see [Cancellation and cleanup lifecycle](#cancellation-and-cleanup-lifecycle)). A panic in a goroutine the check starts is not recovered and exits `2`, which reads as `skipped`. |
 
 Any other exit code also maps to CTRF `other`.
 
