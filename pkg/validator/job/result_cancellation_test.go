@@ -36,15 +36,28 @@ import (
 )
 
 // TestExtractResultListFailureListsOnce verifies a failed pod List is not
-// retried to find a terminated pod, and the planned image is recorded.
+// retried to find a terminated pod, and the image of the last terminated pod
+// observed is recorded.
 func TestExtractResultListFailureListsOnce(t *testing.T) {
-	const image = "ghcr.io/x/deployment:edge"
+	const (
+		planned  = "ghcr.io/x/deployment:edge"
+		observed = "ghcr.io/x/deployment-observed:v2"
+	)
 	cs := fake.NewSimpleClientset()
 	cs.PrependReactor("list", "pods", func(clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, stderrors.New("apiserver unavailable")
 	})
-	d := NewDeployer(Config{Clientset: cs, Namespace: "ns", Entry: catalog.ValidatorEntry{Name: "check", Phase: "deployment", Image: image}})
+	d := NewDeployer(Config{Clientset: cs, Namespace: "ns", Entry: catalog.ValidatorEntry{Name: "check", Phase: "deployment", Image: planned}})
 	d.jobName = "job"
+	d.lastTerminated = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "ns"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: ValidatorContainerName, Image: observed}}},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name:    ValidatorContainerName,
+			ImageID: "ghcr.io/x/deployment-observed@" + testDigestA,
+			State:   corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 3}},
+		}}},
+	}
 
 	result := d.ExtractResult(t.Context())
 
@@ -57,7 +70,7 @@ func TestExtractResultListFailureListsOnce(t *testing.T) {
 	if podLists != 1 {
 		t.Errorf("pod lists = %d, want 1", podLists)
 	}
-	if want := []ctrf.PodImage{{Image: image}}; !slices.Equal(result.Images, want) {
+	if want := []ctrf.PodImage{{Image: observed, Digest: testDigestA}}; !slices.Equal(result.Images, want) {
 		t.Errorf("images = %+v, want %+v", result.Images, want)
 	}
 }
