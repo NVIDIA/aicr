@@ -13,7 +13,7 @@ on hardware AICR maintainers can't reach — see
 This demo walks through the full producer-and-consumer loop:
 
 1. Run `aicr validate --emit-attestation` to produce a bundle and pointer.
-2. Push the bundle to an OCI registry (signs via cosign keyless OIDC).
+2. Push the bundle to an OCI registry, signed with your own OIDC identity (Sigstore keyless).
 3. Commit the pointer file to the repo.
 4. Verify from the pointer (the maintainer's path).
 5. Verify directly from the OCI artifact.
@@ -63,7 +63,9 @@ aicr validate \
 ```
 
 `--push` opens a browser for OIDC sign-in (or uses ambient GitHub Actions
-OIDC if `ACTIONS_ID_TOKEN_REQUEST_URL` is set). The OCI digest is always
+OIDC if `ACTIONS_ID_TOKEN_REQUEST_URL` is set). The signature carries that
+identity, yours or your workflow's, so it needs public Sigstore
+(`*.sigstore.dev`) and write access to the registry. The OCI digest is always
 the canonical address, so the tag is just a human-readable label — tag
 choice never affects verification. We omit the tag above, so aicr derives a
 unique per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g.
@@ -89,19 +91,24 @@ piling onto a shared one. Pass an explicit tag to override. The pointer file
 
 ### Alternative: split validate and publish across networks
 
-Validation needs the cluster (often behind a corporate VPN); keyless signing
-needs `fulcio.sigstore.dev` + `rekor.sigstore.dev`, which corporate networks
-frequently block. Drop `--push` to emit an *unsigned* bundle on the VPN, then
-sign + push + write the pointer from a host with Sigstore egress:
+Validation needs a host that can reach the cluster; keyless signing needs
+public Sigstore (`fulcio.sigstore.dev` and the Rekor log under
+`rekor.sigstore.dev`), and the push needs the OCI registry. When no single host
+reaches all of them, for example when the cluster is only reachable over a
+corporate VPN that blocks Sigstore, drop `--push` to emit an *unsigned* bundle
+where the cluster is reachable, then sign + push + write the pointer from a
+host that reaches Sigstore and the registry:
 
 ```shell
-# On the VPN — validates and emits an unsigned bundle (no signing network).
+# Where the cluster is reachable (for example, on the VPN): validate and emit
+# an unsigned bundle (no Sigstore access needed).
 aicr validate \
   --recipe recipe.yaml \
   --snapshot snapshot.yaml \
   --emit-attestation ./out
 
-# Off the VPN (CI runner, jump box, hotspot) — sign, push, write pointer.
+# Where Sigstore and the registry are reachable (for example, off the VPN: a CI
+# runner, jump box, or hotspot): sign, push, write pointer.
 # Tag optional; aicr derives <recipe-slug>-<fingerprint> when omitted.
 aicr evidence publish ./out --push ghcr.io/<owner>/aicr-evidence
 ```

@@ -178,7 +178,7 @@ func (c *signingConfig) resolveOptions() (attestation.ResolveOptions, error) {
 // binaryAttestationVerifier resolves and cryptographically verifies the running
 // server binary's attestation (tool provenance), returning the raw Sigstore
 // bundle bytes to embed in signed bundles. Injectable so tests can supply a
-// fixture: the real verification pins NVIDIA-CI identity + the running binary's
+// fixture: the real verification pins the AICR release workflow identity + the running binary's
 // digest, which cannot be satisfied by a `go test` executable.
 type binaryAttestationVerifier func(ctx context.Context) ([]byte, error)
 
@@ -205,7 +205,7 @@ func resolveBinaryAttestationPath(binPath string) (string, error) {
 // resolveBinaryAttestationIdentityPattern returns the certificate-identity
 // pattern used to verify the server's own binary attestation: the
 // AICR_BINARY_ATTESTATION_IDENTITY_REGEXP override when set (validated to stay
-// pinned to the NVIDIA org), else the release-workflow default. A custom pattern
+// pinned to the NVIDIA/aicr repository), else the release-workflow default. A custom pattern
 // means bundles this server signs will not pass a verifier using the default
 // identity, so it is logged.
 func resolveBinaryAttestationIdentityPattern() (string, error) {
@@ -222,8 +222,8 @@ func resolveBinaryAttestationIdentityPattern() (string, error) {
 }
 
 // defaultBinaryAttestationVerifier locates the attestation next to the running
-// executable (the in-image convention), verifies it against the NVIDIA-CI
-// identity pattern and the binary's own digest, and returns its bytes.
+// executable (the in-image convention), verifies it against the AICR release
+// workflow identity pattern and the binary's own digest, and returns its bytes.
 func defaultBinaryAttestationVerifier(ctx context.Context) ([]byte, error) {
 	binPath, err := os.Executable()
 	if err != nil {

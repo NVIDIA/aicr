@@ -2,13 +2,15 @@
 
 This guide describes how to install the AI Cluster Runtime (AICR) CLI tool (`aicr`) on Linux, macOS, or Windows.
 
-**What is AICR**: AICR generates validated configurations for GPU-accelerated Kubernetes deployments. See [README](https://github.com/NVIDIA/aicr#readme) for project overview.
+**What is AICR**: AI Cluster Runtime (AICR) is an open source project created by NVIDIA. It provides a common workflow for discovering cluster capabilities, selecting a recipe, generating deployment artifacts, and validating AI infrastructure on Kubernetes. See [README](https://github.com/NVIDIA/aicr#readme) for project overview.
+
+This guide installs the CLI. To run AICR continuously inside a cluster instead, see the [AICR Operator](../operator/index.md). The operator is in Preview: its API may change, and no hardware profile is qualified for it yet.
 
 ## Prerequisites
 
 - **Operating System**: Linux, macOS, or Windows (via WSL)
 - **Kubernetes Cluster** (optional): For agent deployment or bundle generation testing
-- **GPU Hardware** (optional): NVIDIA GPUs for full system snapshot capabilities
+- **GPU Hardware** (optional): Generating recipes and bundles needs no GPU. Snapshotting or validating a GPU cluster needs that cluster's GPU nodes; snapshot accelerator detection reads NVIDIA GPU signals, and the built-in recipes target NVIDIA GPUs
 - **kubectl** (optional): For Kubernetes agent deployment
 
 ## Install aicr CLI

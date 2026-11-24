@@ -1,13 +1,7 @@
 # Maintainers
 
-This document lists the maintainers of the NVIDIA AICR project.
-
-## Current Maintainers
-
-The authoritative source is the
-[`@nvidia/aicr-maintainer`](https://github.com/orgs/NVIDIA/teams/aicr-maintainer)
-GitHub team; [GOVERNANCE.md](GOVERNANCE.md#current-maintainers) carries a readable
-snapshot of it.
+This document describes what AICR maintainers do, how contributors become
+maintainers, and where the current roster lives.
 
 ## Maintainer Responsibilities
 
@@ -34,6 +28,13 @@ To be considered, contributors should:
 2. Demonstrated understanding of the [Design Principles](CONTRIBUTING.md#design-principles)
 3. Been nominated by an existing maintainer
 4. Received approval from a two-thirds supermajority of current maintainers (see [GOVERNANCE.md](GOVERNANCE.md#adding-and-removing-maintainers))
+
+## Current Maintainers
+
+The authoritative source is the
+[`@nvidia/aicr-maintainer`](https://github.com/orgs/NVIDIA/teams/aicr-maintainer)
+GitHub team, which grants maintainer access; [GOVERNANCE.md](GOVERNANCE.md#current-maintainers)
+carries a readable snapshot of it.
 
 ## Emeritus Maintainers
 

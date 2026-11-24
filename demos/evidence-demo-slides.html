@@ -152,17 +152,17 @@
 <body>
 
 <div class="deck-top">
-  <span class="brand">NVIDIA AICR<span class="sub">&nbsp;· Recipe Evidence</span></span>
+  <span class="brand">AICR<span class="sub">&nbsp;· Recipe Evidence</span></span>
   <span class="sect" id="sect"></span>
 </div>
 
 <!-- 1 · TITLE -->
 <section class="slide center" data-title="">
   <div class="slide-inner">
-    <div class="label">NVIDIA AI Cluster Runtime</div>
+    <div class="label">AI Cluster Runtime</div>
     <h1>Recipe evidence</h1>
     <p class="lede">A signed, tamper-evident record binding an identity to an <code class="inl">aicr validate</code> result
-      for a service/hardware/OS/platform combination NVIDIA maintainers can't reach.</p>
+      for a service/hardware/OS/platform combination AICR maintainers can't reach.</p>
     <div class="chips">
       <span class="chip"><b>Keyless</b> cosign + Fulcio</span>
       <span class="chip"><b>Public</b> Rekor transparency log</span>
@@ -253,10 +253,10 @@
     </figure>
     <div class="code">
       <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">producer</span><button class="copy">copy</button></div>
-<pre><span class="c"># on VPN — validate + emit an unsigned bundle</span>
+<pre><span class="c"># with cluster access (for example, on VPN): validate + emit an unsigned bundle</span>
 <span class="p">$</span> aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --emit-attestation ./out
 
-<span class="c"># off VPN — sign (keyless OIDC), push, write the pointer</span>
+<span class="c"># with Sigstore + registry access (for example, off VPN): sign as you (keyless OIDC), push, write the pointer</span>
 <span class="p">$</span> aicr evidence publish ./out --push ghcr.io/&lt;owner&gt;/aicr-evidence</pre>
     </div>
   </div>
@@ -468,8 +468,8 @@
     <div class="label">07 · Where it fits</div>
     <h2>One trust model, three subjects</h2>
     <div class="grid2">
-      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed CycloneDX SBOM and OpenVEX on every published image (CLI binaries ship a separate, unsigned SPDX SBOM asset), signed by NVIDIA CI. <code class="inl">demos/provenance.md</code></p></div>
-      <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with build provenance + trust levels. <code class="inl">demos/bundle-attestation.md</code></p></div>
+      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed CycloneDX SBOM and OpenVEX on every published image (CLI binaries ship a separate, unsigned SPDX SBOM asset), signed by the AICR release workflows in NVIDIA/aicr. <code class="inl">demos/provenance.md</code></p></div>
+      <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with the creator&rsquo;s identity, plus build provenance + trust levels. <code class="inl">demos/bundle-attestation.md</code></p></div>
       <div class="mini"><h4>Recipe evidence</h4><p>A signer-bound validation result for a recipe (proves who signed it, not cluster physicality), OCI-distributed with an in-tree pointer.</p></div>
       <div class="mini"><h4>Next, demand-driven</h4><p>Gate hardening to required · multi-cluster evidence per recipe · identity tiers.</p></div>
     </div>

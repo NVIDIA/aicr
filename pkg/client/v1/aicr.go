@@ -70,7 +70,7 @@
 //     CTRF report. CollectCNCFEvidence collects behavioral submission
 //     evidence from a live cluster.
 //   - VerifyBinaryAttestation — package-level; prove an aicr binary was
-//     built by NVIDIA CI.
+//     built by the AICR release workflow in NVIDIA/aicr.
 //
 // All facade types (Snapshot, SnapshotDiff, SnapshotChange, AgentConfig,
 // Criteria, RecipeRequest, RecipeResult, ComponentBundle, ComponentRef,

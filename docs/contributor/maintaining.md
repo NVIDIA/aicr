@@ -630,18 +630,31 @@ committed pointer file and the PR description.
 ### Signer Identity Trust Patterns
 
 `aicr evidence verify` records the OIDC issuer and identity from the
-cosign keyless certificate but does not classify it. Three patterns
-cover most contributions in V1.
+cosign keyless certificate but does not classify it. Classification against
+the signer allowlist
+([`recipes/evidence/allowlist.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/evidence/allowlist.yaml))
+is enforced in two places:
 
-| Pattern | Issuer | Identity | Treatment |
-|---------|--------|----------|-----------|
-| **NVIDIA employee** | `token.actions.githubusercontent.com` or `accounts.google.com` | GitHub user in `NVIDIA` org, or `@nvidia.com` Google | Accept on identity |
-| **Unknown fork** | GitHub Actions or public OIDC | New GitHub user | Confirm cosign identity == PR author; mismatch warrants a comment |
-| **Corporate tenant** | `login.microsoftonline.com/<tenant>/v2.0` or workspace Google | Tenant user | Note issuer; the tenant is the trust anchor |
+| Where | What is enforced |
+|-------|------------------|
+| Pull request | The blocking Evidence Pointer Contract (`tools/evidence-pointercheck`) rejects a pointer whose *claimed* signer is missing, sits under the wrong signer directory, or is not allowlisted. That is a structural check of the pointer's fields, not signature verification. The warning-only `recipe-evidence` check verifies the bundle signature and cross-checks it against the claimed signer. |
+| Ingest, after merge | [`evidence-ingest.yaml`](evidence-ingest.md#classification) verifies the signature pinned to the claimed signer before it counts any result, and classifies the **verified** issuer and identity against the allowlist. A verified signer with no allowlist entry is reported with zero weight and never counts toward corroboration. |
 
-V1 deliberately ships without a formal trust-tier policy (see ADR-007
-§"What V1 does not ship"). When a pattern recurs often enough to
-warrant filtering, the tier-policy work pulls in.
+Membership in a company or GitHub organization admits no evidence by
+itself. Every signer, maintainers included, carries weight only through an
+allowlist entry, so the allowlist change in a contributor's pull request is
+the trust decision. Review it by class:
+
+| Class | Who | Review |
+|-------|-----|--------|
+| `firstParty` | AICR project UAT workflows | Anchored `identityPattern` on a UAT workflow in `NVIDIA/aicr`. Only AICR project workflows belong here. |
+| `community` | Individual contributor signers | Confirm the certificate identity belongs to the pull request author (for a GitHub Actions identity, a workflow in the author's fork). A mismatch warrants a comment, not an approval. |
+| `partner` | Vetted partner organizations | Note the issuer, for example `login.microsoftonline.com/<tenant>/v2.0` or a workspace Google domain. The tenant is the trust anchor. None are onboarded yet. |
+
+A signer attests that the bundle records the `aicr validate` run they
+performed and the result it reported. That is provenance, not independent
+proof that the recipe works; see
+[What corroboration proves](../user/evidence-dashboard.md#what-corroboration-proves--and-does-not-prove).
 
 ### Exit-1 Review Process
 

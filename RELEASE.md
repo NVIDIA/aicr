@@ -31,8 +31,8 @@ Reaching the previous minor also requires the manual path in
 [Hotfix Procedure](#hotfix-procedure), because there is no long-lived release
 branch. A fix is never backported to an end-of-life version.
 
-Security issues are reported to NVIDIA PSIRT, not through GitHub; see
-[SECURITY.md](SECURITY.md) for reporting, embargo, and CVE assignment. Both
+Security issues are reported to NVIDIA PSIRT, not through GitHub; see the
+[AICR security policy](SECURITY.md) for reporting, embargo, and CVE assignment. Both
 files carry this table so each stands alone, and
 `TestSupportedVersionsMatchSecurityPolicy` in `tests/releasepolicy` fails when
 they disagree.

@@ -18,8 +18,8 @@
 # dashboard (epic #1400, contract #1347). It pins, per class, the signers
 # that may contribute corroborating evidence:
 #
-#   - first-party : the AICR project's own GitHub Actions CI.
-#   - community   : individual external contributors.
+#   - first-party : the AICR project's UAT workflows in NVIDIA/aicr.
+#   - community   : individual contributor signers.
 #   - partner     : vetted partner organizations.
 #
 # GP2's verify step and GP4's consensus model classify a verified signer
@@ -73,7 +73,7 @@ firstParty:
     issuer: https://token.actions.githubusercontent.com
     identityPattern: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-kind\.yaml@refs/heads/.+$'
 
-# Community: individual external contributors, keyed by source slug only.
+# Community: individual contributor signers, keyed by source slug only.
 # Each commits pointers under recipes/evidence/<recipe>/<src>/ where <src> is
 # the slug below.
 community:

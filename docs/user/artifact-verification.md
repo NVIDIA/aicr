@@ -21,6 +21,12 @@ self-contained command; see its [CLI reference entry](cli-reference.md#aicr-reci
 Bundles are unsigned by default; attestation is opt-in via `aicr bundle
 --attest`. An unsigned bundle can still have its closed-world inventory
 verified, but it cannot reach the higher trust levels described below.
+The bundle attestation is signed by whoever runs `aicr bundle --attest`. By
+default it carries their OIDC identity, certified by public Sigstore (Fulcio,
+with the entry logged in Rekor); `--fulcio-url`/`--rekor-url` move that to a
+private Sigstore, and `--signing-key` signs with their own KMS key instead.
+The AICR project does not sign your bundles: the only AICR project signature in
+your bundle is the release workflow's attestation of the `aicr` binary.
 
 A bundle set generated with `aicr bundle --split` is verified the same way
 at its set root, where `checksums.txt` and the attestation cover every
@@ -32,7 +38,7 @@ AICR treats a deployment bundle as a closed-world inventory. `checksums.txt` con
 ## Released Container Image Metadata
 
 The artifacts above are the ones *you* produce with `aicr`. The container images
-NVIDIA publishes carry their own metadata, and all of it is retrievable from the
+AICR releases carry their own metadata, and all of it is retrievable from the
 registry as signed OCI referrers on the image: SLSA build provenance on the
 multi-platform index, plus a CycloneDX SBOM and an OpenVEX document on each
 platform's own manifest digest, recording the CVEs AICR has triaged as not
@@ -131,7 +137,7 @@ each one subsumes the guarantees of the levels beneath it.
 
 | Level | Name | What it guarantees |
 |-------|------|--------------------|
-| 4 | `verified` | Closed-world inventory valid, bundle attestation verified, binary attestation verified with identity pinned to NVIDIA CI, and no external data |
+| 4 | `verified` | Closed-world inventory valid, bundle attestation verified, binary attestation verified with identity pinned to the AICR release workflow in `NVIDIA/aicr`, and no external data |
 | 3 | `attested` | Closed-world inventory and bundle attestation valid, but the chain is incomplete — the binary attestation is missing or external `--data` was used |
 | 2 | `unverified` | Closed-world inventory valid, but no attestation files exist (the bundle was created without `--attest`) |
 | 1 | `unknown` | Inventory is missing, incomplete, or invalid; or an attestation (bundle or binary) is present but *fails* verification — a present binary attestation that does not verify is a hard failure, not a degraded `attested` |
@@ -156,8 +162,8 @@ aicr verify ./my-bundle
 Under the hood this runs three checks:
 
 1. **Closed-world inventory**: every regular payload file, including `recipe.yaml` when present, must have a matching entry in `checksums.txt`; every additional filesystem entry is rejected except the three allowed inventory metadata files.
-2. **Bundle attestation**: the bundle's signature is verified against the Sigstore trusted root.
-3. **Binary attestation**: the provenance chain is verified with identity pinned to NVIDIA CI.
+2. **Bundle attestation**: the bundle creator's signature is verified against the Sigstore trusted root.
+3. **Binary attestation**: the provenance chain is verified with identity pinned to the AICR release workflow (`on-tag.yaml`) in `NVIDIA/aicr`.
 
 Manifest entry order does not affect inventory validation. AICR nevertheless
 generates `checksums.txt` in canonical slash-relative path order. Reordering an
@@ -246,8 +252,9 @@ aicr verify ./my-bundle --trust-root ./trusted_root.json
 
 `--trust-root` is **additive**: the supplied root is unioned with AICR's
 built-in public-good root, not substituted for it. So a single command verifies
-both org-signed bundles (against the private root) and NVIDIA-signed bundles
-(against the public-good root); you do not need to switch flags per artifact.
+both org-signed bundles (against the private root) and bundles signed through
+public Sigstore (against the public-good root); you do not need to switch
+flags per artifact.
 
 The flag supplies trust anchors only; it does not by itself require a bundle to
 be privately signed. To pin a specific signer, keep using `--require-creator`
@@ -270,10 +277,10 @@ aicr verify ./my-bundle \
 ```
 
 Only the **bundle attestation** consults the private root. The **binary
-attestation** is always produced by NVIDIA's public CI and continues to verify
-against the public-good root, regardless of `--trust-root`. Errors with the
-supplied `trusted_root.json` (missing, unreadable, oversized, or malformed) are
-reported as invalid-request failures.
+attestation** is always produced by the AICR release workflow through public
+Sigstore and continues to verify against the public-good root, regardless of
+`--trust-root`. Errors with the supplied `trusted_root.json` (missing,
+unreadable, oversized, or malformed) are reported as invalid-request failures.
 
 ## Offline and Air-Gapped Considerations
 

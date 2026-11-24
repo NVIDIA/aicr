@@ -152,17 +152,17 @@
 <body>
 
 <div class="deck-top">
-  <span class="brand">NVIDIA AICR<span class="sub">&nbsp;· Bundle Attestation</span></span>
+  <span class="brand">AICR<span class="sub">&nbsp;· Bundle Attestation</span></span>
   <span class="sect" id="sect"></span>
 </div>
 
 <!-- 1 · TITLE -->
 <section class="slide center" data-title="">
   <div class="slide-inner">
-    <div class="label">NVIDIA AI Cluster Runtime</div>
+    <div class="label">AI Cluster Runtime</div>
     <h1>Bundle attestation</h1>
     <p class="lede">Signed proof of <strong>who</strong> created a deployment bundle and
-      <strong>which AICR CLI</strong> built it — chained back to NVIDIA CI, verifiable offline,
+      <strong>which AICR CLI</strong> built it — chained back to the AICR release workflow, verifiable offline,
       enforceable by trust level.</p>
     <div class="chips">
       <span class="chip"><b>SLSA Build Provenance v1</b></span>
@@ -261,9 +261,9 @@
 <section class="slide" data-title="The chain">
   <div class="slide-inner">
     <div class="label">03 · The chain</div>
-    <h2>Bundle &harr; binary &harr; NVIDIA CI</h2>
+    <h2>Bundle &harr; binary &harr; AICR release workflow</h2>
     <figure class="fig">
-      <svg class="diagram" viewBox="0 0 860 296" role="img" aria-label="Three-link trust chain: bundle attestation signed by the creator's identity references the binary attestation, which is signed by NVIDIA CI's identity">
+      <svg class="diagram" viewBox="0 0 860 296" role="img" aria-label="Three-link trust chain: bundle attestation signed by the creator's identity references the binary attestation, which is signed by the AICR release workflow's identity">
         <defs>
           <marker id="bD2g" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#76b900"/></marker>
         </defs>
@@ -279,7 +279,7 @@
         <text class="nlabel ttl-g" x="430" y="108" text-anchor="middle">Binary attestation</text>
         <g class="nsub" font-size="11.5">
           <text x="326" y="134">subject: aicr-linux-amd64 sha256</text>
-          <text x="326" y="152">signer: NVIDIA/aicr CI</text>
+          <text x="326" y="152">signer: NVIDIA/aicr release workflow</text>
           <text x="326" y="170">issuer: token.actions.githubusercontent.com</text>
           <text x="326" y="194">workflow: on-tag.yaml@vX.Y.Z</text>
         </g>
@@ -289,7 +289,7 @@
           <text x="620" y="134">Fulcio: short-lived certs</text>
           <text x="620" y="152">Rekor: public log of both</text>
           <text x="620" y="170">witness: third-party monitors</text>
-          <text x="620" y="194">no NVIDIA contact at verify</text>
+          <text x="620" y="194">no network call at verify</text>
         </g>
         <path class="edge-g" d="M256,148 L308,148" marker-end="url(#bD2g)"/>
         <text class="elabel" x="262" y="138">references</text>
@@ -300,8 +300,8 @@
     <div class="note">
       <span class="t info">Why both halves matter</span>
       The bundle signature alone proves a creator made a bundle. The chain to the binary
-      attestation proves the bundle was built by an attested NVIDIA-CI-released AICR CLI —
-      not by a fork, an alpha build, or a tampered binary. AICR generates manifest entries
+      attestation proves the bundle was built by an attested AICR CLI from the AICR release workflow —
+      not by a fork or a tampered binary. AICR generates manifest entries
       sorted, but validates valid entries in any order; reordering a signed manifest changes its
       signed bytes and invalidates this chain.
     </div>
@@ -320,7 +320,7 @@
 <span class="g">✓</span> Checksums verified (12 files)
 <span class="g">✓</span> Bundle attested by: <span class="g">jdoe@company.com</span>
 <span class="g">✓</span> Binary built by: https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v1.0.0
-<span class="g">✓</span> Identity pinned to NVIDIA CI
+<span class="g">✓</span> Identity pinned to a workflow in NVIDIA/aicr
 <span class="g">  Trust level: verified</span>
 
 <span class="g">Bundle verification: PASSED</span></pre>
@@ -339,7 +339,7 @@
     <table class="r">
       <thead><tr><th>Level</th><th>Name</th><th>Criteria</th></tr></thead>
       <tbody>
-        <tr><td class="ok">4</td><td><code>verified</code></td><td>Checksums &nbsp;+ &nbsp;bundle attestation &nbsp;+ &nbsp;binary attestation pinned to NVIDIA CI</td></tr>
+        <tr><td class="ok">4</td><td><code>verified</code></td><td>Checksums &nbsp;+ &nbsp;bundle attestation &nbsp;+ &nbsp;binary attestation pinned to the AICR release workflow</td></tr>
         <tr><td class="ok">3</td><td><code>attested</code></td><td>Bundle attestation verified; binary attestation missing, or external data used</td></tr>
         <tr><td class="warn">2</td><td><code>unverified</code></td><td>Closed-world checksum inventory valid, no <code class="inl">--attest</code> was passed</td></tr>
         <tr><td class="bad">1</td><td><code>unknown</code></td><td>Missing, invalid, or incomplete manifest; unexpected filesystem entry; or failed attestation</td></tr>
@@ -375,7 +375,7 @@
 <span class="p">$</span> set -o pipefail; aicr verify ./my-bundle --format json | jq '.trustLevel, .trustReason'</pre>
     </div>
     <div class="grid2">
-      <div class="mini"><h4 class="ok"><code class="inl">--min-trust-level verified</code></h4><p>Production gate. Demands the full chain back to NVIDIA CI.</p></div>
+      <div class="mini"><h4 class="ok"><code class="inl">--min-trust-level verified</code></h4><p>Production gate. Demands the full chain back to the AICR release workflow.</p></div>
       <div class="mini"><h4 class="warn"><code class="inl">--min-trust-level attested</code></h4><p>Pre-prod gate. Allows external data sources while still requiring a signature.</p></div>
     </div>
   </div>
@@ -415,8 +415,8 @@
     <div class="label">07 · Where it fits</div>
     <h2>One trust model, three subjects</h2>
     <div class="grid2">
-      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed CycloneDX SBOM and OpenVEX on every published image (CLI binaries ship a separate, unsigned SPDX SBOM asset), signed by NVIDIA CI. <code class="inl">demos/provenance.md</code></p></div>
-      <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with build provenance + trust levels. <em>You are here.</em></p></div>
+      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed CycloneDX SBOM and OpenVEX on every published image (CLI binaries ship a separate, unsigned SPDX SBOM asset), signed by the AICR release workflows in NVIDIA/aicr. <code class="inl">demos/provenance.md</code></p></div>
+      <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with the creator&rsquo;s identity, plus build provenance + trust levels. <em>You are here.</em></p></div>
       <div class="mini"><h4>Recipe evidence</h4><p>A signer-bound validation result for a recipe (proves who signed it, not cluster physicality), OCI-distributed with an in-tree pointer. <code class="inl">demos/evidence.md</code></p></div>
       <div class="mini"><h4>Same primitives</h4><p>Sigstore keyless + Fulcio + Rekor + in-toto across the board — different subjects, one verification model.</p></div>
     </div>

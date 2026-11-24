@@ -71,11 +71,11 @@ Trust in a column comes from its provenance metadata. Each build column carries 
 | `k8s_constraint` | the K8s version the recipe declared it needs |
 | `signer_identity` | the signing identity (workflow / subject) that attested the result |
 | `signer_issuer` | the OIDC issuer that vouched for that identity |
-| `source_class` | verified origin class: NVIDIA `uat`, or allowlisted `community`/partner evidence |
+| `source_class` | verified origin class: `uat` for AICR project UAT workflows, or `community` for allowlisted individual contributor and partner evidence |
 | `evidence_digest` | the digest of the underlying signed evidence artifact |
 | `aicr_run_url` | a link to the GitHub Actions run (and attempt) the publisher reports for the result, shown as the build's run link; checked only for format, **not** verified against the signed evidence; empty when none is supplied |
 
-`signer_identity` and `signer_issuer` together identify **community-submitted** results versus **NVIDIA UAT** runs and key the latest-per-signer default scope. The publisher verifies those certificate claims against the checked-in signer allowlist and derives `source_class`; callers cannot assign their own trust class. Allowlisted partner evidence is represented as `community` because TestGrid's wire contract distinguishes first-party UAT from external evidence. `evidence_digest` is the verifiable anchor: every cell traces back to a signed [conformance evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md) artifact you can verify independently with [artifact verification](./artifact-verification.md). `aicr_run_url` is a convenience link supplied by whoever publishes the build, so rely on `evidence_digest`, not the link, for proof of origin.
+`signer_identity` and `signer_issuer` together identify **community-submitted** results versus **AICR project UAT** runs and key the latest-per-signer default scope. The publisher verifies those certificate claims against the checked-in signer allowlist and derives `source_class`; callers cannot assign their own trust class. Allowlisted partner evidence is represented as `community` because TestGrid's wire contract distinguishes first-party UAT from external evidence. `evidence_digest` is the verifiable anchor: every cell traces back to a signed [conformance evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md) artifact you can verify independently with [artifact verification](./artifact-verification.md). `aicr_run_url` is a convenience link supplied by whoever publishes the build, so rely on `evidence_digest`, not the link, for proof of origin.
 
 ## Interim evidence dashboard
 

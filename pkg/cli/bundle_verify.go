@@ -41,7 +41,7 @@ func bundleVerifyCmd() *cli.Command {
 		Description: `Verifies a bundle's checksums, attestation signatures, and provenance chain.
 
 Trust levels:
-  verified    Full chain verified: checksums, bundle attestation, binary attestation with NVIDIA CI identity
+  verified    Full chain verified: checksums, bundle attestation, binary attestation from a workflow in NVIDIA/aicr
   attested    Chain verified but binary attestation missing or external data used
   unverified  Checksums valid, no attestation files (--attest was not used)
   unknown     Missing/invalid checksums, or an attestation present but failing verification
@@ -105,7 +105,7 @@ Output as JSON:
 			},
 			&cli.StringFlag{
 				Name:  flagTrustRoot,
-				Usage: "Verify the bundle attestation against a private Sigstore trusted root (a trusted_root.json from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so NVIDIA-signed and privately-signed bundles both verify. Composes with --key and --certificate-identity-regexp. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`.",
+				Usage: "Verify the bundle attestation against a private Sigstore trusted root (a trusted_root.json from a self-hosted Fulcio/Rekor). Additive to AICR's built-in public-good root, so bundles signed through public Sigstore and privately-signed bundles both verify. Composes with --key and --certificate-identity-regexp. The verify counterpart to `bundle --fulcio-url`/`--rekor-url`.",
 			},
 			&cli.BoolFlag{
 				Name:  flagInsecureIgnoreTLog,
@@ -243,7 +243,7 @@ func outputText(w io.Writer, r *aicr.BundleVerifyReport, policyFailure string) {
 	}
 
 	if r.IdentityPinned {
-		fmt.Fprintf(w, "  ✓ Identity pinned to NVIDIA CI\n")
+		fmt.Fprintf(w, "  ✓ Identity pinned to a workflow in NVIDIA/aicr\n")
 	}
 
 	fmt.Fprintf(w, "  Trust level: %s\n", r.TrustLevel)

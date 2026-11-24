@@ -2,16 +2,17 @@
 
 Bundle attestation provides cryptographic proof of **who** created a deployment
 bundle and **which AICR CLI** built it. When `aicr bundle --attest` runs, the
-CLI signs the bundle's `checksums.txt` using
-[Sigstore](https://www.sigstore.dev/) and generates SLSA Build Provenance v1
-metadata. The manifest is a closed-world inventory of the deployment payload,
-including `recipe.yaml`; the attestation files are verified separately as part
-of the same inventory. Anyone can later verify the bundle with `aicr verify` to
+CLI signs the bundle's `checksums.txt` with the OIDC identity of whoever runs
+it, using public [Sigstore](https://www.sigstore.dev/), and generates SLSA
+Build Provenance v1 metadata. (To sign against a private Sigstore or with a KMS
+key instead, see [`private-signing.md`](private-signing.md).) The manifest is a
+closed-world inventory of the deployment payload, including `recipe.yaml`; the
+attestation files are verified separately as part of the same inventory. Anyone can later verify the bundle with `aicr verify` to
 confirm:
 
 * Every required payload file is present and unchanged, and no additional filesystem entry is present.
-* It was created by a trusted identity.
-* It was built by an attested NVIDIA-CI-released AICR CLI.
+* It was signed by the identity you expect: the bundle creator's, not the AICR project's.
+* It was built by an attested AICR CLI released by the AICR release workflow in `NVIDIA/aicr`.
 
 The companion script is [`bundle-attestation-demo.sh`](bundle-attestation-demo.sh);
 the slide deck is [`bundle-attestation-demo-slides.html`](bundle-attestation-demo-slides.html).
@@ -34,9 +35,10 @@ This walkthrough covers:
 * For signing: a working OIDC source.
   * **GitHub Actions:** ambient OIDC is detected automatically — nothing extra.
   * **Local:** a browser window opens for keyless OIDC sign-in.
-* Sigstore egress: `fulcio.sigstore.dev` and `rekor.sigstore.dev` must be
-  reachable from the signing host. Both are commonly blocked on corporate
-  VPNs — if so, sign from a host with public internet egress.
+* Network for signing: the signing host must reach public Sigstore
+  (`*.sigstore.dev`, which serves Fulcio, the Rekor log, and the OIDC sign-in
+  page). Some networks block it, for example a corporate VPN; if so, sign from
+  a host with public internet egress. Verification needs no network.
 
 ## 1. Trust setup (optional)
 
@@ -117,7 +119,7 @@ The two attestations together form the chain that makes `verified` reachable:
   is the creator's OIDC identity.
 * **`aicr-attestation.sigstore.json`** — the SLSA Build Provenance attestation
   *of the AICR CLI binary that produced the bundle*, copied in at bundle time.
-  Its signer identity is NVIDIA CI (`https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@...`).
+  Its signer identity is the AICR release workflow in `NVIDIA/aicr` (`https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@...`).
 
 Inspect the predicate:
 
@@ -141,7 +143,7 @@ Expected output (release binary, signed bundle):
 ✓ Checksums verified (12 files)
 ✓ Bundle attested by: jdoe@company.com
 ✓ Binary built by: https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v1.0.0
-✓ Identity pinned to NVIDIA CI
+✓ Identity pinned to a workflow in NVIDIA/aicr
   Trust level: verified
 
 Bundle verification: PASSED
@@ -150,10 +152,10 @@ Bundle verification: PASSED
 Five gates run, top to bottom:
 
 1. **Closed-world inventory** — every regular payload file, including `recipe.yaml`, is hashed and compared; additional files, directories, symlinks, and other non-regular objects are rejected.
-2. **Bundle signature** — the Sigstore Bundle is verified against the trusted root.
+2. **Bundle signature** — the creator's Sigstore Bundle is verified against the trusted root, read locally with no network call.
 3. **Bundle predicate** — the in-toto subject is checked against the actual `checksums.txt` digest.
 4. **Binary attestation chain** — `aicr-attestation.sigstore.json` is verified and its subject is checked against the CLI binary digest claimed in the bundle predicate.
-5. **Identity pin** — the binary attestation's signer is pinned to NVIDIA CI workflows.
+5. **Identity pin** — the binary attestation's signer is pinned to the AICR release workflow in `NVIDIA/aicr`.
 
 An invalid inventory or failed attestation reports `unknown` trust. An absent
 attestation can still reach `unverified` when the closed-world inventory is
@@ -170,7 +172,7 @@ aicr verify ./my-bundle --min-trust-level attested
 
 | Level | Name | Criteria |
 |-------|------|----------|
-| **4** | `verified` | Closed-world inventory + bundle attestation + binary attestation pinned to NVIDIA CI |
+| **4** | `verified` | Closed-world inventory + bundle attestation + binary attestation pinned to the AICR release workflow |
 | **3** | `attested` | Closed-world inventory + bundle attestation verified; binary attestation missing, or external data used |
 | **2** | `unverified` | Closed-world checksum inventory valid; `--attest` was not used |
 | **1** | `unknown` | Missing, invalid, or incomplete `checksums.txt`; unexpected filesystem entries; or bundle/binary attestation verification failure |

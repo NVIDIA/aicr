@@ -1,6 +1,6 @@
 # AICR Project Governance
 
-This document describes how the NVIDIA AI Cluster Runtime (AICR) project is
+This document describes how the AI Cluster Runtime (AICR) project is
 governed: the roles people hold, how decisions are made, and how maintainers
 join and leave. It is intentionally lightweight and will grow with the project.
 For the current roster and maintainer responsibilities, see
@@ -8,8 +8,9 @@ For the current roster and maintainer responsibilities, see
 
 ## Roles
 
-AICR uses three roles. They map directly to the project's GitHub teams and to
-[`.github/CODEOWNERS`](.github/CODEOWNERS).
+AICR uses three roles. Each role below states its responsibilities and, where
+one applies, the GitHub team that grants its access.
+[`.github/CODEOWNERS`](.github/CODEOWNERS) maps repository paths to reviewers.
 
 ### Contributors
 
@@ -20,16 +21,19 @@ contribute.
 
 ### Code Owners
 
-Trusted contributors (the `@nvidia/aicr-write` team) who review and approve pull
-requests for the paths they own. Code ownership is declared per path in
-[`.github/CODEOWNERS`](.github/CODEOWNERS), which GitHub uses to request reviews
-automatically. Code owners keep their areas healthy and mentor contributors.
+Trusted contributors who review and approve pull requests for the paths they
+own, keep those areas healthy, and mentor contributors. Code ownership is
+declared per path in [`.github/CODEOWNERS`](.github/CODEOWNERS), which GitHub
+uses to request reviews automatically. Access comes from the
+`@nvidia/aicr-write` team.
 
 ### Maintainers
 
-The `@nvidia/aicr-maintainer` team. Maintainers have merge rights, make and
-ratify project decisions, manage releases, and own this governance process —
-including adding and removing maintainers. Maintainers are also code owners.
+Maintainers have merge rights, make and ratify project decisions, manage
+releases, and own this governance process — including adding and removing
+maintainers. Contributors become maintainers on merit, as described in
+[Adding](#adding). Maintainers are also code owners. Access comes from the
+`@nvidia/aicr-maintainer` team.
 
 ## Areas of Ownership
 

@@ -13,7 +13,7 @@ Act as a Principal Distributed Systems Architect with deep expertise in Go and c
 
 ## Project Overview
 
-NVIDIA AI Cluster Runtime (AICR) generates validated GPU-accelerated Kubernetes configurations.
+AI Cluster Runtime (AICR) is an open source project created by NVIDIA. It generates validated GPU-accelerated Kubernetes configurations.
 
 **Workflow:** Snapshot → Recipe → Validate → Bundle
 

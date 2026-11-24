@@ -16,13 +16,15 @@
 # evidence-demo.sh — interactive walkthrough of the split-leg
 # recipe-evidence workflow:
 #
-#   Leg 1 (ON VPN, cluster-bound):   aicr validate --emit-attestation   (no --push)
-#   Leg 2 (OFF VPN, Sigstore-bound): aicr evidence publish --push <ref>
+#   Leg 1 (cluster-bound):           aicr validate --emit-attestation   (no --push)
+#   Leg 2 (Sigstore + registry):     aicr evidence publish --push <ref>
 #   Verify:                          aicr evidence verify <pointer>
 #
 # The two legs are decoupled so they can run on different networks: validate
-# where the cluster is reachable (often a corporate VPN), then publish from a
-# host with Fulcio/Rekor egress. See demos/evidence.md and ADR-007.
+# where the cluster is reachable (for example, on a corporate VPN), then publish
+# from a host that reaches public Sigstore (Fulcio/Rekor) and the OCI registry.
+# The evidence is signed with the OIDC identity used in leg 2. See
+# demos/evidence.md and ADR-007.
 #
 # Every step pauses first (unless DEMO_NO_PAUSE=1) and streams the FULL output
 # of each aicr command — nothing is suppressed or captured silently.
@@ -203,7 +205,7 @@ note "Criteria:      service=$SERVICE accelerator=$ACCELERATOR os=$OS intent=$IN
 note "Snapshot node: node-selector=${NODE_SELECTOR:-<any>}  runtime-class=${RUNTIME_CLASS:-<none>}"
 note "Kubeconfig:    ${KUBECONFIG:-<from default ~/.kube/config>}"
 note "Note: if a verify step reports a Sigstore trusted-root error, run"
-note "      'aicr trust update' once (OFF VPN) to bootstrap the root, then re-run."
+note "      'aicr trust update' once from a host that reaches Sigstore, then re-run."
 
 if ! command -v "$AICR" >/dev/null 2>&1 && [ ! -x "$AICR" ]; then
   printf '%sERROR: aicr binary not found at %q. Set AICR=/path/to/aicr.%s\n' "$RED" "$AICR" "$RESET" >&2
@@ -218,7 +220,7 @@ OUT="$WORKDIR/out"
 run "$AICR" --version
 pause
 
-# --- leg 1: generate inputs + validate (ON VPN) ------------------------------
+# --- leg 1: generate inputs + validate (cluster access) ----------------------
 # Skipped entirely when SKIP_VALIDATE=1 (reuse the pre-staged bundle at $OUT).
 
 if [ "$SKIP_VALIDATE" = "1" ]; then
@@ -261,7 +263,7 @@ recipe_args=(--service "$SERVICE" --accelerator "$ACCELERATOR" --os "$OS" --inte
 pause "Press Enter to generate the recipe"
 run "$AICR" recipe "${recipe_args[@]}"
 
-banner "Snapshot the live cluster (ON VPN)"
+banner "Snapshot the live cluster (cluster access)"
 note "Captures cluster state the validators run against. Needs the cluster reachable."
 note "Targets a GPU node so the GPU is detected via PCI/NFD (NODE_SELECTOR / RUNTIME_CLASS)."
 # Build snapshot args so node targeting is opt-out: empty NODE_SELECTOR /
@@ -276,7 +278,7 @@ snapshot_args=(--output "$SNAPSHOT")
 pause "Press Enter to snapshot the cluster"
 run "$AICR" snapshot "${snapshot_args[@]}"
 
-banner "LEG 1 (ON VPN): validate + emit attestation, WITHOUT --push"
+banner "LEG 1 (cluster access): validate + emit attestation, WITHOUT --push"
 note "Runs the validators against the cluster and writes an UNSIGNED bundle to disk."
 note "No Fulcio/Rekor contact happens here — this leg only needs the cluster."
 if [ -n "$DEMO_ALLOWED_MUTABLE_TAG" ]; then
@@ -291,7 +293,7 @@ elif [ -n "${AICR_VALIDATOR_IMAGE_TAG:-}" ]; then
   note "      PUSH_REF back at ttl.sh if you only want a throwaway demo artifact."
 fi
 rm -rf "$OUT"
-pause "Confirm you are ON VPN (cluster reachable), then press Enter to validate"
+pause "Confirm the cluster is reachable (for example, on VPN), then press Enter to validate"
 validate_args=(
   --recipe "$RECIPE"
   --snapshot "$SNAPSHOT"
@@ -309,23 +311,26 @@ printf '\n%s--- pointer.yaml (pre-publish) ---%s\n' "$DIM" "$RESET"
 cat "$OUT/pointer.yaml"
 pause
 
-# --- leg 2: sign + push (OFF VPN) ---------------------------------------------
+# --- leg 2: sign + push (Sigstore + registry access) -------------------------
 
-banner "LEG 2 (OFF VPN): sign, push, and write the pointer"
+banner "LEG 2 (Sigstore + registry access): sign, push, and write the pointer"
 printf '%s%s' "$YELLOW" "$BOLD"
 cat <<'EOF'
   ┌────────────────────────────────────────────────────────────────────┐
-  │  SWITCH OFF VPN NOW.                                                  │
-  │  This leg contacts Fulcio (signing cert) and Rekor (transparency     │
-  │  log), which are commonly blocked on corporate VPNs. A browser may   │
-  │  open for keyless OIDC authentication — complete it when it does.    │
+  │  SWITCH TO A NETWORK THAT REACHES SIGSTORE AND THE REGISTRY.       │
+  │  This leg contacts public Sigstore: Fulcio (signing cert) and      │
+  │  Rekor (transparency log), and pushes to the OCI registry.         │
+  │  Corporate VPNs often block Sigstore; if so, for example,          │
+  │  disconnect from the VPN. A browser may open for keyless OIDC      │
+  │  sign-in; complete it when it does. The signature carries that     │
+  │  identity, not the AICR project's.                                 │
   └────────────────────────────────────────────────────────────────────┘
 EOF
 printf '%s' "$RESET"
 note "The predicate (incl. its baked-in attestedAt) is signed VERBATIM from the"
 note "on-disk bundle, so the signed content + digest are identical regardless of host;"
 note "the signature, cert, signer identity, and signing time differ per run."
-pause "Once you are OFF VPN, press Enter to sign + push"
+pause "Once Sigstore and the registry are reachable (for example, off VPN), press Enter to sign + push"
 run "$AICR" evidence publish "$OUT" --push "$PUSH_REF"
 
 banner "Inspect the pointer after publish"

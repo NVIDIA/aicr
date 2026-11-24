@@ -152,17 +152,17 @@
 <body>
 
 <div class="deck-top">
-  <span class="brand">NVIDIA AICR<span class="sub">&nbsp;· Build Provenance</span></span>
+  <span class="brand">AICR<span class="sub">&nbsp;· Build Provenance</span></span>
   <span class="sect" id="sect"></span>
 </div>
 
 <!-- 1 · TITLE -->
 <section class="slide center" data-title="">
   <div class="slide-inner">
-    <div class="label">NVIDIA AI Cluster Runtime</div>
+    <div class="label">AI Cluster Runtime</div>
     <h1>Build provenance</h1>
     <p class="lede">Every released AICR image carries a signed SLSA Build Provenance v1
-      attestation and a signed CycloneDX SBOM — verifiable against NVIDIA CI without trusting the registry (released binaries ship a separate, unsigned SBOM asset).</p>
+      attestation and a signed CycloneDX SBOM — verifiable against the AICR release workflow without trusting the registry (released binaries ship a separate, unsigned SBOM asset).</p>
     <div class="chips">
       <span class="chip"><b>SLSA</b> provenance v1</span>
       <span class="chip"><b>Keyless</b> cosign + Fulcio</span>
@@ -184,7 +184,7 @@
     <table class="r">
       <thead><tr><th>Question</th><th>What proves it</th></tr></thead>
       <tbody>
-        <tr><td>Did NVIDIA actually build this?</td><td>Sigstore signature pinned to NVIDIA&rsquo;s GitHub Actions identity</td></tr>
+        <tr><td>Did the AICR release workflow actually build this?</td><td>Sigstore signature pinned to the release workflow&rsquo;s GitHub Actions identity in NVIDIA/aicr</td></tr>
         <tr><td>From which source, on which workflow?</td><td>SLSA Build Provenance v1: repo + commit SHA + workflow ref</td></tr>
         <tr><td>What&rsquo;s inside it?</td><td>CycloneDX SBOM attestation: every package, library, license</td></tr>
       </tbody>
@@ -319,7 +319,7 @@
 <span class="p">$</span> echo "$IMAGE@$DIGEST"
 <span class="d">ghcr.io/nvidia/aicr@sha256:f0c1abc…</span>
 
-<span class="c"># 2. Verify the SLSA provenance attestation against NVIDIA's identity.</span>
+<span class="c"># 2. Verify the SLSA provenance attestation against the release workflow's identity.</span>
 <span class="p">$</span> gh attestation verify oci://"$IMAGE@$DIGEST" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 <span class="g">Loaded digest sha256:f0c1abc… for oci://ghcr.io/nvidia/aicr@…</span>
 <span class="g">✓ Verification succeeded!</span>
@@ -384,7 +384,7 @@
         <rect class="node" x="16" y="80" width="206" height="90" rx="10"/>
         <text class="nlabel" x="119" y="108" text-anchor="middle">Verifier</text>
         <text class="nsub mono" x="119" y="128" text-anchor="middle" font-size="11.5">rekor-cli search --sha …</text>
-        <text class="nsub" x="119" y="148" text-anchor="middle">(no NVIDIA contact)</text>
+        <text class="nsub" x="119" y="148" text-anchor="middle">(no publisher contact)</text>
         <rect class="node-g" x="304" y="46" width="252" height="64" rx="10"/>
         <text class="nlabel ttl-g" x="430" y="74" text-anchor="middle">Rekor log entry</text>
         <text class="nsub mono" x="430" y="94" text-anchor="middle" font-size="11.5">logIndex: 91234567</text>
@@ -448,8 +448,8 @@
     <div class="label">07 · Where it fits</div>
     <h2>One trust model, three subjects</h2>
     <div class="grid2">
-      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed CycloneDX SBOM and OpenVEX on every published image (CLI binaries ship a separate SPDX SBOM asset), signed by NVIDIA CI. <em>You are here.</em></p></div>
-      <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with build provenance + trust levels. <code class="inl">demos/bundle-attestation.md</code></p></div>
+      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed CycloneDX SBOM and OpenVEX on every published image (CLI binaries ship a separate SPDX SBOM asset), signed by the AICR release workflows in NVIDIA/aicr. <em>You are here.</em></p></div>
+      <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with the creator&rsquo;s identity, plus build provenance + trust levels. <code class="inl">demos/bundle-attestation.md</code></p></div>
       <div class="mini"><h4>Recipe evidence</h4><p>A signer-bound validation result for a recipe (proves who signed it, not cluster physicality), OCI-distributed with an in-tree pointer. <code class="inl">demos/evidence.md</code></p></div>
       <div class="mini"><h4>Same primitives</h4><p>Sigstore keyless + Fulcio + Rekor + in-toto across the board — different subjects, one verification model.</p></div>
     </div>

@@ -119,7 +119,7 @@ func readBoundedFileContext(ctx context.Context, path string) ([]byte, error) {
 	return data, nil
 }
 
-// Identity pinning constants for NVIDIA CI.
+// Identity pinning constants for the AICR release workflow in NVIDIA/aicr.
 const (
 	verifierFileReadBufferSize = 32 * 1024
 
@@ -192,10 +192,11 @@ type VerifyOptions struct {
 
 	// TrustRoot is a path to a sigstore-go trusted_root.json for verifying the
 	// bundle attestation against a private Fulcio/Rekor. ADDITIVE: unioned with
-	// AICR's public-good root, so NVIDIA-signed and privately-signed bundles
-	// both verify. Counterpart to `bundle --fulcio-url`/`--rekor-url`.
-	// Composable with Key. Does NOT affect the binary attestation, which is
-	// always NVIDIA-public-CI-signed and stays pinned to the public-good root.
+	// AICR's public-good root, so bundles signed through public Sigstore and
+	// privately-signed bundles both verify. Counterpart to
+	// `bundle --fulcio-url`/`--rekor-url`. Composable with Key. Does NOT affect
+	// the binary attestation, which the AICR release workflow always signs
+	// through public Sigstore and which stays pinned to the public-good root.
 	TrustRoot string
 
 	// IgnoreTLog enables offline/air-gapped verification of the key-signed
@@ -269,7 +270,7 @@ func ValidateIdentityPattern(pattern string) error {
 		!strings.HasPrefix(body, requiredIdentityPrefixEscaped) {
 
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("certificate identity pattern must begin with %q to pin to the NVIDIA repository "+
+			fmt.Sprintf("certificate identity pattern must begin with %q to pin to the NVIDIA/aicr repository "+
 				"(a leading \"^\" is allowed; put any alternatives after the prefix)", requiredIdentityPrefix))
 	}
 	// A pattern can begin with the required repository and still not be a
@@ -322,7 +323,7 @@ func ValidateIdentityPattern(pattern string) error {
 	for _, canary := range foreignIdentityCanaries {
 		if compiled.MatchString(canary) {
 			return errors.NewWithContext(errors.ErrCodeInvalidRequest,
-				"certificate identity pattern is not confined to the NVIDIA repository: it also matches an unrelated identity",
+				"certificate identity pattern is not confined to the NVIDIA/aicr repository: it also matches an unrelated identity",
 				map[string]any{
 					"pattern":          pattern,
 					"alsoMatches":      canary,
@@ -542,7 +543,7 @@ func verifyStagedSnapshot(
 		return result, nil
 	}
 
-	result.setTrust(TrustVerified, "full chain verified: checksums, bundle attestation, binary attestation with NVIDIA CI identity")
+	result.setTrust(TrustVerified, "full chain verified: checksums, bundle attestation, binary attestation from a workflow in NVIDIA/aicr")
 	return result, nil
 }
 
@@ -812,9 +813,9 @@ func extractBinaryDigestContext(ctx context.Context, bundlePath string) ([]byte,
 
 // verifySigstoreBundle verifies a Sigstore bundle (.sigstore.json) against the
 // public-good trusted root, binding the attestation to the given artifact digest.
-// Requires a valid OIDC-issued certificate from any issuer (bundle attestation
-// proves someone signed it, not necessarily NVIDIA — identity pinning to NVIDIA
-// is enforced separately on the binary attestation).
+// Requires a valid OIDC-issued certificate from any issuer: the bundle attestation
+// carries the bundle creator's identity, not the AICR project's. Identity pinning
+// to the AICR release workflow is enforced separately on the binary attestation.
 // Returns the signer identity on success.
 func verifySigstoreBundle(ctx context.Context, bundlePath string, artifactDigest []byte, src attestation.TrustedRootSource) (string, error) {
 	if err := ctx.Err(); err != nil {
@@ -896,8 +897,8 @@ func ReadBinaryAttestation(ctx context.Context, path string) ([]byte, error) {
 }
 
 // VerifyBinaryAttestationData verifies an already-read binary attestation
-// (Sigstore bundle bytes) against the NVIDIA-CI identity pattern and the
-// artifact digest. VerifyBinaryAttestation reads a file then delegates here;
+// (Sigstore bundle bytes) against the AICR release workflow identity pattern
+// and the artifact digest. VerifyBinaryAttestation reads a file then delegates here;
 // callers that already hold the bytes (e.g. the aicrd server, which caches and
 // embeds them) call this directly to verify the exact content they will use,
 // avoiding a verify-then-reread window.
@@ -906,7 +907,7 @@ func VerifyBinaryAttestationData(ctx context.Context, data []byte, identityPatte
 		return "", errors.Wrap(errors.ErrCodeTimeout, "context cancelled before binary attestation verification", err)
 	}
 
-	// Pin identity to NVIDIA CI using the provided pattern
+	// Pin identity to the AICR release workflow using the provided pattern
 	identity, err := verify.NewShortCertificateIdentity(
 		TrustedOIDCIssuer, "",
 		"", identityPattern,
@@ -915,9 +916,9 @@ func VerifyBinaryAttestationData(ctx context.Context, data []byte, identityPatte
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to create identity matcher", err)
 	}
 
-	// Binary attestation is always signed by NVIDIA's public GitHub-OIDC CI, so
-	// it verifies against the public-good root only (nil source) regardless of
-	// any --trust-root for the bundle attestation.
+	// The AICR release workflow always signs the binary attestation through
+	// public Sigstore, so it verifies against the public-good root only (nil
+	// source) regardless of any --trust-root for the bundle attestation.
 	return attestation.VerifyStatementWith(ctx, data,
 		attestation.NewKeylessVerificationIdentity(identity, nil),
 		attestation.NewRequireTLogPolicy(), artifactDigest)

@@ -187,9 +187,12 @@ free-text flag that a contributor controls.
 
 | Class | Who | Corroboration weight |
 |-------|-----|----------------------|
-| `first-party` | NVIDIA UAT CI — pinned OIDC issuer + exact workflow SAN | Full weight |
-| `community` | Allowlisted community signers; also the class for verified-but-unknown signers (zero-weight) | Full weight (if allowlisted); zero weight if unknown |
-| `partner` | Allowlisted partner signers | Full weight |
+| `first-party` | AICR project UAT workflows: pinned OIDC issuer and exact workflow SAN in `NVIDIA/aicr` | Full weight |
+| `community` | Allowlisted individual contributor signers; also the class for verified-but-unknown signers (zero-weight) | Full weight (if allowlisted); zero weight if unknown |
+| `partner` | Allowlisted partner organizations | Full weight |
+
+Full weight means each distinct verified signer in the class counts toward the
+[consensus states](#states); a zero-weight source is shown but never counted.
 
 First-party AICR UAT runs ingest evidence directly — they do not commit a
 per-run pointer to `main` (which would churn the repo nightly). Community and
@@ -210,8 +213,8 @@ Specifically:
 
 - A `CONFIRMED` cell means ≥ 2 distinct allowlisted parties each independently
   ran their own validation and reported a passing result. It does not mean
-  NVIDIA re-ran the validation on a second cluster independently — first-party
-  NVIDIA UAT runs count as one of those parties.
+  the AICR project re-ran the validation on a second cluster independently;
+  first-party AICR project UAT runs count as one of those parties.
 - The **tab placement** (group, dashboard, tab) is **author-declared** from the
   recipe's resolved criteria. The ingest pipeline verifies the signer and the
   CTRF content, but it cannot independently observe which intent or platform a
@@ -221,7 +224,7 @@ Specifically:
   party verified the cluster independently.
 - Community and partner corroboration is therefore **provenance-grade**: it
   adds independent confirmation from a distinct, verifiable party, not a
-  second NVIDIA-controlled reproduction.
+  second reproduction controlled by the AICR project.
 
 This trust model is derived from [ADR-007](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md).
 The full allowlist posture and signer-class derivation are documented in

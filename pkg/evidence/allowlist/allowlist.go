@@ -63,8 +63,8 @@ var sizeCeiling = defaults.MaxRecipePOSTBytes
 // Class names a contributor trust tier. Classes are disjoint.
 type Class string
 
-// Trust classes. first-party is the AICR project's own CI; community and
-// partner are external contributors with progressively vetted standing.
+// Trust classes. first-party is the AICR project's UAT workflows; community is
+// individual contributor signers and partner is vetted partner organizations.
 const (
 	ClassFirstParty Class = "first-party"
 	ClassCommunity  Class = "community"
