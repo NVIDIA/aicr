@@ -78,15 +78,17 @@ transitions:
               dropped.
           - id: keep-guard-scope
             description: >-
-              Only if prompt guards are configured and must not inspect tool
-              output: give each guard that sets no scope the scope
-              [SystemPrompt, Messages], before applying. Leave a guard that
-              already sets a scope as it is.
+              Only if request prompt guards are configured and must not
+              inspect tool output: give each guard under promptGuard.request
+              that sets no scope the scope [SystemPrompt, Messages], before
+              applying. Leave a guard that already sets a scope, and every
+              promptGuard.response guard, as it is.
             reason: >-
-              1.7 adds ToolOutput to the default scope, which can reject or
-              mask requests that passed before. An explicit scope is not
-              affected, and overwriting it can drop inspection it chose, such
-              as ToolInput.
+              1.7 adds ToolOutput to the default request scope, which can
+              reject or mask requests that passed before. An explicit scope is
+              not affected, and overwriting it can drop inspection it chose,
+              such as ToolInput. Response guards gain scope only in 1.7, and
+              with streaming enabled they accept only Messages.
           - id: check-header-expressions
             description: >-
               Only if CEL expressions read request headers that can repeat:
