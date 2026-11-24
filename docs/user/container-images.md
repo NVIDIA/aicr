@@ -56,9 +56,9 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gpu-operator | helm | nvidia/gpu-operator | v26.7.3 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
-| grove | helm | grove-charts | v0.1.0-alpha.14 | 1 |
+| grove | helm | grove-charts | v0.1.0-alpha.17 | 1 |
 | k8s-aibom | helm | k8s-aibom | 1.6.2 | 1 |
-| k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
+| k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.21.3 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.4 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.4 | 1 |
 | kai-scheduler | helm | kai-scheduler | v0.18.8 | 12 |
@@ -85,8 +85,8 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
 | nvsentinel | helm | nvsentinel | v1.32.0 | 6 |
 | nvsentinel-mongodb | helm | psmdb-db | 1.23.3 | 5 |
-| prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
-| prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
+| prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.4.2 | 1 |
+| prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.4.2 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 31.0.1 | 0 |
 | psmdb-operator | helm | psmdb-operator | 1.23.2 | 1 |
 | rdma-modules | manifest | — | — | 1 |
@@ -215,7 +215,7 @@ _No images extracted._
 
 ### grove
 
-- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.14`
+- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.17`
 
 ### k8s-aibom
 
@@ -223,7 +223,7 @@ _No images extracted._
 
 ### k8s-ephemeral-storage-metrics
 
-- `ghcr.io/jmcgrath207/k8s-ephemeral-storage-metrics:1.19.2`
+- `ghcr.io/jmcgrath207/k8s-ephemeral-storage-metrics:1.21.3`
 
 ### k8s-nim-operator
 
