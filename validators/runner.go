@@ -78,7 +78,9 @@ type CheckFunc func(ctx *Context) error
 // occurrence of ctrf.ReservedLinePrefix. This package's sentinel writers
 // bypass it, and so does the default slog handler, whose text output quotes
 // any value that contains a newline. Writes straight to file descriptors 1
-// and 2 are not filtered.
+// and 2 are not filtered. A process that exits before the check returns, such
+// as on a panic in a goroutine the check started, loses the output the filter
+// still holds.
 //
 // Usage in main.go:
 //

@@ -736,13 +736,15 @@ share the `##AICR-` prefix (`ctrf.ReservedLinePrefix`). `validators.Run` passes
 what the check writes to `os.Stdout` and `os.Stderr` through a filter that
 breaks every occurrence of it, at any offset (`##AICR-` becomes `# #AICR-`), so
 output a check relays from another pod stays in `stdout` and is not parsed. The
-filter writes whole lines only, adding a newline to a partial line at exit,
-before a sentinel line, or at `defaults.ValidatorOutputLineLimit`, so a line
-from the other stream cannot complete a prefix between two of its writes. The
-`validators.Emit*` functions and the runner's own stamps write past the filter,
-and so does `slog`, which is safe because its text handler quotes any value that
-contains a newline. Writes that go to file descriptors 1 and 2 directly, such as
-`println`, are not filtered.
+filter writes whole lines only, adding a newline to a partial line when the
+check returns, before a sentinel line, or at
+`defaults.ValidatorOutputLineLimit`, so a line from the other stream cannot
+complete a prefix between two of its writes. A process that exits before the
+check returns, such as on a panic in a goroutine the check started, loses the
+output the filter still holds. The `validators.Emit*` functions and the runner's
+own stamps write past the filter, and so does `slog`, which is safe because its
+text handler quotes any value that contains a newline. Writes that go to file
+descriptors 1 and 2 directly, such as `println`, are not filtered.
 
 For structured CTRF metadata, these markers supersede the log-parsing
 restriction in ADR-002's
