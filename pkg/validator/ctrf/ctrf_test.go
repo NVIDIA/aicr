@@ -608,6 +608,36 @@ func TestBuilderAddResultCopiesImages(t *testing.T) {
 	}
 }
 
+func TestTestResultImagesJSONShape(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	b := NewBuilder("aicr", "1.0.0", testPhase)
+	b.AddResult(&ValidatorResult{Name: "inference-perf", Phase: testPhase, Images: []PodImage{
+		{Image: "x:v1", Digest: digest, Platform: "linux/amd64"},
+		{Image: "y:v2"},
+	}})
+	b.AddResult(&ValidatorResult{Name: "plain", Phase: testPhase})
+
+	data, err := json.Marshal(b.Build())
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	var raw struct {
+		Results struct {
+			Tests []map[string]json.RawMessage `json:"tests"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	want := `[{"image":"x:v1","digest":"` + digest + `","platform":"linux/amd64"},{"image":"y:v2","digest":""}]`
+	if got := string(raw.Results.Tests[0]["images"]); got != want {
+		t.Errorf("images = %s, want %s", got, want)
+	}
+	if _, exists := raw.Results.Tests[1]["images"]; exists {
+		t.Error("images should be omitted when empty")
+	}
+}
+
 func TestBuilderAddSkippedWithExtra(t *testing.T) {
 	t.Run("extra is attached and AddSkipped still attaches none", func(t *testing.T) {
 		b := NewBuilder("aicr", "1.0.0", "conformance")
