@@ -38,7 +38,7 @@
 # are the value paths this chart *should* expose for mounting the auth
 # config and CA bundle, but confirm the exact keys against the vendored
 # chart version before merging:
-#   helm show values prometheus-community/prometheus-adapter --version 5.3.0
+#   helm show values prometheus-community/prometheus-adapter --version 5.4.2
 
 prometheus:
   url: https://thanos-querier.openshift-monitoring.svc.cluster.local

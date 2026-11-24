@@ -1157,11 +1157,13 @@ components:
       - prometheusadapter
     healthCheck:
       assertFile: checks/prometheus-adapter/health-check.yaml
+    upgrades:
+      file: components/prometheus-adapter/upgrades.yaml
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/prometheus-adapter
       # renovate: datasource=helm depName=prometheus-adapter registryUrl=https://prometheus-community.github.io/helm-charts
-      defaultVersion: 5.3.0
+      defaultVersion: 5.4.2
       defaultNamespace: monitoring
     nodeScheduling:
       system:
@@ -2285,11 +2287,13 @@ components:
       - prometheusadapterocp
     healthCheck:
       assertFile: checks/prometheus-adapter-ocp/health-check.yaml
+    upgrades:
+      file: components/prometheus-adapter-ocp/upgrades.yaml
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/prometheus-adapter
       # renovate: datasource=helm depName=prometheus-adapter registryUrl=https://prometheus-community.github.io/helm-charts
-      defaultVersion: 5.3.0
+      defaultVersion: 5.4.2
       defaultNamespace: monitoring
     nodeScheduling:
       system:
