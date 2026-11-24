@@ -28,7 +28,7 @@ The catalog lists the driver version that the default chart render carries. Vers
 ## Summary
 
 - Components: **61**
-- Unique images: **145**
+- Unique images: **146**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -64,7 +64,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kai-scheduler | helm | kai-scheduler | v0.18.8 | 12 |
 | knative-operator | helm | knative-operator | v1.23.1 | 2 |
 | knative-serving | manifest | — | — | 0 |
-| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.5.0 | 2 |
+| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 88.6.5 | 2 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.1 | 4 |
 | kubeflow-training-operator | manifest | — | — | 1 |
 | kueue | helm | kueue | 0.19.13 | 1 |
@@ -87,7 +87,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nvsentinel-mongodb | helm | psmdb-db | 1.23.3 | 5 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
-| prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
+| prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 31.0.1 | 0 |
 | psmdb-operator | helm | psmdb-operator | 1.23.2 | 1 |
 | rdma-modules | manifest | — | — | 1 |
 | runai-cluster | helm | runai-cluster | 3.0.26 | 10 |
@@ -109,6 +109,7 @@ from the component's registry default above.
 | Component | Variant Version | Declared By | Images |
 |-----------|-----------------|-------------|--------|
 | network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 20 |
+| network-operator | 26.10.0 | gb200-nvke-ubuntu-training, vr200-nvke-ubuntu-training | 20 |
 
 ## Images by component
 
@@ -257,8 +258,8 @@ _No images extracted._
 
 ### kube-prometheus-stack
 
-- `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
-- `quay.io/prometheus/prometheus:v3.11.3`
+- `quay.io/prometheus-operator/prometheus-operator:v0.93.1`
+- `quay.io/prometheus/prometheus:v3.14.0-distroless`
 
 ### kubeflow-trainer
 
@@ -299,11 +300,11 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:842b3816c66623cef061daf9d904c411085c525898e8b95777e531d77b3a7b4e`
-- `nvcr.io/nvidia/mellanox/multus-cni@sha256:19279347b71a1077eaed8479f8fff491fd9a578bc0ff8efcf13ea08270574fd0`
-- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon@sha256:908d278e140b1276b978acf26c3f8d4a1bbc22c7085cc86bda94644987d3d74b`
-- `nvcr.io/nvidia/mellanox/nic-configuration-operator@sha256:3f2d82afbe9e850ff0ace3d1ebff43cef70f83256a6c9632640c7c2f7e7840a8`
-- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:f4012b9c5ee18603def8e842c58861b2524c8da5a946ec9c3e5957de7395a22c`
-- `nvcr.io/nvidia/mellanox/plugins@sha256:9758670f426e238805aba61a1c83a96ae10506dd973845b60477230672c06163`
+- `nvcr.io/nvidia/mellanox/multus-cni@sha256:f4539e04013284b4c37021766852a8702190ac4b7d4e100dd15a5da883a43ec8`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon@sha256:77437fd7b9b6737b811d639266d77e46b50527fda192c6dd0d639fe0cb0468a4`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator@sha256:50e3114bc7ead03c62ba8924fc274592243bb7fd6c994406db5a53c07fdbb13d`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:f2f35a3576a03ef1f05a589185f8150f49ca0d60019917ad8a2a8749688c1b32`
+- `nvcr.io/nvidia/mellanox/plugins@sha256:75408477333bb2aed761dafb521f34c91f734f969384882bb385ab1c892ccbdf`
 - `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.1@sha256:7e5935818437bdeb3461f1c8a7107e2725dcba30a62e14bffcdaa4ea703d70f3`
 
 ### network-operator-ocp
@@ -479,11 +480,34 @@ _No images extracted._
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:842b3816c66623cef061daf9d904c411085c525898e8b95777e531d77b3a7b4e`
-- `nvcr.io/nvidia/mellanox/multus-cni@sha256:19279347b71a1077eaed8479f8fff491fd9a578bc0ff8efcf13ea08270574fd0`
-- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon@sha256:908d278e140b1276b978acf26c3f8d4a1bbc22c7085cc86bda94644987d3d74b`
-- `nvcr.io/nvidia/mellanox/nic-configuration-operator@sha256:3f2d82afbe9e850ff0ace3d1ebff43cef70f83256a6c9632640c7c2f7e7840a8`
-- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:f4012b9c5ee18603def8e842c58861b2524c8da5a946ec9c3e5957de7395a22c`
-- `nvcr.io/nvidia/mellanox/plugins@sha256:9758670f426e238805aba61a1c83a96ae10506dd973845b60477230672c06163`
+- `nvcr.io/nvidia/mellanox/multus-cni@sha256:f4539e04013284b4c37021766852a8702190ac4b7d4e100dd15a5da883a43ec8`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon@sha256:77437fd7b9b6737b811d639266d77e46b50527fda192c6dd0d639fe0cb0468a4`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator@sha256:50e3114bc7ead03c62ba8924fc274592243bb7fd6c994406db5a53c07fdbb13d`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:f2f35a3576a03ef1f05a589185f8150f49ca0d60019917ad8a2a8749688c1b32`
+- `nvcr.io/nvidia/mellanox/plugins@sha256:75408477333bb2aed761dafb521f34c91f734f969384882bb385ab1c892ccbdf`
+- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.1@sha256:7e5935818437bdeb3461f1c8a7107e2725dcba30a62e14bffcdaa4ea703d70f3`
+
+### network-operator@26.10.0 (variant)
+
+- `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0-ubuntu24.04-amd64`
+- `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
+- `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
+- `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
+- `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin@sha256:cabce074d10a0f1d62135e2cc5442d65b49094b95b8297fdd024a1a5f461319f`
+- `ghcr.io/mellanox/k8s-rdma-shared-dev-plugin@sha256:9f468fdc4449e65e4772575f83aa85840a00f97165f9a00ba34695c91d610fbd`
+- `ghcr.io/mellanox/nic-configuration-operator-daemon@sha256:35e38f05004116ee3c0489c9da9dc0639d69e0a75e9a5b90a5a44be2cdee72bd`
+- `ghcr.io/mellanox/nic-configuration-operator@sha256:8e2247c3832bdbd8f046731a2be1cfbf446e2ff8eb1b173b7dea8965ed470796`
+- `ghcr.io/mellanox/nvidia-k8s-ipam@sha256:47e1bb84ac97f9af49f97b49c2de44b4ba82b890b487880edc5c9adf86a176f7`
+- `nvcr.io/nvidia/cloud-native/network-operator:v26.10.0`
+- `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
+- `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:842b3816c66623cef061daf9d904c411085c525898e8b95777e531d77b3a7b4e`
+- `nvcr.io/nvidia/mellanox/multus-cni@sha256:f4539e04013284b4c37021766852a8702190ac4b7d4e100dd15a5da883a43ec8`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon@sha256:77437fd7b9b6737b811d639266d77e46b50527fda192c6dd0d639fe0cb0468a4`
+- `nvcr.io/nvidia/mellanox/nic-configuration-operator@sha256:50e3114bc7ead03c62ba8924fc274592243bb7fd6c994406db5a53c07fdbb13d`
+- `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:f2f35a3576a03ef1f05a589185f8150f49ca0d60019917ad8a2a8749688c1b32`
+- `nvcr.io/nvidia/mellanox/plugins@sha256:75408477333bb2aed761dafb521f34c91f734f969384882bb385ab1c892ccbdf`
 - `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.1@sha256:7e5935818437bdeb3461f1c8a7107e2725dcba30a62e14bffcdaa4ea703d70f3`
 
 <!-- END AICR-BOM -->

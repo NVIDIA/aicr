@@ -280,12 +280,14 @@ func loadUnsignedPredicate(ctx context.Context, mat *MaterializedBundle) (*attes
 	return &envelope.Predicate, envelope.PredicateType, nil
 }
 
+// hasPhaseFailures reports whether any phase recorded a failed or an other
+// result; both block, as ctrf.IsFailingStatus defines.
 func hasPhaseFailures(pred *attestation.Predicate) bool {
 	if pred == nil {
 		return false
 	}
 	for _, p := range pred.Phases {
-		if p.Failed > 0 {
+		if p.Failed > 0 || p.Other > 0 {
 			return true
 		}
 	}

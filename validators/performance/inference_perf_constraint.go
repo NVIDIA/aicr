@@ -241,6 +241,11 @@ const (
 	// catalog). When set, deployInferenceWorkload provisions hfTokenSecretName.
 	envHFToken = "HF_TOKEN" //nolint:gosec // G101: env var name, not a hardcoded credential
 
+	// runIDEnv carries the orchestrator's run ID into the validator pod; the
+	// orchestrator side sets it in pkg/validator/v1 buildEnv. Empty for a
+	// standalone invocation.
+	runIDEnv = "AICR_RUN_ID"
+
 	// inferenceFrontendPort is the port exposed by the Dynamo frontend service.
 	// Used in the deploy path to construct the benchmark endpoint before the
 	// Service object exists.
@@ -249,13 +254,6 @@ const (
 	// inferenceGatewayPort is the port the Service-backed gateway-epp target
 	// uses when the proxy Service is not yet inspectable (defaultGatewayEndpoint).
 	inferenceGatewayPort = int32(80)
-
-	// inferenceWorkloadNamespacePrefix is the base for the per-run benchmark
-	// namespace. Each run suffixes this with its unique run ID (from the
-	// AICR_RUN_ID env var the Deployer injects, or a random suffix for
-	// standalone invocations) so concurrent validate invocations never share
-	// a namespace and can't tear down each other's resources mid-benchmark.
-	inferenceWorkloadNamespacePrefix = "aicr-inference-perf"
 
 	// gpuDRADriverName is the NVIDIA GPU DRA driver identifier. Used to filter
 	// ResourceClaim allocation results when computing in-use GPU count per
@@ -800,7 +798,7 @@ func buildInferenceConfig(ctx *validators.Context, mode *allocmode.Mode) (*infer
 		gpuCount:                         gpuCount,
 		gpuCountPerNode:                  gpuCountPerNode,
 		concurrency:                      concurrencyPerGPU * gpuCount,
-		namespace:                        fmt.Sprintf("%s-%s", inferenceWorkloadNamespacePrefix, runID),
+		namespace:                        validatorv1.InferencePerfNamespace(runID),
 		aiperfJobName:                    fmt.Sprintf("%s-%s", aiperfJobNamePrefix, runID),
 		model:                            model,
 		modelCacheSize:                   cacheSize,
@@ -1593,17 +1591,16 @@ func nodeGPUCount(node v1.Node) int {
 // Output is always 8 hex chars — short enough that downstream names built
 // from it (namespaces, AIPerf Job names, Grove-generated
 // "<namespace>-<dgd-name>" PodClique labels) stay within Kubernetes'
-// 63-char DNS-label limit. The CLI's AICR_RUN_ID (typically a 32-char
-// "<date>-<time>-<hex>" string) is hashed down via SHA-256 so the runID
-// is still deterministic per validator invocation; standalone CLI runs
-// without AICR_RUN_ID get a random 4-byte hex suffix. Callers store the
-// result once on inferenceWorkloadConfig.runID and derive both the
-// namespace name and the AIPerf Job name from it — avoiding the bug of
-// calling the derivation twice and getting two different values.
+// 63-char DNS-label limit. The CLI's AICR_RUN_ID is reduced with
+// validatorv1.WorkloadNamespaceSuffix, the derivation the orchestrator uses
+// to recognize this run's namespaces; standalone CLI runs without
+// AICR_RUN_ID get a random 4-byte hex suffix. Callers store the result once
+// on inferenceWorkloadConfig.runID and derive both the namespace name and
+// the AIPerf Job name from it — avoiding the bug of calling the derivation
+// twice and getting two different values.
 func deriveRunID() string {
-	if runID := os.Getenv("AICR_RUN_ID"); runID != "" {
-		sum := sha256.Sum256([]byte(runID))
-		return hex.EncodeToString(sum[:4])
+	if runID := os.Getenv(runIDEnv); runID != "" {
+		return validatorv1.WorkloadNamespaceSuffix(runID)
 	}
 	buf := make([]byte, 4)
 	if _, err := rand.Read(buf); err != nil {
@@ -2181,7 +2178,12 @@ func copyPullSecret(ctx context.Context, src, dst typedcorev1.SecretInterface, n
 //
 // The namespace is stamped with labels.ManagedBy and component so
 // pruneStaleNCCLNamespaces can scope its List server-side, instead of
-// matching a naming convention.
+// matching a naming convention. Under an orchestrated run (AICR_RUN_ID set)
+// it also carries labels.RunID, which is how the orchestrator finds and
+// deletes it when it abandons the check before the check's own cleanup ran,
+// unless AICR_INFERENCE_PERF_NO_CLEANUP keeps workloads for inspection. Only
+// a namespace this call creates is stamped: a reused one keeps the labels it
+// was created with.
 //
 // The bool result reports whether this call's own Create landed, as
 // opposed to reusing or adopting a namespace that already existed, so a
@@ -2216,13 +2218,15 @@ func ensureNamespace(ctx *validators.Context, namespace, component string) (*v1.
 		return existing, false, nil
 	}
 
-	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name: namespace,
-		Labels: map[string]string{
-			labels.ManagedBy: labels.ValueValidator,
-			labels.Component: component,
-		},
-	}}
+	nsLabels := map[string]string{
+		labels.ManagedBy: labels.ValueValidator,
+		labels.Component: component,
+	}
+	// A namespace kept for inspection must not carry the run ID the orchestrator reaps by.
+	if runID := os.Getenv(runIDEnv); runID != "" && !inferencePerfNoCleanup() {
+		nsLabels[labels.RunID] = runID
+	}
+	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace, Labels: nsLabels}}
 	created, err := clients.Create(nsCtx, ns, metav1.CreateOptions{})
 	if err == nil {
 		return created, true, nil

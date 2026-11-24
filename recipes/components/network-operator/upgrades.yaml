@@ -16,6 +16,289 @@ apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: network-operator
 transitions:
+  # Manual rather than safe: only the NVKE GB200 and VR200 training leaves pin
+  # 26.10.0, and neither has run the in-place path live. A run that keeps a
+  # pod starting more than an hour after the rollout can flip this to safe.
+  - from: ">=26.7.1 <26.10.0"
+    to: "=26.10.0"
+    verdict: manual
+    summary: >-
+      26.10.0 updates the CRDs in place (NicClusterPolicy only gains fields)
+      and rolls the operator, the SR-IOV operator and their operands. Where
+      the NicClusterPolicy sets secondaryNetwork.multus.deploymentType: thick
+      (the NVKE GB200 and VR200 training leaves), the same apply switches
+      multus from thin to thick: the operator replaces the kube-multus-ds pods
+      node by node, and a pod created on a node while its multus pod is being
+      replaced can start without its secondary networks, or fail sandbox
+      creation until the thick daemon has written its conf.
+    precondition: >-
+      The NicClusterPolicy is healthy. Check with `kubectl get
+      nicclusterpolicy nic-cluster-policy`; STATUS must be ready. On NVKE,
+      where thin multus loses its token an hour after it starts, a ready
+      policy does not mean new pods can start; do the refresh-multus-token
+      step first.
+    reversible: false
+    reversibleNotes: >-
+      The chart updates CRDs in place, which a Helm rollback does not revert.
+      Rolling a thick-multus policy back to thin can also leave the thick
+      /etc/cni/net.d/00-multus.conf on each node: the daemon removes it only
+      after a 10-second delay that equals the pod's termination grace period.
+      That file sorts ahead of the thin conf and calls a multus-shim nothing
+      listens to, so delete it on each node once the thin pods run. Fresh
+      installations at 26.10.0 do not cross this transition.
+    affectedResources:
+      - group: mellanox.com
+        kinds: [NicClusterPolicy]
+    stepsByDeployer:
+      - deployers: [helmfile]
+        steps:
+          - id: save-nicclusterpolicy
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy -o yaml >
+              nic-cluster-policy-backup.yaml
+            reason: >-
+              Helm rollback does not revert the CRD update, so the saved copy
+              is the only record of the pre-upgrade policy.
+          - id: refresh-multus-token
+            description: >-
+              On a cluster running thin multus with service-account token
+              extension disabled (the NVKE leaves at 26.7.x), run `kubectl -n
+              nvidia-network-operator rollout restart ds/kube-multus-ds` and
+              `kubectl -n nvidia-network-operator rollout status
+              ds/kube-multus-ds`, then start the apply within the hour.
+            reason: >-
+              Thin multus's copied token expires an hour after its pods start,
+              and the upgrade's CRD hook Job and new operator pods need
+              sandboxes on those nodes; with an expired token they never start.
+          - id: apply
+            description: >-
+              Run helmfile apply from a bundle generated at the new pins.
+            reason: >-
+              The chart's CRD-upgrade hook updates the CRDs before the operator
+              rolls, so the post-install NicClusterPolicy's new fields, such as
+              deploymentType, are not pruned.
+          - id: recreate-unattached-pods
+            description: >-
+              Once kube-multus-ds has finished rolling out on every node, find
+              the pods that request secondary networks (the
+              k8s.v1.cni.cncf.io/networks annotation), started during the
+              rollout (status.startTime), whatever their creation time, are
+              still Pending or Running, and whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network they request. Leave Succeeded and Failed pods alone:
+              re-creating one re-runs work that has already finished; review
+              its result instead. Delete each one that a controller
+              owns (metadata.ownerReferences), so the controller recreates it.
+              For a pod with no owner, save it first (kubectl get pod -o yaml,
+              without status, uid, resourceVersion and nodeName), delete it,
+              and re-create it from the saved manifest.
+            reason: >-
+              A pod admitted to a node while that node's multus pod was being
+              replaced can start without its secondary networks and keeps
+              running that way; nothing re-attaches it, and nothing recreates a
+              deleted pod that no controller owns.
+          - id: verify
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy reports ready and
+              the operand pods in nvidia-network-operator are Ready. Where the
+              policy sets secondaryNetwork.multus.deploymentType: thick, the
+              kube-multus-ds pods also run multus-daemon, and a new pod created
+              on a GPU node more than an hour after the rollout starts. That
+              check covers new pods only; recreate-unattached-pods covers the
+              ones admitted during the rollout.
+            reason: >-
+              Ready means the 26.10.0 operator reconciled the policy. On a
+              thick-multus cluster, a pod that fails sandbox creation with
+              Unauthorized an hour later means a node still runs thin multus.
+      - deployers: [helm]
+        steps:
+          - id: save-nicclusterpolicy
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy -o yaml >
+              nic-cluster-policy-backup.yaml
+            reason: >-
+              Helm rollback does not revert the CRD update, so the saved copy
+              is the only record of the pre-upgrade policy.
+          - id: refresh-multus-token
+            description: >-
+              On a cluster running thin multus with service-account token
+              extension disabled (the NVKE leaves at 26.7.x), run `kubectl -n
+              nvidia-network-operator rollout restart ds/kube-multus-ds` and
+              `kubectl -n nvidia-network-operator rollout status
+              ds/kube-multus-ds`, then start the apply within the hour.
+            reason: >-
+              Thin multus's copied token expires an hour after its pods start,
+              and the upgrade's CRD hook Job and new operator pods need
+              sandboxes on those nodes; with an expired token they never start.
+          - id: apply
+            description: >-
+              Run the network-operator component's install.sh, then the
+              network-operator-post component's install.sh, from a bundle
+              generated at the new pins, or run deploy.sh.
+            reason: >-
+              The chart's CRD-upgrade hook updates the CRDs before the operator
+              rolls, so the post-install NicClusterPolicy's new fields, such as
+              deploymentType, are not pruned.
+          - id: recreate-unattached-pods
+            description: >-
+              Once kube-multus-ds has finished rolling out on every node, find
+              the pods that request secondary networks (the
+              k8s.v1.cni.cncf.io/networks annotation), started during the
+              rollout (status.startTime), whatever their creation time, are
+              still Pending or Running, and whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network they request. Leave Succeeded and Failed pods alone:
+              re-creating one re-runs work that has already finished; review
+              its result instead. Delete each one that a controller
+              owns (metadata.ownerReferences), so the controller recreates it.
+              For a pod with no owner, save it first (kubectl get pod -o yaml,
+              without status, uid, resourceVersion and nodeName), delete it,
+              and re-create it from the saved manifest.
+            reason: >-
+              A pod admitted to a node while that node's multus pod was being
+              replaced can start without its secondary networks and keeps
+              running that way; nothing re-attaches it, and nothing recreates a
+              deleted pod that no controller owns.
+          - id: verify
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy reports ready and
+              the operand pods in nvidia-network-operator are Ready. Where the
+              policy sets secondaryNetwork.multus.deploymentType: thick, the
+              kube-multus-ds pods also run multus-daemon, and a new pod created
+              on a GPU node more than an hour after the rollout starts. That
+              check covers new pods only; recreate-unattached-pods covers the
+              ones admitted during the rollout.
+            reason: >-
+              Ready means the 26.10.0 operator reconciled the policy. On a
+              thick-multus cluster, a pod that fails sandbox creation with
+              Unauthorized an hour later means a node still runs thin multus.
+      - deployers: [terraform]
+        steps:
+          - id: save-nicclusterpolicy
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy -o yaml >
+              nic-cluster-policy-backup.yaml
+            reason: >-
+              Helm rollback does not revert the CRD update, so the saved copy
+              is the only record of the pre-upgrade policy.
+          - id: refresh-multus-token
+            description: >-
+              On a cluster running thin multus with service-account token
+              extension disabled (the NVKE leaves at 26.7.x), run `kubectl -n
+              nvidia-network-operator rollout restart ds/kube-multus-ds` and
+              `kubectl -n nvidia-network-operator rollout status
+              ds/kube-multus-ds`, then start the apply within the hour.
+            reason: >-
+              Thin multus's copied token expires an hour after its pods start,
+              and the upgrade's CRD hook Job and new operator pods need
+              sandboxes on those nodes; with an expired token they never start.
+          - id: apply
+            description: >-
+              Generate a bundle at the new pins, copy it into the Terraform
+              working directory as the bundle's README describes (or point the
+              calling configuration's module source at it), then run
+              terraform apply.
+            reason: >-
+              The chart's CRD-upgrade hook updates the CRDs before the operator
+              rolls, so the post-install NicClusterPolicy's new fields, such as
+              deploymentType, are not pruned.
+          - id: recreate-unattached-pods
+            description: >-
+              Once kube-multus-ds has finished rolling out on every node, find
+              the pods that request secondary networks (the
+              k8s.v1.cni.cncf.io/networks annotation), started during the
+              rollout (status.startTime), whatever their creation time, are
+              still Pending or Running, and whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network they request. Leave Succeeded and Failed pods alone:
+              re-creating one re-runs work that has already finished; review
+              its result instead. Delete each one that a controller
+              owns (metadata.ownerReferences), so the controller recreates it.
+              For a pod with no owner, save it first (kubectl get pod -o yaml,
+              without status, uid, resourceVersion and nodeName), delete it,
+              and re-create it from the saved manifest.
+            reason: >-
+              A pod admitted to a node while that node's multus pod was being
+              replaced can start without its secondary networks and keeps
+              running that way; nothing re-attaches it, and nothing recreates a
+              deleted pod that no controller owns.
+          - id: verify
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy reports ready and
+              the operand pods in nvidia-network-operator are Ready. Where the
+              policy sets secondaryNetwork.multus.deploymentType: thick, the
+              kube-multus-ds pods also run multus-daemon, and a new pod created
+              on a GPU node more than an hour after the rollout starts. That
+              check covers new pods only; recreate-unattached-pods covers the
+              ones admitted during the rollout.
+            reason: >-
+              Ready means the 26.10.0 operator reconciled the policy. On a
+              thick-multus cluster, a pod that fails sandbox creation with
+              Unauthorized an hour later means a node still runs thin multus.
+      - steps:
+          - id: save-nicclusterpolicy
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy -o yaml >
+              nic-cluster-policy-backup.yaml
+            reason: >-
+              Helm rollback does not revert the CRD update, so the saved copy
+              is the only record of the pre-upgrade policy.
+          - id: refresh-multus-token
+            description: >-
+              On a cluster running thin multus with service-account token
+              extension disabled (the NVKE leaves at 26.7.x), run `kubectl -n
+              nvidia-network-operator rollout restart ds/kube-multus-ds` and
+              `kubectl -n nvidia-network-operator rollout status
+              ds/kube-multus-ds`, then start the apply within the hour.
+            reason: >-
+              Thin multus's copied token expires an hour after its pods start,
+              and the upgrade's CRD hook Job and new operator pods need
+              sandboxes on those nodes; with an expired token they never start.
+          - id: apply
+            description: >-
+              Commit a bundle generated at the new pins, then reconcile or sync
+              it.
+            reason: >-
+              The chart's CRD-upgrade hook updates the CRDs before the operator
+              rolls, so the post-install NicClusterPolicy's new fields, such as
+              deploymentType, are not pruned.
+          - id: recreate-unattached-pods
+            description: >-
+              Once kube-multus-ds has finished rolling out on every node, find
+              the pods that request secondary networks (the
+              k8s.v1.cni.cncf.io/networks annotation), started during the
+              rollout (status.startTime), whatever their creation time, are
+              still Pending or Running, and whose
+              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
+              network they request. Leave Succeeded and Failed pods alone:
+              re-creating one re-runs work that has already finished; review
+              its result instead. Delete each one that a controller
+              owns (metadata.ownerReferences), so the controller recreates it.
+              For a pod with no owner, save it first (kubectl get pod -o yaml,
+              without status, uid, resourceVersion and nodeName), delete it,
+              and re-create it from the saved manifest.
+            reason: >-
+              A pod admitted to a node while that node's multus pod was being
+              replaced can start without its secondary networks and keeps
+              running that way; nothing re-attaches it, and nothing recreates a
+              deleted pod that no controller owns.
+          - id: verify
+            description: >-
+              kubectl get nicclusterpolicy nic-cluster-policy reports ready and
+              the operand pods in nvidia-network-operator are Ready. Where the
+              policy sets secondaryNetwork.multus.deploymentType: thick, the
+              kube-multus-ds pods also run multus-daemon, and a new pod created
+              on a GPU node more than an hour after the rollout starts. That
+              check covers new pods only; recreate-unattached-pods covers the
+              ones admitted during the rollout.
+            reason: >-
+              Ready means the 26.10.0 operator reconciled the policy. On a
+              thick-multus cluster, a pod that fails sandbox creation with
+              Unauthorized an hour later means a node still runs thin multus.
+    references:
+      - https://github.com/Mellanox/network-operator/releases/tag/v26.10.0
+      - https://github.com/Mellanox/network-operator/blob/v26.10.0/manifests/state-multus-cni/0050-multus-ds.yml
+      - https://github.com/Mellanox/network-operator/issues/1363
   # Manual rather than safe: the in-place path has not been run live. A run
   # covering the AICR NicClusterPolicy and DOCA driver pins can flip this to
   # safe with that run in verifiedBy.

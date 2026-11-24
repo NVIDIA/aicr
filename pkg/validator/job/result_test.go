@@ -832,8 +832,10 @@ func TestHandleTimeoutPodNotFound(t *testing.T) {
 	if result.ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
 	}
-	if !strings.Contains(result.TerminationMsg, "pod never reached running state") {
-		t.Errorf("TerminationMsg = %q", result.TerminationMsg)
+	if !strings.Contains(result.TerminationMsg, "pod never reached running state") ||
+		strings.Contains(result.TerminationMsg, "could not be read") {
+
+		t.Errorf("TerminationMsg = %q, want only the confirmed-absence wording", result.TerminationMsg)
 	}
 }
 

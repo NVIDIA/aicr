@@ -111,7 +111,7 @@ security_tools:
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.4'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
-  syft: 'v1.57.1'
+  syft: 'v1.57.2'
   # Attaches the aiperf-bench third-party source archive as an OCI 1.1 referrer
   # (tools/generate-aiperf-source). Cosign cannot attach arbitrary artifacts, so
   # this is a separate dependency from the signing/attestation path.
@@ -131,7 +131,7 @@ security_tools:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan.
   # renovate: datasource=github-releases depName=oras-project/oras depType=security_tools
-  oras: '1.3.6'
+  oras: '1.4.0'
   # Refreshed automatically by tools/update-oras-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Pinning the digest
   # here — rather than trusting the checksums.txt served beside the tarball —
@@ -147,7 +147,7 @@ security_tools:
   #
   # linux/amd64 only: this pin feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oras_sha256_linux_amd64: '66fb0ad7206f3f6fa77ed5b552049d364ccf4b50b1684554f731f76302b52ca0'
+  oras_sha256_linux_amd64: 'd8e1dce2fd8ce996f1d901845b688eb0cf505a6082897606f053825bb47935d1'
 
 # E2E Testing Tools
 testing_tools:
@@ -160,7 +160,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
   kind: '0.33.0'
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
-  nvkind: 'c57050497cffee36f10c8b918d2727c4f26d886e'
+  nvkind: 'b2a7778f014079daefdd81c13257540cf399fe45'
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
   ctlptl: '0.9.6'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
@@ -286,7 +286,7 @@ testing_tools:
   # kustomize-controller and helm-controller are the only controllers the
   # bundle consumes (OCIRepository -> Kustomization -> HelmRelease).
   # renovate: datasource=github-releases depName=fluxcd/flux2 depType=testing_tools
-  flux_version: 'v2.10.0'
+  flux_version: 'v2.10.1'
   # In-cluster Git server for the KWOK flux-git deployer lane (issue #963).
   # Rootless variant so the admin-user bootstrap can `kubectl exec gitea
   # admin user create` directly without su gymnastics.

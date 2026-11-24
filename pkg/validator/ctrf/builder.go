@@ -192,6 +192,26 @@ func (b *Builder) AddResult(r *ValidatorResult) {
 	b.tests = append(b.tests, tr)
 }
 
+// AppendMessage appends msg to the Message of the last result recorded for
+// the validator name in phase, separated by "; ", or sets it when empty. It
+// carries what happened after a result was recorded, such as a failed
+// cleanup. It does nothing when no such result exists, and does not change
+// the result's status.
+func (b *Builder) AppendMessage(name, phase, msg string) {
+	for i := len(b.tests) - 1; i >= 0; i-- {
+		tr := &b.tests[i]
+		if tr.Name != name || len(tr.Suite) != 1 || tr.Suite[0] != phase {
+			continue
+		}
+		if tr.Message == "" {
+			tr.Message = msg
+		} else {
+			tr.Message += "; " + msg
+		}
+		return
+	}
+}
+
 // AddSkipped appends a skipped entry for a validator that was not executed.
 func (b *Builder) AddSkipped(name, phase, reason string) {
 	b.AddSkippedWithExtra(name, phase, reason, nil)

@@ -639,3 +639,76 @@ func TestBuilderAddSkippedWithExtra(t *testing.T) {
 		}
 	})
 }
+
+func TestBuilderAppendMessage(t *testing.T) {
+	const appended = "workload namespace cleanup failed: boom"
+	tests := []struct {
+		name    string
+		results []*ValidatorResult
+		target  string
+		phase   string
+		want    []string // Message of each recorded result, in order
+	}{
+		{
+			name:    "appends to the existing message",
+			results: []*ValidatorResult{{Name: "inference-perf", Phase: "performance", ExitCode: -1, TerminationMsg: "validation failed: x"}},
+			target:  "inference-perf", phase: "performance",
+			want: []string{"validation failed: x; " + appended},
+		},
+		{
+			name:    "sets an empty message",
+			results: []*ValidatorResult{{Name: "inference-perf", Phase: "performance", ExitCode: -1}},
+			target:  "inference-perf", phase: "performance",
+			want: []string{appended},
+		},
+		{
+			name: "only the last result with that name and phase",
+			results: []*ValidatorResult{
+				{Name: "check", Phase: "performance", ExitCode: 0, TerminationMsg: "first"},
+				{Name: "check", Phase: "conformance", ExitCode: 0, TerminationMsg: "other phase"},
+				{Name: "check", Phase: "performance", ExitCode: -1, TerminationMsg: "second"},
+				{Name: "next", Phase: "performance", ExitCode: 0, TerminationMsg: "later check"},
+			},
+			target: "check", phase: "performance",
+			want: []string{"first", "other phase", "second; " + appended, "later check"},
+		},
+		{
+			name:    "no matching name is a no-op",
+			results: []*ValidatorResult{{Name: "check", Phase: "performance", TerminationMsg: "kept"}},
+			target:  "missing", phase: "performance",
+			want: []string{"kept"},
+		},
+		{
+			name:    "no matching phase is a no-op",
+			results: []*ValidatorResult{{Name: "check", Phase: "performance", TerminationMsg: "kept"}},
+			target:  "check", phase: "deployment",
+			want: []string{"kept"},
+		},
+		{
+			name:   "empty builder is a no-op",
+			target: "check", phase: "performance",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := NewBuilder("aicr", "1.0.0", tt.phase)
+			for _, r := range tt.results {
+				b.AddResult(r)
+			}
+			b.AppendMessage(tt.target, tt.phase, appended)
+
+			report := b.Build()
+			if len(report.Results.Tests) != len(tt.want) {
+				t.Fatalf("got %d results, want %d", len(report.Results.Tests), len(tt.want))
+			}
+			for i, tr := range report.Results.Tests {
+				if tr.Message != tt.want[i] {
+					t.Errorf("tests[%d].Message = %q, want %q", i, tr.Message, tt.want[i])
+				}
+				if want := ExitCodeToCTRFStatus(tt.results[i].ExitCode); tr.Status != want {
+					t.Errorf("tests[%d].Status = %q, want %q unchanged", i, tr.Status, want)
+				}
+			}
+		})
+	}
+}

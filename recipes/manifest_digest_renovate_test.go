@@ -149,12 +149,64 @@ func TestCRDDigestPinsAreRenovateTracked(t *testing.T) {
 // an image tagged with the network-operator release it ships with.
 var networkOperatorTagRE = regexp.MustCompile(`(?m)^\s*# renovate: datasource=docker depName=\S+ tag=network-operator-v(\S+)\s*$`)
 
+// overlayNetworkOperatorPins maps each manifest an overlay attaches to
+// network-operator to the chart versions it is deployed with: the overlay's
+// own version override, or registryPin when the overlay does not pin one.
+// Inheritance is not resolved, so a manifest is keyed only to the overlays
+// that list it.
+func overlayNetworkOperatorPins(t *testing.T, registryPin string) map[string]map[string]bool {
+	t.Helper()
+	entries, err := fs.ReadDir(FS, "overlays")
+	if err != nil {
+		t.Fatalf("read overlays: %v", err)
+	}
+	pins := map[string]map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() || path.Ext(e.Name()) != ".yaml" {
+			continue
+		}
+		data, rerr := fs.ReadFile(FS, path.Join("overlays", e.Name()))
+		if rerr != nil {
+			t.Fatalf("read overlay %s: %v", e.Name(), rerr)
+		}
+		var ov struct {
+			Spec struct {
+				ComponentRefs []struct {
+					Name          string   `yaml:"name"`
+					Version       string   `yaml:"version"`
+					ManifestFiles []string `yaml:"manifestFiles"`
+				} `yaml:"componentRefs"`
+			} `yaml:"spec"`
+		}
+		if err = yaml.Unmarshal(data, &ov); err != nil {
+			t.Fatalf("parse overlay %s: %v", e.Name(), err)
+		}
+		for _, ref := range ov.Spec.ComponentRefs {
+			if ref.Name != "network-operator" {
+				continue
+			}
+			pin := ref.Version
+			if pin == "" {
+				pin = registryPin
+			}
+			for _, mf := range ref.ManifestFiles {
+				if pins[mf] == nil {
+					pins[mf] = map[string]bool{}
+				}
+				pins[mf][pin] = true
+			}
+		}
+	}
+	return pins
+}
+
 // TestNetworkOperatorTagAnnotationsFollowChartPin requires every
-// `tag=network-operator-v<X>` annotation to name the registry's
-// network-operator chart pin. The annotation is the only record of the tag
-// behind a digest, and Renovate resolves digest updates from it, so one left
-// behind on a chart bump turns the next rotation into a move back to the
-// previous release's images.
+// `tag=network-operator-v<X>` annotation to name the network-operator chart
+// version its manifest is deployed with: the version override of the overlays
+// that attach it, else the registry pin. The annotation is the only record of
+// the tag behind a digest, and Renovate resolves digest updates from it, so
+// one left behind on a chart bump turns the next rotation into a move back to
+// the previous release's images.
 func TestNetworkOperatorTagAnnotationsFollowChartPin(t *testing.T) {
 	data, err := fs.ReadFile(FS, "registry.yaml")
 	if err != nil {
@@ -180,6 +232,7 @@ func TestNetworkOperatorTagAnnotationsFollowChartPin(t *testing.T) {
 	if pin == "" {
 		t.Fatal("registry.yaml has no network-operator helm.defaultVersion")
 	}
+	overlayPins := overlayNetworkOperatorPins(t, pin)
 
 	var checked int
 	err = fs.WalkDir(FS, "components", func(p string, d fs.DirEntry, werr error) error {
@@ -193,11 +246,27 @@ func TestNetworkOperatorTagAnnotationsFollowChartPin(t *testing.T) {
 		if rerr != nil {
 			return rerr
 		}
-		for _, m := range networkOperatorTagRE.FindAllStringSubmatch(string(content), -1) {
+		matches := networkOperatorTagRE.FindAllStringSubmatch(string(content), -1)
+		if len(matches) == 0 {
+			return nil
+		}
+		want, source := pin, "registry.yaml pins"
+		switch deployed := overlayPins[p]; len(deployed) {
+		case 0:
+		case 1:
+			for v := range deployed {
+				want, source = v, "the overlays attaching it deploy"
+			}
+		default:
+			t.Errorf("%s: attached by overlays deploying different network-operator versions %v; "+
+				"one manifest cannot carry tags for both", p, deployed)
+			return nil
+		}
+		for _, m := range matches {
 			checked++
-			if m[1] != pin {
-				t.Errorf("%s: annotation names network-operator-v%s, but registry.yaml pins network-operator %s; "+
-					"move the tag and its digest together with the chart pin", p, m[1], pin)
+			if m[1] != want {
+				t.Errorf("%s: annotation names network-operator-v%s, but %s network-operator %s; "+
+					"move the tag and its digest together with the chart pin", p, m[1], source, want)
 			}
 		}
 		return nil

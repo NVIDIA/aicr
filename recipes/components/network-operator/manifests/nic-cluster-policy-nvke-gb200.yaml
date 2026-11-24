@@ -25,6 +25,19 @@
 # are never executed and a pod gets its VF allocated but no IB netdev.
 # No ibKubernetes: VF partition membership follows the fabric SM's policy for
 # the PF GUIDs, which this recipe has no UFM access to set.
+#
+# multus runs thick (Network Operator >= 26.10.0, pinned in the overlay). Thin
+# multus copies the service-account token into a host kubeconfig once, under
+# --skip-config-watch, and NVKE's API server runs
+# --service-account-extend-token-expiration=false, so that copy expires after
+# an hour and every pod on the node then fails sandbox creation with
+# Unauthorized (#3482). The thick daemon has no kubeconfig and uses in-cluster
+# config, which re-reads the token kubelet rotates.
+#
+# CAUTION: removing the secondaryNetwork section leaves the multus conf in
+# /etc/cni/net.d on every node, ahead of the OVN-Kubernetes conf, and pod
+# creation then fails cluster-wide (measured on VR200 NVKE; see
+# nic-cluster-policy-nvke-vr200.yaml).
 apiVersion: mellanox.com/v1alpha1
 kind: NicClusterPolicy
 metadata:
@@ -55,20 +68,21 @@ spec:
   nvIpam:
     image: nvidia-k8s-ipam
     repository: nvcr.io/nvidia/mellanox
-    # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nvidia-k8s-ipam tag=network-operator-v26.7.1
-    version: sha256:f4012b9c5ee18603def8e842c58861b2524c8da5a946ec9c3e5957de7395a22c
+    # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nvidia-k8s-ipam tag=network-operator-v26.10.0
+    version: sha256:f2f35a3576a03ef1f05a589185f8150f49ca0d60019917ad8a2a8749688c1b32
     enableWebhook: false
   secondaryNetwork:
     cniPlugins:
       image: plugins
       repository: nvcr.io/nvidia/mellanox
-      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/plugins tag=network-operator-v26.7.1
-      version: sha256:9758670f426e238805aba61a1c83a96ae10506dd973845b60477230672c06163
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/plugins tag=network-operator-v26.10.0
+      version: sha256:75408477333bb2aed761dafb521f34c91f734f969384882bb385ab1c892ccbdf
     multus:
       image: multus-cni
       repository: nvcr.io/nvidia/mellanox
-      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/multus-cni tag=network-operator-v26.7.1
-      version: sha256:19279347b71a1077eaed8479f8fff491fd9a578bc0ff8efcf13ea08270574fd0
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/multus-cni tag=network-operator-v26.10.0
+      version: sha256:f4539e04013284b4c37021766852a8702190ac4b7d4e100dd15a5da883a43ec8
+      deploymentType: thick
   deploymentTolerations:
     - key: CriticalAddonsOnly
       operator: Exists

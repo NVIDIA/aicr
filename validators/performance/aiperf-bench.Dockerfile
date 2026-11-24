@@ -46,7 +46,7 @@
 # Single global default so the builder install and the final-stage
 # io.aicr.aiperf.version label always move together on a bump; each stage
 # redeclares `ARG AIPERF_VERSION` (without a value) to pull it into scope.
-ARG AIPERF_VERSION=0.13.0
+ARG AIPERF_VERSION=0.14.0
 
 # ---- Build stage: toolchain + compile-to-venv (never shipped) ----
 # renovate: pinned to 3.13. aiperf 0.13.0 declares requires-python <3.14, so

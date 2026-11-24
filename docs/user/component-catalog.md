@@ -1712,7 +1712,7 @@ The chart creates cluster-scoped objects with fixed names: four `LogProfile` res
 - **Upgrade** kept them in place in the one case tested. On v0.7.0, a revision 1 to revision 2 upgrade left the same four `LogProfile`s, 26 RBAC objects, and seven CRDs; a fresh v0.8.2 install creates the same four `LogProfile`s, 28 RBAC objects, and seven CRDs.
 - **A second release** with the shipped values cannot coexist, even in another namespace. A server-side dry run of a second install (`helm install --dry-run=server`) failed, with Helm reporting that the first cluster-scoped object it reaches (`ClusterRole nvcre-bandwidthmeasurement-admin-role`) already belongs to release `nvcre`; a real second install was not run. Setting a different `fullnameOverride` does not avoid this, because it does not rename the RBAC objects: rendering the v0.8.2 chart with `fullnameOverride=other` produced the same 25 `ClusterRole` and three `ClusterRoleBinding` names, and the `LogProfile` names carry no release prefix either. That was checked by rendering, not by a second install.
 - **Uninstall** deletes the `LogProfile`s and all RBAC objects, and leaves the seven CRDs behind, as Helm does for anything in a chart's `crds/` directory. The `nccl-bandwidth` `LogProfile` holds CRE's bandwidth parse rules (`bandwidthResult`), so a cluster that has uninstalled the release has the CRDs but no profile.
-- **Editing a shipped `LogProfile`** changes what the next upgrade does, and the answer depends on the Helm client and on which field was edited. The `LogProfile` schema defines nine named patterns (`applicationStart`, `bandwidthResult`, `checkpointDone`, `checkpointLoaded`, `checkpointRestore`, `checkpointSave`, `networkTransport`, `trainingStep`, `warmupStep`) plus `containerName`, `logInterval`, `timestamp`, `warmupSteps`, and `workerStrategy`. On `nccl-bandwidth` the chart sets only two patterns, `bandwidthResult` and, since v0.7.0, `networkTransport`. AICR's CRE check does not read `networkTransport`: it asserts the transport itself, from the `Using network <plugin>` line in the launcher log, so an edit or a missing pattern does not change that assertion.
+- **Editing a shipped `LogProfile`** changes what the next upgrade does, and the answer depends on the Helm client and on which field was edited. The `LogProfile` schema defines nine named patterns (`applicationStart`, `bandwidthResult`, `checkpointDone`, `checkpointLoaded`, `checkpointRestore`, `checkpointSave`, `networkTransport`, `trainingStep`, `warmupStep`) plus `containerName`, `logInterval`, `timestamp`, `warmupSteps`, and `workerStrategy`. On `nccl-bandwidth` the chart sets only two patterns, `bandwidthResult` and, since v0.7.0, `networkTransport`. AICR's CRE check asserts the transport from the `Using network <plugin>` line in the launcher log, and depends on `networkTransport` only for its fallback. When that line is missing from the log, or the log cannot be read, the check uses the `status.transport` CRE recorded from the same banner through this pattern. A recorded `Socket` fails the check, and nothing recorded fails it too, so a profile without `networkTransport` disables the fallback and an edited capture changes what it compares with `Socket`. The fallback helps only when kubelet rotation of a long launcher log drops the banner but keeps the results table; when the table is rotated out as well, CRE completes the measurement `NoDataCollected` and the check fails before it reaches the transport assertion.
   - **Helm 3** (3.17.1): an edit to `spec.patterns.bandwidthResult.example` survived a v0.6.0 to v0.7.0 upgrade, and the new pattern was still added.
   - **Helm 4** (4.3.0, server-side apply) without `--force-conflicts`: the same upgrade failed with `UPGRADE FAILED: conflict occurred while applying object /nccl-bandwidth` naming the editing field manager, and the profile was left without `networkTransport`.
   - **Helm 4 with `--force-conflicts`**: the upgrade succeeded, added `networkTransport`, and reverted the edit to the chart's value. The generated `install.sh` passes `--force-conflicts` whenever the client is Helm 4, so an upgrade through an AICR Helm bundle takes this path: it succeeds and silently overwrites an edit to any field the chart sets.
@@ -3139,8 +3139,8 @@ reports `Deployed`, `Available` and `DependenciesFulfilled`, and that the
 operator Deployments and the agent and `cluster-sync` operands are available.
 `DependenciesFulfilled` is the Run:ai operator's own verdict on its
 prerequisites: the GPU Operator, a Prometheus Operator at the version Run:ai
-requires (kube-prometheus-stack 88.6.5 or later; AICR's stack-wide pin is
-being raised to it), and an ingress controller or Gateway API implementation
+requires (kube-prometheus-stack 88.6.5 or later, which AICR's stack-wide pin
+now meets), and an ingress controller or Gateway API implementation
 with the two TLS Secrets Run:ai documents in the `runai` namespace. Until the
 recipe ships those, the check fails on a bare training base; that is the
 intended fail-closed shape, not a flake. Run:ai's pre-install hook labels the
@@ -4342,3 +4342,20 @@ through your deployer) before redeploying the previous bundle: its
 9100. The uninstall keeps that namespace with its TLS Secrets, and the
 `opentelemetry.io` CRDs. If it hangs on a Pending cleanup Job, see
 [NKTP Telemetry Pipeline](#nktp-telemetry-pipeline).
+
+### `kube-prometheus-stack`: `88.6.5` runs Prometheus from a distroless image
+
+From `88.6.5`, Prometheus runs from its distroless image,
+`quay.io/prometheus/prometheus:v3.14.0-distroless` (upstream made it the
+chart's default in `85.0.0`). A cluster already on `84.5.0` upgrades in place
+with no steps: the operator replaces the Prometheus pod once, and its
+`emptyDir` history starts again. Two things change:
+
+- A private registry that mirrors the stack's images needs the `-distroless`
+  Prometheus tag before the upgrade, or the new pod can't pull its image.
+  [`aicr mirror list`](air-gap-mirror.md) run against the new recipe includes
+  it.
+- The Prometheus container has no shell, so `kubectl exec` into it no longer
+  works.
+
+A cluster below `84.5.0` also follows the steps in the section above.
