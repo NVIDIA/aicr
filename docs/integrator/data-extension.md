@@ -66,11 +66,15 @@ aicr recipe list --with ./base-catalog --with ./partner-catalog
 ```
 
 Each value is `nvidia`, the built-in catalog, or the path of a catalog
-directory. `--with` is available wherever `--external-only` is, except
-`recipe validate`, which checks one directory. In an `AICRConfig`, list them
-under `spec.recipe.catalogs`; `--with` on the command line replaces that list.
-With no `--with`, nothing changes: the built-in catalog is used, and `--data`
-and `--external-only` behave as described above.
+directory. Repeat the flag to add a catalog; do not pack several into one
+value, because commands differ in whether they split a slice flag on commas
+(`aicr bundle` does not). `--with` is available wherever `--external-only` is,
+except `recipe validate`, which checks one directory and rejects it. In an
+`AICRConfig`, list the catalogs under `spec.recipe.catalogs`; each entry is
+taken whole, so a directory whose path contains a comma can be named there.
+`--with` on the command line replaces that list. With neither `--with` nor
+`spec.recipe.catalogs`, nothing changes: the built-in catalog is used, and
+`--data` and `--external-only` behave as described above.
 
 **A catalog has a name.** Every catalog passed to `--with` declares it in its
 `registry.yaml`:
@@ -87,6 +91,11 @@ The built-in catalog declares `nvidia`, and the name is reserved: no other
 catalog may declare it. Two catalogs in one composition may not share a name.
 A catalog without `metadata.name` is rejected. The field is optional for a
 `--data` directory.
+
+A name is a lowercase DNS label: lowercase letters, digits and `-`, starting
+and ending with a letter or digit, at most 63 characters. `NVIDIA` is
+rejected rather than treated as a second spelling of `nvidia`, because names
+appear in error messages and in the provenance of what a composition built.
 
 **Composition is a union of graphs, not a stack of layers.** The catalogs are
 sorted by declared name, so the result is the same whatever order they are
@@ -107,11 +116,47 @@ error that names both, never a silent override:
 |---|---|
 | The same component name | `registry.yaml` |
 | The same validator name | `validators/catalog.yaml` |
-| The same overlay name, or the same mixin name, in any file | `overlays/`, `mixins/` |
+| The same overlay name, or the same mixin name | any `.yaml` file, at any path |
 | The same file path (values, manifests, health checks, upgrade records) | any |
+| A second base recipe | a `base.yaml` in any `overlays/` directory, at any depth |
 
-Because the same path is a collision, only one catalog in a composition can
-supply `overlays/base.yaml`, the resolution root.
+A composition has exactly one base recipe, the resolution root of every
+overlay that does not name another overlay as its `spec.base`. Two catalogs
+that both supply one fail; a composition in which none does fails too, naming
+the first overlay that needs it:
+
+```text
+catalog "partner": overlays/leaf.yaml extends the base recipe, which no composed catalog provides (composed: partner);
+add the catalog that supplies overlays/base.yaml, such as nvidia, with --with
+```
+
+So the `--with ./base-catalog --with ./partner-catalog` example above works
+because `./base-catalog` ships an `overlays/base.yaml`.
+
+Only files that a loader reads take part: `.yaml` files, and any file under
+`components/`. Other files, such as a catalog's `README.md` or `LICENSE`, are
+neither served nor compared, so two catalogs may each ship one.
+
+**Identity is never silently overridden; behavior can still be extended.**
+Composition protects what a node is called. It does not stop a partner
+overlay whose `criteria` match a request from being selected next to the
+`nvidia` overlays and changing the version or values of a component that
+`nvidia` defines, which is the point of an overlay. Read a catalog's overlays
+before composing it, as you would read any dependency.
+
+**Where the result comes from.** `aicr recipe list` reports each overlay's
+`source` as `embedded` for the built-in catalog and `external` for a catalog
+directory, so a partner overlay stays `external` whether or not `--data` is
+also given.
+
+**Limits.**
+
+- `aicr bundle --attest` is rejected when the composition includes a catalog
+  directory. A bundle carries `data/` only for a single `--data` directory, so
+  signing a composed bundle would record the recipe as built from embedded
+  data. Remove `--attest`, or build the bundle from one `--data` catalog.
+- `--require-evidence` fails for any composed source, like `--data`.
+- Capturing a catalog artifact from a composed catalog is not supported.
 
 **`--data` stays the override.** `--data <dir>` is still one override
 directory applied last, with last-wins precedence, now on top of the composed

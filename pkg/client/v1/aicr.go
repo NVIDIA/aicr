@@ -1641,7 +1641,7 @@ func buildComposedDataProvider(ctx context.Context, s recipeSource) (recipe.Data
 					fmt.Sprintf("construct catalog provider for %q", child.path))
 			}
 			inputs = append(inputs, recipe.CatalogInput{Provider: dir, Label: child.path})
-		default:
+		case sourceKindUnset, sourceKindOCI, sourceKindComposed:
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"only EmbeddedSource and filesystem sources can be composed")
 		}

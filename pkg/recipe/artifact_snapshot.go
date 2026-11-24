@@ -213,8 +213,16 @@ func captureArtifactLayers(ctx context.Context, provider DataProvider) (map[stri
 	case *LayeredDataProvider:
 		embedded := map[string][]byte{}
 		if !p.externalOnly {
+			// Only the built-in catalog is the embedded layer. A composed
+			// base carries partner catalogs; recording them as embedded would
+			// mislabel their provenance in the artifact.
+			base, ok := p.embedded.(*EmbeddedDataProvider)
+			if !ok {
+				return nil, nil, artifact.Invalid("artifact-source-unsupported",
+					"artifact composition requires an embedded or filesystem source; a composed catalog (--with) is not supported")
+			}
 			var err error
-			embedded, err = captureArtifactFiles(ctx, p.embedded)
+			embedded, err = captureArtifactFiles(ctx, base)
 			if err != nil {
 				return nil, nil, err
 			}

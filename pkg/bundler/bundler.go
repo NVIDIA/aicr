@@ -98,6 +98,13 @@ const (
 // literal would drift silently.
 const RecipeFileName = "recipe.yaml"
 
+// attestComposedCatalogMessage is why --attest refuses a bundle built from a
+// composition that includes a catalog directory.
+const attestComposedCatalogMessage = "--attest cannot sign a bundle built from a composed catalog directory (--with): " +
+	"the bundle does not carry that catalog's files in data/, so the attestation would record recipeSource " +
+	`"embedded" and verification would trust the bundle as built from embedded recipe data only; ` +
+	"remove --attest, or build the bundle from a single --data catalog, whose files are copied into the bundle"
+
 // errCtxKeyComponent is the structured-error context key carrying the
 // component name in bundle value-override failures.
 const errCtxKeyComponent = "component"
@@ -298,6 +305,14 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	}
 	if err := r.validateDeployerConfig(); err != nil {
 		return nil, err
+	}
+	// A composition that includes a catalog directory (--with) copies none of
+	// that catalog into data/, so the attestation would record recipeSource
+	// "embedded" and verification would read the missing data/ as proof that
+	// only embedded recipe data was used. Refuse to sign it until those files
+	// are carried into the bundle.
+	if r.Config.Attest() && recipe.ComposesExternalCatalogs(recipeResult.DataProvider()) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, attestComposedCatalogMessage)
 	}
 
 	// Reject incoherent component refs (e.g. a Helm ref that also carries a

@@ -22,6 +22,10 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
+	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/recipe/providertest"
 )
 
@@ -270,6 +274,42 @@ func TestComposedProviderCollisionsFailClosed(t *testing.T) {
 			want: []string{`overlay "same"`, `"one"`, `"two"`},
 		},
 		{
+			name: "overlay name outside overlays/",
+			a: map[string]string{
+				"registry.yaml":   registryDoc("one"),
+				"overlays/x.yaml": overlayDoc("same", "", "svc-a"),
+			},
+			b: map[string]string{
+				"registry.yaml":    registryDoc("two"),
+				"extra/other.yaml": overlayDoc("same", "", "svc-b"),
+			},
+			want: []string{`overlay "same"`, `"one"`, `"two"`, "extra/other.yaml"},
+		},
+		{
+			name: "second base in a subdirectory of overlays/",
+			a: map[string]string{
+				"registry.yaml":      registryDoc("one"),
+				"overlays/base.yaml": overlayDoc("base", "", ""),
+			},
+			b: map[string]string{
+				"registry.yaml":             registryDoc("two"),
+				"overlays/nested/base.yaml": overlayDoc("base", "", ""),
+			},
+			want: []string{"the base recipe", `"one"`, `"two"`, "overlays/nested/base.yaml"},
+		},
+		{
+			name: "second base in another overlays directory",
+			a: map[string]string{
+				"registry.yaml":      registryDoc("one"),
+				"overlays/base.yaml": overlayDoc("base", "", ""),
+			},
+			b: map[string]string{
+				"registry.yaml":            registryDoc("two"),
+				"extra/overlays/base.yaml": overlayDoc("base", "", ""),
+			},
+			want: []string{"the base recipe", `"one"`, `"two"`, "extra/overlays/base.yaml"},
+		},
+		{
 			name: "mixin name in different files",
 			a: map[string]string{
 				"registry.yaml": registryDoc("one"),
@@ -293,6 +333,7 @@ func TestComposedProviderCollisionsFailClosed(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected a collision error")
 				}
+				errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
 				for _, want := range tt.want {
 					if !strings.Contains(err.Error(), want) {
 						t.Errorf("error %q does not contain %q", err, want)
@@ -351,7 +392,258 @@ func TestComposedProviderCatalogNames(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want it to contain %q", err, tt.want)
 			}
+			errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
 		})
+	}
+}
+
+// TestComposedProviderCatalogNameGrammar pins the rule on metadata.name: a
+// lowercase DNS label. The name appears in errors now and in provenance later,
+// so "NVIDIA" may not sit next to "nvidia", and "+" is the separator of the
+// composed registry's own name.
+func TestComposedProviderCatalogNameGrammar(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"a", "acme", "acme-2", "0day", strings.Repeat("a", maxCatalogNameLength)} {
+		t.Run("valid "+name, func(t *testing.T) {
+			t.Parallel()
+			in := mapCatalog("./x", false, map[string]string{"registry.yaml": registryDoc(name)})
+			if _, err := NewComposedDataProvider(t.Context(), []CatalogInput{in}); err != nil {
+				t.Fatalf("name %q rejected: %v", name, err)
+			}
+		})
+	}
+
+	invalid := []string{"NVIDIA", "Nvidia", "ACME", "acme+beta", "a_b", "-a", "a-", "a b", "a.b", strings.Repeat("a", maxCatalogNameLength+1)}
+	for _, name := range invalid {
+		t.Run("invalid "+name, func(t *testing.T) {
+			t.Parallel()
+			in := mapCatalog("./x", false, map[string]string{"registry.yaml": registryDoc(name)})
+			_, err := NewComposedDataProvider(t.Context(), []CatalogInput{in})
+			if err == nil || !strings.Contains(err.Error(), "lowercase DNS label") {
+				t.Fatalf("name %q: error = %v, want the DNS-label rule", name, err)
+			}
+			errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+		})
+	}
+
+	t.Run("the built-in catalog is held to it too", func(t *testing.T) {
+		t.Parallel()
+		in := mapCatalog("embedded", true, map[string]string{"registry.yaml": registryDoc("NVIDIA")})
+		if _, err := NewComposedDataProvider(t.Context(), []CatalogInput{in}); err == nil {
+			t.Fatal("expected the DNS-label rule to apply to the built-in catalog")
+		}
+	})
+}
+
+// TestComposedProviderOverlayNeedsBase pins that an overlay extending the base
+// fails at construction, naming it, when no catalog supplies one, instead of
+// later with a bare "base.yaml not found".
+func TestComposedProviderOverlayNeedsBase(t *testing.T) {
+	t.Parallel()
+
+	for name, base := range map[string]string{"explicit spec.base: base": "base", "implicit root": ""} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			partner := mapCatalog("./partner", false, map[string]string{
+				"registry.yaml":      registryDoc("partner"),
+				"overlays/leaf.yaml": overlayDoc("leaf", base, "svc"),
+			})
+			_, err := NewComposedDataProvider(t.Context(), []CatalogInput{partner})
+			if err == nil {
+				t.Fatal("expected an error: no composed catalog provides a base")
+			}
+			for _, want := range []string{`"partner"`, "overlays/leaf.yaml", "base recipe"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+			errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+		})
+	}
+
+	t.Run("a base from another catalog satisfies it", func(t *testing.T) {
+		t.Parallel()
+		partner := mapCatalog("./partner", false, map[string]string{
+			"registry.yaml":      registryDoc("partner"),
+			"overlays/leaf.yaml": overlayDoc("leaf", "base", "svc"),
+		})
+		if _, err := NewComposedDataProvider(t.Context(), []CatalogInput{nvidiaCatalog(), partner}); err != nil {
+			t.Fatalf("composition with nvidia's base: %v", err)
+		}
+	})
+}
+
+// TestComposedProviderIgnoresNonCatalogFiles pins that only files a loader
+// reads take part: two directory catalogs that each ship a README.md or a
+// LICENSE are independent catalogs, not a collision.
+func TestComposedProviderIgnoresNonCatalogFiles(t *testing.T) {
+	t.Parallel()
+
+	files := func(name string, extra map[string]string) CatalogInput {
+		m := map[string]string{
+			"registry.yaml":      registryDoc(name),
+			"README.md":          name + "\n",
+			"LICENSE":            name + "\n",
+			"overlays/README.md": name + "\n",
+		}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return mapCatalog("./"+name, false, m)
+	}
+	p, err := NewComposedDataProvider(t.Context(), []CatalogInput{
+		files("acme", map[string]string{"overlays/base.yaml": overlayDoc("base", "", "")}),
+		files("beta", nil),
+	})
+	if err != nil {
+		t.Fatalf("catalogs that both ship a README.md must compose: %v", err)
+	}
+	walked := walkFiles(t, p)
+	for _, path := range []string{"README.md", "LICENSE", "overlays/README.md"} {
+		if _, readErr := p.ReadFile(t.Context(), path); !isNotExist(readErr) {
+			t.Errorf("ReadFile(%q) err = %v, want fs.ErrNotExist: not catalog content", path, readErr)
+		}
+		if slices.Contains(walked, path) {
+			t.Errorf("WalkDir visited %q, which is not catalog content", path)
+		}
+	}
+	if !slices.Contains(walked, "overlays/base.yaml") {
+		t.Errorf("WalkDir lost catalog content; got %v", walked)
+	}
+}
+
+// TestComposedProviderMixinEdges covers spec.mixins edges: a partner overlay
+// may use a mixin an nvidia-style catalog defines, and fails naming the mixin,
+// the catalog and the file when that catalog is left out.
+func TestComposedProviderMixinEdges(t *testing.T) {
+	t.Parallel()
+
+	mixin := "apiVersion: aicr.run/v1beta1\nkind: RecipeMixin\nmetadata:\n  name: shared-mixin\nspec: {}\n"
+	leaf := "apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: mixin-leaf\nspec:\n  base: base\n  mixins:\n    - shared-mixin\n  criteria:\n    service: mixin-service\n"
+	owner := func() CatalogInput {
+		return mapCatalog("./owner", false, map[string]string{
+			"registry.yaml":      registryDoc("owner"),
+			"overlays/base.yaml": overlayDoc("base", "", ""),
+			"mixins/shared.yaml": mixin,
+		})
+	}
+	user := func() CatalogInput {
+		return mapCatalog("./user", false, map[string]string{
+			"registry.yaml":      registryDoc("user"),
+			"overlays/leaf.yaml": leaf,
+		})
+	}
+
+	if _, err := NewComposedDataProvider(t.Context(), []CatalogInput{owner(), user()}); err != nil {
+		t.Fatalf("a mixin defined by another composed catalog must resolve: %v", err)
+	}
+
+	_, err := NewComposedDataProvider(t.Context(), []CatalogInput{user()})
+	if err == nil {
+		t.Fatal("expected a dangling-mixin error")
+	}
+	for _, want := range []string{`mixin "shared-mixin"`, `"user"`, "overlays/leaf.yaml"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+	errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+}
+
+// TestCatalogDocKindAgreesWithMetadataStore guards the classification against
+// drift: over the embedded catalog, the number of overlays, mixins and bases
+// found by catalogDocKind must equal what LoadMetadataStoreFor loads.
+func TestCatalogDocKindAgreesWithMetadataStore(t *testing.T) {
+	t.Parallel()
+
+	dp := NewEmbeddedDataProvider(GetEmbeddedFS(), "")
+	t.Cleanup(func() { EvictCachedStore(dp); EvictCachedRegistry(dp); EvictCachedCriteriaRegistry(dp) })
+	store, err := LoadMetadataStoreFor(t.Context(), dp)
+	if err != nil {
+		t.Fatalf("LoadMetadataStoreFor: %v", err)
+	}
+
+	counts := map[string]int{}
+	walkErr := dp.WalkDir(t.Context(), "", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		kind := catalogDocKind(path)
+		if kind == "" {
+			return nil
+		}
+		data, readErr := dp.ReadFile(t.Context(), path)
+		if readErr != nil {
+			return readErr
+		}
+		var doc nodeDoc
+		if unmarshalErr := yaml.Unmarshal(data, &doc); unmarshalErr != nil {
+			t.Errorf("%s does not parse as a node document: %v", path, unmarshalErr)
+			return nil
+		}
+		if doc.isNodeOf(kind, path) {
+			counts[kind]++
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("WalkDir: %v", walkErr)
+	}
+	if got, want := counts[nodeKindOverlay], len(store.Overlays); got != want {
+		t.Errorf("overlays: classification found %d, the store loaded %d", got, want)
+	}
+	if got, want := counts[nodeKindMixin], len(store.Mixins); got != want {
+		t.Errorf("mixins: classification found %d, the store loaded %d", got, want)
+	}
+	if store.Base == nil || counts[nodeKindBase] != 1 {
+		t.Errorf("bases: classification found %d, the store has base %v", counts[nodeKindBase], store.Base != nil)
+	}
+}
+
+func TestComposesExternalCatalogs(t *testing.T) {
+	t.Parallel()
+
+	nvidiaOnly, err := NewComposedDataProvider(t.Context(), []CatalogInput{nvidiaCatalog()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withPartner, err := NewComposedDataProvider(t.Context(), []CatalogInput{nvidiaCatalog(), partnerCatalog()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	override := providertest.WriteDir(t, map[string][]byte{"registry.yaml": []byte(providertest.EmptyRegistryYAML)})
+	cfg := LayeredProviderConfig{ExternalDir: override}
+	layeredNvidia, err := NewLayeredDataProviderOver(nvidiaOnly, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layeredPartner, err := NewLayeredDataProviderOver(withPartner, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := NewLayeredDataProvider(NewEmbeddedDataProvider(GetEmbeddedFS(), ""), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		dp   DataProvider
+		want bool
+	}{
+		{"nil", nil, false},
+		{"embedded", NewEmbeddedDataProvider(GetEmbeddedFS(), ""), false},
+		{"nvidia only", nvidiaOnly, false},
+		{"nvidia and a directory", withPartner, true},
+		{"--data over nvidia only", layeredNvidia, false},
+		{"--data over a directory catalog", layeredPartner, true},
+		{"--data over embedded", plain, false},
+	}
+	for _, tt := range tests {
+		if got := ComposesExternalCatalogs(tt.dp); got != tt.want {
+			t.Errorf("%s: ComposesExternalCatalogs = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }
 
@@ -377,7 +669,7 @@ func TestComposedProviderCrossCatalogEdges(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveInheritanceChain: %v", err)
 		}
-		var names []string
+		names := make([]string, 0, len(chain))
 		for _, m := range chain {
 			names = append(names, m.Metadata.Name)
 		}
@@ -402,6 +694,7 @@ func TestComposedProviderCrossCatalogEdges(t *testing.T) {
 				t.Errorf("error %q does not contain %q", err, want)
 			}
 		}
+		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
 	})
 }
 
@@ -422,8 +715,9 @@ func TestComposedProviderNeverReadsEmbedded(t *testing.T) {
 		"overlays/beta.yaml":   []byte(overlayDoc("beta-leaf", "alpha-leaf", "beta-service")),
 		"components/b/val.yml": []byte("beta: true\n"),
 	})
-	var inputs []CatalogInput
-	for _, dir := range []string{dirB, dirA} {
+	dirs := []string{dirB, dirA}
+	inputs := make([]CatalogInput, 0, len(dirs))
+	for _, dir := range dirs {
 		dp, err := NewLayeredDataProvider(nil, LayeredProviderConfig{ExternalDir: dir, ExternalOnly: true})
 		if err != nil {
 			t.Fatal(err)
@@ -501,6 +795,50 @@ func TestLayeredOverComposed(t *testing.T) {
 	if files := layered.ExternalFiles(); !slices.Equal(files, []string{"components/new/vals.yml", "components/p/vals.yml", "registry.yaml"}) {
 		t.Errorf("ExternalFiles = %v, want only the override directory's files", files)
 	}
+
+	// A path the override does not own keeps the provenance the composition
+	// reports. Adding --data must not turn a partner overlay into an
+	// "embedded" one.
+	for path, want := range map[string]string{
+		"overlays/nv-leaf.yaml":      sourceEmbedded,
+		"overlays/partner-leaf.yaml": sourceExternal,
+		"components/p/vals.yml":      sourceExternal, // the override owns it
+		"components/new/vals.yml":    sourceExternal,
+	} {
+		if got := layered.Source(path); got != want {
+			t.Errorf("Source(%q) through a --data layer = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// TestLayeredOverComposedKeepsExternalValidation pins the consequence of that
+// provenance: a partner overlay that sets criteria.nodes is rejected by the
+// metadata store's fail-closed check for external overlays, with and without a
+// --data layer on top of the composition.
+func TestLayeredOverComposedKeepsExternalValidation(t *testing.T) {
+	t.Parallel()
+
+	partner := mapCatalog("./partner", false, map[string]string{
+		"registry.yaml": registryDoc("partner"),
+		"overlays/nodes-leaf.yaml": "apiVersion: aicr.run/v1beta1\nkind: RecipeMetadata\nmetadata:\n  name: nodes-leaf\n" +
+			"spec:\n  base: nv-leaf\n  criteria:\n    service: partner-service\n    nodes: 8\n",
+	})
+	composed, err := NewComposedDataProvider(t.Context(), []CatalogInput{nvidiaCatalog(), partner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	override := providertest.WriteDir(t, map[string][]byte{"registry.yaml": []byte(providertest.EmptyRegistryYAML)})
+	layered, err := NewLayeredDataProviderOver(composed, LayeredProviderConfig{ExternalDir: override})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, dp := range map[string]DataProvider{"composition": composed, "composition with --data": layered} {
+		t.Cleanup(func() { EvictCachedStore(dp); EvictCachedRegistry(dp); EvictCachedCriteriaRegistry(dp) })
+		_, err = LoadMetadataStoreFor(t.Context(), dp)
+		if err == nil || !strings.Contains(err.Error(), "criteria.nodes") {
+			t.Errorf("%s: LoadMetadataStoreFor error = %v, want the external criteria.nodes rejection", name, err)
+		}
+	}
 }
 
 func TestComposedWalkDirSkipDir(t *testing.T) {
@@ -528,5 +866,64 @@ func TestComposedWalkDirSkipDir(t *testing.T) {
 		if strings.HasPrefix(path, "components/") {
 			t.Errorf("visited %q after SkipDir on components", path)
 		}
+	}
+}
+
+// TestComposedWalkDirSkipAll pins that fs.SkipAll ends the whole walk: each
+// child walk consumes the sentinel, so without care the next catalog (or the
+// base under a --data layer) would be walked and the callback called again.
+func TestComposedWalkDirSkipAll(t *testing.T) {
+	t.Parallel()
+
+	composed, err := NewComposedDataProvider(t.Context(), []CatalogInput{nvidiaCatalog(), partnerCatalog()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	override := providertest.WriteDir(t, map[string][]byte{
+		"registry.yaml":           []byte(providertest.EmptyRegistryYAML),
+		"components/new/vals.yml": []byte("new: true\n"),
+	})
+	layered, err := NewLayeredDataProviderOver(composed, LayeredProviderConfig{ExternalDir: override})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, dp := range map[string]DataProvider{"composition": composed, "composition with --data": layered} {
+		t.Run(name, func(t *testing.T) {
+			var files []string
+			err := dp.WalkDir(t.Context(), "", func(path string, d fs.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return err
+				}
+				files = append(files, path)
+				return fs.SkipAll
+			})
+			if err != nil {
+				t.Fatalf("WalkDir: %v", err)
+			}
+			if len(files) != 1 {
+				t.Errorf("callback ran for %v, want one file: fs.SkipAll must end the walk", files)
+			}
+		})
+	}
+}
+
+// TestCaptureArtifactLayersRefusesComposedBase pins that an artifact is never
+// built over a composition: its base layer would record partner catalogs as
+// embedded.
+func TestCaptureArtifactLayersRefusesComposedBase(t *testing.T) {
+	t.Parallel()
+
+	composed, err := NewComposedDataProvider(t.Context(), []CatalogInput{nvidiaCatalog(), partnerCatalog()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	override := providertest.WriteDir(t, map[string][]byte{"registry.yaml": []byte(providertest.EmptyRegistryYAML)})
+	layered, err := NewLayeredDataProviderOver(composed, LayeredProviderConfig{ExternalDir: override})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = captureArtifactLayers(t.Context(), layered)
+	if err == nil || !strings.Contains(err.Error(), "composed catalog") {
+		t.Fatalf("captureArtifactLayers error = %v, want the composed-catalog rejection", err)
 	}
 }

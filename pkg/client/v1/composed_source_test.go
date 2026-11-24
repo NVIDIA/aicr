@@ -15,13 +15,19 @@
 package aicr
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"aicr.run/pkg/bundler/attestation"
 	bundleconfig "aicr.run/pkg/bundler/config"
 	appconfig "aicr.run/pkg/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/recipe/providertest"
 )
 
@@ -101,7 +107,7 @@ func resolvedComponentNames(t *testing.T, source RecipeSourceOption) []string {
 	if err != nil {
 		t.Fatalf("ResolveRecipe: %v", err)
 	}
-	var names []string
+	names := make([]string, 0, len(result.internal.ComponentRefs))
 	for _, ref := range result.internal.ComponentRefs {
 		names = append(names, ref.Name)
 	}
@@ -249,5 +255,99 @@ func TestCatalogSourceAndConfig(t *testing.T) {
 	}
 	if names := resolvedComponentNames(t, source); !slices.Equal(names, []string{"custom", "extra"}) {
 		t.Errorf("components = %v", names)
+	}
+}
+
+func TestConfigCatalogList(t *testing.T) {
+	var nilConfig *Config
+	if got := nilConfig.CatalogList(); got != nil {
+		t.Errorf("nil Config CatalogList = %v, want nil", got)
+	}
+	if got := WrapConfig(&appconfig.AICRConfig{}).CatalogList(); len(got) != 0 {
+		t.Errorf("empty Config CatalogList = %v, want none", got)
+	}
+	want := []string{"nvidia", "./partner,with-comma"}
+	cfg := WrapConfig(&appconfig.AICRConfig{Spec: appconfig.Spec{Recipe: &appconfig.RecipeSpec{Catalogs: want}}})
+	if got := cfg.CatalogList(); !slices.Equal(got, want) {
+		t.Errorf("CatalogList = %v, want %v: entries must come back whole, commas included", got, want)
+	}
+}
+
+func TestIncludesDirectoryCatalog(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name   string
+		source RecipeSourceOption
+		want   bool
+	}{
+		{"built-in catalog alone", ComposedSource(CatalogSource("nvidia")), false},
+		{"directory catalog", ComposedSource(CatalogSource(dir)), true},
+		{"built-in and directory", ComposedSource(CatalogSource("nvidia"), CatalogSource(dir)), true},
+		{"not a composition: embedded", EmbeddedSource(), false},
+		{"not a composition: filesystem", ExternalFilesystemSource(dir), false},
+	}
+	for _, tt := range tests {
+		if got := tt.source.IncludesDirectoryCatalog(); got != tt.want {
+			t.Errorf("%s: IncludesDirectoryCatalog = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+// composedStubAttester signs nothing; it records whether it was asked to, so
+// the test can tell a rejection from a signed bundle.
+type composedStubAttester struct{ called bool }
+
+func (a *composedStubAttester) Attest(context.Context, attestation.AttestSubject) ([]byte, error) {
+	a.called = true
+	return []byte(`{"bundle":true}`), nil
+}
+func (a *composedStubAttester) Identity() string    { return "stub" }
+func (a *composedStubAttester) HasRekorEntry() bool { return false }
+
+// TestMakeBundleAttestRejectsComposedDirectoryCatalogs pins the SDK path of the
+// attestation guard: a bundle built from a composition of catalog directories
+// does not carry their files in data/, so signing it would record the recipe
+// source as embedded. The same MakeBundle call without Attest still succeeds.
+func TestMakeBundleAttestRejectsComposedDirectoryCatalogs(t *testing.T) {
+	alpha, beta := composedCatalogDirs(t)
+	client, err := NewClientContext(t.Context(), WithRecipeSource(ComposedSource(
+		ExternalFilesystemSource(alpha), ExternalFilesystemSource(beta))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	result, err := client.ResolveRecipe(t.Context(), RecipeRequest{Service: "eks", Intent: "training"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	att := &composedStubAttester{}
+	outDir := filepath.Join(t.TempDir(), "attested")
+	_, err = client.MakeBundle(t.Context(), result, BundleOptions{
+		Config: bundleconfig.NewConfig(
+			bundleconfig.WithDeployer(bundleconfig.DeployerHelm),
+			bundleconfig.WithAttest(true),
+		),
+		Attester:          att,
+		BinaryAttestation: []byte(`{"pre-verified":true}`),
+		OutputDir:         outDir,
+	})
+	if err == nil || !strings.Contains(err.Error(), "composed catalog") {
+		t.Fatalf("MakeBundle error = %v, want the composed-catalog attestation rejection", err)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if att.called {
+		t.Error("the attester was called for a bundle the guard rejects")
+	}
+	if _, statErr := os.Stat(outDir); statErr == nil {
+		t.Error("the output directory was created for a rejected bundle")
+	}
+
+	artifact, err := client.MakeBundle(t.Context(), result, BundleOptions{
+		Config:    bundleconfig.NewConfig(bundleconfig.WithDeployer(bundleconfig.DeployerHelm)),
+		OutputDir: t.TempDir(),
+	})
+	if err != nil || artifact.HasErrors() {
+		t.Fatalf("MakeBundle without Attest: %v, %+v", err, artifact)
 	}
 }

@@ -161,9 +161,12 @@ packages (`pkg/recipe`, `pkg/bundler`, `pkg/snapshotter`,
 | `ValidateState(ctx, ...)` | `validate` |
 
 Construction in CLI happens via `recipeClientFromCmd(ctx, cmd, cfg)` in
-`root.go` — it reads `--data` (or `cfg.RecipeSource()`, i.e.
-`spec.recipe.data`), picks `FilesystemSource` vs `EmbeddedSource`, and
-threads `version` through to `Metadata.Version`. `cfg` is the facade
+`root.go` — it reads the repeatable `--with` (or `cfg.CatalogList()`, i.e.
+`spec.recipe.catalogs`), which builds a `ComposedSource`, else `--data` (or
+`cfg.RecipeSource()`, i.e. `spec.recipe.data`), picks `FilesystemSource` vs
+`EmbeddedSource`, and threads `version` through to `Metadata.Version`. The
+catalog list is read through the facade (`catalogRefsFromCmd`) because
+`pkg/cli` may not use `pkg/recipe` symbols outside the facade policy. `cfg` is the facade
 `*aicr.Config` returned by `loadFacadeConfig`; `recipeClientFromCmd` never
 holds the raw `*config.AICRConfig`. Callers **must** `defer
 client.Close()`; the client owns goroutines that drain on Close.

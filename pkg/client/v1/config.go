@@ -196,7 +196,7 @@ func (c *Config) RecipeSource() (RecipeSourceOption, bool) {
 	if c.IsExternalOnly() {
 		return ExternalFilesystemSource(dir), true
 	}
-	if refs := c.internal.Recipe().CatalogList(); len(refs) > 0 {
+	if refs := c.CatalogList(); len(refs) > 0 {
 		catalogs := make([]RecipeSourceOption, 0, len(refs))
 		for _, ref := range refs {
 			catalogs = append(catalogs, CatalogSource(ref))
@@ -207,6 +207,16 @@ func (c *Config) RecipeSource() (RecipeSourceOption, bool) {
 		return RecipeSourceOption{}, false
 	}
 	return FilesystemSource(dir), true
+}
+
+// CatalogList reports spec.recipe.catalogs: the catalogs to compose, each
+// "nvidia" or a catalog directory. It returns nil when none is set or the
+// Config is nil.
+func (c *Config) CatalogList() []string {
+	if c == nil || c.internal == nil {
+		return nil
+	}
+	return c.internal.Recipe().CatalogList()
 }
 
 // IsExternalOnly reports spec.recipe.externalOnly.

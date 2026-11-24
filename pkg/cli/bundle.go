@@ -1603,6 +1603,11 @@ func runBundleCmdWithDependencies(
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid bundle command options")
 	}
+	if opts.attest {
+		if attestErr := rejectAttestedComposition(cmd, cfg); attestErr != nil {
+			return attestErr
+		}
+	}
 	// Registered before every later cleanup so it runs after them and sees
 	// their errors too: a failed run must not leave a layout that makes a
 	// rerun to the same path conflict.

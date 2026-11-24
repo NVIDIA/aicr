@@ -1409,7 +1409,8 @@ derive step rather than the load step.
 | `CNCFEvidenceOptions()` | `spec.validate.evidence.cncf` |
 | `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` (**not** `.output`) |
 | `SnapshotOutputOptions()` | `spec.snapshot.output` |
-| `RecipeSource()` | `spec.recipe.data` |
+| `RecipeSource()` | `spec.recipe.catalogs` (a `ComposedSource` of `CatalogSource` values), else `spec.recipe.data` |
+| `CatalogList()` | `spec.recipe.catalogs`, each entry whole (`nil` when unset) |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
 | `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode`, `spec.recipe.configuration.gke.tcpxoInterfaces` |
 | `RecipeProfile()` / `RecipeAccountingMode()` / `RecipeRuntimeInventoryMode()` / `RecipeGKETCPXOInterfaces()` | the same four, raw, for callers applying their own precedence first |

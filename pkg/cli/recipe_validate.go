@@ -43,6 +43,15 @@ Examples:
 			&cli.StringFlag{Name: flagFormat, Value: verifyFormatText, Usage: "Output format (text or json)", Category: catOutput},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			// The recipe command's --with is inherited by this subcommand, but
+			// a static check validates one file or directory, not a
+			// composition. Accepting it would validate the wrong catalog and
+			// still report success.
+			if cmd.IsSet("with") {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					"--with does not apply to recipe validate, which checks one file or one --data directory; "+
+						"validate each catalog directory separately with --data")
+			}
 			if err := validateSingleValueFlags(cmd, flagFormat, "data", "config"); err != nil {
 				return err
 			}

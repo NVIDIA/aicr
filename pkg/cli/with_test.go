@@ -17,12 +17,16 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	aicr "aicr.run/pkg/client/v1"
 	appconfig "aicr.run/pkg/config"
+	"aicr.run/pkg/errors"
+	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/recipe/providertest"
 	"github.com/urfave/cli/v3"
 )
@@ -197,8 +201,9 @@ func TestWithFlagAbsentKeepsDataBehavior(t *testing.T) {
 }
 
 func TestWithFlagOnCatalogCommands(t *testing.T) {
-	var walk func(*cli.Command)
-	walk = func(cmd *cli.Command) {
+	root := RootCommand()
+	var walk func(path string, cmd *cli.Command)
+	walk = func(path string, cmd *cli.Command) {
 		hasExternal, hasWith := false, false
 		for _, flag := range cmd.Flags {
 			for _, name := range flag.Names() {
@@ -206,14 +211,158 @@ func TestWithFlagOnCatalogCommands(t *testing.T) {
 				hasWith = hasWith || name == "with"
 			}
 		}
-		// `recipe validate` statically checks one directory and has no
-		// composition to build, so it has --external-only but not --with.
-		if hasExternal && !hasWith && cmd.Name != "validate" {
-			t.Errorf("%s has --external-only without --with", cmd.Name)
+		// Only `recipe validate` is exempt, by its full path: it statically
+		// checks one directory and has no composition to build, so it has
+		// --external-only but not --with. The top-level `validate` command
+		// resolves recipes against a catalog and must take --with.
+		if hasExternal && !hasWith && path != root.Name+" recipe validate" {
+			t.Errorf("%s has --external-only without --with", path)
 		}
 		for _, child := range cmd.Commands {
-			walk(child)
+			walk(path+" "+child.Name, child)
 		}
 	}
-	walk(RootCommand())
+	walk(root.Name, root)
+}
+
+// TestRecipeValidateRejectsWith pins that --with, which recipe validate
+// inherits from the recipe command, is refused rather than silently ignored.
+func TestRecipeValidateRejectsWith(t *testing.T) {
+	alpha, _, _ := withCatalogs(t)
+	_, err := runFresh(t, "aicr", "recipe", "validate", "--with", alpha, "--data", alpha)
+	if err == nil {
+		t.Fatal("recipe validate accepted --with")
+	}
+	if !strings.Contains(err.Error(), "--with does not apply to recipe validate") {
+		t.Errorf("error = %v, want the recipe validate rejection", err)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+}
+
+// catalogRefs runs catalogRefsFromCmd under a command that defines --with.
+func catalogRefs(t *testing.T, cfg *aicr.Config, args ...string) ([]string, error) {
+	t.Helper()
+	var refs []string
+	cmd := &cli.Command{
+		Name:   "test",
+		Flags:  []cli.Flag{withFlag()},
+		Writer: &bytes.Buffer{},
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			var err error
+			refs, err = catalogRefsFromCmd(cmd, cfg)
+			return err
+		},
+	}
+	err := cmd.Run(t.Context(), append([]string{"test"}, args...))
+	return refs, err
+}
+
+func configWithCatalogs(catalogs ...string) *aicr.Config {
+	return aicr.WrapConfig(&appconfig.AICRConfig{Spec: appconfig.Spec{Recipe: &appconfig.RecipeSpec{Catalogs: catalogs}}})
+}
+
+// TestCatalogRefsFromCmd pins where the catalog list comes from: repeated
+// --with values win over spec.recipe.catalogs, and a configured entry is never
+// split, so a directory whose path contains a comma can be named there.
+func TestCatalogRefsFromCmd(t *testing.T) {
+	t.Run("none set", func(t *testing.T) {
+		refs, err := catalogRefs(t, nil)
+		if err != nil || refs != nil {
+			t.Fatalf("refs = %v, error = %v, want none", refs, err)
+		}
+	})
+	t.Run("repeated flag", func(t *testing.T) {
+		refs, err := catalogRefs(t, nil, "--with", "nvidia", "--with", "./partner")
+		if err != nil || !slices.Equal(refs, []string{"nvidia", "./partner"}) {
+			t.Fatalf("refs = %v, error = %v", refs, err)
+		}
+	})
+	t.Run("the flag wins over the config", func(t *testing.T) {
+		refs, err := catalogRefs(t, configWithCatalogs("./from-config"), "--with", "nvidia")
+		if err != nil || !slices.Equal(refs, []string{"nvidia"}) {
+			t.Fatalf("refs = %v, error = %v", refs, err)
+		}
+	})
+	t.Run("config entries keep their commas", func(t *testing.T) {
+		refs, err := catalogRefs(t, configWithCatalogs("nvidia", "./team,a/catalog"))
+		if err != nil || !slices.Equal(refs, []string{"nvidia", "./team,a/catalog"}) {
+			t.Fatalf("refs = %v, error = %v", refs, err)
+		}
+	})
+	t.Run("empty value", func(t *testing.T) {
+		_, err := catalogRefs(t, configWithCatalogs("nvidia", "  "))
+		if err == nil || !strings.Contains(err.Error(), "empty value") {
+			t.Fatalf("error = %v, want the empty-value rejection", err)
+		}
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+}
+
+// TestRejectAttestedComposition pins the --attest guard: a bundle built from a
+// composition that includes a catalog directory is refused before signing,
+// whether the catalogs came from --with or from spec.recipe.catalogs.
+func TestRejectAttestedComposition(t *testing.T) {
+	alpha, _, _ := withCatalogs(t)
+
+	run := func(t *testing.T, cfg *aicr.Config, args ...string) error {
+		t.Helper()
+		cmd := &cli.Command{
+			Name:   "test",
+			Flags:  []cli.Flag{withFlag()},
+			Writer: &bytes.Buffer{},
+			Action: func(_ context.Context, cmd *cli.Command) error { return rejectAttestedComposition(cmd, cfg) },
+		}
+		return cmd.Run(t.Context(), append([]string{"test"}, args...))
+	}
+
+	for name, tt := range map[string]struct {
+		cfg  *aicr.Config
+		args []string
+		want bool // rejected
+	}{
+		"no catalogs":                  {nil, nil, false},
+		"the built-in catalog":         {nil, []string{"--with", "nvidia"}, false},
+		"a directory catalog":          {nil, []string{"--with", alpha}, true},
+		"built-in and directory":       {nil, []string{"--with", "nvidia", "--with", alpha}, true},
+		"configured built-in catalog":  {configWithCatalogs("nvidia"), nil, false},
+		"configured directory catalog": {configWithCatalogs("nvidia", alpha), nil, true},
+		"flag replaces a configured directory": {
+			configWithCatalogs(alpha), []string{"--with", "nvidia"}, false,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := run(t, tt.cfg, tt.args...)
+			if !tt.want {
+				if err != nil {
+					t.Fatalf("rejectAttestedComposition() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "--attest cannot sign") {
+				t.Fatalf("error = %v, want the --attest rejection", err)
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		})
+	}
+}
+
+// TestBundleAttestRejectsComposedDirectory drives the guard through the real
+// bundle command, which must refuse before it builds or signs anything.
+func TestBundleAttestRejectsComposedDirectory(t *testing.T) {
+	alpha, _, _ := withCatalogs(t)
+	dir := t.TempDir()
+	recipePath := filepath.Join(dir, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte("kind: RecipeResult\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out")
+
+	_, err := runFresh(t, "aicr", "bundle", "--recipe", recipePath, "--attest", "--with", alpha, "--output", out)
+	if err == nil || !strings.Contains(err.Error(), "--attest cannot sign") {
+		t.Fatalf("error = %v, want the --attest rejection", err)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Error("the output directory was created for a rejected bundle")
+	}
 }

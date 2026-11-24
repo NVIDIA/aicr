@@ -531,6 +531,23 @@ func CatalogSource(ref string) RecipeSourceOption {
 	return ExternalFilesystemSource(ref)
 }
 
+// IncludesDirectoryCatalog reports whether the source is a ComposedSource that
+// includes a catalog directory, that is a catalog other than the built-in one.
+// A bundle built from such a source cannot be attested: its catalog files are
+// not carried into the bundle.
+func (s RecipeSourceOption) IncludesDirectoryCatalog() bool {
+	spec := s.internal.composed
+	if spec == nil {
+		return false
+	}
+	for _, child := range spec.children {
+		if child.kind != sourceKindEmbedded {
+			return true
+		}
+	}
+	return false
+}
+
 // WithOverride returns a copy of a ComposedSource that also layers the
 // directory at path over the composition. The directory wins over the
 // composed catalogs file by file, as --data wins over the embedded catalog.
