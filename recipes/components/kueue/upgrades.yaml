@@ -190,11 +190,13 @@ transitions:
           - id: keep-direct-priority
             description: >-
               Only if Workload priorities are set directly and must be kept:
-              add {name: WorkloadPriorityClassWatchesWorkloads, enabled: false}
-              where your kueue override already sets feature gates, either
-              controllerManager.featureGates or the featureGates block of
-              managerConfig.controllerManagerConfigYaml, or in
-              controllerManager.featureGates if it sets none, before applying.
+              turn the gate off where your kueue override already sets
+              feature gates, before applying. In the Helm value
+              controllerManager.featureGates, or there if the override sets
+              none, add the list entry {name: WorkloadPriorityClassWatchesWorkloads,
+              enabled: false}. In the featureGates map of
+              managerConfig.controllerManagerConfigYaml, add the key
+              WorkloadPriorityClassWatchesWorkloads: false.
             reason: >-
               With the gate on, kueue resets such a priority to the
               WorkloadPriorityClass value on its next reconcile. kueue refuses
@@ -216,12 +218,14 @@ transitions:
           - id: keep-direct-priority
             description: >-
               Only if Workload priorities are set directly and must be kept:
-              add {name: WorkloadPriorityClassWatchesWorkloads, enabled: false}
-              where your kueue override already sets feature gates, either
-              controllerManager.featureGates or the featureGates block of
-              managerConfig.controllerManagerConfigYaml, or in
-              controllerManager.featureGates if it sets none, in the same
-              commit that moves the kueue release to 0.19.14.
+              turn the gate off where your kueue override already sets
+              feature gates, in the same commit that moves the kueue release
+              to 0.19.14. In the Helm value controllerManager.featureGates, or
+              there if the override sets none, add the list entry
+              {name: WorkloadPriorityClassWatchesWorkloads, enabled: false}.
+              In the featureGates map of
+              managerConfig.controllerManagerConfigYaml, add the key
+              WorkloadPriorityClassWatchesWorkloads: false.
             reason: >-
               With the gate on, kueue resets such a priority to the
               WorkloadPriorityClass value on its next reconcile. kueue refuses
