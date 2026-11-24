@@ -26,18 +26,9 @@
 # component's manifests. TestHealthCheckCRDAssertionsAnchored enforces this.
 charts:
   - chart: network-operator
-    crds:
-      - cidrpools.nv-ipam.nvidia.com
-      - hostdevicenetworks.mellanox.com
-      - ipoibnetworks.mellanox.com
-      - ippools.nv-ipam.nvidia.com
-      - macvlannetworks.mellanox.com
-      - network-attachment-definitions.k8s.cni.cncf.io
-      - nicclusterpolicies.mellanox.com
-      - nicnodepolicies.mellanox.com
-    image: nvcr.io/nvidia/cloud-native/network-operator:v26.7.1
+    image: nvcr.io/nvidia/cloud-native/network-operator:v26.10.0
     repository: https://helm.ngc.nvidia.com/nvidia
-    sourceVersion: 26.7.1
+    sourceVersion: 26.10.0
     variants:
       - crds:
           - cidrpools.nv-ipam.nvidia.com
@@ -62,6 +53,20 @@ charts:
         recipes:
           - gb200-nvke-ubuntu-training-kubeflow
           - vr200-nvke-ubuntu-training-kubeflow
+  - chart: network-operator
+    crds:
+      - cidrpools.nv-ipam.nvidia.com
+      - hostdevicenetworks.mellanox.com
+      - ipoibnetworks.mellanox.com
+      - ippools.nv-ipam.nvidia.com
+      - macvlannetworks.mellanox.com
+      - network-attachment-definitions.k8s.cni.cncf.io
+      - nicclusterpolicies.mellanox.com
+      - nicnodepolicies.mellanox.com
+    image: nvcr.io/nvidia/cloud-native/network-operator:v26.7.1
+    repository: https://helm.ngc.nvidia.com/nvidia
+    sourceVersion: 26.7.1
+    variants:
       - crds:
           - cidrpools.nv-ipam.nvidia.com
           - hostdevicenetworks.mellanox.com

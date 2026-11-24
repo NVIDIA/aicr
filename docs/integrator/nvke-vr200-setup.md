@@ -256,8 +256,14 @@ RBAC but leaves `/etc/cni/net.d/00-multus.conflist` on every node, which sorts
 ahead of OVN-Kubernetes and fails every subsequent pod creation cluster-wide
 with `Unauthorized`. This was observed on this cluster.
 
-**It needs network-operator 26.7.1 or later.** The registry default is now
-26.7.1; this leaf pinned it while the default was still 26.7.0. The
+**It pins network-operator 26.10.0, for thick multus.** NVKE's API server runs
+`--service-account-extend-token-expiration=false`. Thin multus copies the
+service-account token into `multus.kubeconfig` once, so after an hour every
+new pod on the node fails sandbox creation with `Unauthorized`. The thick
+daemon (`deploymentType: thick`, first available in 26.10.0) reads the token
+kubelet rotates instead.
+
+**It needs network-operator 26.7.1 or later in any case.** The
 daemon in 26.7.0 has no firmware-discovery fallback, so a `flint` failure is
 fatal — and `flint` cannot read ConnectX-9 here. Measured on a worker: 26.7.0
 exits with `failed to discover NIC devices`, while 26.7.1 logs `flint failed,
@@ -265,8 +271,10 @@ falling back to sysfs` and discovers every port. The fix is Mellanox
 [c27f7ae](https://github.com/Mellanox/nic-configuration-operator/commit/c27f7ae71bb65caa93a7142e06e0343156648684)
 (#499/#533), which is absent from the `ghcr.io/mellanox` `v1.3.1` images the
 other in-tree policies pin, so this leaf pins the `nvcr.io/nvidia/mellanox`
-`network-operator-v26.7.1` images instead. ConnectX-7 and ConnectX-8 platforms
-never hit this, because `flint` works there.
+`network-operator` release images instead (now `network-operator-v26.10.0`,
+whose release branch carries the same fallback; it has not been measured on
+this cluster). ConnectX-7 and ConnectX-8 platforms never hit this, because
+`flint` works there.
 
 Verified on the reference cluster: the daemon discovered all eight ConnectX-9
 ports and wrote a `NicDevice` per port, each carrying firmware 82.48.4222,
@@ -307,6 +315,9 @@ does a signed recipe attestation (`--emit-attestation`), which carries the
 - ConnectX-9 qualification and an SR-IOV/RDMA east-west fabric for
   multi-domain training.
 - A kernel-flavour measurement so `nvidia-bos-64k` can be a constraint.
+- A run of thick multus (network-operator 26.10.0) on this cluster: no
+  measurement yet shows pods still starting more than an hour after multus
+  starts, or the 26.10.0 nic-configuration-daemon discovering ConnectX-9.
 - A stable VR200 product matcher; until then, mixed GPU pools need
   `--node-selector`.
 
