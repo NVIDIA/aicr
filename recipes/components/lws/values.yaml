@@ -26,8 +26,13 @@
 #   PodGroups itself, and at 0.10.0 the only provider is volcano. KAI
 #   Scheduler needs no provider: it groups each leader with its workers
 #   itself, for pods that name it as their scheduler.
-# - No fullnameOverride. The health check, and Run:ai's LWS detection, look
-#   for the Deployment lws-controller-manager.
+
+# Without this the chart names its objects after the Helm release, and the
+# release is not lws on every deployer: flux installs it as lws-system-lws, and
+# Argo CD with a name prefix as <prefix>lws. The health check and Run:ai's LWS
+# detection both look for the Deployment lws-controller-manager, so this has to
+# stay in sync with checks/lws/health-check.yaml.
+fullnameOverride: lws
 
 # Same convention as kueue for system controllers: tolerate every taint so
 # the controller can land on tainted system pools. Bundle-time

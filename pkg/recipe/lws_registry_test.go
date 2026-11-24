@@ -63,10 +63,12 @@ func TestLWSRegisteredWithoutOverlay(t *testing.T) {
 	}
 }
 
-// TestLWSHealthCheckMatchesValues guards the names the health check asserts as
-// literals against the values that would change them: a fullnameOverride or
-// nameOverride renames the controller Deployment, and the check would then
-// report a healthy install as unhealthy.
+// TestLWSHealthCheckMatchesValues guards the cross-file coupling between the
+// values file and the health check: fullnameOverride decides the controller
+// Deployment's name, and the check asserts that name as a literal. Without the
+// override the chart names the Deployment after the Helm release, which is not
+// lws on every deployer, and the check would report a healthy install as
+// unhealthy.
 func TestLWSHealthCheckMatchesValues(t *testing.T) {
 	t.Parallel()
 
@@ -78,16 +80,21 @@ func TestLWSHealthCheckMatchesValues(t *testing.T) {
 	if err := yaml.Unmarshal(raw, &values); err != nil {
 		t.Fatalf("parse %s: %v", lwsValuesFile, err)
 	}
-	for _, key := range []string{"fullnameOverride", "nameOverride"} {
-		if v, ok := values[key]; ok && v != "" {
-			t.Errorf("%s sets %s = %v; the controller Deployment must stay %q",
-				lwsValuesFile, key, v, lwsControllerDeployment)
-		}
+	fullnameOverride, ok := values["fullnameOverride"].(string)
+	if !ok || fullnameOverride == "" {
+		t.Fatalf("%s must set fullnameOverride; without it the Deployment carries the release name", lwsValuesFile)
+	}
+
+	// The chart renders the Deployment as <fullname>-controller-manager.
+	wantName := fullnameOverride + "-controller-manager"
+	if wantName != lwsControllerDeployment {
+		t.Errorf("%s renders Deployment %q (fullnameOverride %q), want %q",
+			lwsValuesFile, wantName, fullnameOverride, lwsControllerDeployment)
 	}
 
 	gotName, gotNamespace := healthCheckDeployment(t, "checks/lws/health-check.yaml")
-	if gotName != lwsControllerDeployment {
-		t.Errorf("health check asserts Deployment %q, want %q", gotName, lwsControllerDeployment)
+	if gotName != wantName {
+		t.Errorf("health check asserts Deployment %q, but %s renders %q", gotName, lwsValuesFile, wantName)
 	}
 	if gotNamespace != lwsNamespace {
 		t.Errorf("health check asserts namespace %q, want %q", gotNamespace, lwsNamespace)

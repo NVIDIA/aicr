@@ -1742,7 +1742,7 @@ spec:
       valuesFile: components/lws/values.yaml
 ```
 
-Keep the `valuesFile`. Component values are never discovered from the component name, so a ref without it installs the chart defaults, and those do not tolerate tainted system nodes.
+Keep the `valuesFile`. Component values are never discovered from the component name, so a ref without it installs the chart defaults. Those do not tolerate tainted system nodes, and they name the chart's objects after the Helm release, which is not `lws` on every deployer: `flux` installs it as `lws-system-lws`, and Argo CD with a name prefix as `<prefix>lws`. The values file sets `fullnameOverride: lws`, so the controller Deployment is `lws-controller-manager` whichever deployer installs it.
 
 The component has no dependencies. The controller manages its own webhook certificate, so it does not need cert-manager. Its chart options stay at upstream defaults, which affects three things:
 
@@ -1753,7 +1753,7 @@ The component has no dependencies. The controller manages its own webhook certif
 The release must stay in `lws-system`. The chart does not enforce that: its templates follow the release namespace, so a `componentRef` that sets another namespace still renders and installs, and AICR does not reject it. Three things expect `lws-system` all the same:
 
 - The `LeaderWorkerSet` CRD hard-codes `lws-system` as the namespace of its conversion webhook Service. At this pin the CRD serves and stores only `v1`, so the API server has nothing to convert and never calls that webhook. A release in another namespace would break conversion as soon as a later chart serves a second version.
-- Run:ai looks for the `lws-controller-manager` Deployment there.
+- Run:ai looks for the `lws-controller-manager` Deployment there, by that exact name.
 - This component's health check asserts the Deployment and its pods there.
 
 **Upgrades.** `lws` is not `ownsCRDs`, because the `LeaderWorkerSet` CRD uses webhook conversion. On every deployer except `argocd` and `argocd-helm`, a chart bump leaves the CRDs at their first-install schema. Before upgrading on those deployers, apply the new chart's CRDs with the [CRD-apply command](#upgrading-components-that-own-crds), with `CHART="oci://registry.k8s.io/lws/charts/lws"`. The CRD set also grows across releases: 0.10.0 already ships the two `DisaggregatedSet` CRDs beside `LeaderWorkerSet`.
