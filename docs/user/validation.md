@@ -102,24 +102,34 @@ The check runs one short-lived pod per NetworkAttachmentDefinition the recipe
 renders, directly or from a `SriovNetwork` or `SriovIBNetwork`. The scheduler
 places each pod on a Ready, uncordoned node with a free unit of the network's
 resource, through a node affinity, so the probe never takes a unit the
-scheduler has given a workload. The pod requests one unit, names the network
+scheduler has given a workload. When the run passes `--toleration`, a node
+with a `NoSchedule` or `NoExecute` taint those tolerations do not cover is
+not used. The pod requests one unit, names the network
 in its `k8s.v1.cni.cncf.io/networks` annotation, lists its interfaces, and
 exits. The check then reads the pod's Multus `network-status` and requires
 that:
 
 - the network has an entry whose interface exists in the pod;
-- when the network assigns addresses, the address is inside the network's
-  nv-ipam IPPool and outside the cluster's pod network. The pod network comes
-  from each node's `spec.podCIDRs` and the OVN-Kubernetes
-  `k8s.ovn.org/node-subnets` annotation. When neither is set, the overlap is
-  reported as not evaluated;
-- an SR-IOV attachment carries the VF's PCI address.
+- when the network assigns addresses, each address is configured on that
+  interface, inside the network's declared range, and outside the cluster's
+  pod network. The declared range comes from the network's nv-ipam IPPool, or
+  from a host-local `subnet` or `ranges` or a whereabouts `range` or
+  `ipRanges` in its CNI config; an IPAM type whose range the check does not
+  read, or a pool the recipe does not ship, is reported as not asserted for
+  the addresses of that family. The pod network comes from each node's
+  `spec.podCIDRs` and the OVN-Kubernetes `k8s.ovn.org/node-subnets`
+  annotation. When neither is set, the overlap is reported as not evaluated;
+- an attachment that uses the `sriov` or `ib-sriov` CNI, which includes every
+  `SriovNetwork` and `SriovIBNetwork`, carries the VF's PCI address.
 
 Each network gets its own `RESULT:` line. It sends no traffic between nodes;
 that is the job of the `nccl-all-reduce-bw-net` performance check. A network
 is skipped rather than failed when every unit of its resource is requested by
-running workloads (busy), or when every node that advertises it is cordoned
-(unschedulable). When no network passed or failed, the check skips with
+running workloads (busy), or when every node that advertises it is cordoned or
+carries a taint the run's `--toleration` does not cover (unschedulable). A
+kubelet that rejects the probe because a unit was unavailable counts as busy
+only when other pods hold every unit; otherwise a unit may be unhealthy, and
+the network fails. When no network passed or failed, the check skips with
 `nodes-busy` if at least one was busy, and with `no-schedulable-gpu-nodes` if
 all were unschedulable. The failures name their cause:
 
@@ -129,7 +139,9 @@ all were unschedulable. The failures name their cause:
 | `the probe pod never started: FailedCreatePodSandBox: ...` | Multus is present but failing, for example an expired token (`Unauthorized`) or a stale config | Act on the quoted kubelet message; for an expired token, restart the Multus DaemonSet |
 | `uncordoned node(s) are NotReady` | Every uncordoned node that advertises the resource is NotReady. On OKE GB300, CRI-O waits for Multus, so a node whose Multus never wrote its config stays NotReady | Fix the kubelet or the node's CNI; for OKE GB300, check the Multus pod on that node |
 | `may not be registered on that node` | The kubelet rejected the probe with `OutOf<resource>`: the device plugin for the network's resource is not registered there | Check the device-plugin pod on that node |
-| `the scheduler could not place the probe` | The scheduler refused the node for a reason other than a busy unit, such as a taint the run's `--toleration` does not cover | Act on the quoted scheduler message |
+| `a unit may be unhealthy` | The kubelet had no unit of the resource for the probe although other pods request fewer than the node advertises | Check the device plugin's health reporting for that node's VFs |
+| `is not configured on <interface>` | Multus reported an address the probe did not find on the interface | Check the IPAM plugin and the CNI's address configuration |
+| `the scheduler could not place the probe` | The scheduler refused the node for a reason other than a busy unit | Act on the quoted scheduler message |
 
 The check has run only against fake clusters so far, not against a live
 tenant.
@@ -1811,7 +1823,7 @@ Common reasons and their cause:
 | `nccl-benchmark-runtime … must be a … TrainingRuntime … must declare a "node" replicatedJob` | `stdout` | The referenced file is not a Kubeflow `trainer.kubeflow.org/v1alpha1` `TrainingRuntime`, or lacks the `node` replicatedJob | Fix the runtime file to be a valid `TrainingRuntime` with a `node` replicatedJob |
 | `nccl-benchmark-runtime and nccl-benchmark-profile are mutually exclusive` | `stdout` | The recipe declares both escape hatches at once | Keep only one: borrow an embedded profile **or** supply your own runtime |
 | `no secondary network could be probed (<n> busy, <m> unschedulable)`, with `extra.skipReason` `nodes-busy` | `stdout` | `secondary-network-attachment` probed no network, and at least one had every unit of its resource requested by running workloads | Rerun when a workload releases a VF; see [Secondary network attachment](#secondary-network-attachment) |
-| `no secondary network could be probed (0 busy, <m> unschedulable)`, with `extra.skipReason` `no-schedulable-gpu-nodes`; per network, `all <n> node(s) advertising <resource> are cordoned` | `stdout` | Every node that advertises each network's resource is cordoned | Uncordon a node that advertises the resource (`kubectl uncordon <node>`) and rerun. NotReady nodes fail the check instead of skipping it; see [Secondary network attachment](#secondary-network-attachment) |
+| `no secondary network could be probed (0 busy, <m> unschedulable)`, with `extra.skipReason` `no-schedulable-gpu-nodes`; per network, `all <n> node(s) advertising <resource> are cordoned` (or `... carry a taint the run's tolerations do not cover`) | `stdout` | Every node that advertises each network's resource is cordoned, or excluded by the run's `--toleration` | Uncordon a node that advertises the resource (`kubectl uncordon <node>`), or add a toleration for its taint, and rerun. NotReady nodes fail the check instead of skipping it; see [Secondary network attachment](#secondary-network-attachment) |
 | `the recipe ships no NetworkAttachmentDefinition, SriovNetwork or SriovIBNetwork` | `stdout`, and `extra.skipReason` as `component-not-in-recipe` | `secondary-network-attachment` has no secondary network to attach | None; the check applies only to recipes that ship one |
 | `skipped - no-cluster mode` | `message` | `--no-cluster` was passed — the runner short-circuits every phase before dispatching any Job | Remove the flag to run behavioral checks |
 | `named in skipChecks` | `message`, and `extra.skipReason` as `named-in-skip-checks` (the channel that survives bundle redaction) | The caller withheld this check with `--skip-check` or `spec.validate.execution.skipChecks` | Drop the name from the skip list to run it again; see [Skipping checks a run cannot satisfy](#skipping-checks-a-run-cannot-satisfy) |

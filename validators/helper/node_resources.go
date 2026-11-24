@@ -22,6 +22,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	resourcehelper "k8s.io/component-helpers/resource"
 )
 
 // NodeResourceRequests returns, per resource, the sum of the effective
@@ -60,44 +61,35 @@ func NodeResourceRequests(ctx context.Context, client kubernetes.Interface, node
 }
 
 // PodEffectiveRequests returns the pod's effective request per resource, as
-// the scheduler computes it: the larger of the app containers plus sidecars
-// (restartable init containers), and each regular init container plus the
-// sidecars started before it. A container that sets only a limit is counted
-// by its limit, which is the request the API server defaults for it.
+// the scheduler computes it (k8s.io/component-helpers resource.PodRequests):
+// the larger of the app containers plus sidecars (restartable init
+// containers) and each regular init container plus the sidecars started
+// before it, replaced by pod-level requests for the resources those cover,
+// plus the pod overhead. A container that sets only a limit is counted by its
+// limit, which is the request the API server defaults for it.
 func PodEffectiveRequests(pod *v1.Pod) v1.ResourceList {
-	sidecars := v1.ResourceList{}
-	initPeak := v1.ResourceList{}
-	for i := range pod.Spec.InitContainers {
-		c := &pod.Spec.InitContainers[i]
-		req := containerRequests(c)
-		if c.RestartPolicy != nil && *c.RestartPolicy == v1.ContainerRestartPolicyAlways {
-			addResources(sidecars, req)
-			continue
-		}
-		withSidecars := req.DeepCopy()
-		addResources(withSidecars, sidecars)
-		maxResources(initPeak, withSidecars)
+	defaulted := pod.DeepCopy()
+	for i := range defaulted.Spec.InitContainers {
+		defaultRequestsFromLimits(&defaulted.Spec.InitContainers[i])
 	}
-
-	effective := sidecars.DeepCopy()
-	for i := range pod.Spec.Containers {
-		addResources(effective, containerRequests(&pod.Spec.Containers[i]))
+	for i := range defaulted.Spec.Containers {
+		defaultRequestsFromLimits(&defaulted.Spec.Containers[i])
 	}
-	maxResources(effective, initPeak)
-	return effective
+	return resourcehelper.PodRequests(defaulted, resourcehelper.PodResourcesOptions{})
 }
 
-// containerRequests returns the container's requests, filling each resource
-// that has only a limit with that limit.
-func containerRequests(c *v1.Container) v1.ResourceList {
-	out := v1.ResourceList{}
+// defaultRequestsFromLimits sets the request of every resource c limits
+// without requesting to that limit.
+func defaultRequestsFromLimits(c *v1.Container) {
 	for name, q := range c.Resources.Limits {
-		out[name] = q.DeepCopy()
+		if _, ok := c.Resources.Requests[name]; ok {
+			continue
+		}
+		if c.Resources.Requests == nil {
+			c.Resources.Requests = v1.ResourceList{}
+		}
+		c.Resources.Requests[name] = q.DeepCopy()
 	}
-	for name, q := range c.Resources.Requests {
-		out[name] = q.DeepCopy()
-	}
-	return out
 }
 
 // addResources adds every quantity in add to dst.
@@ -106,14 +98,5 @@ func addResources(dst, add v1.ResourceList) {
 		sum := dst[name]
 		sum.Add(q)
 		dst[name] = sum
-	}
-}
-
-// maxResources raises every quantity in dst to at least the one in other.
-func maxResources(dst, other v1.ResourceList) {
-	for name, q := range other {
-		if cur, ok := dst[name]; !ok || q.Cmp(cur) > 0 {
-			dst[name] = q.DeepCopy()
-		}
 	}
 }

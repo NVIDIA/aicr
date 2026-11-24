@@ -30,8 +30,27 @@ var rail0 = secondaryNetwork{
 	Name:         "sriov-network-rail-0",
 	Resource:     "nvidia.com/sriov_resource_rail_0",
 	Kind:         attachmentKindSRIOV,
+	RequiresPCI:  true,
 	IPAMDeclared: true,
 	IPAMPools:    []string{"nv-ipam-pool-rail-0"},
+}
+
+// rail0AddrLines is the probe's ip -o addr output with rail0Status's address
+// on net1.
+var rail0AddrLines = []string{
+	"1: lo    inet 127.0.0.1/8 scope host lo",
+	"2: eth0    inet 192.168.1.5/24 scope global eth0",
+	"3: net1    inet 10.255.0.12/22 scope global net1",
+}
+
+// hostLocalNet is a shipped NAD whose host-local IPAM declares its range
+// inline.
+var hostLocalNet = secondaryNetwork{
+	Namespace:    "apps",
+	Name:         "macvlan",
+	Kind:         attachmentKindNAD,
+	IPAMDeclared: true,
+	IPAMSubnets:  []netip.Prefix{netip.MustParsePrefix("10.1.0.0/24")},
 }
 
 // okeRdmaNet is the OKE GB300 raw NAD: host-device with empty IPAM.
@@ -246,7 +265,7 @@ func TestEvaluateAttachmentIPs(t *testing.T) {
 		{name: "prefix form accepted", network: rail0, ips: []string{"10.255.1.4/22"}, pools: rail0Pools, podCIDRs: ovnPodCIDRs},
 		{
 			name: "outside pool", network: rail0, ips: []string{"10.255.8.4"}, pools: rail0Pools, podCIDRs: ovnPodCIDRs,
-			wantProblems: []string{"outside the IPPool subnet(s) [10.255.0.0/22]"},
+			wantProblems: []string{"outside the declared range(s) [10.255.0.0/22]"},
 		},
 		{
 			name: "inside pod CIDR (the #3468 pool)", network: rail0, ips: []string{"192.168.1.20"},
@@ -265,7 +284,44 @@ func TestEvaluateAttachmentIPs(t *testing.T) {
 		{
 			name: "unknown pool and unknown pod network are notes, not failures", network: rail0,
 			ips:       []string{"10.255.0.12"},
-			wantNotes: []string{"IPPool nv-ipam-pool-rail-0 is not shipped", "pod-network overlap not evaluated"},
+			wantNotes: []string{"IPPool nv-ipam-pool-rail-0 is not shipped", "pod-network overlap not evaluated", "address 10.255.0.12 is not bounded"},
+		},
+		{
+			name: "an address of a family whose pool is not shipped is a note, not a failure",
+			network: func() secondaryNetwork {
+				n := rail0
+				n.IPAMPools = []string{"nv-ipam-pool-rail-0", "external-v6"}
+				return n
+			}(),
+			ips: []string{"10.255.0.12", "fd00:255::12"}, pools: rail0Pools, podCIDRs: ovnPodCIDRs,
+			wantNotes: []string{"IPPool external-v6 is not shipped", "address fd00:255::12 is not bounded"},
+		},
+		{
+			name: "an address of a family no fully known declaration covers fails", network: rail0,
+			ips: []string{"fd00:255::12"}, pools: rail0Pools, podCIDRs: ovnPodCIDRs,
+			wantProblems: []string{"address fd00:255::12 has no declared range of its family; the network declares [10.255.0.0/22]"},
+		},
+		{
+			name: "an IPv4-mapped address is read as IPv4", network: rail0,
+			ips: []string{"::ffff:10.255.0.12"}, pools: rail0Pools, podCIDRs: ovnPodCIDRs,
+		},
+		{
+			name: "an inline host-local range bounds the address", network: hostLocalNet,
+			ips: []string{"10.2.0.7"}, podCIDRs: ovnPodCIDRs,
+			wantProblems: []string{"address 10.2.0.7 is outside the declared range(s) [10.1.0.0/24]"},
+		},
+		{
+			name: "an inline host-local range admits its own address", network: hostLocalNet,
+			ips: []string{"10.1.0.7"}, podCIDRs: ovnPodCIDRs,
+		},
+		{
+			name: "an IPAM type whose range is not read is a note", network: func() secondaryNetwork {
+				n := hostLocalNet
+				n.IPAMSubnets, n.IPAMUnverified = nil, []string{"dhcp"}
+				return n
+			}(),
+			ips: []string{"10.9.0.7"}, podCIDRs: ovnPodCIDRs,
+			wantNotes: []string{"the address range of IPAM type dhcp is not read", "address 10.9.0.7 is not bounded"},
 		},
 		{
 			name: "empty IPAM asserts no address", network: okeRdmaNet, ips: nil, podCIDRs: ovnPodCIDRs,
@@ -285,17 +341,38 @@ func TestEvaluateAttachmentIPs(t *testing.T) {
 func TestEvaluateAttachment(t *testing.T) {
 	t.Parallel()
 
+	interfaces := []string{"eth0", "lo", "net1"}
 	tests := []struct {
 		name         string
 		network      secondaryNetwork
 		status       string
 		interfaces   []string
+		addrLines    []string
 		wantProblems []string
 		wantSummary  string
 	}{
 		{
-			name: "healthy SR-IOV rail", network: rail0, status: rail0Status, interfaces: []string{"eth0", "lo", "net1"},
+			name: "healthy SR-IOV rail", network: rail0, status: rail0Status, interfaces: interfaces, addrLines: rail0AddrLines,
 			wantSummary: "interface net1, ips 10.255.0.12, pci 0000:03:00.2, rdma mlx5_5",
+		},
+		{
+			name: "an address Multus reported but the interface does not carry fails", network: rail0, status: rail0Status,
+			interfaces: interfaces, addrLines: []string{"3: net1    inet 10.255.0.99/22 scope global net1"},
+			wantProblems: []string{"address 10.255.0.12 that Multus reported is not configured on net1"},
+		},
+		{
+			name: "an interface with no address fails an IPAM network", network: rail0, status: rail0Status,
+			interfaces: interfaces, addrLines: rail0AddrLines[:2],
+			wantProblems: []string{"the probe's ip -o addr shows no address on net1"},
+		},
+		{
+			name: "a shipped NAD on the sriov CNI needs a PCI address", network: func() secondaryNetwork {
+				n := okeRdmaNet
+				n.RequiresPCI = true
+				return n
+			}(),
+			status: `[{"name":"nvidia-network-operator/rdma-net","interface":"net1"}]`, interfaces: interfaces,
+			wantProblems: []string{"no device-info PCI address"},
 		},
 		{
 			name: "no Multus: no network-status", network: rail0, status: "", interfaces: []string{"eth0", "lo"},
@@ -312,16 +389,16 @@ func TestEvaluateAttachment(t *testing.T) {
 			wantProblems: []string{"names no interface"},
 		},
 		{
-			name: "interface absent from the pod", network: rail0, status: rail0Status, interfaces: []string{"eth0", "lo"},
+			name: "interface absent from the pod", network: rail0, status: rail0Status, interfaces: []string{"eth0", "lo"}, addrLines: rail0AddrLines,
 			wantProblems: []string{"interface net1 that Multus reported is not in the pod's /sys/class/net [eth0, lo]"},
 		},
 		{
-			name: "empty ips with IPAM", network: rail0, interfaces: []string{"eth0", "lo", "net1"},
+			name: "empty ips with IPAM", network: rail0, interfaces: interfaces, addrLines: rail0AddrLines,
 			status:       `[{"name":"default/sriov-network-rail-0","interface":"net1","ips":[],"device-info":{"pci":{"pci-address":"0000:03:00.2"}}}]`,
 			wantProblems: []string{"declares IPAM but the attachment has no address"},
 		},
 		{
-			name: "SR-IOV without device-info", network: rail0, interfaces: []string{"eth0", "lo", "net1"},
+			name: "SR-IOV without device-info", network: rail0, interfaces: interfaces, addrLines: rail0AddrLines,
 			status:       `[{"name":"default/sriov-network-rail-0","interface":"net1","ips":["10.255.0.12"]}]`,
 			wantProblems: []string{"no device-info PCI address"},
 		},
@@ -338,7 +415,7 @@ func TestEvaluateAttachment(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			eval := evaluateAttachment(tt.network, tt.status, tt.interfaces, rail0Pools, ovnPodCIDRs)
+			eval := evaluateAttachment(tt.network, tt.status, tt.interfaces, tt.addrLines, rail0Pools, ovnPodCIDRs)
 			assertSubstrings(t, "problems", eval.problems, tt.wantProblems)
 			if tt.wantSummary != "" && eval.summary != tt.wantSummary {
 				t.Errorf("summary = %q, want %q", eval.summary, tt.wantSummary)

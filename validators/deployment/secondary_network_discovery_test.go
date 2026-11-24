@@ -42,6 +42,7 @@ func railNetworks(n int, namePrefix string, source string) []secondaryNetwork {
 			Resource:     fmt.Sprintf("nvidia.com/sriov_resource_rail_%d", i),
 			Kind:         attachmentKindSRIOV,
 			Source:       fmt.Sprintf("%s %s%d (component %s)", source, namePrefix, i, sriovIBNetworksComponent),
+			RequiresPCI:  true,
 			IPAMDeclared: true,
 			IPAMPools:    []string{fmt.Sprintf("nv-ipam-pool-rail-%d", i)},
 		})
@@ -164,7 +165,7 @@ func TestDiscoverSecondaryNetworks_RealManifests(t *testing.T) {
 			if err != nil {
 				t.Fatalf("discoverSecondaryNetworks() error = %v", err)
 			}
-			if !reflect.DeepEqual(got.networks, tt.wantNetworks) {
+			if !reflect.DeepEqual(withoutDeclarations(got.networks), tt.wantNetworks) {
 				t.Errorf("networks =\n%+v\nwant\n%+v", got.networks, tt.wantNetworks)
 			}
 			if !reflect.DeepEqual(got.poolSubnets, tt.wantPools) {
@@ -237,7 +238,8 @@ spec:
   ipam: '{"type":"whereabouts","range":"10.0.0.0/24"}'
 `,
 			wantNetworks: []secondaryNetwork{{Namespace: "sriov", Name: "net-a", Resource: "example.com/vf",
-				Kind: attachmentKindSRIOV, Source: "SriovNetwork net-a", IPAMDeclared: true}},
+				Kind: attachmentKindSRIOV, Source: "SriovNetwork net-a", RequiresPCI: true, IPAMDeclared: true,
+				IPAMSubnets: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/24")}}},
 			wantPools: map[string]netip.Prefix{},
 		},
 		{
@@ -250,7 +252,7 @@ spec:
   resourceName: rail
 `,
 			wantNetworks: []secondaryNetwork{{Namespace: "release-ns", Name: "ib", Resource: "nvidia.com/rail",
-				Kind: attachmentKindSRIOV, Source: "SriovIBNetwork ib"}},
+				Kind: attachmentKindSRIOV, Source: "SriovIBNetwork ib", RequiresPCI: true}},
 			wantPools: map[string]netip.Prefix{},
 		},
 		{
@@ -287,7 +289,8 @@ spec:
   config: '{"type":"macvlan","ipam":{"type":"host-local","subnet":"10.1.0.0/24"}}'
 `,
 			wantNetworks: []secondaryNetwork{{Namespace: "apps", Name: "macvlan", Kind: attachmentKindNAD,
-				Source: "NetworkAttachmentDefinition macvlan", IPAMDeclared: true}},
+				Source: "NetworkAttachmentDefinition macvlan", IPAMDeclared: true,
+				IPAMSubnets: []netip.Prefix{netip.MustParsePrefix("10.1.0.0/24")}}},
 			wantPools: map[string]netip.Prefix{},
 		},
 		{
@@ -419,7 +422,7 @@ spec:
 			if err != nil {
 				t.Fatalf("parseSecondaryNetworkManifest() error = %v", err)
 			}
-			if !reflect.DeepEqual(networks, tt.wantNetworks) {
+			if !reflect.DeepEqual(withoutDeclarations(networks), tt.wantNetworks) {
 				t.Errorf("networks =\n%+v\nwant\n%+v", networks, tt.wantNetworks)
 			}
 			if !reflect.DeepEqual(pools, tt.wantPools) {
@@ -510,7 +513,7 @@ spec:
 	}
 	want := []secondaryNetwork{{Namespace: "apps", Name: "shared", Resource: "example.com/vf_a", Kind: attachmentKindNAD,
 		Source: "NetworkAttachmentDefinition shared (component custom-nets)"}}
-	if !reflect.DeepEqual(got.networks, want) {
+	if !reflect.DeepEqual(withoutDeclarations(got.networks), want) {
 		t.Errorf("networks = %+v, want %+v", got.networks, want)
 	}
 
@@ -572,4 +575,186 @@ func networkKeys(networks []secondaryNetwork) []string {
 		out = append(out, n.key())
 	}
 	return out
+}
+
+// withoutDeclarations clears each network's declaration fingerprint, which
+// TestMergeSecondaryNetworks_Conflicts and the duplicate cases cover, so the
+// remaining fields compare as literals.
+func withoutDeclarations(networks []secondaryNetwork) []secondaryNetwork {
+	out := make([]secondaryNetwork, 0, len(networks))
+	for _, n := range networks {
+		n.declaration = ""
+		out = append(out, n)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// TestDiscoverSecondaryNetworks_FormattingAndConflicts covers selection that
+// does not depend on how a manifest writes its kind (quoted, or JSON), and the
+// duplicate rules: the same NAD declared by two components with different
+// CNI configs fails, an identical declaration formatted differently does not,
+// and two IPPools of one name with different subnets in one file fail.
+func TestDiscoverSecondaryNetworks_FormattingAndConflicts(t *testing.T) {
+	t.Parallel()
+
+	quoted := []byte(`apiVersion: "k8s.cni.cncf.io/v1"
+kind: "NetworkAttachmentDefinition"
+metadata:
+  name: quoted
+  namespace: apps
+spec:
+  config: '{"type":"macvlan","ipam":{"type":"host-local","subnet":"10.1.0.0/24"}}'
+`)
+	jsonDoc := []byte(`{"apiVersion": "k8s.cni.cncf.io/v1", "kind": "NetworkAttachmentDefinition",
+ "metadata": {"name": "flow", "namespace": "apps"}, "spec": {"config": "{\"type\": \"macvlan\"}"}}
+`)
+	rail := func(vlan int, spacing string) []byte {
+		return []byte(fmt.Sprintf(`apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: rail
+  namespace: apps
+spec:
+  config: '{"type":"macvlan",%s"vlan":%d}'
+`, spacing, vlan))
+	}
+	pools := func(second string) []byte {
+		return []byte(`apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: p
+spec:
+  subnet: 10.0.0.0/24
+---
+apiVersion: nv-ipam.nvidia.com/v1alpha1
+kind: IPPool
+metadata:
+  name: p
+spec:
+  subnet: ` + second + `
+`)
+	}
+	dp := providertest.NewMap(map[string][]byte{
+		"components/a/manifests/quoted.yaml":     quoted,
+		"components/a/manifests/flow.json":       jsonDoc,
+		"components/a/manifests/rail.yaml":       rail(10, ""),
+		"components/b/manifests/rail-same.yaml":  rail(10, "  "),
+		"components/b/manifests/rail-vlan.yaml":  rail(20, ""),
+		"components/c/manifests/pools-same.yaml": pools("10.0.0.7/24"),
+		"components/c/manifests/pools-diff.yaml": pools("10.0.1.0/24"),
+	})
+	ref := func(component string, files ...string) recipe.ComponentRef {
+		paths := make([]string, 0, len(files))
+		for _, f := range files {
+			paths = append(paths, "components/"+component+"/manifests/"+f)
+		}
+		return recipe.ComponentRef{Name: component, Namespace: component, ManifestFiles: paths}
+	}
+
+	tests := []struct {
+		name       string
+		refs       []recipe.ComponentRef
+		wantKeys   []string
+		wantErrSub string
+	}{
+		{name: "quoted kind and JSON form are found", refs: []recipe.ComponentRef{ref("a", "quoted.yaml", "flow.json")},
+			wantKeys: []string{"apps/flow", "apps/quoted"}},
+		{name: "identical declarations formatted differently merge",
+			refs: []recipe.ComponentRef{ref("a", "rail.yaml"), ref("b", "rail-same.yaml")}, wantKeys: []string{"apps/rail"}},
+		{name: "the same NAD with a different CNI config fails",
+			refs:       []recipe.ComponentRef{ref("a", "rail.yaml"), ref("b", "rail-vlan.yaml")},
+			wantErrSub: "apps/rail is declared twice with different content"},
+		{name: "one IPPool name, the same masked subnet, merges", refs: []recipe.ComponentRef{ref("c", "pools-same.yaml")}},
+		{name: "one IPPool name with two subnets in one file fails", refs: []recipe.ComponentRef{ref("c", "pools-diff.yaml")},
+			wantErrSub: "IPPool p is declared twice with different subnets"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := discoverSecondaryNetworks(context.Background(), dp, tt.refs)
+			if tt.wantErrSub != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrSub) {
+					t.Fatalf("discoverSecondaryNetworks() error = %v, want substring %q", err, tt.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("discoverSecondaryNetworks() error = %v", err)
+			}
+			if keys := networkKeys(got.networks); strings.Join(keys, ",") != strings.Join(tt.wantKeys, ",") {
+				t.Errorf("networks = %v, want %v", keys, tt.wantKeys)
+			}
+		})
+	}
+}
+
+// TestParseNADConfig covers what discovery reads from a CNI config: the IPAM
+// range of each supported type, the types whose range it does not read, a
+// malformed range, and whether a plugin is the sriov or ib-sriov CNI.
+func TestParseNADConfig(t *testing.T) {
+	t.Parallel()
+
+	prefixes := func(cidrs ...string) []netip.Prefix {
+		out := make([]netip.Prefix, 0, len(cidrs))
+		for _, c := range cidrs {
+			out = append(out, netip.MustParsePrefix(c))
+		}
+		return out
+	}
+	tests := []struct {
+		name           string
+		config         string
+		wantPCI        bool
+		wantDeclared   bool
+		wantSubnets    []netip.Prefix
+		wantPools      []string
+		wantUnverified []string
+		wantErrSub     string
+	}{
+		{name: "host-local subnet and ranges", wantDeclared: true,
+			config:      `{"type":"macvlan","ipam":{"type":"host-local","subnet":"10.1.0.0/24","ranges":[[{"subnet":"10.2.0.0/24"}],[{"subnet":"fd00::/64"}]]}}`,
+			wantSubnets: prefixes("10.1.0.0/24", "10.2.0.0/24", "fd00::/64")},
+		{name: "whereabouts range with start and end, and ipRanges", wantDeclared: true,
+			config:      `{"type":"macvlan","ipam":{"type":"whereabouts","range":"192.168.2.225-192.168.2.230/28","ipRanges":[{"range":"10.3.0.0/16"}]}}`,
+			wantSubnets: prefixes("192.168.2.224/28", "10.3.0.0/16")},
+		{name: "nv-ipam pools", wantDeclared: true,
+			config: `{"type":"macvlan","ipam":{"type":"nv-ipam","poolName":"a,b"}}`, wantPools: []string{"a", "b"}},
+		{name: "an IPAM type whose range is not read", wantDeclared: true,
+			config: `{"type":"macvlan","ipam":{"type":"dhcp"}}`, wantUnverified: []string{"dhcp"}},
+		{name: "host-local without a range", wantDeclared: true,
+			config: `{"type":"macvlan","ipam":{"type":"host-local"}}`, wantUnverified: []string{"host-local"}},
+		{name: "malformed range fails", config: `{"type":"macvlan","ipam":{"type":"host-local","subnet":"10.1.0/24"}}`,
+			wantErrSub: "unparseable IPAM range"},
+		{name: "sriov in a conflist needs a PCI address", wantPCI: true, wantDeclared: true,
+			config:         `{"cniVersion":"0.4.0","plugins":[{"type":"sriov","ipam":{"type":"static"}},{"type":"tuning"}]}`,
+			wantUnverified: []string{"static"}},
+		{name: "ib-sriov needs a PCI address", wantPCI: true, config: `{"type":"ib-sriov"}`},
+		{name: "host-device needs none", config: `{"cniVersion":"0.3.1","plugins":[{"type":"host-device","ipam":{}},{"type":"rdma"}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseNADConfig(tt.config)
+			if tt.wantErrSub != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrSub) {
+					t.Fatalf("parseNADConfig() error = %v, want substring %q", err, tt.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseNADConfig() error = %v", err)
+			}
+			if got.requiresPCI != tt.wantPCI || got.ipam.declared != tt.wantDeclared {
+				t.Errorf("requiresPCI = %v, declared = %v; want %v, %v", got.requiresPCI, got.ipam.declared, tt.wantPCI, tt.wantDeclared)
+			}
+			if !reflect.DeepEqual(got.ipam.subnets, tt.wantSubnets) || !reflect.DeepEqual(got.ipam.pools, tt.wantPools) ||
+				!reflect.DeepEqual(got.ipam.unverified, tt.wantUnverified) {
+
+				t.Errorf("ipam = %+v, want subnets %v pools %v unverified %v", got.ipam, tt.wantSubnets, tt.wantPools, tt.wantUnverified)
+			}
+		})
+	}
 }

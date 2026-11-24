@@ -204,14 +204,16 @@ const podCIDRsNotEvaluatedNote = "pod-network overlap not evaluated: no node dec
 	ovnNodeSubnetsAnnotation + " annotation"
 
 // evaluateAttachment checks one probe pod's attachment of network against its
-// network-status annotation and the interfaces the probe listed:
+// network-status annotation and what the probe listed (the interfaces under
+// /sys/class/net and the `ip -o addr` lines):
 //   - network-status has an entry named "<namespace>/<name>" with an
 //     interface, and that interface is in the pod's /sys/class/net;
-//   - when the network declares IPAM, the entry has an address, each inside a
-//     declared nv-ipam pool's subnet when the pool is known, and none inside
-//     the cluster's pod network;
-//   - for an SR-IOV network, the entry carries the VF's PCI address.
-func evaluateAttachment(network secondaryNetwork, statusAnnotation string, podInterfaces []string,
+//   - when the network declares IPAM, the entry has an address, each one
+//     configured on that interface, inside the network's declared range
+//     (evaluateAttachmentIPs), and outside the cluster's pod network;
+//   - when the network attaches an SR-IOV VF, the entry carries its PCI
+//     address.
+func evaluateAttachment(network secondaryNetwork, statusAnnotation string, podInterfaces, addrLines []string,
 	poolSubnets map[string]netip.Prefix, podCIDRs []netip.Prefix) attachmentEvaluation {
 
 	var eval attachmentEvaluation
@@ -246,12 +248,15 @@ func evaluateAttachment(network secondaryNetwork, statusAnnotation string, podIn
 	ipProblems, ipNotes := evaluateAttachmentIPs(network, entry.IPs, poolSubnets, podCIDRs)
 	eval.problems = append(eval.problems, ipProblems...)
 	eval.notes = append(eval.notes, ipNotes...)
+	if network.IPAMDeclared && entry.Interface != "" {
+		eval.problems = append(eval.problems, unconfiguredAddresses(entry, addrLines)...)
+	}
 
 	pci := ""
 	if entry.DeviceInfo != nil && entry.DeviceInfo.PCI != nil {
 		pci = entry.DeviceInfo.PCI.PCIAddress
 	}
-	if network.Kind == attachmentKindSRIOV && pci == "" {
+	if network.RequiresPCI && pci == "" {
 		eval.problems = append(eval.problems, fmt.Sprintf(
 			"the %s entry for %s carries no device-info PCI address, so no VF was attached",
 			multusNetworkStatusAnnotation, network.key()))
@@ -262,9 +267,12 @@ func evaluateAttachment(network secondaryNetwork, statusAnnotation string, podIn
 }
 
 // evaluateAttachmentIPs applies the address assertions. A network that
-// declares no IPAM gets none; a pool the recipe does not ship cannot bound
-// the address, and an unknown pod network cannot be checked for overlap, and
-// each of those is recorded as a note rather than a failure.
+// declares no IPAM gets none. An address must fall inside one of the
+// network's declared ranges of its own family (inline ranges and the subnets
+// of its nv-ipam pools); when no range of its family is known because a pool
+// is not shipped or the IPAM type's range is not read, that bound is recorded
+// as a note, while a network whose every range is known and none is of the
+// address's family fails. An unknown pod network is a note too.
 func evaluateAttachmentIPs(network secondaryNetwork, ips []string,
 	poolSubnets map[string]netip.Prefix, podCIDRs []netip.Prefix) (problems, notes []string) {
 
@@ -275,13 +283,19 @@ func evaluateAttachmentIPs(network secondaryNetwork, ips []string,
 		return []string{fmt.Sprintf("%s declares IPAM but the attachment has no address", network.key())}, nil
 	}
 
-	var subnets []netip.Prefix
+	ranges := append([]netip.Prefix(nil), network.IPAMSubnets...)
+	unknown := false
 	for _, pool := range network.IPAMPools {
 		if subnet, ok := poolSubnets[pool]; ok {
-			subnets = append(subnets, subnet)
+			ranges = append(ranges, subnet)
 			continue
 		}
+		unknown = true
 		notes = append(notes, fmt.Sprintf("IPPool %s is not shipped by the recipe, so its subnet is not asserted", pool))
+	}
+	for _, ipamType := range network.IPAMUnverified {
+		unknown = true
+		notes = append(notes, fmt.Sprintf("the address range of IPAM type %s is not read, so it is not asserted", ipamType))
 	}
 	if len(podCIDRs) == 0 {
 		notes = append(notes, podCIDRsNotEvaluatedNote)
@@ -293,9 +307,18 @@ func evaluateAttachmentIPs(network secondaryNetwork, ips []string,
 			problems = append(problems, fmt.Sprintf("address %q is not an IP", raw))
 			continue
 		}
-		if len(subnets) > 0 && !slices.ContainsFunc(subnets, func(p netip.Prefix) bool { return p.Contains(addr) }) {
-			problems = append(problems, fmt.Sprintf("address %s is outside the IPPool subnet(s) %s",
-				addr, formatPrefixes(subnets)))
+		family := slices.DeleteFunc(slices.Clone(ranges), func(p netip.Prefix) bool { return p.Addr().Is4() != addr.Is4() })
+		switch {
+		case len(family) > 0:
+			if !slices.ContainsFunc(family, func(p netip.Prefix) bool { return p.Contains(addr) }) {
+				problems = append(problems, fmt.Sprintf("address %s is outside the declared range(s) %s",
+					addr, formatPrefixes(family)))
+			}
+		case unknown:
+			notes = append(notes, fmt.Sprintf("address %s is not bounded: no declared range of its family is known", addr))
+		default:
+			problems = append(problems, fmt.Sprintf("address %s has no declared range of its family; the network declares %s",
+				addr, formatPrefixes(ranges)))
 		}
 		if i := slices.IndexFunc(podCIDRs, func(p netip.Prefix) bool { return p.Contains(addr) }); i >= 0 {
 			problems = append(problems, fmt.Sprintf(
@@ -304,6 +327,46 @@ func evaluateAttachmentIPs(network secondaryNetwork, ips []string,
 		}
 	}
 	return problems, notes
+}
+
+// unconfiguredAddresses reports each address network-status gives entry that
+// the probe's `ip -o addr` did not show on entry's interface, and a probe that
+// listed no address on it at all.
+func unconfiguredAddresses(entry networkStatusEntry, addrLines []string) []string {
+	configured := interfaceAddrs(addrLinesFor(addrLines, entry.Interface))
+	if len(configured) == 0 {
+		return []string{fmt.Sprintf("the probe's ip -o addr shows no address on %s", entry.Interface)}
+	}
+	var problems []string
+	for _, raw := range entry.IPs {
+		addr, err := parseStatusIP(raw)
+		if err != nil {
+			continue
+		}
+		if !slices.Contains(configured, addr.Unmap()) {
+			problems = append(problems, fmt.Sprintf("address %s that Multus reported is not configured on %s", addr, entry.Interface))
+		}
+	}
+	return problems
+}
+
+// interfaceAddrs reads the addresses from `ip -o addr` lines, the field
+// after "inet" or "inet6".
+func interfaceAddrs(lines []string) []netip.Addr {
+	var out []netip.Addr
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		for i := 0; i+1 < len(fields); i++ {
+			if fields[i] != "inet" && fields[i] != "inet6" {
+				continue
+			}
+			if p, err := netip.ParsePrefix(fields[i+1]); err == nil {
+				out = append(out, p.Addr().Unmap())
+			}
+			break
+		}
+	}
+	return out
 }
 
 // parseStatusIP reads an address as network-status reports it, with or
@@ -315,13 +378,13 @@ func parseStatusIP(raw string) (netip.Addr, error) {
 		if err != nil {
 			return netip.Addr{}, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid prefix", err)
 		}
-		return p.Addr(), nil
+		return p.Addr().Unmap(), nil
 	}
 	addr, err := netip.ParseAddr(raw)
 	if err != nil {
 		return netip.Addr{}, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid address", err)
 	}
-	return addr, nil
+	return addr.Unmap(), nil
 }
 
 // addrLinesFor returns the `ip -o addr` lines of iface, whose second field

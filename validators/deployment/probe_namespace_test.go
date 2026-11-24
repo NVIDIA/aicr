@@ -32,6 +32,7 @@ import (
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/validator/labels"
+	"aicr.run/validators"
 )
 
 var namespacesResource = schema.GroupResource{Resource: "namespaces"}
@@ -268,4 +269,29 @@ func TestProbeNamespaceCopiesImagePullSecrets(t *testing.T) {
 		ns.imagePullSecrets, ns.validatorNamespace = []string{"mirror"}, "aicr-validation"
 		errorstest.WantReportedCode(t, ns.create(context.Background(), client), errors.ErrCodeNotFound)
 	})
+}
+
+// TestProbeNamespaceCopiesEachPullSecretOnce proves a Secret named twice in
+// the forwarded list is copied once, where a second copy would fail on
+// AlreadyExists before any probe ran.
+func TestProbeNamespaceCopiesEachPullSecretOnce(t *testing.T) {
+	t.Setenv(validators.ImagePullSecretsEnv, "mirror, mirror,other,mirror")
+	t.Setenv("AICR_NAMESPACE", "aicr-validation")
+	ns, err := newProbeNamespace()
+	if err != nil {
+		t.Fatalf("newProbeNamespace() error = %v", err)
+	}
+	if got := strings.Join(ns.imagePullSecrets, ","); got != "mirror,other" {
+		t.Fatalf("imagePullSecrets = %q, want mirror,other", got)
+	}
+	secret := func(name string) *corev1.Secret {
+		return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns.validatorNamespace}, Type: corev1.SecretTypeDockerConfigJson}
+	}
+	client := k8sfake.NewClientset(secret("mirror"), secret("other"))
+	if err := ns.create(context.Background(), client); err != nil {
+		t.Fatalf("create() error = %v", err)
+	}
+	if refs := ns.imagePullSecretRefs(); len(refs) != 2 {
+		t.Errorf("imagePullSecretRefs() = %v, want one per distinct Secret", refs)
+	}
 }

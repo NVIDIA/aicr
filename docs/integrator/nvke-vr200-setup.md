@@ -227,9 +227,11 @@ NVLink domain.
 declares `secondary-network-attachment`, which attaches each
 `default/roce-network-rail-<n>` network to a short-lived probe pod requesting
 that rail's VF, and requires the interface, an nv-ipam address inside the
-rail's pool and outside the pod network, and the VF's PCI address. With one VF
-per rail, a rail whose VF a running workload holds is skipped rather than
-failed; with every rail held, the check skips with `nodes-busy`. It sends no
+rail's pool and outside the pod network, and the VF's PCI address. Each worker
+has one VF per rail, and the check probes a rail on any Ready worker whose VF
+is free; a rail is skipped rather than failed only when running workloads hold
+its VF on every Ready worker, and with every rail held that way the check
+skips with `nodes-busy`. It sends no
 packet between nodes, so it is expected to pass on a tenant whose DPU bridges
 no spare port, as the manual attachment above did. The check has run only
 against fake clusters so far, not on this cluster. See

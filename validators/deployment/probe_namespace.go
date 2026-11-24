@@ -65,7 +65,8 @@ type probeNamespace struct {
 }
 
 // newProbeNamespace draws the run token and reads the forwarded
-// --image-pull-secret names.
+// --image-pull-secret names, each once: a name given twice would otherwise be
+// copied twice and fail on AlreadyExists.
 func newProbeNamespace() (*probeNamespace, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -75,7 +76,7 @@ func newProbeNamespace() (*probeNamespace, error) {
 	return &probeNamespace{
 		token:              token,
 		name:               defaults.GPUTestNamespacePrefix + token,
-		imagePullSecrets:   validators.ImagePullSecretNames(),
+		imagePullSecrets:   uniqueNames(validators.ImagePullSecretNames()),
 		validatorNamespace: validators.ValidatorNamespace(),
 	}, nil
 }
@@ -215,6 +216,19 @@ func (p *probeNamespace) delete(client kubernetes.Interface) error {
 			"CLEANUP FAILED: probe namespace %s was not deleted; its probe pods may still hold devices", p.name), err)
 	}
 	return nil
+}
+
+// uniqueNames returns names without repeats, in first-seen order.
+func uniqueNames(names []string) []string {
+	seen := make(map[string]bool, len(names))
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // createDefinitelyRejected reports whether a Create error is a verdict the

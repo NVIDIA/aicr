@@ -15,11 +15,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/netip"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -48,38 +48,48 @@ const (
 	// device Multus hands to the attachment's CNI.
 	nadResourceNameAnnotation = "k8s.v1.cni.cncf.io/resourceName"
 
-	// nvIPAMType is the CNI IPAM type of nv-ipam, whose poolName names the
-	// IPPool (or a comma-separated pair, for dual stack) to allocate from.
-	nvIPAMType = "nv-ipam"
-
 	sriovIBNetworksComponent = "sriov-ib-networks"
 )
 
-// secondaryNetworkKindLine selects, from raw manifest content, the files that
-// can declare a secondary network. Files of the components in
-// alwaysRenderedNetworkComponents are rendered whether or not they match.
-var secondaryNetworkKindLine = regexp.MustCompile(
-	`(?m)^kind:[ \t]*(SriovIBNetwork|SriovNetwork|NetworkAttachmentDefinition|IPPool)[ \t]*$`)
+// The CNI and IPAM plugin types discovery reads. nv-ipam's poolName names the
+// IPPool (or a comma-separated pair, for dual stack) to allocate from;
+// host-local and whereabouts carry their ranges inline; the sriov and
+// ib-sriov CNIs attach an SR-IOV VF.
+const (
+	nvIPAMType          = "nv-ipam"
+	hostLocalIPAMType   = "host-local"
+	whereaboutsIPAMType = "whereabouts"
+	sriovCNIType        = "sriov"
+	ibSRIOVCNIType      = "ib-sriov"
+)
+
+// secondaryNetworkKindNames select, from raw manifest content, the files of
+// components outside alwaysRenderedNetworkComponents that discovery renders: a
+// file is rendered when its text contains any of them anywhere, so quoting,
+// flow or JSON style, and comments cannot hide a declaration.
+var secondaryNetworkKindNames = [][]byte{
+	[]byte(kindSriovNetwork), []byte(kindSriovIBNetwork), []byte(kindNetworkAttachmentDef), []byte(kindNVIPAMIPPool),
+}
 
 // alwaysRenderedNetworkComponents are the components whose every manifest is
-// rendered by discovery, not only the ones whose raw content names a
-// secondary-network kind: they own the fabric, so a NAD added to any of their
-// files must never be missed because of how its kind line is written.
+// rendered by discovery whatever its text: they own the fabric, so a NAD in
+// any of their files must never be missed.
 var alwaysRenderedNetworkComponents = map[string]bool{
 	networkOperatorComponent: true,
 	sriovIBNetworksComponent: true,
 }
 
-// attachmentKind says how a secondary network reaches the cluster.
+// attachmentKind says how a secondary network reaches the cluster: as a NAD
+// the SR-IOV Network Operator renders from a SriovNetwork or SriovIBNetwork
+// (attachmentKindSRIOV), or as a NetworkAttachmentDefinition the recipe ships
+// as-is (attachmentKindNAD). Whether the attachment must carry a VF's PCI
+// address is secondaryNetwork.RequiresPCI, not the kind, because a shipped
+// NAD can name the sriov CNI too.
 type attachmentKind string
 
 const (
-	// attachmentKindSRIOV is a NAD the SR-IOV Network Operator renders from a
-	// SriovNetwork or SriovIBNetwork; its attachment carries a VF's PCI
-	// device info.
 	attachmentKindSRIOV attachmentKind = "sriov"
-	// attachmentKindNAD is a NetworkAttachmentDefinition shipped as-is.
-	attachmentKindNAD attachmentKind = "nad"
+	attachmentKindNAD   attachmentKind = "nad"
 )
 
 // secondaryNetwork is one NetworkAttachmentDefinition the recipe ships.
@@ -93,11 +103,24 @@ type secondaryNetwork struct {
 	Kind     attachmentKind
 	// Source names the manifest object and component that declared it.
 	Source string
+	// RequiresPCI reports whether the network attaches an SR-IOV VF (an
+	// operator-rendered kind, or a sriov or ib-sriov plugin in a shipped
+	// NAD), so its network-status entry must carry the VF's PCI address.
+	RequiresPCI bool
 	// IPAMDeclared reports whether the network's CNI config assigns an
 	// address (an IPAM block with a type).
 	IPAMDeclared bool
 	// IPAMPools are the nv-ipam pool names the IPAM block allocates from.
 	IPAMPools []string
+	// IPAMSubnets are the address ranges the IPAM block declares inline
+	// (host-local subnet or ranges, whereabouts range or ipRanges).
+	IPAMSubnets []netip.Prefix
+	// IPAMUnverified names the IPAM types whose address range discovery does
+	// not read, so the addresses they assign are not bounded.
+	IPAMUnverified []string
+	// declaration is the declaring object's kind, resource and spec in
+	// canonical JSON, so two declarations of one NAD compare in full.
+	declaration string
 }
 
 // key is the "<namespace>/<name>" reference Multus reports in network-status.
@@ -124,8 +147,10 @@ func (d declaredSecondaryNetworks) anyIPAM() bool {
 // manifests with each component's effective values, as rdmaFabricResources
 // does for the fabric's device-plugin resources. Every ManifestFiles and
 // PreManifestFiles entry of every ref is a candidate; it is rendered when its
-// component is in alwaysRenderedNetworkComponents or its raw content has a
-// secondaryNetworkKindLine, so file names play no part.
+// component is in alwaysRenderedNetworkComponents or its raw text contains one
+// of secondaryNetworkKindNames, so file names play no part. Other files are
+// not rendered, so a component whose values the validator cannot resolve
+// does not fail discovery unless one of its files could declare a network.
 //
 // dp is the data provider the manifests and values are read from; nil reads
 // the embedded catalog.
@@ -182,11 +207,18 @@ func manifestMayDeclareSecondaryNetwork(goCtx context.Context, dp recipe.DataPro
 		return false, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to load manifest %s for component %s", path, ref.Name), err)
 	}
-	return secondaryNetworkKindLine.Match(content), nil
+	for _, kind := range secondaryNetworkKindNames {
+		if bytes.Contains(content, kind) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // mergeSecondaryNetworks adds networks to byKey, tagging each with component.
-// A key already present with different content is an error.
+// A key already present with a different declaration (any difference in the
+// declaring object's spec, such as a VLAN in the CNI config) is an error;
+// identical declarations from different sources are accepted.
 func mergeSecondaryNetworks(byKey map[string]secondaryNetwork, networks []secondaryNetwork, component string) error {
 	for _, n := range networks {
 		n.Source += " (component " + component + ")"
@@ -195,8 +227,8 @@ func mergeSecondaryNetworks(byKey map[string]secondaryNetwork, networks []second
 			byKey[n.key()] = n
 			continue
 		}
-		if prev.Resource != n.Resource || prev.Kind != n.Kind || prev.IPAMDeclared != n.IPAMDeclared ||
-			strings.Join(prev.IPAMPools, ",") != strings.Join(n.IPAMPools, ",") {
+		if prev.declaration != n.declaration || prev.Resource != n.Resource || prev.Kind != n.Kind ||
+			prev.IPAMDeclared != n.IPAMDeclared || strings.Join(prev.IPAMPools, ",") != strings.Join(n.IPAMPools, ",") {
 
 			return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
 				"NetworkAttachmentDefinition %s is declared twice with different content: %s and %s",
@@ -269,28 +301,68 @@ func parseSecondaryNetworkManifest(rendered []byte, releaseNamespace string) ([]
 		if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
 			return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to decode "+tm.Kind+" document", err)
 		}
-		switch {
-		case isPool:
+		if isPool {
 			subnet, err := poolSubnet(doc)
 			if err != nil {
 				return nil, nil, err
 			}
+			if prev, dup := pools[doc.Metadata.Name]; dup && prev != subnet {
+				return nil, nil, errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+					"nv-ipam IPPool %s is declared twice with different subnets: %s and %s", doc.Metadata.Name, prev, subnet))
+			}
 			pools[doc.Metadata.Name] = subnet
-		case isSriov:
-			n, err := sriovAttachment(tm.Kind, doc, releaseNamespace)
-			if err != nil {
-				return nil, nil, err
-			}
-			networks = append(networks, n)
-		default:
-			n, err := nadAttachment(doc, releaseNamespace)
-			if err != nil {
-				return nil, nil, err
-			}
-			networks = append(networks, n)
+			continue
 		}
+		n, err := networkFromDoc(tm.Kind, isSriov, doc, releaseNamespace)
+		if err != nil {
+			return nil, nil, err
+		}
+		if n.declaration, err = declarationOf(tm.Kind, n.Resource, []byte(raw)); err != nil {
+			return nil, nil, err
+		}
+		networks = append(networks, n)
 	}
 	return networks, pools, nil
+}
+
+func networkFromDoc(kind string, isSriov bool, doc networkManifestDoc, releaseNamespace string) (secondaryNetwork, error) {
+	if isSriov {
+		return sriovAttachment(kind, doc, releaseNamespace)
+	}
+	return nadAttachment(doc, releaseNamespace)
+}
+
+// declarationOf renders a network-declaring document's kind, resource and
+// spec as canonical JSON. The JSON strings a spec embeds (a NAD's config, a
+// SriovNetwork's ipam) are decoded first, so formatting differences do not
+// make two equal declarations differ.
+func declarationOf(kind, resource string, raw []byte) (string, error) {
+	var doc struct {
+		Spec map[string]any `json:"spec"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to decode "+kind+" spec", err)
+	}
+	for _, field := range []string{"config", "ipam"} {
+		text, ok := doc.Spec[field].(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			continue
+		}
+		var decoded any
+		if err := json.Unmarshal([]byte(text), &decoded); err != nil {
+			return "", errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to decode %s spec.%s", kind, field), err)
+		}
+		doc.Spec[field] = decoded
+	}
+	out, err := json.Marshal(struct {
+		Kind     string         `json:"kind"`
+		Resource string         `json:"resource"`
+		Spec     map[string]any `json:"spec"`
+	}{kind, resource, doc.Spec})
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to encode "+kind+" declaration", err)
+	}
+	return string(out), nil
 }
 
 // poolSubnet returns an IPPool's spec.subnet.
@@ -333,13 +405,16 @@ func sriovAttachment(kind string, doc networkManifestDoc, releaseNamespace strin
 			fmt.Sprintf("%s %s declares an unparseable spec.ipam", kind, name), err)
 	}
 	return secondaryNetwork{
-		Namespace:    namespace,
-		Name:         name,
-		Resource:     resource,
-		Kind:         attachmentKindSRIOV,
-		Source:       kind + " " + name,
-		IPAMDeclared: ipam.declared,
-		IPAMPools:    ipam.pools,
+		Namespace:      namespace,
+		Name:           name,
+		Resource:       resource,
+		Kind:           attachmentKindSRIOV,
+		Source:         kind + " " + name,
+		RequiresPCI:    true,
+		IPAMDeclared:   ipam.declared,
+		IPAMPools:      ipam.pools,
+		IPAMSubnets:    ipam.subnets,
+		IPAMUnverified: ipam.unverified,
 	}, nil
 }
 
@@ -356,26 +431,38 @@ func nadAttachment(doc networkManifestDoc, releaseNamespace string) (secondaryNe
 		return secondaryNetwork{}, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("NetworkAttachmentDefinition %s has no namespace", name))
 	}
-	ipam, err := parseNADConfigIPAM(doc.Spec.Config)
+	conf, err := parseNADConfig(doc.Spec.Config)
 	if err != nil {
 		return secondaryNetwork{}, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("NetworkAttachmentDefinition %s declares an unparseable spec.config", name), err)
 	}
 	return secondaryNetwork{
-		Namespace:    namespace,
-		Name:         name,
-		Resource:     strings.TrimSpace(doc.Metadata.Annotations[nadResourceNameAnnotation]),
-		Kind:         attachmentKindNAD,
-		Source:       kindNetworkAttachmentDef + " " + name,
-		IPAMDeclared: ipam.declared,
-		IPAMPools:    ipam.pools,
+		Namespace:      namespace,
+		Name:           name,
+		Resource:       strings.TrimSpace(doc.Metadata.Annotations[nadResourceNameAnnotation]),
+		Kind:           attachmentKindNAD,
+		Source:         kindNetworkAttachmentDef + " " + name,
+		RequiresPCI:    conf.requiresPCI,
+		IPAMDeclared:   conf.ipam.declared,
+		IPAMPools:      conf.ipam.pools,
+		IPAMSubnets:    conf.ipam.subnets,
+		IPAMUnverified: conf.ipam.unverified,
 	}, nil
 }
 
-// cniIPAM is the part of a CNI IPAM block discovery reads.
+// cniIPAM is the part of a CNI IPAM block discovery reads: nv-ipam's pool
+// names, host-local's subnet and ranges, and whereabouts' range and ipRanges.
 type cniIPAM struct {
 	Type     string `json:"type"`
 	PoolName string `json:"poolName"`
+	Subnet   string `json:"subnet"`
+	Ranges   [][]struct {
+		Subnet string `json:"subnet"`
+	} `json:"ranges"`
+	Range    string `json:"range"`
+	IPRanges []struct {
+		Range string `json:"range"`
+	} `json:"ipRanges"`
 }
 
 // cniPluginConf is one CNI plugin config, or a single-plugin network config.
@@ -392,25 +479,79 @@ type cniNetConf struct {
 
 // ipamDeclaration is what a network's CNI config says about addressing.
 type ipamDeclaration struct {
-	declared bool
-	pools    []string
+	declared   bool
+	pools      []string
+	subnets    []netip.Prefix
+	unverified []string
 }
 
-// add folds one IPAM block in: a block with a type assigns an address, and an
-// nv-ipam block names its pools.
-func (d *ipamDeclaration) add(ipam *cniIPAM) {
+// add folds one IPAM block in. A block with a type assigns an address; its
+// range is read from nv-ipam pool names, host-local subnets and whereabouts
+// ranges, and any other type, or one of those with no range, is recorded as
+// unverified. A range that does not parse is an error.
+func (d *ipamDeclaration) add(ipam *cniIPAM) error {
 	if ipam == nil || strings.TrimSpace(ipam.Type) == "" {
-		return
+		return nil
 	}
 	d.declared = true
-	if ipam.Type != nvIPAMType {
-		return
-	}
-	for _, pool := range strings.Split(ipam.PoolName, ",") {
-		if pool = strings.TrimSpace(pool); pool != "" {
-			d.pools = append(d.pools, pool)
+	var ranges []string
+	switch ipam.Type {
+	case nvIPAMType:
+		before := len(d.pools)
+		for _, pool := range strings.Split(ipam.PoolName, ",") {
+			if pool = strings.TrimSpace(pool); pool != "" {
+				d.pools = append(d.pools, pool)
+			}
 		}
+		if len(d.pools) == before {
+			d.unverified = append(d.unverified, ipam.Type)
+		}
+		return nil
+	case hostLocalIPAMType:
+		ranges = append(ranges, ipam.Subnet)
+		for _, set := range ipam.Ranges {
+			for _, r := range set {
+				ranges = append(ranges, r.Subnet)
+			}
+		}
+	case whereaboutsIPAMType:
+		ranges = append(ranges, ipam.Range)
+		for _, r := range ipam.IPRanges {
+			ranges = append(ranges, r.Range)
+		}
+	default:
+		d.unverified = append(d.unverified, ipam.Type)
+		return nil
 	}
+	before := len(d.subnets)
+	for _, r := range ranges {
+		if strings.TrimSpace(r) == "" {
+			continue
+		}
+		prefix, err := parseIPAMRange(r)
+		if err != nil {
+			return err
+		}
+		d.subnets = append(d.subnets, prefix)
+	}
+	if len(d.subnets) == before {
+		d.unverified = append(d.unverified, ipam.Type)
+	}
+	return nil
+}
+
+// parseIPAMRange reads a range as a CIDR. A whereabouts start-end range
+// ("10.0.0.5-10.0.0.9/24") is bounded by the CIDR its end address carries.
+func parseIPAMRange(r string) (netip.Prefix, error) {
+	text := strings.TrimSpace(r)
+	if i := strings.LastIndex(text, "-"); i >= 0 {
+		text = text[i+1:]
+	}
+	prefix, err := netip.ParsePrefix(text)
+	if err != nil {
+		return netip.Prefix{}, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("unparseable IPAM range %q", r), err)
+	}
+	return prefix.Masked(), nil
 }
 
 // parseIPAMJSON reads a standalone IPAM block (SriovNetwork spec.ipam). Empty
@@ -424,26 +565,38 @@ func parseIPAMJSON(raw string) (ipamDeclaration, error) {
 	if err := json.Unmarshal([]byte(raw), &ipam); err != nil {
 		return d, errors.Wrap(errors.ErrCodeInternal, "failed to decode IPAM JSON", err)
 	}
-	d.add(&ipam)
-	return d, nil
+	err := d.add(&ipam)
+	return d, err
 }
 
-// parseNADConfigIPAM reads the IPAM blocks of a NAD's spec.config, top-level
-// or in any plugin of a conflist. Empty config means no IPAM.
-func parseNADConfigIPAM(config string) (ipamDeclaration, error) {
-	var d ipamDeclaration
+// nadConfig is what discovery reads from a NAD's spec.config.
+type nadConfig struct {
+	ipam        ipamDeclaration
+	requiresPCI bool
+}
+
+// parseNADConfig reads a NAD's spec.config, top-level or every plugin of a
+// conflist: its IPAM blocks, and whether a plugin is the sriov or ib-sriov
+// CNI. Empty config means no IPAM.
+func parseNADConfig(config string) (nadConfig, error) {
+	var c nadConfig
 	if strings.TrimSpace(config) == "" {
-		return d, nil
+		return c, nil
 	}
 	var conf cniNetConf
 	if err := json.Unmarshal([]byte(config), &conf); err != nil {
-		return d, errors.Wrap(errors.ErrCodeInternal, "failed to decode CNI config JSON", err)
+		return c, errors.Wrap(errors.ErrCodeInternal, "failed to decode CNI config JSON", err)
 	}
-	d.add(conf.IPAM)
-	for i := range conf.Plugins {
-		d.add(conf.Plugins[i].IPAM)
+	plugins := append([]cniPluginConf{conf.cniPluginConf}, conf.Plugins...)
+	for i := range plugins {
+		if plugins[i].Type == sriovCNIType || plugins[i].Type == ibSRIOVCNIType {
+			c.requiresPCI = true
+		}
+		if err := c.ipam.add(plugins[i].IPAM); err != nil {
+			return c, err
+		}
 	}
-	return d, nil
+	return c, nil
 }
 
 func firstNonEmpty(values ...string) string {

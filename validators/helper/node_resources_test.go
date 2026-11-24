@@ -84,6 +84,15 @@ func TestPodEffectiveRequests(t *testing.T) {
 			want: 3,
 		},
 		{name: "no resources", pod: vfPod("p", "n", v1.PodRunning, v1.Container{Name: "c"}), want: 0},
+		{
+			name: "pod overhead is added",
+			pod: func() *v1.Pod {
+				p := vfPod("p", "n", v1.PodRunning, resourceContainer(1, -1))
+				p.Spec.Overhead = v1.ResourceList{testVF: *resource.NewQuantity(1, resource.DecimalSI)}
+				return p
+			}(),
+			want: 2,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,5 +130,30 @@ func TestNodeResourceRequests(t *testing.T) {
 	})
 	if _, err := NodeResourceRequests(context.Background(), failing, "node-a"); err == nil {
 		t.Error("NodeResourceRequests() error = nil on a failed List, want error")
+	}
+}
+
+// TestPodEffectiveRequestsPodLevel covers the cpu and memory accounting the
+// scheduler applies on top of the containers: pod-level requests replace the
+// containers' sum for the resources they name, and overhead is added after.
+func TestPodEffectiveRequestsPodLevel(t *testing.T) {
+	t.Parallel()
+	pod := vfPod("p", "n", v1.PodRunning, v1.Container{Name: "c", Resources: v1.ResourceRequirements{
+		Requests: v1.ResourceList{v1.ResourceCPU: resource.MustParse("100m"), v1.ResourceMemory: resource.MustParse("64Mi")},
+	}})
+	pod.Spec.Overhead = v1.ResourceList{v1.ResourceCPU: resource.MustParse("50m")}
+
+	got := PodEffectiveRequests(pod)
+	if q := got[v1.ResourceCPU]; q.MilliValue() != 150 {
+		t.Errorf("cpu = %s, want 150m (100m container + 50m overhead)", q.String())
+	}
+
+	pod.Spec.Resources = &v1.ResourceRequirements{Requests: v1.ResourceList{v1.ResourceMemory: resource.MustParse("256Mi")}}
+	got = PodEffectiveRequests(pod)
+	if q := got[v1.ResourceMemory]; q.Value() != 256*1024*1024 {
+		t.Errorf("memory = %s, want the 256Mi pod-level request", q.String())
+	}
+	if q := got[v1.ResourceCPU]; q.MilliValue() != 150 {
+		t.Errorf("cpu = %s, want 150m: pod-level requests name only memory", q.String())
 	}
 }

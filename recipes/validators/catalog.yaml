@@ -60,9 +60,10 @@ validators:
     description: >-
       Attach every secondary network the recipe ships (SR-IOV and
       NetworkAttachmentDefinition) to a probe pod and verify the interface,
-      its address against the pool and the pod network, and the VF device
-      (skipped when the recipe ships none; a network whose resource is fully
-      requested or whose nodes are all cordoned is skipped per network)
+      its address against the declared range and the pod network, and the VF
+      device (skipped when the recipe ships none; a network whose resource is
+      fully requested, or whose nodes are all cordoned or excluded by the
+      run's tolerations, is skipped per network)
     image: ghcr.io/nvidia/aicr-validators/deployment:latest
     # Covers defaults.SecondaryNetworkProbeTimeout (75s) plus
     # defaults.SecondaryNetworkProbeReportReserve (15s) and discovery and

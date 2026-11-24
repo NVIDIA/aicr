@@ -1556,8 +1556,10 @@ enum.
 `secondary-network-attachment` places one probe per secondary network
 rather than one per node, so it applies the same rules to the node it picks.
 For each network it considers the nodes that advertise the network's
-resource, and picks the first by name that is Ready, not cordoned, and has a
-unit of the resource that no unfinished pod requests. Units are reserved as
+resource, and picks the first by name that is Ready, not cordoned, free of
+any `NoSchedule` or `NoExecute` taint the run's `--toleration` override does
+not cover (with no override the probe tolerates every taint), and has a unit
+of the resource that no unfinished pod requests. Units are reserved as
 they are assigned, so two networks sharing a resource never count the same
 unit. The probe reaches that node through a required node affinity on
 `metadata.name`, not a `nodeName` bind, so the scheduler accounts its unit
@@ -1571,24 +1573,30 @@ cluster whose GPU and network nodes are all KWOK skips with
   that should serve the fabric and cannot is a fault (#2122), not a reason to
   skip. On OKE GB300, CRI-O waits for Multus, so a Multus that never wrote its
   config shows up here.
-- A network whose advertising nodes are all cordoned, an operator's
-  deliberate choice, is `SKIPPED (unschedulable)`.
+- A network whose advertising nodes are all cordoned or excluded by the
+  run's tolerations, both an operator's deliberate choice, is
+  `SKIPPED (unschedulable)`.
 - A network whose Ready nodes have every unit requested is `SKIPPED (busy)`.
   A VR200 rail has one VF per node, so a training job holding the rails must
-  not fail the check. Two later signals of the same race are busy too: the
-  scheduler leaving the probe `Unschedulable` with `Insufficient <resource>`
-  for the whole probe budget, and the kubelet's device manager rejecting it
-  with `UnexpectedAdmissionError` and a message naming
-  `requested number of devices unavailable for <resource>`. Any other
-  `Unschedulable` message fails with the scheduler's text, and
-  `OutOf<resource>` fails too: the device manager admits a
-  device-plugin resource before the resource predicate runs, so that reason
-  means the plugin is not registered on the node.
+  not fail the check. Two later signals of the same race are busy too, each
+  only with evidence. The scheduler leaving the probe `Unschedulable` with
+  `Insufficient <resource>` is busy only when the wait watched the pod to the
+  end of the probe budget; a wait stopped by an API error fails with that
+  error. The kubelet's device manager rejecting the probe with
+  `UnexpectedAdmissionError` and a message naming
+  `requested number of devices unavailable for <resource>` is busy only when
+  other unfinished pods then request every allocatable unit; otherwise the
+  device manager had fewer healthy units than the node advertises and the
+  network fails as a possibly unhealthy unit. Any other `Unschedulable`
+  message fails with the scheduler's text, and `OutOf<resource>` fails too:
+  the device manager admits a device-plugin resource before the resource
+  predicate runs, so that reason means the plugin is not registered on the
+  node.
 - Any network failing fails the check. At least one passing, with none
   failing, passes, with the skipped networks disclosed. When every network
   is skipped, the check skips with `nodes-busy` if at least one was busy,
   and with `no-schedulable-gpu-nodes` if every one was skipped because its
-  candidates are cordoned.
+  candidates are cordoned or excluded by the run's tolerations.
 - Reading a node's pod requests failing is an error, never `busy`.
 
 The probes run in a per-run `aicr-gpu-test-<token>` namespace labeled

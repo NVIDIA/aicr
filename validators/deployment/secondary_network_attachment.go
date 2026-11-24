@@ -16,14 +16,17 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -101,7 +104,7 @@ const (
 	// network's resource has all of it requested by other pods.
 	attachmentSkippedBusy
 	// attachmentSkippedUnschedulable: every node advertising the resource is
-	// cordoned.
+	// cordoned or carries a taint the run's tolerations do not cover.
 	attachmentSkippedUnschedulable
 )
 
@@ -155,12 +158,13 @@ func (o attachmentOutcome) resultLine() string {
 //
 // For each NetworkAttachmentDefinition the recipe renders
 // (discoverSecondaryNetworks), it runs one short-lived pod, all networks in
-// parallel, placed by the scheduler on one Ready, uncordoned node that has a
-// free unit of the network's resource, annotated with the network and
-// requesting one unit. The pod must finish, and its Multus network-status must
-// show the attachment with an interface the pod can see, an address from the
-// network's pool and outside the pod network when the network declares IPAM,
-// and a PCI address for an SR-IOV VF (evaluateAttachment). The Multus failure
+// parallel, placed by the scheduler on one Ready, uncordoned node whose taints
+// the run tolerates and that has a free unit of the network's resource,
+// annotated with the network and requesting one unit. The pod must finish, and
+// its Multus network-status must show the attachment with an interface the pod
+// can see; when the network declares IPAM, addresses configured on that
+// interface, inside the declared range and outside the pod network; and a PCI
+// address for an SR-IOV VF (evaluateAttachment). The Multus failure
 // modes surface as:
 //   - no Multus in the node's CNI chain (NVKE as the image ships): the pod runs
 //     on the primary network alone and fails on the missing network-status
@@ -174,7 +178,8 @@ func (o attachmentOutcome) resultLine() string {
 //
 // The check skips when the recipe ships no secondary network, when the GPU
 // and network nodes are KWOK simulated, and when no network could be probed
-// because every candidate was busy or cordoned; a network with such
+// because every candidate was busy, cordoned or excluded by the run's
+// tolerations; a network with such
 // candidates is disclosed as SKIPPED while the others are still probed. A
 // network whose resource no node advertises, or whose uncordoned candidates
 // are all NotReady, fails, and so does any API error.
@@ -356,16 +361,23 @@ func nodeReady(node *corev1.Node) bool {
 // probeCandidates partitions the non-simulated nodes that can serve network
 // (those advertising its resource, or every GPU node for a network with no
 // resource) into the Ready, uncordoned ones a probe can use, the uncordoned
-// ones that are NotReady, and a count of the cordoned ones.
+// ones that are NotReady, and counts of the cordoned ones and of the Ready,
+// uncordoned ones whose taints the run's tolerations do not cover.
 type probeCandidates struct {
-	ready    []*corev1.Node
-	notReady []string
-	cordoned int
+	ready       []*corev1.Node
+	notReady    []string
+	cordoned    int
+	untolerated int
 }
 
-func (c probeCandidates) total() int { return len(c.ready) + len(c.notReady) + c.cordoned }
+func (c probeCandidates) total() int {
+	return len(c.ready) + len(c.notReady) + c.cordoned + c.untolerated
+}
 
-func candidatesFor(sorted []corev1.Node, network secondaryNetwork) probeCandidates {
+// candidatesFor partitions sorted for network. tolerations is the probe's
+// override; nil is the probe's tolerate-all default, under which no taint
+// excludes a node.
+func candidatesFor(sorted []corev1.Node, network secondaryNetwork, tolerations []corev1.Toleration) probeCandidates {
 	var c probeCandidates
 	for i := range sorted {
 		node := &sorted[i]
@@ -380,11 +392,32 @@ func candidatesFor(sorted []corev1.Node, network secondaryNetwork) probeCandidat
 			c.cordoned++
 		case !nodeReady(node):
 			c.notReady = append(c.notReady, node.Name)
+		case tolerations != nil && hasUntoleratedTaint(node, tolerations):
+			c.untolerated++
 		default:
 			c.ready = append(c.ready, node)
 		}
 	}
 	return c
+}
+
+// hasUntoleratedTaint reports whether node carries a NoSchedule or NoExecute
+// taint that no toleration covers, which keeps the scheduler from placing a
+// probe there.
+func hasUntoleratedTaint(node *corev1.Node, tolerations []corev1.Toleration) bool {
+	for i := range node.Spec.Taints {
+		taint := &node.Spec.Taints[i]
+		if taint.Effect != corev1.TaintEffectNoSchedule && taint.Effect != corev1.TaintEffectNoExecute {
+			continue
+		}
+		tolerated := slices.ContainsFunc(tolerations, func(t corev1.Toleration) bool {
+			return t.ToleratesTaint(logr.Discard(), taint, false)
+		})
+		if !tolerated {
+			return true
+		}
+	}
+	return false
 }
 
 // probeAssignment is one network and the node its probe runs on.
@@ -401,14 +434,16 @@ type attachmentPlan struct {
 }
 
 // planAttachmentProbes picks one node per network: among the Ready,
-// uncordoned candidates (candidatesFor), the first by name with a unit of the
-// resource no pod requests. Units are reserved as they are assigned, so two
+// uncordoned candidates whose taints the run's tolerations cover
+// (candidatesFor), the first by name with a unit of the resource no pod
+// requests. Units are reserved as they are assigned, so two
 // networks sharing a resource never count the same free unit.
 //
 // A network no node advertises fails. When no candidate is Ready and
 // uncordoned, a NotReady uncordoned candidate fails the network, since a node
 // that should serve the fabric and cannot is a fault (#2122), while
-// candidates that are all cordoned, an operator's deliberate choice, skip it.
+// candidates that are all cordoned or excluded by the run's tolerations, an
+// operator's deliberate choices, skip it.
 // A network whose Ready candidates are all fully requested is skipped as
 // busy. Reading a node's pod requests failing is an error, never "busy".
 func planAttachmentProbes(ctx *validators.Context, nodes []corev1.Node, networks []secondaryNetwork) (attachmentPlan, error) {
@@ -418,7 +453,7 @@ func planAttachmentProbes(ctx *validators.Context, nodes []corev1.Node, networks
 
 	var plan attachmentPlan
 	for _, network := range networks {
-		c := candidatesFor(sorted, network)
+		c := candidatesFor(sorted, network, ctx.Tolerations)
 		res := valueOr(network.Resource, "a GPU")
 		switch {
 		case c.total() == 0:
@@ -433,7 +468,7 @@ func planAttachmentProbes(ctx *validators.Context, nodes []corev1.Node, networks
 		case len(c.ready) == 0:
 			plan.resolved = append(plan.resolved, attachmentOutcome{
 				network: network, status: attachmentSkippedUnschedulable,
-				detail: fmt.Sprintf("all %d node(s) advertising %s are cordoned", c.cordoned, res),
+				detail: unschedulableDetail(c, res),
 			})
 			continue
 		}
@@ -450,6 +485,14 @@ func planAttachmentProbes(ctx *validators.Context, nodes []corev1.Node, networks
 		plan.probes = append(plan.probes, probeAssignment{network: network, node: node})
 	}
 	return plan, nil
+}
+
+func unschedulableDetail(c probeCandidates, res string) string {
+	if c.untolerated == 0 {
+		return fmt.Sprintf("all %d node(s) advertising %s are cordoned", c.cordoned, res)
+	}
+	return fmt.Sprintf("all %d node(s) advertising %s are cordoned (%d) or carry a taint the run's tolerations do not cover (%d)",
+		c.total(), res, c.cordoned, c.untolerated)
 }
 
 func notAdvertisedDetail(network secondaryNetwork) string {
@@ -535,7 +578,17 @@ func probeAttachment(ctx *validators.Context, ns *probeNamespace, p probeAssignm
 	out := attachmentOutcome{network: p.network, node: p.node}
 	pods := ctx.Clientset.CoreV1().Pods(ns.name)
 
-	createCtx, cancelCreate := ctx.Timeout(defaults.ResourceVerificationTimeout)
+	// A probe queued behind the others may start late; neither its create nor
+	// its wait may run into the report reserve.
+	if !time.Now().Before(deadline) {
+		return out.failed("the probe budget ran out before this probe could start; " +
+			"the probes ahead of it held every slot until the deadline")
+	}
+	createDeadline := time.Now().Add(defaults.ResourceVerificationTimeout)
+	if deadline.Before(createDeadline) {
+		createDeadline = deadline
+	}
+	createCtx, cancelCreate := context.WithDeadline(ctx.Ctx, createDeadline)
 	created, err := pods.Create(createCtx, buildAttachmentProbePod(ns, p, ctx.Tolerations), metav1.CreateOptions{})
 	cancelCreate()
 	if err != nil {
@@ -544,18 +597,15 @@ func probeAttachment(ctx *validators.Context, ns *probeNamespace, p probeAssignm
 
 	waitCtx, cancelWait := context.WithDeadline(ctx.Ctx, deadline)
 	pod, err := waitForProbePod(waitCtx, ctx.Clientset, ns.name, created.Name)
+	reachedDeadline := stderrors.Is(waitCtx.Err(), context.DeadlineExceeded)
 	cancelWait()
 	if err != nil {
-		if insufficient, message, unscheduled := probeUnschedulable(pod, p.network.Resource); unscheduled {
-			if insufficient {
-				return out.busy(fmt.Sprintf("the scheduler found no free %s on %s within the probe budget: %s",
-					p.network.Resource, p.node, message))
-			}
-			return out.failed(fmt.Sprintf("the scheduler could not place the probe on %s: %s", p.node, message))
-		}
-		return out.failed(stuckProbeDetail(ctx, ns.name, created.Name, pod, err))
+		return unfinishedProbeOutcome(ctx, out, ns.name, created.Name, pod, err, reachedDeadline)
 	}
 	if pod.Status.Phase == corev1.PodFailed {
+		if deviceShortageAtAdmission(pod, p.network.Resource) {
+			return admissionShortageOutcome(ctx, out)
+		}
 		return failedProbeOutcome(out, pod)
 	}
 
@@ -570,7 +620,7 @@ func probeAttachment(ctx *validators.Context, ns *probeNamespace, p probeAssignm
 		return out.failed(err.Error())
 	}
 
-	eval := evaluateAttachment(p.network, pod.Annotations[multusNetworkStatusAnnotation], interfaces, poolSubnets, podCIDRs)
+	eval := evaluateAttachment(p.network, pod.Annotations[multusNetworkStatusAnnotation], interfaces, addrLines, poolSubnets, podCIDRs)
 	out.notes = eval.notes
 	if len(eval.problems) > 0 {
 		return out.failed(strings.Join(eval.problems, "; "))
@@ -594,17 +644,73 @@ func probeUnschedulable(pod *corev1.Pod, resourceName string) (insufficient bool
 	return false, "", false
 }
 
-// failedProbeOutcome judges a probe pod in phase Failed. Only the device
-// manager's rejection for the last unit of the network's own resource is
-// busy, a race the scheduler lost to a pod bound outside it; every other
-// failure, OutOf<resource> included, is a fault.
+// unfinishedProbeOutcome judges a probe whose wait ended without a terminal
+// phase. Only a wait that observed the pod until the probe deadline may read
+// the scheduler's verdict: Unschedulable for lack of a unit of the network's
+// resource is busy, and any other Unschedulable message fails with it. A wait
+// stopped by an API error, or by the check's own context, fails with that
+// error, never busy.
+func unfinishedProbeOutcome(ctx *validators.Context, out attachmentOutcome, namespace, name string,
+	pod *corev1.Pod, waitErr error, reachedDeadline bool) attachmentOutcome {
+
+	if !reachedDeadline {
+		return out.failed(fmt.Sprintf("the probe pod could not be observed to the end of the probe budget: %v", waitErr))
+	}
+	if insufficient, message, unscheduled := probeUnschedulable(pod, out.network.Resource); unscheduled {
+		if insufficient {
+			return out.busy(fmt.Sprintf("the scheduler found no free %s on %s within the probe budget: %s",
+				out.network.Resource, out.node, message))
+		}
+		return out.failed(fmt.Sprintf("the scheduler could not place the probe on %s: %s", out.node, message))
+	}
+	return out.failed(stuckProbeDetail(ctx, namespace, name, pod, waitErr))
+}
+
+// deviceShortageAtAdmission reports whether the kubelet's device manager
+// rejected pod because no unit of resourceName was available. That is a busy
+// node only when other pods hold every unit (admissionShortageOutcome); the
+// same message follows a unit turning unhealthy.
+func deviceShortageAtAdmission(pod *corev1.Pod, resourceName string) bool {
+	return resourceName != "" && pod.Status.Reason == kubeletUnexpectedAdmissionError &&
+		strings.Contains(pod.Status.Message, kubeletDevicesUnavailable+resourceName)
+}
+
+// admissionShortageOutcome decides a device-manager shortage by evidence of
+// competing allocation: other unfinished pods on the node requesting every
+// allocatable unit is busy, a race the scheduler lost to a pod bound outside
+// it. Free units by that count mean the device manager had fewer healthy
+// devices than the node advertises, which fails, and so does any error
+// reading the node or its pods.
+func admissionShortageOutcome(ctx *validators.Context, out attachmentOutcome) attachmentOutcome {
+	res := out.network.Resource
+	readCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
+	defer cancel()
+	node, err := ctx.Clientset.CoreV1().Nodes().Get(readCtx, out.node, metav1.GetOptions{})
+	if err != nil {
+		return out.failed(fmt.Sprintf("the kubelet on %s had no %s at admission, and the node could not be read to tell contention from an unhealthy unit: %v",
+			out.node, res, err))
+	}
+	requests, err := helper.NodeResourceRequests(readCtx, ctx.Clientset, out.node)
+	if err != nil {
+		return out.failed(fmt.Sprintf("the kubelet on %s had no %s at admission, and its pods could not be read to tell contention from an unhealthy unit: %v",
+			out.node, res, err))
+	}
+	allocatable := node.Status.Allocatable[corev1.ResourceName(res)]
+	requested := requests[corev1.ResourceName(res)]
+	if allocatable.Value()-requested.Value() < 1 {
+		return out.busy(fmt.Sprintf("the kubelet on %s had no free %s at admission; other pods request %d of %d",
+			out.node, res, requested.Value(), allocatable.Value()))
+	}
+	return out.failed(fmt.Sprintf("the kubelet on %s had no healthy %s at admission although other pods request only %d of %d: "+
+		"a unit may be unhealthy (device plugin health), not in use", out.node, res, requested.Value(), allocatable.Value()))
+}
+
+// failedProbeOutcome judges a probe pod in phase Failed for any reason other
+// than a device-manager shortage. Every such failure is a fault, OutOf<resource>
+// included.
 func failedProbeOutcome(out attachmentOutcome, pod *corev1.Pod) attachmentOutcome {
 	res := out.network.Resource
 	switch {
-	case res != "" && pod.Status.Reason == kubeletUnexpectedAdmissionError &&
-		strings.Contains(pod.Status.Message, kubeletDevicesUnavailable+res):
-		return out.busy(fmt.Sprintf("the kubelet on %s had no free %s at admission; another pod took the last unit",
-			out.node, res))
 	case strings.HasPrefix(pod.Status.Reason, kubeletOutOfResourcePrefix):
 		return out.failed(fmt.Sprintf("the kubelet on %s rejected the probe with %s: the device plugin for %s may not be registered on that node (%s)",
 			out.node, pod.Status.Reason, valueOr(res, "the resource"), pod.Status.Message))
