@@ -49,7 +49,7 @@ AND shape, never by label alone, and every delete is pinned to the UID seen at
 planning time, so an object recreated in between is left alone.
 
 What is swept:
-  - per-run conformance test namespaces: aicr-gpu-test-*,
+  - per-run deployment and conformance test namespaces: aicr-gpu-test-*,
     gang-scheduling-test-*, hpa-test-*, ai-metrics-test-* and
     gateway-traffic-* (32-hex run token), cluster-auto-test-* (8-hex
     token), each carrying the aicr.run/gpu-test-run label whose value must

@@ -1553,7 +1553,8 @@ pointed at your mirror yet:
   `docker.io/nvidia/cuda:12.9.0-base-ubuntu24.04` and
   `docker.io/library/ubuntu:22.04`. The nvidia-smi and NCCL preflight checks run
   theirs in the validator's namespace (`aicr-validation` by default), and
-  several conformance checks create a namespace for each run. The validator
+  `secondary-network-attachment` and several conformance checks create a
+  namespace for each run. The validator
   Jobs themselves follow `AICR_VALIDATOR_IMAGE_REGISTRY` and need your
   signature like any other image.
 

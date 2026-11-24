@@ -2010,6 +2010,22 @@ const (
 	MaxOCIRecipeFiles = 4096
 )
 
+// Secondary-network attachment probe budget (the deployment-phase
+// secondary-network-attachment check). Both sit inside the check's catalog
+// timeout, which TestSecondaryNetworkAttachmentCatalogEnvelope in
+// pkg/validator/catalog pins above their sum.
+const (
+	// SecondaryNetworkProbeTimeout bounds one attachment probe pod reaching a
+	// terminal phase: the probe image pull, sandbox creation through Multus
+	// and the network's CNI, and a shell that lists the pod's interfaces.
+	SecondaryNetworkProbeTimeout = 75 * time.Second
+
+	// SecondaryNetworkProbeReportReserve is the part of the check budget the
+	// probe wait leaves unused, so the events of a probe stuck in sandbox
+	// creation can still be read and reported before the check's own deadline.
+	SecondaryNetworkProbeReportReserve = 15 * time.Second
+)
+
 // AtRiskListPageSize is the most objects the at-risk scan asks for in one List
 // request.
 const AtRiskListPageSize int64 = 200

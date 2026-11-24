@@ -23,6 +23,7 @@
 //	deployment check-nvidia-smi
 //	deployment gke-gpu-nic-networks
 //	deployment gke-gpu-nic-topology
+//	deployment secondary-network-attachment
 package main
 
 import (
@@ -30,12 +31,19 @@ import (
 )
 
 func main() {
-	validators.Run(map[string]validators.CheckFunc{
-		"operator-health":      checkOperatorHealth,
-		"expected-resources":   checkExpectedResources,
-		"gpu-operator-version": checkGPUOperatorVersion,
-		"check-nvidia-smi":     checkNvidiaSMI,
-		"gke-gpu-nic-networks": checkGKEGPUNICNetworks,
-		"gke-gpu-nic-topology": checkGKEGPUNICTopology,
-	})
+	validators.Run(deploymentChecks())
+}
+
+// deploymentChecks maps each deployment-phase catalog entry's first argument
+// to its check.
+func deploymentChecks() map[string]validators.CheckFunc {
+	return map[string]validators.CheckFunc{
+		"operator-health":              checkOperatorHealth,
+		"expected-resources":           checkExpectedResources,
+		"gpu-operator-version":         checkGPUOperatorVersion,
+		"check-nvidia-smi":             checkNvidiaSMI,
+		"gke-gpu-nic-networks":         checkGKEGPUNICNetworks,
+		"gke-gpu-nic-topology":         checkGKEGPUNICTopology,
+		"secondary-network-attachment": checkSecondaryNetworkAttachment,
+	}
 }

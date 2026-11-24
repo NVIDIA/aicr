@@ -861,6 +861,7 @@ page are the contract.
 | `dra-support` | `configuredPolicy` |
 | `gpu-operator-version` | `detectedVersion`, `versionSatisfied` |
 | `check-nvidia-smi` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped` |
+| `secondary-network-attachment` | `nodesValidated`, `nodesTotal`, `nodesFailed`, `nodesSkipped`, counting networks |
 | `cluster-autoscaling`, on every passing path | `observationOnly` |
 | any check, on an in-pod skip | `skipReason` |
 | any check, on every result whose stamp write succeeded (every `passed` and `skipped` result an image that stamps produces) | `resultSchema`, stamped by the runner before the check starts |
@@ -876,6 +877,16 @@ page are the contract.
 - `gke-gpu-nic-topology` publishes `nodesValidated` and `nodesTotal` on every
   exit once the node list succeeds, including an empty list and a
   `no-verifiable-nodes` skip. A failed node list publishes neither.
+- `secondary-network-attachment` attaches each secondary network on one node,
+  so its counts are counts of networks, not of nodes: `nodesTotal` is the
+  number of networks the recipe ships, `nodesValidated` the networks whose
+  probe passed, `nodesFailed` the networks that failed (a probe failure, a
+  resource no node advertises, or only NotReady candidates), and
+  `nodesSkipped` the networks skipped as busy or because every candidate is
+  cordoned. It publishes them once every network has an outcome, on a pass, a
+  failure, or a `nodes-busy` or `no-schedulable-gpu-nodes` skip. It publishes
+  none when the recipe ships no network, the nodes are simulated, or the check
+  fails before it has a verdict per network.
 - `draReady` and `draDesired` come from the last observed DRA kubelet-plugin
   DaemonSet, and are absent if none was found. `nodewrightComplete` and
   `nodewrightExpected` are `0`/`0` when every Skyhook CR is suppressed.
@@ -1596,15 +1607,73 @@ Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
 certifies the cohort or fails closed — so it mints no `skipReason`
 enum.
 
+`secondary-network-attachment` places one probe per secondary network
+rather than one per node, so it applies the same rules to the node it picks.
+For each network it considers the nodes that advertise the network's
+resource, and picks the first by name that is Ready, not cordoned, free of
+any `NoSchedule` or `NoExecute` taint the run's `--toleration` override does
+not cover (with no override the probe tolerates every taint), and has a unit
+of the resource that no unfinished pod requests. Units are reserved as
+they are assigned, so two networks sharing a resource never count the same
+unit. The probe reaches that node through a required node affinity on
+`metadata.name`, not a `nodeName` bind, so the scheduler accounts its unit
+with every other pod's and a probe can never make a workload lose a VF at
+kubelet admission. KWOK nodes (`kwok.x-k8s.io/node`) are never picked, and a
+cluster whose GPU and network nodes are all KWOK skips with
+`simulated-nodes`.
+
+- A network that no node advertises fails: no pod can request its device.
+- A network whose uncordoned advertising nodes are all NotReady fails: a node
+  that should serve the fabric and cannot is a fault (#2122), not a reason to
+  skip. On OKE GB300, CRI-O waits for Multus, so a Multus that never wrote its
+  config shows up here.
+- A network whose advertising nodes are all cordoned or excluded by the
+  run's tolerations, both an operator's deliberate choice, is
+  `SKIPPED (unschedulable)`.
+- A network whose Ready nodes have every unit requested by other workloads
+  is `SKIPPED (busy)`. A VR200 rail has one VF per node, so a training job
+  holding the rails must not fail the check. Units held by the check's own
+  probes, in the probe namespace or reserved for another network in the same
+  plan, are not workloads: a network waiting only on them is deferred and
+  planned again once the probes ahead of it finish, within the same probe
+  budget, and one still waiting when the budget runs out is reported with
+  that cause.
+- Two later signals of the same race are busy only with evidence that other
+  workloads request at least one unit and every allocatable unit: the
+  scheduler leaving the probe `Unschedulable` with `Insufficient <resource>`
+  at the end of the probe budget, and the kubelet's device manager rejecting
+  it with `UnexpectedAdmissionError` and a message naming
+  `requested number of devices unavailable for <resource>`. Without that
+  evidence a unit may have turned unhealthy, or allocatable dropped, since
+  planning, and the network fails. The scheduler's verdict is read from a
+  fresh read of the pod at the deadline, never from the last watch event; a
+  wait stopped by an API error, or a fresh read that fails, fails the
+  network. Any other `Unschedulable` message fails with the scheduler's text,
+  and `OutOf<resource>` fails too: the device manager admits a device-plugin
+  resource before the resource predicate runs, so that reason means the
+  plugin is not registered on the node.
+- Any network failing fails the check. At least one passing, with none
+  failing, passes, with the skipped networks disclosed. When every network
+  is skipped, the check skips with `nodes-busy` if at least one was busy,
+  and with `no-schedulable-gpu-nodes` if every one was skipped because its
+  candidates are cordoned or excluded by the run's tolerations.
+- Reading a node's pod requests failing is an error, never `busy`.
+
+The probes run in a per-run `aicr-gpu-test-<token>` namespace labeled
+`aicr.run/gpu-test-run`, so `aicr sweep` reclaims it after a SIGKILL. A
+cleanup that cannot delete the namespace turns a pass or a skip into a
+failure, since a leaked probe stuck in sandbox creation holds a VF.
+
 Cluster-aggregate checks that assert on an operator's aggregate status
 (`gpu-operator-health`) remain unaffected — DaemonSet operands ignore
 cordons.
 
 **Structured coverage survives redaction.** Minimal redaction strips the
-`RESULT:` stdout line, so `check-nvidia-smi` and the RDMA gate also
-publish coverage in `extra` as `nodesValidated`, `nodesTotal`,
-`nodesFailed`, and `nodesSkipped`, and `check-nvidia-smi` adds a
-`skipReason` code when it skips. A signed bundle records a pass on a
+`RESULT:` stdout line, so `check-nvidia-smi`, the RDMA gate and
+`secondary-network-attachment` also publish coverage in `extra` as
+`nodesValidated`, `nodesTotal`, `nodesFailed`, and `nodesSkipped`, and
+`check-nvidia-smi` and `secondary-network-attachment` add a `skipReason`
+code when they skip. A signed bundle records a pass on a
 partly busy or cordoned cluster as partial coverage. Node names appear
 only in stdout, never in `extra`.
 

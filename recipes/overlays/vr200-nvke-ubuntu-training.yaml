@@ -277,6 +277,10 @@ spec:
         - expected-resources
         - gpu-operator-version
         - check-nvidia-smi
+        # Proves each RoCE rail attaches (interface, nv-ipam address, VF). It
+        # does not exercise traffic between nodes, which these rails have not
+        # carried.
+        - secondary-network-attachment
       constraints:
         # Gates gpu-operator only. No per-component deployment version check
         # exists for nvidia-dra-driver-gpu, so its version is not asserted.

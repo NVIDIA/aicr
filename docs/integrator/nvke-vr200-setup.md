@@ -223,6 +223,22 @@ DPU-side work outside the tenant cluster. So the `>= 50` floor is a
 placeholder, and the only collective path proven here is MNNVL inside one
 NVLink domain.
 
+**The deployment phase checks the attachment, not the traffic.** The leaf
+declares `secondary-network-attachment`, which attaches each
+`default/roce-network-rail-<n>` network to a short-lived probe pod requesting
+that rail's VF, and requires the interface, an nv-ipam address inside the
+rail's pool and outside the pod network, and the VF's PCI address. Each worker
+has one VF per rail, and the check probes a rail on any Ready worker whose VF
+is free. A rail is skipped rather than failed when running workloads hold its
+VF on every Ready worker (busy), or when every worker advertising it is
+cordoned or carries a taint the run's `--toleration` does not cover
+(unschedulable); with every rail busy the check skips with `nodes-busy`. It
+sends no
+packet between nodes, so it is expected to pass on a tenant whose DPU bridges
+no spare port, as the manual attachment above did. The check has run only
+against fake clusters so far, not on this cluster. See
+[Secondary network attachment](../user/validation.md#secondary-network-attachment).
+
 **These `SriovNetwork`s set no VF attributes, deliberately.** GB200's set
 `linkState: enable`; on this platform the PF driver refuses it, and `trust` and
 `spoofChk` too, failing the attachment with `operation not permitted`. The PF

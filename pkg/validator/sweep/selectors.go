@@ -54,7 +54,7 @@ var podGroupGVR = schema.GroupVersionResource{
 // requirement. Selection is deliberately narrower than "stamped by aicr":
 // only the run-scoped shapes the sweeper can prove ownership of.
 const (
-	// testNamespaceSelector selects every per-run conformance test
+	// testNamespaceSelector selects every per-run check test
 	// namespace, including any a user stamped by hand — which is why the
 	// name-and-token check in acceptTestNamespace decides candidacy.
 	testNamespaceSelector = labels.GPUTestRun

@@ -55,6 +55,26 @@ validators:
     timeout: 8m
     args: ["expected-resources"]
     env: []
+  - name: secondary-network-attachment
+    phase: deployment
+    description: >-
+      Attach every secondary network the recipe ships (SR-IOV and
+      NetworkAttachmentDefinition) to a probe pod and verify the interface,
+      its address against the declared range and the pod network, and the VF
+      device (skipped when the recipe ships none; a network whose resource is
+      fully requested, or whose nodes are all cordoned or excluded by the
+      run's tolerations, is skipped per network)
+    image: ghcr.io/nvidia/aicr-validators/deployment:latest
+    # Covers defaults.SecondaryNetworkProbeTimeout (75s) plus
+    # defaults.SecondaryNetworkProbeReportReserve (15s) and discovery and
+    # setup ahead of the probes; TestSecondaryNetworkAttachmentCatalogEnvelope
+    # pins it above that sum. The deployment phase's total envelope is
+    # bounded by the operator's ValidationJobDeadline
+    # (TestDeploymentPhaseEnvelopeFitsOperatorJobDeadline), which leaves
+    # less than 1m55s for this entry.
+    timeout: 1m45s
+    args: ["secondary-network-attachment"]
+    env: []
   - name: gpu-operator-version
     phase: deployment
     description: "Validate GPU Operator version against recipe constraints"

@@ -281,6 +281,19 @@ aicr validate --recipe bundle/recipe.yaml --phase deployment --phase conformance
 `aicr validate` runs the deployment and conformance phases against the live
 cluster, so the bundle must be deployed before it.
 
+The deployment phase includes `secondary-network-attachment`. It attaches each
+`default/sriov-network-rail-<n>` network to a short-lived probe pod that
+requests one VF of that rail, and requires the pod to see the interface, an
+IPoIB address inside the rail's IPPool and outside the OVN-Kubernetes pod
+network, and the VF's PCI address. On a node with no multus in its CNI chain,
+as the NVKE image ships, the probe runs on OVN-Kubernetes alone and fails on
+the missing `network-status` entry. A multus that is present but broken, for
+example one that lost its token, fails it with the kubelet's
+`FailedCreatePodSandBox` message. A rail whose VFs are all held by running
+workloads is skipped, not failed. The check has run only against fake
+clusters so far. See
+[Secondary network attachment](../user/validation.md#secondary-network-attachment).
+
 The performance phase runs the `gb200/nvke` NCCL runtimes.
 
 - `nccl-all-reduce-bw-nvls` measured 839.5 GB/s on the reference tenant
@@ -302,6 +315,8 @@ The performance phase runs the `gb200/nvke` NCCL runtimes.
   ([#3482](https://github.com/NVIDIA/aicr/issues/3482)). There,
   `kubectl -n nvidia-network-operator rollout restart ds/kube-multus-ds` buys
   one more hour; upgrading to this recipe's thick multus removes the cause.
+  The deployment phase's `secondary-network-attachment` check names the same
+  failure, if it is present when that phase runs.
 - The `>= 40` NET floor is copied from the GB200 OKE recipe. No tenant with
   full IB partition membership has measured it yet, so it is a placeholder.
 
