@@ -68,7 +68,9 @@ const (
 	// PlatformLinePrefix marks a stdout line carrying, as one JSON string,
 	// the os/arch the image's process runs as. Every such line is stripped
 	// from Stdout. When the result's ExtraKeyResultSchema stamp passes
-	// TrustsReportedImages, the lines are folded with PlatformLines.
+	// TrustsReportedImages, the lines are folded with PlatformLines. For the
+	// log of a pod a check launches, ReportedPlatform reads only its first
+	// line.
 	PlatformLinePrefix = "##AICR-PLATFORM## "
 )
 

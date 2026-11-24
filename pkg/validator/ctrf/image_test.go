@@ -91,7 +91,11 @@ func TestReportedPlatform(t *testing.T) {
 		want string
 	}{
 		{"no line", "work\ndone", ""},
-		{"line among output", "work\n" + PlatformLinePrefix + `"linux/arm64"` + "\ndone", "linux/arm64"},
+		{"first line", PlatformLinePrefix + `"linux/arm64"` + "\nwork\ndone", "linux/arm64"},
+		{"only line", PlatformLinePrefix + `"linux/arm64"`, "linux/arm64"},
+		{"line after other output ignored", "work\n" + PlatformLinePrefix + `"linux/arm64"` + "\ndone", ""},
+		{"relayed later line ignored", PlatformLinePrefix + `"linux/arm64"` + "\nwork\n" + PlatformLinePrefix + `"linux/amd64"`, "linux/arm64"},
+		{"malformed first line", PlatformLinePrefix + `"arm64"` + "\nwork", ""},
 		{"prefix mid-line ignored", "work " + PlatformLinePrefix + `"linux/arm64"`, ""},
 	}
 	for _, tt := range tests {

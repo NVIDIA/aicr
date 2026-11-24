@@ -765,9 +765,10 @@ platform manifest digest, so a digest identifies an image only together with
 its platform. A record has no digest when the runtime reports none for that
 repository or the pod could not be read. The platform comes only from the
 image's `##AICR-PLATFORM##` lines, and is empty when they were not read, are
-missing, or conflict. The inference performance check reports
-its aiperf-bench pod's image the same way, with the platform from the line
-`aiperf_entrypoint.py` prints.
+missing, or conflict. The inference performance check reports its aiperf-bench
+pod's image the same way, with the platform from the first line of that pod's
+log, which `aiperf_entrypoint.py` prints before it starts aiperf. Later platform
+lines in that log, such as any aiperf relays, are ignored.
 
 The runner (`validators.Run`) sets up its output filter, then writes two stamps
 before the check starts. One is an `##AICR-EXTRA##` line with

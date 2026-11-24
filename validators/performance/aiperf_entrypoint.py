@@ -44,8 +44,9 @@ Contract notes:
   empty sentinel block, so parseAIPerfOutput reports the real cause instead of
   a downstream JSON parse failure.
 * Before anything else, the wrapper prints the os/arch it runs as, when it has
-  a Go name, on one ctrf.PlatformLinePrefix line, which the validator records
-  as this image's platform.
+  a Go name, on one ctrf.PlatformLinePrefix line. The validator records it as
+  this image's platform only from the log's first line, so a platform line in
+  aiperf's own output is ignored.
 """
 
 import json

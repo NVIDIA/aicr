@@ -92,15 +92,18 @@ func (p *PlatformLines) Add(payload string) {
 // none or the lines conflicted.
 func (p *PlatformLines) Platform() string { return p.platform }
 
-// ReportedPlatform returns the platform the PlatformLinePrefix lines in logs
-// agree on, or "" when there are none or they conflict.
+// ReportedPlatform returns the platform on the first line of logs, or "" when
+// that line is not a valid PlatformLinePrefix line. Later lines are ignored
+// because the process prints its platform before any output it relays, which
+// can carry PlatformLinePrefix lines of its own.
 func ReportedPlatform(logs string) string {
-	var p PlatformLines
-	for line := range strings.SplitSeq(logs, "\n") {
-		if payload, ok := strings.CutPrefix(line, PlatformLinePrefix); ok {
-			p.Add(payload)
-		}
+	first, _, _ := strings.Cut(logs, "\n")
+	payload, ok := strings.CutPrefix(first, PlatformLinePrefix)
+	if !ok {
+		return ""
 	}
+	var p PlatformLines
+	p.Add(payload)
 	return p.Platform()
 }
 
