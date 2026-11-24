@@ -24,10 +24,11 @@ import (
 	"aicr.run/pkg/validator/ctrf"
 )
 
-// extrasOut is the destination for the sentinel lines. Nil means the CURRENT
-// os.Stdout (the pod-boundary transport the orchestrator reads back), resolved
-// at write time so a test that swaps os.Stdout for a pipe captures the line;
-// tests in this package set it directly instead.
+// extrasOut is the destination for the sentinel lines. Run sets it to bypass
+// its output filter. Nil means the CURRENT os.Stdout (the pod-boundary
+// transport the orchestrator reads back), resolved at write time so a test
+// that swaps os.Stdout for a pipe captures the line. Tests in this package
+// set it directly instead.
 var extrasOut io.Writer
 
 func sentinelOut() io.Writer {

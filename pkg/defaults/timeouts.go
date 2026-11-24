@@ -1575,6 +1575,17 @@ const (
 	// ValidatorLogReadRetryDelay is the pause between those attempts.
 	ValidatorLogReadRetryDelay = 2 * time.Second
 
+	// ValidatorOutputDrainTimeout bounds how long validators.Run waits, after
+	// the check returns, for the check's filtered output to reach the
+	// container's stdout and stderr before exiting. When it expires, Run waits
+	// up to the same time again for a held partial line to be written.
+	ValidatorOutputDrainTimeout = 5 * time.Second
+
+	// ValidatorOutputLineLimit is the partial-line length, in bytes, at which
+	// validators.Run stops waiting for a newline and writes the line with one
+	// added.
+	ValidatorOutputLineLimit = 64 << 10
+
 	// ImagePullSecretCopyTimeout bounds copying one --image-pull-secret Secret
 	// from the validator namespace into a check's per-run namespace (one Get
 	// and one Create or Update).

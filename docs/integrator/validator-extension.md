@@ -48,6 +48,13 @@ The container receives:
 
 Evidence output goes to **stdout**. Debug logs go to **stderr**. On failure, write a reason to `/dev/termination-log` (max 4096 bytes).
 
+Lines starting with `##AICR-` are reserved for the structured markers the
+orchestrator reads, and only those markers may print them. A validator that
+prints another process's output should break every `##AICR-` in it. Validators
+built on `validators.Run` do this for everything written to `os.Stdout` and
+`os.Stderr`, turning it into `# #AICR-`. Writes that go to file descriptors 1
+and 2 directly, such as `println`, are not filtered.
+
 ### Step 2: Build and Push the Image
 
 ```shell

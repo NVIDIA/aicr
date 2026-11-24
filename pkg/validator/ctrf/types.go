@@ -38,6 +38,11 @@ const (
 	// StatusOther indicates an unexpected outcome (crash, OOM, timeout, etc.).
 	StatusOther = "other"
 
+	// ReservedLinePrefix begins every sentinel line prefix. A check that
+	// relays another process's output must break every occurrence of it in
+	// that output, at any offset, as validators.Run does.
+	ReservedLinePrefix = "##AICR-"
+
 	// ExtraLinePrefix marks a stdout line carrying one JSON object for
 	// TestResult.Extra. pkg/validator/job.ExtractResult merges every such line,
 	// a later value winning per key, and strips them from Stdout.

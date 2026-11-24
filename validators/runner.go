@@ -73,7 +73,12 @@ type CheckFunc func(ctx *Context) error
 
 // Run is the main entry point for v2 validator containers.
 // It loads the context, dispatches to the named check, and handles
-// exit codes and termination log writing.
+// exit codes and termination log writing. What the check writes to
+// os.Stdout and os.Stderr passes through a filter that breaks every
+// occurrence of ctrf.ReservedLinePrefix. This package's sentinel writers
+// bypass it, and so does the default slog handler, whose text output quotes
+// any value that contains a newline. Writes straight to file descriptors 1
+// and 2 are not filtered.
 //
 // Usage in main.go:
 //
@@ -101,7 +106,13 @@ func Run(checks map[string]CheckFunc) {
 
 	slog.Info("starting check", "name", checkName)
 
+	stopGuard, err := guardOutput(defaults.ValidatorOutputDrainTimeout)
+	if err != nil {
+		writeTerminationLog("failed to guard check output: %v", err)
+		os.Exit(1) //nolint:gocritic // Intentional exit before any deferred resources
+	}
 	exitCode := runCheck(checkFn)
+	stopGuard()
 	os.Exit(exitCode)
 }
 
@@ -109,9 +120,9 @@ func Run(checks map[string]CheckFunc) {
 // runs the check, and returns the exit code. Separated from Run so defer
 // works correctly before os.Exit.
 //
-// The stamps go out before anything that can fail or exit, so every result
-// the orchestrator reads from this image carries them. A stamp that cannot be
-// written fails the check.
+// The stamps go out before anything else in runCheck can fail or exit, so
+// every result carries them unless a stamp cannot be written, which fails
+// the check.
 func runCheck(checkFn CheckFunc) int {
 	if err := publishStamps(); err != nil {
 		writeTerminationLog("failed to publish result stamps: %v", err)

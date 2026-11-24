@@ -1530,6 +1530,11 @@ var (
 	testDigestB = "sha256:" + strings.Repeat("b", 64)
 )
 
+// neutralized returns line as validators.Run's output filter relays it.
+func neutralized(line string) string {
+	return strings.ReplaceAll(line, ctrf.ReservedLinePrefix, "# #AICR-")
+}
+
 // imageSentinel returns img as the stdout line validators.EmitImage writes.
 func imageSentinel(t *testing.T, img ctrf.PodImage) string {
 	t.Helper()
@@ -1554,6 +1559,7 @@ func TestParseImageSentinel(t *testing.T) {
 		{"records kept in order", aiperf + "\n" + other, "", []string{testDigestA, testDigestB}},
 		{"malformed JSON dropped", ctrf.ImageLinePrefix + `{"image":` + "\n" + other, "", []string{testDigestB}},
 		{"invalid record dropped", invalid + "\n" + other, "", []string{testDigestB}},
+		{"neutralized relay kept as stdout", neutralized(aiperf) + "\n" + other, neutralized(aiperf), []string{testDigestB}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1574,22 +1580,32 @@ func TestParseImageSentinel(t *testing.T) {
 	}
 }
 
+func TestSentinelPrefixesAreReserved(t *testing.T) {
+	for _, p := range sentinelPrefixes {
+		if !strings.HasPrefix(p, ctrf.ReservedLinePrefix) {
+			t.Errorf("sentinel prefix %q does not start with ctrf.ReservedLinePrefix %q", p, ctrf.ReservedLinePrefix)
+		}
+	}
+}
+
 func TestParsePlatformSentinel(t *testing.T) {
 	line := func(platform string) string { return ctrf.PlatformLinePrefix + strconv.Quote(platform) }
 	tests := []struct {
 		name         string
 		logs         string
+		wantCleaned  string
 		wantPlatform string
 	}{
-		{"line parsed and stripped", line("linux/arm64") + "\nwork", "linux/arm64"},
-		{"agreeing lines", line("linux/arm64") + "\nwork\n" + line("linux/arm64"), "linux/arm64"},
-		{"conflicting lines", line("linux/arm64") + "\nwork\n" + line("linux/amd64"), ""},
+		{"line parsed and stripped", line("linux/arm64") + "\nwork", "work", "linux/arm64"},
+		{"agreeing lines", line("linux/arm64") + "\nwork\n" + line("linux/arm64"), "work", "linux/arm64"},
+		{"conflicting lines", line("linux/arm64") + "\nwork\n" + line("linux/amd64"), "work", ""},
+		{"neutralized relay kept as stdout", neutralized(line("linux/amd64")) + "\n" + line("linux/arm64"), neutralized(line("linux/amd64")), "linux/arm64"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cleaned, s := parseSentinels(tt.logs)
-			if cleaned != "work" {
-				t.Errorf("cleaned = %q, want %q", cleaned, "work")
+			if cleaned != tt.wantCleaned {
+				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
 			}
 			if s.platform != tt.wantPlatform {
 				t.Errorf("platform = %q, want %q", s.platform, tt.wantPlatform)

@@ -728,9 +728,20 @@ non-blocking), letting a broken or unauthorized cluster clear conformance.
 A check runs inside a pod; the only channels that reach the orchestrator are the
 exit code, `/dev/termination-log`, and the captured stdout (pod logs). To move
 *more* than a pass/fail verdict across that boundary, checks emit **sentinel
-lines** — stdout lines with a reserved prefix that a specific parser recognizes
-and pulls out. Plain (non-prefixed) stdout is unaffected and flows into the CTRF
-`stdout` array as before.
+lines**. These are stdout lines with a reserved prefix that a specific parser
+recognizes and pulls out. Plain (non-prefixed) stdout flows into the CTRF
+`stdout` array through the filter described next. The structured sentinels below
+share the `##AICR-` prefix (`ctrf.ReservedLinePrefix`). `validators.Run` passes
+what the check writes to `os.Stdout` and `os.Stderr` through a filter that
+breaks every occurrence of it, at any offset (`##AICR-` becomes `# #AICR-`), so
+output a check relays from another pod stays in `stdout` and is not parsed. The
+filter writes whole lines only, adding a newline to a partial line at exit,
+before a sentinel line, or at `defaults.ValidatorOutputLineLimit`, so a line
+from the other stream cannot complete a prefix between two of its writes. The
+`validators.Emit*` functions and the runner's own stamps write past the filter,
+and so does `slog`, which is safe because its text handler quotes any value that
+contains a newline. Writes that go to file descriptors 1 and 2 directly, such as
+`println`, are not filtered.
 
 For structured CTRF metadata, these markers supersede the log-parsing
 restriction in ADR-002's
@@ -757,13 +768,15 @@ missing, or conflict. The inference performance check reports
 its aiperf-bench pod's image the same way, with the platform from the line
 `aiperf_entrypoint.py` prints.
 
-The runner (`validators.Run`) writes two stamps before anything else. One is an
+The runner (`validators.Run`) sets up its output filter, then writes two
+stamps before the check starts. One is an
 `##AICR-EXTRA##` line with `resultSchema: "1"` (`ctrf.ResultSchemaVersion`),
 the result-contract version this image speaks. The other is an
 `##AICR-PLATFORM##` line with the binary's `GOOS/GOARCH`, which is the image's
 platform because the validator Dockerfiles copy the binary built for it. A
 result carries both on a pass, a skip, a failure or a context-load failure. If
-a write fails, the check exits 1 without the remaining stamps. A passed check
+the filter cannot be set up, the check exits 1 before either stamp. If a write
+fails, the check exits 1 without the remaining stamps. A passed check
 whose logs the orchestrator could not read carries no markers and is reported
 `other`. A `passed` result read from its logs therefore carries the
 `resultSchema` stamp unless the image predates it.
