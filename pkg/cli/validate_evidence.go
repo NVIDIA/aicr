@@ -44,7 +44,8 @@ type recipeEvidenceConfig struct {
 	Full bool
 
 	// AllowMutableValidatorTags emits despite a validator image resolving to a
-	// moving tag (see attestation.EmitOptions.AllowMutableValidatorTags).
+	// moving tag lacking a recorded digest or platform (see
+	// attestation.EmitOptions.AllowMutableValidatorTags).
 	// CLI-only, mirroring Full and NoSign: a config file is committed, and an
 	// opt-out of a provenance guard should be a deliberate per-invocation act
 	// rather than a setting a later run inherits silently.

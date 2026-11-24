@@ -62,10 +62,7 @@ type BuildOptions struct {
 	AICRVersion             string
 	AICRCommit              string
 	ValidatorCatalogVersion string
-
-	// Digest fields stay blank: the catalog tracks refs by tag and
-	// resolving to digest would require a registry round-trip per image.
-	ValidatorImages []ValidatorImage
+	ValidatorImages         []ValidatorImage
 
 	// Redaction records the minimal-bundle redaction policy in the
 	// predicate. nil for full bundles.

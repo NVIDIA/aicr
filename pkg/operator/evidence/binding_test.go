@@ -16,11 +16,14 @@ package evidence
 
 import (
 	"bytes"
+	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
 	operrors "aicr.run/pkg/operator/errors"
+	"aicr.run/pkg/operator/registry"
 )
 
 const (
@@ -157,6 +160,66 @@ func TestCheckValidators(t *testing.T) {
 	}
 	if err := CheckValidators(nil, pins()); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
 		t.Errorf("evidence naming no validator: %v", err)
+	}
+}
+
+// indexLister serves the manifests each index digest lists and counts reads.
+type indexLister struct {
+	indexes map[string][]string
+	err     error
+	reads   int
+}
+
+func (l *indexLister) IndexManifests(_ context.Context, _ registry.Repository, d string) ([]string, error) {
+	l.reads++
+	return l.indexes[d], l.err
+}
+
+func TestToPinnedIndexDigests(t *testing.T) {
+	t.Parallel()
+	ref, pinned, _ := strings.Cut(deployment, "@")
+	amd64 := "sha256:" + strings.Repeat("a", 64)
+	unlisted := "sha256:" + strings.Repeat("b", 64)
+	unpinned := "registry.example.com/mirror/deployment:v1.0.0"
+	named := []ValidatorImage{
+		{Image: ref, Digest: amd64},
+		{Image: ref, Digest: amd64},
+		{Image: ref, Digest: pinned},
+		{Image: ref, Digest: unlisted},
+		{Image: ref},
+		{Image: unpinned, Digest: amd64},
+	}
+	indexes := &indexLister{indexes: map[string][]string{pinned: {amd64}}}
+
+	got, err := ToPinnedIndexDigests(t.Context(), indexes, named, pins())
+	if err != nil {
+		t.Fatalf("ToPinnedIndexDigests() error = %v", err)
+	}
+	want := []ValidatorImage{
+		{Image: ref, Digest: pinned},
+		{Image: ref, Digest: pinned},
+		{Image: ref, Digest: pinned},
+		{Image: ref, Digest: unlisted},
+		{Image: ref},
+		{Image: unpinned, Digest: amd64},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("ToPinnedIndexDigests() = %v, want %v", got, want)
+	}
+	if named[0].Digest != amd64 {
+		t.Error("ToPinnedIndexDigests() modified its input")
+	}
+	if indexes.reads != 1 {
+		t.Errorf("read the pinned index %d times, want once", indexes.reads)
+	}
+
+	failing := &indexLister{err: operrors.New(operrors.ErrCodeUnavailable, "registry down")}
+	if _, err = ToPinnedIndexDigests(t.Context(), failing, named[:1], pins()); operrors.CodeOf(err) != operrors.ErrCodeUnavailable {
+		t.Errorf("unreadable index: ToPinnedIndexDigests() error = %v, want UNAVAILABLE", err)
+	}
+	hostless := map[string]string{"validator": "validator:v1@" + pinned}
+	if _, err = ToPinnedIndexDigests(t.Context(), indexes, []ValidatorImage{{Image: "validator:v1", Digest: amd64}}, hostless); operrors.CodeOf(err) != operrors.ErrCodeInvalidRequest {
+		t.Errorf("unparsable pin: ToPinnedIndexDigests() error = %v, want INVALID_REQUEST", err)
 	}
 }
 

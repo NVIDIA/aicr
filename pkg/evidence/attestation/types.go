@@ -221,11 +221,15 @@ type RecipeRef struct {
 	Digest string `json:"digest" yaml:"digest"`
 }
 
-// ValidatorImage records one validator image that ran during the
-// validate session. The list is sorted by Image for determinism.
+// ValidatorImage is one image a validate session recorded, at one digest and
+// platform. A record without a Digest can be a planned image whose pod never
+// started. Digest is the registry digest the kubelet reported, and Platform
+// is the os/arch the image's own process reported. Either is empty when it
+// was not recorded (see ctrf.PodImage).
 type ValidatorImage struct {
-	Image  string `json:"image" yaml:"image"`
-	Digest string `json:"digest" yaml:"digest"`
+	Image    string `json:"image" yaml:"image"`
+	Digest   string `json:"digest" yaml:"digest"`
+	Platform string `json:"platform,omitempty" yaml:"platform,omitempty"`
 }
 
 // PhaseSummary is the per-phase outcome recorded in the predicate.

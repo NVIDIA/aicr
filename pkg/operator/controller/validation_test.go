@@ -590,14 +590,16 @@ func TestValidationIgnoresOtherRuns(t *testing.T) {
 // is promoted and no evidence annotation is set.
 func TestValidationFailureFailsRollout(t *testing.T) {
 	for name, tc := range map[string]struct {
-		exit     int32
-		pushed   bool
-		evidence bool
+		exit         int32
+		pushed       bool
+		noValidators bool
+		evidence     bool
 	}{
-		"checks failed":     {exit: aicrjob.ExitInternal, pushed: true, evidence: true},
-		"pre-flight failed": {exit: aicrjob.ExitInvalidInput},
-		"unauthorized":      {exit: aicrjob.ExitUnauthorized},
-		"no exit":           {exit: -1},
+		"checks failed":                          {exit: aicrjob.ExitInternal, pushed: true, evidence: true},
+		"checks failed before any validator ran": {exit: aicrjob.ExitInternal, pushed: true, noValidators: true, evidence: true},
+		"pre-flight failed":                      {exit: aicrjob.ExitInvalidInput},
+		"unauthorized":                           {exit: aicrjob.ExitUnauthorized},
+		"no exit":                                {exit: -1},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := testContext(t)
@@ -605,7 +607,11 @@ func TestValidationFailureFailsRollout(t *testing.T) {
 			r, f := newValidating(t, newEngine(), true)
 			job := untilValidating(t, ctx, r)
 			if tc.pushed {
-				f.pushEvidence(t, job.Labels[v1alpha1.LabelRunID], "h100", 3, deploymentValidator)
+				validators := []string{deploymentValidator}
+				if tc.noValidators {
+					validators = nil
+				}
+				f.pushEvidence(t, job.Labels[v1alpha1.LabelRunID], "h100", 3, validators...)
 			}
 			fail(t, ctx, job, tc.exit)
 			reconcileRollout(t, ctx, r)
@@ -1220,6 +1226,7 @@ func TestValidationRejectsEvidence(t *testing.T) {
 		"moved tag":     {recipe: "h100", validators: []string{deploymentValidator}, moved: true, want: "not the pinned"},
 		"other recipe":  {recipe: "other", validators: []string{deploymentValidator}, want: "not the plan's h100"},
 		"failed checks": {recipe: "h100", failed: 1, validators: []string{deploymentValidator}, want: "records failed checks"},
+		"no validator":  {recipe: "h100", want: "names no validator image"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := testContext(t)

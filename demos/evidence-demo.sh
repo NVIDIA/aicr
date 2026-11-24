@@ -61,11 +61,12 @@
 #
 #   # demo behavior
 #   AICR_VALIDATOR_IMAGE_TAG=edge   validator image tag for dev aicr builds. :edge moves, and
-#                                   validate refuses to attest a mutable validator tag. When
+#                                   validate refuses to attest a mutable validator tag whose
+#                                   digest or platform it did not record. When
 #                                   this is set AND PUSH_REF is a ttl.sh ref (the default),
 #                                   the demo adds --allow-mutable-validator-tags, since the
 #                                   artifact expires on its own. Against any other PUSH_REF the
-#                                   guard stands and validate fails closed — real evidence
+#                                   guard stands and validate can fail closed. Real evidence
 #                                   leaves the override unset instead (see #2873 and
 #                                   docs/contributor/evidence-publishing.md).
 #   SKIP_VALIDATE=1                 reuse the bundle at $WORKDIR/out; skip recipe + snapshot + validate.
@@ -125,12 +126,13 @@ PUSH_REF="${PUSH_REF:-ttl.sh/aicr-evidence-$(new_uuid):72h}"
 
 # A dev build usually needs AICR_VALIDATOR_IMAGE_TAG=edge to find published
 # validator images, but :edge moves, so `validate --emit-attestation` refuses to
-# record it as provenance (#2873). The demo may waive that — but ONLY when the
+# record it as provenance unless it recorded each image's digest and platform.
+# The demo may waive that. It does so ONLY when the
 # bundle is going somewhere it expires on its own. ttl.sh drops the artifact
 # after its TTL, so nothing unverifiable outlives the demo. Against any other
 # PUSH_REF the evidence is retained, and waiving the guard there would publish
 # exactly the artifact this check exists to prevent — so the guard stands and
-# the run fails closed with an actionable message.
+# an unrecorded image fails the run closed with an actionable message.
 DEMO_ALLOWED_MUTABLE_TAG=""
 if [ -n "${AICR_VALIDATOR_IMAGE_TAG:-}" ]; then
   case "$PUSH_REF" in
@@ -288,8 +290,9 @@ if [ -n "$DEMO_ALLOWED_MUTABLE_TAG" ]; then
   note "      unset, so the bundle names the immutable :vX.Y.Z / :sha-<commit> tag aicr resolves."
 elif [ -n "${AICR_VALIDATOR_IMAGE_TAG:-}" ]; then
   note "NOTE: AICR_VALIDATOR_IMAGE_TAG=${AICR_VALIDATOR_IMAGE_TAG} is a moving tag and PUSH_REF is a"
-  note "      durable registry, so the demo does NOT waive the provenance guard — validate will"
-  note "      fail closed. Unset AICR_VALIDATOR_IMAGE_TAG to record an immutable tag, or point"
+  note "      durable registry, so the demo does NOT waive the provenance guard. validate fails"
+  note "      closed for any validator whose digest or platform it could not record."
+  note "      Unset AICR_VALIDATOR_IMAGE_TAG to record an immutable tag, or point"
   note "      PUSH_REF back at ttl.sh if you only want a throwaway demo artifact."
 fi
 rm -rf "$OUT"

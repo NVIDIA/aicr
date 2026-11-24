@@ -200,11 +200,10 @@ func evidenceClient(ctx context.Context, t *testing.T) (*registry.Client, regist
 // checks, exits 8 and still pushes unsigned evidence to the run's tag. From
 // AICR v1.1.0 the run's launcher holds no RBAC write, so the run creates no
 // RBAC object, and the run reports the evidence digest through its
-// termination message. The
-// evidence names the pinned validators by tag, each tag resolves to its
-// pinned digest, and the operator's binding pushed with AICR's evidence as
-// its subject reads back by digest naming the plan, the operator digest and
-// the AICR image digest.
+// termination message. The evidence names the pinned validators, each tag
+// resolves to its pinned digest, and the operator's binding pushed with
+// AICR's evidence as its subject reads back by digest naming the plan, the
+// operator digest and the AICR image digest.
 func TestValidationJobPushesBindableEvidence(t *testing.T) {
 	// AICR built from a commit (tools/operator-e2e-commit) names validators
 	// :sha-<commit>, not the release validators this test pins.
@@ -240,10 +239,14 @@ func TestValidationJobPushesBindableEvidence(t *testing.T) {
 	if err = aicrjob.CheckArtifactVersion(aicrVersion, summary.AICRVersion); err != nil || summary.Passed() || summary.Phases[aicrjob.ValidationPhase].Failed == 0 {
 		t.Fatalf("summary = %+v (%v)", summary, err)
 	}
-	if err = evidence.CheckValidators(summary.ValidatorImages, pins); err != nil {
+	upstream := registry.New(registry.Options{})
+	named, err := evidence.ToPinnedIndexDigests(ctx, upstream, summary.ValidatorImages, pins)
+	if err != nil {
 		t.Fatal(err)
 	}
-	upstream := registry.New(registry.Options{})
+	if err = evidence.CheckValidators(named, pins); err != nil {
+		t.Fatal(err)
+	}
 	for _, pin := range pins {
 		ref, pinned, _ := strings.Cut(pin, "@")
 		pinRepo, rerr := registry.ParseRepository(evidence.Repository(pin))
@@ -293,22 +296,55 @@ func TestValidationJobPushesBindableEvidence(t *testing.T) {
 	t.Logf("binding %s@%s", repo, bound)
 }
 
-// AICR refuses to attest a validator image that resolves to a mutable tag
-// unless --allow-mutable-validator-tags, which the operator never passes: a
-// run whose validators resolve to :latest runs the same failing check as
-// above, but exits 2 (INVALID_REQUEST) instead of 8 and pushes no evidence.
+// A validator image that resolves to :latest never yields evidence the
+// operator binds. AICR refuses to attest a mutable tag unless
+// --allow-mutable-validator-tags, which the operator never passes, or unless
+// it recorded the image's digest and platform. A refused run exits 2
+// (INVALID_REQUEST) instead of 8 and pushes no evidence. An attested run
+// names every validator by digest, and the operator's pin check rejects the
+// unpinned tag.
 func TestValidationRefusesMutableValidatorTags(t *testing.T) {
 	ctx := testContext(t)
+	pins := validatorPins(t)
 	r, outcome := runValidation(ctx, t, func(job *batchv1.Job) {
 		c := &job.Spec.Template.Spec.Containers[0]
 		c.Env = append(c.Env, corev1.EnvVar{Name: "AICR_VALIDATOR_IMAGE_TAG", Value: "latest"})
 	})
 	t.Logf("outcome %s: %v", outcome.State, outcome.Err)
-	if outcome.State != aicrjob.StateFailed || operrors.CodeOf(outcome.Err) != operrors.ErrCodeInvalidRequest {
-		t.Fatalf("validation Job %s: %v (message %q); want INVALID_REQUEST", outcome.State, outcome.Err, outcome.Message)
-	}
 	c, repo := evidenceClient(ctx, t)
-	if d, err := c.Resolve(ctx, repo, "run-"+r.RunID); operrors.CodeOf(err) != operrors.ErrCodeNotFound {
-		t.Fatalf("evidence pushed for a mutable validator: %s %v", d, err)
+	tag := "run-" + r.RunID
+	if outcome.State == aicrjob.StateFailed && operrors.CodeOf(outcome.Err) == operrors.ErrCodeInvalidRequest &&
+		strings.Contains(outcome.Err.Error(), "exited 2") {
+
+		if d, err := c.Resolve(ctx, repo, tag); operrors.CodeOf(err) != operrors.ErrCodeNotFound {
+			t.Fatalf("evidence pushed for a mutable validator: %s %v", d, err)
+		}
+		return
+	}
+	if outcome.State != aicrjob.StateFailed || !strings.Contains(outcome.Err.Error(), "exited 8") {
+		t.Fatalf("validation Job %s: %v (message %q); want INVALID_REQUEST with exit 2, or failed checks with exit 8", outcome.State, outcome.Err, outcome.Message)
+	}
+	dgst, err := c.Resolve(ctx, repo, tag)
+	if err != nil {
+		t.Fatalf("no evidence at %s:%s: %v", repo, tag, err)
+	}
+	bundle, err := c.PullBundle(ctx, repo, dgst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := evidence.ParseAICRStatement(bundle.Files[evidence.AICRStatementFile])
+	if err != nil {
+		t.Fatalf("ParseAICRStatement() = %v (files %v)", err, len(bundle.Files))
+	}
+	if len(summary.ValidatorImages) == 0 {
+		t.Fatal("evidence names no validator image")
+	}
+	for _, v := range summary.ValidatorImages {
+		if v.Digest == "" || !strings.HasSuffix(v.Image, ":latest") {
+			t.Fatalf("evidence names validator %s (digest %q), want :latest with a digest", v.Image, v.Digest)
+		}
+	}
+	if err = evidence.CheckValidators(summary.ValidatorImages, pins); err == nil || !strings.Contains(err.Error(), ":latest") {
+		t.Fatalf("CheckValidators(%+v) = %v, want a rejection naming the :latest tag", summary.ValidatorImages, err)
 	}
 }

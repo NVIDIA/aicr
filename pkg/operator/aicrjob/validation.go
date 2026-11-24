@@ -48,7 +48,8 @@ type Validation struct {
 // and AICR supports it, and pushed unsigned otherwise; AICR v1.1.0 and later
 // report its digest through the termination message. The exit status fails
 // on any failed check; the operator never passes
-// --allow-mutable-validator-tags, so a mutable validator image fails the run.
+// --allow-mutable-validator-tags, so a mutable validator image lacking a
+// recorded digest or platform fails the run.
 func ValidationArgs(r *Request, v *Validation) []string {
 	args := []string{
 		"--recipe", InputURI(r, InputTo),

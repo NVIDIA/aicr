@@ -230,8 +230,9 @@ jobs:
             # loaded images. Release cells leave this unset (released :<version>).
             echo "AICR_VALIDATOR_IMAGE_TAG=latest"
             # That :latest pin is a mutable tag, which `validate --emit-attestation`
-            # refuses by default (#2873) because the predicate names validators by
-            # tag alone. Accept it here and ONLY here: these are ko.local images
+            # refuses by default unless it recorded the image's registry digest and
+            # platform. A side-loaded ko.local image has no registry digest, so it is
+            # always refused. Accept it here and ONLY here: these are ko.local images
             # side-loaded into a throwaway kind cluster, so there is no registry the
             # tag could be repointed in and no immutable tag to prefer. The cloud
             # lanes resolve :uat-<run_id> (main) or :<version> (release) and must
