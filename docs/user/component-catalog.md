@@ -3139,8 +3139,8 @@ reports `Deployed`, `Available` and `DependenciesFulfilled`, and that the
 operator Deployments and the agent and `cluster-sync` operands are available.
 `DependenciesFulfilled` is the Run:ai operator's own verdict on its
 prerequisites: the GPU Operator, a Prometheus Operator at the version Run:ai
-requires (kube-prometheus-stack 88.6.5 or later; AICR's stack-wide pin is
-being raised to it), and an ingress controller or Gateway API implementation
+requires (kube-prometheus-stack 88.6.5 or later, which AICR's stack-wide pin
+now meets), and an ingress controller or Gateway API implementation
 with the two TLS Secrets Run:ai documents in the `runai` namespace. Until the
 recipe ships those, the check fails on a bare training base; that is the
 intended fail-closed shape, not a flake. Run:ai's pre-install hook labels the
@@ -4342,3 +4342,20 @@ through your deployer) before redeploying the previous bundle: its
 9100. The uninstall keeps that namespace with its TLS Secrets, and the
 `opentelemetry.io` CRDs. If it hangs on a Pending cleanup Job, see
 [NKTP Telemetry Pipeline](#nktp-telemetry-pipeline).
+
+### `kube-prometheus-stack`: `88.6.5` runs Prometheus from a distroless image
+
+From `88.6.5`, Prometheus runs from its distroless image,
+`quay.io/prometheus/prometheus:v3.14.0-distroless` (upstream made it the
+chart's default in `85.0.0`). A cluster already on `84.5.0` upgrades in place
+with no steps: the operator replaces the Prometheus pod once, and its
+`emptyDir` history starts again. Two things change:
+
+- A private registry that mirrors the stack's images needs the `-distroless`
+  Prometheus tag before the upgrade, or the new pod can't pull its image.
+  [`aicr mirror list`](air-gap-mirror.md) run against the new recipe includes
+  it.
+- The Prometheus container has no shell, so `kubectl exec` into it no longer
+  works.
+
+A cluster below `84.5.0` also follows the steps in the section above.
