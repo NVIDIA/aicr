@@ -18,8 +18,11 @@ import (
 	"bytes"
 	"reflect"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
+	"aicr.run/pkg/defaults"
 	"aicr.run/pkg/evidence/redact"
 	"aicr.run/pkg/fingerprint"
 	"aicr.run/pkg/header"
@@ -457,6 +460,11 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			want: map[string]string{"resultSchema": "1"},
 		},
 		{
+			name: "current result schema stamp survives",
+			in:   map[string]string{"resultSchema": "2"},
+			want: map[string]string{"resultSchema": "2"},
+		},
+		{
 			name: "result schema stamp of an unknown version is dropped",
 			in:   map[string]string{"resultSchema": "2-dev on aks-prod-cluster"},
 			want: nil,
@@ -845,6 +853,46 @@ func reportWithProvenance(p *ctrf.RuntimeProvenance) *ctrf.Report {
 	r := reportWithExtra(nil)
 	r.Results.Tests[0].RuntimeProvenance = p
 	return r
+}
+
+func TestCTRFBoundsImages(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	valid := ctrf.PodImage{Image: "ghcr.io/x/deployment:v1", Digest: digest, Platform: "linux/arm64"}
+	in := reportWithExtra(nil)
+	in.Results.Tests[0].Images = []ctrf.PodImage{
+		{Image: "ghcr.io/x/deployment:v1", Digest: "sha256:short"},
+		{Image: "ghcr.io/x/deployment:v1", Digest: digest, Platform: "node gpu-0"},
+		{Image: "arn:aws:iam::123456789012:role/x"},
+		valid,
+	}
+	out, rules := redact.CTRF(in)
+	if got, want := out.Results.Tests[0].Images, []ctrf.PodImage{valid}; !reflect.DeepEqual(got, want) {
+		t.Errorf("bounded images = %+v, want %+v", got, want)
+	}
+	if in.Results.Tests[0].Images[0].Digest != "sha256:short" {
+		t.Errorf("CTRF mutated its input images: %+v", in.Results.Tests[0].Images)
+	}
+	if !slices.Contains(rules, "ctrf.tests.images.bound") {
+		t.Errorf("applied rules must name the images bound, got %v", rules)
+	}
+}
+
+func TestCTRFCapsImageRecords(t *testing.T) {
+	in := reportWithExtra(nil)
+	invalid := ctrf.PodImage{Image: "arn:aws:iam::123456789012:role/x"}
+	in.Results.Tests[0].Images = []ctrf.PodImage{invalid}
+	for i := range defaults.ValidatorMaxImageRecords + 1 {
+		in.Results.Tests[0].Images = append(in.Results.Tests[0].Images,
+			ctrf.PodImage{Image: "ghcr.io/x/y:v" + strconv.Itoa(i)})
+	}
+	out, _ := redact.CTRF(in)
+	got := out.Results.Tests[0].Images
+	if len(got) != defaults.ValidatorMaxImageRecords {
+		t.Fatalf("kept %d images, want %d", len(got), defaults.ValidatorMaxImageRecords)
+	}
+	if got[0].Image != "ghcr.io/x/y:v0" {
+		t.Errorf("first kept image = %q, want the first valid record", got[0].Image)
+	}
 }
 
 // TestCTRFBoundsRuntimeProvenance covers #2297's evidence carrier policy: the

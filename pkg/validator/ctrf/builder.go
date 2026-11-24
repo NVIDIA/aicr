@@ -46,6 +46,10 @@ type ValidatorResult struct {
 	// container's ProvenanceLinePrefix sentinel line; nil when none was emitted.
 	RuntimeProvenance *RuntimeProvenance
 
+	// Images lists the validator image and the images the check reports
+	// (see TestResult.Images).
+	Images []PodImage
+
 	// Duration is the wall-clock execution time.
 	Duration time.Duration
 
@@ -181,6 +185,9 @@ func (b *Builder) AddResult(r *ValidatorResult) {
 		p.OverriddenPaths = append([]string(nil), p.OverriddenPaths...)
 		p.InheritedPaths = append([]string(nil), p.InheritedPaths...)
 		tr.RuntimeProvenance = &p
+	}
+	if len(r.Images) > 0 {
+		tr.Images = append([]PodImage(nil), r.Images...)
 	}
 
 	b.tests = append(b.tests, tr)

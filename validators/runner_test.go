@@ -19,9 +19,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -133,23 +135,25 @@ func withTempTerminationLog(t *testing.T) string {
 	return tmp
 }
 
-// TestPublishResultSchema verifies the stamp every result carries: one extra
-// sentinel line with the current contract version, and a failed write
-// surfaces as an error rather than a warning, since the runner fails the
-// check on it.
-func TestPublishResultSchema(t *testing.T) {
-	t.Run("writes the stamp", func(t *testing.T) {
+// TestPublishStamps verifies publishStamps writes the contract version and
+// platform lines, and returns an error when a write fails.
+func TestPublishStamps(t *testing.T) {
+	t.Run("writes the stamps", func(t *testing.T) {
 		var buf bytes.Buffer
 		orig := extrasOut
 		extrasOut = &buf
 		t.Cleanup(func() { extrasOut = orig })
 
-		if err := publishResultSchema(); err != nil {
-			t.Fatalf("publishResultSchema() error = %v", err)
+		if err := publishStamps(); err != nil {
+			t.Fatalf("publishStamps() error = %v", err)
 		}
-		payload, ok := strings.CutPrefix(strings.TrimSuffix(buf.String(), "\n"), ctrf.ExtraLinePrefix)
+		lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("output %q, want an extra line and a platform line", buf.String())
+		}
+		payload, ok := strings.CutPrefix(lines[0], ctrf.ExtraLinePrefix)
 		if !ok {
-			t.Fatalf("output %q missing extra sentinel", buf.String())
+			t.Fatalf("line %q missing extra sentinel", lines[0])
 		}
 		var got map[string]string
 		if err := json.Unmarshal([]byte(payload), &got); err != nil {
@@ -159,15 +163,48 @@ func TestPublishResultSchema(t *testing.T) {
 		if !maps.Equal(got, want) {
 			t.Errorf("stamp = %v, want %v", got, want)
 		}
+		payload, ok = strings.CutPrefix(lines[1], ctrf.PlatformLinePrefix)
+		if !ok {
+			t.Fatalf("line %q missing platform sentinel", lines[1])
+		}
+		var platforms ctrf.PlatformLines
+		platforms.Add(payload)
+		if got, want := platforms.Platform(), runtime.GOOS+"/"+runtime.GOARCH; got != want {
+			t.Errorf("platform = %q, want %q", got, want)
+		}
 	})
-	t.Run("a failed write is an error", func(t *testing.T) {
-		orig := extrasOut
-		extrasOut = errWriter{}
-		t.Cleanup(func() { extrasOut = orig })
+	for _, tt := range []struct {
+		name   string
+		writes int
+	}{
+		{"a failed extra stamp is an error", 0},
+		{"a failed platform stamp is an error", 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := extrasOut
+			w := &failAfterWriter{writes: tt.writes}
+			extrasOut = w
+			t.Cleanup(func() { extrasOut = orig })
 
-		err := publishResultSchema()
-		errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInternal)
-	})
+			err := publishStamps()
+			errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInternal)
+			if w.writes != 0 {
+				t.Errorf("publishStamps() failed with %d successful writes unused, want the failure on write %d", w.writes, tt.writes+1)
+			}
+		})
+	}
+}
+
+// failAfterWriter succeeds for its first writes calls to Write and fails
+// every call after them.
+type failAfterWriter struct{ writes int }
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.writes == 0 {
+		return 0, io.ErrClosedPipe
+	}
+	w.writes--
+	return len(p), nil
 }
 
 func TestHandleCheckResult(t *testing.T) {

@@ -1400,9 +1400,15 @@ CTRF reports omit per-test stdout/message. Each test's CTRF `extra` keeps only
 allowlisted counts, measurements, thresholds, versions, allocation modes,
 transport, fabric, and runtime-source codes, the `nodeLocal` and
 `versionSatisfied` booleans, and skip-reason codes, never node names or IPs, and
-is omitted when none remain. The signed predicate records the applied policy in
-a `redaction` block, and the bundle self-verifies exactly like a full one. Pass
-`--full` to publish the raw payloads instead.
+is omitted when none remain. Each test that ran a validator Job lists, in
+`images`, the validator image, then any image the check reports itself (today,
+the inference performance check's aiperf-bench pod). Other pods a check
+launches, such as NCCL or conformance probe pods, are not listed. `images` keeps
+up to 16 well-formed image records, unaliased, including any mirror registry
+host. A record with no digest does not prove the image ran, and a digest
+identifies an image only together with its platform. The signed predicate
+records the applied policy in a `redaction` block, and the bundle self-verifies
+exactly like a full one. Pass `--full` to publish the raw payloads instead.
 
 Commit `pointer.yaml` to its per-source path
 `recipes/evidence/<recipe>/<src>/<digest>.yaml` — the emit output prints

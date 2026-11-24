@@ -21,7 +21,10 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -61,10 +64,7 @@ const (
 // This method must be called after WaitForCompletion returns, when the Job is
 // in a terminal state (Complete or Failed).
 func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
-	result := &ctrf.ValidatorResult{
-		Name:  d.config.Entry.Name,
-		Phase: d.config.Entry.Phase,
-	}
+	result := d.newResult()
 
 	// Find the pod for this Job
 	jobPod, err := d.getPodForJob(ctx)
@@ -74,9 +74,21 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		// activeDeadlineSeconds expiry. The Job object still records why,
 		// so classify from its Failed condition instead of reporting a bare
 		// "pod not found" (see issue #2186).
-		result.ExitCode, result.TerminationMsg = d.missingPodOutcome(ctx, err)
+		termPod := sync.OnceValue(func() *corev1.Pod {
+			// A failed List says nothing about the pod, so skip a second one.
+			if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+				return d.lastTerminated
+			}
+			return d.terminatedPod(ctx)
+		})
+		result.ExitCode, result.TerminationMsg = d.missingPodOutcome(ctx, err, termPod)
+		if p := termPod(); p != nil {
+			d.recordValidatorImage(p, result)
+		}
 		return result
 	}
+
+	d.recordValidatorImage(jobPod, result)
 
 	// Extract container status from "validator" container
 	cs, found := pod.ContainerStatus(jobPod, ValidatorContainerName)
@@ -115,13 +127,15 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 // captureValidatorOutput reads the validator container's stdout into result
 // and applies the fail-closed rule of #3703: a check is credited only from
 // output the orchestrator actually read. Every structured marker a check
-// emits (skipReason, the coverage counts, observationOnly, resultSchema)
+// emits (skipReason, coverage counts, observationOnly, resultSchema, images)
 // rides stdout, so an exit-0 result whose logs could not be read is a pass
-// the orchestrator cannot vouch for; it is reported as `other` with the read
+// the orchestrator cannot vouch for. It is reported as `other` with the read
 // error, in the shape missingPodOutcome uses for a vanished pod, never as a
 // clean pass. A result that already failed keeps its exit code and
-// termination message, since the verdict does not depend on the output; the
-// read error is logged.
+// termination message, since the verdict does not depend on the output. The
+// read error is logged. Image and platform lines are recorded only when the
+// resultSchema stamp on the first Extra line that parses passes
+// ctrf.TrustsReportedImages.
 func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, result *ctrf.ValidatorResult) {
 	logs, attempts, logErr := d.readValidatorLogs(ctx, podName)
 	switch {
@@ -133,7 +147,50 @@ func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, r
 	case logErr != nil:
 		slog.Warn("failed to capture pod logs", "pod", podName, "error", logErr)
 	case logs != "":
-		result.Extra, result.RuntimeProvenance, result.Stdout = processValidatorLogs(logs)
+		var s sentinels
+		s, result.Stdout = processValidatorLogs(logs)
+		result.Extra, result.RuntimeProvenance = s.extra, s.prov
+		if !ctrf.TrustsReportedImages(s.schema) {
+			if len(s.images) > 0 || s.platform != "" {
+				slog.Warn("ignoring image and platform lines from a validator image that does not neutralize relayed output",
+					"pod", podName, "resultSchema", s.schema)
+			}
+			s.images, s.platform = nil, ""
+		}
+		if len(result.Images) == 1 {
+			result.Images[0].Platform = s.platform
+		}
+		reported := s.images
+		if room := max(defaults.ValidatorMaxImageRecords-len(result.Images), 0); len(reported) > room {
+			slog.Warn("dropping validator image records over the cap",
+				"pod", podName, "dropped", len(reported)-room, "cap", defaults.ValidatorMaxImageRecords)
+			reported = reported[:room]
+		}
+		result.Images = append(result.Images, reported...)
+	}
+}
+
+// newResult returns an empty result for d's check that records the Job's
+// planned image with no digest. A check with a Job may have run even when its
+// pod cannot be read.
+func (d *Deployer) newResult() *ctrf.ValidatorResult {
+	result := &ctrf.ValidatorResult{
+		Name:  d.config.Entry.Name,
+		Phase: d.config.Entry.Phase,
+	}
+	if d.config.Entry.Image != "" {
+		result.Images = []ctrf.PodImage{{Image: d.config.Entry.Image}}
+	}
+	return result
+}
+
+// recordValidatorImage sets result.Images to the image p's spec names for the
+// validator container, and leaves result unchanged when p has none. Call it
+// before captureValidatorOutput, which sets that image's platform and appends
+// the images the validator reports.
+func (d *Deployer) recordValidatorImage(p *corev1.Pod, result *ctrf.ValidatorResult) {
+	if img, ok := ctrf.ContainerImage(p, ValidatorContainerName); ok {
+		result.Images = []ctrf.PodImage{img}
 	}
 }
 
@@ -169,7 +226,9 @@ func (d *Deployer) readValidatorLogs(ctx context.Context, podName string) (logs 
 }
 
 // missingPodOutcome classifies an ExtractResult run whose Job pod could not be
-// found, returning the exit code and termination message to report.
+// found, returning the exit code and termination message to report. termPod
+// returns the validator's last known terminated pod, or nil. It is called only
+// after the Job's condition is read.
 //
 // The dominant cause is not a vanished pod but a deadline: when a validator Job
 // exceeds its activeDeadlineSeconds, the Job controller kills the pod AND
@@ -197,7 +256,7 @@ func (d *Deployer) readValidatorLogs(ctx context.Context, podName string) (logs 
 //
 // Both branches remain blocking (ctrf.IsFailingStatus covers failed and other), so
 // this changes only diagnostic fidelity, never whether the phase fails.
-func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error) (exitCode int32, msg string) {
+func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error, termPod func() *corev1.Pod) (exitCode int32, msg string) {
 	notFound := fmt.Sprintf("pod not found for Job %s: %v", d.jobName, findErr)
 
 	// Only a CONFIRMED absence licenses a Job-condition diagnosis.
@@ -233,7 +292,7 @@ func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error) (exitCo
 		// still readable while the pod terminates, or from the last status the
 		// deployer observed. Keep the failed verdict and attach what the check
 		// reported instead of discarding it behind a generic message.
-		if reported, ok := d.reportedTermination(ctx); ok {
+		if reported, ok := reportedTermination(termPod()); ok {
 			return validatorExitFailed, boundTerminationMsg(fmt.Sprintf(
 				"validator Job did not complete within its %s Job deadline (check budget %s) (Job condition Failed/%s: %s); check reported: %s",
 				enforcedDeadline(job, d.config.Entry.Timeout), truncateToSeconds(effectiveTimeout(d.config.Entry.Timeout)),
@@ -258,13 +317,10 @@ func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error) (exitCo
 		defaults.ValidatorMaxTerminationMsgBytes)
 }
 
-// reportedTermination returns what the validator container reported when its
-// pod is no longer returned by getPodForJob: the exit code and termination
-// message from a pod still in its deletion grace window, else from the last
-// terminated pod the deployer observed while waiting. ok is false when neither
-// source has a terminated validator container.
-func (d *Deployer) reportedTermination(ctx context.Context) (string, bool) {
-	termPod := d.terminatedPod(ctx)
+// reportedTermination returns the exit code and termination message of
+// termPod's validator container. ok is false when termPod is nil or its
+// validator container has not terminated.
+func reportedTermination(termPod *corev1.Pod) (string, bool) {
 	if termPod == nil {
 		return "", false
 	}
@@ -332,31 +388,56 @@ func (d *Deployer) jobFailedCondition(ctx context.Context) (*batchv1.Job, batchv
 	return nil, batchv1.JobCondition{}, false
 }
 
-// processValidatorLogs turns raw pod logs into the structured Extra map, the
-// RuntimeProvenance carrier, and the human-readable Stdout lines. Order matters
-// and is the invariant both call sites rely on: the sentinels are parsed from
-// the FULL logs BEFORE any tail-truncation, so a sentinel emitted after more
-// than ValidatorMaxStdoutLines of output still survives; only then is the
-// sentinel-stripped remainder truncated and length-capped for human display.
-func processValidatorLogs(logs string) (extra map[string]string, prov *ctrf.RuntimeProvenance, stdout []string) {
-	cleaned, extra, prov := parseSentinels(logs)
+var sentinelPrefixes = []string{
+	ctrf.ExtraLinePrefix, ctrf.ProvenanceLinePrefix, ctrf.ImageLinePrefix, ctrf.PlatformLinePrefix,
+}
+
+// sentinels holds the payloads parseSentinels reads from a validator's
+// sentinel lines.
+type sentinels struct {
+	// extra merges the Extra payloads, a later value winning per key. Its
+	// ctrf.ExtraKeyResultSchema value is schema, never a later line's. It is
+	// nil unless some line parsed to a non-empty object.
+	extra map[string]string
+	// schema is the ctrf.ExtraKeyResultSchema value of the first Extra line
+	// that parsed. A validators.Run that stamps writes that line before the
+	// check runs, so output the check relays cannot supply it unless the
+	// logs lack the stamp, as for an image that predates it or a log rotated
+	// past it. Empty when that line has none.
+	schema string
+	// prov is the last provenance record carrying both digests, or nil.
+	prov *ctrf.RuntimeProvenance
+	// images holds, in order, every record that passes ctrf.PodImage.Valid.
+	images []ctrf.PodImage
+	// platform is the platform the validator's platform lines agree on (see
+	// ctrf.PlatformLines).
+	platform string
+}
+
+// processValidatorLogs returns the payloads parsed from the sentinels in logs,
+// and the remaining lines as stdout, tail-truncated and length-capped for
+// display. Sentinels are parsed from the full logs before truncation, so one
+// emitted after more than ValidatorMaxStdoutLines of output survives.
+func processValidatorLogs(logs string) (s sentinels, stdout []string) {
+	cleaned, s := parseSentinels(logs)
 	stdout = filterStdoutLines(
 		truncateLogLines(cleaned, defaults.ValidatorMaxStdoutLines),
 		defaults.ValidatorMaxStdoutLineLength,
 	)
-	return extra, prov, stdout
+	return s, stdout
 }
 
-// parseSentinels returns logs with every ctrf.ExtraLinePrefix and
-// ctrf.ProvenanceLinePrefix line removed as cleaned, the valid Extra payloads
-// merged as extra (a later value wins per key), and the last valid provenance
-// record as prov. A malformed line is logged and skipped without discarding
-// earlier payloads. extra is nil unless some line parsed to a non-empty
-// object, and prov is nil unless some record carried both digests.
-func parseSentinels(logs string) (cleaned string, extra map[string]string, prov *ctrf.RuntimeProvenance) {
-	if !strings.Contains(logs, ctrf.ExtraLinePrefix) && !strings.Contains(logs, ctrf.ProvenanceLinePrefix) {
-		return logs, nil, nil
+// parseSentinels returns logs as cleaned, with every ctrf.ExtraLinePrefix,
+// ctrf.ProvenanceLinePrefix, ctrf.ImageLinePrefix and ctrf.PlatformLinePrefix
+// line removed, and the payloads of those lines. A malformed line is logged
+// and skipped without discarding earlier payloads. ctrf.ExtraKeyResultSchema
+// is read only from the first Extra line that parses.
+func parseSentinels(logs string) (cleaned string, s sentinels) {
+	if !slices.ContainsFunc(sentinelPrefixes, func(p string) bool { return strings.Contains(logs, p) }) {
+		return logs, sentinels{}
 	}
+	var platforms ctrf.PlatformLines
+	sawExtra := false
 	lines := strings.Split(logs, "\n")
 	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -365,11 +446,17 @@ func parseSentinels(logs string) (cleaned string, extra map[string]string, prov 
 			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 				// Logged, not returned, because the exit code is the verdict.
 				slog.Warn("failed to parse validator extra sentinel; dropping", "error", err)
-			} else if len(parsed) > 0 {
-				if extra == nil {
-					extra = make(map[string]string, len(parsed))
+				continue
+			}
+			if !sawExtra {
+				sawExtra, s.schema = true, parsed[ctrf.ExtraKeyResultSchema]
+			}
+			delete(parsed, ctrf.ExtraKeyResultSchema)
+			if len(parsed) > 0 {
+				if s.extra == nil {
+					s.extra = make(map[string]string, len(parsed))
 				}
-				maps.Copy(extra, parsed)
+				maps.Copy(s.extra, parsed)
 			}
 			continue // transport, not human evidence — strip it
 		}
@@ -378,13 +465,39 @@ func parseSentinels(logs string) (cleaned string, extra map[string]string, prov 
 			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 				slog.Warn("failed to parse validator provenance sentinel; dropping", "error", err)
 			} else if parsed.ShippedDigest != "" && parsed.DerivedDigest != "" {
-				prov = &parsed
+				s.prov = &parsed
 			}
+			continue
+		}
+		if payload, ok := strings.CutPrefix(line, ctrf.ImageLinePrefix); ok {
+			var parsed ctrf.PodImage
+			switch err := json.Unmarshal([]byte(payload), &parsed); {
+			case err != nil:
+				slog.Warn("dropping malformed validator image sentinel", "error", err)
+			case !parsed.Valid():
+				// Quoted and capped, since a relayed line can carry
+				// control bytes and any length to the operator's terminal.
+				slog.Warn("dropping invalid validator image record",
+					"record", strconv.Quote(payload[:min(len(payload), defaults.ValidatorMaxStdoutLineLength)]))
+			default:
+				s.images = append(s.images, parsed)
+			}
+			continue
+		}
+		if payload, ok := strings.CutPrefix(line, ctrf.PlatformLinePrefix); ok {
+			platforms.Add(payload)
 			continue
 		}
 		kept = append(kept, line)
 	}
-	return strings.Join(kept, "\n"), extra, prov
+	s.platform = platforms.Platform()
+	if s.schema != "" {
+		if s.extra == nil {
+			s.extra = make(map[string]string, 1)
+		}
+		s.extra[ctrf.ExtraKeyResultSchema] = s.schema
+	}
+	return strings.Join(kept, "\n"), s
 }
 
 // HandleTimeout extracts whatever result is available when the orchestrator's
@@ -403,10 +516,7 @@ func parseSentinels(logs string) (cleaned string, extra map[string]string, prov 
 // the message says the pod never reached running state only if the lookup
 // confirmed none exists; a failed lookup is reported as such.
 func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.ValidatorResult {
-	result := &ctrf.ValidatorResult{
-		Name:  d.config.Entry.Name,
-		Phase: d.config.Entry.Phase,
-	}
+	result := d.newResult()
 
 	// Try to find the pod
 	jobPod, err := d.getPodForJob(ctx)
@@ -431,6 +541,8 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 		}
 		return result
 	}
+
+	d.recordValidatorImage(jobPod, result)
 
 	// Check container status from "validator" container first (before fetching logs)
 	cs, found := pod.ContainerStatus(jobPod, ValidatorContainerName)

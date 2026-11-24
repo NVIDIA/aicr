@@ -21,9 +21,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 
 	"aicr.run/pkg/defaults"
 	aicrerrors "aicr.run/pkg/errors"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 // terminationLogPath is the standard K8s termination message path.
@@ -39,6 +42,12 @@ const exitCodeSkip = 2
 // CTRF status "other" (indeterminate), because the check never reached a
 // verdict. It still blocks, like "failed".
 const exitCodeTerminated = 3
+
+// exitCodePanicked is the exit code for a check that panicked. It maps to
+// CTRF status "other" because the check reached no verdict. The Go runtime's
+// own exit code for an unrecovered panic is 2, which reads as a skip, and a
+// panic in a goroutine the check starts still exits that way.
+const exitCodePanicked = 4
 
 // errSkip is the sentinel error for skipping a check.
 var errSkip = errors.New("skip")
@@ -64,7 +73,14 @@ type CheckFunc func(ctx *Context) error
 
 // Run is the main entry point for v2 validator containers.
 // It loads the context, dispatches to the named check, and handles
-// exit codes and termination log writing.
+// exit codes and termination log writing. What the check writes to
+// os.Stdout and os.Stderr passes through a filter that breaks every
+// occurrence of ctrf.ReservedLinePrefix. This package's sentinel writers
+// bypass it, and so does the default slog handler, whose text output quotes
+// any value that contains a newline. Writes straight to file descriptors 1
+// and 2 are not filtered. A process that exits before the check returns, such
+// as on a panic in a goroutine the check started, loses the output the filter
+// still holds.
 //
 // Usage in main.go:
 //
@@ -92,22 +108,26 @@ func Run(checks map[string]CheckFunc) {
 
 	slog.Info("starting check", "name", checkName)
 
+	stopGuard, err := guardOutput(defaults.ValidatorOutputDrainTimeout)
+	if err != nil {
+		writeTerminationLog("failed to guard check output: %v", err)
+		os.Exit(1) //nolint:gocritic // Intentional exit before any deferred resources
+	}
 	exitCode := runCheck(checkFn)
+	stopGuard()
 	os.Exit(exitCode)
 }
 
-// runCheck publishes the result-contract stamp, loads context, runs the
-// check, and returns the exit code. Separated from Run so defer works
-// correctly before os.Exit.
+// runCheck publishes the result-contract and platform stamps, loads context,
+// runs the check, and returns the exit code. Separated from Run so defer
+// works correctly before os.Exit.
 //
-// The stamp goes out first, before anything that can fail or exit, so every
-// result the orchestrator reads from this image carries it: a pass, a skip, a
-// failure, and a context-load failure alike. A stamp that cannot be written
-// fails the check, because a result the orchestrator would otherwise credit
-// without the contract marker is the gap #3703 closes.
+// The stamps go out before anything else in runCheck can fail or exit, so
+// every result carries them unless a stamp cannot be written, which fails
+// the check.
 func runCheck(checkFn CheckFunc) int {
-	if err := publishResultSchema(); err != nil {
-		writeTerminationLog("failed to publish result schema: %v", err)
+	if err := publishStamps(); err != nil {
+		writeTerminationLog("failed to publish result stamps: %v", err)
 		return 1
 	}
 	ctx, err := LoadContext()
@@ -120,12 +140,18 @@ func runCheck(checkFn CheckFunc) int {
 }
 
 // runCheckWithContext runs checkFn and maps the outcome to an exit code. A
-// SIGTERM that arrived before checkFn returned always wins over its result:
-// the verdict is incomplete, so a nil return (a check that swallowed the
-// cancellation) must not be reported as a pass.
+// panic in checkFn returns exitCodePanicked. Otherwise a SIGTERM that
+// arrived before checkFn returned always wins over its result. The verdict
+// is incomplete, so a nil return (a check that swallowed the cancellation)
+// must not be reported as a pass.
 func runCheckWithContext(ctx *Context, checkFn CheckFunc) int {
-	err := checkFn(ctx)
+	recovered, stack, err := callCheck(ctx, checkFn)
 	ctx.Cancel()
+	if recovered != nil {
+		slog.Error("check panicked", "panic", fmt.Sprint(recovered), "stack", string(stack))
+		writeTerminationLog("check panicked: %v", recovered)
+		return exitCodePanicked
+	}
 	cause := context.Cause(ctx.Ctx)
 	if checkCtx, ok := ctx.Ctx.(*checkContext); ok {
 		cause = context.Cause(checkCtx.signalCtx)
@@ -134,6 +160,17 @@ func runCheckWithContext(ctx *Context, checkFn CheckFunc) int {
 		return handleTerminated(err)
 	}
 	return handleCheckResult(err)
+}
+
+// callCheck runs checkFn and returns what it panicked with, and the stack at
+// the panic, or its result when it returned.
+func callCheck(ctx *Context, checkFn CheckFunc) (recovered any, stack []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			recovered, stack = r, debug.Stack()
+		}
+	}()
+	return nil, nil, checkFn(ctx)
 }
 
 // handleTerminated records that the check was interrupted by SIGTERM and
@@ -149,12 +186,18 @@ func handleTerminated(checkErr error) int {
 	return exitCodeTerminated
 }
 
-// publishResultSchema stamps ctrf.ExtraKeyResultSchema on the result.
+// publishStamps stamps ExtraKeyResultSchema on the result and writes the
+// binary's platform as one ctrf.PlatformLinePrefix line. The validator
+// Dockerfiles copy the binary built for the image's architecture, so the
+// binary's platform is the image's.
 //
 // Errors:
-//   - ErrCodeInternal when the sentinel line could not be written to stdout.
-func publishResultSchema() error {
-	return EmitExtra(ResultSchemaExtra())
+//   - ErrCodeInternal when a sentinel line could not be written to stdout.
+func publishStamps() error {
+	if err := EmitExtra(ResultSchemaExtra()); err != nil {
+		return err
+	}
+	return emitSentinel(ctrf.PlatformLinePrefix, runtime.GOOS+"/"+runtime.GOARCH, false, "platform")
 }
 
 // handleCheckResult maps a CheckFunc return value to an exit code and

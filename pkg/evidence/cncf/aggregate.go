@@ -16,6 +16,7 @@ package cncf
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -74,13 +75,14 @@ const (
 // observationOnlyReason explains why an unmarked pass of a check known to be
 // observation-only is read as an observation rather than a demonstration,
 // from the result-contract stamp it carries: none (the image predates the
-// marker), the known version (the marker line was dropped in transit) or a
-// version this reader does not know (its markers may differ).
+// marker, or the log was rotated past the stamp), a known version (the marker
+// line was dropped in transit) or a version this reader does not know (its
+// markers may differ).
 func observationOnlyReason(stamp string) string {
-	switch stamp {
-	case "":
+	switch {
+	case stamp == "":
 		return reasonResultSchemaAbsent
-	case ctrf.ResultSchemaVersion:
+	case slices.Contains(ctrf.ResultSchemaVersions(), stamp):
 		return reasonMarkerDroppedPrefix + stamp
 	default:
 		return reasonSchemaUnknownPrefix + stamp

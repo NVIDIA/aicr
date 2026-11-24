@@ -43,16 +43,38 @@ Contract notes:
 * A missing result file after a successful run is a hard error rather than an
   empty sentinel block, so parseAIPerfOutput reports the real cause instead of
   a downstream JSON parse failure.
+* Before anything else, the wrapper prints the os/arch it runs as, when it has
+  a Go name, on one ctrf.PlatformLinePrefix line. The validator records it as
+  this image's platform only from the log's first line, so a platform line in
+  aiperf's own output is ignored.
 """
 
+import json
 import os
+import platform
 import signal
 import subprocess
 import sys
 
 AIPERF_BIN = "aiperf"
 RESULT_FILENAME = "profile_export_aiperf.json"
+PLATFORM_LINE_PREFIX = "##AICR-PLATFORM## "
 _SIGNAL_NUMBERS = {s.value for s in signal.Signals}
+# Go's GOOS and GOARCH names for what sys.platform and platform.machine() report.
+_GOOS = {"linux": "linux", "darwin": "darwin"}
+_GOARCH = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
+
+
+def _report_platform() -> None:
+    """Print the os/arch this process runs as on one platform line.
+
+    A platform with no Go name prints nothing, so the validator records none.
+    """
+    goos = _GOOS.get(sys.platform)
+    goarch = _GOARCH.get(platform.machine().lower())
+    if goos is None or goarch is None:
+        return
+    print(PLATFORM_LINE_PREFIX + json.dumps(f"{goos}/{goarch}"), flush=True)
 
 
 def _require_env(name: str) -> str:
@@ -88,6 +110,7 @@ def _report_failure(returncode: int) -> int:
 
 
 def main() -> int:
+    _report_platform()
     artifact_dir = _require_env("AICR_AIPERF_ARTIFACT_DIR")
     sentinel = _require_env("AICR_RESULT_SENTINEL")
 

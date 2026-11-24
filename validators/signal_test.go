@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/validator/ctrf"
 )
 
 func fakeSIGTERM(t *testing.T) (chan os.Signal, *int) {
@@ -94,6 +95,34 @@ func TestRunCheckSIGTERM(t *testing.T) {
 	}
 }
 
+// TestRunCheckPanicAfterSIGTERM verifies a panic outranks a SIGTERM that
+// arrived first.
+func TestRunCheckPanicAfterSIGTERM(t *testing.T) {
+	events, _ := fakeSIGTERM(t)
+	path := withTempTerminationLog(t)
+	ctx, cancel := newCheckContext(time.Minute)
+	defer cancel()
+	code := runCheckWithContext(&Context{Ctx: ctx, Cancel: cancel}, func(c *Context) error {
+		events <- syscall.SIGTERM
+		select {
+		case <-c.Ctx.(*checkContext).signalCtx.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("SIGTERM was not delivered")
+		}
+		panic("boom")
+	})
+	if code != exitCodePanicked {
+		t.Fatalf("code=%d want %d", code, exitCodePanicked)
+	}
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(data), "check panicked: boom") {
+		t.Errorf("termination message=%q", data)
+	}
+}
+
 func TestCheckContextRelease(t *testing.T) {
 	for _, signalFirst := range []bool{false, true} {
 		t.Run(map[bool]string{false: "normal", true: "signaled"}[signalFirst], func(t *testing.T) {
@@ -115,16 +144,18 @@ func TestCheckContextRelease(t *testing.T) {
 
 func TestRunCheckWithoutSIGTERM(t *testing.T) {
 	tests := []struct {
-		name     string
-		checkErr error
-		timeout  time.Duration
-		want     int
-		message  string
+		name      string
+		checkErr  error
+		panicWith any
+		timeout   time.Duration
+		want      int
+		message   string
 	}{
-		{"pass", nil, time.Minute, 0, ""},
-		{"fail", errors.New("check failed"), time.Minute, 1, "check failed"},
-		{"skip", Skip("not applicable"), time.Minute, exitCodeSkip, "not applicable"},
-		{"timeout", context.DeadlineExceeded, -time.Second, 1, "context deadline exceeded"},
+		{"pass", nil, nil, time.Minute, 0, ""},
+		{"fail", errors.New("check failed"), nil, time.Minute, 1, "check failed"},
+		{"skip", Skip("not applicable"), nil, time.Minute, exitCodeSkip, "not applicable"},
+		{"timeout", context.DeadlineExceeded, nil, -time.Second, 1, "context deadline exceeded"},
+		{"panic", nil, "boom", time.Minute, exitCodePanicked, "check panicked: boom"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -132,9 +163,17 @@ func TestRunCheckWithoutSIGTERM(t *testing.T) {
 			path := withTempTerminationLog(t)
 			ctx, cancel := newCheckContext(tt.timeout)
 			defer cancel()
-			code := runCheckWithContext(&Context{Ctx: ctx, Cancel: cancel}, func(*Context) error { return tt.checkErr })
+			code := runCheckWithContext(&Context{Ctx: ctx, Cancel: cancel}, func(*Context) error {
+				if tt.panicWith != nil {
+					panic(tt.panicWith)
+				}
+				return tt.checkErr
+			})
 			if code != tt.want {
 				t.Errorf("code=%d want %d", code, tt.want)
+			}
+			if tt.panicWith != nil && ctrf.ExitCodeToCTRFStatus(int32(code)) != ctrf.StatusOther {
+				t.Errorf("status=%s, want %s", ctrf.ExitCodeToCTRFStatus(int32(code)), ctrf.StatusOther)
 			}
 			if tt.message != "" {
 				data, err := os.ReadFile(filepath.Clean(path))

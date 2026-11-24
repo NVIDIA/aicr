@@ -294,13 +294,21 @@ func TestAggregateReportObservationOnly(t *testing.T) {
 			wantObserved: true,
 		},
 		{
+			name:         "a pass stamped with the current contract version names the dropped marker",
+			tests:        withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: map[string]string{"resultSchema": ctrf.ResultSchemaVersion}}),
+			requirement:  "cluster_autoscaling",
+			wantStatus:   StatusObserved,
+			wantReason:   "cluster-autoscaling observed, not demonstrated: " + reasonMarkerDroppedPrefix + ctrf.ResultSchemaVersion,
+			wantObserved: true,
+		},
+		{
 			// Fail closed on a contract version this reader does not know:
 			// its markers may differ, so its pass is not a demonstration.
 			name:         "a pass stamped with an unknown contract version is observed",
-			tests:        withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: map[string]string{"resultSchema": "2"}}),
+			tests:        withResult(allMustsPassed, "cluster-autoscaling", &ctrf.TestResult{Name: "cluster-autoscaling", Status: "passed", Extra: map[string]string{"resultSchema": "3"}}),
 			requirement:  "cluster_autoscaling",
 			wantStatus:   StatusObserved,
-			wantReason:   "cluster-autoscaling observed, not demonstrated: " + reasonSchemaUnknownPrefix + "2",
+			wantReason:   "cluster-autoscaling observed, not demonstrated: " + reasonSchemaUnknownPrefix + "3",
 			wantObserved: true,
 		},
 		{
