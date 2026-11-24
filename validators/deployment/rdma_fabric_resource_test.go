@@ -47,6 +47,11 @@ func TestRDMAFabricResources_RealManifests(t *testing.T) {
 			want:         []string{helper.AKSRdmaSharedResource},
 		},
 		{
+			name:         "NVKE GB10 rdmaSharedDevicePlugin (hca_shared_devices_a)",
+			ncpManifests: []string{"components/network-operator/manifests/nic-cluster-policy-nvke-gb10.yaml"},
+			want:         []string{helper.AKSRdmaSharedResource},
+		},
+		{
 			name:         "OKE GB200 rdmaSharedDevicePlugin (IB shared HCAs)",
 			ncpManifests: []string{"components/network-operator/manifests/nic-cluster-policy-oke-gb200.yaml"},
 			want:         []string{"nvidia.com/mlnxnics"},

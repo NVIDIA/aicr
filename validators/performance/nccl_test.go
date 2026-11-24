@@ -1093,11 +1093,12 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 		},
 		{
 			// NVKE carries both NVL72 generations on the NET variant too:
-			// GB200 over IB rails, VR200 over RoCE rails.
+			// GB200 over IB rails, VR200 over RoCE rails. GB10 (DGX Spark) runs
+			// RoCE over a direct link through the RDMA shared device plugin.
 			name:    "NET NVKE",
 			variant: variantNET,
 			service: recipe.CriteriaServiceNVKE,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorVR200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorVR200, recipe.CriteriaAcceleratorGB10},
 		},
 		{
 			// NVKE carries three NVL72 generations on the NVLS variant.

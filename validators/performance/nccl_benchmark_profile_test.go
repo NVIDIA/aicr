@@ -166,6 +166,10 @@ func TestNCCLCombinationSupported(t *testing.T) {
 		// generic nccl-all-reduce-bw check would report skipped, not fail.
 		{"default VR200 RKE2 not covered", variantDefault, target(recipe.CriteriaAcceleratorVR200, recipe.CriteriaServiceRKE2), false},
 		{"NET GB300 EKS", variantNET, target(recipe.CriteriaAcceleratorGB300, recipe.CriteriaServiceEKS), true},
+		{"NET GB10 NVKE (RoCE via rdmaSharedDevicePlugin)", variantNET, target(recipe.CriteriaAcceleratorGB10, recipe.CriteriaServiceNVKE), true},
+		// GB10 is NET-only: one GPU per node, so no NVLS, and no default entry.
+		{"default GB10 NVKE not covered", variantDefault, target(recipe.CriteriaAcceleratorGB10, recipe.CriteriaServiceNVKE), false},
+		{"NVLS GB10 NVKE not covered", variantNVLS, target(recipe.CriteriaAcceleratorGB10, recipe.CriteriaServiceNVKE), false},
 		{"NVLS GB300 EKS", variantNVLS, target(recipe.CriteriaAcceleratorGB300, recipe.CriteriaServiceEKS), true},
 		{"unknown service", variantNVLS, target(recipe.CriteriaAcceleratorGB200, "custom-svc"), false},
 		{"unknown accelerator", variantNET, target("unknown-accel", recipe.CriteriaServiceEKS), false},
@@ -187,6 +191,7 @@ func TestNCCLCombinationSupported(t *testing.T) {
 func TestKnownBenchmarkProfiles(t *testing.T) {
 	want := []string{
 		"b200/any",
+		"gb10/nvke",
 		"gb200/any",
 		"gb200/eks",
 		"gb200/gke",
