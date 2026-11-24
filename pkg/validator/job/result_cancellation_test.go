@@ -185,12 +185,14 @@ func TestHandleTimeoutPodLookupFailure(t *testing.T) {
 	}
 }
 
-// TestExtractResultDeadlineKilledReportsCheckResult covers issue #1632: when the
-// Job controller deletes a pod on activeDeadlineSeconds expiry, the lookup finds
-// no live pod, but the check's own SIGTERM result is still readable from the
-// pod in its deletion grace window or from the last status the deployer
-// observed. The verdict stays failed and carries the check's message.
-func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
+// TestExtractResultMissingPod verifies the result when the lookup finds no
+// live pod for the Job. On a deadline failure the Job controller deleted the
+// pod, and the check's own SIGTERM result is still read from the pod in its
+// deletion grace or from the last status the deployer observed, so the
+// verdict stays failed with the check's message. Without a deadline failure
+// the result stays inconclusive. Either way the Job is read before the one
+// terminated-pod List, which also supplies the image.
+func TestExtractResultMissingPod(t *testing.T) {
 	const (
 		checkMsg = "terminated by SIGTERM before the check completed"
 		image    = "ghcr.io/x/deployment:edge"
@@ -214,28 +216,33 @@ func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
 		}
 		return p
 	}
-	failedJob := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: "ns"},
-		Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{
-			Type: batchv1.JobFailed, Status: corev1.ConditionTrue,
-			Reason: batchv1.JobReasonDeadlineExceeded, Message: "Job was active longer than specified deadline",
-		}}},
+	failed := func(reason, message string) []batchv1.JobCondition {
+		return []batchv1.JobCondition{{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: reason, Message: message}}
 	}
+	deadline := failed(batchv1.JobReasonDeadlineExceeded, "Job was active longer than specified deadline")
+	withDigest := []ctrf.PodImage{{Image: image, Digest: testDigestA}}
 
 	tests := []struct {
 		name         string
+		conditions   []batchv1.JobCondition
 		listed       *corev1.Pod
 		lastObserved *corev1.Pod
+		wantExit     int32
+		wantMsg      string
 		wantCheckMsg bool
 		wantImages   []ctrf.PodImage
 	}{
-		{"terminating pod is still listed", terminated(true), nil, true, []ctrf.PodImage{{Image: image, Digest: testDigestA}}},
-		{"pod deleted, last observed status survives", nil, terminated(false), true, []ctrf.PodImage{{Image: image, Digest: testDigestA}}},
-		{"nothing observed keeps the generic message", nil, nil, false, []ctrf.PodImage{{Image: image}}},
+		{"deadline, terminating pod is still listed", deadline, terminated(true), nil, validatorExitFailed, "Job deadline", true, withDigest},
+		{"deadline, pod deleted, last observed status survives", deadline, nil, terminated(false), validatorExitFailed, "Job deadline", true, withDigest},
+		{"deadline, nothing observed keeps the generic message", deadline, nil, nil, validatorExitFailed, "Job deadline", false, []ctrf.PodImage{{Image: image}}},
+		{"no Failed condition", nil, terminated(true), nil, -1, "pod not found for Job job", false, withDigest},
+		{"Failed without a deadline", failed(batchv1.JobReasonBackoffLimitExceeded, "Job has reached the specified backoff limit"),
+			terminated(true), nil, -1, "Job job failed (BackoffLimitExceeded)", false, withDigest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cs := fake.NewSimpleClientset(failedJob.DeepCopy())
+			job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: "ns"}, Status: batchv1.JobStatus{Conditions: tt.conditions}}
+			cs := fake.NewSimpleClientset(job)
 			if tt.listed != nil {
 				if _, err := cs.CoreV1().Pods("ns").Create(t.Context(), tt.listed, metav1.CreateOptions{}); err != nil {
 					t.Fatal(err)
@@ -263,16 +270,14 @@ func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
 			if !jobReadFirst {
 				t.Error("Job condition was not read before the terminated-pod lookup")
 			}
-
 			if !slices.Equal(result.Images, tt.wantImages) {
 				t.Errorf("images=%+v, want %+v", result.Images, tt.wantImages)
 			}
-
-			if result.ExitCode != validatorExitFailed || result.CTRFStatus() != ctrf.StatusFailed {
-				t.Errorf("exit=%d status=%s, want failed (exit %d)", result.ExitCode, result.CTRFStatus(), validatorExitFailed)
+			if result.ExitCode != tt.wantExit || result.CTRFStatus() != ctrf.ExitCodeToCTRFStatus(tt.wantExit) {
+				t.Errorf("exit=%d status=%s, want exit %d", result.ExitCode, result.CTRFStatus(), tt.wantExit)
 			}
-			if !strings.Contains(result.TerminationMsg, "Job deadline") {
-				t.Errorf("message=%q, want the Job deadline named", result.TerminationMsg)
+			if !strings.Contains(result.TerminationMsg, tt.wantMsg) {
+				t.Errorf("message=%q, want it to contain %q", result.TerminationMsg, tt.wantMsg)
 			}
 			if got := strings.Contains(result.TerminationMsg, "check reported: exit code 3: "+checkMsg); got != tt.wantCheckMsg {
 				t.Errorf("message=%q, check message present = %v, want %v", result.TerminationMsg, got, tt.wantCheckMsg)
