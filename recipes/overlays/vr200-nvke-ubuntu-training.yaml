@@ -163,9 +163,13 @@ spec:
     # ofedDriver: NVKE runs the host's inbox mlx5_core, and DOCA-OFED must not
     # be installed on these nodes.
     #
-    # Needs chart 26.7.1 or later, which is the registry default; this leaf
-    # pinned it while the default was still 26.7.0. The daemon in 26.7.0 has
-    # no firmware-discovery fallback, so a flint failure is fatal, and flint
+    # Pinned to chart 26.10.0, ahead of the registry default, for thick multus
+    # (the first release with secondaryNetwork.multus.deploymentType): NVKE
+    # disables service-account token extension, so thin multus loses its
+    # token after an hour and pod creation on the node stops (#3482).
+    #
+    # Needs chart 26.7.1 or later in any case. The daemon in 26.7.0 has no
+    # firmware-discovery fallback, so a flint failure is fatal, and flint
     # cannot read ConnectX-9 here. Measured on a VR200 worker: 26.7.0 dies
     # with "failed to discover NIC devices", 26.7.1 logs "flint failed,
     # falling back to sysfs" and discovers every port. The manifest pins the
@@ -183,6 +187,7 @@ spec:
     # and the default route, so it cannot be carved.
     - name: network-operator
       type: Helm
+      version: "26.10.0"
       valuesFile: components/network-operator/values-nvke-gb200.yaml
       manifestFiles:
         - components/network-operator/manifests/nic-cluster-policy-nvke-vr200.yaml

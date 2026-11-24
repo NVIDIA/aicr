@@ -534,4 +534,6 @@ type versionPinExemption struct {
 
 var versionPinExemptions = []versionPinExemption{
 	{source: "b300-mk8s-ubuntu-inference-dynamo", component: "network-operator", field: "version", expectedPin: "25.7.0", expectedDefault: "26.7.1", reason: "Nebius Marketplace packages the DOCA driver for managed B300 workers; the upstream chart is a different distribution."},
+	{source: "gb200-nvke-ubuntu-training", component: "network-operator", field: "version", expectedPin: "26.10.0", expectedDefault: "26.7.1", reason: "Thick multus (26.10.0+): NVKE disables service-account token extension, so thin multus loses its token after an hour (#3482)."},
+	{source: "vr200-nvke-ubuntu-training", component: "network-operator", field: "version", expectedPin: "26.10.0", expectedDefault: "26.7.1", reason: "Thick multus (26.10.0+): NVKE disables service-account token extension, so thin multus loses its token after an hour (#3482)."},
 }
