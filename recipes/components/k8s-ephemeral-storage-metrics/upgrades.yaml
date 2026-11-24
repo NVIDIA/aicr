@@ -31,12 +31,14 @@ transitions:
       enabled, and GC_INTERVAL and GC_BATCH_SIZE give way to
       SCRAPE_MISS_TOLERANCE=2. No values path AICR sets is removed.
     summary: >-
-      Two new metric families, container rootfs and logs usage, are on by
-      default, adding series per container to Prometheus; set
+      The exporter now publishes two more metric families by default,
+      container rootfs and logs usage; set
       metrics.ephemeral_storage_container_rootfs_usage and
       metrics.ephemeral_storage_container_logs_usage to false in the values
-      override to keep the old set. A series is
-      now dropped after two missed scrapes instead of by a periodic sweep.
+      override to keep the old set. AICR's bundled Prometheus keeps only the
+      series its consumers declare, so these reach it only where a recipe
+      declares them. AICR never enabled the chart's periodic garbage
+      collection; 1.21 adds dropping a series after two missed scrapes.
       Nothing to change on upgrade.
     references:
       - https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics/releases/tag/1.20.0

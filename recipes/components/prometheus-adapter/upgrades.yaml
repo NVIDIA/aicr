@@ -27,11 +27,15 @@ transitions:
       adds optional schedulerName and runtimeClassName values that render
       nothing when unset, and its PodDisruptionBudget template now renders a
       zero minAvailable and uses maxUnavailable only when minAvailable is
-      unset. AICR's values set no PDB, and the chart keeps it disabled by default. helm template of 5.3.0 and 5.4.2 with AICR's values
-      renders the same 14 objects, differing only in the chart and version
-      labels.
+      unset. AICR's values set no PDB, and the chart keeps it disabled by
+      default.
+      helm template of 5.3.0 and 5.4.2 with AICR's values renders the same
+      14 objects, differing only in the helm.sh/chart label and the
+      checksum/config annotation.
     summary: >-
       Chart-only release. Nothing to change on upgrade.
     references:
       - https://github.com/prometheus-community/helm-charts/releases/tag/prometheus-adapter-5.4.0
+      - https://github.com/prometheus-community/helm-charts/releases/tag/prometheus-adapter-5.4.1
+      - https://github.com/prometheus-community/helm-charts/releases/tag/prometheus-adapter-5.4.2
       - https://github.com/prometheus-community/helm-charts/pull/7492
