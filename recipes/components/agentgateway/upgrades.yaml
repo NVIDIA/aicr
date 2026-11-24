@@ -34,10 +34,12 @@ transitions:
       link-local addresses. AICR creates no AgentgatewayModel, guard, policy
       or dynamic backend, so a default install needs only the apply.
     precondition: >-
-      Know whether the cluster has AgentgatewayModel objects, whether any
-      policy configures prompt guards or reads request headers in CEL, and
-      whether a dynamic backend targets a loopback or link-local address. If
-      none does, only the apply step applies.
+      Know whether the cluster has AgentgatewayModel objects and how they
+      attach (directly to a Gateway or ListenerSet, or through an HTTPRoute),
+      whether an OpenAI provider points at a server other than the OpenAI
+      API, whether any policy configures prompt guards or reads request
+      headers in CEL, and whether a dynamic backend targets a loopback or
+      link-local address. If none does, only the apply step applies.
     stepsByDeployer:
       - steps:
           - id: review-models
@@ -49,15 +51,35 @@ transitions:
             reason: >-
               From 1.7 the controller serves the kind by default, and a base
               URL without a path sends requests to /, which providers reject.
-          - id: keep-guard-behavior
+          - id: route-prefixed-models
             description: >-
-              Only if prompt guards are configured: to keep the 1.5 behavior,
-              set each guard's scope to [SystemPrompt, Messages] before
-              applying, and its failureMode to failOpen after applying, once
-              the 1.7 schema accepts it.
+              Only if an AgentgatewayModel attached directly to a Gateway or
+              ListenerSet serves a prefixed path such as
+              /tenant-a/v1/messages: attach it through an HTTPRoute instead,
+              before applying.
             reason: >-
-              1.7 adds ToolOutput to the default scope, and a guard failure on
-              a streamed response now rejects the content.
+              Model routers attached directly to a Gateway or ListenerSet now
+              serve only exact standard LLM paths, so a prefixed request is
+              passed through without format conversion.
+          - id: fix-provider-formats
+            description: >-
+              Only if an OpenAI provider points at a server other than the
+              OpenAI API: configure it as a custom provider that advertises
+              only the formats that server supports, before applying.
+            reason: >-
+              Anthropic Messages requests now always convert through the
+              Responses format when a provider offers it, and the setting that
+              preferred Chat Completions is removed, so a server without
+              /v1/responses rejects them and extended-thinking history is
+              dropped.
+          - id: keep-guard-scope
+            description: >-
+              Only if prompt guards are configured and must not inspect tool
+              output: set each guard's scope to [SystemPrompt, Messages],
+              before applying.
+            reason: >-
+              1.7 adds ToolOutput to the default scope, which can reject or
+              mask requests that passed before.
           - id: check-header-expressions
             description: >-
               Only if CEL expressions read request headers that can repeat:
@@ -77,6 +99,14 @@ transitions:
             description: >-
               Apply the regenerated bundle with your deployer.
             reason: Moves agentgateway to 1.7.0.
+          - id: set-guard-failure-mode
+            description: >-
+              Only if OpenAI Moderation, Bedrock Guardrails or Google Model
+              Armor guards must keep the 1.5 behavior on streamed responses:
+              set their failureMode to failOpen once the new version runs.
+            reason: >-
+              A guard failure while checking a streamed response now rejects
+              the content, and the 1.5.0 schema has no failureMode on these guards.
     references:
       - https://github.com/agentgateway/agentgateway/releases/tag/v1.6.0
       - https://github.com/agentgateway/agentgateway/releases/tag/v1.7.0
