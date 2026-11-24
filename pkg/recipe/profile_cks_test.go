@@ -68,6 +68,13 @@ func TestCKSGPUStackProfile(t *testing.T) {
 							t.Errorf("missing enabled %s", name)
 						}
 					}
+					nodewright, err := result.GetValuesForComponentWithContext(t.Context(), "nodewright-operator")
+					if err != nil {
+						t.Fatalf("hydrate NodeWright values: %v", err)
+					}
+					if got, _ := profileValueAtPath(nodewright, "controllerManager.manager.env.reapplyOnReboot"); got != "true" {
+						t.Errorf("NodeWright reapplyOnReboot = %#v, want string true", got)
+					}
 					values, err := result.GetValuesForComponentWithContext(t.Context(), "kube-prometheus-stack")
 					if err != nil {
 						t.Fatalf("hydrate Prometheus values: %v", err)
