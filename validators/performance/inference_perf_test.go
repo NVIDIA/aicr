@@ -157,6 +157,25 @@ func TestInferServicePort(t *testing.T) {
 	}
 }
 
+// TestWorkloadNamespacesMatchOrchestrator pins that every namespace the
+// performance checks create under a run is one the orchestrator's
+// abandon-path cleanup recognizes for that run, so the two cannot drift.
+func TestWorkloadNamespacesMatchOrchestrator(t *testing.T) {
+	const runID = "20261106-173024-0123456789abcdef"
+	t.Setenv(runIDEnv, runID)
+	names := []string{
+		validatorv1.InferencePerfNamespace(deriveRunID()),
+		ncclRunNamespace(variantDefault),
+		ncclRunNamespace(variantNET),
+		ncclRunNamespace(variantNVLS),
+	}
+	for _, name := range names {
+		if !validatorv1.IsRunWorkloadNamespace(name, runID) {
+			t.Errorf("namespace %q is not recognized as run %s's", name, runID)
+		}
+	}
+}
+
 func TestDeriveRunID(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -2107,6 +2126,7 @@ func TestEnsureNamespace(t *testing.T) {
 	const component = labels.ValueInferencePerf
 
 	t.Run("creates a fresh namespace", func(t *testing.T) {
+		t.Setenv(runIDEnv, "")
 		client := fake.NewClientset()
 		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
 		got, created, err := ensureNamespace(ctx, ns, component)
@@ -2116,8 +2136,85 @@ func TestEnsureNamespace(t *testing.T) {
 		if got.Labels[labels.ManagedBy] != labels.ValueValidator || got.Labels[labels.Component] != component {
 			t.Errorf("created namespace labels = %v, want ManagedBy/Component set", got.Labels)
 		}
+		if _, ok := got.Labels[labels.RunID]; ok {
+			t.Errorf("created namespace labels = %v, want no %s without AICR_RUN_ID", got.Labels, labels.RunID)
+		}
 		if !created {
 			t.Error("expected created=true for a brand new namespace")
+		}
+	})
+
+	// The orchestrator deletes namespaces carrying its run ID when it
+	// abandons a check, so every namespace a run creates must carry it.
+	t.Run("stamps the run ID under an orchestrated run", func(t *testing.T) {
+		const runID = "20261106-173024-0123456789abcdef"
+		t.Setenv(runIDEnv, runID)
+		t.Setenv("AICR_INFERENCE_PERF_NO_CLEANUP", "")
+		for _, tc := range []struct {
+			name string
+			seed bool // a terminating race winner forces the second Create call
+		}{
+			{name: "first create"},
+			{name: "create after a terminating race winner", seed: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				client := fake.NewClientset()
+				if tc.seed {
+					var seeded bool
+					client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+						if seeded {
+							return false, nil, nil
+						}
+						seeded = true
+						now := metav1.Now()
+						winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+							Name: ns, DeletionTimestamp: &now, Finalizers: []string{"kubernetes"},
+						}}
+						if err := client.Tracker().Add(winner); err != nil {
+							return true, nil, err
+						}
+						return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+					})
+					go func() {
+						time.Sleep(50 * time.Millisecond)
+						_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
+					}()
+				}
+				ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+				got, created, err := ensureNamespace(ctx, ns, component)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !created || got.Labels[labels.RunID] != runID {
+					t.Errorf("created=%v labels=%v, want a created namespace with %s=%s", created, got.Labels, labels.RunID, runID)
+				}
+				if !namespaceOwnedBy(got, component) {
+					t.Errorf("labels=%v, run ID must not displace the ownership labels", got.Labels)
+				}
+			})
+		}
+	})
+
+	// A namespace kept for inspection must stay out of reach of the
+	// orchestrator's run-ID reap when a later check in the same run is
+	// abandoned.
+	t.Run("leaves the run ID off a namespace kept for inspection", func(t *testing.T) {
+		t.Setenv(runIDEnv, "20261106-173024-0123456789abcdef")
+		for _, keep := range []string{"1", "true"} {
+			t.Run(keep, func(t *testing.T) {
+				t.Setenv("AICR_INFERENCE_PERF_NO_CLEANUP", keep)
+				ctx := &validators.Context{Ctx: context.Background(), Clientset: fake.NewClientset()}
+				got, created, err := ensureNamespace(ctx, ns, component)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if _, ok := got.Labels[labels.RunID]; ok || !created {
+					t.Errorf("created=%v labels=%v, want a created namespace without %s", created, got.Labels, labels.RunID)
+				}
+				if !namespaceOwnedBy(got, component) {
+					t.Errorf("labels=%v, want the ownership labels kept", got.Labels)
+				}
+			})
 		}
 	})
 

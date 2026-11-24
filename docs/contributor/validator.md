@@ -1260,14 +1260,66 @@ arithmetic is pinned in `pkg/defaults/timeouts_test.go` and
 `pkg/validator/catalog/catalog_test.go`; see ADR 002 for the table.
 
 The client facade's `ValidationOperationTimeout` cap (75m) covers a check only
-while its catalog timeout `c` satisfies `c + 6m05s < 75m`, that is
-`c < 68m55s`: the envelope (`c` + 4m05s) plus the 30s result capture and the 90s
-pod termination wait. The embedded catalog's longest check (65m) fits. The 75m is
-a total budget shared with snapshot and setup work and any earlier checks in the
-same run, so `c < 68m55s` is a necessary per-check condition, not a guarantee the
-check fits in the remaining budget. A `--data` catalog override above that
-ceiling, run through the facade without its own deadline, reaches the facade cap
-before the check reports its verdict.
+while its catalog timeout `c` satisfies `c + 9m05s < 75m`, that is
+`c < 65m55s`: the envelope (`c` + 4m05s) plus the 30s result capture, the 90s
+pod termination wait and, when the wait failed, the 3m workload-namespace
+cleanup described below. The embedded catalog's longest check (65m) fits. The
+75m is a total budget shared with snapshot and setup work and any earlier
+checks in the same run, so `c < 65m55s` is a necessary per-check condition, not
+a guarantee the check fits in the remaining budget. A `--data` catalog override
+above that ceiling, run through the facade without its own deadline, can reach
+the facade cap during the workload-namespace cleanup of an abandoned check: the
+check's verdict is already recorded, but the cleanup is cut short and the run
+ends with a deadline error. With `c` of 68m55s or more, the cap can expire
+before the check's verdict is recorded at all.
+
+When the wait for a check's Job fails without cancellation (a timeout, or an
+API connection lost mid-run), the orchestrator records what it can read of the
+check: `other` with the wait cause, unless the validator container had already
+terminated, in which case the check keeps the verdict of that exit code. It then
+deletes the Job and waits for the pod to terminate. The check's pod dies with
+the Job, so a check that runs its workload in a namespace of its own never gets
+to delete it, and the orchestrator does, within
+`ValidatorWorkloadNamespaceCleanupTimeout` (3m). It deletes a namespace only
+when all of these hold:
+
+- it carries `aicr.run/run-id=<run-id>`;
+- it carries the ownership labels `inference-perf` and the
+  `nccl-all-reduce-bw*` checks stamp on the namespace they create
+  (`app.kubernetes.io/managed-by=aicr-validator` and
+  `app.kubernetes.io/component` of `inference-perf` or `nccl-perf`);
+- its name is one those checks derive for the run
+  (`aicr-inference-perf-<h>` or `aicr-nccl-perf-<variant>-<h>`, where `<h>`
+  is the first 4 bytes of the run ID's SHA-256 in hex; see
+  `pkg/validator/v1.IsRunWorkloadNamespace`).
+
+A namespace that carries the labels but not such a name is left in place and
+named in the check's message. Each delete is pinned to the listed UID, and
+transient API failures are retried within the 3m. The step is skipped with
+`--no-cleanup` and on the interrupted paths. When
+`AICR_INFERENCE_PERF_NO_CLEANUP` keeps the `inference-perf` workload for
+inspection, its namespace is created without the run-ID label, so no abandoned
+check in the same run deletes it.
+
+The outcome is appended to the check's CTRF message, whatever its status, and
+never changes the status. A refused List, Delete or Watch appends
+`workload namespace cleanup failed: <cause>`, naming the namespaces still
+present when they could be listed. Deletions that were accepted but outlast
+the 3m append
+`workload namespace deletion requested but still terminating after 3m0s: <names>`;
+the apiserver finishes them on its own.
+
+The identity running `aicr validate` needs `list`, `watch` and `delete` on
+namespaces for this step. Two supported setups do not grant them: the AICR
+Operator's validation launcher (the `aicr-validation` ServiceAccount) and a
+caller holding only the Role documented for `--validator-service-account-name`.
+In both, the List is refused first with `Forbidden`, so nothing is deleted and
+no namespace can be named: the namespaces stay until someone deletes them, and
+the abandoned check's message ends with
+`workload namespace cleanup failed: <cause>`. When even the pod lookup fails
+after a failed wait, the message says
+`validator pod could not be read: <cause>` rather than claiming the pod never
+reached running state.
 
 On operator cancellation, the orchestrator uses one fresh 30s deadline for the
 in-flight Job's result capture, deletion and partial CTRF persistence, in that
@@ -1367,13 +1419,14 @@ facade timeout, so an all-phase run can outlive 2h. And Job existence is a
 point-in-time signal: with cleanup on, the validator deletes each Job right
 after its check — a foreground delete, so the Job stays visible, with a
 deletion timestamp, while its pods terminate — and the next check's Job
-appears only after the remaining pod-termination wait plus, between phases,
-the result ConfigMap write, the dependency-affinity scan and the Job apply,
-so a live run can show no Job at all. `Execute` therefore re-plans
+appears only after the remaining pod-termination wait, the up to 3m
+workload-namespace cleanup that follows a check whose wait failed and,
+between phases, the result ConfigMap write, the dependency-affinity scan and
+the Job apply, so a live run can show no Job at all. `Execute` therefore re-plans
 against current cluster state before deleting and, while run-scoped
 candidates remain, lists the run-labeled Jobs and watches from the list's
 ResourceVersion for the settle window
-(`defaults.ValidationSweepSettleWindow`, ~2m30s — a conservative margin over
+(`defaults.ValidationSweepSettleWindow`, ~5m30s — a conservative margin over
 the usual between-checks gap; that gap has no proven bound, since not all of
 the work in it is budgeted) for a Job to appear; a run that reappears keeps
 all of its objects, and a run suspended

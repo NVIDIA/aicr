@@ -100,6 +100,14 @@ func TestVerify_PendingOnlyWhenExitZero(t *testing.T) {
 			wantPending: false,
 		},
 		{
+			// A check that ended without a verdict blocks like a failed
+			// one (issue #3709), so it is not a clean exit 0 either.
+			name:        "unsigned bundle with an other result reports phase failures",
+			build:       buildTestBundleOtherPhase,
+			wantExit:    ExitValidPhaseFailures,
+			wantPending: false,
+		},
+		{
 			name: "unsigned bundle that fails integrity is not pending",
 			// Tamper a bundle file so the manifest hash check fails (exit 2)
 			// while the signature step still skips as unsigned.

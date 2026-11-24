@@ -16,6 +16,7 @@ package job
 
 import (
 	"context"
+	stderrors "errors"
 	"strings"
 	"testing"
 	"time"
@@ -26,8 +27,11 @@ import (
 	"aicr.run/pkg/validator/ctrf"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 func TestWaitFailureMessageAndHandleTimeout(t *testing.T) {
@@ -82,6 +86,59 @@ func TestWaitFailureMessageAndHandleTimeout(t *testing.T) {
 						t.Errorf("status=%s", result.CTRFStatus())
 					}
 				})
+			}
+		})
+	}
+}
+
+// TestHandleTimeoutPodLookupFailure pins that "pod never reached running
+// state" is claimed only when the lookup confirmed no pod exists. A lookup
+// that itself failed, as when the API connection that failed the wait is
+// still down, must say so instead (issue #3709).
+func TestHandleTimeoutPodLookupFailure(t *testing.T) {
+	waitErr := errors.Wrap(errors.ErrCodeUnavailable, "job watch closed", stderrors.New("connection reset by peer"))
+	tests := []struct {
+		name      string
+		listErr   error
+		want      string
+		wantNotIn string
+	}{
+		{
+			name:      "no pod exists",
+			want:      "(pod never reached running state)",
+			wantNotIn: "could not be read",
+		},
+		{
+			name:      "pod list fails",
+			listErr:   apierrors.NewServiceUnavailable("apiserver unreachable"),
+			want:      "(validator pod could not be read: ",
+			wantNotIn: "never reached running state",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cs := fake.NewSimpleClientset()
+			if tt.listErr != nil {
+				cs.PrependReactor("list", "pods", func(clienttesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.listErr
+				})
+			}
+			d := NewDeployer(Config{Clientset: cs, Namespace: "ns", Entry: catalog.ValidatorEntry{Name: "check", Phase: "performance", Timeout: time.Minute}})
+			d.jobName = "job"
+
+			result := d.HandleTimeout(t.Context(), waitErr)
+
+			if result.ExitCode != -1 || result.CTRFStatus() != ctrf.StatusOther {
+				t.Errorf("exit=%d status=%s, want -1/%s", result.ExitCode, result.CTRFStatus(), ctrf.StatusOther)
+			}
+			if prefix := waitFailureMessage(waitErr, time.Minute); !strings.HasPrefix(result.TerminationMsg, prefix) {
+				t.Errorf("message=%q, want the wait cause %q first", result.TerminationMsg, prefix)
+			}
+			if !strings.Contains(result.TerminationMsg, tt.want) || strings.Contains(result.TerminationMsg, tt.wantNotIn) {
+				t.Errorf("message=%q, want %q and not %q", result.TerminationMsg, tt.want, tt.wantNotIn)
+			}
+			if tt.listErr != nil && !strings.Contains(result.TerminationMsg, "apiserver unreachable") {
+				t.Errorf("message=%q, want the lookup cause named", result.TerminationMsg)
 			}
 		})
 	}

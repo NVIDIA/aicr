@@ -649,10 +649,12 @@ A structured `exit: 1` (the `.exit` field from `aicr evidence verify --format
 json`; the process itself exits with OS code 2) means the bundle verified
 cleanly (signature, predicate/schema,
 manifest-inventory hash, signer cross-check) but one or more validator
-phases reported failures. Common causes: a conformance check failed on the
-contributor's hardware, a performance threshold was not met, an
-optional check requires a feature the contributor's cluster does not
-have.
+phases reported failures: a `failed` check, or an `other` check that ended
+without a verdict (predicate schema `1.1.0` and later). Common causes: a
+conformance check failed on the contributor's hardware, a performance
+threshold was not met, an optional check requires a feature the
+contributor's cluster does not have, or the run lost its connection to the
+cluster while a check was running.
 
 A structured `exit: 1` is **not** the same as evidence/exempt: `exit: 1` means
 "evidence was produced and shows a partial failure"; exempt means

@@ -216,6 +216,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 			Passed:     pr.Report.Results.Summary.Passed,
 			Failed:     pr.Report.Results.Summary.Failed,
 			Skipped:    pr.Report.Results.Summary.Skipped,
+			Other:      pr.Report.Results.Summary.Other,
 			CTRFDigest: HashBytesSHA256(body),
 		}
 	}

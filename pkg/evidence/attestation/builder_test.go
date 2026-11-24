@@ -541,3 +541,55 @@ func TestProfileSelectionString(t *testing.T) {
 		t.Errorf("profiled recipe: got %q, want %q", got, "gpuStack=operator-managed")
 	}
 }
+
+// TestBuild_PhaseSummaryCopiesOther covers issue #3709: a check that ended
+// without a verdict is counted in the signed phase summary, and a phase with
+// none serializes without the field, as before schema 1.1.0.
+func TestBuild_PhaseSummaryCopiesOther(t *testing.T) {
+	tests := []struct {
+		name      string
+		summary   ctrf.Summary
+		wantOther int
+	}{
+		{"one other result", ctrf.Summary{Tests: 3, Passed: 2, Other: 1}, 1},
+		{"no other result", ctrf.Summary{Tests: 2, Passed: 2}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			report := &ctrf.Report{}
+			report.Results.Summary = tt.summary
+			bundle, err := Build(context.Background(), BuildOptions{
+				OutputDir:    t.TempDir(),
+				Recipe:       &recipe.RecipeResult{Criteria: &recipe.Criteria{Accelerator: "h100"}},
+				RecipeYAML:   []byte("a: b\n"),
+				Snapshot:     &snapshotter.Snapshot{},
+				SnapshotYAML: []byte("a: b\n"),
+				BOM:          BOMInputs{Body: []byte("{}"), CycloneDXVersion: "1.6"},
+				PhaseResults: []*validator.PhaseResult{{Phase: validator.PhasePerformance, Report: report}},
+			})
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			got := bundle.Predicate.Phases[PhasePerformance]
+			if got.Other != tt.wantOther || got.Passed != tt.summary.Passed {
+				t.Errorf("phase summary = %+v, want other=%d passed=%d", got, tt.wantOther, tt.summary.Passed)
+			}
+			// A literal, not the constant: the other count is what schema
+			// 1.1.0 added, so the two must not move apart unnoticed.
+			if bundle.Predicate.SchemaVersion != "1.1.0" {
+				t.Errorf("schemaVersion = %q, want 1.1.0", bundle.Predicate.SchemaVersion)
+			}
+			body, err := json.Marshal(bundle.Predicate.Phases[PhasePerformance])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]any
+			if err = json.Unmarshal(body, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if _, has := fields["other"]; has != (tt.wantOther > 0) {
+				t.Errorf("serialized phase %s: other present = %v, want %v", body, has, tt.wantOther > 0)
+			}
+		})
+	}
+}

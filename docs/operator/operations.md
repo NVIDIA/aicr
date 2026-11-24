@@ -209,8 +209,8 @@ timeout and is not checked.
 8. **Deployment validation** runs when `spec.validation.deployment` is
    `Required`, against a new snapshot taken after every step is ready. It is
    run again, at most three times in all, only when AICR could not finish a
-   run and that run pushed no evidence of a failed check
-   ([troubleshooting](troubleshooting.md#validation)).
+   run and that run pushed no evidence of a failed or unfinished (`other`)
+   check ([troubleshooting](troubleshooting.md#validation)).
 9. **The rollout succeeds** and its target becomes the active plan. The whole
    rollout must finish within `spec.rollout.deadline` (default 6 hours) of its
    creation.

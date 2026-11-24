@@ -435,10 +435,12 @@ rollout is in `Validating`:
 unavailable, rate limited, canceled) means AICR could not finish the run.
 AICR can exit that way after its checks ran, when pushing or signing the
 evidence fails, so the operator first reads the evidence the run pushed. If
-it records failed checks, or otherwise does not record that validation
+it records failed checks, checks that ended without a verdict (`other`, from
+AICR evidence schema 1.1.0), or otherwise does not record that validation
 passed, the rollout ends `Failed` on that run and nothing is run again. Its
-message leads with the verdict:
-`deployment validation failed: the evidence run <id> pushed records failed checks`,
+message leads with the verdict, for example
+`deployment validation failed: the evidence run <id> pushed records failed checks`
+or `... pushed records checks that ended without a verdict`,
 followed by how the run ended. The evidence is bound and recorded as for any
 failed run. Where `validation.signingKey` is set and the run failed before
 signing, it cannot be bound: the message continues with
