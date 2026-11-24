@@ -13,4 +13,4 @@
 #
 # A transitive version that aiperf's own pins rule out is replaced through
 # requirements-overrides.txt, not here: pip rejects a conflicting pin.
-aiperf==0.13.0
+aiperf==0.14.0
