@@ -1,0 +1,8 @@
+attestations:
+  - attestedAt: 2026-11-24T19:15:22Z
+    bundle:
+      digest: sha256:be98f82dd8068f43f7c1d350803252910af41ad9aaf7bb9c6bccb94591ab81c4
+      oci: ghcr.io/xdu31/aicr-evidence:gb10-nvke-ubuntu-training-0ee8875feaea
+      predicateType: https://aicr.run/recipe-evidence/v3
+recipe: gb10-nvke-ubuntu-training
+schemaVersion: 1.0.0
