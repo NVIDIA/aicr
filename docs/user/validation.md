@@ -87,6 +87,58 @@ a component the bundler enabled at bundle time is not checked.
 - **Run:ai recipes** (`platform=runai`): the `gang-scheduling` conformance check runs its test pods in a Run:ai Project namespace, so export `AICR_RUNAI_PROJECT_NAMESPACE=runai-<project>` in the shell running `aicr validate`; the check fails, rather than skips, without it. The Project needs an explicit CPU and memory quota and no CPU or memory limit, and a private probe image needs its pull Secret already in that namespace. See [Run:ai cluster](component-catalog.md#runai-cluster).
 - **`NodeTopology.gpu-nodes.label` readiness constraints outside GKE** (including bare metal and `--data` services): GPU nodes are those the GPU Operator labels `nvidia.com/gpu.present=true`, so capture the snapshot after it is running. A snapshot with no such node fails readiness closed (exit 2), and GPU nodes it has not labeled are not checked.
 
+## Secondary network attachment
+
+Recipes that ship a secondary network run the deployment-phase
+`secondary-network-attachment` check: the NVKE GB200 and VR200 training
+leaves, with their per-rail SR-IOV networks, and the OKE GB300 training leaf,
+with its `rdma-net` network. A device plugin that advertises the VF and an
+SR-IOV node state that reads `Succeeded` do not prove that a pod can attach
+the network. When Multus is missing or broken, a pod that asks for the network
+can get the VF but no interface, and its traffic falls back to the pod
+network.
+
+The check runs one short-lived pod per NetworkAttachmentDefinition the recipe
+renders, directly or from a `SriovNetwork` or `SriovIBNetwork`. The scheduler
+places each pod on a Ready, uncordoned node with a free unit of the network's
+resource, through a node affinity, so the probe never takes a unit the
+scheduler has given a workload. The pod requests one unit, names the network
+in its `k8s.v1.cni.cncf.io/networks` annotation, lists its interfaces, and
+exits. The check then reads the pod's Multus `network-status` and requires
+that:
+
+- the network has an entry whose interface exists in the pod;
+- when the network assigns addresses, the address is inside the network's
+  nv-ipam IPPool and outside the cluster's pod network. The pod network comes
+  from each node's `spec.podCIDRs` and the OVN-Kubernetes
+  `k8s.ovn.org/node-subnets` annotation. When neither is set, the overlap is
+  reported as not evaluated;
+- an SR-IOV attachment carries the VF's PCI address.
+
+Each network gets its own `RESULT:` line. It sends no traffic between nodes;
+that is the job of the `nccl-all-reduce-bw-net` performance check. A network
+is skipped rather than failed when every unit of its resource is requested by
+running workloads (busy), or when every node that advertises it is cordoned
+(unschedulable). When no network passed or failed, the check skips with
+`nodes-busy` if at least one was busy, and with `no-schedulable-gpu-nodes` if
+all were unschedulable. The failures name their cause:
+
+| Message excerpt | Cause | Fix |
+|-----------------|-------|-----|
+| `has no entry for <namespace>/<name>`, or `Multus attached no network` | The pod ran on the primary network alone: the node's CNI chain has no Multus, as on NVKE before the recipe installs it | Deploy the recipe's `network-operator`, whose NicClusterPolicy installs Multus, and check its DaemonSet on that node |
+| `the probe pod never started: FailedCreatePodSandBox: ...` | Multus is present but failing, for example an expired token (`Unauthorized`) or a stale config | Act on the quoted kubelet message; for an expired token, restart the Multus DaemonSet |
+| `uncordoned node(s) are NotReady` | Every uncordoned node that advertises the resource is NotReady. On OKE GB300, CRI-O waits for Multus, so a node whose Multus never wrote its config stays NotReady | Fix the kubelet or the node's CNI; for OKE GB300, check the Multus pod on that node |
+| `may not be registered on that node` | The kubelet rejected the probe with `OutOf<resource>`: the device plugin for the network's resource is not registered there | Check the device-plugin pod on that node |
+| `the scheduler could not place the probe` | The scheduler refused the node for a reason other than a busy unit, such as a taint the run's `--toleration` does not cover | Act on the quoted scheduler message |
+
+The check has run only against fake clusters so far, not against a live
+tenant.
+
+The probes run in a per-run `aicr-gpu-test-*` namespace that the check deletes
+when it finishes and that [`aicr sweep`](cli-reference.md#aicr-sweep) reclaims
+after a killed run. The probe image is `docker.io/library/busybox:1.37`; a
+`--image-pull-secret` is copied into the namespace for it.
+
 ## `ai-service-metrics` on your own metrics backend
 
 By default the `ai-service-metrics` conformance check queries NKTP's bundled
@@ -132,7 +184,7 @@ is installed on the cluster.
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE (GPUDirect TCPXO), H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE and NVKE) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB300 + EKS, GB300 + OKE, and VR200 + NVKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS; on OKE, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) for GB200 and RoCE over SR-IOV VFs (`nvidia.com/mlnxnics` VFs attached through the `rdma-net` network) for GB300; on NVKE, the per-rail SR-IOV VFs (`nvidia.com/sriov_resource_rail_<n>`), over InfiniBand for GB200 and RoCE v2 for VR200 — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the GB200 combinations and GB300 + EKS — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS; built-in IB/verbs on OKE and NVKE) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB300 + EKS, GB300 + OKE, and VR200 + NVKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS; on OKE, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) for GB200 and RoCE over SR-IOV VFs (`nvidia.com/mlnxnics` VFs attached through the `rdma-net` network) for GB300; on NVKE, the per-rail SR-IOV VFs (`nvidia.com/sriov_resource_rail_<n>`), over InfiniBand for GB200 and RoCE v2 for VR200 — catching silent fallback to Socket when GPUDirect RDMA is unavailable. Whether the VF networks attach at all is checked by the deployment phase, which runs before the performance phase when both are selected — see [Secondary network attachment](#secondary-network-attachment). A driver preflight gates the GB200 combinations and GB300 + EKS — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, GB200 + NVKE, GB200 + GKE (A4X GPUDirect-RDMA/gIB carries the IMEX/NVLink fabric traffic; gIB is the transport driver, not the NCCL algorithm), GB300 (EKS, OKE, NVKE, generic), VR200 + RKE2, and VR200 + NVKE. Asserts the NVLS communicator actually initialized. Catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE GB200 and NVKE, RoCE on OKE GB300), or gIB/RDMA initialization failure (GKE), when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
@@ -211,7 +263,10 @@ RoCE: each worker pod requests the node's four SR-IOV VFs
 network, and NCCL reads the node topology that `nvidia-tuned` writes to
 `/etc/nccl/topo.xml`. On `BM.GPU.GB300.4` nodes with NCCL 2.29.2, the 16 GiB bus
 bandwidth measured 363 GB/s (NET) and 836 GB/s (NVLS) on 2 nodes, and 376 GB/s
-and 909 GB/s on 4.
+and 909 GB/s on 4. The deployment phase, which runs before the performance
+phase when both are selected, includes `secondary-network-attachment`, which
+attaches `rdma-net` to a probe pod. The network assigns no address, so that
+check asserts only the interface.
 
 ```bash
 # Capture snapshot, generate training recipe, validate the performance phase.
@@ -1755,6 +1810,9 @@ Common reasons and their cause:
 | `failed to resolve nccl-benchmark-runtime-ref=… expected … in the --data tree` | `stderr` | The referenced runtime file is missing from `--data` (or `--data` wasn't passed) | Place the `TrainingRuntime` at `validators/performance/testdata/{accelerator}/{service}/runtime.yaml` in your `--data` dir — see [Supplying a benchmark runtime for a private service](#supplying-a-benchmark-runtime-for-a-private-service) |
 | `nccl-benchmark-runtime … must be a … TrainingRuntime … must declare a "node" replicatedJob` | `stdout` | The referenced file is not a Kubeflow `trainer.kubeflow.org/v1alpha1` `TrainingRuntime`, or lacks the `node` replicatedJob | Fix the runtime file to be a valid `TrainingRuntime` with a `node` replicatedJob |
 | `nccl-benchmark-runtime and nccl-benchmark-profile are mutually exclusive` | `stdout` | The recipe declares both escape hatches at once | Keep only one: borrow an embedded profile **or** supply your own runtime |
+| `no secondary network could be probed (<n> busy, <m> unschedulable)`, with `extra.skipReason` `nodes-busy` | `stdout` | `secondary-network-attachment` probed no network, and at least one had every unit of its resource requested by running workloads | Rerun when a workload releases a VF; see [Secondary network attachment](#secondary-network-attachment) |
+| `no secondary network could be probed (0 busy, <m> unschedulable)`, with `extra.skipReason` `no-schedulable-gpu-nodes`; per network, `all <n> node(s) advertising <resource> are cordoned` | `stdout` | Every node that advertises each network's resource is cordoned | Uncordon a node that advertises the resource (`kubectl uncordon <node>`) and rerun. NotReady nodes fail the check instead of skipping it; see [Secondary network attachment](#secondary-network-attachment) |
+| `the recipe ships no NetworkAttachmentDefinition, SriovNetwork or SriovIBNetwork` | `stdout`, and `extra.skipReason` as `component-not-in-recipe` | `secondary-network-attachment` has no secondary network to attach | None; the check applies only to recipes that ship one |
 | `skipped - no-cluster mode` | `message` | `--no-cluster` was passed — the runner short-circuits every phase before dispatching any Job | Remove the flag to run behavioral checks |
 | `named in skipChecks` | `message`, and `extra.skipReason` as `named-in-skip-checks` (the channel that survives bundle redaction) | The caller withheld this check with `--skip-check` or `spec.validate.execution.skipChecks` | Drop the name from the skip list to run it again; see [Skipping checks a run cannot satisfy](#skipping-checks-a-run-cannot-satisfy) |
 | `skipped due to previous phase failure` | `message` | `--fail-fast` was set and an earlier phase failed, so subsequent phases were skipped | Fix the earlier phase first, or drop `--fail-fast` to run all phases regardless |
@@ -1787,8 +1845,8 @@ accelerator driver or tools, and it must provide what the probe script runs on:
 a POSIX `/bin/sh`, `head` and `tr` (`timeout` is used when present). A
 distroless image cannot run the probe; mirroring the Ubuntu image is the
 simplest choice. When the mirror needs credentials, `--image-pull-secret`
-covers the probe too: every conformance check that creates a per-run namespace
-copies the named Secrets from the validator namespace into it and attaches
+covers the probe too: every deployment or conformance check that creates a
+per-run namespace copies the named Secrets from the validator namespace into it and attaches
 them to its probe pods, and the copies are deleted with the namespace. A
 Secret the flag names but the validator namespace lacks fails the check with
 `NotFound` before any probe is created.

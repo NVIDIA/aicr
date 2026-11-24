@@ -146,8 +146,12 @@ spec:
         - cert-manager
 
   # The deployment-phase floor is contributed by the gb300-any cross-cutting
-  # overlay and is not duplicated here.
+  # overlay and is not duplicated here; this leaf adds the attachment probe
+  # for its rdma-net network.
   validation:
+    deployment:
+      checks:
+        - secondary-network-attachment
     performance:
       # Both transport variants: NET (RoCE over the four SR-IOV VF rails,
       # GPUDirect RDMA) and NVLS (MNNVL across the NVL72 IMEX domain).

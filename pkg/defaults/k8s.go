@@ -63,7 +63,8 @@ const (
 	GangSchedulingNegativeGroupPrefix = "gang-neg-group-"
 
 	// GPUTestNamespacePrefix prefixes the PER-RUN test namespace the GPU
-	// conformance checks create. A fresh namespace per run makes cleanup a
+	// conformance checks and the secondary-network-attachment deployment check
+	// create. A fresh namespace per run makes cleanup a
 	// single bounded operation — delete the namespace and wait — and closes
 	// the ambiguous-create leak window: once the namespace is Terminating,
 	// the NamespaceLifecycle admission plugin rejects subsequent Creates in
@@ -121,6 +122,12 @@ const (
 // a --discover-network run — and opening that many connections at once buys
 // nothing over a handful of waves while adding avoidable apiserver load.
 const K8sAccessReviewConcurrency = 16
+
+// SecondaryNetworkProbeConcurrency bounds how many attachment probe pods the
+// secondary-network-attachment check runs at once, one per
+// NetworkAttachmentDefinition the recipe ships. Eight covers every rail of the
+// widest shipped shape in a single wave.
+const SecondaryNetworkProbeConcurrency = 8
 
 // MaxK8sNameLength is the maximum length of a Kubernetes object name built
 // from a run-scoped prefix. 63 characters is the general DNS label ceiling

@@ -264,7 +264,9 @@ value:
 Both values pass deployment, conformance and NCCL performance validation on a
 4-node GB300 pool: `oci-managed` on Oracle's 6.17-kernel image, which runs the
 RDMA subsystem in shared network namespace mode, and `operator-managed` in both
-shared and exclusive mode (see [Fabric](#fabric)).
+shared and exclusive mode (see [Fabric](#fabric)). Those runs predate the
+`secondary-network-attachment` deployment check, which has not yet run on this
+pool.
 
 Pass `--accelerated-node-selector` at bundle time with a label only the GB300
 pool carries: the recipe's Nodewright CR reboots every node it matches, and
@@ -346,6 +348,20 @@ fixes it; a recipe without the reading gets an informational note instead. The
 reading comes from the one node the snapshot agent runs on, so keep every
 GB300 node in the same mode: check each with
 `cat /sys/module/ib_core/parameters/netns_mode`.
+
+The deployment phase's `secondary-network-attachment` check attaches
+`rdma-net` to a short-lived probe pod that requests one `nvidia.com/mlnxnics`
+VF, and requires Multus to report the attachment with an interface the pod
+can see. A Multus that is running but failing fails the check with the
+kubelet's `FailedCreatePodSandBox` message. A Multus that never wrote its
+config leaves the node `NotReady`, because CRI-O waits for it (see
+[Node preparation](#node-preparation)), and the check fails because no Ready
+node advertises `nvidia.com/mlnxnics`. Because `rdma-net` declares no IPAM, the
+check asserts no address, and it does not look for the RDMA device, so a
+namespace-mode mismatch that leaves the device on the host still passes it and
+shows up in `nccl-all-reduce-bw-net`. The check has run only against fake
+clusters so far. See
+[Secondary network attachment](../user/validation.md#secondary-network-attachment).
 
 ### Node preparation
 
