@@ -179,10 +179,10 @@ func TestGuardOutput(t *testing.T) {
 	if extrasOut != nil {
 		t.Error("stop did not clear extrasOut")
 	}
-	if _, err := fmt.Println(relayed); err == nil {
+	if _, writeErr := fmt.Println(relayed); writeErr == nil {
 		t.Error("a stdout write after stop succeeded, want it dropped")
 	}
-	if _, err := fmt.Fprintln(os.Stderr, relayed); err == nil {
+	if _, writeErr := fmt.Fprintln(os.Stderr, relayed); writeErr == nil {
 		t.Error("a stderr write after stop succeeded, want it dropped")
 	}
 	stdout, err := os.ReadFile(stdoutFile.Name())
