@@ -25,21 +25,25 @@ transitions:
       The controller now serves the AgentgatewayModel API, which AICR's values
       left off at 1.5.0, so existing AgentgatewayModel objects start routing,
       and a model spec.baseURL without a path now means /, where 1.5
-      appended /v1 for custom and Ollama providers. Configured LLM traffic also changes: prompt guards
-      inspect tool output and reject when a streamed-response check fails,
-      CEL lookups of a repeated header return a list, models attached
-      directly to a Gateway or ListenerSet serve only exact LLM paths,
-      Anthropic Messages requests convert through the Responses API (dropping
-      extended-thinking history), and dynamic backends refuse loopback and
-      link-local addresses. AICR creates no AgentgatewayModel, guard, policy
-      or dynamic backend, so a default install needs only the apply.
+      appended /v1 for custom and Ollama providers. Configured LLM traffic
+      also changes: prompt guards inspect tool output and reject when a
+      streamed-response check fails, CEL lookups of a repeated header return
+      a list, models attached directly to a Gateway or ListenerSet serve only
+      exact LLM paths, Anthropic Messages requests convert through the
+      Responses API (dropping extended-thinking history), a built-in model
+      catalog prices requests to common public models so cost budgets and
+      llm.cost expressions start counting them, and dynamic backends refuse
+      loopback and link-local addresses. AICR creates no AgentgatewayModel,
+      guard, policy or dynamic backend, so a default install needs only the
+      apply.
     precondition: >-
       Know whether the cluster has AgentgatewayModel objects and how they
       attach (directly to a Gateway or ListenerSet, or through an HTTPRoute),
       whether an OpenAI provider points at a server other than the OpenAI
-      API, whether any policy configures prompt guards or reads request
-      headers in CEL, and whether a dynamic backend targets a loopback or
-      link-local address. If none does, only the apply step applies.
+      API, whether any policy configures prompt guards, cost budgets or CEL
+      expressions over request headers or llm.cost, and whether a dynamic
+      backend targets a loopback or link-local address. If none does, only
+      the apply step applies.
     stepsByDeployer:
       - steps:
           - id: review-models
@@ -75,11 +79,14 @@ transitions:
           - id: keep-guard-scope
             description: >-
               Only if prompt guards are configured and must not inspect tool
-              output: set each guard's scope to [SystemPrompt, Messages],
-              before applying.
+              output: give each guard that sets no scope the scope
+              [SystemPrompt, Messages], before applying. Leave a guard that
+              already sets a scope as it is.
             reason: >-
               1.7 adds ToolOutput to the default scope, which can reject or
-              mask requests that passed before.
+              mask requests that passed before. An explicit scope is not
+              affected, and overwriting it can drop inspection it chose, such
+              as ToolInput.
           - id: check-header-expressions
             description: >-
               Only if CEL expressions read request headers that can repeat:
@@ -95,6 +102,15 @@ transitions:
             reason: >-
               1.7 rejects those destinations by default, including cloud
               metadata servers.
+          - id: review-cost-policies
+            description: >-
+              Only if USD budgets, cost-based rate limits or CEL expressions
+              use llm.cost: review them against the built-in catalog's default
+              pricing for common public models, before applying.
+            reason: >-
+              1.6 prices those requests without a configured catalog, so
+              budgets and cost limits that saw no cost before start counting
+              them.
           - id: apply
             description: >-
               Apply the regenerated bundle with your deployer.
@@ -103,10 +119,11 @@ transitions:
             description: >-
               Only if OpenAI Moderation, Bedrock Guardrails or Google Model
               Armor guards must keep the 1.5 behavior on streamed responses:
-              set their failureMode to failOpen once the new version runs.
+              set their failureMode to FailOpen once the new version runs.
             reason: >-
               A guard failure while checking a streamed response now rejects
-              the content, and the 1.5.0 schema has no failureMode on these guards.
+              the content, and the 1.5.0 schema has no failureMode on these
+              guards.
     references:
       - https://github.com/agentgateway/agentgateway/releases/tag/v1.6.0
       - https://github.com/agentgateway/agentgateway/releases/tag/v1.7.0
