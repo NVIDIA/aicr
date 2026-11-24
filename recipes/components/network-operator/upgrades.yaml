@@ -81,14 +81,19 @@ transitions:
             description: >-
               Once kube-multus-ds has finished rolling out on every node, find
               the pods that request secondary networks (the
-              k8s.v1.cni.cncf.io/networks annotation) and were created during
-              the rollout, and delete each one whose
-              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
-              network it requests, so its controller recreates it.
+              k8s.v1.cni.cncf.io/networks annotation) and started during the
+              rollout (status.startTime), whatever their creation time, and
+              whose k8s.v1.cni.cncf.io/network-status annotation has no entry
+              for a network they request. Delete each one that a controller
+              owns (metadata.ownerReferences), so the controller recreates it.
+              For a pod with no owner, save it first (kubectl get pod -o yaml,
+              without status, uid, resourceVersion and nodeName), delete it,
+              and re-create it from the saved manifest.
             reason: >-
-              A pod created while its node's multus pod was being replaced can
-              start without its secondary networks and keeps running that way;
-              nothing re-attaches it.
+              A pod admitted to a node while that node's multus pod was being
+              replaced can start without its secondary networks and keeps
+              running that way; nothing re-attaches it, and nothing recreates a
+              deleted pod that no controller owns.
           - id: verify
             description: >-
               kubectl get nicclusterpolicy nic-cluster-policy reports ready and
@@ -135,14 +140,19 @@ transitions:
             description: >-
               Once kube-multus-ds has finished rolling out on every node, find
               the pods that request secondary networks (the
-              k8s.v1.cni.cncf.io/networks annotation) and were created during
-              the rollout, and delete each one whose
-              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
-              network it requests, so its controller recreates it.
+              k8s.v1.cni.cncf.io/networks annotation) and started during the
+              rollout (status.startTime), whatever their creation time, and
+              whose k8s.v1.cni.cncf.io/network-status annotation has no entry
+              for a network they request. Delete each one that a controller
+              owns (metadata.ownerReferences), so the controller recreates it.
+              For a pod with no owner, save it first (kubectl get pod -o yaml,
+              without status, uid, resourceVersion and nodeName), delete it,
+              and re-create it from the saved manifest.
             reason: >-
-              A pod created while its node's multus pod was being replaced can
-              start without its secondary networks and keeps running that way;
-              nothing re-attaches it.
+              A pod admitted to a node while that node's multus pod was being
+              replaced can start without its secondary networks and keeps
+              running that way; nothing re-attaches it, and nothing recreates a
+              deleted pod that no controller owns.
           - id: verify
             description: >-
               kubectl get nicclusterpolicy nic-cluster-policy reports ready and
@@ -190,14 +200,19 @@ transitions:
             description: >-
               Once kube-multus-ds has finished rolling out on every node, find
               the pods that request secondary networks (the
-              k8s.v1.cni.cncf.io/networks annotation) and were created during
-              the rollout, and delete each one whose
-              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
-              network it requests, so its controller recreates it.
+              k8s.v1.cni.cncf.io/networks annotation) and started during the
+              rollout (status.startTime), whatever their creation time, and
+              whose k8s.v1.cni.cncf.io/network-status annotation has no entry
+              for a network they request. Delete each one that a controller
+              owns (metadata.ownerReferences), so the controller recreates it.
+              For a pod with no owner, save it first (kubectl get pod -o yaml,
+              without status, uid, resourceVersion and nodeName), delete it,
+              and re-create it from the saved manifest.
             reason: >-
-              A pod created while its node's multus pod was being replaced can
-              start without its secondary networks and keeps running that way;
-              nothing re-attaches it.
+              A pod admitted to a node while that node's multus pod was being
+              replaced can start without its secondary networks and keeps
+              running that way; nothing re-attaches it, and nothing recreates a
+              deleted pod that no controller owns.
           - id: verify
             description: >-
               kubectl get nicclusterpolicy nic-cluster-policy reports ready and
@@ -242,14 +257,19 @@ transitions:
             description: >-
               Once kube-multus-ds has finished rolling out on every node, find
               the pods that request secondary networks (the
-              k8s.v1.cni.cncf.io/networks annotation) and were created during
-              the rollout, and delete each one whose
-              k8s.v1.cni.cncf.io/network-status annotation has no entry for a
-              network it requests, so its controller recreates it.
+              k8s.v1.cni.cncf.io/networks annotation) and started during the
+              rollout (status.startTime), whatever their creation time, and
+              whose k8s.v1.cni.cncf.io/network-status annotation has no entry
+              for a network they request. Delete each one that a controller
+              owns (metadata.ownerReferences), so the controller recreates it.
+              For a pod with no owner, save it first (kubectl get pod -o yaml,
+              without status, uid, resourceVersion and nodeName), delete it,
+              and re-create it from the saved manifest.
             reason: >-
-              A pod created while its node's multus pod was being replaced can
-              start without its secondary networks and keeps running that way;
-              nothing re-attaches it.
+              A pod admitted to a node while that node's multus pod was being
+              replaced can start without its secondary networks and keeps
+              running that way; nothing re-attaches it, and nothing recreates a
+              deleted pod that no controller owns.
           - id: verify
             description: >-
               kubectl get nicclusterpolicy nic-cluster-policy reports ready and
