@@ -149,7 +149,9 @@ func guardOutput(drainTimeout time.Duration) (stop func(), err error) {
 			_ = outR.Close()
 			_ = errR.Close()
 		case <-timer.C:
-			slog.Warn("check output still open after the check returned; not waiting for it",
+			// Logged from a goroutine, since the stalled destination may be
+			// the stderr the default slog handler writes to.
+			go slog.Warn("check output still open after the check returned; not waiting for it",
 				"timeout", drainTimeout)
 			var flushes sync.WaitGroup
 			for _, g := range []*outputGuard{outGuard, errGuard} {

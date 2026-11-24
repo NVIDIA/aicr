@@ -16,7 +16,9 @@ package validators
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -252,52 +254,73 @@ func TestGuardOutputBoundsDrain(t *testing.T) {
 	}
 }
 
-// TestGuardOutputBoundsBlockedDestination verifies stop returns when the
+// TestGuardOutputBoundsBlockedDestination verifies stop returns when a
 // container stream stops draining, so a relay is blocked writing to it while
-// holding the guard. It is not parallel because it swaps os.Stdout and
-// os.Stderr.
+// holding its guard. The default slog handler writes to the original stderr,
+// as Run installs it, so the stderr case also blocks any synchronous log. It
+// is not parallel because it swaps os.Stdout, os.Stderr and the default slog
+// logger.
 func TestGuardOutputBoundsBlockedDestination(t *testing.T) {
-	swapStdStreams(t)
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-	t.Cleanup(func() {
-		_ = r.Close()
-		_ = w.Close()
-	})
-	stop, err := guardOutput(50 * time.Millisecond)
-	if err != nil {
-		t.Fatalf("guardOutput() error = %v", err)
-	}
-	t.Cleanup(func() { extrasOut = nil })
-	guarded := os.Stdout
-	go func() { _, _ = fmt.Fprint(guarded, strings.Repeat("x\n", 1<<20)) }()
+	for _, stream := range []string{"stdout", "stderr"} {
+		t.Run(stream, func(t *testing.T) {
+			swapStdStreams(t)
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = r.Close()
+				_ = w.Close()
+			})
+			fillPipe(t, w)
+			dest := &os.Stdout
+			if stream == "stderr" {
+				dest = &os.Stderr
+			}
+			*dest = w
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+			t.Cleanup(func() { slog.SetDefault(prev) })
 
-	// A relay blocked on the full destination holds g.mu for good. Any other
-	// holder releases it within microseconds.
-	g := extrasOut.(sentinelWriter).g
-	for busy, deadline := 0, time.Now().Add(10*time.Second); busy < 50; time.Sleep(time.Millisecond) {
-		if g.mu.TryLock() {
-			g.mu.Unlock()
-			busy = 0
-		} else {
-			busy++
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("relay never blocked on the undrained destination")
+			stop, err := guardOutput(50 * time.Millisecond)
+			if err != nil {
+				t.Fatalf("guardOutput() error = %v", err)
+			}
+			t.Cleanup(func() { extrasOut = nil })
+			if _, err := fmt.Fprintln(*dest, "held by the stalled relay"); err != nil {
+				t.Fatal(err)
+			}
+
+			done := make(chan struct{})
+			go func() {
+				stop()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatalf("stop did not return while the %s relay was blocked on the destination", stream)
+			}
+		})
+	}
+}
+
+// fillPipe writes to w until the pipe buffer is full, so the next write blocks.
+func fillPipe(t *testing.T, w *os.File) {
+	t.Helper()
+	if err := w.SetWriteDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatalf("pipe write deadline: %v", err)
+	}
+	chunk := bytes.Repeat([]byte("x"), 64<<10)
+	for {
+		if _, err := w.Write(chunk); err != nil {
+			if !errors.Is(err, os.ErrDeadlineExceeded) {
+				t.Fatalf("fill pipe: %v", err)
+			}
+			break
 		}
 	}
-
-	done := make(chan struct{})
-	go func() {
-		stop()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("stop did not return while a relay was blocked on the destination")
+	if err := w.SetWriteDeadline(time.Time{}); err != nil {
+		t.Fatalf("clear pipe write deadline: %v", err)
 	}
 }
