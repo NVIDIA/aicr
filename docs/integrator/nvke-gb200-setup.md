@@ -73,13 +73,14 @@ plus Kubeflow Trainer through the `platform-kubeflow` mixin.
   on such a node gets the VF allocated and no IB interface, silently. The
   NicClusterPolicy therefore carries `secondaryNetwork.multus` and
   `cniPlugins`; the NVKE image contract is OVN-Kubernetes only, and multus is
-  the recipe's to install. The operator renders the multus DaemonSet with
-  `--skip-config-watch`, so the service-account token multus copies into
-  `multus.kubeconfig` is not refreshed on rotation. Under default API-server
-  settings the legacy-token extension keeps that copy valid for one year
-  from issuance (`serviceaccount.ExpirationExtensionSeconds`); other settings
-  may shorten it. Restart the multus pods before it expires to rewrite the
-  file. The SR-IOV policies select only the ConnectX-7 root devices.
+  the recipe's to install. It runs multus **thick** (`deploymentType: thick`,
+  which is why the leaf pins network-operator 26.10.0): the thick daemon reads
+  the service-account token kubelet rotates. Thin multus would not work here.
+  It copies the token into `multus.kubeconfig` once, under
+  `--skip-config-watch`, and NVKE's API server runs
+  `--service-account-extend-token-expiration=false`, so that copy expires after
+  an hour and every new pod on the node then fails sandbox creation with
+  `Unauthorized`. The SR-IOV policies select only the ConnectX-7 root devices.
 
 ## Never install DOCA-OFED on these nodes
 
@@ -293,11 +294,14 @@ The performance phase runs the `gb200/nvke` NCCL runtimes.
   A failed check names the rail and the cause, rather than letting NCCL fall
   back to the pod network.
 - If the CNI fails to attach a rail when the pod is created, the worker never
-  starts and the check fails as a launcher-pod timeout with no reason. On NVKE
-  the usual cause is multus losing its service-account token an hour after
-  it starts ([#3482](https://github.com/NVIDIA/aicr/issues/3482)). Run
-  `kubectl -n nvidia-network-operator rollout restart ds/kube-multus-ds`
-  shortly before `aicr validate`.
+  starts and the check fails as a launcher-pod timeout with no reason. If the
+  pod's events show `FailedCreatePodSandBox` with `Unauthorized`, check that
+  the `kube-multus-ds` pods run `multus-daemon`: a node still on thin multus
+  (a bundle from before network-operator 26.10.0) loses its service-account
+  token an hour after multus starts
+  ([#3482](https://github.com/NVIDIA/aicr/issues/3482)). There,
+  `kubectl -n nvidia-network-operator rollout restart ds/kube-multus-ds` buys
+  one more hour; upgrading to this recipe's thick multus removes the cause.
 - The `>= 40` NET floor is copied from the GB200 OKE recipe. No tenant with
   full IB partition membership has measured it yet, so it is a placeholder.
 
@@ -365,6 +369,9 @@ versions, except `nodewright-operator` at v0.20.0.
   [Upgrade Notes: `nvidia-dra-driver-gpu` 0.5.0 to
   0.5.1](../user/component-catalog.md#nvidia-dra-driver-gpu-050-to-051)).
 - No published evidence yet.
+- Thick multus (network-operator 26.10.0) has not yet been run on an NVKE
+  tenant: no measurement yet shows pods still starting more than an hour
+  after multus starts.
 - No `inference-perf` floor on the Dynamo leaf: nothing has measured Dynamo
   serving on NVKE.
 - KWOK profiles model scheduling only; they cannot validate RDMA traffic.

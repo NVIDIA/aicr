@@ -61,19 +61,21 @@ spec:
   # dies with "failed to discover NIC devices". Measured on both images:
   # network-operator-v26.7.0 fails exactly that way, v26.7.1 logs "flint
   # failed, falling back to sysfs" and discovers every port. ConnectX-7/8
-  # platforms never hit it because flint works there.
+  # platforms never hit it because flint works there. network-operator-v26.10.0
+  # carries the same fallback (pkg/devicediscovery/utils.go on its release
+  # branch); it has not been measured on this platform.
   nicConfigurationOperator:
     logLevel: info
     operator:
       image: nic-configuration-operator
       repository: nvcr.io/nvidia/mellanox
-      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nic-configuration-operator tag=network-operator-v26.7.1
-      version: sha256:3f2d82afbe9e850ff0ace3d1ebff43cef70f83256a6c9632640c7c2f7e7840a8
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nic-configuration-operator tag=network-operator-v26.10.0
+      version: sha256:50e3114bc7ead03c62ba8924fc274592243bb7fd6c994406db5a53c07fdbb13d
     configurationDaemon:
       image: nic-configuration-operator-daemon
       repository: nvcr.io/nvidia/mellanox
-      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon tag=network-operator-v26.7.1
-      version: sha256:908d278e140b1276b978acf26c3f8d4a1bbc22c7085cc86bda94644987d3d74b
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon tag=network-operator-v26.10.0
+      version: sha256:77437fd7b9b6737b811d639266d77e46b50527fda192c6dd0d639fe0cb0468a4
       imagePullSecrets: []
       # Unset by default, so the operator applies its own default
       # (manifests/state-nic-configuration-operator/070-config-daemon.yaml).
@@ -98,11 +100,18 @@ spec:
   nvIpam:
     image: nvidia-k8s-ipam
     repository: nvcr.io/nvidia/mellanox
-    # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nvidia-k8s-ipam tag=network-operator-v26.7.1
-    version: sha256:f4012b9c5ee18603def8e842c58861b2524c8da5a946ec9c3e5957de7395a22c
+    # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/nvidia-k8s-ipam tag=network-operator-v26.10.0
+    version: sha256:f2f35a3576a03ef1f05a589185f8150f49ca0d60019917ad8a2a8749688c1b32
     enableWebhook: false
   # Required for the rails: a SriovNetwork renders a NetworkAttachmentDefinition
   # and multus is what attaches it to a pod.
+  #
+  # multus runs thick (Network Operator >= 26.10.0, pinned in the overlay): thin
+  # multus copies the service-account token into a host kubeconfig once, and
+  # with NVKE's --service-account-extend-token-expiration=false that copy
+  # expires after an hour, after which every pod on the node fails with
+  # Unauthorized (#3482). The thick daemon uses in-cluster config, which
+  # re-reads the token kubelet rotates.
   #
   # CAUTION, measured on this platform: removing a NicClusterPolicy that
   # carries this section deletes multus's DaemonSet and RBAC but leaves
@@ -115,13 +124,14 @@ spec:
     cniPlugins:
       image: plugins
       repository: nvcr.io/nvidia/mellanox
-      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/plugins tag=network-operator-v26.7.1
-      version: sha256:9758670f426e238805aba61a1c83a96ae10506dd973845b60477230672c06163
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/plugins tag=network-operator-v26.10.0
+      version: sha256:75408477333bb2aed761dafb521f34c91f734f969384882bb385ab1c892ccbdf
     multus:
       image: multus-cni
       repository: nvcr.io/nvidia/mellanox
-      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/multus-cni tag=network-operator-v26.7.1
-      version: sha256:19279347b71a1077eaed8479f8fff491fd9a578bc0ff8efcf13ea08270574fd0
+      # renovate: datasource=docker depName=nvcr.io/nvidia/mellanox/multus-cni tag=network-operator-v26.10.0
+      version: sha256:f4539e04013284b4c37021766852a8702190ac4b7d4e100dd15a5da883a43ec8
+      deploymentType: thick
   tolerations:
     - key: dedicated
       operator: Exists
