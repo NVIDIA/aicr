@@ -160,7 +160,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
   kind: '0.33.0'
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
-  nvkind: 'c57050497cffee36f10c8b918d2727c4f26d886e'
+  nvkind: 'b2a7778f014079daefdd81c13257540cf399fe45'
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
   ctlptl: '0.9.6'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
@@ -286,7 +286,7 @@ testing_tools:
   # kustomize-controller and helm-controller are the only controllers the
   # bundle consumes (OCIRepository -> Kustomization -> HelmRelease).
   # renovate: datasource=github-releases depName=fluxcd/flux2 depType=testing_tools
-  flux_version: 'v2.10.0'
+  flux_version: 'v2.10.1'
   # In-cluster Git server for the KWOK flux-git deployer lane (issue #963).
   # Rootless variant so the admin-user bootstrap can `kubectl exec gitea
   # admin user create` directly without su gymnastics.
