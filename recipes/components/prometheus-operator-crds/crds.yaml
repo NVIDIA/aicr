@@ -38,5 +38,5 @@ charts:
       - servicemonitors.monitoring.coreos.com
       - thanosrulers.monitoring.coreos.com
     repository: https://prometheus-community.github.io/helm-charts
-    sourceVersion: 28.0.1
+    sourceVersion: 31.0.1
 component: prometheus-operator-crds
