@@ -1030,7 +1030,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.BoolFlag{
 			Name:     "no-cleanup",
-			Usage:    "Skip removal of Job and RBAC resources on completion (leaves the per-run validator cluster-admin binding active unless --validator-service-account-name is set)",
+			Usage:    "Skip removal of Job and RBAC resources on completion, and of the workload namespaces a check leaves behind when the run gives up waiting on it (leaves the per-run validator cluster-admin binding active unless --validator-service-account-name is set)",
 			Category: catAgentDeployment,
 		},
 		&cli.BoolFlag{

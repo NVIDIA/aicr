@@ -94,7 +94,7 @@ themselves. The floor does not bound a whole uncapped validate run, and a
 live run with cleanup on shows no Job between its checks, so an apply
 re-plans against the cluster's current state, then — while run-scoped
 candidates remain — lists the run-labeled Jobs and watches from the list's
-resourceVersion for up to about 2m30s (a conservative margin over the usual
+resourceVersion for up to about 5m30s (a conservative margin over the usual
 between-checks gap, not a proven bound) for a Job to appear, and re-plans
 once more against current state before deleting anything run-scoped;
 a run that stays suspended while idle between checks for longer than that
@@ -113,8 +113,11 @@ pod, robust-controller webhook probes, a Trainer self-install, CRE
 Certification objects, and the pod-autoscaling PodMonitor left in the
 recipe's Prometheus namespace. That PodMonitor carries the ownership label
 but lives in a shared namespace this command never enters; the next
-pod-autoscaling run prunes it. None of the others carry the labels this
-command trusts.
+pod-autoscaling run prunes it. The benchmark namespaces carry the run-id
+label, but this command selects namespaces only by aicr.run/gpu-test-run:
+their run-id label is used only by aicr validate itself, to delete them
+after giving up on the check that created them. None of the others carry the
+labels this command trusts.
 
 Safety: the kube context, the API server and the exact candidate list are
 printed before anything is deleted. On a terminal the command asks for y/N;

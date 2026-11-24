@@ -842,6 +842,18 @@ func TestValidationTransientExitReadsTheRunsEvidence(t *testing.T) {
 				b.Files[evidence.AICRStatementFile] = []byte(strings.Replace(string(b.Files[evidence.AICRStatementFile]),
 					`"passed":4`, `"passed":0,"skipped":4`, 1))
 			}},
+		{name: "evidence records a check that ended without a verdict", failedChecks: 0, want: failed,
+			wantVerdict: "records checks that ended without a verdict",
+			spoil: func(b *registry.Bundle) {
+				b.Files[evidence.AICRStatementFile] = []byte(strings.Replace(string(b.Files[evidence.AICRStatementFile]),
+					`"passed":4`, `"other":1,"passed":4`, 1))
+			}},
+		{name: "evidence records failed checks and a check that ended without a verdict", failedChecks: 3, want: failed,
+			wantVerdict: "records failed checks and checks that ended without a verdict",
+			spoil: func(b *registry.Bundle) {
+				b.Files[evidence.AICRStatementFile] = []byte(strings.Replace(string(b.Files[evidence.AICRStatementFile]),
+					`"passed":1`, `"other":1,"passed":1`, 1))
+			}},
 		{name: "evidence records every check passed", failedChecks: 0, want: rerun},
 		{name: "no evidence was pushed", failedChecks: -1, want: rerun},
 		{name: "evidence without a statement", failedChecks: 3, want: rerun,

@@ -205,6 +205,36 @@ offline dry-run call `ValidateState` with `WithValidationNoCluster(true)`
 instead; drop `Features` and any use of `CNCFEvidenceFeatures()`. See
 [Go library](../integrator/go-library.md#cncf-ai-conformance-evidence).
 
+### `aicr evidence verify` passing a bundle with an unfinished check
+
+**Surface:** CLI, Go SDK ·
+**Deprecated in:** v1.4 · **Removed in:** v1.4 (entry moves to Removed when its tag lands)
+
+A check that ends without a verdict (CTRF status `other`: a crash, a timeout, a
+wait the run gave up on) blocks `aicr validate`, but the evidence predicate
+counted only `passed`, `failed` and `skipped`. A phase whose only blocking
+result was `other` summarized as clean, and `aicr evidence verify` reported the
+bundle as passing (verdict `0`, process exit `0`). From predicate schema
+`1.1.0` the phase summary records an `other` count, and a phase with `other`
+above zero gets verdict `1`, "recorded validator phase results show failures"
+(process exit `2`), exactly as a `failed` check does. The Go SDK's
+`EvidenceVerification.Exit` reports `EvidenceExitValidPhaseFailures` for the
+same bundles. The operator likewise no longer treats such evidence as a pass.
+
+This closes a fail-open gate rather than deprecating a behavior:
+`aicr validate` already rejected these runs, and the verifier now agrees with
+it, so per the
+[deprecation policy](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy)
+it owes no notice window. Bundles whose predicate has no `other` field,
+including every bundle produced before schema `1.1.0`, verify exactly as
+before. An `aicr` verifier older than this change ignores the new field and
+verifies a schema `1.1.0` bundle as it did before.
+
+**What to do.** Nothing, unless a CI gate expects verdict `0` from a bundle
+whose run had a check end without a verdict. Fix that check and re-run
+validation, or treat verdict `1` the way the gate already treats a `failed`
+check.
+
 
 ## Removed
 

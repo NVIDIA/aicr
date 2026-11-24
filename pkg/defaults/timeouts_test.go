@@ -81,13 +81,14 @@ func TestTimeoutConstants(t *testing.T) {
 		{"ValidatorCleanupGrace", ValidatorCleanupGrace, 10 * time.Second, 60 * time.Second},
 		{"ValidatorResultFlushMargin", ValidatorResultFlushMargin, 10 * time.Second, 60 * time.Second},
 		{"ValidationCancellationBudget", ValidationCancellationBudget, 1 * time.Minute, 5 * time.Minute},
+		{"ValidatorWorkloadNamespaceCleanupTimeout", ValidatorWorkloadNamespaceCleanupTimeout, 2 * time.Minute, 3 * time.Minute},
 		{"ValidatorJobDeadlineHeadroom", ValidatorJobDeadlineHeadroom, 1 * time.Minute, 10 * time.Minute},
 		{"ValidatorDefaultTimeout", ValidatorDefaultTimeout, 1 * time.Minute, 15 * time.Minute},
 		{"ValidatorTerminationGracePeriod", ValidatorTerminationGracePeriod, 10 * time.Second, 60 * time.Second},
 		{"ValidatorTerminationWaitMargin", ValidatorTerminationWaitMargin, 1 * time.Second, 15 * time.Second},
 		{"ValidatorMinCompletionWait", ValidatorMinCompletionWait, 10 * time.Second, 60 * time.Second},
 		{"ValidationSweepMinAge", ValidationSweepMinAge, 90 * time.Minute, 4 * time.Hour},
-		{"ValidationSweepSettleWindow", ValidationSweepSettleWindow, 2 * time.Minute, 5 * time.Minute},
+		{"ValidationSweepSettleWindow", ValidationSweepSettleWindow, 2 * time.Minute, 10 * time.Minute},
 
 		// ConfigMap read/write budgets — held as distinct constants so the
 		// read path (serializer resolving cm:// URIs) and the write path
@@ -367,15 +368,16 @@ func TestValidationSweepMinAgeInvariant(t *testing.T) {
 }
 
 // TestValidationSweepSettleWindowInvariant pins the floor of the `aicr
-// sweep` settle observation — at least one pod-termination wait plus one
-// bounded API call. The real
-// between-checks gap adds unbudgeted work (the phase-boundary result write,
-// the dependency-affinity scan, the Job apply), so the window is a
+// sweep` settle observation — at least one pod-termination wait, the
+// workload-namespace cleanup after a failed wait, and one bounded API call.
+// The real between-checks gap adds unbudgeted work (the phase-boundary result
+// write, the dependency-affinity scan, the Job apply), so the window is a
 // conservative margin and this test pins a floor, not a derivation.
 func TestValidationSweepSettleWindowInvariant(t *testing.T) {
-	if min := K8sPodTerminationWaitTimeout + K8sCleanupTimeout; ValidationSweepSettleWindow < min {
-		t.Errorf("ValidationSweepSettleWindow (%v) must be at least one pod-termination wait plus a bounded API call (%v)",
-			ValidationSweepSettleWindow, min)
+	floor := K8sPodTerminationWaitTimeout + ValidatorWorkloadNamespaceCleanupTimeout + K8sCleanupTimeout
+	if ValidationSweepSettleWindow < floor {
+		t.Errorf("ValidationSweepSettleWindow (%v) must cover a pod-termination wait, the workload-namespace cleanup and a bounded API call (%v)",
+			ValidationSweepSettleWindow, floor)
 	}
 }
 
