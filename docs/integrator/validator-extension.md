@@ -53,7 +53,9 @@ orchestrator reads, and only those markers may print them. A validator that
 prints another process's output should break every `##AICR-` in it. Validators
 built on `validators.Run` do this for everything written to `os.Stdout` and
 `os.Stderr`, turning it into `# #AICR-`. Writes that go to file descriptors 1
-and 2 directly, such as `println`, are not filtered.
+and 2 directly, such as `println`, are not filtered. Writes to `os.Stdout` and
+`os.Stderr` after the check function returns, such as from a goroutine it left
+running, are dropped.
 
 ### Step 2: Build and Push the Image
 
