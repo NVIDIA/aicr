@@ -945,6 +945,12 @@ func TestValidateCancellationDuringPodTerminationWait(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				cs := newFakeClusterClient()
+				// The run's workload namespace: only the abandon path of a
+				// live run may delete it, never an interrupted one.
+				runNS := ncclNS("midwait")
+				if err := cs.Tracker().Add(runNS); err != nil {
+					t.Fatal(err)
+				}
 				var p *corev1.Pod
 				applied := 0
 				cs.PrependReactor("patch", "jobs", func(a clienttesting.Action) (bool, runtime.Object, error) {
@@ -1140,6 +1146,10 @@ func TestValidateCancellationDuringPodTerminationWait(t *testing.T) {
 				}
 				if tt.cancel && (len(tests) != 2 || tests[1].Status != ctrf.StatusSkipped || tests[1].Message != notRunCanceledReason) {
 					t.Errorf("unstarted check not retained: %+v", tests)
+				}
+				if exists := namespaceExists(t, cs, runNS.Name); exists != tt.cancel || namespaceDeleted(cs) != !tt.cancel {
+					t.Errorf("run namespace exists=%v deleted=%v; an interrupted run must leave it, a live abandon must delete it",
+						exists, namespaceDeleted(cs))
 				}
 			})
 		})

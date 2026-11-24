@@ -50,8 +50,9 @@ const (
 	EvidenceExitValidPassed = evverifier.ExitValidPassed
 
 	// EvidenceExitValidPhaseFailures: bundle valid, but the validator
-	// results recorded inside it show phase failures. Informational — the
-	// evidence itself is sound.
+	// results recorded inside it show phase failures: a failed check, or,
+	// from predicate schema 1.1.0, a check that ended without a verdict.
+	// Informational — the evidence itself is sound.
 	EvidenceExitValidPhaseFailures = evverifier.ExitValidPhaseFailures
 
 	// EvidenceExitInvalid: bundle invalid (signature, schema, or integrity
