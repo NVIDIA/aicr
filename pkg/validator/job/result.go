@@ -134,8 +134,9 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 // clean pass. A result that already failed keeps its exit code and
 // termination message, since the verdict does not depend on the output. The
 // read error is logged. Image and platform lines are recorded only when the
-// resultSchema stamp on the first Extra line that parses passes
-// ctrf.TrustsReportedImages.
+// first Extra line that parses carries the Job's result nonce and a
+// resultSchema stamp that passes ctrf.TrustsReportedImages. Only the runner
+// knows the nonce, so relayed output cannot supply that stamp.
 func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, result *ctrf.ValidatorResult) {
 	logs, attempts, logErr := d.readValidatorLogs(ctx, podName)
 	switch {
@@ -150,12 +151,13 @@ func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, r
 		var s sentinels
 		s, result.Stdout = processValidatorLogs(logs)
 		result.Extra, result.RuntimeProvenance = s.extra, s.prov
-		if !ctrf.TrustsReportedImages(s.schema) {
+		if !ctrf.TrustsReportedImages(s.schema) || d.resultNonce == "" || s.nonce != d.resultNonce {
 			if len(s.images) > 0 || s.platform != "" {
 				// Quoted and capped, since an unstamped log can take the
 				// stamp from relayed text.
-				slog.Warn("ignoring image and platform lines from a validator image that does not neutralize relayed output",
-					"pod", podName, "resultSchema", strconv.Quote(s.schema[:min(len(s.schema), defaults.ValidatorMaxStdoutLineLength)]))
+				slog.Warn("ignoring image and platform lines without the runner's result stamp",
+					"pod", podName, "resultSchema", strconv.Quote(s.schema[:min(len(s.schema), defaults.ValidatorMaxStdoutLineLength)]),
+					"nonceMatches", d.resultNonce != "" && s.nonce == d.resultNonce)
 			}
 			s.images, s.platform = nil, ""
 		}
@@ -407,6 +409,9 @@ type sentinels struct {
 	// logs lack the stamp, as for an image that predates it or a log rotated
 	// past it. Empty when that line has none.
 	schema string
+	// nonce is the ctrf.ExtraKeyResultNonce value of that same line, or
+	// empty. It is never merged into extra.
+	nonce string
 	// prov is the last provenance record carrying both digests, or nil.
 	prov *ctrf.RuntimeProvenance
 	// images holds, in order, every record that passes ctrf.PodImage.Valid.
@@ -433,7 +438,8 @@ func processValidatorLogs(logs string) (s sentinels, stdout []string) {
 // ctrf.ProvenanceLinePrefix, ctrf.ImageLinePrefix and ctrf.PlatformLinePrefix
 // line removed, and the payloads of those lines. A malformed line is logged
 // and skipped without discarding earlier payloads. ctrf.ExtraKeyResultSchema
-// is read only from the first Extra line that parses.
+// and ctrf.ExtraKeyResultNonce are read only from the first Extra line that
+// parses, and ctrf.ExtraKeyResultNonce is dropped from every line.
 func parseSentinels(logs string) (cleaned string, s sentinels) {
 	if !slices.ContainsFunc(sentinelPrefixes, func(p string) bool { return strings.Contains(logs, p) }) {
 		return logs, sentinels{}
@@ -451,9 +457,10 @@ func parseSentinels(logs string) (cleaned string, s sentinels) {
 				continue
 			}
 			if !sawExtra {
-				sawExtra, s.schema = true, parsed[ctrf.ExtraKeyResultSchema]
+				sawExtra, s.schema, s.nonce = true, parsed[ctrf.ExtraKeyResultSchema], parsed[ctrf.ExtraKeyResultNonce]
 			}
 			delete(parsed, ctrf.ExtraKeyResultSchema)
+			delete(parsed, ctrf.ExtraKeyResultNonce)
 			if len(parsed) > 0 {
 				if s.extra == nil {
 					s.extra = make(map[string]string, len(parsed))

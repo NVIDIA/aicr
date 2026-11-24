@@ -294,6 +294,29 @@ func TestBuildJobPlan(t *testing.T) {
 	}
 }
 
+// TestBuildJobPlan_DropsCatalogResultNonce verifies a catalog entry cannot set
+// ResultNonceEnv, which the Job deployer owns.
+func TestBuildJobPlan_DropsCatalogResultNonce(t *testing.T) {
+	entry := ValidatorEntry{
+		Name: "operator-health", Phase: "deployment", Image: "img:v1", Timeout: time.Minute,
+		Env: []EnvVar{{Name: ResultNonceEnv, Value: "from-catalog"}, {Name: "KEPT", Value: "1"}},
+	}
+	plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+	if err != nil {
+		t.Fatalf("BuildJobPlan error: %v", err)
+	}
+	kept := false
+	for _, e := range plan.Env {
+		if e.Name == ResultNonceEnv {
+			t.Errorf("plan env carries the catalog's %s = %q", ResultNonceEnv, e.Value)
+		}
+		kept = kept || e.Name == "KEPT"
+	}
+	if !kept {
+		t.Error("plan env dropped an ordinary catalog variable")
+	}
+}
+
 // TestBuildJobPlan_ForwardsHFToken verifies HF_TOKEN is forwarded from the
 // orchestrator's environment into the validator Job env when set, and omitted
 // when unset — so inference-perf can provision it for model downloads without

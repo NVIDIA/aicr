@@ -20,6 +20,15 @@ package v1
 // does for the other named checks.
 const ClusterAutoscalingCheckName = "cluster-autoscaling"
 
+// ResultNonceEnv names the validator container's environment variable that
+// holds the random nonce the orchestrator generates for each validator Job.
+// validators.Run echoes it in its result-contract stamp, as
+// ctrf.ExtraKeyResultNonce, and the orchestrator records a result's image and
+// platform lines only from logs whose stamp carries it. Output the check
+// relays never sees the container's environment, so it cannot supply a
+// trusted stamp.
+const ResultNonceEnv = "AICR_RESULT_NONCE"
+
 // observationOnlyChecks are the checks whose every passing result is an
 // observation (validators.ObservationOnlyExtra), never a demonstration. It is
 // the one list both ends of the result contract consult: the conformance

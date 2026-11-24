@@ -36,8 +36,14 @@ const (
 	// not this key is present, and uses the key to tell whether the image
 	// predates ExtraKeyObservationOnly or dropped the marker. The orchestrator
 	// also records a result's image and platform lines only when
-	// TrustsReportedImages accepts the key.
+	// TrustsReportedImages accepts the key and the same stamp carries
+	// ExtraKeyResultNonce.
 	ExtraKeyResultSchema = "resultSchema"
+
+	// ExtraKeyResultNonce carries, on the result-contract stamp, the nonce
+	// the orchestrator gave the validator Job (v1.ResultNonceEnv). The
+	// orchestrator strips it from every Extra line, so it is never published.
+	ExtraKeyResultNonce = "resultNonce"
 
 	// ExtraValueTrue is the published form of a true boolean extra.
 	ExtraValueTrue = "true"

@@ -778,7 +778,9 @@ lines in that log, such as any aiperf relays, are ignored. See
 The runner (`validators.Run`) sets up its output filter, then writes two stamps
 before the check starts. One is an `##AICR-EXTRA##` line with
 `resultSchema: "2"` (`ctrf.ResultSchemaVersion`), the result-contract version
-this image speaks. The other is an `##AICR-PLATFORM##` line with the binary's
+this image speaks, and `resultNonce`, the random value the orchestrator gave
+the Job in `AICR_RESULT_NONCE` (`v1.ResultNonceEnv`). The runner unsets that
+variable before the check starts. The other is an `##AICR-PLATFORM##` line with the binary's
 `GOOS/GOARCH`, which is the image's platform because the validator Dockerfiles
 copy the binary built for it. A result carries both on a pass, a skip, a failure
 or a context-load failure. If the filter cannot be set up, the check exits 1
@@ -796,14 +798,15 @@ that survives redaction](#structured-evidence-that-survives-redaction)).
 
 Version 2 images neutralize relayed output, so the orchestrator records
 `##AICR-IMAGE##` and `##AICR-PLATFORM##` lines only when the first
-`##AICR-EXTRA##` line that parses, which the runner writes before the check
-runs, is stamped 2 or later (`ctrf.TrustsReportedImages`). It reads
-`resultSchema` from that line only, so output a version 1 image relays after
-its stamp cannot raise it, and the orchestrator keeps only the validator image
-and digest it read from the pod. The gate depends on reading the stamp. When
-the logs it reads lack one, as for an image that predates the stamp or a log
-the kubelet rotated past its first lines, a relayed first `##AICR-EXTRA##`
-line can claim version 2.
+`##AICR-EXTRA##` line that parses carries the Job's `resultNonce` and is
+stamped 2 or later (`ctrf.TrustsReportedImages`). Output the check relays never
+sees the validator container's environment, so it cannot supply that line.
+Otherwise the orchestrator keeps only the validator image and digest it read
+from the pod. That covers an image that predates the nonce, a version 1 image
+whose relayed output follows its stamp, and a log the kubelet rotated past its
+first lines, where a relayed `##AICR-EXTRA##` line might otherwise come first.
+The orchestrator strips `resultNonce` from every `##AICR-EXTRA##` line, so it
+is never published.
 
 All are parsed with `strings.CutPrefix` and the parsers are pure, unit-tested
 functions. They are separate channels on purpose: `RESULT:` surfaces live
@@ -1079,6 +1082,7 @@ appended after these):
 | `AICR_VALIDATOR_IMAGE_TAG` | Override the resolved tag when the binary's stamped commit has no published image (e.g. `edge` or `sha-<commit>`). See [Validator image tags](#validator-image-tags). Forwarded to inner workloads (including `aiperf-bench`). |
 | `AICR_NODE_SELECTOR` | Comma-separated `key=value`; read via `ctx.NodeSelector` |
 | `AICR_TOLERATIONS` | Comma-separated `key=value:effect`; read via `ctx.Tolerations` |
+| `AICR_RESULT_NONCE` | Random per-Job value `validators.Run` echoes in its result stamp and unsets before the check runs. A catalog entry cannot set it. See [Stdout sentinels](#stdout-sentinels). |
 
 **Forwarded from the orchestrator's shell.** These variables are read from the
 environment of the process running `aicr validate` and forwarded only to the

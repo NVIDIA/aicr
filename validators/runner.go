@@ -27,6 +27,7 @@ import (
 	"aicr.run/pkg/defaults"
 	aicrerrors "aicr.run/pkg/errors"
 	"aicr.run/pkg/validator/ctrf"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 // terminationLogPath is the standard K8s termination message path.
@@ -191,15 +192,25 @@ func handleTerminated(checkErr error) int {
 	return exitCodeTerminated
 }
 
-// publishStamps stamps ExtraKeyResultSchema on the result and writes the
-// binary's platform as one ctrf.PlatformLinePrefix line. The validator
-// Dockerfiles copy the binary built for the image's architecture, so the
-// binary's platform is the image's.
+// publishStamps stamps ExtraKeyResultSchema on the result, with the
+// v1.ResultNonceEnv value as ctrf.ExtraKeyResultNonce when it is set, and
+// writes the binary's platform as one ctrf.PlatformLinePrefix line. The
+// validator Dockerfiles copy the binary built for the image's architecture,
+// so the binary's platform is the image's. It unsets v1.ResultNonceEnv, so
+// neither the check nor a process it starts can echo the nonce.
 //
 // Errors:
-//   - ErrCodeInternal when a sentinel line could not be written to stdout.
+//   - ErrCodeInternal when v1.ResultNonceEnv cannot be unset or a sentinel
+//     line could not be written to stdout.
 func publishStamps() error {
-	if err := EmitExtra(ResultSchemaExtra()); err != nil {
+	stamp := ResultSchemaExtra()
+	if nonce := os.Getenv(v1.ResultNonceEnv); nonce != "" {
+		stamp[ctrf.ExtraKeyResultNonce] = nonce
+	}
+	if err := os.Unsetenv(v1.ResultNonceEnv); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to unset the result nonce", err)
+	}
+	if err := EmitExtra(stamp); err != nil {
 		return err
 	}
 	return emitSentinel(ctrf.PlatformLinePrefix, runtime.GOOS+"/"+runtime.GOARCH, false, "platform")

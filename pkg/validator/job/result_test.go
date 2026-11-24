@@ -1532,9 +1532,12 @@ var (
 	testDigestB = "sha256:" + strings.Repeat("b", 64)
 )
 
-// schemaStamp is the resultSchema stamp validators.Run writes, without which
-// captureValidatorOutput drops image and platform lines.
-var schemaStamp = ctrf.ExtraLinePrefix + `{"resultSchema":"` + ctrf.ResultSchemaVersion + `"}`
+// testNonce is the result nonce tests give a Deployer.
+const testNonce = "TESTNONCE"
+
+// schemaStamp is the stamp validators.Run writes for a Job with testNonce,
+// without which captureValidatorOutput drops image and platform lines.
+var schemaStamp = ctrf.ExtraLinePrefix + `{"resultNonce":"` + testNonce + `","resultSchema":"` + ctrf.ResultSchemaVersion + `"}`
 
 // neutralized returns line as validators.Run's output filter relays it.
 func neutralized(line string) string {
@@ -1645,9 +1648,9 @@ func TestParseSentinelsBoundsRejectedValues(t *testing.T) {
 	d.captureValidatorOutput(t.Context(), "pod", d.newResult())
 
 	attrs := map[string]string{
-		"dropping invalid validator image record":                                                          "record",
-		"dropping platform sentinel without the os/arch form":                                              "platform",
-		"ignoring image and platform lines from a validator image that does not neutralize relayed output": "resultSchema",
+		"dropping invalid validator image record":                             "record",
+		"dropping platform sentinel without the os/arch form":                 "platform",
+		"ignoring image and platform lines without the runner's result stamp": "resultSchema",
 	}
 	for msg, key := range attrs {
 		got, _ := loggingtest.FindRecord(t, captured.Bytes(), msg)[key].(string)
@@ -1710,6 +1713,7 @@ func TestExtractResultRecordsImages(t *testing.T) {
 			logs = schemaStamp + "\n" + logs
 			ns := createUniqueNamespace(t)
 			d := deployTestJobWithLogs(t, ns, testEntry(), scriptedLogs(logResponse{logs: logs}))
+			d.resultNonce = testNonce
 			now := metav1.Now()
 			p := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1842,7 +1846,7 @@ func TestResultRecordsReadablePodImage(t *testing.T) {
 			cs := fake.NewClientset(p)
 			d := NewDeployer(Config{Clientset: cs, Namespace: "ns", Entry: testEntry(),
 				LogReader: scriptedLogs(logResponse{logs: tt.logs}).read})
-			d.jobName = "job"
+			d.jobName, d.resultNonce = "job", testNonce
 
 			result := tt.extract(d)
 
@@ -1863,6 +1867,7 @@ func TestCaptureValidatorOutputCapsImages(t *testing.T) {
 	}
 	d := NewDeployer(Config{Namespace: "ns", Entry: testEntry(),
 		LogReader: scriptedLogs(logResponse{logs: logs.String()}).read})
+	d.resultNonce = testNonce
 	result := d.newResult()
 
 	d.captureValidatorOutput(t.Context(), "pod", result)
@@ -1876,28 +1881,35 @@ func TestCaptureValidatorOutputCapsImages(t *testing.T) {
 }
 
 // TestCaptureValidatorOutputGatesImagesOnSchema verifies image and platform
-// lines are recorded only from an image whose stamp says it neutralizes
-// relayed output.
+// lines are recorded only when the first Extra line carries the Job's result
+// nonce and a schema that neutralizes relayed output, and that the nonce is
+// never published.
 func TestCaptureValidatorOutputGatesImagesOnSchema(t *testing.T) {
 	reported := ctrf.PodImage{Image: "example.com/bench:v1", Digest: testDigestB}
 	lines := ctrf.PlatformLinePrefix + strconv.Quote("linux/arm64") + "\n" + imageSentinel(t, reported) + "\n"
-	stamp := func(v string) string { return ctrf.ExtraLinePrefix + `{"resultSchema":"` + v + `"}` + "\n" }
+	stamp := func(v, nonce string) string {
+		return ctrf.ExtraLinePrefix + `{"resultNonce":"` + nonce + `","resultSchema":"` + v + `"}` + "\n"
+	}
+	untrusted := []ctrf.PodImage{{Image: testEntry().Image}}
 	tests := []struct {
 		name       string
 		logs       string
 		want       []ctrf.PodImage
 		wantSchema string
 	}{
-		{"no stamp", lines, []ctrf.PodImage{{Image: testEntry().Image}}, ""},
-		{"version 1", stamp("1") + lines, []ctrf.PodImage{{Image: testEntry().Image}}, "1"},
-		{"current version", stamp(ctrf.ResultSchemaVersion) + lines, []ctrf.PodImage{{Image: testEntry().Image, Platform: "linux/arm64"}, reported}, ctrf.ResultSchemaVersion},
-		{"relayed stamp after version 1", stamp("1") + stamp(ctrf.ResultSchemaVersion) + lines, []ctrf.PodImage{{Image: testEntry().Image}}, "1"},
-		{"relayed stamp after an unstamped extra", ctrf.ExtraLinePrefix + `{"nodesTotal":"2"}` + "\n" + stamp(ctrf.ResultSchemaVersion) + lines, []ctrf.PodImage{{Image: testEntry().Image}}, ""},
+		{"no stamp", lines, untrusted, ""},
+		{"version 1", stamp("1", "") + lines, untrusted, "1"},
+		{"current version", stamp(ctrf.ResultSchemaVersion, testNonce) + lines, []ctrf.PodImage{{Image: testEntry().Image, Platform: "linux/arm64"}, reported}, ctrf.ResultSchemaVersion},
+		{"current version without the nonce", stamp(ctrf.ResultSchemaVersion, "") + lines, untrusted, ctrf.ResultSchemaVersion},
+		{"another Job's nonce", stamp(ctrf.ResultSchemaVersion, "OTHERNONCE") + lines, untrusted, ctrf.ResultSchemaVersion},
+		{"relayed stamp after version 1", stamp("1", "") + stamp(ctrf.ResultSchemaVersion, testNonce) + lines, untrusted, "1"},
+		{"relayed stamp after an unstamped extra", ctrf.ExtraLinePrefix + `{"nodesTotal":"2"}` + "\n" + stamp(ctrf.ResultSchemaVersion, testNonce) + lines, untrusted, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := NewDeployer(Config{Namespace: "ns", Entry: testEntry(),
 				LogReader: scriptedLogs(logResponse{logs: tt.logs}).read})
+			d.resultNonce = testNonce
 			result := d.newResult()
 
 			d.captureValidatorOutput(t.Context(), "pod", result)
@@ -1907,6 +1919,9 @@ func TestCaptureValidatorOutputGatesImagesOnSchema(t *testing.T) {
 			}
 			if got := result.Extra[ctrf.ExtraKeyResultSchema]; got != tt.wantSchema {
 				t.Errorf("published resultSchema = %q, want %q", got, tt.wantSchema)
+			}
+			if got, ok := result.Extra[ctrf.ExtraKeyResultNonce]; ok {
+				t.Errorf("published resultNonce = %q, want none", got)
 			}
 		})
 	}

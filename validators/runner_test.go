@@ -32,6 +32,7 @@ import (
 	aicrerrors "aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/validator/ctrf"
+	v1 "aicr.run/pkg/validator/v1"
 )
 
 func TestSkip(t *testing.T) {
@@ -172,6 +173,29 @@ func TestPublishStamps(t *testing.T) {
 		platforms.Add(payload)
 		if got, want := platforms.Platform(), runtime.GOOS+"/"+runtime.GOARCH; got != want {
 			t.Errorf("platform = %q, want %q", got, want)
+		}
+	})
+	t.Run("echoes and unsets the result nonce", func(t *testing.T) {
+		t.Setenv(v1.ResultNonceEnv, "NONCE")
+		var buf bytes.Buffer
+		orig := extrasOut
+		extrasOut = &buf
+		t.Cleanup(func() { extrasOut = orig })
+
+		if err := publishStamps(); err != nil {
+			t.Fatalf("publishStamps() error = %v", err)
+		}
+		first, _, _ := strings.Cut(buf.String(), "\n")
+		var got map[string]string
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(first, ctrf.ExtraLinePrefix)), &got); err != nil {
+			t.Fatalf("stamp %q: %v", first, err)
+		}
+		want := map[string]string{ctrf.ExtraKeyResultSchema: ctrf.ResultSchemaVersion, ctrf.ExtraKeyResultNonce: "NONCE"}
+		if !maps.Equal(got, want) {
+			t.Errorf("stamp = %v, want %v", got, want)
+		}
+		if v, ok := os.LookupEnv(v1.ResultNonceEnv); ok {
+			t.Errorf("%s = %q after publishStamps, want it unset", v1.ResultNonceEnv, v)
 		}
 	})
 	for _, tt := range []struct {
