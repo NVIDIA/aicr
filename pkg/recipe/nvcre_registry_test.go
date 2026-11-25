@@ -284,12 +284,12 @@ func TestNVCRERefWithoutValuesFileResolvesEmpty(t *testing.T) {
 	}
 }
 
-// TestNVCREDocumentedTrainerSourceProvidesTrainer pins that platform=kubeflow
+// TestPlatformKubeflowProvidesTrainer pins that platform=kubeflow
 // supplies kubeflow-trainer. NVCRE drives benchmarks through Kubeflow Trainer
 // and the chart does not install it. The Enabling NVCRE fragment declares
 // Trainer itself, at the version NVCRE supports, so it does not rely on this
 // route; #3949 returns NVCRE to it once NVCRE supports the registry pin.
-func TestNVCREDocumentedTrainerSourceProvidesTrainer(t *testing.T) {
+func TestPlatformKubeflowProvidesTrainer(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()

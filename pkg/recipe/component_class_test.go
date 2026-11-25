@@ -218,10 +218,10 @@ func TestClassDependencyDirectionGuard(t *testing.T) {
 		t.Fatal("no leaf overlays found; the guard checked nothing")
 	}
 
-	// NVCRE ships only on gb300-eks-ubuntu-training-kubeflow. Adding it
-	// elsewhere puts the same nvcre -> kubeflow-trainer edge on another
-	// recipe, here a Kubeflow leaf that supplies Trainer through
-	// platform-kubeflow, and the direction rule must hold for it too.
+	// The leaf loop above covers nvcre only where a shipped overlay carries
+	// it. This adds it to a Kubeflow leaf that supplies Trainer through
+	// platform-kubeflow, so the nvcre -> kubeflow-trainer edge is checked on a
+	// recipe that does not ship it.
 	t.Run("nvcre opt-in on a kubeflow leaf", func(t *testing.T) {
 		const leaf = "h100-eks-ubuntu-training-kubeflow"
 		overlay, ok := store.Overlays[leaf]
