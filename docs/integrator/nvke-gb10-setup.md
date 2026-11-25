@@ -79,6 +79,32 @@ sudo sysctl -p /etc/sysctl.d/60-cx7-arp.conf
 `ibdev2netdev` should then show `rocep1s0f1` and `roceP2p1s0f1` as `Up`, and a
 `ping -M do -s 8972` to the other Spark's address on each function should pass.
 
+## Generating the bundle
+
+For either inference leaf, generate the bundle with a ClusterIP gateway.
+NVKE provisions no LoadBalancer:
+
+```shell
+aicr bundle -r recipe.yaml -o bundle \
+  --set agentgateway:serviceType=ClusterIP
+```
+
+If the control plane sees a GPU, first label it as described in
+[A control plane that sees a GPU](#a-control-plane-that-sees-a-gpu) and add the
+worker selectors. With an amd64 control plane and arm64 Spark workers, use:
+
+```shell
+aicr bundle -r recipe.yaml -o bundle \
+  --set agentgateway:serviceType=ClusterIP \
+  --accelerated-node-selector kubernetes.io/arch=arm64 \
+  --set-json 'nvsentinel:global.nodeSelector={"kubernetes.io/arch":"arm64"}'
+```
+
+For an arm64 control plane, use the worker labels from that section instead
+of the architecture selector. See
+[External address for the gateway](nvke-vr200-setup.md#external-address-for-the-gateway)
+for gateway access options.
+
 ## Validating
 
 On two Sparks, the performance phase runs `nccl-all-reduce-bw-net`: two
@@ -135,20 +161,9 @@ v1.36.3 with two DGX Spark workers and an amd64 control plane. The plain
 inference leaf passed 4 deployment and 7 conformance checks; the Dynamo leaf
 passed 4 deployment and 8 conformance checks. Neither recipe declares
 performance checks. These runs do not measure model throughput or cross-node
-model serving. The gateway used `serviceType=ClusterIP` and was tested from
-inside the cluster.
-
-The passing Dynamo 1.6.2 run used HTTP/1.1 for the operator's Kubernetes API
-client after repeated Lease timeouts and `leader election lost` restarts with
-the default client transport. Append this bundle override when reproducing
-that deployment:
-
-```shell
---set-json 'dynamo-platform:dynamo-operator.env=[{"name":"DISABLE_HTTP2","value":"true"}]'
-```
-
-This is an environment-specific deployment override, not a recipe default.
-The underlying cause of the API timeouts has not been established.
+model serving. The gateway was configured as described in
+[Generating the bundle](#generating-the-bundle) and tested from inside the
+cluster.
 
 ## Known gaps
 
