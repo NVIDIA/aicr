@@ -22,7 +22,8 @@
 #    only when kind MPIJob is served at kubeflow.org/v2beta1).
 # 2. The Deployment the Run:ai operator reads by name,
 #    mpi-operator/mpi-operator, has rolled out: an available replica, and no
-#    stale rollout (the slinky-drainer check's guards).
+#    stale rollout (the slinky-drainer check's guards, as positive
+#    predicates in one assert so they are judged on one read).
 # 3. The operator holds its leader-election Lease. Upstream ships the
 #    Deployment with no probes, so an available replica only says the
 #    container started; the controller runs only after the operator has
@@ -54,6 +55,10 @@ spec:
                 (conditions[?type == 'Established' && status == 'True'] | length(@) > `0`): true
     - name: validate-operator-rollout
       try:
+        # One assert, so every predicate reads the same snapshot of the
+        # Deployment and a retry re-evaluates all of them. Split across
+        # operations, an early "a replica is available" could stand while a
+        # later guard passed only after that replica was gone.
         - assert:
             resource:
               apiVersion: apps/v1
@@ -63,41 +68,13 @@ spec:
                 namespace: mpi-operator
               status:
                 (availableReplicas > `0`): true
-        # Stale-rollout guards, compared against spec.replicas, which
-        # status.replicas lags.
-        - error:
-            resource:
-              apiVersion: apps/v1
-              kind: Deployment
-              metadata:
-                name: mpi-operator
-                namespace: mpi-operator
-              ((status.updatedReplicas || `0`) < (spec.replicas || `1`)): true
-        - error:
-            resource:
-              apiVersion: apps/v1
-              kind: Deployment
-              metadata:
-                name: mpi-operator
-                namespace: mpi-operator
-              ((status.availableReplicas || `0`) < (spec.replicas || `1`)): true
-        # Old pods can still be ready while new ones are stuck.
-        - error:
-            resource:
-              apiVersion: apps/v1
-              kind: Deployment
-              metadata:
-                name: mpi-operator
-                namespace: mpi-operator
-              ((status.replicas || `0`) > (status.updatedReplicas || `0`)): true
-        - error:
-            resource:
-              apiVersion: apps/v1
-              kind: Deployment
-              metadata:
-                name: mpi-operator
-                namespace: mpi-operator
-              ((status.observedGeneration || `0`) < metadata.generation): true
+              # No stale rollout, compared against spec.replicas, which
+              # status.replicas lags.
+              ((status.updatedReplicas || `0`) >= (spec.replicas || `1`)): true
+              ((status.availableReplicas || `0`) >= (spec.replicas || `1`)): true
+              # Old pods can still be ready while new ones are stuck.
+              ((status.replicas || `0`) <= (status.updatedReplicas || `0`)): true
+              ((status.observedGeneration || `0`) >= metadata.generation): true
     - name: validate-leader-lease-held
       try:
         - assert:

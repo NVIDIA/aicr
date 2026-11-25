@@ -51,11 +51,13 @@ const (
 // re-vendor; never from the vendored file.
 const mpiOperatorUpstreamCRDSHA256 = "90851cf759b6e94019ac6511ca8e4d1310cc4970bb8f47611c1f93de895e8b4d"
 
-// mpiOperatorImagePattern matches the operator image in the vendored
+// mpiOperatorImagePattern matches the whole image line in the vendored
 // Deployment: the upstream repository with its registry spelled out, a
-// release-shaped tag and a digest.
+// release-shaped tag and a digest of exactly 64 hex characters, with nothing
+// after it. Unanchored, it would accept a longer, invalid digest by its
+// first 64 characters.
 var mpiOperatorImagePattern = regexp.MustCompile(
-	`image: (docker\.io/mpioperator/mpi-operator):([0-9]+\.[0-9]+\.[0-9]+)@sha256:([0-9a-f]{64})`)
+	`(?m)^\s*image: (docker\.io/mpioperator/mpi-operator):([0-9]+\.[0-9]+\.[0-9]+)@sha256:([0-9a-f]{64})$`)
 
 // TestRunaiLeavesCarryMPIOperator pins what lets a Run:ai leaf run MPI
 // workloads: the Kubeflow MPI Operator is present and enabled, as the vendored
@@ -362,7 +364,7 @@ func TestMPIOperatorImageReadableByRunai(t *testing.T) {
 		t.Errorf("%s does not record upstream tag v%s in its provenance header", file, mpiOperatorVersion)
 	}
 
-	reference := strings.TrimPrefix(matches[0][0], "image: ")
+	reference := strings.TrimPrefix(strings.TrimSpace(matches[0][0]), "image: ")
 	read := reference[strings.LastIndex(reference, ":")+1:]
 	if read != digestHex {
 		t.Fatalf("the text after the last colon of %s is %q, want the digest hex", reference, read)
@@ -371,6 +373,34 @@ func TestMPIOperatorImageReadableByRunai(t *testing.T) {
 		t.Errorf("Run:ai would read %q from %s as an MPI Operator older than 0.4 or as no version at all, and report "+
 			"MPI workloads not suspendable. Pin a digest whose hex starts with a number from 1 up followed by a letter, "+
 			"or drop the digest from this one image until Run:ai strips it before reading the tag", read, reference)
+	}
+}
+
+// TestMPIOperatorImagePatternIsExact keeps mpiOperatorImagePattern from
+// accepting an image line it only partly matches.
+func TestMPIOperatorImagePatternIsExact(t *testing.T) {
+	t.Parallel()
+
+	const digest = "2740913e1802cbd24c9b16e143fbbfa99f0049e6d2946c8015bfd87c45ba6caa"
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{"tag and 64-character digest", "        image: docker.io/mpioperator/mpi-operator:0.8.2@sha256:" + digest, true},
+		{"digest one character too long", "        image: docker.io/mpioperator/mpi-operator:0.8.2@sha256:" + digest + "a", false},
+		{"digest one character short", "        image: docker.io/mpioperator/mpi-operator:0.8.2@sha256:" + digest[:63], false},
+		{"text after the digest", "        image: docker.io/mpioperator/mpi-operator:0.8.2@sha256:" + digest + " # pinned", false},
+		{"no digest", "        image: docker.io/mpioperator/mpi-operator:0.8.2", false},
+		{"registry left implied", "        image: mpioperator/mpi-operator:0.8.2@sha256:" + digest, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := mpiOperatorImagePattern.MatchString("      containers:\n" + tt.line + "\n        name: mpi-operator\n"); got != tt.want {
+				t.Errorf("pattern matches %q = %v, want %v", tt.line, got, tt.want)
+			}
+		})
 	}
 }
 

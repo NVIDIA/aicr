@@ -25,7 +25,8 @@ import (
 // TestMPIOperatorHealthCheckClusterStates runs the mpi-operator health check
 // against the states it must tell apart: nothing installed, Training Operator
 // v1's CRD standing in under the same name, the operator missing, not rolled
-// out or stalled mid-upgrade, and the leader-election Lease absent or unheld.
+// out, partly available, scaled to zero or stalled mid-upgrade, and the
+// leader-election Lease absent or unheld.
 func TestMPIOperatorHealthCheckClusterStates(t *testing.T) {
 	t.Parallel()
 
@@ -106,6 +107,13 @@ func TestMPIOperatorHealthCheckClusterStates(t *testing.T) {
 		},
 		{name: "new spec not yet observed → fail", crd: v2, lease: held,
 			deployment: deployment(rollout{spec: 1, replicas: 1, updated: 1, available: 1, generation: 3, observed: 2})},
+		{name: "one of two replicas unavailable → fail", crd: v2, lease: held,
+			deployment: deployment(rollout{spec: 2, replicas: 2, updated: 2, available: 1, generation: 2, observed: 2})},
+		{
+			// Every "at least spec.replicas" predicate holds at zero.
+			name: "scaled to zero → fail", crd: v2, lease: held,
+			deployment: deployment(rollout{spec: 0, replicas: 0, updated: 0, available: 0, generation: 2, observed: 2}),
+		},
 		{name: "Lease missing → fail", crd: v2, deployment: healthy},
 		{name: "Lease without a holder → fail", crd: v2, deployment: healthy, lease: lease(map[string]any{})},
 		{name: "Lease with an empty holder → fail", crd: v2, deployment: healthy,
