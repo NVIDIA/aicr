@@ -284,11 +284,12 @@ func TestNVCRERefWithoutValuesFileResolvesEmpty(t *testing.T) {
 	}
 }
 
-// TestNVCREDocumentedTrainerSourceProvidesTrainer guards the Trainer source the
-// catalog tells adopters to use. NVCRE drives benchmarks through Kubeflow
-// Trainer and the chart does not install it, so dependencyRefs naming
-// kubeflow-trainer only resolves when something else supplies it.
-func TestNVCREDocumentedTrainerSourceProvidesTrainer(t *testing.T) {
+// TestPlatformKubeflowProvidesTrainer pins that platform=kubeflow
+// supplies kubeflow-trainer. NVCRE drives benchmarks through Kubeflow Trainer
+// and the chart does not install it. The Enabling NVCRE fragment declares
+// Trainer itself, at the version NVCRE supports, so it does not rely on this
+// route; #3949 returns NVCRE to it once NVCRE supports the registry pin.
+func TestPlatformKubeflowProvidesTrainer(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
@@ -306,7 +307,7 @@ func TestNVCREDocumentedTrainerSourceProvidesTrainer(t *testing.T) {
 	}
 	if !slices.Contains(result.DeploymentOrder, "kubeflow-trainer") {
 		t.Errorf("platform=kubeflow no longer supplies kubeflow-trainer (order=%v); "+
-			"the Enabling NVCRE fragment in docs/user/component-catalog.md depends on it",
+			"#3949 returns NVCRE to this Trainer source once NVCRE supports the registry pin",
 			result.DeploymentOrder)
 	}
 }
