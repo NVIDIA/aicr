@@ -31,6 +31,15 @@ const (
 	// TopologyListPageSize to bound memory on large clusters.
 	K8sPodListPageSize = int64(500)
 
+	// K8sWorkloadImageMaxRows bounds the retained per-container observations.
+	K8sWorkloadImageMaxRows = 256
+	// K8sWorkloadImageMaxBytes bounds the retained rows as compact JSON.
+	K8sWorkloadImageMaxBytes = 64 << 10
+	// K8sWorkloadImageMaxNodeReads bounds distinct optional Node reads per scan.
+	K8sWorkloadImageMaxNodeReads = 8
+	// K8sWorkloadImageNodeTimeout caps optional enrichment within the collector deadline.
+	K8sWorkloadImageNodeTimeout = 2 * time.Second
+
 	// NFDDetectionTimeout is the timeout for NFD-based hardware detection.
 	// PCI enumeration and kernel module listing are fast local operations
 	// reading from sysfs/procfs, so a short timeout is sufficient.

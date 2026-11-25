@@ -658,7 +658,7 @@ func removedSubtype(ctx context.Context, prefix string, st *measurement.Subtype)
 
 // Workload images record run-scoped Pod state, which is not configuration drift.
 func isWorkloadImageObservation(kind measurement.Type, subtype string) bool {
-	return kind == measurement.TypeK8s && subtype == "workload-images"
+	return kind == measurement.TypeK8s && subtype == measurement.SubtypeK8sWorkloadImages
 }
 
 func indexSubtypes(ctx context.Context, subtypes []measurement.Subtype) (map[string]*measurement.Subtype, error) {

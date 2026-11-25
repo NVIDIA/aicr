@@ -106,7 +106,7 @@ Each `/proc` read (sysctl, `/proc/cmdline`, `/proc/modules`) is abandoned if it 
 │   │                                                     │
 │   ├─ K8s                                                │
 │   │   └─ subtypes: [server, image, workload-images,     │
-│   │                 policy, node, slinky-slurm,          │
+│   │                 policy, node, slinky-slurm,         │
 │   │                 mariadb-operator,                   │
 │   │                 oke-legacy-plugin,                  │
 │   │                 default-storage-class,              │
@@ -115,8 +115,8 @@ Each `/proc` read (sysctl, `/proc/cmdline`, `/proc/modules`) is abandoned if it 
 │   │                 oke-addons (--oke-addons),          │
 │   │                 gke-gpu-pools (--gke-gpu-pools)]    │
 │   │       ├─ data: map[string]Reading                   │
-│   │       ├─ workload-images.items: []ItemEntry          │
-│   │       └─ slinky-slurm.items: []ItemEntry              │
+│   │       ├─ workload-images.items: []ItemEntry         │
+│   │       └─ slinky-slurm.items: []ItemEntry            │
 │   │             (allowlisted resource context + data)   │
 │   │                                                     │
 │   ├─ GPU                                                │

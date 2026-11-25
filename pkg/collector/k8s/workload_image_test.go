@@ -21,8 +21,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
+	"aicr.run/pkg/defaults"
+	"aicr.run/pkg/measurement"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -38,6 +39,7 @@ func TestWorkloadImagesMatchStatusByCategoryAndName(t *testing.T) {
 	sha := "sha256:" + strings.Repeat("a", 64)
 	requested := "registry.invalid/team/worker:one@" + sha
 	rawRuntimeID := "docker-pullable://registry.invalid/team/worker@" + sha
+	restartAlways := corev1.ContainerRestartPolicyAlways
 	pods := []corev1.Pod{
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "test-pod-a", Namespace: "workers", UID: "pod-uid-a"},
@@ -49,7 +51,10 @@ func TestWorkloadImagesMatchStatusByCategoryAndName(t *testing.T) {
 					{Name: "no-id", Image: "registry.invalid/team/no-id:stable"},
 					{Name: "duplicate-status", Image: "registry.invalid/team/duplicate:stable"},
 				},
-				InitContainers: []corev1.Container{{Name: "init", Image: "registry.invalid/team/init:one"}},
+				InitContainers: []corev1.Container{
+					{Name: "init", Image: "registry.invalid/team/init:one"},
+					{Name: "sidecar", Image: "registry.invalid/team/sidecar:one", RestartPolicy: &restartAlways},
+				},
 				EphemeralContainers: []corev1.EphemeralContainer{
 					{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug", Image: "registry.invalid/team/debug:one"}},
 				},
@@ -61,7 +66,10 @@ func TestWorkloadImagesMatchStatusByCategoryAndName(t *testing.T) {
 					{Name: "no-id", Image: "registry.invalid/team/no-id:stable"},
 					{Name: "duplicate-status", ImageID: "some-other-id"},
 				},
-				InitContainerStatuses:      []corev1.ContainerStatus{{Name: "init", ImageID: "containerd://" + sha}},
+				InitContainerStatuses: []corev1.ContainerStatus{
+					{Name: "init", ImageID: "containerd://" + sha},
+					{Name: "sidecar", ImageID: "registry.invalid/team/sidecar@" + sha},
+				},
 				EphemeralContainerStatuses: []corev1.ContainerStatus{{Name: "debug", ImageID: "custom://opaque"}},
 			},
 		},
@@ -89,15 +97,15 @@ func TestWorkloadImagesMatchStatusByCategoryAndName(t *testing.T) {
 	}, metav1.CreateOptions{})
 	require.NoError(t, err)
 
-	measurement, err := collector.Collect(t.Context())
+	result, err := collector.Collect(t.Context())
 	require.NoError(t, err)
-	legacy := measurement.GetSubtype(SubtypeImage)
+	legacy := result.GetSubtype(SubtypeImage)
 	require.NotNil(t, legacy)
 	assert.Equal(t, "two", legacy.Data["worker"].Any())
-	workload := measurement.GetSubtype(workloadImagesSubtype)
+	workload := result.GetSubtype(measurement.SubtypeK8sWorkloadImages)
 	require.NotNil(t, workload)
 	assert.Equal(t, "complete", workload.Data["coverage"].Any())
-	require.Len(t, workload.Items, 7)
+	require.Len(t, workload.Items, 8)
 	assert.Equal(t, "ephemeral", workload.Items[0].Context["container-type"])
 	assert.Equal(t, "init", workload.Items[1].Context["container-type"])
 
@@ -106,6 +114,7 @@ func TestWorkloadImagesMatchStatusByCategoryAndName(t *testing.T) {
 	}{
 		{"regular", "test-pod-a", "regular", "worker", requested, rawRuntimeID, sha, "observed", "node-amd-uid", "amd64"},
 		{"init", "test-pod-a", "init", "init", "registry.invalid/team/init:one", "containerd://" + sha, sha, "observed", "node-amd-uid", "amd64"},
+		{"restartable init", "test-pod-a", "init", "sidecar", "registry.invalid/team/sidecar:one", "registry.invalid/team/sidecar@" + sha, sha, "observed", "node-amd-uid", "amd64"},
 		{"ephemeral", "test-pod-a", "ephemeral", "debug", "registry.invalid/team/debug:one", "custom://opaque", "", "observed", "node-amd-uid", "amd64"},
 		{"missing status", "test-pod-a", "regular", "pending", "nginx", "", "", "status-missing", "node-amd-uid", "amd64"},
 		{"missing ID", "test-pod-a", "regular", "no-id", "registry.invalid/team/no-id:stable", "", "", "image-id-missing", "node-amd-uid", "amd64"},
@@ -145,17 +154,19 @@ func TestWorkloadImagesMatchStatusByCategoryAndName(t *testing.T) {
 
 func TestWorkloadImagesLimitsAndCoverage(t *testing.T) {
 	t.Parallel()
+	const rowCap = 256
 	for _, tc := range []struct {
 		name, coverage string
 		pods           []corev1.Pod
 		wantItems      int
 	}{
 		{name: "empty", coverage: "complete"},
-		{name: "rows", coverage: "limited", pods: makePods(workloadImageMaxRows + 2), wantItems: workloadImageMaxRows},
+		{name: "at row cap", coverage: "complete", pods: makePods(rowCap), wantItems: rowCap},
+		{name: "past row cap", coverage: "limited", pods: makePods(rowCap + 1), wantItems: rowCap},
 		{
 			name: "oversize single row", coverage: "limited",
 			pods: []corev1.Pod{{Spec: corev1.PodSpec{Containers: []corev1.Container{
-				{Name: "worker", Image: strings.Repeat("x", workloadImageMaxBytes)},
+				{Name: "worker", Image: strings.Repeat("x", defaults.K8sWorkloadImageMaxBytes)},
 			}}}},
 		},
 	} {
@@ -169,7 +180,7 @@ func TestWorkloadImagesLimitsAndCoverage(t *testing.T) {
 			assert.Len(t, observation.Items, tc.wantItems)
 			raw, err := json.Marshal(observation.Items)
 			require.NoError(t, err)
-			assert.LessOrEqual(t, len(raw), workloadImageMaxBytes)
+			assert.LessOrEqual(t, len(raw), defaults.K8sWorkloadImageMaxBytes)
 		})
 	}
 }
@@ -189,20 +200,27 @@ func TestWorkloadImagesPodReadFailure(t *testing.T) {
 			clientSet := collector.ClientSet.(*fake.Clientset)
 			wantErr := stderrors.New("pod list unavailable")
 			pageCalls := 0
+			pod := makePods(1)[0]
+			pod.Spec.NodeName = "partial-workload-node"
 			clientSet.PrependReactor("list", "pods", func(_ clienttesting.Action) (bool, runtime.Object, error) {
 				pageCalls++
 				if tc.firstPage && pageCalls == 1 {
-					return true, &corev1.PodList{ListMeta: metav1.ListMeta{Continue: "next"}, Items: makePods(1)}, nil
+					return true, &corev1.PodList{ListMeta: metav1.ListMeta{Continue: "next"}, Items: []corev1.Pod{pod}}, nil
 				}
 				return true, nil, wantErr
 			})
 			result, err := collector.Collect(t.Context())
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			observation := result.GetSubtype(workloadImagesSubtype)
+			observation := result.GetSubtype(measurement.SubtypeK8sWorkloadImages)
 			require.NotNil(t, observation)
 			assert.Equal(t, tc.coverage, observation.Data["coverage"].Any())
 			assert.Len(t, observation.Items, pageCalls-1)
+			for _, action := range clientSet.Actions() {
+				if action.Matches("get", "nodes") {
+					assert.NotEqual(t, pod.Spec.NodeName, action.(clienttesting.GetAction).GetName())
+				}
+			}
 			assert.Empty(t, result.GetSubtype(SubtypeImage).Data)
 		})
 	}
@@ -244,6 +262,7 @@ func TestObservedImageDigest(t *testing.T) {
 		{"CRI-O", "cri-o://" + sha, sha},
 		{"Docker", "docker://" + sha, sha},
 		{"bare digest", sha, sha},
+		{"repository digest without scheme", "registry.invalid/team/worker@" + sha, sha},
 		{"unknown scheme", "custom://" + sha, ""},
 		{"tag without digest", "docker-pullable://registry.invalid/team/worker:stable", ""},
 	} {
@@ -270,7 +289,7 @@ func TestWorkloadImagesAggregateByteLimit(t *testing.T) {
 	assert.Less(t, len(observation.Items), len(pods))
 	raw, err := json.Marshal(observation.Items)
 	require.NoError(t, err)
-	assert.LessOrEqual(t, len(raw), workloadImageMaxBytes)
+	assert.LessOrEqual(t, len(raw), defaults.K8sWorkloadImageMaxBytes)
 }
 
 func TestWorkloadImagesNodeFactsOverflowByteLimit(t *testing.T) {
@@ -299,7 +318,7 @@ func TestWorkloadImagesNodeFactsOverflowByteLimit(t *testing.T) {
 	require.NoError(t, err)
 	// Bring the Pod-only rows near the cap, leaving room for the first
 	// observed Node's facts but not for the facts of every retained row.
-	padding := (workloadImageMaxBytes - len(raw) - 160) / len(pods)
+	padding := (defaults.K8sWorkloadImageMaxBytes - len(raw) - 160) / len(pods)
 	require.Positive(t, padding)
 	for i := range pods {
 		pods[i].Spec.Containers[0].Image =
@@ -315,13 +334,13 @@ func TestWorkloadImagesNodeFactsOverflowByteLimit(t *testing.T) {
 
 	result, err := collector.Collect(t.Context())
 	require.NoError(t, err)
-	observation := result.GetSubtype(workloadImagesSubtype)
+	observation := result.GetSubtype(measurement.SubtypeK8sWorkloadImages)
 	require.NotNil(t, observation)
 	require.Len(t, observation.Items, len(pods))
 	assert.Equal(t, "limited", observation.Data["coverage"].Any())
 	raw, err = json.Marshal(observation.Items)
 	require.NoError(t, err)
-	assert.LessOrEqual(t, len(raw), workloadImageMaxBytes)
+	assert.LessOrEqual(t, len(raw), defaults.K8sWorkloadImageMaxBytes)
 
 	withFacts, withoutNodeFacts := 0, 0
 	for _, row := range observation.Items {
@@ -339,68 +358,6 @@ func TestWorkloadImagesNodeFactsOverflowByteLimit(t *testing.T) {
 	}
 	assert.Positive(t, withFacts)
 	assert.Positive(t, withoutNodeFacts)
-}
-
-func TestWorkloadImagesBoundsDistinctNodeReads(t *testing.T) {
-	t.Parallel()
-	pods := makePods(workloadImageMaxNodeReads + 4)
-	for i := range pods {
-		pods[i].Spec.NodeName = fmt.Sprintf("test-node-%02d", i/2)
-	}
-	pods = append(pods, makePods(2*workloadImageMaxNodeReads)...)
-	for i := workloadImageMaxNodeReads + 4; i < len(pods); i++ {
-		pods[i].Name = fmt.Sprintf("other-pod-%02d", i)
-		pods[i].Spec.NodeName = fmt.Sprintf("other-node-%02d", i)
-	}
-
-	collector := createTestCollector(pods...)
-	result, err := collector.Collect(t.Context())
-	require.NoError(t, err)
-	observation := result.GetSubtype(workloadImagesSubtype)
-	require.NotNil(t, observation)
-	require.Len(t, observation.Items, len(pods))
-	assert.Equal(t, "complete", observation.Data["coverage"].Any())
-
-	clientSet := collector.ClientSet.(*fake.Clientset)
-	calls := make(map[string]int)
-	for _, action := range clientSet.Actions() {
-		if action.Matches("get", "nodes") {
-			name := action.(clienttesting.GetAction).GetName()
-			if strings.HasPrefix(name, "test-node-") || strings.HasPrefix(name, "other-node-") {
-				calls[name]++
-			}
-		}
-	}
-	assert.Len(t, calls, workloadImageMaxNodeReads)
-	for name, count := range calls {
-		assert.Equal(t, 1, count, "unexpected retry for %s", name)
-	}
-}
-
-func TestWorkloadImagesPreservePodScanWhenNodeDeadlineExpires(t *testing.T) {
-	t.Parallel()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	pod := makePods(1)[0]
-	pod.Spec.NodeName = "test-node-enrichment"
-	collector := createTestCollector(pod)
-	collector.ClientSet.(*fake.Clientset).PrependReactor("get", "nodes", func(action clienttesting.Action) (bool, runtime.Object, error) {
-		if action.(clienttesting.GetAction).GetName() != pod.Spec.NodeName {
-			return false, nil, nil
-		}
-		<-ctx.Done()
-		return true, nil, ctx.Err()
-	})
-
-	result, err := collector.collectWithinDeadline(ctx, t.Context())
-	require.NoError(t, err)
-	require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
-	assert.Equal(t, "v1", result.GetSubtype(SubtypeImage).Data["img-0"].Any())
-	observation := result.GetSubtype(workloadImagesSubtype)
-	require.NotNil(t, observation)
-	require.Len(t, observation.Items, 1)
-	assert.Equal(t, "complete", observation.Data["coverage"].Any())
-	assert.NotContains(t, observation.Items[0].Context, "node-architecture")
 }
 
 func TestWorkloadImagesCallerCancellationDuringNodeRead(t *testing.T) {

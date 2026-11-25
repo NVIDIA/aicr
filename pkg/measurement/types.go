@@ -79,6 +79,9 @@ const (
 // that limit is a deliberate future step.
 type Type string
 
+// SubtypeK8sWorkloadImages identifies per-container workload image observations.
+const SubtypeK8sWorkloadImages = "workload-images"
+
 // String returns the string representation of the measurement Type.
 func (mt Type) String() string {
 	return string(mt)

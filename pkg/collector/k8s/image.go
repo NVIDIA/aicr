@@ -34,11 +34,13 @@ import (
 // fragile magic literal.
 const SubtypeImage = "image"
 
-// collectContainerImages extracts unique container images from all pods.
+// collectContainerImages returns the legacy image summary and per-container
+// workload observations from a paginated Pod scan. A non-transient failure
+// after an earlier page returns usable partial observations alongside an error
+// and no legacy summary. Callers must retain those observations.
 //
-// Pods are listed via paginated API calls (see defaults.K8sPodListPageSize)
-// to bound peak memory on large clusters. Iteration honors ctx cancellation
-// between pages and within each page's pod loop.
+// Pagination bounds peak memory. The scan checks cancellation between pages
+// and while processing Pods.
 func (k *Collector) collectContainerImages(ctx context.Context) (map[string]measurement.Reading, workloadImageObservations, error) {
 	// Track unique images (map of image name to version)
 	imageVersions := make(map[string]string)

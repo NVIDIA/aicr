@@ -151,7 +151,7 @@ var catalog = map[Type]typeSpec{
 			// Keys are container image names (pkg/collector/k8s/image.go).
 			"image": {scalar: openKeys()},
 			// pkg/collector/k8s/workload_image.go
-			"workload-images": {
+			SubtypeK8sWorkloadImages: {
 				scalar: closedKeys("coverage"),
 				item: closedKeys(
 					"namespace", "pod", "pod-uid", "container-type", "container", "node",

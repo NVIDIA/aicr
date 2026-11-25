@@ -100,7 +100,7 @@ subtypes:
           node-architecture: arm64
         data:
           requested-image: registry.invalid/team/worker:stable
-          runtime-image-id: containerd://sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb
+          runtime-image-id: registry.invalid/team/worker@sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb
           runtime-digest: sha256:ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb
           status: observed
 ```
@@ -115,8 +115,10 @@ keeps the requested image verbatim. Its `status` is `observed`,
 `status-missing`, `status-ambiguous`, or `image-id-missing`. A parsed digest
 is present only for a recognized runtime ID form.
 
-Recipe constraints can address `K8s.workload-images.coverage` and item
-fields such as `K8s.workload-images[container-type=init].runtime-digest`. Raw
+Recipe constraints can address `K8s.workload-images.coverage` and individual
+items. An item predicate resolves only when it matches exactly one row. For
+example, `K8s.workload-images[container-type=init].runtime-digest` returns a
+conflict when more than one init container matches. Raw
 and full-evidence snapshots retain Pod and Node identities and private image
 references. The minimal evidence policy drops the subtype. See the
 [Go library guide](go-library.md#workload-image-observations) for collection

@@ -225,7 +225,7 @@ func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {
 	assert.Equal(t, measurement.TypeK8s, m.Type)
 	// All standard subtypes are present. Their workload observations and resource detection are unavailable.
 	assert.Len(t, m.Subtypes, 11)
-	workloadImages := m.GetSubtype(workloadImagesSubtype)
+	workloadImages := m.GetSubtype(measurement.SubtypeK8sWorkloadImages)
 	require.NotNil(t, workloadImages)
 	assert.Equal(t, "unavailable", workloadImages.Data["coverage"].Any())
 	assert.Empty(t, workloadImages.Items)

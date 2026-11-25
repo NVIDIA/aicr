@@ -24,8 +24,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
+	"aicr.run/pkg/defaults"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/measurement"
 	"github.com/distribution/reference"
@@ -36,13 +36,8 @@ import (
 )
 
 const (
-	workloadImagesSubtype         = "workload-images"
 	workloadImageCoverageComplete = "complete"
 	workloadImageNodeKey          = "node"
-	workloadImageMaxRows          = 256
-	workloadImageMaxBytes         = 64 << 10
-	workloadImageMaxNodeReads     = 8
-	workloadImageNodeTimeout      = 2 * time.Second
 )
 
 type workloadImageObservations struct {
@@ -73,7 +68,7 @@ func (o *workloadImageObservations) subtype() measurement.Subtype {
 		return 0
 	})
 	return measurement.Subtype{
-		Name:  workloadImagesSubtype,
+		Name:  measurement.SubtypeK8sWorkloadImages,
 		Data:  map[string]measurement.Reading{"coverage": measurement.Str(coverage)},
 		Items: o.items,
 	}
@@ -115,7 +110,7 @@ func (o *workloadImageObservations) record(
 	pod *corev1.Pod, kind, name, requested string, statuses map[string]*corev1.ContainerStatus,
 ) {
 
-	if o.limited || len(o.items) == workloadImageMaxRows {
+	if o.limited || len(o.items) == defaults.K8sWorkloadImageMaxRows {
 		o.limited = true
 		return
 	}
@@ -131,7 +126,7 @@ func (o *workloadImageObservations) record(
 	case status.ImageID == "":
 		state = "image-id-missing"
 	default:
-		if len(status.ImageID) > workloadImageMaxBytes {
+		if len(status.ImageID) > defaults.K8sWorkloadImageMaxBytes {
 			o.limited = true
 			return
 		}
@@ -140,7 +135,7 @@ func (o *workloadImageObservations) record(
 			data["runtime-digest"] = measurement.Str(value)
 		}
 	}
-	if len(requested) > workloadImageMaxBytes {
+	if len(requested) > defaults.K8sWorkloadImageMaxBytes {
 		o.limited = true
 		return
 	}
@@ -154,7 +149,7 @@ func (o *workloadImageObservations) record(
 		Data: data,
 	}
 	size := workloadImageItemBytes(item) + 1 // Include the array separator.
-	if size > workloadImageMaxBytes-o.bytes {
+	if size > defaults.K8sWorkloadImageMaxBytes-o.bytes {
 		o.limited = true
 		return
 	}
@@ -190,14 +185,14 @@ func observedImageDigest(raw string) string {
 func workloadImageItemBytes(item measurement.ItemEntry) int {
 	raw, err := json.Marshal(item)
 	if err != nil {
-		return workloadImageMaxBytes + 1
+		return defaults.K8sWorkloadImageMaxBytes + 1
 	}
 	return len(raw)
 }
 
 func (o *workloadImageObservations) enrichNodes(ctx context.Context, nodes typedcorev1.NodeInterface) {
-	names := make([]string, 0, workloadImageMaxNodeReads)
-	index := make(map[string]int, workloadImageMaxNodeReads)
+	names := make([]string, 0, defaults.K8sWorkloadImageMaxNodeReads)
+	index := make(map[string]int, defaults.K8sWorkloadImageMaxNodeReads)
 	for _, item := range o.items {
 		name := item.Context[workloadImageNodeKey]
 		if _, found := index[name]; found || name == "" {
@@ -205,7 +200,7 @@ func (o *workloadImageObservations) enrichNodes(ctx context.Context, nodes typed
 		}
 		index[name] = len(names)
 		names = append(names, name)
-		if len(names) == workloadImageMaxNodeReads {
+		if len(names) == defaults.K8sWorkloadImageMaxNodeReads {
 			break
 		}
 	}
@@ -213,7 +208,7 @@ func (o *workloadImageObservations) enrichNodes(ctx context.Context, nodes typed
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, workloadImageNodeTimeout)
+	ctx, cancel := context.WithTimeout(ctx, defaults.K8sWorkloadImageNodeTimeout)
 	defer cancel()
 
 	observed := make([]*corev1.Node, len(names))
@@ -251,7 +246,7 @@ func (o *workloadImageObservations) recordNode(item measurement.ItemEntry, node 
 		"node-architecture": node.Status.NodeInfo.Architecture,
 	}
 	for _, value := range fields {
-		if len(value) > workloadImageMaxBytes {
+		if len(value) > defaults.K8sWorkloadImageMaxBytes {
 			o.limited = true
 			return
 		}
@@ -263,7 +258,7 @@ func (o *workloadImageObservations) recordNode(item measurement.ItemEntry, node 
 		}
 	}
 	added := workloadImageItemBytes(item) - before
-	if added > workloadImageMaxBytes-o.bytes {
+	if added > defaults.K8sWorkloadImageMaxBytes-o.bytes {
 		for key := range fields {
 			delete(item.Context, key)
 		}
