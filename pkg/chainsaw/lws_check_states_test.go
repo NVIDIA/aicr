@@ -16,6 +16,7 @@ package chainsaw
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,7 +75,7 @@ func TestLWSHealthCheckClusterStates(t *testing.T) {
 	}
 	healthyPod := pod("lws-controller-manager-a", "Running", []any{running}, nil)
 
-	tests := []struct {
+	type state struct {
 		name           string
 		omitCRD        bool
 		crdEstablished string
@@ -85,7 +86,8 @@ func TestLWSHealthCheckClusterStates(t *testing.T) {
 		pods           []map[string]any
 		wantPass       bool
 		wantOutput     string
-	}{
+	}
+	tests := []state{
 		{
 			name:    "converged controller passes",
 			desired: 1, generation: 2, status: converged,
@@ -171,46 +173,53 @@ func TestLWSHealthCheckClusterStates(t *testing.T) {
 			desired: 1, generation: 1,
 			wantOutput: "Deployment",
 		},
-		{
-			name:    "Pending pod fails",
-			desired: 1, generation: 2, status: converged,
-			pods:       []map[string]any{healthyPod, pod("stuck-pending", "Pending", nil, nil)},
-			wantOutput: "stuck-pending",
-		},
-		{
-			name:    "crash-looping pod fails",
-			desired: 1, generation: 2, status: converged,
-			pods: []map[string]any{
-				healthyPod,
-				pod("crash-looping", "Running", []any{waiting("CrashLoopBackOff")}, nil),
-			},
-			wantOutput: "crash-looping",
-		},
-		{
-			// Two containers, so a one-element slice literal in the check
-			// would not match this pod.
-			name:    "ImagePullBackOff in a two-container pod fails",
-			desired: 1, generation: 2, status: converged,
-			pods: []map[string]any{
-				healthyPod,
-				pod("image-pull", "Running", []any{running, waiting("ImagePullBackOff")}, nil),
-			},
-			wantOutput: "image-pull",
-		},
-		{
-			// Phase stays Running here so that only the init container step
-			// can report the pod.
-			name:    "crash-looping init container fails",
-			desired: 1, generation: 2, status: converged,
-			pods: []map[string]any{
-				healthyPod,
-				pod("init-crash", "Running", []any{running}, []any{waiting("CrashLoopBackOff")}),
-			},
-			wantOutput: "init-crash",
-		},
 	}
 
-	for _, tt := range tests {
+	// One case per pod phase and per waiting reason the check names, for
+	// containers and for init containers, so deleting any one of them from the
+	// check fails a test. Each pod is otherwise healthy, which leaves a single
+	// step able to report it.
+	phases := []string{"Pending", "Failed", "Unknown"}
+	reasons := []string{"CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError"}
+	podStates := make([]state, 0, len(phases)+2*len(reasons))
+	for _, phase := range phases {
+		// No status.reason: the executor skips a pod marked NodeLost.
+		name := "phase-" + strings.ToLower(phase)
+		podStates = append(podStates, state{
+			name:    phase + " pod fails",
+			desired: 1, generation: 2, status: converged,
+			pods:       []map[string]any{healthyPod, pod(name, phase, nil, nil)},
+			wantOutput: name,
+		})
+	}
+	for _, reason := range reasons {
+		// Two containers, so a one-element slice literal in the check would
+		// not match this pod.
+		container := "container-" + strings.ToLower(reason)
+		initContainer := "init-" + strings.ToLower(reason)
+		podStates = append(podStates,
+			state{
+				name:    "container waiting with " + reason + " fails",
+				desired: 1, generation: 2, status: converged,
+				pods: []map[string]any{
+					healthyPod,
+					pod(container, "Running", []any{running, waiting(reason)}, nil),
+				},
+				wantOutput: container,
+			},
+			state{
+				name:    "init container waiting with " + reason + " fails",
+				desired: 1, generation: 2, status: converged,
+				pods: []map[string]any{
+					healthyPod,
+					pod(initContainer, "Running", []any{running}, []any{waiting(reason)}),
+				},
+				wantOutput: initContainer,
+			},
+		)
+	}
+
+	for _, tt := range slices.Concat(tests, podStates) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
