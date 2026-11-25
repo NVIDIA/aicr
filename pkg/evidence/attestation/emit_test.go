@@ -518,6 +518,45 @@ func TestEmit_RecordedDigestPinsMutableTag(t *testing.T) {
 	}
 }
 
+// TestEmit_ListsOnlyBundledReportImages verifies the predicate lists images
+// only from the report the bundle carries for each canonical phase.
+func TestEmit_ListsOnlyBundledReportImages(t *testing.T) {
+	const repo = "ghcr.io/nvidia/aicr-validators/conformance:"
+	earlier := ctrf.PodImage{Image: repo + "v1.0.0"}
+	later := ctrf.PodImage{Image: repo + "v2.0.0"}
+	tests := []struct {
+		name    string
+		results []*validator.PhaseResult
+	}{
+		{"later report for a phase wins", []*validator.PhaseResult{
+			phaseWithImages(validator.PhaseConformance, []ctrf.PodImage{earlier}),
+			phaseWithImages(validator.PhaseConformance, []ctrf.PodImage{later}),
+		}},
+		{"non-canonical phase is not listed", []*validator.PhaseResult{
+			phaseWithImages(validator.Phase("custom"), []ctrf.PodImage{earlier}),
+			phaseWithImages(validator.PhaseConformance, []ctrf.PodImage{later}),
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := Emit(context.Background(), EmitOptions{
+				OutDir:       t.TempDir(),
+				Recipe:       emitRecipe(),
+				Snapshot:     snapshotWithSensitiveData(),
+				PhaseResults: tt.results,
+				AICRVersion:  "v0.0.0-test",
+			})
+			if err != nil {
+				t.Fatalf("Emit: %v", err)
+			}
+			want := []ValidatorImage{ValidatorImage(later)}
+			if got := res.Bundle.Predicate.ValidatorImages; !reflect.DeepEqual(got, want) {
+				t.Errorf("predicate validatorImages = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
 func TestEmit_RejectsReportedImageWithoutDigest(t *testing.T) {
 	const ref = "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest"
 	tests := []struct {
