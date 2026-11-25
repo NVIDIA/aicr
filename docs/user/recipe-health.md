@@ -129,7 +129,7 @@ Today every committed pointer is `community`, published from a contributor fork 
 | rtx-pro-6000-lke-ubuntu-inference | lke | rtx-pro-6000 | ubuntu | inference | — | pass | R:0 D:4 P:0 C:10 | pending | — |
 | rtx-pro-6000-lke-ubuntu-training-kubeflow | lke | rtx-pro-6000 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:11 | pending | — |
 | b300-mk8s-ubuntu-inference-dynamo | mk8s | b300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:3 | pending | community |
-| gb10-nvke-ubuntu-inference-dynamo | nvke | gb10 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:8 | pending | — |
+| gb10-nvke-ubuntu-inference-dynamo | nvke | gb10 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:8 | pending | community |
 | gb10-nvke-ubuntu-training-kubeflow | nvke | gb10 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:5 | pending | community |
 | gb200-nvke-ubuntu-inference-dynamo | nvke | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending | community |
 | gb200-nvke-ubuntu-training-kubeflow | nvke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:5 P:2 C:6 | pending | community |

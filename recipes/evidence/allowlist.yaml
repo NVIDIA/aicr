@@ -101,6 +101,9 @@ community:
   - issuer: https://github.com/login/oauth
     source: a5460c0aead783a8b1316659e75e7acc
     label: mlsorensen
+  - issuer: https://token.actions.githubusercontent.com
+    source: 40e71d0acb503921edf04eb40233699c
+    label: SENC275
 
 # Partner: vetted partner organizations. None onboarded yet.
 partner: []
