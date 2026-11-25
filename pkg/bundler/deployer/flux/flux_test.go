@@ -1484,6 +1484,7 @@ func TestBundleGolden_HelmComponents(t *testing.T) {
 
 	goldenDir := "testdata/helm_components"
 	for _, rel := range []string{
+		"README.md",
 		"cert-manager/helmrelease.yaml",
 		"gpu-operator/helmrelease.yaml",
 		"kustomization.yaml",
@@ -1492,9 +1493,9 @@ func TestBundleGolden_HelmComponents(t *testing.T) {
 	}
 }
 
-// TestGenerate_UpgradeNotice covers a non-empty notice. The README has no
-// golden, so the empty case asserts the Components table still runs straight
-// into Repository Setup.
+// TestGenerate_UpgradeNotice covers a non-empty notice. The README golden
+// pins only the empty-notice render, so the empty case also asserts the
+// Components table still runs straight into Repository Setup.
 func TestGenerate_UpgradeNotice(t *testing.T) {
 	const notice = "## Before You Upgrade\n\nNOTICE-SENTINEL\n\n"
 	tests := []struct {
