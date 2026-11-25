@@ -17,6 +17,7 @@ package evidence
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -130,6 +131,44 @@ func TestAICRSummaryPassedCountsOther(t *testing.T) {
 	}
 	if bytes.Contains(binding, []byte(`"other"`)) {
 		t.Errorf("binding of evidence with no other result carries an other count: %s", binding)
+	}
+}
+
+// TestBindingKeepsValidatorPlatforms verifies the binding keeps the platform
+// of each record AICR makes for a validator image, one per platform it ran as.
+func TestBindingKeepsValidatorPlatforms(t *testing.T) {
+	t.Parallel()
+	const record = `{"image":"ghcr.io/nvidia/aicr-validators/deployment:v1.0.0",` +
+		`"digest":"sha256:3c0a8553a346e6ba5a273a10f0b91574945b8b23cffc9d83db3107701e467790","platform":"linux/%s"}`
+	statement := `{"_type":"https://in-toto.io/Statement/v1","predicateType":"https://aicr.run/recipe-evidence/v3",` +
+		`"predicate":{"validatorImages":[` + fmt.Sprintf(record, "amd64") + `,` + fmt.Sprintf(record, "arm64") + `]}}`
+	ref, dgst, _ := strings.Cut(deployment, "@")
+	want := []ValidatorImage{
+		{Image: ref, Digest: dgst, Platform: "linux/amd64"},
+		{Image: ref, Digest: dgst, Platform: "linux/arm64"},
+	}
+
+	s, err := ParseAICRStatement([]byte(statement))
+	if err != nil {
+		t.Fatalf("ParseAICRStatement() = %v", err)
+	}
+	if !slices.Equal(s.ValidatorImages, want) {
+		t.Fatalf("summary validator images = %+v, want %+v", s.ValidatorImages, want)
+	}
+	data, err := NewBinding("registry.test/aicr/evidence@"+evidenceDig, evidenceDig, s,
+		Predicate{ValidatorImages: []ValidatorImage{{Image: ref, Digest: dgst}}})
+	if err != nil {
+		t.Fatalf("NewBinding() = %v", err)
+	}
+	if n := bytes.Count(data, []byte(`"platform":`)); n != 2 {
+		t.Errorf("binding carries %d platform fields, want one per AICR record: %s", n, data)
+	}
+	b, err := ParseBinding(data)
+	if err != nil {
+		t.Fatalf("ParseBinding() = %v", err)
+	}
+	if got := b.Predicate.AICREvidence.ValidatorImages; !slices.Equal(got, want) {
+		t.Errorf("binding aicrEvidence.validatorImages = %+v, want %+v", got, want)
 	}
 }
 

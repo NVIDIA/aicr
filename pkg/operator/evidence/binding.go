@@ -60,10 +60,13 @@ type AICRSummary struct {
 	KeyFingerprint string
 }
 
-// ValidatorImage is a validator image and, when known, its digest.
+// ValidatorImage is a validator image and, when known, its digest and the
+// os/arch platform it ran as. AICR records one entry per platform, so two
+// entries can share an image and digest.
 type ValidatorImage struct {
-	Image  string `json:"image"`
-	Digest string `json:"digest,omitempty"`
+	Image    string `json:"image"`
+	Digest   string `json:"digest,omitempty"`
+	Platform string `json:"platform,omitempty"`
 }
 
 // PhaseResult counts a validation phase's checks. Other counts checks that
