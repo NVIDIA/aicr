@@ -93,9 +93,9 @@ the same deliberate per-call act — see the
 
 Each check records its validator image in the CTRF `images` field, with the
 registry digest from the pod's `containerStatuses[].imageID` and the `os/arch`
-the image's own process printed on its `##AICR-PLATFORM##` line. A validator
-reports the images of workloads it launches, such as the `aiperf-bench` Job,
-with the `##AICR-IMAGE##` sentinel. See
+the image's own process printed on its `##AICR-PLATFORM##` line. Only the
+inference performance check reports an image it launches, its `aiperf-bench`
+pod, with the `##AICR-IMAGE##` sentinel. See
 [Stdout sentinels](validator.md#stdout-sentinels).
 
 `validatorImages` lists each distinct image, digest and platform in the
@@ -106,6 +106,8 @@ bundled CTRF reports, after redaction. The catalog supplies only
   skips itself in its pod.
 - A check skipped before its Job was created (`--no-cluster`,
   `--skip-check`), or whose Job failed to deploy, records nothing.
+- Other pods a check launches, such as NCCL or conformance probe pods, are
+  never listed, so the mutable-tag check does not cover their images.
 - Cluster workload images from the snapshot are never listed.
 
 The digest is what the kubelet pulled, not what the tag resolves to now.
@@ -120,11 +122,16 @@ or its log lacks the stamp `validators.Run` writes with the Job's result nonce,
 without which the orchestrator ignores `##AICR-PLATFORM##` lines. That includes
 a custom `--data` validator not built on `validators.Run`, a validator image
 from a release that predates the nonce, and a log the kubelet rotated past the
-stamp. Each such image is listed even when another run
-recorded its digest and platform, so it still gets the mutable-tag check. Unset
+stamp. Each such image is listed even when another run recorded its digest and
+platform, so it still gets the mutable-tag check. Unset
 `AICR_VALIDATOR_IMAGE_TAG` so an immutable tag resolves, pin a catalog image by
 digest, or pass `--allow-mutable-validator-tags`. A launched image such as
 `aiperf-bench` is not a catalog entry, so only the first and last apply to it.
+
+A launched image is listed only from a result whose log holds that stamp.
+Without it the orchestrator drops every `##AICR-IMAGE##` line, so the image is
+missing from `validatorImages` and the BOM, and the mutable-tag check never
+sees it.
 
 ## The Fulcio connectivity problem
 

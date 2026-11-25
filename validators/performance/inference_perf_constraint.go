@@ -3199,8 +3199,11 @@ type aiperfPodRun struct {
 //   - ErrCodeTimeout when no AIPerf pod was found.
 //   - ErrCodeInternal when the pod did not succeed, returned with its logs,
 //     when its logs could not be read, or when the image line could not be
-//     written. An image that cannot be reported fails a run that otherwise
-//     passes, so the result never omits the image that produced it.
+//     written. An image line that cannot be written fails a run that
+//     otherwise passes, so a passing result whose stamp the orchestrator
+//     trusts never omits the image that produced it. A run that already
+//     fails only logs the unwritten line. The orchestrator records no image
+//     line from a result whose stamp it does not trust.
 func aiperfRunResult(plannedImage string, findErr error, run *aiperfPodRun) (string, error) {
 	if run == nil {
 		logUnreportedImage(reportAIPerfImage(ctrf.PodImage{Image: plannedImage}))
