@@ -242,6 +242,7 @@ func TestRunGuarded(t *testing.T) {
 	}
 	code := runGuarded(func(*Context) error {
 		fmt.Println(forged)
+		fmt.Print("unterminated")
 		return nil
 	}, load)
 
@@ -252,7 +253,7 @@ func TestRunGuarded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := stamps.String() + broken(forged) + "\n"; string(got) != want {
+	if want := stamps.String() + broken(forged) + "\nunterminated\n"; string(got) != want {
 		t.Errorf("stdout = %q, want %q", got, want)
 	}
 }
