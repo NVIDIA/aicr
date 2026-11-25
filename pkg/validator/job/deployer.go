@@ -103,8 +103,8 @@ type Deployer struct {
 	lastTerminated *corev1.Pod
 	// resultNonce is the v1.ResultNonceEnv value DeployJob gave the Job's
 	// validator container. Image and platform lines are recorded only from
-	// logs whose stamp carries it. Empty until DeployJob runs, which records
-	// none.
+	// logs whose stamp carries it. Empty until DeployJob runs. While empty, no
+	// image or platform line is recorded.
 	resultNonce string
 }
 

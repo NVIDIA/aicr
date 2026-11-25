@@ -102,7 +102,7 @@ func (s sentinelWriter) Write(p []byte) (int, error) { return s.g.writeSentinel(
 // closes the pipes, waits up to drainTimeout for everything written to them
 // to be copied, then clears extrasOut. os.Stdout and os.Stderr stay on the
 // closed pipes, so a write after stop, such as from a goroutine the check
-// left running, fails and is dropped instead of reaching the original
+// left running, fails and is dropped, so it never reaches the original
 // streams unfiltered. The wait is bounded because a child process that
 // inherited a pipe keeps it open past the check. When it times out, any
 // partial line already read is written with a newline added, waiting up to

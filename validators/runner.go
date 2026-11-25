@@ -79,10 +79,10 @@ type CheckFunc func(ctx *Context) error
 // occurrence of ctrf.ReservedLinePrefix. This package's sentinel writers
 // bypass it, and so does the default slog handler, whose text output quotes
 // any value that contains a newline. Writes straight to file descriptors 1
-// and 2 are not filtered. Writes to os.Stdout and os.Stderr after the check
-// returns are dropped. A process that exits before the check returns, such
-// as on a panic in a goroutine the check started, loses the output the filter
-// still holds.
+// and 2 are not filtered. Once the check returns and the runner stops the
+// filter, writes to os.Stdout and os.Stderr are dropped. A process that exits
+// before the check returns, such as on a panic in a goroutine the check
+// started, loses the output the filter still holds.
 //
 // Usage in main.go:
 //
@@ -197,7 +197,7 @@ func handleTerminated(checkErr error) int {
 // writes the binary's platform as one ctrf.PlatformLinePrefix line. The
 // validator Dockerfiles copy the binary built for the image's architecture,
 // so the binary's platform is the image's. It unsets v1.ResultNonceEnv, so
-// neither the check nor a process it starts can echo the nonce.
+// processes the check starts do not inherit the nonce.
 //
 // Errors:
 //   - ErrCodeInternal when v1.ResultNonceEnv cannot be unset or a sentinel

@@ -24,9 +24,10 @@ const ClusterAutoscalingCheckName = "cluster-autoscaling"
 // holds the random nonce the orchestrator generates for each validator Job.
 // validators.Run echoes it in its result-contract stamp, as
 // ctrf.ExtraKeyResultNonce, and the orchestrator records a result's image and
-// platform lines only from logs whose stamp carries it. Output the check
-// relays never sees the container's environment, so it cannot supply a
-// trusted stamp.
+// platform lines only from logs whose stamp carries it. In a validator built
+// on validators.Run, relayed output cannot supply that stamp, and processes
+// the check starts do not inherit the nonce. Any other validator must keep the
+// nonce from the processes it starts.
 const ResultNonceEnv = "AICR_RESULT_NONCE"
 
 // observationOnlyChecks are the checks whose every passing result is an

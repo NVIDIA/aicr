@@ -779,10 +779,11 @@ The runner (`validators.Run`) sets up its output filter, then writes two stamps
 before the check starts. One is an `##AICR-EXTRA##` line with
 `resultSchema: "2"` (`ctrf.ResultSchemaVersion`), the result-contract version
 this image speaks, and `resultNonce`, the random value the orchestrator gave
-the Job in `AICR_RESULT_NONCE` (`v1.ResultNonceEnv`). The runner unsets that
-variable before the check starts. The other is an `##AICR-PLATFORM##` line with the binary's
-`GOOS/GOARCH`, which is the image's platform because the validator Dockerfiles
-copy the binary built for it. A result carries both on a pass, a skip, a failure
+the Job in `AICR_RESULT_NONCE` (`v1.ResultNonceEnv`). The other is an
+`##AICR-PLATFORM##` line with the binary's `GOOS/GOARCH`, which is the image's
+platform because the validator Dockerfiles copy the binary built for it. The
+runner unsets `AICR_RESULT_NONCE` before the check starts. A result carries both
+stamps on a pass, a skip, a failure
 or a context-load failure. If the filter cannot be set up, the check exits 1
 before either stamp. If a write fails, the check exits 1 without the remaining
 stamps. A passed check whose logs the orchestrator could not read carries no
@@ -799,8 +800,9 @@ that survives redaction](#structured-evidence-that-survives-redaction)).
 Version 2 images neutralize relayed output, so the orchestrator records
 `##AICR-IMAGE##` and `##AICR-PLATFORM##` lines only when the first
 `##AICR-EXTRA##` line that parses carries the Job's `resultNonce` and is
-stamped 2 or later (`ctrf.TrustsReportedImages`). Output the check relays never
-sees the validator container's environment, so it cannot supply that line.
+stamped 2 or later (`ctrf.TrustsReportedImages`). In a validator built on
+`validators.Run`, relayed output cannot supply that line, and processes the
+check starts do not inherit the nonce.
 Otherwise the orchestrator keeps only the validator image and digest it read
 from the pod. That covers an image that predates the nonce, a version 1 image
 whose relayed output follows its stamp, and a log the kubelet rotated past its
@@ -1082,7 +1084,7 @@ appended after these):
 | `AICR_VALIDATOR_IMAGE_TAG` | Override the resolved tag when the binary's stamped commit has no published image (e.g. `edge` or `sha-<commit>`). See [Validator image tags](#validator-image-tags). Forwarded to inner workloads (including `aiperf-bench`). |
 | `AICR_NODE_SELECTOR` | Comma-separated `key=value`; read via `ctx.NodeSelector` |
 | `AICR_TOLERATIONS` | Comma-separated `key=value:effect`; read via `ctx.Tolerations` |
-| `AICR_RESULT_NONCE` | Random per-Job value `validators.Run` echoes in its result stamp and unsets before the check runs. A catalog entry cannot set it. See [Stdout sentinels](#stdout-sentinels). |
+| `AICR_RESULT_NONCE` | Random per-Job value `validators.Run` echoes in its result stamp and unsets before the check runs. A catalog entry cannot set it. A validator not built on `validators.Run` must keep it from the processes it starts, or their relayed output can carry a stamp the orchestrator trusts. See [Stdout sentinels](#stdout-sentinels). |
 
 **Forwarded from the orchestrator's shell.** These variables are read from the
 environment of the process running `aicr validate` and forwarded only to the

@@ -124,7 +124,8 @@ func (s *AICRSummary) Passed() bool {
 // pinned maps an image repository (no tag or digest) to its pinned
 // repository:tag@digest reference. Every validator AICR names must be
 // pinned, at the pinned tag, and at the pinned digest when AICR records one;
-// AICR v1.0.x records tags only, and refuses a mutable tag itself.
+// AICR v1.0.x records tags only. AICR refuses to attest a mutable tag unless
+// it recorded the image's digest and platform.
 func CheckValidators(named []ValidatorImage, pinned map[string]string) error {
 	if len(named) == 0 {
 		return operrors.New(operrors.ErrCodeInvalidRequest, "the evidence names no validator image")

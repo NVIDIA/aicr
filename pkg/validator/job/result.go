@@ -135,8 +135,9 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 // termination message, since the verdict does not depend on the output. The
 // read error is logged. Image and platform lines are recorded only when the
 // first Extra line that parses carries the Job's result nonce and a
-// resultSchema stamp that passes ctrf.TrustsReportedImages. Only the runner
-// knows the nonce, so relayed output cannot supply that stamp.
+// resultSchema stamp that passes ctrf.TrustsReportedImages. In a validator
+// built on validators.Run, relayed output cannot supply that stamp, and
+// processes the check starts do not inherit the nonce.
 func (d *Deployer) captureValidatorOutput(ctx context.Context, podName string, result *ctrf.ValidatorResult) {
 	logs, attempts, logErr := d.readValidatorLogs(ctx, podName)
 	switch {
