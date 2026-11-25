@@ -1893,23 +1893,27 @@ func TestCaptureValidatorOutputGatesImagesOnSchema(t *testing.T) {
 	untrusted := []ctrf.PodImage{{Image: testEntry().Image}}
 	tests := []struct {
 		name       string
+		jobNonce   string
 		logs       string
 		want       []ctrf.PodImage
 		wantSchema string
 	}{
-		{"no stamp", lines, untrusted, ""},
-		{"version 1", stamp("1", "") + lines, untrusted, "1"},
-		{"current version", stamp(ctrf.ResultSchemaVersion, testNonce) + lines, []ctrf.PodImage{{Image: testEntry().Image, Platform: "linux/arm64"}, reported}, ctrf.ResultSchemaVersion},
-		{"current version without the nonce", stamp(ctrf.ResultSchemaVersion, "") + lines, untrusted, ctrf.ResultSchemaVersion},
-		{"another Job's nonce", stamp(ctrf.ResultSchemaVersion, "OTHERNONCE") + lines, untrusted, ctrf.ResultSchemaVersion},
-		{"relayed stamp after version 1", stamp("1", "") + stamp(ctrf.ResultSchemaVersion, testNonce) + lines, untrusted, "1"},
-		{"relayed stamp after an unstamped extra", ctrf.ExtraLinePrefix + `{"nodesTotal":"2"}` + "\n" + stamp(ctrf.ResultSchemaVersion, testNonce) + lines, untrusted, ""},
+		{"no stamp", testNonce, lines, untrusted, ""},
+		{"version 1", testNonce, stamp("1", "") + lines, untrusted, "1"},
+		{"version 1 with the nonce", testNonce, stamp("1", testNonce) + lines, untrusted, "1"},
+		{"current version", testNonce, stamp(ctrf.ResultSchemaVersion, testNonce) + lines, []ctrf.PodImage{{Image: testEntry().Image, Platform: "linux/arm64"}, reported}, ctrf.ResultSchemaVersion},
+		{"current version without the nonce", testNonce, stamp(ctrf.ResultSchemaVersion, "") + lines, untrusted, ctrf.ResultSchemaVersion},
+		{"Job without a nonce", "", stamp(ctrf.ResultSchemaVersion, "") + lines, untrusted, ctrf.ResultSchemaVersion},
+		{"another Job's nonce", testNonce, stamp(ctrf.ResultSchemaVersion, "OTHERNONCE") + lines, untrusted, ctrf.ResultSchemaVersion},
+		{"nonce only on a later Extra line", testNonce, stamp(ctrf.ResultSchemaVersion, "") + ctrf.ExtraLinePrefix + `{"resultNonce":"` + testNonce + `"}` + "\n" + lines, untrusted, ctrf.ResultSchemaVersion},
+		{"relayed stamp after version 1", testNonce, stamp("1", "") + stamp(ctrf.ResultSchemaVersion, testNonce) + lines, untrusted, "1"},
+		{"relayed stamp after an unstamped extra", testNonce, ctrf.ExtraLinePrefix + `{"nodesTotal":"2"}` + "\n" + stamp(ctrf.ResultSchemaVersion, testNonce) + lines, untrusted, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := NewDeployer(Config{Namespace: "ns", Entry: testEntry(),
 				LogReader: scriptedLogs(logResponse{logs: tt.logs}).read})
-			d.resultNonce = testNonce
+			d.resultNonce = tt.jobNonce
 			result := d.newResult()
 
 			d.captureValidatorOutput(t.Context(), "pod", result)
