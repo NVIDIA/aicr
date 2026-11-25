@@ -8,7 +8,8 @@ pre-installed. Four Preview coordinates:
   performance phase runs NCCL over that link.
 - `gb10-nvke-ubuntu-training-kubeflow`: adds Kubeflow Trainer to the training
   leaf.
-- `gb10-nvke-ubuntu-inference`: one Spark.
+- `gb10-nvke-ubuntu-inference`: inference components; the signed validation
+  run uses two Sparks.
 - `gb10-nvke-ubuntu-inference-dynamo`: adds the Dynamo platform to the
   inference leaf.
 
@@ -126,6 +127,28 @@ both selectors. NVSentinel's node agents follow `global.nodeSelector`, not
 `--accelerated-node-selector`, and tolerate every taint, so they need their own
 selector. The validators count only nodes with allocatable `nvidia.com/gpu`, so
 such a control plane does not enter the NCCL check.
+
+## Inference validation environment
+
+Signed evidence for both inference leaves was collected on NVKE Kubernetes
+v1.36.3 with two DGX Spark workers and an amd64 control plane. The plain
+inference leaf passed 4 deployment and 7 conformance checks; the Dynamo leaf
+passed 4 deployment and 8 conformance checks. Neither recipe declares
+performance checks. These runs do not measure model throughput or cross-node
+model serving. The gateway used `serviceType=ClusterIP` and was tested from
+inside the cluster.
+
+The passing Dynamo 1.6.2 run used HTTP/1.1 for the operator's Kubernetes API
+client after repeated Lease timeouts and `leader election lost` restarts with
+the default client transport. Append this bundle override when reproducing
+that deployment:
+
+```shell
+--set-json 'dynamo-platform:dynamo-operator.env=[{"name":"DISABLE_HTTP2","value":"true"}]'
+```
+
+This is an environment-specific deployment override, not a recipe default.
+The underlying cause of the API timeouts has not been established.
 
 ## Known gaps
 
