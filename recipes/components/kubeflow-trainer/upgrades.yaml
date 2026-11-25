@@ -184,12 +184,12 @@ transitions:
               which AICR's values do not install and which has a conversion
               webhook; the JobSet CRD has none, so applying it cannot overwrite
               an injected caBundle. If you set jobset.install to false to use a
-              separately managed JobSet, skip this command and upgrade that
-              release to at least JobSet 0.13.0, the version Trainer 2.4.0
-              bundles, instead. Its CRD needs the same care: the JobSet chart
-              keeps it in crds/ as well, so a Helm upgrade of that release
-              leaves the old schema in place until you apply the 0.13.0 CRD by
-              hand.
+              separately managed JobSet, skip this command. Instead, first apply
+              the JobSet 0.13.0 CRD for that release by hand (its chart also
+              keeps the CRD in crds/, so a Helm upgrade leaves the old schema in
+              place), then upgrade that release to at least JobSet 0.13.0, the
+              version Trainer 2.4.0 bundles. In that order, the old schema never
+              prunes fields the new controller writes.
             reason: >-
               jobsets.jobset.x-k8s.io ships in the JobSet subchart's crds/
               directory, which Helm installs once and never upgrades, and
@@ -293,12 +293,12 @@ transitions:
               which AICR's values do not install and which has a conversion
               webhook; the JobSet CRD has none, so applying it cannot overwrite
               an injected caBundle. If you set jobset.install to false to use a
-              separately managed JobSet, skip this command and upgrade that
-              release to at least JobSet 0.13.0, the version Trainer 2.4.0
-              bundles, instead. Its CRD needs the same care: the JobSet chart
-              keeps it in crds/ as well, so a Helm upgrade of that release
-              leaves the old schema in place until you apply the 0.13.0 CRD by
-              hand.
+              separately managed JobSet, skip this command. Instead, first apply
+              the JobSet 0.13.0 CRD for that release by hand (its chart also
+              keeps the CRD in crds/, so a Helm upgrade leaves the old schema in
+              place), then upgrade that release to at least JobSet 0.13.0, the
+              version Trainer 2.4.0 bundles. In that order, the old schema never
+              prunes fields the new controller writes.
             reason: >-
               jobsets.jobset.x-k8s.io ships in the JobSet subchart's crds/
               directory, which Helm installs once and never upgrades, and
