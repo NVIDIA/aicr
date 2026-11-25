@@ -165,7 +165,7 @@ func ObservationOnlyExtra() map[string]string {
 // this image speaks (ctrf.ResultSchemaVersion). The runner publishes it before
 // the check runs, so every result the orchestrator reads carries it unless
 // the kubelet rotated the log past it. The CNCF aggregation reads an unmarked
-// pass of an observation-only check as observed with or without it; the
+// pass of an observation-only check as observed with or without it. The
 // stamp only tells it whether to report a missing stamp, from an image that
 // predates the marker or a log rotated past it, or a marker that went
 // missing. Emit it with EmitExtra and fail the check when the write fails.
