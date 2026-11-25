@@ -1,0 +1,110 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Kubeflow MPI Operator v2 (kubeflow.org/v2beta1) health check.
+#
+# Positive asserts throughout, so nothing passes on an empty cluster:
+# 1. mpijobs.kubeflow.org is Established and serves v2beta1. The version is
+#    asserted, not only the name: Training Operator v1 defines a CRD with the
+#    same name that serves v1 only, and a cluster carrying that one has no
+#    MPIJob API this operator or Run:ai can use (Run:ai reports MPI available
+#    only when kind MPIJob is served at kubeflow.org/v2beta1).
+# 2. The Deployment the Run:ai operator reads by name,
+#    mpi-operator/mpi-operator, has rolled out: an available replica, and no
+#    stale rollout (the slinky-drainer check's guards).
+# 3. The operator holds its leader-election Lease. Upstream ships the
+#    Deployment with no probes, so an available replica only says the
+#    container started; the controller runs only after the operator has
+#    reached the apiserver, found the CRD and taken the Lease
+#    mpi-operator in its lock namespace, so a held Lease is what shows it got
+#    that far. A Lease left by a pod that has since died still names a
+#    holder; the rollout asserts above are what catch that state.
+#
+# Names verified against mpi-operator v0.8.2's deploy/v2beta1/mpi-operator.yaml
+# and cmd/mpi-operator/app/server.go; re-verify on every re-vendor.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: mpi-operator-health
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-crd-serves-v2beta1
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: mpijobs.kubeflow.org
+              (spec.versions[?name == 'v2beta1' && served == `true`] | length(@) > `0`): true
+              status:
+                (conditions[?type == 'Established' && status == 'True'] | length(@) > `0`): true
+    - name: validate-operator-rollout
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: mpi-operator
+                namespace: mpi-operator
+              status:
+                (availableReplicas > `0`): true
+        # Stale-rollout guards, compared against spec.replicas, which
+        # status.replicas lags.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: mpi-operator
+                namespace: mpi-operator
+              ((status.updatedReplicas || `0`) < (spec.replicas || `1`)): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: mpi-operator
+                namespace: mpi-operator
+              ((status.availableReplicas || `0`) < (spec.replicas || `1`)): true
+        # Old pods can still be ready while new ones are stuck.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: mpi-operator
+                namespace: mpi-operator
+              ((status.replicas || `0`) > (status.updatedReplicas || `0`)): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: mpi-operator
+                namespace: mpi-operator
+              ((status.observedGeneration || `0`) < metadata.generation): true
+    - name: validate-leader-lease-held
+      try:
+        - assert:
+            resource:
+              apiVersion: coordination.k8s.io/v1
+              kind: Lease
+              metadata:
+                name: mpi-operator
+                namespace: mpi-operator
+              (spec.holderIdentity != null && spec.holderIdentity != ''): true

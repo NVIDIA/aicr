@@ -27,8 +27,8 @@ The catalog lists the driver version that the default chart render carries. Vers
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **61**
-- Unique images: **148**
+- Components: **62**
+- Unique images: **149**
 - Distinct registries: **12**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -70,6 +70,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kueue | helm | kueue | 0.19.13 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.2 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.2 | 0 |
+| mpi-operator | manifest | — | — | 1 |
 | network-operator | helm | nvidia/network-operator | 26.7.1 | 20 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
@@ -284,6 +285,10 @@ _No images extracted._
 ### mariadb-operator-crds
 
 _No images extracted._
+
+### mpi-operator
+
+- `docker.io/mpioperator/mpi-operator:0.8.2@sha256:2740913e1802cbd24c9b16e143fbbfa99f0049e6d2946c8015bfd87c45ba6caa`
 
 ### network-operator
 

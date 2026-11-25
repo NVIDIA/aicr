@@ -39,6 +39,7 @@ var untrackedComponents = map[string]string{
 	"slinky-drainer":             "manifest-only: vendored from NVSentinel; image moves with nvsentinel's pin",
 	"slinky-drainer-crds":        "manifest-only: vendored from NVSentinel; moves with nvsentinel's pin",
 	"kubeflow-training-operator": "manifest-only: vendored from kubeflow/training-operator v1.9.4 (Kustomize upstream, no chart)",
+	"mpi-operator":               "manifest-only: vendored from kubeflow/mpi-operator v0.8.2 (single manifest upstream, no chart)",
 	"gpu-operator-ocp-olm":       "OpenShift OLM variant: subscription manifests, no chart",
 	"gpu-operator-ocp":           "OpenShift manifest variant, no chart",
 	"network-operator-ocp-olm":   "OpenShift OLM variant: subscription manifests, no chart",

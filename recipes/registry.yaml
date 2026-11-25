@@ -1724,6 +1724,41 @@ components:
         tolerationPaths:
           - systemTolerations
 
+  # Kubeflow MPI Operator v2: the kubeflow.org/v2beta1 MPIJob controller,
+  # which Run:ai 3.0 runs MPI workloads through. The companion of
+  # kubeflow-training-operator, whose MPI v1 scheme and CRD are left out so
+  # the two do not fight over mpijobs.kubeflow.org. Upstream ships a single
+  # manifest and no chart, so it is vendored from tag v0.8.2, the version
+  # Run:ai's installer pins inside the 0.6.0 to 0.8.2 its support matrix lists
+  # (see components/mpi-operator/manifests/mpi-operator.yaml for provenance
+  # and the deliberate differences). The CRD is in the vendored manifests, so
+  # the health check's CRD assertion anchors there and the component has no
+  # crds.yaml. Run:ai needs no value in components/runai-cluster/values.yaml
+  # for it: unlike the training operator, it reads this operator's version
+  # straight from the image reference. Added by the Run:ai leaves. See #3302
+  # (Phase 3).
+  - name: mpi-operator
+    displayName: Kubeflow MPI Operator
+    class: ops
+    valueOverrideKeys:
+      - mpioperator
+    healthCheck:
+      assertFile: checks/mpi-operator/health-check.yaml
+    helm:
+      defaultRepository: ""
+      # Fixed, not a preference: the Run:ai operator reads the Deployment at
+      # mpi-operator/mpi-operator and scrapes the pods in this namespace.
+      defaultNamespace: mpi-operator
+    manifestFiles:
+      - components/mpi-operator/manifests/kubeflow.org_mpijobs.yaml
+      - components/mpi-operator/manifests/mpi-operator.yaml
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - systemNodeSelector
+        tolerationPaths:
+          - systemTolerations
+
   - name: runai-cluster
     displayName: Run:ai cluster
     class: ops

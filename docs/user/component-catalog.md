@@ -53,7 +53,8 @@ Every component has a bundle class, `core` or `ops` ([ADR-018](https://github.co
 | **knative-serving** | `ops` | Knative Serving with the Kourier ingress and the HPA autoscaler: request-driven HTTP model serving with scale to zero, which Run:ai's standard inference runs on. A single `KnativeServing` resource that `knative-operator` turns into the Serving Deployments, so it depends on that component. **Not installed by default.** Cluster-local URLs only. Installs into `knative-serving`. See [Enabling Knative Serving](#enabling-knative-serving). | [Knative Serving](https://github.com/knative/serving) |
 | **kueue** | `ops` | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. The `platform=kueue` leaves (`h100-kind-training-kueue`, `h100-gke-cos-training-kueue`, `h100-eks-ubuntu-training-kueue`) do exactly that to enable topology-aware scheduling; see [Topology-aware scheduling](#topology-aware-scheduling-with-kueue-and-topograph). Upgrading from a 0.18.x bundle needs two checks first: see [Upgrade Notes](#kueue-018x-to-019x) below. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | `ops` | Kubeflow Trainer v2 for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
-| **kubeflow-training-operator** | `ops` | Kubeflow Training Operator v1 (`kubeflow.org/v1` PyTorchJob, TFJob, XGBoostJob, PaddleJob and JAXJob), the API Run:ai 3.0 submits distributed training through. MPIJob v1 is left out: Run:ai runs MPI through [MPI Operator v2](https://docs.nvidia.com/run-ai/self-hosted/documentation/installation-and-configuration/install/manual-helm/prerequisites-and-features), which AICR does not install. Not Kubeflow Trainer v2 (`kubeflow-trainer`): different CRD group, and no recipe installs both. Upstream ships v1 only as Kustomize, so the v1.9.4 manifests are vendored, installing into the `kubeflow` namespace as Deployment `training-operator`, the names the Run:ai operator looks up. Added by the `--platform runai` leaves; see [Run:ai cluster](#runai-cluster). CLI aliases: `kubeflowtrainingoperator`, `trainingoperator`. | [Kubeflow Training Operator](https://github.com/kubeflow/training-operator/tree/v1.9.4) |
+| **kubeflow-training-operator** | `ops` | Kubeflow Training Operator v1 (`kubeflow.org/v1` PyTorchJob, TFJob, XGBoostJob, PaddleJob and JAXJob), the API Run:ai 3.0 submits distributed training through. MPIJob v1 is left out: Run:ai runs MPI through [MPI Operator v2](https://docs.nvidia.com/run-ai/self-hosted/documentation/installation-and-configuration/install/manual-helm/prerequisites-and-features), which the same leaves install as `mpi-operator`. Not Kubeflow Trainer v2 (`kubeflow-trainer`): different CRD group, and no recipe installs both. Upstream ships v1 only as Kustomize, so the v1.9.4 manifests are vendored, installing into the `kubeflow` namespace as Deployment `training-operator`, the names the Run:ai operator looks up. Added by the `--platform runai` leaves; see [Run:ai cluster](#runai-cluster). CLI aliases: `kubeflowtrainingoperator`, `trainingoperator`. | [Kubeflow Training Operator](https://github.com/kubeflow/training-operator/tree/v1.9.4) |
+| **mpi-operator** | `ops` | Kubeflow MPI Operator v2 (`kubeflow.org/v2beta1` MPIJob), the API Run:ai 3.0 runs MPI workloads through and the companion of `kubeflow-training-operator`, whose MPI v1 scheme and CRD are left out. Upstream ships a single manifest and no chart, so the v0.8.2 manifest is vendored (the version Run:ai's installer pins; its support matrix lists 0.6.0 to 0.8.2), installing into the `mpi-operator` namespace as Deployment `mpi-operator`, the names the Run:ai operator reads. Added by the `--platform runai` leaves; see [Run:ai cluster](#runai-cluster). CLI alias: `mpioperator`. | [Kubeflow MPI Operator](https://github.com/kubeflow/mpi-operator/tree/v0.8.2) |
 | **runai-cluster** | `ops` | NVIDIA Run:ai cluster side (3.0, open source): the Run:ai operator, KAI Scheduler 0.18 with KAI Resource Management, Karta, and the agent and controllers that register the cluster with a Run:ai control plane you already run. Selected by `--platform runai`; its leaves turn off AICR's `kai-scheduler` because the chart bundles its own. The control plane URL, cluster UID and cluster FQDN (`cluster.url`) are `--set` at bundle time; the bootstrap token is declared with `--dynamic` and written in at install time. Preview. See [Run:ai cluster](#runai-cluster). | [Run:ai](https://github.com/dsx-ai-factory/run-ai) |
 | **nvcre** | `ops` | NVIDIA Cluster Readiness Engine, a GPU cluster burn-in certification controller. Runs training and NCCL workloads, measures goodput and bandwidth. **Not installed by default**: only the `gb300-eks-ubuntu-training-kubeflow` recipe carries it. Enabling it elsewhere takes both a `valuesFile` and Kubeflow Trainer at 2.2.1, the only version NVCRE v0.12.0 supports. See [Enabling NVCRE](#enabling-nvcre) for a fragment that resolves. With that values file referenced, `metrics.serviceMonitor.enabled` is **false** so install does not require prometheus-operator CRDs. Turn it on with `--set cre:metrics.serviceMonitor.enabled=true` only after those CRDs exist, and add `prometheus-operator-crds` to `dependencyRefs`. The chart has no manager `nodeSelector`. For hard placement, set `manager.affinity` in `recipes/components/nvcre/values.yaml` or a complete JSON object, for example `--set-json cre:manager.affinity='{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"nvidia.com/gpu.present","operator":"Exists"}]}]}}}'` (scalar `--set cre:manager.affinity=...` renders an invalid string). CLI aliases: `cre`, `cluster-readiness-engine`. Shipped EKS H100 training still uses the TrainJob NCCL check. Opt-in AICR validators drive CRE with `Certification` (create, wait, delete), not `WorkloadRun`. **Disconnected installs.** The certification workloads pull images the chart does not render, because the workload catalog is compiled into the manager binary. Mirror the set in `recipes/components/nvcre/workload-images.yaml`, regenerated with `make nvcre-closure`. Each image is listed by tag with the digest that tag resolved to when the file was generated, and `sourceCommit` records the upstream commit it was derived from. A `Certification` you submit yourself pulls by tag, so the mirror has to serve each tag, and serving it at the recorded digest keeps the cluster on the bytes the file describes. AICR's `nccl-cre-all-reduce-bw` and `cre-training-goodput` checks pull their workload image by the recorded digest instead, so for them the mirror must serve that digest. That committed set is scoped, not universal. It resolves the catalog for `platform: aws`, `gpuArchitecture: h100`, and the two certification entries `communication/nccl-all-reduce` and `training/nemotron5-8b`. The NCCL image it names is an EFA build, so another platform or accelerator pulls a different set and mirroring this one leaves those images unmirrored. Derive the set you need instead of reusing this one, writing it somewhere other than the committed path, for example `go run ./tools/nvcre-closure -platform gcp -arch h100 -entries communication/nccl-all-reduce -out /tmp/nvcre-gcp.yaml`. The `gb300-eks-ubuntu-training-kubeflow` recipe's NCCL checks pin the image in `recipes/components/nvcre/workload-images-gb300.yaml` instead, so mirror that set for `eks` x `gb300`. The training path additionally needs Megatron-LM at pod start, and the clone recorded in the closure is its last resort. The init container uses an already-populated workspace if one is mounted, else copies from `/opt/megatron-lm` in the image, and only clones when neither is there. So it can run disconnected, but only once you have provided the source by one of those two routes. The NCCL path needs nothing beyond the mirrored images. | [Cluster Readiness Engine](https://github.com/NVIDIA/cluster-readiness-engine) |
 | **mariadb-operator-crds** | `ops` | Official MariaDB Operator CRDs. Declared in every Slurm recipe but installed only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
@@ -120,7 +121,7 @@ Not every component appears in every recipe. The recipe engine selects component
 - **Base components** (cert-manager, kube-prometheus-stack) appear in most recipes.
 - **Cloud-specific components** (aws-efa, aws-ebs-csi-driver) are added when the service matches. OCP recipes replace base components (gpu-operator, nfd, network-operator, cert-manager) with OLM+CR pairs where a certified operator exists (e.g., `gpu-operator-ocp-olm` + `gpu-operator-ocp`, `cert-manager-ocp-olm` + `cert-manager-ocp`). Components with no certified OCP operator (for example, prometheus-adapter, nvidia-dra-driver-gpu, k8s-nim-operator) instead reuse the same upstream Helm chart as their base component, with OCP-specific manifests (SCC RoleBindings, RBAC, CA bundle injection) layered on top. `k8s-nim-operator-ocp` is available on OCP via the `ocp-inference-nim` overlay and depends on `cert-manager-ocp` for webhook TLS.
 - **Intent-specific components** (agentgateway, agentgateway-crds) are added based on workload intent (e.g., inference recipes include the inference gateway).
-- **Platform-specific components** (slinky-slurm-operator, slinky-slurm, kubeflow-trainer, dynamo-platform, runai-cluster, kubeflow-training-operator) are added when the recipe selects a matching `--platform`. For `--platform slurm`, all three core Slinky pieces (`slinky-slurm-operator-crds`, `slinky-slurm-operator`, `slinky-slurm`) are declared inline per slurm leaf overlay — the same shape `dynamo-platform` uses across `*-inference-dynamo` leaves. IMEX-capable Slurm leaves attach a fixed ComputeDomain through `slinky-slurm.preManifestFiles` so slurmd pods can consume DRA-provisioned IMEX channels. Leaves that want the operator only inline the CRDs + operator and omit the `slinky-slurm` componentRef. For an end-to-end walkthrough (recipe → bundle → install → validate → `srun` smoke job on AKS, EKS, GKE, or Kind), see [`demos/cuj1-slinky-slurm.md`](https://github.com/NVIDIA/aicr/blob/main/demos/cuj1-slinky-slurm.md).
+- **Platform-specific components** (slinky-slurm-operator, slinky-slurm, kubeflow-trainer, dynamo-platform, runai-cluster, kubeflow-training-operator, mpi-operator) are added when the recipe selects a matching `--platform`. For `--platform slurm`, all three core Slinky pieces (`slinky-slurm-operator-crds`, `slinky-slurm-operator`, `slinky-slurm`) are declared inline per slurm leaf overlay — the same shape `dynamo-platform` uses across `*-inference-dynamo` leaves. IMEX-capable Slurm leaves attach a fixed ComputeDomain through `slinky-slurm.preManifestFiles` so slurmd pods can consume DRA-provisioned IMEX channels. Leaves that want the operator only inline the CRDs + operator and omit the `slinky-slurm` componentRef. For an end-to-end walkthrough (recipe → bundle → install → validate → `srun` smoke job on AKS, EKS, GKE, or Kind), see [`demos/cuj1-slinky-slurm.md`](https://github.com/NVIDIA/aicr/blob/main/demos/cuj1-slinky-slurm.md).
 - **Topology-aware optional components** (`topograph`, `slinky-topograph`) are not installed by default. `topograph` comes with the `platform=kueue` leaves (see [Topology-aware scheduling](#topology-aware-scheduling-with-kueue-and-topograph)); for `slinky-topograph`: Opting in requires an explicit `componentRef` entry for `slinky-topograph` in the leaf overlay — the `componentRef` is what installs it; `dependencyRefs` alone does not. That `componentRef` declares `slinky-slurm` as a `dependencyRef`, so Topograph deploys after the Slurm cluster chart, which owns the ConfigMap Topograph patches. See the wiring example in the [Recipe Development Guide](../integrator/recipe-development.md#slinky-slurm-inline-components).
 - **Accelerator/OS-specific tuning** (nodewright-customizations, nvidia-dra-driver-gpu) varies by hardware and OS combination.
 
@@ -3072,8 +3073,9 @@ way Run:ai's [prerequisites page](https://docs.nvidia.com/run-ai/self-hosted/doc
 configures the operator: the Deployment passes `--enable-scheme` for TFJob,
 PyTorchJob, XGBoostJob, PaddleJob and JAXJob only, and `mpijobs.kubeflow.org`
 is not installed, because Run:ai runs MPI through MPI Operator v2
-(`kubeflow.org/v2beta1`), whose CRD has the same name. AICR does not install
-MPI Operator v2; follow that page to add it. The component's health check
+(`kubeflow.org/v2beta1`), whose CRD has the same name. The leaves install
+MPI Operator v2 as its own component; see **MPI Operator** below. The
+component's health check
 asserts the five `kubeflow.org` CRDs are Established, the Deployment has
 rolled out, the webhook serving certificate was written, and the CA is
 injected into all five webhooks.
@@ -3139,7 +3141,96 @@ kubectl get crd mpijobs.kubeflow.org -o jsonpath='{.spec.versions[?(@.served==tr
   nothing reconciles its jobs any more. Replacing it is a migration to MPI
   Operator v2, not cleanup: Run:ai's page has you delete this CRD and then
   install MPI Operator v2, and deleting it deletes every existing `v1` MPIJob.
-  Do it only once those jobs have finished or are no longer needed.
+  Do it only once those jobs have finished or are no longer needed. The
+  leaves' `mpi-operator` component does not do it for you: Helm refuses to
+  install its `v2beta1` CRD over one it does not own, so the bundle stops at
+  that component, and its health check fails while the CRD serves `v1` only.
+
+**MPI Operator.** Run:ai runs MPI workloads as `kubeflow.org/v2beta1` MPIJobs,
+which need the Kubeflow MPI Operator (MPI v2) next to the Training Operator,
+so both leaves also install `mpi-operator`: MPI Operator v0.8.2, the version
+Run:ai 3.0's installer pins inside the 0.6.0 to 0.8.2 its support matrix
+lists. Upstream publishes one
+manifest and no chart, so `deploy/v2beta1/mpi-operator.yaml` is vendored from
+tag v0.8.2: the `mpijobs.kubeflow.org` CRD, the RBAC, and the Deployment
+`mpi-operator` in the `mpi-operator` namespace. Those two names are fixed. The
+Run:ai operator reports MPI available when a Deployment whose name matches
+`mpi.*operator` exists in exactly one namespace and kind `MPIJob` is served at
+`kubeflow.org/v2beta1`, and it decides whether MPI workloads can be suspended,
+which the control plane requires before it stops one, from the image of the
+Deployment `mpi-operator/mpi-operator`. `runai-cluster` depends on the
+component so the first reconcile finds it (the operator re-reads all of this
+every 30 seconds in any case). Nothing is needed in
+`components/runai-cluster/values.yaml`: Run:ai keeps no tag-to-version map for
+this operator. It takes the version from the text after
+the image reference's last colon and accepts 0.4 or later. AICR pins the image
+by digest, so that text is the digest's hex and not `0.8.2`. The pinned digest
+reads as a version above 0.4 only because its hex starts with digits followed
+by a letter; a digest whose hex starts with a letter, or whose leading digits
+are all zeros, would report MPI workloads not suspendable.
+`TestMPIOperatorImageReadableByRunai` holds every re-vendor to a digest Run:ai
+accepts. Four more differences from upstream:
+the image names `docker.io`, which upstream leaves implied; the container
+requests CPU and memory; it passes `--monitoring-port=8081`, which
+upstream leaves off, because the Run:ai operator always creates a PodMonitor
+that scrapes the operator's pods on that port; and the operator's ClusterRole
+also grants `update` on `batch` `jobs/status`. Without that last rule a
+suspended MPIJob never resumes: from v0.8.0 the controller updates the
+launcher Job's status when it resumes one, the ClusterRole upstream ships at
+v0.8.0 and v0.8.2 does not allow it, the launcher stays suspended, and under
+gang scheduling the workers then wait for it. Run:ai's Stop and Run on an MPI
+workload are that suspend and resume. Upstream added the rule on `master`
+after v0.8.2. The operator has no admission
+webhook and no Service, so cert-manager is not a dependency. The CRD keeps its
+descriptions and carries `helm.sh/resource-policy: keep` and
+`argocd.argoproj.io/sync-options: Delete=false,Prune=false`: uninstalling the
+`mpi-operator` release removes the operator and leaves the CRD and every
+MPIJob, and nothing reconciles them until an operator runs again. The health
+check asserts that the CRD is Established and serves `v2beta1`, that the
+Deployment has rolled out, and that the operator holds its leader-election
+Lease. Checked on GKE with Run:ai 3.0.26 on both sides: Run:ai reports MPI
+available and suspendable, an MPIJob in a Project namespace gets one PodGroup
+for the launcher and workers and is placed by `runai-scheduler`, Stop and Run
+on a workload submitted through Run:ai suspend and resume it, and Run:ai's
+Prometheus scrapes the operator.
+
+**Open MPI 5 images need the hostfile named.** The operator writes the worker
+list to `/etc/mpi/hostfile` and points Open MPI at it through
+`OMPI_MCA_orte_default_hostfile`, a variable Open MPI 5 no longer reads. With
+an Open MPI 5 image, upstream's own `mpioperator/mpi-pi:openmpi` among them,
+`mpirun -n 2 ...` therefore starts every rank in the launcher pod and reports
+success. Pass the file, `mpirun --hostfile /etc/mpi/hostfile -n 2 ...`, or
+set `PRTE_MCA_prte_default_hostfile=/etc/mpi/hostfile` on the launcher, and
+the ranks start on the workers.
+
+**A cluster that already runs MPI Operator v2.** An operator installed the way
+Run:ai's prerequisites page describes, from the upstream manifest with
+`kubectl`, uses the same namespace and the same object names, at any version
+from 0.6.0 on. Helm refuses to install over objects it does not own, so a
+Helm-based deployer stops at `mpi-operator` with `invalid ownership metadata`.
+Do not clear the way by deleting the upstream manifest (`kubectl delete -f`):
+that deletes the CRD and every MPIJob with it. Hand the existing objects to
+the release instead, then deploy the bundle. Existing MPIJobs are kept, and
+the operator restarts once with AICR's settings:
+
+```bash
+adopt() {
+  kubectl label --overwrite "$@" app.kubernetes.io/managed-by=Helm
+  kubectl annotate --overwrite "$@" \
+    meta.helm.sh/release-name=mpi-operator \
+    meta.helm.sh/release-namespace=mpi-operator
+}
+adopt crd mpijobs.kubeflow.org
+adopt clusterrole kubeflow-mpijobs-admin kubeflow-mpijobs-edit \
+  kubeflow-mpijobs-view mpi-operator
+adopt clusterrolebinding mpi-operator
+adopt -n mpi-operator serviceaccount,deployment mpi-operator
+```
+
+Check the CRD first with the command above: only a CRD that serves `v2beta1`
+is this operator's. The Deployment's selector is the same in upstream 0.6.0
+and 0.8.2, so the release updates it in place; running MPIJobs and their pods
+are not touched.
 
 **Prerequisites the health check expects.** The check asserts the
 `RunaiConfig` the install creates from the control plane's configuration
@@ -3225,7 +3316,7 @@ The admitted Workload records the placement in `status.admission.podSetAssignmen
 
 The annotation value must be one of the leaf's `Topology` levels: use `accelerator.topograph.run/domain` on the Kind leaf, and `fabric.topograph.run/tier-0` (or a wider tier) on GKE and EKS. `Topology.spec.levels` is immutable in Kueue, so changing a leaf's levels on a running cluster needs the old objects removed first: delete the LocalQueue, ClusterQueue, `tas-flavor` and `tas-topology` (uninstalling the release leaves them behind), then reinstall the `kueue-post` release.
 
-`tas-flavor` tolerates only the `nvidia.com/gpu` taint, and Kueue injects flavor tolerations only. If your GPU nodes carry another taint (a managed node group labelled `nodeGroup=gpu:NoSchedule`, for example), the Workload is admitted but its pods stay `Pending`; add a matching toleration to the Job's pod template. Check with `kubectl describe node <gpu-node> | grep Taints`.
+`tas-flavor` tolerates only the `nvidia.com/gpu` taint, and Kueue injects flavor tolerations only. If your GPU nodes carry another taint (a managed node group labeled `nodeGroup=gpu:NoSchedule`, for example), the Workload is admitted but its pods stay `Pending`; add a matching toleration to the Job's pod template. Check with `kubectl describe node <gpu-node> | grep Taints`.
 
 **Automated verification (Kind):** `tests/uat/kind/verify-kueue-tas.sh` runs the same check against the `aicr-uat-slurm` cluster. It submits a Job sized so no single node can hold it (forcing a spread across nodes) and asserts every pod landed in one Topograph domain from the pods' own `spec.nodeName` and the nodes' `accelerator.topograph.run/domain` labels — never from Kueue's own `topologyAssignment`, so the check cannot pass merely because Kueue says so. It then submits a Job sized so no single domain can hold it and asserts Kueue's `QuotaReserved` condition stays `False`: without this negative control, a passing positive check could mean TAS is unconstrained rather than working, since an unconstrained Job can also land in one domain by coincidence. `tests/uat/kind/verify-kueue-tas_test.sh` covers the pod-to-domain derivation hermetically, with no cluster, and runs under `make test-shell`.
 
