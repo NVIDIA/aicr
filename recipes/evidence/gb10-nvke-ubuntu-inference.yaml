@@ -1,0 +1,8 @@
+attestations:
+  - attestedAt: 2026-11-25T17:40:52Z
+    bundle:
+      digest: sha256:6e8d7e449d85b321bd898d94c14a78b694ba4665d2173f18d574be7b732a0e74
+      oci: ghcr.io/senc275/aicr-evidence:gb10-nvke-ubuntu-inference-5824c420cec8
+      predicateType: https://aicr.run/recipe-evidence/v3
+recipe: gb10-nvke-ubuntu-inference
+schemaVersion: 1.0.0
