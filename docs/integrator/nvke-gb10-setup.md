@@ -16,8 +16,9 @@ pre-installed. Four Preview coordinates:
 
 - Kubernetes 1.34 or newer.
 - Sparks that the VXNIP Cluster API provider brings into NVKE carry
-  `providerID: vxnip://<machine-uid>`. `aicr snapshot` maps that scheme to
-  `service: nvke`, as it does NICo's `nico://` on Forge.
+  `providerID: vxnip://<machine-uid>`. `aicr snapshot` maps every `vxnip://`
+  node to `service: nvke`, as it does NICo's `nico://` on Forge, so a VXNIP
+  cluster that does not run NVKE must pass `--service` to `aicr recipe`.
 - DGX OS with its NVIDIA driver. GPU Operator's driver is off; the recipes use
   the host driver.
 - A CRI-enabled containerd. DGX OS ships a containerd config that disables
