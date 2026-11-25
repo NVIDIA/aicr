@@ -2072,7 +2072,7 @@ components:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/topograph
       defaultChart: topograph/topograph
       # renovate: datasource=helm depName=topograph registryUrl=https://helm.ngc.nvidia.com/nvidia/topograph
-      defaultVersion: "1.1.0"
+      defaultVersion: "1.2.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:
@@ -2109,7 +2109,7 @@ components:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/topograph
       defaultChart: topograph/topograph
       # renovate: datasource=helm depName=topograph registryUrl=https://helm.ngc.nvidia.com/nvidia/topograph
-      defaultVersion: "1.1.0"
+      defaultVersion: "1.2.0"
       defaultNamespace: topograph
     nodeScheduling:
       system:
