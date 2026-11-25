@@ -1758,13 +1758,15 @@ The release must stay in `lws-system`. The chart does not enforce that: its temp
 
 **Upgrades.** `lws` is not `ownsCRDs`, because the `LeaderWorkerSet` CRD uses webhook conversion. On every deployer except `argocd` and `argocd-helm`, a chart bump leaves the CRDs at their first-install schema. Before upgrading on those deployers, apply the new chart's CRDs with the [CRD-apply command](#upgrading-components-that-own-crds), with `CHART="oci://registry.k8s.io/lws/charts/lws"`. The CRD set also grows across releases: 0.10.0 already ships the two `DisaggregatedSet` CRDs beside `LeaderWorkerSet`.
 
-**Taking over a release installed at 0.7.0 or earlier.** That step is enough only for a release first installed at 0.8.0 or later. An older release is a real case: Run:ai supports LWS 0.7.0 to 0.10.0, and upstream's own instructions install the release as `lws` in `lws-system`. The `helm` and `helmfile` deployers use that same release name and namespace, so their first deploy on such a cluster upgrades that release in place. The rest of this procedure is for those two deployers.
+**Taking over a release installed at 0.7.0 or earlier.** That step is enough only for a release first installed at 0.8.0 or later. An older release is a real case: Run:ai supports LWS 0.7.0 to 0.10.0, and upstream's own instructions install the release as `lws` in `lws-system`. What the first AICR deploy does to that release depends on the deployer:
 
-`flux`, `argocd` and `argocd-helm` do not take over an existing `lws` release. Flux names its release `lws-system-lws`: a second release, whose objects have the same names as the ones the `lws` release owns, so Helm refuses to install it. Argo CD runs no Helm upgrade: it renders the chart and applies the objects itself, and leaves the existing release where it is. With those deployers, add `lws` only on a cluster that has no `lws` release, or leave it out of the overlay and keep managing the existing release yourself. The `terraform` and `fleet` deployers also name the release `lws`, but were not tried against a release they did not create.
+- `helm`, `helmfile` and `fleet` use that same release name and namespace, so their first deploy upgrades the release in place.
+- `flux`, `argocd` and `argocd-helm` do not take it over. Flux names its release `lws-system-lws`: a second release, whose objects have the same names as the ones the `lws` release owns, so Helm refuses to install it. Argo CD runs no Helm upgrade: it renders the chart and applies the objects itself, and leaves the existing release where it is. With those deployers, either leave `lws` out of the overlay and keep managing that release yourself, or move the release as described at the end of this section.
+- `terraform` also names the release `lws`, but was not tried against a release it did not create.
 
-Chart versions up to 0.7.0 render the `LeaderWorkerSet` CRD from `templates/`, which makes it part of the Helm release. From 0.8.0 the CRD ships under `crds/` and is not. The first `helm upgrade` across that boundary therefore sees the CRD as removed from the release and deletes it, and Kubernetes deletes every `LeaderWorkerSet` in the cluster with it. Applying the new CRDs beforehand does not prevent this.
+Chart versions up to 0.7.0 render the `LeaderWorkerSet` CRD from `templates/`, which makes it part of the Helm release. From 0.8.0 the CRD ships under `crds/` and is not. The first `helm upgrade` across that boundary therefore sees the CRD as removed from the release and deletes it, and Kubernetes deletes every `LeaderWorkerSet` in the cluster with it. Applying the new CRDs beforehand does not prevent this. `helm uninstall` of such a release deletes the CRD too, because the CRD is one of the release's objects.
 
-Before the first `helm` or `helmfile` deploy over such a release, run upstream's one-time step, which tells Helm to keep the CRD when it leaves the release:
+Before the first `helm`, `helmfile` or `fleet` deploy over such a release, run upstream's one-time step, which tells Helm to keep the CRD when it leaves the release:
 
 ```shell
 kubectl annotate crd leaderworkersets.leaderworkerset.x-k8s.io \
@@ -1772,6 +1774,16 @@ kubectl annotate crd leaderworkersets.leaderworkerset.x-k8s.io \
 ```
 
 Then apply the new chart's CRDs as above and deploy. Later upgrades do not need the annotation again. Upstream describes the same step under [Upgrading from v0.7.0 or earlier](https://github.com/kubernetes-sigs/lws/blob/main/site/content/en/docs/installation/_index.md#upgrading-from-v070-or-earlier).
+
+The annotation does not protect an uninstall. `helm uninstall` reads the keep policy from the manifest stored in the release, not from the object in the cluster, so uninstalling a release that is still at 0.7.0 or earlier deletes the CRD and every `LeaderWorkerSet` whether or not the annotation is set. To move such a release to `flux` or Argo CD, upgrade it in place first, which takes the CRD out of the release, and uninstall it only then. After the annotation and the CRD apply above:
+
+```shell
+VERSION="0.10.0"   # the chart version this component pins
+helm upgrade lws oci://registry.k8s.io/lws/charts/lws --version "${VERSION}" --namespace lws-system
+helm uninstall lws --namespace lws-system
+```
+
+The CRDs, the `LeaderWorkerSet` objects and their pods stay, with no controller until the new release is up. Then deploy `lws` with `flux` or Argo CD. A release first installed at 0.8.0 or later needs only the uninstall.
 
 ## NIM Workload Credentials
 
@@ -2808,8 +2820,8 @@ prevents that, so it stays opt-in.
 
 A component qualifies only if it solely owns every CRD it ships and ships none
 using `spec.conversion.strategy: Webhook`, since forcing or replacing the CRD
-can overwrite a `caBundle` injected at runtime. `kubeflow-trainer` and `lws`
-are excluded for that second reason.
+can overwrite a `caBundle` injected at runtime. `kubeflow-trainer`,
+`knative-operator` and `lws` are excluded for that second reason.
 Currently `gatekeeper`, `k8s-aibom`, `nktp`, `nvcre`, `nvsentinel`, and
 `psmdb-operator` qualify; the audited chart version for each is pinned in
 `pkg/recipe/ownscrds_audit_test.go`, so bumping a pin without re-auditing fails
