@@ -196,8 +196,9 @@ func evidenceClient(ctx context.Context, t *testing.T) (*registry.Client, regist
 	return c, registry.Repository{Host: host, Path: "evidence/cluster"}
 }
 
-// Deployment validation on a cluster without the GPU Operator fails its
-// checks, exits 8 and still pushes unsigned evidence to the run's tag. From
+// TestValidationJobPushesBindableEvidence verifies deployment validation on a
+// cluster without the GPU Operator fails its checks, exits 8 and still pushes
+// unsigned evidence to the run's tag. From
 // AICR v1.1.0 the run's launcher holds no RBAC write, so the run creates no
 // RBAC object, and the run reports the evidence digest through its
 // termination message. The evidence names the pinned validators, each tag
@@ -296,13 +297,13 @@ func TestValidationJobPushesBindableEvidence(t *testing.T) {
 	t.Logf("binding %s@%s", repo, bound)
 }
 
-// A validator image that resolves to :latest never yields evidence the
-// operator binds. AICR refuses to attest a mutable tag unless
-// --allow-mutable-validator-tags, which the operator never passes, or unless
-// it recorded the image's digest and platform. A refused run exits 2
-// (INVALID_REQUEST) instead of 8 and pushes no evidence. An attested run
-// names every validator by digest, and the operator's pin check rejects the
-// unpinned tag.
+// TestValidationRefusesMutableValidatorTags verifies a validator image that
+// resolves to :latest never yields evidence the operator binds. AICR refuses
+// to attest a mutable tag unless --allow-mutable-validator-tags, which the
+// operator never passes, or unless it recorded the image's digest and
+// platform. A refused run exits 2 (INVALID_REQUEST) and pushes no evidence.
+// An attested run fails its checks with exit 8 and names every validator by
+// digest, and the operator's pin check rejects the unpinned tag.
 func TestValidationRefusesMutableValidatorTags(t *testing.T) {
 	ctx := testContext(t)
 	pins := validatorPins(t)
