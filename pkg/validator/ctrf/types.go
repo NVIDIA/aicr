@@ -60,17 +60,19 @@ const (
 
 	// ImageLinePrefix marks a stdout line carrying one JSON PodImage record.
 	// Every such line is stripped from Stdout. When the result's
-	// ExtraKeyResultSchema stamp passes TrustsReportedImages, each valid one
-	// is appended to TestResult.Images, up to defaults.ValidatorMaxImageRecords
-	// per result.
+	// ExtraKeyResultSchema stamp passes TrustsReportedImages and carries the
+	// Job's ExtraKeyResultNonce, each valid one is appended to
+	// TestResult.Images, up to defaults.ValidatorMaxImageRecords per result.
+	// A log rotated past the stamp records none.
 	ImageLinePrefix = "##AICR-IMAGE## "
 
 	// PlatformLinePrefix marks a stdout line carrying, as one JSON string,
 	// the os/arch the image's process runs as. Every such line is stripped
 	// from Stdout. When the result's ExtraKeyResultSchema stamp passes
-	// TrustsReportedImages, the lines are folded with PlatformLines. For the
-	// log of a pod a check launches, ReportedPlatform reads only its first
-	// line.
+	// TrustsReportedImages and carries the Job's ExtraKeyResultNonce, the
+	// lines are folded with PlatformLines. A log rotated past the stamp
+	// records no platform. For the log of a pod a check launches,
+	// ReportedPlatform reads only its first line.
 	PlatformLinePrefix = "##AICR-PLATFORM## "
 )
 

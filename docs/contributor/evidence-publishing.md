@@ -115,10 +115,12 @@ that ran only together with `platform`, so the mutable-tag check treats an
 entry as pinned only when it has both.
 
 A check whose pod could not be read, or whose image was side-loaded into kind,
-records no digest. A check whose output was not read, or whose image prints no
-`##AICR-PLATFORM##` line, records no platform. That includes a custom `--data`
-validator not built on `validators.Run`, and a validator image from a release
-that predates the line. Each such image is listed even when another run
+records no digest. A check records no platform when its output was not read,
+or its log lacks the stamp `validators.Run` writes with the Job's result nonce,
+without which the orchestrator ignores `##AICR-PLATFORM##` lines. That includes
+a custom `--data` validator not built on `validators.Run`, a validator image
+from a release that predates the nonce, and a log the kubelet rotated past the
+stamp. Each such image is listed even when another run
 recorded its digest and platform, so it still gets the mutable-tag check. Unset
 `AICR_VALIDATOR_IMAGE_TAG` so an immutable tag resolves, pin a catalog image by
 digest, or pass `--allow-mutable-validator-tags`. A launched image such as

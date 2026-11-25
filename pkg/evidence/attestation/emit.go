@@ -145,8 +145,8 @@ func checkValidatorTagProvenance(images []ValidatorImage, allow bool) error {
 			// operator to unset a variable they never set would be a dead end.
 			"hint": "an image records no digest when its pod was not read or its runtime reported no " +
 				"registry digest for it, as for an image side-loaded into kind, and no platform when " +
-				"its output was not read or it prints no " +
-				strings.TrimSpace(ctrf.PlatformLinePrefix) + " line. " +
+				"its output was not read or lacks the result stamp carrying the Job's nonce, without which its " +
+				strings.TrimSpace(ctrf.PlatformLinePrefix) + " line is ignored, as when its log rotated past the stamp. " +
 				"Unset AICR_VALIDATOR_IMAGE_TAG if set, or build with a stamped commit " +
 				"(make build) so an immutable tag resolves (:vX.Y.Z or :sha-<commit>); " +
 				"an image outside " + catalog.TrustedValidatorRepoPrefix +
