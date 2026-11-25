@@ -95,6 +95,7 @@ func (k *Collector) collectNode(ctx context.Context) (map[string]measurement.Rea
 //   - ocid1.instance.oc1... → "oke" (OKE emits a raw OCID, no scheme prefix)
 //   - linode://58291 → "lke" (Akamai Cloud / Linode LKE)
 //   - nico://<uuid> → "nvke" (NVIDIA Kubernetes Engine, Forge/NICo bare metal)
+//   - vxnip://<machine-uid> → "nvke" (NVIDIA Kubernetes Engine; VXNIP Cluster API provider)
 //
 // If the format is unrecognized, it returns the raw provider prefix.
 func parseProvider(providerID string) string {
@@ -125,7 +126,7 @@ func parseProvider(providerID string) string {
 		return "oke"
 	case "linode":
 		return "lke"
-	case "nico":
+	case "nico", "vxnip":
 		return "nvke"
 	default:
 		return provider

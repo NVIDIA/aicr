@@ -447,8 +447,9 @@ func extractRegion(m *measurement.Measurement) (region string, multi bool) {
 // normalizes this to "lke" via parseProvider, but hand-crafted snapshots may
 // carry the raw "linode://..." URL or the bare "linode" string.
 //
-// NVIDIA Kubernetes Engine (Forge/NICo bare metal) nodes carry "nico://<uuid>",
-// normalized to "nvke" the same way.
+// NVIDIA Kubernetes Engine nodes carry "nico://<uuid>" on Forge/NICo bare metal
+// and "vxnip://<machine-uid>" on hosts the VXNIP Cluster API provider
+// provisions; both normalize to "nvke" the same way.
 func normalizeProviderID(v string) string {
 	if strings.HasPrefix(v, "ocid1.") {
 		return serviceOKE
@@ -469,6 +470,12 @@ func normalizeProviderID(v string) string {
 		return serviceNVKE
 	}
 	if v == "nico" {
+		return serviceNVKE
+	}
+	if strings.HasPrefix(v, "vxnip://") {
+		return serviceNVKE
+	}
+	if v == "vxnip" {
 		return serviceNVKE
 	}
 	return v

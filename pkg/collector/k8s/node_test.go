@@ -244,6 +244,11 @@ func TestParseProvider(t *testing.T) {
 			want:       "nvke",
 		},
 		{
+			name:       "NVKE VXNIP",
+			providerID: "vxnip://7f3e2a10-4b5c-4d8e-9a1f-2c3b4d5e6f70",
+			want:       "nvke",
+		},
+		{
 			name:       "unknown format",
 			providerID: "custom-provider://some-id",
 			want:       "custom-provider",

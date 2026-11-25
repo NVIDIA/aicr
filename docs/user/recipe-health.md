@@ -57,8 +57,8 @@ Today every committed pointer is `community`, published from a contributor fork 
 {/* BEGIN AICR-HEALTH */}
 ## Summary
 
-- Recipes: **81**
-- Pass: **81** · Warn: **0** · Fail: **0** · Unknown: **0**
+- Recipes: **85**
+- Pass: **85** · Warn: **0** · Fail: **0** · Unknown: **0**
 
 ## Recipes
 
@@ -66,6 +66,7 @@ Today every committed pointer is `community`, published from a contributor fork 
 |--------|---------|-------------|----|--------|----------|--------|----------|----------|--------------|
 | a100-any | — | a100 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending | — |
 | b200-any | — | b200 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending | — |
+| b300-any | — | b300 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending | — |
 | gb200-any | — | gb200 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending | — |
 | gb300-any | — | gb300 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending | — |
 | h100-any | — | h100 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending | — |
@@ -91,9 +92,9 @@ Today every committed pointer is `community`, published from a contributor fork 
 | gb200-eks-ubuntu-training-slurm | eks | gb200 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:13 | pending | — |
 | gb300-eks-amazonlinux-inference | eks | gb300 | amazonlinux | inference | — | pass | R:0 D:4 P:0 C:5 | pending | — |
 | gb300-eks-ubuntu-inference-dynamo | eks | gb300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:12 | [eks/gb300-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/gb300-ubuntu/inference-dynamo) | community |
-| gb300-eks-ubuntu-training-kubeflow | eks | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:11 | [eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) | community |
+| gb300-eks-ubuntu-training-kubeflow | eks | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:4 C:11 | [eks/gb300-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/gb300-ubuntu/training-kubeflow) | community |
 | gb300-eks-ubuntu-training-slurm | eks | gb300 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:13 | pending | — |
-| h100-eks-amazonlinux-inference | eks | h100 | amazonlinux | inference | — | pass | R:0 D:4 P:0 C:5 | pending | — |
+| h100-eks-amazonlinux-inference-dynamo | eks | h100 | amazonlinux | inference | dynamo | pass | R:0 D:4 P:1 C:12 | pending | — |
 | h100-eks-ubuntu-inference-dynamo | eks | h100 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:12 | [eks/h100-ubuntu/inference-dynamo](https://validation.aicr.run/#/eks/h100-ubuntu/inference-dynamo) | — |
 | h100-eks-ubuntu-inference-nim | eks | h100 | ubuntu | inference | nim | pass | R:0 D:4 P:0 C:12 | pending | — |
 | h100-eks-ubuntu-training-kubeflow | eks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:11 | [eks/h100-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/h100-ubuntu/training-kubeflow) | — |
@@ -128,6 +129,9 @@ Today every committed pointer is `community`, published from a contributor fork 
 | rtx-pro-6000-lke-ubuntu-inference | lke | rtx-pro-6000 | ubuntu | inference | — | pass | R:0 D:4 P:0 C:10 | pending | — |
 | rtx-pro-6000-lke-ubuntu-training-kubeflow | lke | rtx-pro-6000 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:11 | pending | — |
 | b300-mk8s-ubuntu-inference-dynamo | mk8s | b300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:3 | pending | community |
+| gb10-nvke-ubuntu-inference-dynamo | nvke | gb10 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:8 | pending | — |
+| gb10-nvke-ubuntu-training-kubeflow | nvke | gb10 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:5 | pending | community |
+| gb200-nvke-ubuntu-inference-dynamo | nvke | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending | community |
 | gb200-nvke-ubuntu-training-kubeflow | nvke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:5 P:2 C:6 | pending | community |
 | gb300-nvke-ubuntu-inference-dynamo | nvke | gb300 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending | community |
 | gb300-nvke-ubuntu-training-kubeflow | nvke | gb300 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:6 | pending | community |
@@ -138,7 +142,7 @@ Today every committed pointer is `community`, published from a contributor fork 
 | a100-oke-ubuntu-training-kubeflow | oke | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:11 | pending | — |
 | gb200-oke-ubuntu-inference-dynamo | oke | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:12 | pending | — |
 | gb200-oke-ubuntu-training-kubeflow | oke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:11 | pending | — |
-| gb300-oke-ubuntu-training | oke | gb300 | ubuntu | training | — | pass | R:0 D:5 P:2 C:9 | pending | community |
+| gb300-oke-ubuntu-training | oke | gb300 | ubuntu | training | — | pass | R:0 D:5 P:2 C:8 | pending | community |
 | l40s-oke-inference | oke | l40s | ol | inference | — | pass | R:0 D:4 P:0 C:10 | pending | — |
 | l40s-oke-training-kubeflow | oke | l40s | ol | training | kubeflow | pass | R:0 D:4 P:0 C:11 | pending | — |
 | rke2-sles | rke2 | — | sles | — | — | pass | R:0 D:0 P:0 C:4 | pending | — |

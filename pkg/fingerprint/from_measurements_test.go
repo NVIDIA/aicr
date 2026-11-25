@@ -362,6 +362,8 @@ func TestFromMeasurements_ServiceDetection(t *testing.T) {
 		{"nvke", "nvke"},
 		{"nico", "nvke"},
 		{"nico://0c6f2a4e-6d0e-4a1b-9f3c-2b7d8e9f0a11", "nvke"},
+		{"vxnip", "nvke"},
+		{"vxnip://7f3e2a10-4b5c-4d8e-9a1f-2c3b4d5e6f70", "nvke"},
 		{"nke", "nke"},
 		{"kind", "kind"},
 		{"", ""},
