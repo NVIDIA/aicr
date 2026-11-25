@@ -1,0 +1,8 @@
+attestations:
+  - attestedAt: 2026-11-25T05:34:46Z
+    bundle:
+      digest: sha256:e3177268b7ffc5e66a9486746fc8797d284ad7abef5452d16f14ba9bb5e6ff45
+      oci: ghcr.io/senc275/aicr-evidence:gb10-nvke-ubuntu-training-kubeflow-9596dbbe5a46
+      predicateType: https://aicr.run/recipe-evidence/v3
+recipe: gb10-nvke-ubuntu-training-kubeflow
+schemaVersion: 1.0.0
