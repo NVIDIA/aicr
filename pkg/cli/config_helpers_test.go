@@ -15,9 +15,8 @@
 package cli
 
 import (
-	"log/slog"
-
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 

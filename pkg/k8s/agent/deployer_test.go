@@ -15,12 +15,11 @@
 package agent
 
 import (
-	"log/slog"
-
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"slices"
 	"strings"

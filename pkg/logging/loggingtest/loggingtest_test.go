@@ -15,7 +15,9 @@
 package loggingtest
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"log/slog"
 	"strings"
 	"sync"
@@ -26,8 +28,16 @@ import (
 
 func TestCaptureText(t *testing.T) {
 	prev := slog.Default()
+	prevWriter, prevFlags := log.Writer(), log.Flags()
+	var stderr bytes.Buffer
+	log.SetOutput(&stderr)
+	t.Cleanup(func() {
+		log.SetOutput(prevWriter)
+		log.SetFlags(prevFlags)
+	})
+	var logs *Buffer
 	t.Run("capture", func(t *testing.T) {
-		logs := CaptureText(t, slog.LevelWarn)
+		logs = CaptureText(t, slog.LevelWarn)
 		slog.Info("below the level")
 		slog.Warn("captured", "key", "value")
 		if got := logs.String(); strings.Contains(got, "below the level") || !strings.Contains(got, "msg=captured key=value") {
@@ -36,6 +46,13 @@ func TestCaptureText(t *testing.T) {
 	})
 	if slog.Default() != prev {
 		t.Error("the default logger was not restored when the test ended")
+	}
+	if log.Writer() != &stderr || log.Flags() != prevFlags {
+		t.Error("the log package's writer and flags were not restored when the test ended")
+	}
+	slog.Warn("after the capture")
+	if strings.Contains(logs.String(), "after the capture") || !strings.Contains(stderr.String(), "after the capture") {
+		t.Errorf("a record logged after the capture missed the log package's writer: captured %q, writer %q", logs.String(), stderr.String())
 	}
 }
 

@@ -15,11 +15,10 @@
 package agent
 
 import (
-	"log/slog"
-
 	"context"
 	stderrors "errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"

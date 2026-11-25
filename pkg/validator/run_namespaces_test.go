@@ -15,10 +15,9 @@
 package validator
 
 import (
-	"log/slog"
-
 	"context"
 	"encoding/json"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync/atomic"

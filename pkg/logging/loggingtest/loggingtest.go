@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"log/slog"
 	"sync"
 	"testing"
@@ -78,8 +79,15 @@ func CaptureJSON(t testing.TB, level slog.Level) *Buffer {
 
 func capture(t testing.TB, h slog.Handler) {
 	prev := slog.Default()
+	// slog.SetDefault also redirects the log package, which restoring prev
+	// does not undo when prev uses the default handler.
+	prevWriter, prevFlags := log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(h))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(prevWriter)
+		log.SetFlags(prevFlags)
+	})
 }
 
 // FindRecord returns the first JSON record in logs whose msg is want, with
