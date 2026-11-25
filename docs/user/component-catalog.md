@@ -3041,7 +3041,7 @@ gate requires; compose `nvsentinel-preflight-runai` with it so that
 [Preflight Checks](#preflight-checks)). Run:ai's support matrix covers Kubernetes 1.35 through 1.37,
 and the leaves carry that floor.
 
-**NVSentinel quarantine.** Run:ai runs two DaemonSets on every GPU node,
+**NVSentinel quarantine.** Run:ai runs two DaemonSets on GPU nodes,
 `gpu-fractioning-fractiond` and `gpu-fractioning-mpsd`, and reports the
 cluster's GPU stack unavailable while either has a pod that is expected on a
 node and not ready; the control plane can then show the whole cluster
@@ -3050,7 +3050,10 @@ tolerates the cordon. Run:ai's
 [cluster troubleshooting page](https://docs.nvidia.com/run-ai/self-hosted/documentation/installation-and-configuration/operate/clusters)
 documents a taint for this case, `runai/gpu-fault=true:NoSchedule`: the two
 DaemonSets tolerate only `nvidia.com/gpu`, so Kubernetes stops expecting them
-on a node that carries it. The Run:ai leaves have NVSentinel apply that taint.
+on a node that carries it. It recomputes that count the next time one of the
+DaemonSet's pods changes state: a pod that keeps failing drops out within
+about a minute, and a node whose pods are healthy keeps its place until one of
+them changes. The Run:ai leaves have NVSentinel apply that taint.
 Every `fault-quarantine` rule set that cordons a node also taints it, and
 `fault-quarantine` removes the taint together with the cordon once every fault
 on the node has recovered. Nothing is tainted as shipped: the rule sets take
@@ -3066,6 +3069,13 @@ effect when you compose [`nvsentinel-quarantine`](#graded-remediation), and
   `runai-cluster`, written out at the chart's default. Do not add a
   tolerate-all entry there: the taint works only while those two DaemonSets do
   not tolerate it.
+- **Only where those two DaemonSets run.** They tolerate `nvidia.com/gpu` and
+  nothing else, and `--accelerated-node-toleration` does not reach
+  `gpu-fractioning.daemonTolerations`. On a fleet whose GPU nodes carry a
+  different taint they have no pod on any GPU node (`GpuFractioningConfig`
+  reports `NoTargetNodes`), and the taint is applied and lifted with nothing to
+  act on. For them to run there, that fleet's taint has to be added to
+  `gpu-fractioning.daemonTolerations`.
 - **Leave the taint to NVSentinel while it holds the node.** Removing it by
   hand, or uncordoning the node, ends the quarantine: `fault-quarantine` stops
   tracking the node and cancels the pending drain, and whichever of the cordon
@@ -3073,8 +3083,10 @@ effect when you compose [`nvsentinel-quarantine`](#graded-remediation), and
   applied yourself before the fault is recorded as yours and is not removed.
 - **Pods already on the node stay.** `NoSchedule` evicts nothing, and
   `node-drainer` does not delete DaemonSet pods. A Run:ai pod stuck on the
-  node no longer counts against the cluster, but it is still there; delete it
-  as Run:ai's page describes if you want it gone before the node recovers.
+  node stops counting against the cluster once the count is recomputed, but it
+  is still there. Delete it as Run:ai's page describes: a pod that is stuck
+  without changing state does not prompt that recomputation, and deleting it
+  does.
 - **Only faults NVSentinel acts on.** A node stuck in GPU Operator validation
   that raises no fatal health event is not quarantined, so the manual steps on
   Run:ai's page still apply to it.

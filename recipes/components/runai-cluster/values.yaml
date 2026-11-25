@@ -127,8 +127,9 @@ kai-resource-management:
         - operator: Exists
       # The chart's default, written out because the leaves depend on it. These
       # are the tolerations of the fractiond and mpsd DaemonSets, which run on
-      # every GPU node, and the operator reports the GPU stack unavailable
-      # while either has fewer ready pods than nodes it is expected on. They
+      # the GPU nodes whose taints these tolerate, and the operator reports the
+      # GPU stack unavailable while either has fewer ready pods than nodes it is
+      # expected on. On a fleet with another GPU taint they run nowhere. They
       # must not tolerate runai/gpu-fault: that taint is how a faulty node
       # leaves the count, and the leaves have NVSentinel apply it. So no
       # tolerate-all here, and the path stays out of the registry's toleration
