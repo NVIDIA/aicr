@@ -158,9 +158,10 @@ transitions:
               kubeflow -o jsonpath='{.spec.template.spec.containers[*].image}'`
               (in the release namespace) shows
               trainer-controller-manager:v2.3.0, since the controller applies
-              the bundle on its next reconcile. Then wait for `kubectl rollout
-              status deployment/kubeflow-trainer-controller-manager -n kubeflow`
-              to complete. Do not roll back or uninstall while on 2.3.0, and on
+              the bundle on its next reconcile. On every deployer, then wait for
+              `kubectl rollout status
+              deployment/kubeflow-trainer-controller-manager -n kubeflow` to
+              complete. Do not roll back or uninstall while on 2.3.0, and on
               terraform leave atomic off for this apply.
             reason: >-
               A Deployment reports available while the 2.2 controller pod still
