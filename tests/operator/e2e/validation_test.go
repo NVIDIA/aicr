@@ -303,7 +303,7 @@ func TestValidationJobPushesBindableEvidence(t *testing.T) {
 // operator never passes, or unless it recorded the image's digest and
 // platform. A refused run exits 2 (INVALID_REQUEST) and pushes no evidence.
 // An attested run fails its checks with exit 8 and names every validator by
-// digest, and the operator's pin check rejects the unpinned tag.
+// digest and platform, and the operator's pin check rejects the unpinned tag.
 func TestValidationRefusesMutableValidatorTags(t *testing.T) {
 	ctx := testContext(t)
 	pins := validatorPins(t)
@@ -341,8 +341,9 @@ func TestValidationRefusesMutableValidatorTags(t *testing.T) {
 		t.Fatal("evidence names no validator image")
 	}
 	for _, v := range summary.ValidatorImages {
-		if v.Digest == "" || !strings.HasSuffix(v.Image, ":latest") {
-			t.Fatalf("evidence names validator %s (digest %q), want :latest with a digest", v.Image, v.Digest)
+		if v.Digest == "" || v.Platform == "" || !strings.HasSuffix(v.Image, ":latest") {
+			t.Fatalf("evidence names validator %s (digest %q, platform %q), want :latest with a digest and platform",
+				v.Image, v.Digest, v.Platform)
 		}
 	}
 	if err = evidence.CheckValidators(summary.ValidatorImages, pins); err == nil || !strings.Contains(err.Error(), ":latest") {
