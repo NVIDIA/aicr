@@ -279,7 +279,7 @@ func TestObservationOnlyExtra(t *testing.T) {
 }
 
 func TestResultSchemaExtra(t *testing.T) {
-	want := map[string]string{"resultSchema": "1"}
+	want := map[string]string{"resultSchema": "2"}
 	got := ResultSchemaExtra()
 	if !maps.Equal(got, want) {
 		t.Errorf("ResultSchemaExtra() = %v, want %v", got, want)

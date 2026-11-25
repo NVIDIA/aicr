@@ -38,9 +38,15 @@ const (
 	// StatusOther indicates an unexpected outcome (crash, OOM, timeout, etc.).
 	StatusOther = "other"
 
+	// ReservedLinePrefix begins every sentinel line prefix. A check that
+	// relays another process's output must break every occurrence of it in
+	// that output, at any offset, as validators.Run does.
+	ReservedLinePrefix = "##AICR-"
+
 	// ExtraLinePrefix marks a stdout line carrying one JSON object for
 	// TestResult.Extra. pkg/validator/job.ExtractResult merges every such line,
-	// a later value winning per key, and strips them from Stdout.
+	// a later value winning per key except ExtraKeyResultSchema, which comes
+	// from the first such line that parses, and strips them from Stdout.
 	//
 	// The prefix lives here (not in validators/ or pkg/validator/job) because it
 	// is the shared contract between the in-pod producer and the orchestrator
@@ -51,6 +57,21 @@ const (
 	// RuntimeProvenance record. Every such line is stripped from Stdout, and
 	// the last valid one wins.
 	ProvenanceLinePrefix = "##AICR-PROVENANCE## "
+
+	// ImageLinePrefix marks a stdout line carrying one JSON PodImage record.
+	// Every such line is stripped from Stdout. When the result's
+	// ExtraKeyResultSchema stamp passes TrustsReportedImages, each valid one
+	// is appended to TestResult.Images, up to defaults.ValidatorMaxImageRecords
+	// per result.
+	ImageLinePrefix = "##AICR-IMAGE## "
+
+	// PlatformLinePrefix marks a stdout line carrying, as one JSON string,
+	// the os/arch the image's process runs as. Every such line is stripped
+	// from Stdout. When the result's ExtraKeyResultSchema stamp passes
+	// TrustsReportedImages, the lines are folded with PlatformLines. For the
+	// log of a pod a check launches, ReportedPlatform reads only its first
+	// line.
+	PlatformLinePrefix = "##AICR-PLATFORM## "
 )
 
 // RuntimeProvenance is the bounded, digest-bound evidence carrier for a
@@ -206,6 +227,14 @@ type TestResult struct {
 	// compared (see RuntimeProvenance). It survives minimal redaction after the
 	// shape and key-collapsing rules in pkg/evidence/redact; nil otherwise.
 	RuntimeProvenance *RuntimeProvenance `json:"runtimeProvenance,omitempty"`
+
+	// Images lists the validator container's image, then each image the
+	// check reports with validators.EmitImage (see PodImage). Other pods a
+	// check launches are not listed. It is empty for a test that never had
+	// a validator Job, such as a check skipped before its Job was created or
+	// one whose Job failed to deploy. A record with no digest can name the
+	// planned image of a pod that never started or could not be read.
+	Images []PodImage `json:"images,omitempty"`
 }
 
 // Environment describes the execution environment and build context.

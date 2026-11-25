@@ -17,6 +17,7 @@ package job
 import (
 	"context"
 	stderrors "errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,46 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
+
+// TestExtractResultListFailureListsOnce verifies a failed pod List is not
+// retried to find a terminated pod, and the image of the last terminated pod
+// observed is recorded.
+func TestExtractResultListFailureListsOnce(t *testing.T) {
+	const (
+		planned  = "ghcr.io/x/deployment:edge"
+		observed = "ghcr.io/x/deployment-observed:v2"
+	)
+	cs := fake.NewSimpleClientset()
+	cs.PrependReactor("list", "pods", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, stderrors.New("apiserver unavailable")
+	})
+	d := NewDeployer(Config{Clientset: cs, Namespace: "ns", Entry: catalog.ValidatorEntry{Name: "check", Phase: "deployment", Image: planned}})
+	d.jobName = "job"
+	d.lastTerminated = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "ns"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: ValidatorContainerName, Image: observed}}},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name:    ValidatorContainerName,
+			ImageID: "ghcr.io/x/deployment-observed@" + testDigestA,
+			State:   corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 3}},
+		}}},
+	}
+
+	result := d.ExtractResult(t.Context())
+
+	var podLists int
+	for _, a := range cs.Actions() {
+		if a.GetVerb() == "list" && a.GetResource().Resource == "pods" {
+			podLists++
+		}
+	}
+	if podLists != 1 {
+		t.Errorf("pod lists = %d, want 1", podLists)
+	}
+	if want := []ctrf.PodImage{{Image: observed, Digest: testDigestA}}; !slices.Equal(result.Images, want) {
+		t.Errorf("images = %+v, want %+v", result.Images, want)
+	}
+}
 
 func TestWaitFailureMessageAndHandleTimeout(t *testing.T) {
 	tests := []struct {
@@ -144,18 +185,25 @@ func TestHandleTimeoutPodLookupFailure(t *testing.T) {
 	}
 }
 
-// TestExtractResultDeadlineKilledReportsCheckResult covers issue #1632: when the
-// Job controller deletes a pod on activeDeadlineSeconds expiry, the lookup finds
-// no live pod, but the check's own SIGTERM result is still readable from the
-// pod in its deletion grace window or from the last status the deployer
-// observed. The verdict stays failed and carries the check's message.
-func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
-	const checkMsg = "terminated by SIGTERM before the check completed"
+// TestExtractResultMissingPod verifies the result when the lookup finds no
+// live pod for the Job. On a deadline failure the Job controller deleted the
+// pod, and the check's own SIGTERM result is still read from the pod in its
+// deletion grace or from the last status the deployer observed, so the
+// verdict stays failed with the check's message. Without a deadline failure
+// the result stays inconclusive. Either way the Job is read before the one
+// terminated-pod List, which also supplies the image.
+func TestExtractResultMissingPod(t *testing.T) {
+	const (
+		checkMsg = "terminated by SIGTERM before the check completed"
+		image    = "ghcr.io/x/deployment:edge"
+	)
 	terminated := func(deleting bool) *corev1.Pod {
 		p := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "ns", Labels: map[string]string{"batch.kubernetes.io/job-name": "job"}},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: ValidatorContainerName, Image: image}}},
 			Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
-				Name: ValidatorContainerName,
+				Name:    ValidatorContainerName,
+				ImageID: "ghcr.io/x/deployment@" + testDigestA,
 				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
 					ExitCode: 3, Message: checkMsg,
 				}},
@@ -168,43 +216,68 @@ func TestExtractResultDeadlineKilledReportsCheckResult(t *testing.T) {
 		}
 		return p
 	}
-	failedJob := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: "ns"},
-		Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{{
-			Type: batchv1.JobFailed, Status: corev1.ConditionTrue,
-			Reason: batchv1.JobReasonDeadlineExceeded, Message: "Job was active longer than specified deadline",
-		}}},
+	failed := func(reason, message string) []batchv1.JobCondition {
+		return []batchv1.JobCondition{{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: reason, Message: message}}
 	}
+	deadline := failed(batchv1.JobReasonDeadlineExceeded, "Job was active longer than specified deadline")
+	withDigest := []ctrf.PodImage{{Image: image, Digest: testDigestA}}
 
 	tests := []struct {
 		name         string
+		conditions   []batchv1.JobCondition
 		listed       *corev1.Pod
 		lastObserved *corev1.Pod
+		wantExit     int32
+		wantMsg      string
 		wantCheckMsg bool
+		wantImages   []ctrf.PodImage
 	}{
-		{"terminating pod is still listed", terminated(true), nil, true},
-		{"pod deleted, last observed status survives", nil, terminated(false), true},
-		{"nothing observed keeps the generic message", nil, nil, false},
+		{"deadline, terminating pod is still listed", deadline, terminated(true), nil, validatorExitFailed, "Job deadline", true, withDigest},
+		{"deadline, pod deleted, last observed status survives", deadline, nil, terminated(false), validatorExitFailed, "Job deadline", true, withDigest},
+		{"deadline, nothing observed keeps the generic message", deadline, nil, nil, validatorExitFailed, "Job deadline", false, []ctrf.PodImage{{Image: image}}},
+		{"no Failed condition", nil, terminated(true), nil, -1, "pod not found for Job job", false, withDigest},
+		{"Failed without a deadline", failed(batchv1.JobReasonBackoffLimitExceeded, "Job has reached the specified backoff limit"),
+			terminated(true), nil, -1, "Job job failed (BackoffLimitExceeded)", false, withDigest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cs := fake.NewSimpleClientset(failedJob.DeepCopy())
+			job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: "ns"}, Status: batchv1.JobStatus{Conditions: tt.conditions}}
+			cs := fake.NewSimpleClientset(job)
 			if tt.listed != nil {
 				if _, err := cs.CoreV1().Pods("ns").Create(t.Context(), tt.listed, metav1.CreateOptions{}); err != nil {
 					t.Fatal(err)
 				}
 			}
-			d := NewDeployer(Config{Clientset: cs, Namespace: "ns", Entry: catalog.ValidatorEntry{Name: "check", Phase: "deployment", Timeout: time.Minute}})
+			d := NewDeployer(Config{Clientset: cs, Namespace: "ns", Entry: catalog.ValidatorEntry{Name: "check", Phase: "deployment", Image: image, Timeout: time.Minute}})
 			d.jobName = "job"
 			d.lastTerminated = tt.lastObserved
 
 			result := d.ExtractResult(t.Context())
 
-			if result.ExitCode != validatorExitFailed || result.CTRFStatus() != ctrf.StatusFailed {
-				t.Errorf("exit=%d status=%s, want failed (exit %d)", result.ExitCode, result.CTRFStatus(), validatorExitFailed)
+			var podLists int
+			jobReadFirst := false
+			for _, a := range cs.Actions() {
+				switch {
+				case a.GetVerb() == "list" && a.GetResource().Resource == "pods":
+					podLists++
+				case a.GetVerb() == "get" && a.GetResource().Resource == "jobs":
+					jobReadFirst = podLists == 1
+				}
 			}
-			if !strings.Contains(result.TerminationMsg, "Job deadline") {
-				t.Errorf("message=%q, want the Job deadline named", result.TerminationMsg)
+			if podLists != 2 {
+				t.Errorf("pod lists = %d, want 2", podLists)
+			}
+			if !jobReadFirst {
+				t.Error("Job condition was not read before the terminated-pod lookup")
+			}
+			if !slices.Equal(result.Images, tt.wantImages) {
+				t.Errorf("images=%+v, want %+v", result.Images, tt.wantImages)
+			}
+			if result.ExitCode != tt.wantExit || result.CTRFStatus() != ctrf.ExitCodeToCTRFStatus(tt.wantExit) {
+				t.Errorf("exit=%d status=%s, want exit %d", result.ExitCode, result.CTRFStatus(), tt.wantExit)
+			}
+			if !strings.Contains(result.TerminationMsg, tt.wantMsg) {
+				t.Errorf("message=%q, want it to contain %q", result.TerminationMsg, tt.wantMsg)
 			}
 			if got := strings.Contains(result.TerminationMsg, "check reported: exit code 3: "+checkMsg); got != tt.wantCheckMsg {
 				t.Errorf("message=%q, check message present = %v, want %v", result.TerminationMsg, got, tt.wantCheckMsg)

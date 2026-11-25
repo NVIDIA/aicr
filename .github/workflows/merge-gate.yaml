@@ -838,18 +838,20 @@ jobs:
       - name: Verify the documented NVCRE wiring still resolves
         # `go test -run <name>` exits 0 with "no tests to run" if a test is
         # renamed or removed, which would let this gate silently no-op. Assert
-        # the named test actually executed by requiring its PASS line.
+        # each named test actually executed by requiring its PASS line.
         run: |
           set -uo pipefail
-          out=$(go test ./pkg/recipe/... -run '^TestNVCREDocumentedWiringResolves$' -v -count=1 2>&1) && rc=0 || rc=$?
+          out=$(go test ./pkg/recipe/... -run '^(TestNVCREDocumentedWiringResolves|TestNVCRETrainerRefMatchesMixin)$' -v -count=1 2>&1) && rc=0 || rc=$?
           echo "$out"
           if [ "$rc" -ne 0 ]; then
             exit "$rc"
           fi
-          if ! grep -q "^--- PASS: TestNVCREDocumentedWiringResolves" <<<"$out"; then
-            echo "::error::TestNVCREDocumentedWiringResolves did not execute (renamed or removed?); the NVCRE wiring gate would silently pass. Update this job to run the guard."
-            exit 1
-          fi
+          for name in TestNVCREDocumentedWiringResolves TestNVCRETrainerRefMatchesMixin; do
+            if ! grep -q "^--- PASS: ${name} " <<<"$out"; then
+              echo "::error::${name} did not execute (renamed or removed?); the NVCRE wiring gate would silently pass. Update this job to run the guard."
+              exit 1
+            fi
+          done
 
   nvcre-wiring-skip:
     needs: [check-paths]

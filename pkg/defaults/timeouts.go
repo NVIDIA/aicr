@@ -1548,6 +1548,16 @@ const (
 	// inline JSON payloads (e.g., Prometheus metric scrapes).
 	ValidatorMaxStdoutLineLength = 512
 
+	// ValidatorMaxImageRecords is the maximum number of image records kept
+	// per validator result. Records past it are dropped.
+	ValidatorMaxImageRecords = 16
+
+	// ValidatorMaxImageRefLength is the maximum length of an image reference
+	// kept in a validator result. It fits a 253-character registry host with
+	// a port, a 255-character repository path, a 128-character tag and a
+	// digest.
+	ValidatorMaxImageRefLength = 1024
+
 	// ValidatorMaxTerminationMsgBytes bounds the container termination message
 	// copied into a validator result. kubelet caps the message at 4 KiB
 	// upstream, but the result flows into ConfigMaps and rendered reports, so
@@ -1564,6 +1574,17 @@ const (
 
 	// ValidatorLogReadRetryDelay is the pause between those attempts.
 	ValidatorLogReadRetryDelay = 2 * time.Second
+
+	// ValidatorOutputDrainTimeout bounds how long validators.Run waits, after
+	// the check returns, for the check's filtered output to reach the
+	// container's stdout and stderr before exiting. When it expires, Run waits
+	// up to the same time again for a held partial line to be written.
+	ValidatorOutputDrainTimeout = 5 * time.Second
+
+	// ValidatorOutputLineLimit is the partial-line length, in bytes, at which
+	// validators.Run stops waiting for a newline and writes the line with one
+	// added.
+	ValidatorOutputLineLimit = 64 << 10
 
 	// ImagePullSecretCopyTimeout bounds copying one --image-pull-secret Secret
 	// from the validator namespace into a check's per-run namespace (one Get

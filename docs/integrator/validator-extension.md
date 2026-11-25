@@ -29,14 +29,16 @@ A validator is any container that follows the exit code contract:
 | `1` | Check failed |
 | `2` | Check skipped |
 | `3` | Interrupted by SIGTERM before reaching a verdict (CTRF `other`) |
+| `4` | Panicked before reaching a verdict (CTRF `other`) |
 
 Any other exit code, or a container that never terminates, maps to CTRF `other`
-(indeterminate), which blocks like `failed`. A validator that traps SIGTERM
-(Job deadline, eviction, node drain or operator cancellation) should finish its
-cleanup within the pod's 60s termination grace (30s for cleanup, 30s to write the
-termination message) and exit `3`, not `0`, because
-its verdict is incomplete. Validators built on `validators.Run` do this
-automatically.
+(indeterminate), which blocks like `failed`. A validator that traps SIGTERM (Job
+deadline, eviction, node drain or operator cancellation) should finish its
+cleanup within the pod's 60s termination grace (30s for cleanup, 30s to write
+the termination message) and exit `3`, not `0`, because its verdict is
+incomplete. Validators built on `validators.Run` do this automatically, and exit
+`4` when the check function panics. A Go program that panics without recovering
+exits `2`, which reads as a skip.
 
 The container receives:
 
@@ -45,6 +47,13 @@ The container receives:
 - Kubernetes API access via in-cluster ServiceAccount
 
 Evidence output goes to **stdout**. Debug logs go to **stderr**. On failure, write a reason to `/dev/termination-log` (max 4096 bytes).
+
+Lines starting with `##AICR-` are reserved for the structured markers the
+orchestrator reads, and only those markers may print them. A validator that
+prints another process's output should break every `##AICR-` in it. Validators
+built on `validators.Run` do this for everything written to `os.Stdout` and
+`os.Stderr`, turning it into `# #AICR-`. Writes that go to file descriptors 1
+and 2 directly, such as `println`, are not filtered.
 
 ### Step 2: Build and Push the Image
 

@@ -22,12 +22,15 @@ for a release build, `:sha-<commit>` for a `main`-tip build — and the override
 replaces it unconditionally, including over a release tag.
 
 That matters more here than in an ordinary validate run, because the predicate
-identifies the validators that ran by *tag alone*: `validatorImages[].digest`
-is deliberately empty (resolving it would cost a registry round-trip per
-image), so a moving tag leaves the attestation with nothing to fall back on.
-Once `:edge` advances, the bundle's claim about which validator code produced
-its results is no longer true, and nothing in the bundle records that. This is
-not hypothetical — `:edge` has been observed moving to a commit with a breaking
+identifies the validators that ran by *tag alone*. Its
+`validatorImages[].digest` is deliberately empty, since resolving it would cost
+a registry round-trip per image. Each CTRF test that ran a validator Job records
+the validator image in `images`, but with a digest only when the container
+runtime reported one for that image's repository. A side-loaded image or an
+unreadable pod leaves no digest, so a moving tag can still leave the bundle with
+nothing that pins the validator code. Once `:edge` advances, the predicate's
+claim about which validator code produced its results is no longer true. This is
+not hypothetical. `:edge` has been observed moving to a commit with a breaking
 rename about 75 minutes after a run it was recorded in, and moving twice within
 a single working session ([#2873](https://github.com/NVIDIA/aicr/issues/2873)).
 

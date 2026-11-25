@@ -1619,12 +1619,14 @@ components:
     valueOverrideKeys:
       - kubeflowtrainer
       - trainer
-    # Ships TrainJob / TrainingRuntime / ClusterTrainingRuntime CRDs in
-    # `crds/` AND default ClusterTrainingRuntime CRs (torch-distributed,
-    # mlx-distributed, deepspeed-distributed, jax-distributed, xgboost-
-    # distributed, ...) in templates/runtimes/. helm-diff on a fresh
-    # cluster fails to resolve the CR kind. disableValidation: true
-    # on this release tells helm-diff to skip the live-mapper check.
+    # Chart 2.2.x ships TrainJob / TrainingRuntime / ClusterTrainingRuntime
+    # CRDs in `crds/` AND default ClusterTrainingRuntime CRs
+    # (torch-distributed, mlx-distributed, deepspeed-distributed, ...) in
+    # templates/runtimes/, so helm-diff on a fresh cluster fails to resolve
+    # the CR kind. disableValidation: true on this release tells helm-diff
+    # to skip the live-mapper check. From 2.3 the CRDs are templates and the
+    # default runtimes are applied by a post-install hook Job instead; the
+    # flag stays for the recipe that holds 2.2.1 (#3949).
     # See https://github.com/NVIDIA/aicr/issues/914.
     hasSelfRefCRDs: true
     # recipes/mixins/platform-kubeflow.yaml additionally attaches
@@ -1644,7 +1646,7 @@ components:
       defaultRepository: oci://ghcr.io/kubeflow/charts
       defaultChart: kubeflow-trainer
       # renovate: datasource=docker depName=ghcr.io/kubeflow/charts/kubeflow-trainer
-      defaultVersion: 2.2.1
+      defaultVersion: 2.4.0
       defaultNamespace: kubeflow
     nodeScheduling:
       system:
@@ -1790,8 +1792,9 @@ components:
   # TrainingRuntime); the chart does not install Trainer. A referencing
   # recipe therefore needs two things this registry entry cannot supply:
   #
-  #   1. kubeflow-trainer in componentRefs — via the platform-kubeflow
-  #      mixin, or a base that already carries it. dependencyRefs only
+  #   1. kubeflow-trainer in componentRefs, declared in the overlay at the
+  #      version NVCRE supports (below); the platform-kubeflow mixin brings
+  #      the registry default instead. dependencyRefs only
   #      orders components that are already present; it does not add one,
   #      and naming an absent component fails resolution outright
   #      (ValidateDependencies: "references unknown dependency").
@@ -1813,11 +1816,10 @@ components:
   # off. Re-enable it only when prometheus-operator-crds are already on
   # the cluster (base.yaml or a dependencyRef).
   #
-  # NVCRE pins kubeflowTrainerVersion = "v2.2.1", which is the registry's
-  # kubeflow-trainer default; its `setup status` reports a cluster still on
-  # 2.2.0 as unsupported. No functional break is known between the two: the
-  # CRD delta is documentation text plus one embedded PodSpec field NVCRE
-  # does not set.
+  # NVCRE pins kubeflowTrainerVersion = "v2.2.1", and its `setup status`
+  # reports any other Trainer as unsupported. The registry's kubeflow-trainer
+  # default is newer, so an NVCRE overlay declares Trainer at 2.2.1 rather
+  # than taking it from platform-kubeflow (#3949).
   #
   # Only the overlays in nvcreAdoptingOverlays reference this component
   # (TestNVCRERegisteredAdoptedOnlyByQualifiedOverlays); ADR-025 admits them.

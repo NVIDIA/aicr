@@ -30,7 +30,7 @@ func TestExtraKeysPinned(t *testing.T) {
 		{"ExtraKeyObservationOnly", ExtraKeyObservationOnly, "observationOnly"},
 		{"ExtraKeyResultSchema", ExtraKeyResultSchema, "resultSchema"},
 		{"ExtraValueTrue", ExtraValueTrue, "true"},
-		{"ResultSchemaVersion", ResultSchemaVersion, "1"},
+		{"ResultSchemaVersion", ResultSchemaVersion, "2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -38,5 +38,34 @@ func TestExtraKeysPinned(t *testing.T) {
 				t.Errorf("%s = %q, want %q", tt.name, tt.got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTrustsReportedImages(t *testing.T) {
+	tests := []struct {
+		schema string
+		want   bool
+	}{
+		{"", false},
+		{"1", false},
+		{"2", true},
+		{"3", true},
+		{"2-dev", false},
+		{"02", false},
+		{"+2", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.schema, func(t *testing.T) {
+			if got := TrustsReportedImages(tt.schema); got != tt.want {
+				t.Errorf("TrustsReportedImages(%q) = %v, want %v", tt.schema, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResultSchemaVersions(t *testing.T) {
+	got := ResultSchemaVersions()
+	if len(got) != 2 || got[0] != "1" || got[len(got)-1] != ResultSchemaVersion {
+		t.Errorf("ResultSchemaVersions() = %v, want [1 %s]", got, ResultSchemaVersion)
 	}
 }

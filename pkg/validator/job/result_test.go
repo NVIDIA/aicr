@@ -15,9 +15,14 @@
 package job
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"log/slog"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -172,7 +177,7 @@ func TestExtractResultLogReadRetried(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	logs := scriptedLogs(
 		logResponse{err: errLogsUnavailable},
-		logResponse{logs: "work\n" + ctrf.ExtraLinePrefix + `{"resultSchema":"1","observationOnly":"true"}` + "\n"},
+		logResponse{logs: "work\n" + ctrf.ExtraLinePrefix + `{"resultSchema":"` + ctrf.ResultSchemaVersion + `","observationOnly":"true"}` + "\n"},
 	)
 	d := deployTestJobWithLogs(t, ns, testEntry(), logs)
 	createPassedPod(t, ns, d.JobName(), "all checks passed")
@@ -1248,7 +1253,8 @@ func TestParseExtraSentinels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cleaned, extra, _ := parseSentinels(tt.logs)
+			cleaned, s := parseSentinels(tt.logs)
+			extra := s.extra
 			if cleaned != tt.wantCleaned {
 				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
 			}
@@ -1275,7 +1281,8 @@ func TestProcessValidatorLogs(t *testing.T) {
 	}
 	b.WriteString(p + `{"nodesValidated":"1","nodesTotal":"2"}`)
 
-	extra, _, stdout := processValidatorLogs(b.String())
+	s, stdout := processValidatorLogs(b.String())
+	extra := s.extra
 
 	if extra["nodesValidated"] != "1" || extra["nodesTotal"] != "2" {
 		t.Fatalf("late sentinel beyond truncation window was lost: extra=%v", extra)
@@ -1502,7 +1509,8 @@ func TestParseProvenanceSentinel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cleaned, extra, prov := parseSentinels(tt.logs)
+			cleaned, s := parseSentinels(tt.logs)
+			extra, prov := s.extra, s.prov
 			if cleaned != tt.wantCleaned {
 				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
 			}
@@ -1514,6 +1522,394 @@ func TestParseProvenanceSentinel(t *testing.T) {
 			}
 			if len(extra) != tt.wantExtra {
 				t.Errorf("extra = %v", extra)
+			}
+		})
+	}
+}
+
+var (
+	testDigestA = "sha256:" + strings.Repeat("a", 64)
+	testDigestB = "sha256:" + strings.Repeat("b", 64)
+)
+
+// schemaStamp is the resultSchema stamp validators.Run writes, without which
+// captureValidatorOutput drops image and platform lines.
+var schemaStamp = ctrf.ExtraLinePrefix + `{"resultSchema":"` + ctrf.ResultSchemaVersion + `"}`
+
+// neutralized returns line as validators.Run's output filter relays it.
+func neutralized(line string) string {
+	return strings.ReplaceAll(line, ctrf.ReservedLinePrefix, "# #AICR-")
+}
+
+// imageSentinel returns img as the stdout line validators.EmitImage writes.
+func imageSentinel(t *testing.T, img ctrf.PodImage) string {
+	t.Helper()
+	b, err := json.Marshal(img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctrf.ImageLinePrefix + string(b)
+}
+
+func TestParseImageSentinel(t *testing.T) {
+	aiperf := imageSentinel(t, ctrf.PodImage{Image: "ghcr.io/x/aiperf-bench:v1.0.0", Digest: testDigestA, Platform: "linux/amd64"})
+	other := imageSentinel(t, ctrf.PodImage{Image: "example.com/bench:v2", Digest: testDigestB})
+	invalid := imageSentinel(t, ctrf.PodImage{Image: "x:v1", Digest: "sha256:abc"})
+	tests := []struct {
+		name        string
+		logs        string
+		wantCleaned string
+		wantImages  []string
+	}{
+		{"record parsed and stripped", "work\n" + aiperf + "\ndone", "work\ndone", []string{testDigestA}},
+		{"records kept in order", aiperf + "\n" + other, "", []string{testDigestA, testDigestB}},
+		{"malformed JSON dropped", ctrf.ImageLinePrefix + `{"image":` + "\n" + other, "", []string{testDigestB}},
+		{"invalid record dropped", invalid + "\n" + other, "", []string{testDigestB}},
+		{"neutralized relay kept as stdout", neutralized(aiperf) + "\n" + other, neutralized(aiperf), []string{testDigestB}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleaned, s := parseSentinels(tt.logs)
+			images := s.images
+			if cleaned != tt.wantCleaned {
+				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
+			}
+			if len(images) != len(tt.wantImages) {
+				t.Fatalf("images = %+v, want digests %v", images, tt.wantImages)
+			}
+			for i, want := range tt.wantImages {
+				if images[i].Digest != want {
+					t.Errorf("images[%d].Digest = %q, want %q", i, images[i].Digest, want)
+				}
+			}
+		})
+	}
+}
+
+func TestSentinelPrefixesAreReserved(t *testing.T) {
+	for _, p := range sentinelPrefixes {
+		if !strings.HasPrefix(p, ctrf.ReservedLinePrefix) {
+			t.Errorf("sentinel prefix %q does not start with ctrf.ReservedLinePrefix %q", p, ctrf.ReservedLinePrefix)
+		}
+	}
+}
+
+func TestParsePlatformSentinel(t *testing.T) {
+	line := func(platform string) string { return ctrf.PlatformLinePrefix + strconv.Quote(platform) }
+	tests := []struct {
+		name         string
+		logs         string
+		wantCleaned  string
+		wantPlatform string
+	}{
+		{"line parsed and stripped", line("linux/arm64") + "\nwork", "work", "linux/arm64"},
+		{"agreeing lines", line("linux/arm64") + "\nwork\n" + line("linux/arm64"), "work", "linux/arm64"},
+		{"conflicting lines", line("linux/arm64") + "\nwork\n" + line("linux/amd64"), "work", ""},
+		{"neutralized relay kept as stdout", neutralized(line("linux/amd64")) + "\n" + line("linux/arm64"), neutralized(line("linux/amd64")), "linux/arm64"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleaned, s := parseSentinels(tt.logs)
+			if cleaned != tt.wantCleaned {
+				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
+			}
+			if s.platform != tt.wantPlatform {
+				t.Errorf("platform = %q, want %q", s.platform, tt.wantPlatform)
+			}
+		})
+	}
+}
+
+// TestParseSentinelsBoundsRejectedValues verifies a rejected image or
+// platform value reaches the log quoted and capped, with no raw newline or
+// escape byte.
+func TestParseSentinelsBoundsRejectedValues(t *testing.T) {
+	hostile := "x\n[cli] status=passed\x1b[2K" + strings.Repeat("A", 4*defaults.ValidatorMaxStdoutLineLength)
+	platform, err := json.Marshal(hostile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := imageSentinel(t, ctrf.PodImage{Image: hostile}) + "\n" + ctrf.PlatformLinePrefix + string(platform)
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	parseSentinels(logs)
+
+	attrs := map[string]string{
+		"dropping invalid validator image record":             "record",
+		"dropping platform sentinel without the os/arch form": "platform",
+	}
+	dec := json.NewDecoder(&buf)
+	for {
+		var rec map[string]any
+		if err := dec.Decode(&rec); err != nil {
+			break
+		}
+		key, ok := attrs[rec["msg"].(string)]
+		if !ok {
+			continue
+		}
+		delete(attrs, rec["msg"].(string))
+		got, _ := rec[key].(string)
+		if !strings.Contains(got, "status=passed") {
+			t.Errorf("%s = %q, want the rejected value", key, got)
+		}
+		if strings.ContainsAny(got, "\n\x1b") {
+			t.Errorf("%s = %q, carries a raw newline or escape byte", key, got)
+		}
+		if limit := 2 * defaults.ValidatorMaxStdoutLineLength; len(got) > limit {
+			t.Errorf("%s is %d bytes, want at most %d", key, len(got), limit)
+		}
+	}
+	for msg := range attrs {
+		t.Errorf("no %q log record", msg)
+	}
+}
+
+// TestExtractResultRecordsImages verifies the validator's own image comes
+// first, with its registry digest and reported platform.
+func TestExtractResultRecordsImages(t *testing.T) {
+	reported := ctrf.PodImage{Image: "ghcr.io/nvidia/aicr-validators/aiperf-bench:v1.0.0", Digest: testDigestB, Platform: "linux/arm64"}
+	sentinel := imageSentinel(t, reported)
+	pinned := testEntry().Image[:strings.LastIndex(testEntry().Image, ":")] + "@" + testDigestA
+	tests := []struct {
+		name      string
+		imageID   string
+		platforms []string
+		want      []ctrf.PodImage
+	}{
+		{
+			name:    "registry digest recorded first",
+			imageID: pinned,
+			want:    []ctrf.PodImage{{Image: testEntry().Image, Digest: testDigestA}, reported},
+		},
+		{
+			name:    "bare local image ID records the image without a digest",
+			imageID: testDigestA,
+			want:    []ctrf.PodImage{{Image: testEntry().Image}, reported},
+		},
+		{
+			name:      "platform line sets the platform",
+			imageID:   pinned,
+			platforms: []string{"linux/amd64"},
+			want:      []ctrf.PodImage{{Image: testEntry().Image, Digest: testDigestA, Platform: "linux/amd64"}, reported},
+		},
+		{
+			name:      "conflicting platform lines record none",
+			imageID:   pinned,
+			platforms: []string{"linux/amd64", "linux/arm64"},
+			want:      []ctrf.PodImage{{Image: testEntry().Image, Digest: testDigestA}, reported},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := "work\n" + sentinel + "\n"
+			for _, platform := range tt.platforms {
+				logs = ctrf.PlatformLinePrefix + strconv.Quote(platform) + "\n" + logs
+			}
+			logs = schemaStamp + "\n" + logs
+			ns := createUniqueNamespace(t)
+			d := deployTestJobWithLogs(t, ns, testEntry(), scriptedLogs(logResponse{logs: logs}))
+			now := metav1.Now()
+			p := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: d.JobName() + "-",
+					Namespace:    ns,
+					Labels:       map[string]string{"batch.kubernetes.io/job-name": d.JobName()},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: ValidatorContainerName, Image: testEntry().Image}},
+				},
+			}
+			created, err := testClientset.CoreV1().Pods(ns).Create(context.Background(), p, metav1.CreateOptions{})
+			if err != nil {
+				t.Fatalf("failed to create test pod: %v", err)
+			}
+			created.Status = corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+				Name:    ValidatorContainerName,
+				ImageID: tt.imageID,
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					ExitCode: 0, StartedAt: now, FinishedAt: now,
+				}},
+			}}}
+			if _, err = testClientset.CoreV1().Pods(ns).UpdateStatus(context.Background(), created, metav1.UpdateOptions{}); err != nil {
+				t.Fatalf("failed to update pod status: %v", err)
+			}
+
+			result := d.ExtractResult(context.Background())
+
+			if result.CTRFStatus() != ctrf.StatusPassed {
+				t.Fatalf("CTRFStatus = %q, want passed (message %q)", result.CTRFStatus(), result.TerminationMsg)
+			}
+			if len(result.Images) != len(tt.want) {
+				t.Fatalf("Images = %+v, want %+v", result.Images, tt.want)
+			}
+			for i := range tt.want {
+				if result.Images[i] != tt.want[i] {
+					t.Errorf("Images[%d] = %+v, want %+v", i, result.Images[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestResultRecordsImageWithoutContainerStatus verifies a result with no
+// validator container status records, with no digest, the pod spec image when
+// a pod exists and the planned image when none does.
+func TestResultRecordsImageWithoutContainerStatus(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  *corev1.PodStatus
+		extract func(*Deployer) *ctrf.ValidatorResult
+		want    string
+	}{
+		{"pod not found", nil, func(d *Deployer) *ctrf.ValidatorResult {
+			return d.ExtractResult(context.Background())
+		}, testEntry().Image},
+		{"validator container status missing", &corev1.PodStatus{}, func(d *Deployer) *ctrf.ValidatorResult {
+			return d.ExtractResult(context.Background())
+		}, "busybox"},
+		{"validator container status missing at timeout", &corev1.PodStatus{}, func(d *Deployer) *ctrf.ValidatorResult {
+			return d.HandleTimeout(context.Background(), context.DeadlineExceeded)
+		}, "busybox"},
+		{"pod not found at timeout", nil, func(d *Deployer) *ctrf.ValidatorResult {
+			return d.HandleTimeout(context.Background(), context.DeadlineExceeded)
+		}, testEntry().Image},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := createUniqueNamespace(t)
+			d := deployTestJob(t, ns, testEntry())
+			if tt.status != nil {
+				createPodForJob(t, ns, d.JobName(), *tt.status)
+			}
+
+			result := tt.extract(d)
+
+			want := []ctrf.PodImage{{Image: tt.want}}
+			if !slices.Equal(result.Images, want) {
+				t.Errorf("Images = %+v, want %+v", result.Images, want)
+			}
+		})
+	}
+}
+
+// TestResultRecordsReadablePodImage verifies the validator image record of a
+// timed-out pod and of a container that never started.
+func TestResultRecordsReadablePodImage(t *testing.T) {
+	image := testEntry().Image
+	const mirrored = "mirror.example.com/aicr/validator:v2"
+	platformLine := ctrf.PlatformLinePrefix + strconv.Quote("linux/arm64")
+	tests := []struct {
+		name      string
+		specImage string
+		status    corev1.ContainerStatus
+		logs      string
+		extract   func(*Deployer) *ctrf.ValidatorResult
+		want      []ctrf.PodImage
+	}{
+		{
+			name:      "timed out while running",
+			specImage: image,
+			status: corev1.ContainerStatus{
+				ImageID: image[:strings.LastIndex(image, ":")] + "@" + testDigestA,
+				State:   corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+			},
+			logs: schemaStamp + "\n" + platformLine + "\nwork",
+			extract: func(d *Deployer) *ctrf.ValidatorResult {
+				return d.HandleTimeout(t.Context(), context.DeadlineExceeded)
+			},
+			want: []ctrf.PodImage{{Image: image, Digest: testDigestA, Platform: "linux/arm64"}},
+		},
+		{
+			name:      "image pull failure records the spec image",
+			specImage: mirrored,
+			status: corev1.ContainerStatus{
+				State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"}},
+			},
+			extract: func(d *Deployer) *ctrf.ValidatorResult { return d.ExtractResult(t.Context()) },
+			want:    []ctrf.PodImage{{Image: mirrored}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.status.Name = ValidatorContainerName
+			p := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "ns", Labels: map[string]string{"batch.kubernetes.io/job-name": "job"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: ValidatorContainerName, Image: tt.specImage}}},
+				Status:     corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{tt.status}},
+			}
+			cs := fake.NewClientset(p)
+			d := NewDeployer(Config{Clientset: cs, Namespace: "ns", Entry: testEntry(),
+				LogReader: scriptedLogs(logResponse{logs: tt.logs}).read})
+			d.jobName = "job"
+
+			result := tt.extract(d)
+
+			if !slices.Equal(result.Images, tt.want) {
+				t.Errorf("Images = %+v, want %+v", result.Images, tt.want)
+			}
+		})
+	}
+}
+
+// TestCaptureValidatorOutputCapsImages verifies a result keeps at most
+// defaults.ValidatorMaxImageRecords image records, the validator's own first.
+func TestCaptureValidatorOutputCapsImages(t *testing.T) {
+	var logs strings.Builder
+	logs.WriteString(schemaStamp + "\n")
+	for i := range defaults.ValidatorMaxImageRecords + 4 {
+		logs.WriteString(imageSentinel(t, ctrf.PodImage{Image: "example.com/bench:v" + strconv.Itoa(i)}) + "\n")
+	}
+	d := NewDeployer(Config{Namespace: "ns", Entry: testEntry(),
+		LogReader: scriptedLogs(logResponse{logs: logs.String()}).read})
+	result := d.newResult()
+
+	d.captureValidatorOutput(t.Context(), "pod", result)
+
+	if len(result.Images) != defaults.ValidatorMaxImageRecords {
+		t.Fatalf("kept %d images, want %d", len(result.Images), defaults.ValidatorMaxImageRecords)
+	}
+	if result.Images[0].Image != testEntry().Image || result.Images[1].Image != "example.com/bench:v0" {
+		t.Errorf("Images = %+v, want the validator image, then the first reported", result.Images)
+	}
+}
+
+// TestCaptureValidatorOutputGatesImagesOnSchema verifies image and platform
+// lines are recorded only from an image whose stamp says it neutralizes
+// relayed output.
+func TestCaptureValidatorOutputGatesImagesOnSchema(t *testing.T) {
+	reported := ctrf.PodImage{Image: "example.com/bench:v1", Digest: testDigestB}
+	lines := ctrf.PlatformLinePrefix + strconv.Quote("linux/arm64") + "\n" + imageSentinel(t, reported) + "\n"
+	stamp := func(v string) string { return ctrf.ExtraLinePrefix + `{"resultSchema":"` + v + `"}` + "\n" }
+	tests := []struct {
+		name       string
+		logs       string
+		want       []ctrf.PodImage
+		wantSchema string
+	}{
+		{"no stamp", lines, []ctrf.PodImage{{Image: testEntry().Image}}, ""},
+		{"version 1", stamp("1") + lines, []ctrf.PodImage{{Image: testEntry().Image}}, "1"},
+		{"current version", stamp(ctrf.ResultSchemaVersion) + lines, []ctrf.PodImage{{Image: testEntry().Image, Platform: "linux/arm64"}, reported}, ctrf.ResultSchemaVersion},
+		{"relayed stamp after version 1", stamp("1") + stamp(ctrf.ResultSchemaVersion) + lines, []ctrf.PodImage{{Image: testEntry().Image}}, "1"},
+		{"relayed stamp after an unstamped extra", ctrf.ExtraLinePrefix + `{"nodesTotal":"2"}` + "\n" + stamp(ctrf.ResultSchemaVersion) + lines, []ctrf.PodImage{{Image: testEntry().Image}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := NewDeployer(Config{Namespace: "ns", Entry: testEntry(),
+				LogReader: scriptedLogs(logResponse{logs: tt.logs}).read})
+			result := d.newResult()
+
+			d.captureValidatorOutput(t.Context(), "pod", result)
+
+			if !slices.Equal(result.Images, tt.want) {
+				t.Errorf("Images = %+v, want %+v", result.Images, tt.want)
+			}
+			if got := result.Extra[ctrf.ExtraKeyResultSchema]; got != tt.wantSchema {
+				t.Errorf("published resultSchema = %q, want %q", got, tt.wantSchema)
 			}
 		})
 	}

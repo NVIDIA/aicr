@@ -26,11 +26,23 @@
 # component's manifests. TestHealthCheckCRDAssertionsAnchored enforces this.
 charts:
   - chart: kubeflow-trainer
+    repository: oci://ghcr.io/kubeflow/charts
+    sourceVersion: 2.2.1
+    variants:
+      - crds:
+          - clustertrainingruntimes.trainer.kubeflow.org
+          - jobsets.jobset.x-k8s.io
+          - trainingruntimes.trainer.kubeflow.org
+          - trainjobs.trainer.kubeflow.org
+        recipes:
+          - gb300-eks-ubuntu-training-kubeflow
+  - chart: kubeflow-trainer
     crds:
       - clustertrainingruntimes.trainer.kubeflow.org
       - jobsets.jobset.x-k8s.io
+      - optimizationjobs.trainer.kubeflow.org
       - trainingruntimes.trainer.kubeflow.org
       - trainjobs.trainer.kubeflow.org
     repository: oci://ghcr.io/kubeflow/charts
-    sourceVersion: 2.2.1
+    sourceVersion: 2.4.0
 component: kubeflow-trainer

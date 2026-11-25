@@ -37,7 +37,8 @@
 //     kept. Extra keeps only keys in ctrfExtraAllowlist whose values pass
 //     that key's validator, so an IP under nodesTotal is dropped. This is the
 //     publication boundary, since raw prefixed stdout can bypass emission-side
-//     checks. An Extra map that retains nothing is omitted.
+//     checks. An Extra map that retains nothing is omitted. Images keeps up
+//     to defaults.ValidatorMaxImageRecords valid records, unaliased.
 //
 // Both functions are pure and never alter their inputs.
 package redact
@@ -82,7 +83,9 @@ const (
 	//     validator image spoke.
 	//   - v11 added the no-metrics-backend skipReason code.
 	//   - v12 added the superseded-by-cre skipReason code.
-	PolicyVersion = "v12"
+	//   - v13 added the per-test images carrier (boundImages) and resultSchema
+	//     version 2.
+	PolicyVersion = "v13"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -339,7 +342,7 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	// the CNCF aggregation reads an unmarked pass of an observation-only
 	// check as observed either way and uses it only to word the reason. Only
 	// the versions a reader knows are publishable.
-	ctrf.ExtraKeyResultSchema: closedSet(ctrf.ResultSchemaVersion),
+	ctrf.ExtraKeyResultSchema: closedSet(ctrf.ResultSchemaVersions()...),
 }
 
 // ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.
@@ -624,9 +627,26 @@ func collapseListSelectors(p string) string {
 	})
 }
 
+// boundImages returns, in a new slice, the first
+// defaults.ValidatorMaxImageRecords records of in that pass
+// ctrf.PodImage.Valid, or nil when none do.
+func boundImages(in []ctrf.PodImage) []ctrf.PodImage {
+	var out []ctrf.PodImage
+	for _, img := range in {
+		if len(out) == defaults.ValidatorMaxImageRecords {
+			break
+		}
+		if img.Valid() {
+			out = append(out, img)
+		}
+	}
+	return out
+}
+
 // ctrfAppliedRules is the static, sorted description of the CTRF scrub.
 var ctrfAppliedRules = []string{
 	"ctrf.tests.extra.allowlist",
+	"ctrf.tests.images.bound",
 	"ctrf.tests.omit:message",
 	"ctrf.tests.omit:stdout",
 	"ctrf.tests.runtimeProvenance.bound",
@@ -721,9 +741,9 @@ func redactHeader(h header.Header) header.Header {
 }
 
 // CTRF returns a redacted deep copy of in with per-test Stdout and Message
-// omitted and each per-test Extra map rebuilt against ctrfExtraAllowlist, plus
-// the sorted list of applied rule identifiers. It never mutates in. Returns
-// (nil, nil) when in is nil.
+// omitted, each per-test Extra map rebuilt against ctrfExtraAllowlist and
+// Images bounded by boundImages, plus the sorted list of applied rule
+// identifiers. It never mutates in. Returns (nil, nil) when in is nil.
 func CTRF(in *ctrf.Report) (*ctrf.Report, []string) {
 	if in == nil {
 		return nil, nil
@@ -741,6 +761,9 @@ func CTRF(in *ctrf.Report) (*ctrf.Report, []string) {
 			tr.Message = ""
 			tr.Extra = allowlistExtra(tr.Extra)
 			tr.RuntimeProvenance = boundRuntimeProvenance(tr.RuntimeProvenance)
+			// Image refs are kept unaliased, so a mirror registry host is
+			// published.
+			tr.Images = boundImages(tr.Images)
 			tests[i] = tr
 		}
 		out.Results.Tests = tests

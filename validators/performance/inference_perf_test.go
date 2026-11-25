@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"net/http"
@@ -33,6 +34,7 @@ import (
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/recipe"
+	"aicr.run/pkg/validator/ctrf"
 	"aicr.run/pkg/validator/labels"
 	validatorv1 "aicr.run/pkg/validator/v1"
 	"aicr.run/validators"
@@ -2424,9 +2426,12 @@ func TestBuildAIPerfJob_ReturnedParams(t *testing.T) {
 		// 128*8 = 1024 exceeds the 1000 floor, so the count is the scaled value
 		// — exactly the case the old log (which printed the 1000 constant) got
 		// wrong.
-		_, params, err := buildAIPerfJob("ns", "run-0", "http://ep:8000", "Qwen/Qwen3-8B", 128, nil)
+		job, params, err := buildAIPerfJob("ns", "run-0", "http://ep:8000", "Qwen/Qwen3-8B", 128, nil)
 		if err != nil {
 			t.Fatalf("buildAIPerfJob: unexpected error: %v", err)
+		}
+		if got := job.Spec.Template.Spec.Containers[0].Image; params.image != got {
+			t.Errorf("image = %q, want the container's %q", params.image, got)
 		}
 		if params.requestCount != 128*aiperfRequestsPerConcurrency {
 			t.Errorf("requestCount = %d, want %d", params.requestCount, 128*aiperfRequestsPerConcurrency)
@@ -2451,6 +2456,151 @@ func TestBuildAIPerfJob_ReturnedParams(t *testing.T) {
 			t.Errorf("warmupCount = %d, want 300", params.warmupCount)
 		}
 	})
+}
+
+func TestAIPerfPodImage(t *testing.T) {
+	const (
+		ns    = "ns"
+		name  = "aiperf-0"
+		ref   = "nvcr.io/nvidia/aiperf-bench:edge"
+		ranAs = "nvcr.io/nvidia/aiperf-bench:v1"
+	)
+	digest := "sha256:" + strings.Repeat("a", 64)
+	pod := func(container string) *v1.Pod {
+		return &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec:       v1.PodSpec{Containers: []v1.Container{{Name: container, Image: ranAs}}},
+			Status: v1.PodStatus{ContainerStatuses: []v1.ContainerStatus{
+				{Name: container, ImageID: ranAs + "@" + digest},
+			}},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		objects []runtime.Object
+		want    ctrf.PodImage
+	}{
+		{"pod digest", []runtime.Object{pod(aiperfContainerName)}, ctrf.PodImage{Image: ranAs, Digest: digest}},
+		{"pod not found", nil, ctrf.PodImage{Image: ref}},
+		{"no benchmark container", []runtime.Object{pod("other")}, ctrf.PodImage{Image: ref}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewClientset(tt.objects...)
+			if got := aiperfPodImage(t.Context(), client, ns, name, ref); got != tt.want {
+				t.Errorf("aiperfPodImage() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAIPerfRunResult(t *testing.T) {
+	const planned = "nvcr.io/nvidia/aiperf-bench:edge"
+	digest := "sha256:" + strings.Repeat("a", 64)
+	ran := ctrf.PodImage{Image: "nvcr.io/nvidia/aiperf-bench:v1", Digest: digest}
+	logs := ctrf.PlatformLinePrefix + `"linux/arm64"` + "\nbenchmark output"
+	withPlatform := ran
+	withPlatform.Platform = "linux/arm64"
+	errFailed := stderrors.New("pod failed")
+
+	tests := []struct {
+		name     string
+		findErr  error
+		run      *aiperfPodRun
+		want     ctrf.PodImage
+		wantLogs string
+		wantCode errors.ErrorCode
+	}{
+		{"pod not found", errFailed, nil, ctrf.PodImage{Image: planned}, "", errors.ErrCodeTimeout},
+		{"job failed", nil, &aiperfPodRun{image: ran, waitErr: errFailed, logs: logs}, withPlatform, logs, errors.ErrCodeInternal},
+		{"logs unreadable", nil, &aiperfPodRun{image: ran, logErr: errFailed}, ran, "", errors.ErrCodeInternal},
+		{"success", nil, &aiperfPodRun{image: ran, logs: logs}, withPlatform, logs, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotLogs string
+			var err error
+			out := captureStdout(t, func() { gotLogs, err = aiperfRunResult(planned, tt.findErr, tt.run) })
+
+			var images []ctrf.PodImage
+			for line := range strings.SplitSeq(out, "\n") {
+				if payload, ok := strings.CutPrefix(line, ctrf.ImageLinePrefix); ok {
+					var img ctrf.PodImage
+					if jerr := json.Unmarshal([]byte(payload), &img); jerr != nil {
+						t.Fatalf("image line %q: %v", line, jerr)
+					}
+					images = append(images, img)
+				}
+			}
+			if len(images) != 1 || images[0] != tt.want {
+				t.Errorf("image lines = %+v, want exactly %+v", images, tt.want)
+			}
+			if gotLogs != tt.wantLogs {
+				t.Errorf("logs = %q, want %q", gotLogs, tt.wantLogs)
+			}
+			if tt.wantCode == "" {
+				if err != nil {
+					t.Errorf("err = %v, want nil", err)
+				}
+				return
+			}
+			errorstest.WantReportedCode(t, err, tt.wantCode)
+		})
+	}
+}
+
+// TestRunAIPerfJobReportsPodImage is not parallel because captureStdout
+// swaps os.Stdout.
+func TestRunAIPerfJobReportsPodImage(t *testing.T) {
+	const (
+		ns      = "ns"
+		jobName = "aiperf-run"
+		ranAs   = "nvcr.io/nvidia/aiperf-bench:v1"
+	)
+	t.Setenv("HOSTNAME", "")
+	t.Setenv("AICR_INFERENCE_PERF_NO_CLEANUP", "")
+	digest := "sha256:" + strings.Repeat("a", 64)
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: jobName + "-0", Namespace: ns, Labels: map[string]string{"job-name": jobName}},
+		Spec:       v1.PodSpec{Containers: []v1.Container{{Name: aiperfContainerName, Image: ranAs}}},
+		Status: v1.PodStatus{
+			Phase:             v1.PodSucceeded,
+			ContainerStatuses: []v1.ContainerStatus{{Name: aiperfContainerName, ImageID: ranAs + "@" + digest}},
+		},
+	}
+	client := fake.NewClientset(pod)
+	// The selector wait skips terminal pods, so it sees the pod still running.
+	client.PrependWatchReactor("pods", func(k8stesting.Action) (bool, watch.Interface, error) {
+		running := pod.DeepCopy()
+		running.Status.Phase = v1.PodRunning
+		w := watch.NewFakeWithChanSize(1, false)
+		w.Add(running)
+		return true, w, nil
+	})
+	runCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	ctx := &validators.Context{Ctx: runCtx, Clientset: client, Namespace: ns}
+
+	var err error
+	out := captureStdout(t, func() { _, err = runAIPerfJob(ctx, "http://frontend:8000", "model", 1, jobName) })
+	if err != nil {
+		t.Fatalf("runAIPerfJob() error = %v", err)
+	}
+
+	var images []ctrf.PodImage
+	for line := range strings.SplitSeq(out, "\n") {
+		if payload, ok := strings.CutPrefix(line, ctrf.ImageLinePrefix); ok {
+			var img ctrf.PodImage
+			if jerr := json.Unmarshal([]byte(payload), &img); jerr != nil {
+				t.Fatalf("image line %q: %v", line, jerr)
+			}
+			images = append(images, img)
+		}
+	}
+	if want := (ctrf.PodImage{Image: ranAs, Digest: digest}); len(images) != 1 || images[0] != want {
+		t.Errorf("image lines = %+v, want exactly %+v", images, want)
+	}
 }
 
 func TestResolveAiperfImage(t *testing.T) {

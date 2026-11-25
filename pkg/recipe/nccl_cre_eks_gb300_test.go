@@ -25,10 +25,10 @@ import (
 // cannot drop an inherited check; the validator skips the nvls and net
 // TrainJob checks as superseded. The net floor is 40 on both backends: the CRE
 // net entry sets NCCL_ALGO=Tree to work around the new nccl-tests image's EFA
-// regression (NVIDIA/nccl#2630). The kubeflow leaf already
-// carries kubeflow-trainer through the platform-kubeflow mixin that nvcre
-// needs. Attaching CRE to a shared base would install nvcre's CRDs and
-// cluster-scoped RBAC for every consumer of that base, including the Slurm and
+// regression (NVIDIA/nccl#2630). The kubeflow leaf already carries the
+// kubeflow-trainer nvcre needs, declared in the leaf at the version NVCRE
+// supports (#3949). Attaching CRE to a shared base would install nvcre's CRDs
+// and cluster-scoped RBAC for every consumer of that base, including the Slurm and
 // inference leaves, and AICR has no mechanism for a user-selectable optional
 // component.
 func TestGB300EKSTrainingCREAdoption(t *testing.T) {

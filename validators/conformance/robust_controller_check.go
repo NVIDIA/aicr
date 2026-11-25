@@ -315,12 +315,12 @@ func requireCRDEstablished(ctx context.Context, dynClient dynamic.Interface, crd
 // bound is spent on the controller (TrainJob → JobSet → Job → Pod) and not
 // on a multi-gigabyte image pull.
 //
-// The TrainJob sets no scheduling of its own: Trainer v2.2.0 offers
+// The TrainJob sets no scheduling of its own: Trainer v2.2.0 and later offer
 // spec.runtimePatches for per-TrainJob tolerations, but AICR's
 // torch-distributed manifest already carries the accelerated node selector
 // and tolerations the bundler bakes in from --accelerated-node-selector and
-// --accelerated-node-toleration, and that path holds across Trainer v2.1 and
-// v2.2. That is the chosen design: the probe exercises the runtime as a user's
+// --accelerated-node-toleration, and that path holds across Trainer v2.1
+// through v2.4. That is the chosen design: the probe exercises the runtime as a user's
 // bare TrainJob would, so a bundle generated without the accelerated
 // toleration surfaces here as a Timeout verdict naming the Pending pod and
 // its Unschedulable reason. The one runtimePatches entry it carries, and only
@@ -512,7 +512,7 @@ func buildValidTrainJob(namespace string, pullSecrets []corev1.LocalObjectRefere
 }
 
 // trainJobPodSpecPatch wraps podSpec, the pod-spec fields to patch, in the
-// Trainer v2.2 spec.runtimePatches shape addressing the default runtime's
+// Trainer v2.2+ spec.runtimePatches shape addressing the default runtime's
 // node Job: runtimePatches[].trainingRuntimeSpec.template.spec.replicatedJobs
 // [name=node].template.spec.template.spec. The entry is keyed by
 // trainJobPatchManager, as Trainer requires.
