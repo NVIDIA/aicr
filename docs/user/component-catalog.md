@@ -945,6 +945,7 @@ With a step composed, the datastore is in NVSentinel's event path, not only its 
 - Custom cluster domains: the connection URI names `svc.cluster.local`.
 - The remediation step on Kind, unless `lifecycle-manager.config.tests.dcgm-diag-test.command` is overridden: Kind runs no standalone DCGM hostengine for the post-reboot diagnostic to call, and the bundle fails (see [Node Validation](#node-validation) prerequisites).
 - The remediation step on GKE COS, under every `gpuStack` profile value (`gke-default`, `bundle-installer`, or `dra`). In all of them, the driver comes from outside the GPU Operator and lives in `/home/kubernetes/bin/nvidia`. The GPU reset Job runs `nvidia-smi` by chrooting into the driver root, and that directory holds only driver files, not a complete filesystem; the `gpu-reset` image ships no `nvidia-smi` of its own. The bundle fails. The observe and quarantine steps work there.
+- The remediation step on a Run:ai leaf (`--platform runai`). Those leaves have every cordon also apply Run:ai's `runai/gpu-fault=true:NoSchedule` taint, and post-reboot validation cannot release a taint whose value is `true`. The bundle fails. The observe and quarantine steps work there (see [Run:ai cluster](#runai-cluster)).
 
 **Bundle-time gates.** `CheckNVSentinelPostRemediationValidationCoherent` blocks post-reboot validation that would strand or skip a repaired node (see [Node Validation](#node-validation)). `CheckNVSentinelRemediationPipelineCoherent` blocks a bundle whose pipeline cannot work: quarantine, drain or remediation with the embedded `mongodbStore` on, with no `global.datastore.provider`, or with one other than `mongodb` or `postgresql`; a stage without the one before it (`node-drainer` without `fault-quarantine`, `fault-remediation` without `node-drainer`); a live `fault-remediation` without `janitor`, or without the [health events analyzer](#health-events-analyzer) and its `MultipleRemediations` rule; `janitor` without `janitor-provider`; janitor's GPU reset Job requesting a RuntimeClass other than the GPU Operator's, or any RuntimeClass where the GPU Operator runs CDI with the NRI plugin; the reset Job reading the driver from a path the GPU Operator does not populate (`/run/nvidia/driver`, or its `hostPaths.driverInstallDir`, when it installs the driver; `/` when the node image does), a reset `driverRoot` that is not an absolute, clean path, or is `/`, or the reset on GKE COS under either `gpuStack` profile; a reset service manager that waits for an operand the GPU Operator does not run, in a namespace it does not use, or with a custom spec missing its timeouts; `fault-remediation` without `metadata-collector`. When NVSentinel reads the `nvsentinel-mongodb-uri` Secret, it also requires x509 auth with the `nvsentinel-mongodb-app-client` certificate, and both Percona components deployed, enabled and in NVSentinel's namespace. `CheckNVSentinelMongoDBCoherent` blocks an `nvsentinel-mongodb` with no NVSentinel to use it, TLS below `requireTLS`, no `$external` app user or one without `readWrite` on `HealthEventsDatabase` and the `nvsentinelTTLIndex` role, sharding on, no enabled `psmdb-operator`, a `psmdb-operator` with `watchAllNamespaces` on or `disableTelemetry` off, or a `crVersion` or `initImage` off the operator image's minor. `CheckNVSentinelDatastorePrerequisites` reads the snapshot evidence above: it blocks no default StorageClass (unless one is named), another Percona cluster or operator, or unreadable evidence, and warns when the recipe carries no evidence, as a criteria-only recipe does. `CheckNVSentinelRemediationPipelineCoherent` and `CheckNVSentinelMongoDBCoherent` also reject `--dynamic` on any path they verify, since install-time edits to `cluster-values.yaml` would bypass them. The mixins satisfy those two by construction, so they catch `--set` edits and overlays that disable a dependency; `CheckNVSentinelDatastorePrerequisites` depends on the cluster. On a Slurm recipe `CheckNVSentinelSlurmCustomDrainCoherent` also applies; see [Slurm Drain Through Slinky](#slurm-drain-through-slinky). `CheckNVSentinelDrainScopeCoherent` checks the drain timing and scope; see [Drain Scope and Timing](#drain-scope-and-timing).
 
@@ -3039,6 +3040,50 @@ gate requires; compose `nvsentinel-preflight-runai` with it so that
 `nvsentinel` installs after `runai-cluster` (see
 [Preflight Checks](#preflight-checks)). Run:ai's support matrix covers Kubernetes 1.35 through 1.37,
 and the leaves carry that floor.
+
+**NVSentinel quarantine.** Run:ai runs two DaemonSets on every GPU node,
+`gpu-fractioning-fractiond` and `gpu-fractioning-mpsd`, and reports the
+cluster's GPU stack unavailable while either has a pod that is expected on a
+node and not ready; the control plane can then show the whole cluster
+**Disconnected**. Cordoning the node does not help, because a DaemonSet pod
+tolerates the cordon. Run:ai's
+[cluster troubleshooting page](https://docs.nvidia.com/run-ai/self-hosted/documentation/installation-and-configuration/operate/clusters)
+documents a taint for this case, `runai/gpu-fault=true:NoSchedule`: the two
+DaemonSets tolerate only `nvidia.com/gpu`, so Kubernetes stops expecting them
+on a node that carries it. The Run:ai leaves have NVSentinel apply that taint.
+Every `fault-quarantine` rule set that cordons a node also taints it, and
+`fault-quarantine` removes the taint together with the cordon once every fault
+on the node has recovered. Nothing is tainted as shipped: the rule sets take
+effect when you compose [`nvsentinel-quarantine`](#graded-remediation), and
+`nvsentinel-observe` only logs what it would do.
+
+- **What the leaves set.** `fault-quarantine.ruleSets` on `nvsentinel`, which
+  is the chart's whole list with the taint added (Helm replaces lists, so
+  restate the whole list if you override it); a `runai/gpu-fault` toleration
+  on the GPU Operator's `daemonsets.tolerations`, because an operand that does
+  not tolerate a `NoSchedule` taint is left misscheduled and the operator then
+  stops every driver upgrade; and `gpu-fractioning.daemonTolerations` on
+  `runai-cluster`, written out at the chart's default. Do not add a
+  tolerate-all entry there: the taint works only while those two DaemonSets do
+  not tolerate it.
+- **Leave the taint to NVSentinel while it holds the node.** Removing it by
+  hand, or uncordoning the node, ends the quarantine: `fault-quarantine` stops
+  tracking the node and cancels the pending drain, and whichever of the cordon
+  and the taint you did not remove stays until you remove it too. A taint you
+  applied yourself before the fault is recorded as yours and is not removed.
+- **Pods already on the node stay.** `NoSchedule` evicts nothing, and
+  `node-drainer` does not delete DaemonSet pods. A Run:ai pod stuck on the
+  node no longer counts against the cluster, but it is still there; delete it
+  as Run:ai's page describes if you want it gone before the node recovers.
+- **Only faults NVSentinel acts on.** A node stuck in GPU Operator validation
+  that raises no fatal health event is not quarantined, so the manual steps on
+  Run:ai's page still apply to it.
+- **Not with `nvsentinel-remediation` yet.** Its post-reboot validation hands
+  the node to `lifecycle-manager`, which lifts only the taints listed under
+  `lifecycle-manager.config.schedulingGate.taints`, and the chart's test Job
+  template writes a listed value unquoted, so `true` reaches the API server as
+  a boolean and the Job is rejected. `aicr bundle` refuses the combination and
+  names the taint.
 
 **Kubeflow Training Operator.** Run:ai submits distributed training as
 `kubeflow.org/v1` jobs (PyTorchJob, TFJob, XGBoostJob, JAXJob), so

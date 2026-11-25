@@ -39,11 +39,13 @@
 # verbatim, the maintenance-request one asserts the controller, its socket
 # mount, its webhooks and the quarantine rule set its events match, the
 # csp-health-monitor one asserts both images, STORE_ONLY and each cloud's
-# workload identity annotation, and the CRD exclusion one asserts every
-# component's ownsCRDsExcludeSubcharts (nvsentinel's and nktp's) still matches
-# its pinned chart. One more test (pkg/bundler) renders kube-prometheus-stack
-# with a stock bundle's values and asserts the Prometheus CR carries the
-# bundler's PromQL scrape scope.
+# workload identity annotation, the Run:ai quarantine taint one asserts the
+# rule sets the Run:ai leaves restate still match the chart's, apart from the
+# runai/gpu-fault taint beside each cordon, and the CRD exclusion one asserts
+# every component's ownsCRDsExcludeSubcharts (nvsentinel's and nktp's) still
+# matches its pinned chart. One more test (pkg/bundler) renders
+# kube-prometheus-stack with a stock bundle's values and asserts the
+# Prometheus CR carries the bundler's PromQL scrape scope.
 # All are gated on testing.Short() -- `make
 # test`/`make qualify`/every other CI job run with -short, so this is the only
 # place they execute. There is no PR-blocking trigger here on purpose: these
@@ -126,6 +128,7 @@ jobs:
             TestNVSentinelMaintenanceRequestChartRender
             TestNVSentinelCSPHealthMonitorChartRender
             TestNVSentinelLabelerChartRendersLabelClasses
+            TestNVSentinelRunaiQuarantineTaintChartRender
           )
           pattern="^($(IFS='|'; echo "${tests[*]}"))$"
           out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?
