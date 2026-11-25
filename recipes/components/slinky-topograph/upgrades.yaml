@@ -70,11 +70,16 @@ transitions:
       in the rendered output is the node-observer Deployment, which gains an
       http containerPort 8080, a healthzPort config entry, and /healthz
       liveness and readiness probes. Chart values changes are additive
-      (service healthz port, commented nodeLabels and nodeReadiness options).
+      (nodeObserver.port, default 8080, the node-observer /healthz port;
+      commented nodeLabels and nodeReadiness options).
       No CRDs, no renamed or removed values, no RBAC changes, and no change
-      to the Deployment names AICR's health checks assert on. Evidence is the
-      rendered diff plus the upstream v1.2.0 release notes, which list no
-      breaking changes; not exercised by a UAT or KWOK run.
+      to the Deployment names AICR's health checks assert on.
+      Upstream PR 673 (v1.2.0 notes) changes the k8s and nfd engines'
+      handling of nodes with no provider topology; this component runs the
+      slinky engine, which that change does not touch.
+      Evidence is the
+      rendered diff plus the upstream v1.2.0 release notes (a PR list, not a
+      breaking-change statement); not exercised by a UAT or KWOK run.
     summary: >-
       Chart 1.2.0 adds /healthz liveness and readiness probes and a container
       port 8080 to the node-observer. Nothing the recipe sets is renamed or
