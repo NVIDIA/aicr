@@ -122,6 +122,17 @@ func TestRun(t *testing.T) {
 			want: []string{},
 		},
 		{
+			name:   "digest from the component hash",
+			mirror: mirrorYAML, aiboms: []string{`{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+  "components": [{"type": "container", "bom-ref": "a", "name": "agent",
+    "hashes": [{"alg": "SHA-256", "content": "` + strings.TrimPrefix(otherDigest, "sha256:") + `"}],
+    "properties": [{"name": "k8s-aibom:image:reference", "value": "example.com/op/agent:1.0.0"}]},
+  {"type": "container", "bom-ref": "b", "name": "locked",
+    "hashes": [{"alg": "SHA-256", "content": "` + strings.TrimPrefix(otherDigest, "sha256:") + `"}],
+    "properties": [{"name": "k8s-aibom:image:reference", "value": "example.com/op/locked:2.0"}]}]}`},
+			want: []string{"example.com/op/locked:2.0@" + otherDigest},
+		},
+		{
 			name:   "k8s-aibom v1.7.0 reference property",
 			mirror: mirrorYAML, aiboms: []string{`{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
   "components": [{"type": "container", "bom-ref": "a", "name": "agent",

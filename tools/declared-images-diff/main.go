@@ -20,7 +20,8 @@
 // A running image with a digest is covered by a listed image with the same
 // repository and digest, or with the same repository and tag and no digest.
 // A running image without a digest is covered by a listed image with the same
-// repository and tag.
+// repository and tag. The digest of a running image comes from its reference,
+// or else from the SHA-256 hash k8s-aibom records for it.
 //
 // It runs offline on exported files. It exits 1 when a running image is not
 // covered, and 2 when an input cannot be read, a BOM is not held inline, or
@@ -46,6 +47,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/distribution/reference"
@@ -316,17 +318,28 @@ func bomImages(data []byte) ([]string, error) {
 }
 
 // containerRef returns the image reference property of c, or else its name
-// and version joined as name:version.
+// and version joined as name:version. A reference without a digest gets the
+// SHA-256 hash of c, which k8s-aibom sets to the digest the pods run.
 func containerRef(c cdx.Component) string {
+	ref := ""
 	if c.Properties != nil {
 		for _, p := range *c.Properties {
 			if slices.Contains(imageReferenceProperties, p.Name) && p.Value != "" {
-				return p.Value
+				ref = p.Value
+				break
 			}
 		}
 	}
-	if c.Name != "" && c.Version != "" {
-		return c.Name + ":" + c.Version
+	if ref == "" && c.Name != "" && c.Version != "" {
+		ref = c.Name + ":" + c.Version
 	}
-	return ""
+	if ref == "" || strings.Contains(ref, "@") || c.Hashes == nil {
+		return ref
+	}
+	for _, h := range *c.Hashes {
+		if h.Algorithm == cdx.HashAlgoSHA256 && h.Value != "" {
+			return ref + "@sha256:" + h.Value
+		}
+	}
+	return ref
 }
