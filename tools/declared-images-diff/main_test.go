@@ -147,7 +147,7 @@ func TestRun(t *testing.T) {
 		{
 			name:   "AIBOM without an inline BOM fails closed",
 			mirror: mirrorYAML, aiboms: []string{aibomList(workloadBOM, "")},
-			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "AIBOM ns/w1 holds no inline BOM",
+			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "pass the exported files with -aibom in place of the list",
 		},
 		{
 			name:   "container with no reference",
