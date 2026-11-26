@@ -25,6 +25,13 @@ import (
 	"aicr.run/pkg/errors"
 )
 
+// recipeValidateNoCompositionFmt is the rejection for a catalog composition
+// (--with or spec.recipe.catalogs): recipe validate checks one file or one
+// --data directory, so accepting a composition would validate the wrong catalog
+// and still report success. The argument names the setting that asked for it.
+const recipeValidateNoCompositionFmt = "%s does not apply to recipe validate, which checks one file or one --data directory; " +
+	"validate each catalog directory separately with --data, and do not pass a --config that sets spec.recipe.catalogs"
+
 func recipeValidateCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "validate",
@@ -48,9 +55,7 @@ Examples:
 			// composition. Accepting it would validate the wrong catalog and
 			// still report success.
 			if cmd.IsSet("with") {
-				return errors.New(errors.ErrCodeInvalidRequest,
-					"--with does not apply to recipe validate, which checks one file or one --data directory; "+
-						"validate each catalog directory separately with --data")
+				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(recipeValidateNoCompositionFmt, "--with"))
 			}
 			if err := validateSingleValueFlags(cmd, flagFormat, "data", "config"); err != nil {
 				return err
@@ -58,6 +63,12 @@ Examples:
 			cfg, err := loadFacadeConfig(ctx, cmd)
 			if err != nil {
 				return err
+			}
+			// The same rule for a configured composition: this command never
+			// reads spec.recipe.catalogs, so it would validate the embedded
+			// catalog (or --data) and report success for the wrong thing.
+			if len(cfg.CatalogList()) > 0 {
+				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(recipeValidateNoCompositionFmt, "spec.recipe.catalogs"))
 			}
 			dataDir, externalOnly, err := catalogInputsFromCmd(cmd, cfg)
 			if err != nil {

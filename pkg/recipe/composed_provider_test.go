@@ -181,11 +181,11 @@ func TestComposedProviderUnion(t *testing.T) {
 		{"validators/catalog.yaml", sourceMerged, "nvidia + partner"},
 	}
 	for _, tt := range tests {
-		if got := p.Source(tt.path); got != tt.wantSource {
-			t.Errorf("Source(%q) = %q, want %q", tt.path, got, tt.wantSource)
+		if gotSource := p.Source(tt.path); gotSource != tt.wantSource {
+			t.Errorf("Source(%q) = %q, want %q", tt.path, gotSource, tt.wantSource)
 		}
-		if got := p.CatalogOf(tt.path); got != tt.wantCatalog {
-			t.Errorf("CatalogOf(%q) = %q, want %q", tt.path, got, tt.wantCatalog)
+		if gotCatalog := p.CatalogOf(tt.path); gotCatalog != tt.wantCatalog {
+			t.Errorf("CatalogOf(%q) = %q, want %q", tt.path, gotCatalog, tt.wantCatalog)
 		}
 	}
 
@@ -510,6 +510,85 @@ func TestComposedProviderIgnoresNonCatalogFiles(t *testing.T) {
 	}
 	if !slices.Contains(walked, "overlays/base.yaml") {
 		t.Errorf("WalkDir lost catalog content; got %v", walked)
+	}
+}
+
+// registryReferencing is a registry whose one component names files by path.
+func registryReferencing(name, component, assertFile, upgradesFile string) string {
+	var b strings.Builder
+	b.WriteString(registryDoc(name, component))
+	if assertFile != "" {
+		fmt.Fprintf(&b, "    healthCheck:\n      assertFile: %s\n", assertFile)
+	}
+	if upgradesFile != "" {
+		fmt.Fprintf(&b, "    upgrades:\n      file: %s\n", upgradesFile)
+	}
+	return b.String()
+}
+
+// TestComposedProviderServesReferencedFiles pins that a file a registry names
+// is served even when it is neither under components/ nor a .yaml file: the
+// metadata store reads healthCheck.assertFile by path, so a composition that
+// dropped it would fail with a missing file for a catalog that is valid alone.
+func TestComposedProviderServesReferencedFiles(t *testing.T) {
+	t.Parallel()
+
+	partner := mapCatalog("./partner", false, map[string]string{
+		"registry.yaml":           registryReferencing("partner", "partner-operator", "assert/p-assert.yml", "notes/p-upgrades.json"),
+		"assert/p-assert.yml":     "apiVersion: v1\nkind: Pod\n",
+		"notes/p-upgrades.json":   "{}\n",
+		"assert/unreferenced.yml": "unused: true\n",
+	})
+	p, err := NewComposedDataProvider(t.Context(), []CatalogInput{nvidiaCatalog(), partner})
+	if err != nil {
+		t.Fatalf("NewComposedDataProvider: %v", err)
+	}
+	walked := walkFiles(t, p)
+	for _, path := range []string{"assert/p-assert.yml", "notes/p-upgrades.json"} {
+		got, readErr := p.ReadFile(t.Context(), path)
+		if readErr != nil {
+			t.Errorf("ReadFile(%q): %v; a registry-named file must be served", path, readErr)
+		}
+		if len(got) == 0 {
+			t.Errorf("ReadFile(%q) returned no content", path)
+		}
+		if !slices.Contains(walked, path) {
+			t.Errorf("WalkDir did not visit %q; got %v", path, walked)
+		}
+		if gotCatalog := p.CatalogOf(path); gotCatalog != "partner" {
+			t.Errorf("CatalogOf(%q) = %q, want partner", path, gotCatalog)
+		}
+	}
+	// Naming one file does not make its neighbours catalog content.
+	if _, readErr := p.ReadFile(t.Context(), "assert/unreferenced.yml"); !isNotExist(readErr) {
+		t.Errorf("ReadFile of an unreferenced non-yaml file err = %v, want fs.ErrNotExist", readErr)
+	}
+}
+
+// TestComposedProviderReferencedFileCollision pins that a referenced file is
+// subject to the same collision rule as any other catalog file: when one
+// catalog names a path and another ships it, the composition fails instead of
+// quietly serving one of them.
+func TestComposedProviderReferencedFileCollision(t *testing.T) {
+	t.Parallel()
+
+	namer := mapCatalog("./namer", false, map[string]string{
+		"registry.yaml":     registryReferencing("namer", "namer-operator", "assert/shared.yml", ""),
+		"assert/shared.yml": "from: namer\n",
+	})
+	shipper := mapCatalog("./shipper", false, map[string]string{
+		"registry.yaml":     registryDoc("shipper"),
+		"assert/shared.yml": "from: shipper\n",
+	})
+	_, err := NewComposedDataProvider(t.Context(), []CatalogInput{nvidiaCatalog(), namer, shipper})
+	if err == nil {
+		t.Fatal("two catalogs shipping a registry-named file composed, want a collision")
+	}
+	errorstest.WantReportedCode(t, err, aicrerrors.ErrCodeInvalidRequest)
+	for _, want := range []string{`"assert/shared.yml"`, `"namer"`, `"shipper"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %s", err, want)
+		}
 	}
 }
 
@@ -890,15 +969,15 @@ func TestComposedWalkDirSkipAll(t *testing.T) {
 	for name, dp := range map[string]DataProvider{"composition": composed, "composition with --data": layered} {
 		t.Run(name, func(t *testing.T) {
 			var files []string
-			err := dp.WalkDir(t.Context(), "", func(path string, d fs.DirEntry, err error) error {
-				if err != nil || d.IsDir() {
-					return err
+			walkErr := dp.WalkDir(t.Context(), "", func(path string, d fs.DirEntry, entryErr error) error {
+				if entryErr != nil || d.IsDir() {
+					return entryErr
 				}
 				files = append(files, path)
 				return fs.SkipAll
 			})
-			if err != nil {
-				t.Fatalf("WalkDir: %v", err)
+			if walkErr != nil {
+				t.Fatalf("WalkDir: %v", walkErr)
 			}
 			if len(files) != 1 {
 				t.Errorf("callback ran for %v, want one file: fs.SkipAll must end the walk", files)

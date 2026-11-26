@@ -17,6 +17,7 @@ package aicr
 import (
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -524,7 +525,10 @@ func ComposedSource(catalogs ...RecipeSourceOption) RecipeSourceOption {
 // CatalogSource turns one catalog reference, as given to --with or listed in
 // spec.recipe.catalogs, into a source for ComposedSource: "nvidia" is the
 // built-in catalog and anything else is the path of a catalog directory.
+// Surrounding whitespace is ignored, so a configured " nvidia " selects the
+// built-in catalog here exactly as it does on the command line.
 func CatalogSource(ref string) RecipeSourceOption {
+	ref = strings.TrimSpace(ref)
 	if ref == recipe.NvidiaCatalogName {
 		return EmbeddedSource()
 	}

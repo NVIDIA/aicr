@@ -102,6 +102,11 @@ type composedCatalog struct {
 type ComposedDataProvider struct {
 	catalogs []composedCatalog // sorted by declared name
 	owner    map[string]int    // file path -> index into catalogs
+	// referenced holds the data-root paths the catalogs' registries name
+	// (an assertFile, an upgrades file, a manifest). A loader reads them by
+	// path whatever their extension or directory, so they take part like any
+	// other catalog content.
+	referenced map[string]bool
 
 	registry      []byte
 	validators    []byte
@@ -173,7 +178,8 @@ func NewComposedDataProvider(ctx context.Context, inputs []CatalogInput) (*Compo
 		}
 	}
 
-	p := &ComposedDataProvider{catalogs: catalogs, owner: make(map[string]int)}
+	p := &ComposedDataProvider{catalogs: catalogs, owner: make(map[string]int), referenced: make(map[string]bool)}
+	p.collectReferencedFiles()
 
 	validatorCatalogs, err := p.indexFiles(ctx)
 	if err != nil {
@@ -211,13 +217,44 @@ func readCatalogRegistry(ctx context.Context, dp DataProvider, label string) (*C
 	return &reg, nil
 }
 
-// isCatalogContent reports whether a loader reads path. LoadMetadataStoreFor
-// keeps every file under components/ and parses every other .yaml file, and
-// reads nothing else, so only those paths can shadow one another. A README.md
-// or LICENSE that two catalogs both ship is not catalog content and is never
-// indexed, served or walked.
+// isCatalogContent reports whether LoadMetadataStoreFor reads path by walking.
+// It keeps every file under components/ and parses every other .yaml file.
+// Files a registry names are read by path instead and are covered by
+// carriesContent. A README.md or LICENSE that two catalogs both ship is neither,
+// so it is never indexed, served or walked.
 func isCatalogContent(path string) bool {
 	return strings.Contains(path, "components/") || strings.HasSuffix(path, ".yaml")
+}
+
+// carriesContent reports whether path is catalog content: a file the metadata
+// store walks to, or one a registry refers to by path. Only such files can
+// shadow one another.
+func (p *ComposedDataProvider) carriesContent(path string) bool {
+	return isCatalogContent(path) || p.referenced[path]
+}
+
+// collectReferencedFiles records the files the catalogs' registries name:
+// healthCheck.assertFile, upgrades.file and manifestFiles. They are read
+// through the provider by path, and nothing requires them to end in .yaml or
+// sit under components/ (an assertFile may be checks/x/assert.yml). The set is
+// the union over all catalogs, so a path one catalog names and another ships
+// is still a collision rather than a file that silently belongs to one of them.
+func (p *ComposedDataProvider) collectReferencedFiles() {
+	add := func(ref string) {
+		if ref != "" {
+			p.referenced[filepath.ToSlash(ref)] = true
+		}
+	}
+	for i := range p.catalogs {
+		for j := range p.catalogs[i].registry.Components {
+			c := &p.catalogs[i].registry.Components[j]
+			add(c.HealthCheck.AssertFile)
+			add(c.Upgrades.File)
+			for _, f := range c.ManifestFiles {
+				add(f)
+			}
+		}
+	}
 }
 
 // indexFiles records which catalog owns each catalog-content file and fails
@@ -243,7 +280,7 @@ func (p *ComposedDataProvider) indexFiles(ctx context.Context) ([]int, error) {
 				validatorCatalogs = append(validatorCatalogs, i)
 				return nil
 			}
-			if !isCatalogContent(rel) {
+			if !p.carriesContent(rel) {
 				return nil
 			}
 			if prev, dup := p.owner[rel]; dup {
@@ -651,7 +688,7 @@ func (p *ComposedDataProvider) WalkDir(ctx context.Context, root string, fn fs.W
 				}
 				return nil
 			}
-			if !d.IsDir() && !servesFile(path) {
+			if !d.IsDir() && !p.servesFile(path) {
 				return nil
 			}
 			if seen[path] {
@@ -680,9 +717,9 @@ func (p *ComposedDataProvider) WalkDir(ctx context.Context, root string, fn fs.W
 // servesFile reports whether the composition serves path: the two merged
 // documents and catalog content. Other files, such as a README.md, are
 // neither read nor walked.
-func servesFile(path string) bool {
+func (p *ComposedDataProvider) servesFile(path string) bool {
 	rel := filepath.ToSlash(path)
-	return rel == registryFileName || rel == catalogFileName || isCatalogContent(rel)
+	return rel == registryFileName || rel == catalogFileName || p.carriesContent(rel)
 }
 
 func composedUnderSkipped(skipped []string, path string) bool {

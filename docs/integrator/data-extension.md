@@ -133,9 +133,13 @@ add the catalog that supplies overlays/base.yaml, such as nvidia, with --with
 So the `--with ./base-catalog --with ./partner-catalog` example above works
 because `./base-catalog` ships an `overlays/base.yaml`.
 
-Only files that a loader reads take part: `.yaml` files, and any file under
-`components/`. Other files, such as a catalog's `README.md` or `LICENSE`, are
-neither served nor compared, so two catalogs may each ship one.
+Only files that a loader reads take part: `.yaml` files, any file under
+`components/`, and any file that the catalog's `registry.yaml` names by path
+(`healthCheck.assertFile`, `upgrades.file` or `manifestFiles`), whatever its
+extension or directory. Other files, such as a catalog's `README.md` or
+`LICENSE`, are neither served nor compared, so two catalogs may each ship one.
+A path that one catalog's registry names and another catalog ships is a
+collision like any other.
 
 **Identity is never silently overridden; behavior can still be extended.**
 Composition protects what a node is called. It does not stop a partner

@@ -239,6 +239,25 @@ func TestRecipeValidateRejectsWith(t *testing.T) {
 	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
 }
 
+// TestRecipeValidateRejectsConfiguredCatalogs pins the same rule for a
+// composition that comes from the config: recipe validate never reads
+// spec.recipe.catalogs, so it must refuse rather than validate something else
+// and report success.
+func TestRecipeValidateRejectsConfiguredCatalogs(t *testing.T) {
+	alpha, _, _ := withCatalogs(t)
+	doc := "apiVersion: " + appconfig.APIVersion + "\nkind: " + appconfig.Kind +
+		"\nmetadata:\n  name: test\nspec:\n  recipe:\n    catalogs:\n      - " + alpha + "\n"
+	cfgPath := filepath.Join(t.TempDir(), "aicr-config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runFresh(t, "aicr", "recipe", "validate", "--config", cfgPath, "--data", alpha)
+	if err == nil || !strings.Contains(err.Error(), "spec.recipe.catalogs does not apply to recipe validate") {
+		t.Fatalf("error = %v, want the recipe validate rejection of spec.recipe.catalogs", err)
+	}
+	errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+}
+
 // catalogRefs runs catalogRefsFromCmd under a command that defines --with.
 func catalogRefs(t *testing.T, cfg *aicr.Config, args ...string) ([]string, error) {
 	t.Helper()

@@ -247,6 +247,14 @@ func TestCatalogSourceAndConfig(t *testing.T) {
 	if got := CatalogSource("nvidia").internal.kind; got != sourceKindEmbedded {
 		t.Errorf(`CatalogSource("nvidia") kind = %v, want embedded`, got)
 	}
+	// The CLI trims a reference before it reaches CatalogSource; the SDK must
+	// give the same answer for a config entry that has stray whitespace.
+	if got := CatalogSource("  nvidia\t").internal.kind; got != sourceKindEmbedded {
+		t.Errorf("CatalogSource with surrounding whitespace kind = %v, want embedded", got)
+	}
+	if got := CatalogSource(" ./partner ").internal; got.kind != sourceKindFilesystem || got.path != "./partner" {
+		t.Errorf("CatalogSource(%q) = kind %v, path %q; want a filesystem source at ./partner", " ./partner ", got.kind, got.path)
+	}
 	alpha, beta := composedCatalogDirs(t)
 	cfg := WrapConfig(&appconfig.AICRConfig{Spec: appconfig.Spec{Recipe: &appconfig.RecipeSpec{Catalogs: []string{alpha, beta}}}})
 	source, ok := cfg.RecipeSource()
