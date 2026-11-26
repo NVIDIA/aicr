@@ -380,6 +380,13 @@ func containerRef(c cdx.Component) string {
 	}
 	for _, h := range *c.Hashes {
 		if h.Algorithm == cdx.HashAlgoSHA256 && h.Value != "" {
+			// An untagged reference pulls latest. Keep that tag, since a
+			// digest alone leaves no tag for a tag-only listed image to match.
+			if named, err := reference.ParseNormalizedNamed(ref); err == nil {
+				if _, tagged := named.(reference.Tagged); !tagged {
+					ref += ":latest"
+				}
+			}
 			return ref + "@sha256:" + h.Value
 		}
 	}

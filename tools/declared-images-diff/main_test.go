@@ -143,6 +143,14 @@ func TestRun(t *testing.T) {
 			wantTagOnly: []string{"example.com/op/agent:1.0.0@" + otherDigest},
 		},
 		{
+			name:   "untagged image with a component hash keeps the latest tag",
+			mirror: "images: [busybox:latest]\n", aiboms: []string{`{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+  "components": [{"type": "container", "bom-ref": "a", "name": "busybox",
+    "hashes": [{"alg": "SHA-256", "content": "` + strings.TrimPrefix(digest, "sha256:") + `"}],
+    "properties": [{"name": "k8s-aibom:image:reference", "value": "busybox"}]}]}`},
+			wantTagOnly: []string{"busybox:latest@" + digest},
+		},
+		{
 			name:   "k8s-aibom v1.7.0 reference property",
 			mirror: mirrorYAML, aiboms: []string{`{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
   "components": [{"type": "container", "bom-ref": "a", "name": "agent",
