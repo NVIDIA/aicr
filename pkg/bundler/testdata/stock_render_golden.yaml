@@ -167,7 +167,7 @@ a100-eks-ubuntu-training-kubeflow:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -220,12 +220,12 @@ a100-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 5702f0e1d21b429493e4762e12f912e9b0df425ae6000a74161bcafc84bafcc2
-  UPGRADING.md: c93e95516afb1a9b84a6f093723bdb5eb2c30a94ef4e92fb3ec5e61da87da37d
-  bundle-info.yaml: 1406c6c6281e01c9d295cd2d0cc38eac22dec79421116c0a7c0163b4b355c129
-  checksums.txt: a0876b83cac4e0ca5daf216542be48a370c8bfc41ed06364fa9a23116a883c67
+  README.md: dc7724f1fad61be7a6c130feb930b6d6770cbe713aae95e3d93d8e7b951657d2
+  UPGRADING.md: 093923c8511d39c240e95f6376a6039ea509129c0092d5d9ef88432b28c6868d
+  bundle-info.yaml: e863fe76ec2d3fc660172a5d7c21c16f6250ae8f030be9d9de2a871d289e536e
+  checksums.txt: 8c736db4adcf816978d67d06b9da3e5ad985bf8831f249780dca8a8290efb1ce
   deploy.sh: 9f6fea7fc8568ab8837436b7ec9feebf259c0d92f8ae0d66a89d6d7d6c38aca9
-  recipe.yaml: f96fbf4e838d368852989f362713e6fd21302844f3199b9224e630e219a18065
+  recipe.yaml: 6e65653b7e963e9dcf157947693d9ac199c8587079caa573a5782b8aa9bf616f
 a100-gke-cos-training-kubeflow:
   001-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   001-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -878,7 +878,7 @@ eks-ubuntu:
   003-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   004-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   004-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  004-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  004-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   004-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   005-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -922,12 +922,12 @@ eks-ubuntu:
   014-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   014-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   014-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 653dabacadf0d34f4fae04ad72b77a01ce8ff08dcdd60a4984f7160a70bef4e4
-  UPGRADING.md: 9b5e5f64f043c45b0100d44ed3e19451eed6a5b50ad9915e80f3514c5dddbee8
-  bundle-info.yaml: 5f0990e9b8b3d9deeabe102cb7e76cbf206f01979a0cd82ab3de005acd38b595
-  checksums.txt: d3a366ac29bbd6789d214a16f30f6f5e753b95006ce2c9c74825888e9b5d083a
+  README.md: adc8886ef844d7621f7963f988ac9816aa2cfaed37ae092c57949c39e6c2b913
+  UPGRADING.md: 7cc08d2ac293d191cd59a74e57aa96742ae321ebc049b80e1002c762d49ada08
+  bundle-info.yaml: 7ca06e89585f4293eae3ed94218aa6a3f7cda91040e6792041aa6dea57032cc9
+  checksums.txt: adb3d5b5ec2a8d56e1eb290b0e451b926e447a6f077765155a23ac42a8272c46
   deploy.sh: 860f070271d05ec31b70b7be573f585fad633e4a6d3852c7a97e84ab8704b652
-  recipe.yaml: e3e0729926e2fb2dad92b3613cabf35e00a73d17238f24584b0fe444cf9f8f67
+  recipe.yaml: 6e1594f508999d0286f90e5f7fd0bd2a0a14ca2fda2d3050adbe199f3aa0e49e
 gb10-nvke-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
@@ -1169,7 +1169,7 @@ gb200-eks-amazonlinux-inference:
   005-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   006-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  006-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  006-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   006-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   007-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -1227,12 +1227,12 @@ gb200-eks-amazonlinux-inference:
   019-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 6dbf5c4ca77c22321c71b97f15d4a1bcf98bb9ea304a1b85fd3ade16eb575aa0
-  UPGRADING.md: 9b5e5f64f043c45b0100d44ed3e19451eed6a5b50ad9915e80f3514c5dddbee8
-  bundle-info.yaml: b513775ad7ce2ce41fe57d4a0155d1e0da09af8e29033941539caf3e0f4e0c1f
-  checksums.txt: f8e380cb6c76af9f3004cb13c36731416a1d3f037ded7a3d5ce0bbaca1c05e23
+  README.md: 211fd24ada7219b50878bc0339293c0ef52d59720b44ff0627d9ac2bd743a58d
+  UPGRADING.md: 7cc08d2ac293d191cd59a74e57aa96742ae321ebc049b80e1002c762d49ada08
+  bundle-info.yaml: bb9c426d2af7c5842eeec34089fd166db9b43791f0940fb5787bfd03a68a98b7
+  checksums.txt: 5d57efaa118a464c58eeead164c1923f382a3b0a0045bf04ea41b87bc0f61853
   deploy.sh: 4187eaebc6605ef81e5963495d1e112cab1d0d79b75a866ac953d9832ab80713
-  recipe.yaml: 23049acdfa92127568f2ce11d295576576e07ded8bbbf053471507d0d3d82a09
+  recipe.yaml: edb164d3b8f30b7d8cb5406a679188095d9e735ff09569064a2b578599575ab6
 gb200-eks-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
@@ -1263,7 +1263,7 @@ gb200-eks-ubuntu-inference-dynamo:
   006-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   007-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  007-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  007-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   007-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   008-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -1329,12 +1329,12 @@ gb200-eks-ubuntu-inference-dynamo:
   022-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   022-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   022-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: e47f71f5fdc674d99ad76fe95399f950979b2b4ab313f901f73cc010e4d0e428
-  UPGRADING.md: e7bc9f9f9476d5a9ff3ce4175b257518b235ce3ace3720a19313c7501ef24da3
-  bundle-info.yaml: b21a9d98fff66d75a4f20bbe2dc924fdf9915a98eca811788607ec872d242c61
-  checksums.txt: 85f2414f156d4e1b0e719a8d0191227893082d7bac08d0c3951ad5215ff18189
+  README.md: 59574cab01c7936c342dc2c12861f0b1fd4e9e4e91da9671f324b44408020df1
+  UPGRADING.md: f07fce3855e9f04373c38898adcc232da5acc021e02928864d1a04d2df2fc637
+  bundle-info.yaml: 8a10e2fb970fd4a600203e5b4a489af7a2ef9d5d90b3b5a6c97005fdf4d4a694
+  checksums.txt: 5203ef8b5ecb35f21323d543a5a2410dc8bcded728d4cee60f151a0af8ab6af1
   deploy.sh: 212fc08a28e10cd728ee970b3b95f14a4e1921798819e88c08e2b71eee30d486
-  recipe.yaml: c4b194501112b956b3865f169b258dae4e34839265e3c8c5912563513fc4e2a3
+  recipe.yaml: 7005c41451c38c18a564f606379f756b68e3e7a63924771a1a099117e8244bfe
 gb200-eks-ubuntu-training-kubeflow:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -1355,7 +1355,7 @@ gb200-eks-ubuntu-training-kubeflow:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -1413,12 +1413,12 @@ gb200-eks-ubuntu-training-kubeflow:
   018-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: c5c356819636c178e4aaa1ed3fc199016fa3d628adc613bdd6b22ff59e9288ab
-  UPGRADING.md: c93e95516afb1a9b84a6f093723bdb5eb2c30a94ef4e92fb3ec5e61da87da37d
-  bundle-info.yaml: 40300490b280c0c23f000b587accea1bd4749c2fc4741e3b200592a4ec9469c6
-  checksums.txt: edd8e06b1d11b3e50a58efc0da0ecc6a3e7bad7a653fe3a5b72a6293b5656ecd
+  README.md: d631c465af5261fd71ebfb0e0937215196b490403824125aaefb636cf7b7672a
+  UPGRADING.md: 093923c8511d39c240e95f6376a6039ea509129c0092d5d9ef88432b28c6868d
+  bundle-info.yaml: e4c46921230c254ad346ebe36cc582b2f0baf982c15d01c77b260d7a2d55be63
+  checksums.txt: 3fca062e87962fe8f8298a56df08813886219eda464c20425a84e4fc0b3f3468
   deploy.sh: 9f6fea7fc8568ab8837436b7ec9feebf259c0d92f8ae0d66a89d6d7d6c38aca9
-  recipe.yaml: 8968914c19585d4271496cab66abcaeb05ffc44e5e2d495d8c5cec3bf1781b39
+  recipe.yaml: 48c448f1d25f3d09513f7893631228e39fb2847b8da83ac439c3bf3c63d09c64
 gb200-eks-ubuntu-training-slurm:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -1439,7 +1439,7 @@ gb200-eks-ubuntu-training-slurm:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -1490,28 +1490,28 @@ gb200-eks-ubuntu-training-slurm:
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   017-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-operator-crds/install.sh: 667ec2f3a8a311e5253234eaed3ab9f29979be172910cb0a8adb3a4f6eef0ae0
-  017-slinky-slurm-operator-crds/upstream.env: 8e5d5bb8937b1af2120817e7bbe90c07284fc602be78898031dd4ba8928b0612
+  017-slinky-slurm-operator-crds/upstream.env: a07bc3583ee826103d93efbcf8f691708abeb75e0fced68695463045d592ef94
   017-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   018-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-operator/install.sh: f7ac4a8a1639fcd2e52252cdebc1a72134cf6da6ea4d9e5ca768cc287c7b9779
-  018-slinky-slurm-operator/upstream.env: 20dd53b4a1277e1404ac8a953bc2f9b58040540d2869401ad72f9d03a8487806
+  018-slinky-slurm-operator/upstream.env: f2757cc8a37fbac2dc45c7a8b601096035f5043f2aa39a291f96066dc569e4f8
   018-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  019-slinky-slurm-pre/Chart.yaml: 96abddf315b1b6024531b24f4a559c48b3ffac1804d5be0137e24abc9ae005c1
+  019-slinky-slurm-pre/Chart.yaml: 2854fc9cc91c1bfb42e070f53680d3c0b970fb6e14b0702e3f0593950370189f
   019-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm-pre/install.sh: 81a42ad3d2342f567074c56e5e18a07b665ff8eb934c12ae91594ab2c4abb4e3
-  019-slinky-slurm-pre/templates/compute-domain.yaml: 681c69e37feed784981e7bfaa5e81d17d943954876361feb5758485ee047e4c3
+  019-slinky-slurm-pre/templates/compute-domain.yaml: e7f43b5c5c3a2373f87af08456fb1781007b1a195e7dc30d3a887780eb09c247
   019-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   019-slinky-slurm-pre/values.yaml: 3a2dd1888df27899c573b67f06a75fc8eff8cb4ae9f0efd681c0fa09b57c0117
   020-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-slinky-slurm/install.sh: e42da451f77183abb1fee67e9e4709cc88f905480c8d5b037e7e5f9c94082bb3
-  020-slinky-slurm/upstream.env: 2a86c45383aaed8aae07bdc46abae8cb0212215e3ad8027436fcfd632286fc44
+  020-slinky-slurm/upstream.env: 8f14c622fc81ef6fce0cee9b3eb48b60cf8da07881f14ead4e3ff7c8a76a5523
   020-slinky-slurm/values.yaml: 3a2dd1888df27899c573b67f06a75fc8eff8cb4ae9f0efd681c0fa09b57c0117
-  README.md: aa23e22f11a7577d988b2e5a7f252921a325fb579c51bf29ccc5949de26533e2
-  UPGRADING.md: d93cb37f76f763143e6b10acc634cb1c3c3b0e07ebbd4cdd7ea1d00a2c60d6ff
-  bundle-info.yaml: 00a85ca180f2f2ccda97e63aaaf447493b2496a37119ce40ce2e5b8e039e99ea
-  checksums.txt: b1e5e90a4252718aad84e276e68502a7a1bc32805d6f1186bd591d424abfeddd
+  README.md: 3f6b53e9ccd5f90f1b026e8b9e05daf2c29374c4b8a6ab136988febabb2d8758
+  UPGRADING.md: 5e83d39e0e1a92abe129fab6044f8c02638db293976cf734418881f9e182cb61
+  bundle-info.yaml: 5f3b72e9624fd1d9ec45096b932c4bde7e3ba8620061fadc0fa34d13cb3339e6
+  checksums.txt: 21f7c0e1c025c646e2669e9e723cfe413d7f5205d9a18c8716c97e100c25ab40
   deploy.sh: bef08882eafd47a1adefe5a6d101da276bcfb9f9e82b94112b6e39733fdbd1f4
-  recipe.yaml: d5a801e61b20f8a0f1de303cd6c2ef488b6f7ac347fbe2db3169e4b8db739717
+  recipe.yaml: b45e911969b65669529363974350b81e4cd368ba1fa12e90bdb0b661ef44d190
 gb200-gke-cos-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
@@ -1781,28 +1781,28 @@ gb200-gke-cos-training-slurm:
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   017-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-operator-crds/install.sh: 667ec2f3a8a311e5253234eaed3ab9f29979be172910cb0a8adb3a4f6eef0ae0
-  017-slinky-slurm-operator-crds/upstream.env: 8e5d5bb8937b1af2120817e7bbe90c07284fc602be78898031dd4ba8928b0612
+  017-slinky-slurm-operator-crds/upstream.env: a07bc3583ee826103d93efbcf8f691708abeb75e0fced68695463045d592ef94
   017-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   018-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-operator/install.sh: f7ac4a8a1639fcd2e52252cdebc1a72134cf6da6ea4d9e5ca768cc287c7b9779
-  018-slinky-slurm-operator/upstream.env: 20dd53b4a1277e1404ac8a953bc2f9b58040540d2869401ad72f9d03a8487806
+  018-slinky-slurm-operator/upstream.env: f2757cc8a37fbac2dc45c7a8b601096035f5043f2aa39a291f96066dc569e4f8
   018-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  019-slinky-slurm-pre/Chart.yaml: 96abddf315b1b6024531b24f4a559c48b3ffac1804d5be0137e24abc9ae005c1
+  019-slinky-slurm-pre/Chart.yaml: 2854fc9cc91c1bfb42e070f53680d3c0b970fb6e14b0702e3f0593950370189f
   019-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm-pre/install.sh: 81a42ad3d2342f567074c56e5e18a07b665ff8eb934c12ae91594ab2c4abb4e3
-  019-slinky-slurm-pre/templates/compute-domain.yaml: 681c69e37feed784981e7bfaa5e81d17d943954876361feb5758485ee047e4c3
+  019-slinky-slurm-pre/templates/compute-domain.yaml: e7f43b5c5c3a2373f87af08456fb1781007b1a195e7dc30d3a887780eb09c247
   019-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   019-slinky-slurm-pre/values.yaml: 3a2dd1888df27899c573b67f06a75fc8eff8cb4ae9f0efd681c0fa09b57c0117
   020-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-slinky-slurm/install.sh: e42da451f77183abb1fee67e9e4709cc88f905480c8d5b037e7e5f9c94082bb3
-  020-slinky-slurm/upstream.env: 2a86c45383aaed8aae07bdc46abae8cb0212215e3ad8027436fcfd632286fc44
+  020-slinky-slurm/upstream.env: 8f14c622fc81ef6fce0cee9b3eb48b60cf8da07881f14ead4e3ff7c8a76a5523
   020-slinky-slurm/values.yaml: 3a2dd1888df27899c573b67f06a75fc8eff8cb4ae9f0efd681c0fa09b57c0117
-  README.md: d889861d010616b26f40e52dee1c30e340b5974d34f8103f4458ce87e3f6f8c6
-  UPGRADING.md: 2324c47486d16f2aba1b33386915ae7f143a3a4e3ff1b70c1a9bca38a95d3290
-  bundle-info.yaml: b19d10b1c8fde1d405ef9249710bdacbbb71ac524730fb35dc8490a37a7eb1ba
-  checksums.txt: 318b3b30017a59d2cce2c9ec44ec297278c398350659bb5be860afb8a4871004
+  README.md: d50ef5e7d8eac431ed29d3e20454551e00a4f50023836969b3519e6d93127710
+  UPGRADING.md: 82389f19a1b4bc81850c809478d7c3de54f09ef1e20f9d2e0bee8eb321c477fb
+  bundle-info.yaml: 1f16cef28b933234b18d1055483cf803d88a0b4dbb4e619284c1ef5e412b4415
+  checksums.txt: 58bebe26421a815e732f64bba45b0e2e7e7443203ff2328ad84ba987a0230669
   deploy.sh: 2110682552472b15a081a2b3c6d50b805f094e4ed206115702b63515b2c7ba67
-  recipe.yaml: 14909b843f243a46ad05a19ca237c4a80d1af6785c663136e00f15201e41a595
+  recipe.yaml: ec4f851cc4ad41866fdc615e984ecedd230c53d95aabd3507c4f057672fe448d
 gb200-nvke-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
@@ -2233,7 +2233,7 @@ gb300-eks-amazonlinux-inference:
   005-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   006-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  006-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  006-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   006-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   007-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -2291,12 +2291,12 @@ gb300-eks-amazonlinux-inference:
   019-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 49adcf163bbe1e9bed4335f16a5088361c03c21b3d9a61d25a95cc91fb55a046
-  UPGRADING.md: 9b5e5f64f043c45b0100d44ed3e19451eed6a5b50ad9915e80f3514c5dddbee8
-  bundle-info.yaml: d0d455fc9d57b43723036de0a7a9ac72cba91345e71f9898ef018b9d8c4c0cab
-  checksums.txt: 1f48b966d6971d93b96e0c408c3a69515b82855b9dfe48025f86b99c09f0d003
+  README.md: 856fdf7cd702383f1c8fcfac955f19ff2d1ed7dcb6433785abf177166b4c1169
+  UPGRADING.md: 7cc08d2ac293d191cd59a74e57aa96742ae321ebc049b80e1002c762d49ada08
+  bundle-info.yaml: 0f1a874aac7b63d387081f8778a6bb4668ec0e0da6f35744e51e7c34c8f64ac7
+  checksums.txt: ee6e617c129f5c494bf1dce3fda1c2f1bde46393862105f33418c246e3dd1700
   deploy.sh: 4187eaebc6605ef81e5963495d1e112cab1d0d79b75a866ac953d9832ab80713
-  recipe.yaml: 5e082db1fc0b022a6d038917ca22e1dceb78ac79fdafd431618bc4b8534efe77
+  recipe.yaml: c494e33ba2504c25676f17421889fdb094b880c7a05417a58dde28145d109c35
 gb300-eks-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
@@ -2327,7 +2327,7 @@ gb300-eks-ubuntu-inference-dynamo:
   006-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   007-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  007-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  007-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   007-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   008-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -2393,12 +2393,12 @@ gb300-eks-ubuntu-inference-dynamo:
   022-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   022-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   022-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 8598bd2cb9ee5a36ae253c09f736923aaca55c1fd56d1511997f0400a19c51ef
-  UPGRADING.md: e7bc9f9f9476d5a9ff3ce4175b257518b235ce3ace3720a19313c7501ef24da3
-  bundle-info.yaml: b859710c7ce11737810ceddb5009bda88ddd7bc603b97a6cbf0ade13facba2b8
-  checksums.txt: 5c905df0dce07c95e0355c2dd7db46621da8a9e3215cc9a8ccc1d0f8c714313e
+  README.md: c78ad913af91a4a7d6011e4c8d1694c9ff0b0ed10b68977d7c438d55e175fbdc
+  UPGRADING.md: f07fce3855e9f04373c38898adcc232da5acc021e02928864d1a04d2df2fc637
+  bundle-info.yaml: b4bf9ee9390c9fbd9817e18725e68486ecad87b150ca98a329b1f9598912feac
+  checksums.txt: fbe6a2fb3e7666575612fba9b195762a5bc3655c293dff61f2afd7e64f0d0b7e
   deploy.sh: 212fc08a28e10cd728ee970b3b95f14a4e1921798819e88c08e2b71eee30d486
-  recipe.yaml: d2a11d1a15ebf0505141a4640a3cbbd07785ffe167fee361abc10fc8cb28cdf7
+  recipe.yaml: e6152067b8b57016d74755cc2700af3f271f6cab2f2ce9b25df994556c8ffdcc
 gb300-eks-ubuntu-training-kubeflow:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -2419,7 +2419,7 @@ gb300-eks-ubuntu-training-kubeflow:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -2482,12 +2482,12 @@ gb300-eks-ubuntu-training-kubeflow:
   019-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: b7812763d45a6cd02dd5be7d97d6136ae2046f55b4d8e03cbf347e15784732f8
-  UPGRADING.md: 15b39300377c31f0d4d1b31624b1f4618c49c9e4e79cfde2d351b75fe334d667
-  bundle-info.yaml: 083f38752cd4ee04795c9a7d932e56ecc0063863fd45320b246cb89e68b537ac
-  checksums.txt: 34ca2f03da8f1733a03b2303e49d2efa6c9366b3c5f6ae7dc402777e10957c79
+  README.md: f2fa4f8c040da5afbb54e231cda0d5057e04c3690c14e255c73ea6dc4e6712fe
+  UPGRADING.md: bdd5d056b9689a8c6a89252a2a5f2f018967acc764c223a481e5087daafc9af1
+  bundle-info.yaml: 2f270ac9384e11d5cfb41db114b7352067a074ee9c06d3e4602daf4a1c452bc4
+  checksums.txt: e723941c542aefddc299c77039536157a99ab4b8b17a1e7a15ddd1e5061fef76
   deploy.sh: e708c427f523dc36fdd8464953e38228cf243897e9e7bdef3a2ed50d837bc902
-  recipe.yaml: 86669f629fb6d5600782150f7118aabdfaf171c6ca41a4bc82b033a0c4ab27d4
+  recipe.yaml: 2dda506513a8a441e1844d5133f876503638adf16be872eccfb300358ec0bcaf
 gb300-eks-ubuntu-training-slurm:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -2508,7 +2508,7 @@ gb300-eks-ubuntu-training-slurm:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -2559,28 +2559,28 @@ gb300-eks-ubuntu-training-slurm:
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   017-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-operator-crds/install.sh: 667ec2f3a8a311e5253234eaed3ab9f29979be172910cb0a8adb3a4f6eef0ae0
-  017-slinky-slurm-operator-crds/upstream.env: 8e5d5bb8937b1af2120817e7bbe90c07284fc602be78898031dd4ba8928b0612
+  017-slinky-slurm-operator-crds/upstream.env: a07bc3583ee826103d93efbcf8f691708abeb75e0fced68695463045d592ef94
   017-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   018-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-operator/install.sh: f7ac4a8a1639fcd2e52252cdebc1a72134cf6da6ea4d9e5ca768cc287c7b9779
-  018-slinky-slurm-operator/upstream.env: 20dd53b4a1277e1404ac8a953bc2f9b58040540d2869401ad72f9d03a8487806
+  018-slinky-slurm-operator/upstream.env: f2757cc8a37fbac2dc45c7a8b601096035f5043f2aa39a291f96066dc569e4f8
   018-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  019-slinky-slurm-pre/Chart.yaml: 96abddf315b1b6024531b24f4a559c48b3ffac1804d5be0137e24abc9ae005c1
+  019-slinky-slurm-pre/Chart.yaml: 2854fc9cc91c1bfb42e070f53680d3c0b970fb6e14b0702e3f0593950370189f
   019-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm-pre/install.sh: 81a42ad3d2342f567074c56e5e18a07b665ff8eb934c12ae91594ab2c4abb4e3
-  019-slinky-slurm-pre/templates/compute-domain.yaml: 681c69e37feed784981e7bfaa5e81d17d943954876361feb5758485ee047e4c3
+  019-slinky-slurm-pre/templates/compute-domain.yaml: e7f43b5c5c3a2373f87af08456fb1781007b1a195e7dc30d3a887780eb09c247
   019-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   019-slinky-slurm-pre/values.yaml: 7156ebcc98d8c91ea1f3792ccbf7c21dfc612ad2652909d3d626f5499e4eb16f
   020-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-slinky-slurm/install.sh: e42da451f77183abb1fee67e9e4709cc88f905480c8d5b037e7e5f9c94082bb3
-  020-slinky-slurm/upstream.env: 2a86c45383aaed8aae07bdc46abae8cb0212215e3ad8027436fcfd632286fc44
+  020-slinky-slurm/upstream.env: 8f14c622fc81ef6fce0cee9b3eb48b60cf8da07881f14ead4e3ff7c8a76a5523
   020-slinky-slurm/values.yaml: 7156ebcc98d8c91ea1f3792ccbf7c21dfc612ad2652909d3d626f5499e4eb16f
-  README.md: 0b55b9ab94c51ad6f0e93f6314dd9f074f809259a0c1231106e476886c6f9451
-  UPGRADING.md: d93cb37f76f763143e6b10acc634cb1c3c3b0e07ebbd4cdd7ea1d00a2c60d6ff
-  bundle-info.yaml: 3c1bc252ad387616b7b897862e2ea15414efe530d0166099c277c9c209ca2097
-  checksums.txt: 2959cd4f7a27e81d19ed711d95e36b3ed93609c4ed5022b14d97362d8c514bf6
+  README.md: b745da31fae3311235d9a5570969d3b59ce9c1cfe811e5604d6a1fa04672e347
+  UPGRADING.md: 5e83d39e0e1a92abe129fab6044f8c02638db293976cf734418881f9e182cb61
+  bundle-info.yaml: 8ba7b6598e62cb0f74315756fa79ba571e31f4bd04e96bc34a2c6bc93a3ee7b0
+  checksums.txt: cca41fc172194462a9c12f7288bce8006f38d01adaa450a8774768890df84dd8
   deploy.sh: bef08882eafd47a1adefe5a6d101da276bcfb9f9e82b94112b6e39733fdbd1f4
-  recipe.yaml: 659324fd2b0234feaa23cdd466c8d3a2f8be1122a79e7dbf795645c9a4e041a5
+  recipe.yaml: 8eea4c20d8307cd04bc485de51fe5ec0fb441a5479e9f2858d2da5f226a270c3
 gb300-generic-ubuntu-training:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5c369f979f2008b30aeab8658a89ba0868f36ae5df1df39557138401048ccdb7
@@ -3307,27 +3307,27 @@ h100-aks-ubuntu-training-slurm:
   015-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   016-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-slinky-slurm-operator-crds/install.sh: 667ec2f3a8a311e5253234eaed3ab9f29979be172910cb0a8adb3a4f6eef0ae0
-  016-slinky-slurm-operator-crds/upstream.env: 8e5d5bb8937b1af2120817e7bbe90c07284fc602be78898031dd4ba8928b0612
+  016-slinky-slurm-operator-crds/upstream.env: a07bc3583ee826103d93efbcf8f691708abeb75e0fced68695463045d592ef94
   016-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   017-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-operator/install.sh: f7ac4a8a1639fcd2e52252cdebc1a72134cf6da6ea4d9e5ca768cc287c7b9779
-  017-slinky-slurm-operator/upstream.env: 20dd53b4a1277e1404ac8a953bc2f9b58040540d2869401ad72f9d03a8487806
+  017-slinky-slurm-operator/upstream.env: f2757cc8a37fbac2dc45c7a8b601096035f5043f2aa39a291f96066dc569e4f8
   017-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  018-slinky-slurm-pre/Chart.yaml: 96abddf315b1b6024531b24f4a559c48b3ffac1804d5be0137e24abc9ae005c1
+  018-slinky-slurm-pre/Chart.yaml: 2854fc9cc91c1bfb42e070f53680d3c0b970fb6e14b0702e3f0593950370189f
   018-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-pre/install.sh: 81a42ad3d2342f567074c56e5e18a07b665ff8eb934c12ae91594ab2c4abb4e3
   018-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   018-slinky-slurm-pre/values.yaml: efd9525d04fb69ffea430a76aae43654b7ac9ab8970fcff9f32dbf9b01c06de5
   019-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm/install.sh: e42da451f77183abb1fee67e9e4709cc88f905480c8d5b037e7e5f9c94082bb3
-  019-slinky-slurm/upstream.env: 2a86c45383aaed8aae07bdc46abae8cb0212215e3ad8027436fcfd632286fc44
+  019-slinky-slurm/upstream.env: 8f14c622fc81ef6fce0cee9b3eb48b60cf8da07881f14ead4e3ff7c8a76a5523
   019-slinky-slurm/values.yaml: efd9525d04fb69ffea430a76aae43654b7ac9ab8970fcff9f32dbf9b01c06de5
-  README.md: d5f62388c207738f8e9b9d270d9d2bef3f3b7906f1fc0f13e5989fa572a9bd5d
-  UPGRADING.md: 2cc41164cc4adcd64bff61f3ec7faebe8b3b761526ac6b1e4320a61c245b567a
-  bundle-info.yaml: 04bd9b00dacd45a31bc3fc77899b0535ca797f71af8d5f748376aeffb0122988
-  checksums.txt: f3a41d6f2ea8c97de508a551b896dd2d291616e86eef0107b574f3b7158f9325
+  README.md: a83dbb6d289acbc02ee309b653b65f070ed406b5c353a41471afd70dcbe7ffb7
+  UPGRADING.md: 6b2a8ef56708526263084b0ebd0b883daff94d6425d63b659457f5bf8c2793b7
+  bundle-info.yaml: 0a063bfeb54b2a038d27779e33fc7651cfa165fc7bdb0b28cc3fe8e160e0e05d
+  checksums.txt: b0e38d5ea60a71cc4e5a9a9ccb81ab97eaae7c85dc2e04ee12c6556156a75aed
   deploy.sh: 1cf208b96951418838837b8f582324165495e8e2c59900ea9fd2c7fa3aac549b
-  recipe.yaml: db7009e91fb2324d0185659a279c52bd3c78dc310eb883eea0f005b462e19809
+  recipe.yaml: 3b1efc893cf2b74bb7dbb36e2a81fdcbcaa658957e961fc7692981f6d039f57b
 h100-any:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5c369f979f2008b30aeab8658a89ba0868f36ae5df1df39557138401048ccdb7
@@ -3517,7 +3517,7 @@ h100-eks-amazonlinux-inference-dynamo:
   005-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   006-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  006-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  006-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   006-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   007-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -3578,12 +3578,12 @@ h100-eks-amazonlinux-inference-dynamo:
   020-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: ada5ff4a7b792cae12ea338147d90196b51a16cd685f77043034269752127847
-  UPGRADING.md: e7bc9f9f9476d5a9ff3ce4175b257518b235ce3ace3720a19313c7501ef24da3
-  bundle-info.yaml: e79467e4ea36fe2922f1efb968bb1ce455737ebbbb94c7295ba52410ff75ab7b
-  checksums.txt: daf44ff7d58519dfdae13880afadf31cef1da7eab31530431e1654630fed558b
+  README.md: 3d349f18316ffd76f909fc6ad00ce2c7585b0383ababbe9bc7eac6f2cc3cd790
+  UPGRADING.md: f07fce3855e9f04373c38898adcc232da5acc021e02928864d1a04d2df2fc637
+  bundle-info.yaml: 1e5e883ac92ce1e19f2320f0d37d914e2fbfa4d2d2eba4a382cefeef53982bdd
+  checksums.txt: 9da8cf2368c34c6087b9e24fc926c04de0a6b37684a0f3a18673ca9be08ef38a
   deploy.sh: 2a699ebd12e819ae0fb40b46f292cdd9a138d66b2f60461cf75707cbde85b29a
-  recipe.yaml: ab2b94a591af805eaefd358ac1b9c9d785db412ffbdec64df4e2c2c70854d75d
+  recipe.yaml: 1126387a4a6f59d6dcf2862f0b9b6cbbf36673a1d494090d2198ad161d9f5da3
 h100-eks-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
@@ -3614,7 +3614,7 @@ h100-eks-ubuntu-inference-dynamo:
   006-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   007-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  007-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  007-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   007-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   008-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -3675,12 +3675,12 @@ h100-eks-ubuntu-inference-dynamo:
   021-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   021-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 8cc0ff7844c7ae4f805c9a846e5881472fad888f7e8e591e7e8b331de56a0d1a
-  UPGRADING.md: e7bc9f9f9476d5a9ff3ce4175b257518b235ce3ace3720a19313c7501ef24da3
-  bundle-info.yaml: 5a62404da8ea539610030d4872bc94038d00126a84f834b6017ca5db60a54864
-  checksums.txt: 458c71156a68d0ae625e7f703885f5086ac98729d0aece65866045cee315279d
+  README.md: 25f48fd08cea7c1c2a7b52288a92c1aeb78f203829c5661bfae4e49df48addb3
+  UPGRADING.md: f07fce3855e9f04373c38898adcc232da5acc021e02928864d1a04d2df2fc637
+  bundle-info.yaml: afa801ea15fefc6e9929282c866c1226046578ae710a0754b997ec627a3a2e26
+  checksums.txt: fefd03562e0bc3d828e5ca6b31855f22e3e9f0683023edc5a978751412883826
   deploy.sh: 212fc08a28e10cd728ee970b3b95f14a4e1921798819e88c08e2b71eee30d486
-  recipe.yaml: 5a523cdcd10ab1672df2019c584d52556c15216c9c666149ce11acf60295a0ce
+  recipe.yaml: c10d59fbc6f15cb3947eecb3b7f163337241ec527270cff345e44147aceb0711
 h100-eks-ubuntu-inference-nim:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
@@ -3711,7 +3711,7 @@ h100-eks-ubuntu-inference-nim:
   006-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   007-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  007-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  007-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   007-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   008-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -3768,12 +3768,12 @@ h100-eks-ubuntu-inference-nim:
   020-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 5d340182c1ad972e0251f10dafb9a28999ddc5d98f016e702208f767f2359faa
-  UPGRADING.md: 4f04bb226f290bfeb71e97fe57f70d739de9d1dce6a6d11835bad9251d0398a8
-  bundle-info.yaml: 72b6a8d0fb50a98ca4481eefaff2ade874ea383e5bfffbaf8a299e4a101f8340
-  checksums.txt: 6bac57c0692f4a65409e8ca7c711474922fadfb865e9102dfacab624585e67b2
+  README.md: 03f935898217a124412100decf451146c3395858da9c59308b1f9aad96a4d738
+  UPGRADING.md: 56c4758326f2611bf9d17d61c4b630bec346db97d2e06e02a4e47d63a1fc13b3
+  bundle-info.yaml: a81e5d8ae18365a52989ad8d8cddcbc9835f86ac5e8fa2a3b5365bf3117bac6a
+  checksums.txt: 3b64b8d43176b288f505b04846170795a55d9fcba379d2bb90e1103afa04b354
   deploy.sh: 3bbc580880673d4cce1d9f1b8e27a3ab4dde5b1fbf80eafced3c43f40b653bf0
-  recipe.yaml: f0e4714a415b9744d2d90c7cf4d6c3b77adf5f2b6a4c4651df21d2ae254ef8ad
+  recipe.yaml: 892ac0746205777d7f4a2e94087362f934d10ebfa58e3e997635af21de22b77a
 h100-eks-ubuntu-training-kubeflow:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -3794,7 +3794,7 @@ h100-eks-ubuntu-training-kubeflow:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -3847,12 +3847,12 @@ h100-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 3fe7c66c822a8a28569b59c6b33f23dea5608b504a0aebd1fad6cfb0d7618b18
-  UPGRADING.md: c93e95516afb1a9b84a6f093723bdb5eb2c30a94ef4e92fb3ec5e61da87da37d
-  bundle-info.yaml: da7edaf97c70903594100bee1a9557a886c1779860376ea8f1ac0c6c07654269
-  checksums.txt: 06a243262cd327dc7639b55c40cc4d3fc24e8dc3f1c0118577daa193e04ebc27
+  README.md: c49d5569f291b8464aac0a5ff0ad76fb067fca4307c0b80cb227ac7c530591c7
+  UPGRADING.md: 093923c8511d39c240e95f6376a6039ea509129c0092d5d9ef88432b28c6868d
+  bundle-info.yaml: 0326985b47a48f0b2719733085f268d4949f523e884707dc661b3e905bc6e73b
+  checksums.txt: fa333c1c67997ac8527c5473507e06e3925595f5a224249ee0de7ca43689a672
   deploy.sh: 9f6fea7fc8568ab8837436b7ec9feebf259c0d92f8ae0d66a89d6d7d6c38aca9
-  recipe.yaml: 814ceb81c14a9230cdbed94eb73fc87e82bef9343fc9aff4789cc85c1372ed59
+  recipe.yaml: a8ac37349cc6a638f9234ccffdb0709cc8e3aff1e366fe60137b1e15c3cf6eda
 h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -3873,7 +3873,7 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -3931,12 +3931,12 @@ h100-eks-ubuntu-training-kubeflow+dra-eviction-node-label:
   018-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 957ec8c2b3b6f5a6bbb3397015a5e81deb3109b7840ef69a77e4a467aacde65d
-  UPGRADING.md: c93e95516afb1a9b84a6f093723bdb5eb2c30a94ef4e92fb3ec5e61da87da37d
-  bundle-info.yaml: a7d673d5f58cdbfcd34fda04bc369b97c8c8d78e13ea23640fd2051ed6181233
-  checksums.txt: c62c022721aaa08b0253d1b6dfa4897b99fc5429e55ffdf9f41055e405ab8736
+  README.md: 80d63ba00405712d5b9e67014d5b75ef1831080b6d25889a20321ae4e32c98c8
+  UPGRADING.md: 093923c8511d39c240e95f6376a6039ea509129c0092d5d9ef88432b28c6868d
+  bundle-info.yaml: 09ed949e1826ca65701f211d1cbd887a5f37a39c7735a0f66905ef5045f0faf2
+  checksums.txt: 13ea1ad0bb0b79578a38061c8409408e6aea969bfee91d63ef253d759a6ead2f
   deploy.sh: 7f14d795578c79e1faf4bfcfd77e11c0acb74f0fac891d6101c614c49371dc89
-  recipe.yaml: 0b0a88a81d3ea98b5afffc296a7ed7eecb6496da18936872a2e81ad16181b2d4
+  recipe.yaml: 971c491a6ba2ff89ac6adcad1875e98ebde0ab41bd6272afd19bdd05d666239e
 h100-eks-ubuntu-training-kubeflow+nktp:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -3957,7 +3957,7 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -4010,14 +4010,14 @@ h100-eks-ubuntu-training-kubeflow+nktp:
   017-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 3fe7c66c822a8a28569b59c6b33f23dea5608b504a0aebd1fad6cfb0d7618b18
-  UPGRADING.md: c93e95516afb1a9b84a6f093723bdb5eb2c30a94ef4e92fb3ec5e61da87da37d
-  bundle-info.yaml: 5bbb35eb32bad6a08d48dbe208f43d4354eb282988a2ab0570c5c62810a538a8
-  checksums.txt: 6fc7ec98a0e473d2ec5d344460bd7f916a751aeae8853d6fec44058a983c7b99
+  README.md: c49d5569f291b8464aac0a5ff0ad76fb067fca4307c0b80cb227ac7c530591c7
+  UPGRADING.md: 093923c8511d39c240e95f6376a6039ea509129c0092d5d9ef88432b28c6868d
+  bundle-info.yaml: 086faf184d4b17560a2a212bd71ed77def6675853f8023cad042bf8c5b2771e8
+  checksums.txt: e4b8007330273291ed3b329962ecf6f30a0e97b0e4246785b29802757f1007a2
   data/overlays/stock-render-opt-in.yaml: 28518490ca46ac3ecf1b7cb220cfc55c3c4d3e3f595446b6aab9894f15f80557
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 9f6fea7fc8568ab8837436b7ec9feebf259c0d92f8ae0d66a89d6d7d6c38aca9
-  recipe.yaml: 5f54dd9091a81045a7957c7dafb1193862942d573fd960cc8df9d67375596985
+  recipe.yaml: 10b70f67bd940f365fd6499c0e27bc148fe34f9da32c7a6d88a59946f4b5e6c6
 h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -4043,7 +4043,7 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   005-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   006-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  006-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  006-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   006-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   007-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -4085,7 +4085,7 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   015-nktp/values.yaml: 1e07de644620a6405256863f12d6608f3f47c2688e46598990cabb32e91152d1
   016-node-problem-detector/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-node-problem-detector/install.sh: 5b06afb5858e1fa33057a09f08c9fd27bcae899b7c3d1e7d9e2e2d3c98930b4b
-  016-node-problem-detector/upstream.env: ef6ae27151ec40531376d97fa9312870af2cded8644ce3886700476b72e64fbe
+  016-node-problem-detector/upstream.env: bccfc55a06ac31703d3bbf8f76d19d6fc9aed14c0f6db12c8b01fb777b7ec726
   016-node-problem-detector/values.yaml: ce9d368bf8b918ec8da0cbc76874b10d9dbe0c52d8cc9eb5f89356e296068991
   017-nvcre/apply-crds.sh: 4f8ccc8fc9987885bf48366bc3c20ceb2f17c14e19f5ebc153172252722ac302
   017-nvcre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -4105,14 +4105,14 @@ h100-eks-ubuntu-training-kubeflow+user-overlay-components:
   020-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 8c9d15e40eaa5902841aa89c91d435356c46548bfd36c11f7dba4804f9b7219d
-  UPGRADING.md: f2aebbb11908b38b44418bdd3a3a35b2a0acf0cfc390260d62d6d17c295a0a53
-  bundle-info.yaml: 1888289e4ae78646dba478a7f3731c3961dae3f95902893fe7801baed7fef105
-  checksums.txt: ccbf580a15c8fe44a0538301875b2ff4bf165a629a07198fedfb3ff6a1bb737f
+  README.md: 220325d5c67bb586c5714721349fa9c5b68a0ae2f771da6e3fc63c93ce64e230
+  UPGRADING.md: bd39f1b0cb606fa0755e4a1e0c88e687d8c36a31af9b2a47b097e19e02b1c669
+  bundle-info.yaml: e21aa08dade910abeb15889b5146fcb36e003456cabdecc7dc32b81c1c959c0e
+  checksums.txt: cce1b2ee9f57cd893e0f9fd71cac044b12fbeb9a15a00e4e2189191fcf391a26
   data/overlays/stock-render-opt-in.yaml: 100a230e36a3fe11b9678bb4ad0dcd59fe8ae0a51534814dace25056bb9a2ba3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: f512b054d9378db2e1fb4149b0f2db0961e6658c963da7154c17ecc916d57ab7
-  recipe.yaml: bf260d280c96786119efab87c2ac9bb7f4850abc09606d502ac8030c98e2cec3
+  recipe.yaml: f85e0a6d05141c24ffe879e9f3a9dbf2384b1d5f353d69c93f1727cc3b3195ca
 h100-eks-ubuntu-training-kueue:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -4133,7 +4133,7 @@ h100-eks-ubuntu-training-kueue:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -4183,9 +4183,9 @@ h100-eks-ubuntu-training-kueue:
   016-topograph/values.yaml: 7cf4177fe92eec9bcf9dc28f3631e1fb14975308a90fe50a054594421f1a40d4
   017-kueue/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-kueue/install.sh: c64a05fc853ece9bb0089ff34e4f81e3e05e75501abded03f6176cd6e9afa2ca
-  017-kueue/upstream.env: 6da2c13c74f6c8ac34bafd6b2978f679908310c88d231c3fa7209a147ee5a31c
+  017-kueue/upstream.env: df94340dc338fb3162c5c60dd2a761081dee744ae11cd63ccb4c795e4750519f
   017-kueue/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
-  018-kueue-post/Chart.yaml: 6e6183e99f4bf67069ad7657e77660b44a2d619ecb868fdb4bda664378e6c86c
+  018-kueue-post/Chart.yaml: a195e73bab19c45a97ca221b493e5894921e08cbe30de6a7d5b607f04abb0866
   018-kueue-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-kueue-post/install.sh: 6ae335eeb344cdd638c5e95ad76ff38ae17d558dc0b3dd51521ba5f64bcc2e7a
   018-kueue-post/templates/cluster-queue-tas.yaml: 9cec20f28239249b9fa3db6d6135a547796c1ae7b324fc613c578e6397230344
@@ -4193,12 +4193,12 @@ h100-eks-ubuntu-training-kueue:
   018-kueue-post/templates/tas-flavor.yaml: 96016a5899b403b6fc980013e7deee18f51c4ae820be6c840ba18cd17d7ce3ed
   018-kueue-post/templates/topology-tiers-3.yaml: b5bb53f7c4dcbedb14332f5309913fe5252db2756081ddbea64d2148be4331d7
   018-kueue-post/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
-  README.md: 50387199da97c4ee109972ad1f8983a6d17286496b002c1aba752d3173b6b883
-  UPGRADING.md: 4829ef0b231e4608358970d22b63b6fc823e7a40cd605a5c3391bfcaae6f926e
-  bundle-info.yaml: 5aa77d01941ec379c29bca6ed71b89876c0c0f303db03cf5684a0ed667773d3e
-  checksums.txt: bd2e3c114513acb6fc3978317bb91cdc63505969304fe9c2830c12405979190e
+  README.md: a49b83c76908b304a2bb81f73e0a25584fa69a73bb860232ad231a589c2034d2
+  UPGRADING.md: 3585fef9a1f573a05e51da02dd6bbb7152c37da134c9451d8de251763e521f83
+  bundle-info.yaml: 7ec67a170660b2f1bad095984c3378ceec94d859760389f920a01653090d818f
+  checksums.txt: b5e5955ad017541e0b6cc174c89fdf07fceb8818cae33d39f12174a9bb603994
   deploy.sh: e9df16c4b37f4c6e5202f795b3988ba540715d8204c274eaf9312994051f9cd5
-  recipe.yaml: da8b26db40a76be1db4ae118650959e4eb8c33e3553c7945b9f1bedf37768f7f
+  recipe.yaml: 1185607d69cfbff328559ff2af9933feb68b1fbc26af6a94b232da1c161ed6ad
 h100-eks-ubuntu-training-runai:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -4229,7 +4229,7 @@ h100-eks-ubuntu-training-runai:
   005-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   006-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  006-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  006-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   006-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   007-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -4273,12 +4273,12 @@ h100-eks-ubuntu-training-runai:
   016-runai-cluster/install.sh: ae940398e95bd7ff34c733dd2c0d83c660a396acb0516ac65c57543ecb15e5a1
   016-runai-cluster/upstream.env: cefc53873a73bc2c6782645d393c283bd0ff5209bb331e9071ad4155839c598e
   016-runai-cluster/values.yaml: d9fb7851f728802a9e93683f4d25810a573193d9de65ef14ce955737166955b1
-  README.md: 3837f605496edbb196bf29388e7bc85cc7e32801a0459a0a58217950d82f5144
-  UPGRADING.md: fc5acc21136771408fa0f38cd66c789e77d50a5c4c9f39941660f1bb8012fff0
-  bundle-info.yaml: 2ccca71e3e291b3734f29235271bd36977c8686a000023246431f7b2f14e3c2c
-  checksums.txt: 82eb770bb36863291b5df602c6a4e4ec0f68987bc2912cae988354ccb422860c
+  README.md: d8d098ec547f32c0fea3fc30a79b465ea5258a2fc4589ba66829584ca81da45d
+  UPGRADING.md: 8dbb682313e8e6e7e69cfd0f048a1c36c344d3d5ee507768781d8612bb1e2fee
+  bundle-info.yaml: e33af1e10d5a9acf9e6ca67d6329f6d213c1b0aafc15aad7b6f4a17cd52b45be
+  checksums.txt: 4b9439d6ddcf399a5c481e2470b12b64ddc747650d1d52923abe6e3e825ebc97
   deploy.sh: fb80fb14537c4a4d7d4eb46aae5f6c514f160c08d1f5116e704ec8d5693e4797
-  recipe.yaml: d393f71ee2884d959f75eb4877d6162f0842481393c727c2f7c31fc36109262a
+  recipe.yaml: 200fd44b569a4cd4184bf091a0582c2c44a743407f31ca2db7b1e2efcbd8bd28
 h100-eks-ubuntu-training-slurm:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -4299,7 +4299,7 @@ h100-eks-ubuntu-training-slurm:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -4345,27 +4345,27 @@ h100-eks-ubuntu-training-slurm:
   015-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   016-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-slinky-slurm-operator-crds/install.sh: 667ec2f3a8a311e5253234eaed3ab9f29979be172910cb0a8adb3a4f6eef0ae0
-  016-slinky-slurm-operator-crds/upstream.env: 8e5d5bb8937b1af2120817e7bbe90c07284fc602be78898031dd4ba8928b0612
+  016-slinky-slurm-operator-crds/upstream.env: a07bc3583ee826103d93efbcf8f691708abeb75e0fced68695463045d592ef94
   016-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   017-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-operator/install.sh: f7ac4a8a1639fcd2e52252cdebc1a72134cf6da6ea4d9e5ca768cc287c7b9779
-  017-slinky-slurm-operator/upstream.env: 20dd53b4a1277e1404ac8a953bc2f9b58040540d2869401ad72f9d03a8487806
+  017-slinky-slurm-operator/upstream.env: f2757cc8a37fbac2dc45c7a8b601096035f5043f2aa39a291f96066dc569e4f8
   017-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  018-slinky-slurm-pre/Chart.yaml: 96abddf315b1b6024531b24f4a559c48b3ffac1804d5be0137e24abc9ae005c1
+  018-slinky-slurm-pre/Chart.yaml: 2854fc9cc91c1bfb42e070f53680d3c0b970fb6e14b0702e3f0593950370189f
   018-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-pre/install.sh: 81a42ad3d2342f567074c56e5e18a07b665ff8eb934c12ae91594ab2c4abb4e3
   018-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   018-slinky-slurm-pre/values.yaml: efd9525d04fb69ffea430a76aae43654b7ac9ab8970fcff9f32dbf9b01c06de5
   019-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm/install.sh: e42da451f77183abb1fee67e9e4709cc88f905480c8d5b037e7e5f9c94082bb3
-  019-slinky-slurm/upstream.env: 2a86c45383aaed8aae07bdc46abae8cb0212215e3ad8027436fcfd632286fc44
+  019-slinky-slurm/upstream.env: 8f14c622fc81ef6fce0cee9b3eb48b60cf8da07881f14ead4e3ff7c8a76a5523
   019-slinky-slurm/values.yaml: efd9525d04fb69ffea430a76aae43654b7ac9ab8970fcff9f32dbf9b01c06de5
-  README.md: 9f9507cdd8f11a48e20a1eeb7c52db862273c85f1d4ecf824ff20310b25c5401
-  UPGRADING.md: d93cb37f76f763143e6b10acc634cb1c3c3b0e07ebbd4cdd7ea1d00a2c60d6ff
-  bundle-info.yaml: de9a561773d3cbb5f1c01fc96cd74ae2dc49b84890f478fae3175a5c76e2354d
-  checksums.txt: 408b5a9f3597f5c32f2a9842d1d11e1a93c25ade266b9bfaa16b0be07a56123f
+  README.md: eaa90e9579f41656f8c1c44422c844c17cd3728f04fef50c8e1e05e4e66735bc
+  UPGRADING.md: 5e83d39e0e1a92abe129fab6044f8c02638db293976cf734418881f9e182cb61
+  bundle-info.yaml: dab33ed9f33be14bd0c1340efea9d28dbef8087f19fa643015848a8f8539b4a9
+  checksums.txt: 0d3b91b1dfc3989f2ebf6dbaacd1d0d968461cbfd84599c04174da666a43dc0a
   deploy.sh: bef08882eafd47a1adefe5a6d101da276bcfb9f9e82b94112b6e39733fdbd1f4
-  recipe.yaml: ab0b48acc86b3807503ab01fbf4291f4c3d36cff4110d9c16a754193fd8f2034
+  recipe.yaml: a4cfb4b96d72393dfc4024290b64142b60ec92abb1ff920e47d2a339cc30c4ea
 h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -4386,7 +4386,7 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -4432,9 +4432,9 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   015-psmdb-operator/values.yaml: 4e54f419b8a134b280ec6d367d63d38cf983088a40dfe656d1629bfee689152b
   016-nvsentinel-mongodb/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-nvsentinel-mongodb/install.sh: 0b331a7fa136306ff98becb2f34297dde926bf9beea818f4d9a2e5139dc8f70a
-  016-nvsentinel-mongodb/upstream.env: 13d69c43b9838f0696ff4147a0bf0ad558ccade8044e530c3a6c906e3e5391fe
+  016-nvsentinel-mongodb/upstream.env: 3a25d6a2186fda586b0431e0427db9f637e272bbc5a3a0012c4c493fabdb3343
   016-nvsentinel-mongodb/values.yaml: a3806dbd57419af5a85a192c7cfa6fde25ed1c3ab478ea8ccde2b09f391ebd6f
-  017-nvsentinel-mongodb-post/Chart.yaml: 4b2c16ce61ea600f15205931307484310c6e7152bc94865c00eb84e7ea18d989
+  017-nvsentinel-mongodb-post/Chart.yaml: 3b0136939847bcf0d5989abfe30791b8883bac5fc611ac3a47c596dcabd9b0cf
   017-nvsentinel-mongodb-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-nvsentinel-mongodb-post/install.sh: ba394a2f72fc022673b0b854b76e5a5232eb9dd72b118ef4785de1f873d3b5c4
   017-nvsentinel-mongodb-post/templates/client-certificate.yaml: 9262bfd83508a30382c87d07871b0744e43bbd37bd34e0f9666ff47f312912d9
@@ -4458,29 +4458,29 @@ h100-eks-ubuntu-training-slurm+nvsentinel-slinky-drainer:
   020-nvsentinel/values.yaml: b496bdb51deca16f57fc853648b57a95d742a660127d3a61ad8656f9c0a576e1
   021-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   021-slinky-slurm-operator-crds/install.sh: 667ec2f3a8a311e5253234eaed3ab9f29979be172910cb0a8adb3a4f6eef0ae0
-  021-slinky-slurm-operator-crds/upstream.env: 8e5d5bb8937b1af2120817e7bbe90c07284fc602be78898031dd4ba8928b0612
+  021-slinky-slurm-operator-crds/upstream.env: a07bc3583ee826103d93efbcf8f691708abeb75e0fced68695463045d592ef94
   021-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   022-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   022-slinky-slurm-operator/install.sh: f7ac4a8a1639fcd2e52252cdebc1a72134cf6da6ea4d9e5ca768cc287c7b9779
-  022-slinky-slurm-operator/upstream.env: 20dd53b4a1277e1404ac8a953bc2f9b58040540d2869401ad72f9d03a8487806
+  022-slinky-slurm-operator/upstream.env: f2757cc8a37fbac2dc45c7a8b601096035f5043f2aa39a291f96066dc569e4f8
   022-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  023-slinky-slurm-pre/Chart.yaml: 96abddf315b1b6024531b24f4a559c48b3ffac1804d5be0137e24abc9ae005c1
+  023-slinky-slurm-pre/Chart.yaml: 2854fc9cc91c1bfb42e070f53680d3c0b970fb6e14b0702e3f0593950370189f
   023-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   023-slinky-slurm-pre/install.sh: 81a42ad3d2342f567074c56e5e18a07b665ff8eb934c12ae91594ab2c4abb4e3
   023-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   023-slinky-slurm-pre/values.yaml: 24b4418eae1e7dec15ae641661f5a21b925dd268b28304b18ad7639269e288a2
   024-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   024-slinky-slurm/install.sh: e42da451f77183abb1fee67e9e4709cc88f905480c8d5b037e7e5f9c94082bb3
-  024-slinky-slurm/upstream.env: 2a86c45383aaed8aae07bdc46abae8cb0212215e3ad8027436fcfd632286fc44
+  024-slinky-slurm/upstream.env: 8f14c622fc81ef6fce0cee9b3eb48b60cf8da07881f14ead4e3ff7c8a76a5523
   024-slinky-slurm/values.yaml: 24b4418eae1e7dec15ae641661f5a21b925dd268b28304b18ad7639269e288a2
-  README.md: 53a7871c2942a79a230b4971846b7495563eee58550623cc93124ef3b6bc3dc8
-  UPGRADING.md: d669628f17f4e00757a945e558d31e634ab051e63d14111ee535f8fe468cad8a
-  bundle-info.yaml: accd6adc60e5edd703b5ef89a08d1f45b881826ab9b803902a09f7e95b869b85
-  checksums.txt: 808c83d1da76b69c37b27ed8194ed5ffd9c45d552e065419cd29854a6e8777a2
+  README.md: afbfa7f990e4edcca491acd0a5c8abf4b9c99f726ac914b6abf02ebcca81ac5f
+  UPGRADING.md: e2304df5149d8e74efadb06b55f100d4bcbb34d334ee543bc77a221625954f2e
+  bundle-info.yaml: 20c6fb0f3237ce2e7e06b118517942c4ec620a8ad4193c46f6335d52ecb6521f
+  checksums.txt: 9d6aa43b8501e73b187eb0e29a1071374daa664c2219d00beaa6cf39984309a2
   data/overlays/stock-render-opt-in.yaml: 328e7217055d4c00c950d690a1579830a95456e9953214a1ec0803416edaaaf3
   data/registry.yaml: f9dbb0c0e12b4f7932d93c44aded6be227bdb838c5be22e9ef0df93b3386ae1c
   deploy.sh: 02352012f161b6f88f35548c7b68e842c9dc603839aa95e22bae37f8bc7aa0ff
-  recipe.yaml: d65652ff18bb70e52710cc26f02c11886a89e6ee78c7263c3feaff946d9e5cba
+  recipe.yaml: db6ee64f4cb1ff2cfbf1778ac8c4c2735f44c5463e1417724b4bd4e3ed377448
 h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -4505,7 +4505,7 @@ h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   005-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   006-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  006-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  006-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   006-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   007-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -4555,31 +4555,31 @@ h100-eks-ubuntu-training-slurm+slurm-accounting-aicr-provided:
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   018-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-operator-crds/install.sh: 667ec2f3a8a311e5253234eaed3ab9f29979be172910cb0a8adb3a4f6eef0ae0
-  018-slinky-slurm-operator-crds/upstream.env: 8e5d5bb8937b1af2120817e7bbe90c07284fc602be78898031dd4ba8928b0612
+  018-slinky-slurm-operator-crds/upstream.env: a07bc3583ee826103d93efbcf8f691708abeb75e0fced68695463045d592ef94
   018-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   019-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm-operator/install.sh: f7ac4a8a1639fcd2e52252cdebc1a72134cf6da6ea4d9e5ca768cc287c7b9779
-  019-slinky-slurm-operator/upstream.env: 20dd53b4a1277e1404ac8a953bc2f9b58040540d2869401ad72f9d03a8487806
+  019-slinky-slurm-operator/upstream.env: f2757cc8a37fbac2dc45c7a8b601096035f5043f2aa39a291f96066dc569e4f8
   019-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
   020-slurm-accounting-mariadb/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-slurm-accounting-mariadb/install.sh: a504fa2641ee417304b789660330a3c01fbe4d2340c9a0654a1cb16b60190507
   020-slurm-accounting-mariadb/upstream.env: fe1429ef23b2b93c565fd243e6e166992d534823981ab61ff8159f1374c573bf
   020-slurm-accounting-mariadb/values.yaml: 64b1adf76aca02f43618e99a460dd485b822763fdba1a1db103042b007f26745
-  021-slinky-slurm-pre/Chart.yaml: 96abddf315b1b6024531b24f4a559c48b3ffac1804d5be0137e24abc9ae005c1
+  021-slinky-slurm-pre/Chart.yaml: 2854fc9cc91c1bfb42e070f53680d3c0b970fb6e14b0702e3f0593950370189f
   021-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   021-slinky-slurm-pre/install.sh: 81a42ad3d2342f567074c56e5e18a07b665ff8eb934c12ae91594ab2c4abb4e3
   021-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   021-slinky-slurm-pre/values.yaml: b97df3268a17dd1b4d1d963c6e003ab30b6b5ead510207f2a1476140143f6ea8
   022-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   022-slinky-slurm/install.sh: e42da451f77183abb1fee67e9e4709cc88f905480c8d5b037e7e5f9c94082bb3
-  022-slinky-slurm/upstream.env: 2a86c45383aaed8aae07bdc46abae8cb0212215e3ad8027436fcfd632286fc44
+  022-slinky-slurm/upstream.env: 8f14c622fc81ef6fce0cee9b3eb48b60cf8da07881f14ead4e3ff7c8a76a5523
   022-slinky-slurm/values.yaml: b97df3268a17dd1b4d1d963c6e003ab30b6b5ead510207f2a1476140143f6ea8
-  README.md: 853f1a76de678f2e3cb0aa061ef8e36ee4e253ead27fae8562205fd7316c8351
-  UPGRADING.md: dc1470cbd566ac4c9303e90f0fa0a1e64a06a19710ab4150d9118fda67d8830d
-  bundle-info.yaml: 39264b9eeb5ba11ce2f212bd22c8241b3dd79e178eae6a545c221c6fa87ec972
-  checksums.txt: 14389fd507cdf75fd49e4141ce3bed7aab94698b730cdb881422702fdc589d9a
+  README.md: 30a9876c6aed11db995981addba64e1e562f6d1de8539f521213b7863996c4d9
+  UPGRADING.md: 003d19736b8d5c577670b2709863f80ce72c2422ba384034cc8352ec7f6822c3
+  bundle-info.yaml: 18ccfa1f4eadedf58f64151523a896c999cb5bb51765b3cadf6eff5cc0262020
+  checksums.txt: b51e0a993b22c291690ca20d40b20c98f0e8ef9d09cc2c54275cc0277231f2a7
   deploy.sh: 024cf94e53bc8def4c616126dcc2df617c3c28b4fec7978adc4c26db89aa77f5
-  recipe.yaml: 16460e283a247680e37d49334a02619967b2eb20867535f4f17a6e9488146de5
+  recipe.yaml: 9062ad5295a8413cb55cb0c1c10afb5fe44ab2a41a12204f5c9dcd938965e56f
 h100-gke-cos-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
@@ -5049,9 +5049,9 @@ h100-gke-cos-training-kueue:
   017-topograph/values.yaml: 4ae7173f67ffcc6b760e12ecac3e6487d055c935863415ae6bfd9aab7e265c49
   018-kueue/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-kueue/install.sh: c64a05fc853ece9bb0089ff34e4f81e3e05e75501abded03f6176cd6e9afa2ca
-  018-kueue/upstream.env: 6da2c13c74f6c8ac34bafd6b2978f679908310c88d231c3fa7209a147ee5a31c
+  018-kueue/upstream.env: df94340dc338fb3162c5c60dd2a761081dee744ae11cd63ccb4c795e4750519f
   018-kueue/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
-  019-kueue-post/Chart.yaml: 6e6183e99f4bf67069ad7657e77660b44a2d619ecb868fdb4bda664378e6c86c
+  019-kueue-post/Chart.yaml: a195e73bab19c45a97ca221b493e5894921e08cbe30de6a7d5b607f04abb0866
   019-kueue-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-kueue-post/install.sh: 6ae335eeb344cdd638c5e95ad76ff38ae17d558dc0b3dd51521ba5f64bcc2e7a
   019-kueue-post/templates/cluster-queue-tas.yaml: 9cec20f28239249b9fa3db6d6135a547796c1ae7b324fc613c578e6397230344
@@ -5059,12 +5059,12 @@ h100-gke-cos-training-kueue:
   019-kueue-post/templates/tas-flavor.yaml: 96016a5899b403b6fc980013e7deee18f51c4ae820be6c840ba18cd17d7ce3ed
   019-kueue-post/templates/topology-tiers-3.yaml: b5bb53f7c4dcbedb14332f5309913fe5252db2756081ddbea64d2148be4331d7
   019-kueue-post/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
-  README.md: 8974317909bad4093a3e1ad5c011d6ba80c4f18867342eeeb077d813fdcd4ab1
-  UPGRADING.md: 0220687857a647bc604772d1f0b7f02e15839270d55d8e3e6e420d9c477cacfa
-  bundle-info.yaml: 3ea7f695d27b2624876764f4b588a1440b88a7bbeb6d8b5fc987f176d0958446
-  checksums.txt: c406eb6ce9861a4b784ad5b87240873094daefaf362f41ee5a62277491a1c9d0
+  README.md: 31ef462f54ecd9d4a0891d8ffc7625c62dd1dca4d018e39e6ad264861e8de2b5
+  UPGRADING.md: bd696be41bfcff9f9d214b719a7e3847f016117a5e866c0fefde03994077784a
+  bundle-info.yaml: 372f57f5e7db9de548e0f08927bb8739b16e5553330e34d21fd6feb0423d1535
+  checksums.txt: c1ed0cbbde0e583a4832228299d0c572f83a2a9de62a0f543cebe41d93f03cf7
   deploy.sh: cfcc5fa1fa64bfd3ca8f45c8c1a3a5627f270eedc9bf7f7b35c2677e1f09fe57
-  recipe.yaml: fecf251826534f8a59e6c280c0d1e97198ab7c1f04842e58ced3b4843b83fd32
+  recipe.yaml: c606b7a657a3f076801da22a3f6b588753df2b388650922041882e524689de07
 h100-gke-cos-training-runai:
   001-gcp-driver-installer/Chart.yaml: b0476226ebbc9a7738c4e5c2828ce5a73dbd371f3fa7cf1139c5fe9b2e825c02
   001-gcp-driver-installer/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
@@ -5225,31 +5225,31 @@ h100-gke-cos-training-slurm:
   016-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   017-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm-operator-crds/install.sh: 667ec2f3a8a311e5253234eaed3ab9f29979be172910cb0a8adb3a4f6eef0ae0
-  017-slinky-slurm-operator-crds/upstream.env: 8e5d5bb8937b1af2120817e7bbe90c07284fc602be78898031dd4ba8928b0612
+  017-slinky-slurm-operator-crds/upstream.env: a07bc3583ee826103d93efbcf8f691708abeb75e0fced68695463045d592ef94
   017-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   018-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-slurm-operator/install.sh: f7ac4a8a1639fcd2e52252cdebc1a72134cf6da6ea4d9e5ca768cc287c7b9779
-  018-slinky-slurm-operator/upstream.env: 20dd53b4a1277e1404ac8a953bc2f9b58040540d2869401ad72f9d03a8487806
+  018-slinky-slurm-operator/upstream.env: f2757cc8a37fbac2dc45c7a8b601096035f5043f2aa39a291f96066dc569e4f8
   018-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  019-slinky-slurm-pre/Chart.yaml: 96abddf315b1b6024531b24f4a559c48b3ffac1804d5be0137e24abc9ae005c1
+  019-slinky-slurm-pre/Chart.yaml: 2854fc9cc91c1bfb42e070f53680d3c0b970fb6e14b0702e3f0593950370189f
   019-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   019-slinky-slurm-pre/install.sh: 81a42ad3d2342f567074c56e5e18a07b665ff8eb934c12ae91594ab2c4abb4e3
   019-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   019-slinky-slurm-pre/values.yaml: b273c36baa0dae120350cb527e8aafb531d0ab5416d95d5dcaee1ac8216c32f7
   020-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   020-slinky-slurm/install.sh: e42da451f77183abb1fee67e9e4709cc88f905480c8d5b037e7e5f9c94082bb3
-  020-slinky-slurm/upstream.env: 2a86c45383aaed8aae07bdc46abae8cb0212215e3ad8027436fcfd632286fc44
+  020-slinky-slurm/upstream.env: 8f14c622fc81ef6fce0cee9b3eb48b60cf8da07881f14ead4e3ff7c8a76a5523
   020-slinky-slurm/values.yaml: b273c36baa0dae120350cb527e8aafb531d0ab5416d95d5dcaee1ac8216c32f7
   021-slinky-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   021-slinky-topograph/install.sh: a9032e234a557bd3b089d34005689e9e385682c085676ff137c8b532b3423dc6
   021-slinky-topograph/upstream.env: dda993ee795d95551c98e5e1f97587c6cf1e2c5a722f61fb90726a097788cfba
   021-slinky-topograph/values.yaml: f11e2c423e180afd7141528eabed1ea9f0c1a81839f9b8218e194b7a61726bdb
-  README.md: c6d3ade92f1901b2d6a3bba44f6e203a7d463cb6940f72373204cd0959f3585b
-  UPGRADING.md: 2324c47486d16f2aba1b33386915ae7f143a3a4e3ff1b70c1a9bca38a95d3290
-  bundle-info.yaml: d3a4cea631e11d9e8a8648653441e21706d22adfd6cf388de7d24faf03d376e1
-  checksums.txt: 592e6592412aeefae17af52d6c032369ed4f441070dbc8ee0c1c9e45718db20e
+  README.md: 58e75af508f1b75ec8d052c27c2c8f5962072b2081fc67855c9ad613862e5fa1
+  UPGRADING.md: 82389f19a1b4bc81850c809478d7c3de54f09ef1e20f9d2e0bee8eb321c477fb
+  bundle-info.yaml: bbdc05c79ce92255ff52711fb387f9307bb55252f4e03d89b5b848a535891326
+  checksums.txt: 376c77b6c10c71992491fc81e219bc056d435b7b12b3612b45b02e09181d254b
   deploy.sh: 85b4a4005787e90b0b641665314da8aeadef25c14fdbef8ec958b1396a0ba1b0
-  recipe.yaml: 8b3d41d8d2d27828f39265c16fa125d738541af29939d31b085b6b7c7c267faa
+  recipe.yaml: c885ae46dac4c96ed3263374774728a48b18ef785fc4ec552eb40c94766c0a8c
 h100-kind-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
@@ -5469,9 +5469,9 @@ h100-kind-training-kueue:
   014-topograph/values.yaml: 5e203737fb65ae9f990eac5d02402f685d4093f08bb58e9feb3d18b68561d525
   015-kueue/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-kueue/install.sh: c64a05fc853ece9bb0089ff34e4f81e3e05e75501abded03f6176cd6e9afa2ca
-  015-kueue/upstream.env: 6da2c13c74f6c8ac34bafd6b2978f679908310c88d231c3fa7209a147ee5a31c
+  015-kueue/upstream.env: df94340dc338fb3162c5c60dd2a761081dee744ae11cd63ccb4c795e4750519f
   015-kueue/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
-  016-kueue-post/Chart.yaml: 6e6183e99f4bf67069ad7657e77660b44a2d619ecb868fdb4bda664378e6c86c
+  016-kueue-post/Chart.yaml: a195e73bab19c45a97ca221b493e5894921e08cbe30de6a7d5b607f04abb0866
   016-kueue-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-kueue-post/install.sh: 6ae335eeb344cdd638c5e95ad76ff38ae17d558dc0b3dd51521ba5f64bcc2e7a
   016-kueue-post/templates/cluster-queue-tas.yaml: 9cec20f28239249b9fa3db6d6135a547796c1ae7b324fc613c578e6397230344
@@ -5479,12 +5479,12 @@ h100-kind-training-kueue:
   016-kueue-post/templates/tas-flavor.yaml: 96016a5899b403b6fc980013e7deee18f51c4ae820be6c840ba18cd17d7ce3ed
   016-kueue-post/templates/topology-accelerator.yaml: 1ca4ffa711704422d5ec1796cac645bfc0e10d0b1538e2d48c22013300609ea9
   016-kueue-post/values.yaml: 9ae0af1abd28154ef1efc514bd20ee1daf35cfccbfaa0c6d97e08092b211d6fc
-  README.md: 886df0fdcb8e375aedca22c2e3178a0002cb3dac390ad86d8a957af2b95bb502
-  UPGRADING.md: ada11857a7f83d70bc4581d09aa3451a6866158525d7eddbf9320178ef296c6a
-  bundle-info.yaml: e6cd18fc72bbc910cb20d95f7595a7a1d3fb4c500f272daf30d39b0491da61b9
-  checksums.txt: 486a33872f7f9f691333c966e993acda8c0f3612ab7500a4918b0d2070dd0daa
+  README.md: d5c51a2d1236194a58983f5eca63a4145824e0b4f7a8b0370f4765f1f9db80ee
+  UPGRADING.md: 94c2f0e9bac40c04b446ae5e34c53541803c1246923a68fbc78edb307e55e012
+  bundle-info.yaml: 9cb4ccb94bd374f4ce95858e49e0d268ea15af52f656dcfdaf6d5dcc8e5151e1
+  checksums.txt: 32fe761f1f8d2dd77bb3ccfb5d296619b36c37bfe0ea43b44adccee3571a6014
   deploy.sh: fd0def74bf39cc7d68982a6ed92c506f0c042dde5e19fc57f66a21e9bd4fab2b
-  recipe.yaml: b570bda6dcd1c4e6b36e83cee0527f8a06efd1e71d72c463ab1ee76f727caea8
+  recipe.yaml: e43e4460326519a7454c5b74b117cca54d1f920fe416a236ef32ff46a9c73d86
 h100-kind-training-slurm:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5c369f979f2008b30aeab8658a89ba0868f36ae5df1df39557138401048ccdb7
@@ -5542,31 +5542,31 @@ h100-kind-training-slurm:
   013-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
   014-slinky-slurm-operator-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-slinky-slurm-operator-crds/install.sh: 667ec2f3a8a311e5253234eaed3ab9f29979be172910cb0a8adb3a4f6eef0ae0
-  014-slinky-slurm-operator-crds/upstream.env: 8e5d5bb8937b1af2120817e7bbe90c07284fc602be78898031dd4ba8928b0612
+  014-slinky-slurm-operator-crds/upstream.env: a07bc3583ee826103d93efbcf8f691708abeb75e0fced68695463045d592ef94
   014-slinky-slurm-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   015-slinky-slurm-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-slinky-slurm-operator/install.sh: f7ac4a8a1639fcd2e52252cdebc1a72134cf6da6ea4d9e5ca768cc287c7b9779
-  015-slinky-slurm-operator/upstream.env: 20dd53b4a1277e1404ac8a953bc2f9b58040540d2869401ad72f9d03a8487806
+  015-slinky-slurm-operator/upstream.env: f2757cc8a37fbac2dc45c7a8b601096035f5043f2aa39a291f96066dc569e4f8
   015-slinky-slurm-operator/values.yaml: d40d9941ddd05279343fad2c98b2f3c8ac5cb2e2459266e63d1937adab908e60
-  016-slinky-slurm-pre/Chart.yaml: 96abddf315b1b6024531b24f4a559c48b3ffac1804d5be0137e24abc9ae005c1
+  016-slinky-slurm-pre/Chart.yaml: 2854fc9cc91c1bfb42e070f53680d3c0b970fb6e14b0702e3f0593950370189f
   016-slinky-slurm-pre/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   016-slinky-slurm-pre/install.sh: 81a42ad3d2342f567074c56e5e18a07b665ff8eb934c12ae91594ab2c4abb4e3
   016-slinky-slurm-pre/templates/enroot-config.yaml: c90815614101b5b1299602c1a89863bb31e98c16e219a9d3e6497f321e140954
   016-slinky-slurm-pre/values.yaml: 94842abdc07807198d923ad297e064c8eb036b81afcf80a02e954e8a8550f8ec
   017-slinky-slurm/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   017-slinky-slurm/install.sh: e42da451f77183abb1fee67e9e4709cc88f905480c8d5b037e7e5f9c94082bb3
-  017-slinky-slurm/upstream.env: 2a86c45383aaed8aae07bdc46abae8cb0212215e3ad8027436fcfd632286fc44
+  017-slinky-slurm/upstream.env: 8f14c622fc81ef6fce0cee9b3eb48b60cf8da07881f14ead4e3ff7c8a76a5523
   017-slinky-slurm/values.yaml: 94842abdc07807198d923ad297e064c8eb036b81afcf80a02e954e8a8550f8ec
   018-slinky-topograph/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   018-slinky-topograph/install.sh: a9032e234a557bd3b089d34005689e9e385682c085676ff137c8b532b3423dc6
   018-slinky-topograph/upstream.env: dda993ee795d95551c98e5e1f97587c6cf1e2c5a722f61fb90726a097788cfba
   018-slinky-topograph/values.yaml: c9015074818102d8727cfd38e96941c5c285175852fa71f81182c4323f751e05
-  README.md: 034c75f6f5a1091c8b0d0a9d5fa1573ce5e4b134978b7db491ac182ed2567737
-  UPGRADING.md: 35d4fa218a06a7083ead73f2a9060e6a3fc8e06ed49f9e4313b08522381903e3
-  bundle-info.yaml: de390cd05be437fc8792ab17b290e0706963487029ccd22b7fe7bb939b972f21
-  checksums.txt: c18403637aa081f1e02cac3e8436315ff37e51da6e17a9b9cd182b15c5ec002f
+  README.md: c23aac45cb69cc99288a89d409ff7f03d02bb383f5d4a307491e5f8a99207b5a
+  UPGRADING.md: 5498735ec3a7a52cae2d492800888c2876e041e0f01a19fca83777bb8428344a
+  bundle-info.yaml: 01e00da1570ce86ba767d289b596f6df6ac1932f4de03c10161c81faf479a981
+  checksums.txt: b42ffceccbc94b3df2469b49706cf7018e78434c6289db980f633e92e8ec1df1
   deploy.sh: 189d0cfd11ca7309b6da113ddaf36bf314036352e35037c91f3335b2e937e2e5
-  recipe.yaml: f1b63d2b666f6ce35a2007cbcefc449247485be75c44407294939003a1b4c138
+  recipe.yaml: 04c9626ba6b1746e9d10a4e00f1a31e268bd9b80d8b3e50d0e7ac7a3c4b1fe33
 h200-any:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5c369f979f2008b30aeab8658a89ba0868f36ae5df1df39557138401048ccdb7
@@ -5654,7 +5654,7 @@ h200-eks-inference:
   006-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   007-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  007-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  007-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   007-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   008-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -5707,12 +5707,12 @@ h200-eks-inference:
   019-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   019-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   019-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 853355eba6303a6dcff192fe49fc21244575149075d663dab5087970f47f80a0
-  UPGRADING.md: 9b5e5f64f043c45b0100d44ed3e19451eed6a5b50ad9915e80f3514c5dddbee8
-  bundle-info.yaml: 54da91e3ba98a5ca0b74dbbad3bb366a70ea1b8d8c44599de999db5690c709e7
-  checksums.txt: b021db76642d509c491f505d75b081a753ff8393c82bbb0c037ae8e55d76ee2b
+  README.md: 190ab549c0303c9939ab096770e0080e625f46ae30c5a102fd684830592f48b1
+  UPGRADING.md: 7cc08d2ac293d191cd59a74e57aa96742ae321ebc049b80e1002c762d49ada08
+  bundle-info.yaml: ddb02dd9dff4e1f28c806a28b6253a8a4e06d67038978d2cba497221264e1d14
+  checksums.txt: 0bb38cd635c293a1d7a7c9540ee4f7cc14d6587b5ce03ce5d6f65da9895f6406
   deploy.sh: d12f07432e62ddf2c45520880114a7f8a8a6607bfe14a8908049906703597dc2
-  recipe.yaml: c0910c667c09b53d2816b0f3873c466aa4e78e3308de4550ab083a09ef75ddcd
+  recipe.yaml: 9e287daf843bfa60d3c24d98f5a5b193f757222b72908b2f275c98b4603bce3c
 h200-eks-training-kubeflow:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -5733,7 +5733,7 @@ h200-eks-training-kubeflow:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -5786,12 +5786,12 @@ h200-eks-training-kubeflow:
   017-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 4a67a84e90fb73a1e1ef33effd588c225f0f1246ce20e0fecd98f2442c7eb931
-  UPGRADING.md: c93e95516afb1a9b84a6f093723bdb5eb2c30a94ef4e92fb3ec5e61da87da37d
-  bundle-info.yaml: 4fbf4c06f4ce8e4da302455ee648365bdef4edf1b193f0d2ba9c172881d2b639
-  checksums.txt: 78b7d359072c71eed0f01131f098d15abd284387e297eed82ddd5781946eaa6e
+  README.md: 88e7447ab29fe39d9248a75874902b4bf675f82f6bad37e6408a612115757fac
+  UPGRADING.md: 093923c8511d39c240e95f6376a6039ea509129c0092d5d9ef88432b28c6868d
+  bundle-info.yaml: 47291dcc78b81f2c88bda2c23548389de8a0ee8275abc38af04da2f862669af1
+  checksums.txt: 81876809a94e175ca80cdd3adf367c93ef266660c8641f09bf9a1aab539d1a4a
   deploy.sh: 9f6fea7fc8568ab8837436b7ec9feebf259c0d92f8ae0d66a89d6d7d6c38aca9
-  recipe.yaml: cbf40ea02f0b922a3cbe5974f929a7af320789587c81af98139b834a06b2f89e
+  recipe.yaml: c63d0dc3668aa49ff33c9981794551cb8ce22806fc69f9cd7a013ee38b4959c2
 h200-k0s-ubuntu-training:
   001-nodewright-operator/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-nodewright-operator/install.sh: 5c369f979f2008b30aeab8658a89ba0868f36ae5df1df39557138401048ccdb7
@@ -6521,7 +6521,7 @@ rtx-pro-6000-eks-amazonlinux-inference:
   005-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   006-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  006-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  006-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   006-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   007-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -6574,12 +6574,12 @@ rtx-pro-6000-eks-amazonlinux-inference:
   018-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   018-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   018-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 8ae78546f51cc2a54b8e1fe87b0f41623f33176418db17f62e3fca54ad3de262
-  UPGRADING.md: 9b5e5f64f043c45b0100d44ed3e19451eed6a5b50ad9915e80f3514c5dddbee8
-  bundle-info.yaml: cda4c7cc9e5cc7b9523c944f01dced893226bb1d818a88e72778c2d09dd044f8
-  checksums.txt: a3bc28fb05b89b3b4d04821b5c3b84277d0c87729bae459f12575cfcbee9f492
+  README.md: 7f5c8548856d4695886f273b450fb9e58e0476a7dfd4991011475aa392964587
+  UPGRADING.md: 7cc08d2ac293d191cd59a74e57aa96742ae321ebc049b80e1002c762d49ada08
+  bundle-info.yaml: 4add45a77902bf835bb2cf360ae209e252df918d07a11460ec2c4d30bdded846
+  checksums.txt: dfe41fbb973c7e74c09f0a7999940fa60946c53457b8c8eff0e36ae14f38ad23
   deploy.sh: 4187eaebc6605ef81e5963495d1e112cab1d0d79b75a866ac953d9832ab80713
-  recipe.yaml: 6891546ad7600912451c665cc0b9492de281790a980c83cfb2eaf65d3f950f26
+  recipe.yaml: 1f6b9ca37f20d6bac91089c2259df5a99072689e287ed2d7bb24e7b032b1b805
 rtx-pro-6000-eks-ubuntu-inference-dynamo:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
@@ -6610,7 +6610,7 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   006-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   007-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  007-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  007-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   007-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   008-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -6671,12 +6671,12 @@ rtx-pro-6000-eks-ubuntu-inference-dynamo:
   021-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   021-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   021-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 185fce0b6b461391f73d14340bced990c06f03b89ae3f43c087b38ac187ece5b
-  UPGRADING.md: e7bc9f9f9476d5a9ff3ce4175b257518b235ce3ace3720a19313c7501ef24da3
-  bundle-info.yaml: 82b4fa781e674daf5cf4fc084bcd0fdba1bd3ef8e7c9902b39e1954c13f9cf2d
-  checksums.txt: 35218a614a1f14cef80eced8edf2884ea293f21646d583bad1432b9e11733ae4
+  README.md: b217fd0589352b0adcec02d0fb12022a2d488a761679f531b6d2329b872e19d1
+  UPGRADING.md: f07fce3855e9f04373c38898adcc232da5acc021e02928864d1a04d2df2fc637
+  bundle-info.yaml: 67cd96f6bb79597dbd0e577efc1c7acea229c7d3c3ed5104b105f8f01f5fc306
+  checksums.txt: 65aefc4ef43ac0e42612481a074bab3a70d2e44fb555c7da560fb31c016259ac
   deploy.sh: 212fc08a28e10cd728ee970b3b95f14a4e1921798819e88c08e2b71eee30d486
-  recipe.yaml: 36ce4f3ea9917b267658292650288065bffbf92e415a2d5b5d7bf40450ce1c4e
+  recipe.yaml: 4d7ea27a6d4ae7b867c34b7073817a351ced89a9a09c321668b4cb4433888ad6
 rtx-pro-6000-eks-ubuntu-inference-nim:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
@@ -6707,7 +6707,7 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   006-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   007-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   007-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  007-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  007-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   007-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   008-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   008-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -6764,12 +6764,12 @@ rtx-pro-6000-eks-ubuntu-inference-nim:
   020-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   020-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   020-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 978f6e64c8d6736ddd96f2b3510e6b05a816d308d7a979c0f946fb394a526012
-  UPGRADING.md: 4f04bb226f290bfeb71e97fe57f70d739de9d1dce6a6d11835bad9251d0398a8
-  bundle-info.yaml: cd66ca9273d5ca82a56d87a4f77b4fac1045cf139004351013d08a596383b130
-  checksums.txt: 862a70334b0b9a6eda1ab7a08e81d5e5395aea67d02fc9f8656a6cf2d680c8c3
+  README.md: a07a2431cccb5b89d2e2a148feca5daf905fa2b3df29de4e8b014cb89023d049
+  UPGRADING.md: 56c4758326f2611bf9d17d61c4b630bec346db97d2e06e02a4e47d63a1fc13b3
+  bundle-info.yaml: ebc193d786478dfa630aadf317c77ed2735b98f302cc018d299f50c3a8d162bd
+  checksums.txt: e3ab0417d5446afec3e9544d2e3359ebc7b236fd73f58746aa313d7769703b5d
   deploy.sh: 3bbc580880673d4cce1d9f1b8e27a3ab4dde5b1fbf80eafced3c43f40b653bf0
-  recipe.yaml: 5825acf364237dbcdf5e166b6cc745fa447459739e65f4ec78b3e7f2f412bb0c
+  recipe.yaml: fd6b42cc3e4788d0142e8cbf312a1c8a6087cbcb3e95c969750739695a79ce7d
 rtx-pro-6000-eks-ubuntu-training-kubeflow:
   001-aws-efa/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-aws-efa/install.sh: 17bd5564fa944a7b2d9d66f8f9bc7542fa272f21eb345e8d3e3b630323b9e6d8
@@ -6790,7 +6790,7 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   004-prometheus-operator-crds/values.yaml: f6ded79ccc11132cec0b9dbbf1248ba5862248b9e4daea35c21e60e28c078b12
   005-aws-ebs-csi-driver/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   005-aws-ebs-csi-driver/install.sh: 08b9c236862f606ba75641433574c16e2e24445e9b6554f2f7a0f66269fa1409
-  005-aws-ebs-csi-driver/upstream.env: b37a8ac5bd59784935a37f72fc60f0d43f5f0abd9bc32ad0ae1360887b87d148
+  005-aws-ebs-csi-driver/upstream.env: 14330cd8972c00e05e2850aa3107b735cb45726cebd6d77cd7d31667dbcef0d4
   005-aws-ebs-csi-driver/values.yaml: 26021a90cb7e8c6692afae0ac3c443f33d94ee152a022c4fe33d4999e0819347
   006-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   006-cert-manager/install.sh: 19fc4cb7a616f3ff925b0dbe42b8108c6de86533d22fb00869c39fc837ba7c0d
@@ -6843,12 +6843,12 @@ rtx-pro-6000-eks-ubuntu-training-kubeflow:
   017-prometheus-adapter/install.sh: c895aedc8dbf7bdbebb4dcd2e56138db3914fb9855a245469a947cbd2166aeaa
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 0bd5bfcf4947a30ea12ccfcee961eae880524a1fcc02778ca04861b021408a02
-  README.md: 3874294de41b1e43d188478c0d66741deae27922acae40d9ed7b15393310d59a
-  UPGRADING.md: c93e95516afb1a9b84a6f093723bdb5eb2c30a94ef4e92fb3ec5e61da87da37d
-  bundle-info.yaml: 87d457adf6c958ca5a6ab024cf3a94ba1bb0e40c581225ed57974ca33dfa7d06
-  checksums.txt: 82945b8cc407e093eca6afbd9af8b6cb77893ce55f2a263fd0095306a9e7cdd9
+  README.md: 469e8accadec8a6bb73f84e5659d5a7c3ca26a33ec60dd57a6f6e2e1b9dd7f3d
+  UPGRADING.md: 093923c8511d39c240e95f6376a6039ea509129c0092d5d9ef88432b28c6868d
+  bundle-info.yaml: 8c9199d2d646b1df397d8e5bee39af8c3e2bf219cb5f8b875979376e6ce9d95c
+  checksums.txt: 41c49017dcf24ac375898c7e1ecb4b932252b7575f03a24db6998fa57ab292d6
   deploy.sh: 9f6fea7fc8568ab8837436b7ec9feebf259c0d92f8ae0d66a89d6d7d6c38aca9
-  recipe.yaml: bbcf349235f4c607707ce8d156f53d9af45597ac4b958db9acc5b4fbf6433414
+  recipe.yaml: 6f6472e4872bce5413ffe02323414436bccdd6cb71d4878d772125737c9974ed
 rtx-pro-6000-lke-ubuntu-inference:
   001-agentgateway-crds/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-agentgateway-crds/install.sh: cc0986fb5c9696e0c6ccfaa6f98e8cc7eebd611975b786b353c31593a23d5b90
