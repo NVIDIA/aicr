@@ -185,10 +185,14 @@ func toleratesRunaiGPUFaultTaint(toleration map[string]any) bool {
 	if effect != "" && effect != runaiGPUFaultTaintEffect {
 		return false
 	}
-	if operator == "Exists" {
+	switch operator {
+	case "", "Equal":
+		return key == runaiGPUFaultTaintKey && value == runaiGPUFaultTaintValue
+	case "Exists":
 		return key == "" || key == runaiGPUFaultTaintKey
+	default:
+		return false
 	}
-	return key == runaiGPUFaultTaintKey && value == runaiGPUFaultTaintValue
 }
 
 func TestToleratesRunaiGPUFaultTaint(t *testing.T) {
@@ -202,6 +206,8 @@ func TestToleratesRunaiGPUFaultTaint(t *testing.T) {
 		{"tolerate-all", map[string]any{"operator": "Exists"}, true},
 		{"keyed exists", map[string]any{"key": runaiGPUFaultTaintKey, "operator": "Exists", "effect": "NoSchedule"}, true},
 		{"keyed equal", map[string]any{"key": runaiGPUFaultTaintKey, "operator": "Equal", "value": "true"}, true},
+		{"omitted operator", map[string]any{"key": runaiGPUFaultTaintKey, "value": "true"}, true},
+		{"unknown operator", map[string]any{"key": runaiGPUFaultTaintKey, "operator": "EqualTypo", "value": "true"}, false},
 		{"other value", map[string]any{"key": runaiGPUFaultTaintKey, "operator": "Equal", "value": "false"}, false},
 		{"other effect", map[string]any{"key": runaiGPUFaultTaintKey, "operator": "Exists", "effect": "NoExecute"}, false},
 		{"other key", map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}, false},

@@ -3057,8 +3057,9 @@ them changes. The Run:ai leaves have NVSentinel apply that taint.
 Every `fault-quarantine` rule set that cordons a node also taints it, and
 `fault-quarantine` removes the taint together with the cordon once every fault
 on the node has recovered. Nothing is tainted as shipped: the rule sets take
-effect when you compose [`nvsentinel-quarantine`](#graded-remediation), and
-`nvsentinel-observe` only logs what it would do.
+effect when you compose [`nvsentinel-quarantine`](#graded-remediation).
+`nvsentinel-observe` cordons and taints nothing; it writes the quarantine it
+would have made to the node's annotations and logs it.
 
 - **What the leaves set.** `fault-quarantine.ruleSets` on `nvsentinel`, which
   is the chart's whole list with the taint added (Helm replaces lists, so
@@ -3081,6 +3082,9 @@ effect when you compose [`nvsentinel-quarantine`](#graded-remediation), and
   tracking the node and cancels the pending drain, and whichever of the cordon
   and the taint you did not remove stays until you remove it too. A taint you
   applied yourself before the fault is recorded as yours and is not removed.
+  A node that is schedulable again and still carries `runai/gpu-fault` is one
+  NVSentinel no longer tracks: remove the taint with
+  `kubectl taint node <node> runai/gpu-fault-`.
 - **Pods already on the node stay.** `NoSchedule` evicts nothing, and
   `node-drainer` does not delete DaemonSet pods. A Run:ai pod stuck on the
   node stops counting against the cluster once the count is recomputed, but it
