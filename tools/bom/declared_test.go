@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"aicr.run/pkg/bom"
+	pkgcomponent "aicr.run/pkg/component"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/errors/errorstest"
 	"aicr.run/pkg/helm"
@@ -189,7 +190,7 @@ func (g *gatedRenderer) Render(_ context.Context, in helm.ChartInput) ([]byte, e
 	g.inputs = append(g.inputs, in)
 	out := g.base
 	for p, extra := range g.gated {
-		if valueAt(in.Values, p) != true {
+		if v, _ := pkgcomponent.GetValueByPath(in.Values, p); v != true {
 			continue
 		}
 		if err := g.errs[p]; err != nil {
@@ -198,19 +199,6 @@ func (g *gatedRenderer) Render(_ context.Context, in helm.ChartInput) ([]byte, e
 		out += extra
 	}
 	return []byte(out), nil
-}
-
-// valueAt returns the value at the dot-separated path in values, or nil.
-func valueAt(values map[string]any, p string) any {
-	var cur any = values
-	for _, k := range strings.Split(p, ".") {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return nil
-		}
-		cur = m[k]
-	}
-	return cur
 }
 
 const opDeployment = `
@@ -244,8 +232,11 @@ func TestSurveyComponentMergesDeclaredImages(t *testing.T) {
 	if !slices.Equal(res.Images, want) {
 		t.Errorf("images = %v, want %v (declared merged, sorted, deduplicated)", res.Images, want)
 	}
-	if len(r.inputs) != 2 || valueAt(r.inputs[1].Values, "extra.enabled") != true {
-		t.Errorf("renders = %+v, want the default render and one with extra.enabled=true", r.inputs)
+	if len(r.inputs) != 2 {
+		t.Fatalf("renders = %+v, want the default render and one with extra.enabled=true", r.inputs)
+	}
+	if v, _ := pkgcomponent.GetValueByPath(r.inputs[1].Values, "extra.enabled"); v != true {
+		t.Errorf("second render values = %v, want extra.enabled=true", r.inputs[1].Values)
 	}
 }
 
