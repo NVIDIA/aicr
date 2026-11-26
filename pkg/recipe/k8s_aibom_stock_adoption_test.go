@@ -185,7 +185,7 @@ func TestK8sAIBOMStockAdoption(t *testing.T) {
 				t.Fatalf("component %q is absent, want declared: the target recipe no longer ships it",
 					stockAdoptionComponent)
 			}
-			if got := ref.IsEnabled(); got != tt.wantEnabled {
+			if got := ref.IsDeployable(); got != tt.wantEnabled {
 				t.Errorf("IsEnabled() = %v, want %v", got, tt.wantEnabled)
 			}
 			// The dynamo overlay's ref is ordering-only, so the values file
@@ -265,7 +265,7 @@ func TestGKECriteriaUnchangedWithoutOptIn(t *testing.T) {
 				t.Fatalf("BuildFromCriteria() error = %v", err)
 			}
 			ref := result.GetComponentRef("k8s-aibom")
-			enabled := ref != nil && ref.IsEnabled()
+			enabled := ref != nil && ref.IsDeployable()
 			if enabled != tt.wantEnabled {
 				t.Errorf("k8s-aibom enabled = %v, want %v (no flag was passed)", enabled, tt.wantEnabled)
 			}
@@ -321,7 +321,7 @@ func TestGKECriteriaAcceptOptIn(t *testing.T) {
 				t.Fatalf("BuildFromCriteria() error = %v, want the opt-in accepted", err)
 			}
 			ref := result.GetComponentRef("k8s-aibom")
-			if ref == nil || !ref.IsEnabled() {
+			if ref == nil || !ref.IsDeployable() {
 				t.Fatal("k8s-aibom was not granted")
 			}
 			var ordered bool
@@ -420,7 +420,7 @@ func TestEveryGKEDynamoRecipeAcceptsTheOptIn(t *testing.T) {
 
 		t.Run(string(acc), func(t *testing.T) {
 			if ref := base.GetComponentRef("k8s-aibom"); ref != nil {
-				if !ref.IsEnabled() {
+				if !ref.IsDeployable() {
 					t.Fatal("k8s-aibom is declared but declined on a GKE dynamo recipe; " +
 						"the pairing is qualified, so the overlay's decline is stale")
 				}
@@ -434,7 +434,7 @@ func TestEveryGKEDynamoRecipeAcceptsTheOptIn(t *testing.T) {
 				t.Fatalf("BuildFromCriteria() error = %v, want the opt-in accepted", err)
 			}
 			for _, n := range []string{"k8s-aibom", "grove", "dynamo-platform"} {
-				if ref := result.GetComponentRef(n); ref == nil || !ref.IsEnabled() {
+				if ref := result.GetComponentRef(n); ref == nil || !ref.IsDeployable() {
 					t.Errorf("%s is not enabled after the opt-in", n)
 				}
 			}

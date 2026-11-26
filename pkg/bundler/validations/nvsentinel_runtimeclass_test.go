@@ -552,7 +552,7 @@ func TestNVSentinelRuntimeClassPlatformSpotChecks(t *testing.T) {
 			if gpuOpRef == nil {
 				t.Fatal("resolved recipe has no GPU Operator ref; the gate would skip and the row would pass vacuously")
 			}
-			if !gpuOpRef.IsEnabled() {
+			if !gpuOpRef.IsDeployable() {
 				t.Fatalf("GPU Operator %q is disabled; the gate would skip and the row would pass vacuously", gpuOpName)
 			}
 			cfg := config.NewConfig()

@@ -1028,18 +1028,31 @@ criteria dimension and overlays must not author
 | `customer-managed` | true | install false |
 | `aicr-provided` | true | install true |
 
-The AICR install gate is consumed by `ComponentRef.IsEnabled` before deployer,
-mirror, BOM, and health paths. It is not an upstream chart value. Mode-owned
-paths are immutable at bundle time. See
+Root `overrides.install` is the AICR install gate (not an upstream chart
+value). Predicates on `ComponentRef`:
+
+| Method | Reads | Meaning |
+| --- | --- | --- |
+| `IsEnabled()` | `overrides.enabled` | Enabled; still in recipe inventory / probe scope |
+| `IsInstall()` | `overrides.install` | AICR should install the component |
+| `IsDeployable()` | both (`&&`) | Bundler, mirror, BOM, and health gate |
+
+`install: false` keeps the ref in the resolved inventory (probe-scoped
+validators can still read `namespace` and related fields) while
+`IsDeployable()` excludes it from deploy paths. Mode-owned paths are
+immutable at bundle time. See
 [ADR-016](https://github.com/NVIDIA/aicr/blob/main/docs/design/016-slurm-accounting-enablement.md) and the
 [Slurm Accounting guide](../user/slinky-slurm-accounting.md).
 
 ## Disable a Component in an Overlay
 
-Set `overrides.enabled: false` on a `componentRef` to drop a component a base
-recipe would otherwise install. Use this when the target platform already
-provides that component — for example a CSP-managed cert-manager on OKE, where
-installing a second copy would conflict.
+Set `overrides.enabled: false` on a `componentRef` to mark a component as not
+enabled when a base recipe would otherwise install it. Use this when the target
+platform already provides that component and AICR should neither deploy nor
+probe it — for example a CSP-managed cert-manager on OKE, where installing a
+second copy would conflict. To keep the ref in inventory for validators while
+suppressing AICR deploy (externally managed probe target), use
+`overrides.install: false` instead.
 
 ```yaml
 # Leaf overlay: the platform supplies cert-manager, so don't install ours.
@@ -1049,15 +1062,15 @@ componentRefs:
       enabled: false
 ```
 
-A disabled component is excluded from the recipe's `deploymentOrder` and from
-the generated bundle. A dependency edge pointing at it is treated as **already
-satisfied** (the component is assumed provided externally), so components that
-declare it in `dependencyRefs` — such as `gpu-operator` — still resolve and
-order correctly instead of failing with a circular-dependency error. A
-`dependencyRefs` entry that names a component which does not exist in the recipe
-at all is still an error.
+A non-deployable component (`enabled: false` or `install: false`) is excluded
+from the recipe's `deploymentOrder` and from the generated bundle. A dependency
+edge pointing at it is treated as **already satisfied** (the component is
+assumed provided externally), so components that declare it in `dependencyRefs`
+— such as `gpu-operator` — still resolve and order correctly instead of failing
+with a circular-dependency error. A `dependencyRefs` entry that names a
+component which does not exist in the recipe at all is still an error.
 
-The disabled `componentRef` remains in the resolved recipe's `componentRefs`
+The non-deployable `componentRef` remains in the resolved recipe's `componentRefs`
 (with `overrides.enabled: false`) for transparency, but it cannot be re-enabled at
 bundle time — `--set <component>:enabled=true` on a recipe-disabled component
 is rejected, because re-enabling a platform-provided component would install a

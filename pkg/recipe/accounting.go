@@ -28,9 +28,6 @@ const (
 	mariaDBOperatorCRDsComponentName    = "mariadb-operator-crds"
 	mariaDBOperatorComponentName        = "mariadb-operator"
 	slurmAccountingMariaDBComponentName = "slurm-accounting-mariadb"
-	accountingEnabledOverrideKey        = "enabled"
-	componentEnabledOverrideKey         = "enabled"
-	componentInstallOverrideKey         = "install"
 )
 
 // AccountingMode is the ownership model for a Slurm accounting database.
@@ -173,15 +170,15 @@ func AccountingOwnership(mode AccountingMode) OwnershipDomain {
 		},
 		mariaDBOperatorCRDsComponentName: {
 			profileComponentEnabledPath,
-			componentInstallOverrideKey,
+			ComponentInstallOverrideKey,
 		},
 		mariaDBOperatorComponentName: {
 			profileComponentEnabledPath,
-			componentInstallOverrideKey,
+			ComponentInstallOverrideKey,
 		},
 		slurmAccountingMariaDBComponentName: {
 			profileComponentEnabledPath,
-			componentInstallOverrideKey,
+			ComponentInstallOverrideKey,
 		},
 	}
 	if mode == AccountingModeAICRProvided {
@@ -280,7 +277,7 @@ func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
 	mariaDBInstall := mode == AccountingModeAICRProvided
 
 	if err := setComponentOverride(result, slinkySlurmComponentName,
-		map[string]any{"accounting": map[string]any{accountingEnabledOverrideKey: accountingEnabled}}); err != nil {
+		map[string]any{"accounting": map[string]any{ComponentEnabledOverrideKey: accountingEnabled}}); err != nil {
 		return err
 	}
 	if accountingEnabled {
@@ -293,7 +290,7 @@ func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
 		mariaDBOperatorComponentName,
 		slurmAccountingMariaDBComponentName,
 	} {
-		if err := setComponentOverride(result, name, map[string]any{componentInstallOverrideKey: mariaDBInstall}); err != nil {
+		if err := setComponentOverride(result, name, map[string]any{ComponentInstallOverrideKey: mariaDBInstall}); err != nil {
 			return err
 		}
 	}
@@ -475,13 +472,12 @@ func requireAccountingComponentEnabled(
 	component string,
 	mode AccountingMode,
 ) error {
-
 	ref := result.GetComponentRef(component)
 	if ref == nil {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("accounting mode requires component %q", component))
 	}
-	if !ref.IsEnabled() {
+	if !ref.IsDeployable() {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q must be enabled for Slurm accounting mode %q", component, mode))
 	}

@@ -41,7 +41,7 @@ func TestGPUOperatorLeavesTolerateNVSentinelReleaseTaint(t *testing.T) {
 			continue // TestCatalogParityGolden reports resolution failures
 		}
 		ref := leaf.Result.GetComponentRef("gpu-operator")
-		if ref == nil || !ref.IsEnabled() {
+		if ref == nil || !ref.IsDeployable() {
 			continue
 		}
 		guarded = append(guarded, leaf.Entry.Name)

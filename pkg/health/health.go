@@ -307,7 +307,7 @@ func classifyChartPinned(result *recipe.RecipeResult) (state, detail string) {
 	helmCount := 0
 	var unpinned []string
 	for _, ref := range result.ComponentRefs {
-		if ref.Type != recipe.ComponentTypeHelm || !ref.IsEnabled() {
+		if ref.Type != recipe.ComponentTypeHelm || !ref.IsDeployable() {
 			continue
 		}
 		// Manifest-only "Helm" components (e.g. nodewright-customizations) are

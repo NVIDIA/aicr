@@ -201,12 +201,12 @@ func (r *RecipeResult) ShipsGKETCPXORuntime() bool {
 		return false
 	}
 	ref := r.GetComponentRef(kubeflowTrainerComponentName)
-	return ref != nil && ref.IsEnabled() && slices.Contains(ref.ManifestFiles, gkeTCPXORuntimeManifest)
+	return ref != nil && ref.IsDeployable() && slices.Contains(ref.ManifestFiles, gkeTCPXORuntimeManifest)
 }
 
 func componentPresentAndEnabled(r *RecipeResult, name string) bool {
 	ref := r.GetComponentRef(name)
-	return ref != nil && ref.IsEnabled()
+	return ref != nil && ref.IsDeployable()
 }
 
 // IsMissingGKETCPXOInterfaces reports whether err is the fail-closed

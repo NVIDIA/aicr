@@ -88,7 +88,7 @@ var ClusterTrainingRuntimeGVR = schema.GroupVersionResource{
 func FabricRuntimeDelivered(refs []recipe.ComponentRef) ([]recipe.NetworkInterfaceMapping, bool, error) {
 	for i := range refs {
 		ref := &refs[i]
-		if ref.Name != recipe.KubeflowTrainerComponentName || !ref.IsEnabled() {
+		if ref.Name != recipe.KubeflowTrainerComponentName || !ref.IsDeployable() {
 			continue
 		}
 		if !slices.Contains(ref.ManifestFiles, recipe.GKETCPXORuntimeManifest) {

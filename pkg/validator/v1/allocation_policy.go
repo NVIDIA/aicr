@@ -330,7 +330,7 @@ func ToValidationInputWithContext(ctx context.Context, r *recipe.RecipeResult) (
 // deployed, so its values cannot select an allocation mechanism.
 func enabledComponentRef(r *recipe.RecipeResult, name string) *recipe.ComponentRef {
 	ref := r.GetComponentRef(name)
-	if ref == nil || !ref.IsEnabled() {
+	if ref == nil || !ref.IsDeployable() {
 		return nil
 	}
 	return ref

@@ -297,7 +297,7 @@ func TestOverlayValidationPhaseFloor(t *testing.T) {
 						}
 					}
 					ownsGPUOperator := slices.ContainsFunc(result.ComponentRefs, func(ref ComponentRef) bool {
-						return ref.IsEnabled() && (ref.Name == allocpolicy.ComponentGPUOperator ||
+						return ref.IsDeployable() && (ref.Name == allocpolicy.ComponentGPUOperator ||
 							ref.Name == allocpolicy.ComponentGPUOperatorOCP || ref.Name == "gpu-operator-ocp-olm")
 					})
 					if ownsGPUOperator {

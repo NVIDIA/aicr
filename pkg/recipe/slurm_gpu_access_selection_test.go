@@ -52,7 +52,7 @@ func TestGPUSlurmLeavesSelectGPUAccessCheck(t *testing.T) {
 			continue // TestCatalogParityGolden reports resolution failures
 		}
 		ref := leaf.Result.GetComponentRef("slinky-slurm")
-		if ref == nil || !ref.IsEnabled() {
+		if ref == nil || !ref.IsDeployable() {
 			continue
 		}
 		if leaf.Entry.Criteria != nil && leaf.Entry.Criteria.Service == recipe.CriteriaServiceKind {

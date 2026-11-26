@@ -41,7 +41,7 @@ func TestNFDPostDeleteCleanupDisabled(t *testing.T) {
 			t.Fatalf("overlay %q: BuildRecipeResult: %v", name, err)
 		}
 		ref := result.GetComponentRef("nfd")
-		if ref == nil || !ref.IsEnabled() {
+		if ref == nil || !ref.IsDeployable() {
 			continue
 		}
 		checked++

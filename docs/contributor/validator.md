@@ -677,7 +677,7 @@ capability is genuinely **inapplicable** — not a way to paper over a missing
 prerequisite or an infrastructure error. The dividing line is whether the
 resolved recipe *declares* the component that supplies the capability:
 `RecipeDeclares(ctx, component)` reports true only when that componentRef is
-present **and** enabled in `ctx.ValidationInput`.
+present **and** deployable (`IsDeployable()`) in `ctx.ValidationInput`.
 
 `Require(ctx, probeErr, present)` resolves the fate from the probe outcome.
 `present` is consulted only on a clean read (`probeErr == nil`) — e.g. a `List`

@@ -121,7 +121,7 @@ func TestRunaiLeavesCarryKubeflowTrainingOperator(t *testing.T) {
 			if ref == nil {
 				t.Fatalf("%s is absent from the resolved recipe", kubeflowTrainingOperatorComponent)
 			}
-			if !ref.IsEnabled() {
+			if !ref.IsDeployable() {
 				t.Errorf("%s is disabled", kubeflowTrainingOperatorComponent)
 			}
 			if ref.Source != "" || ref.Version != "" {
@@ -154,7 +154,7 @@ func TestRunaiLeavesCarryKubeflowTrainingOperator(t *testing.T) {
 				t.Errorf("deploymentOrder %v does not place %s before %s", order, kubeflowTrainingOperatorComponent, runaiClusterComponent)
 			}
 
-			if trainer := result.GetComponentRef("kubeflow-trainer"); trainer != nil && trainer.IsEnabled() {
+			if trainer := result.GetComponentRef("kubeflow-trainer"); trainer != nil && trainer.IsDeployable() {
 				t.Errorf("kubeflow-trainer (Trainer v2) is enabled alongside %s; the combination is not qualified",
 					kubeflowTrainingOperatorComponent)
 			}

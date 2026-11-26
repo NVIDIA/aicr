@@ -151,7 +151,7 @@ func TestAKSToolkitHardeningManifest(t *testing.T) {
 func TestAKSToolkitHardeningCoverage(t *testing.T) {
 	hasHardening := func(r *RecipeResult) bool {
 		ref := r.GetComponentRef("nodewright-customizations")
-		return ref != nil && ref.IsEnabled() && slices.Contains(ref.ManifestFiles, aksToolkitHardeningManifest)
+		return ref != nil && ref.IsDeployable() && slices.Contains(ref.ManifestFiles, aksToolkitHardeningManifest)
 	}
 
 	leaves, err := ResolveLeaves(t.Context(), ResolveLeavesOptions{})

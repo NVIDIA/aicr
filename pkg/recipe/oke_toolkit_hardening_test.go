@@ -89,7 +89,7 @@ func TestOKEToolkitHardeningManifest(t *testing.T) {
 func TestOKEToolkitHardeningCoverage(t *testing.T) {
 	hasHardening := func(r *RecipeResult) bool {
 		ref := r.GetComponentRef("nodewright-customizations")
-		return ref != nil && ref.IsEnabled() && slices.Contains(ref.ManifestFiles, okeToolkitHardeningManifest)
+		return ref != nil && ref.IsDeployable() && slices.Contains(ref.ManifestFiles, okeToolkitHardeningManifest)
 	}
 
 	leaves, err := ResolveLeaves(t.Context(), ResolveLeavesOptions{})

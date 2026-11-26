@@ -217,7 +217,7 @@ func resolveNVSentinelValues(t *testing.T, criteria *Criteria) map[string]any {
 	if ref == nil {
 		t.Fatal("nvsentinel componentRef missing — the assertions would be vacuous")
 	}
-	if !ref.IsEnabled() {
+	if !ref.IsDeployable() {
 		t.Fatal("nvsentinel is disabled — the assertions would be vacuous")
 	}
 	values, err := result.GetValuesForComponentWithContext(t.Context(), nvsentinelComponent)

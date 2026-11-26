@@ -835,53 +835,88 @@ func TestRecipeMetadataSpecMerge(t *testing.T) {
 	})
 }
 
-func TestComponentRefIsEnabled(t *testing.T) {
+func TestComponentRefEnabledInstallDeployable(t *testing.T) {
 	tests := []struct {
-		name     string
-		ref      ComponentRef
-		expected bool
+		name            string
+		ref             ComponentRef
+		wantEnabled     bool
+		wantInstall     bool
+		wantDeployable  bool
 	}{
 		{
-			name:     "no overrides",
-			ref:      ComponentRef{Name: "gpu-operator"},
-			expected: true,
+			name:           "no overrides",
+			ref:            ComponentRef{Name: "gpu-operator"},
+			wantEnabled:    true,
+			wantInstall:    true,
+			wantDeployable: true,
 		},
 		{
-			name:     "enabled true",
-			ref:      ComponentRef{Name: "gpu-operator", Overrides: map[string]any{"enabled": true}},
-			expected: true,
+			name:           "enabled true",
+			ref:            ComponentRef{Name: "gpu-operator", Overrides: map[string]any{"enabled": true}},
+			wantEnabled:    true,
+			wantInstall:    true,
+			wantDeployable: true,
 		},
 		{
-			name:     "enabled false",
-			ref:      ComponentRef{Name: "aws-ebs-csi-driver", Overrides: map[string]any{"enabled": false}},
-			expected: false,
+			name:           "enabled false",
+			ref:            ComponentRef{Name: "aws-ebs-csi-driver", Overrides: map[string]any{"enabled": false}},
+			wantEnabled:    false,
+			wantInstall:    true,
+			wantDeployable: false,
 		},
 		{
-			name:     "install false",
-			ref:      ComponentRef{Name: "mariadb-operator", Overrides: map[string]any{"install": false}},
-			expected: false,
+			name:           "install false keeps IsEnabled",
+			ref:            ComponentRef{Name: "mariadb-operator", Overrides: map[string]any{"install": false}},
+			wantEnabled:    true,
+			wantInstall:    false,
+			wantDeployable: false,
 		},
 		{
-			name:     "install true",
-			ref:      ComponentRef{Name: "mariadb-operator", Overrides: map[string]any{"install": true}},
-			expected: true,
+			name:           "install true",
+			ref:            ComponentRef{Name: "mariadb-operator", Overrides: map[string]any{"install": true}},
+			wantEnabled:    true,
+			wantInstall:    true,
+			wantDeployable: true,
 		},
 		{
-			name:     "enabled string false is not recognized",
-			ref:      ComponentRef{Name: "test", Overrides: map[string]any{"enabled": "false"}},
-			expected: true,
+			name:           "enabled false and install false",
+			ref:            ComponentRef{Name: "test", Overrides: map[string]any{"enabled": false, "install": false}},
+			wantEnabled:    false,
+			wantInstall:    false,
+			wantDeployable: false,
 		},
 		{
-			name:     "other overrides no enabled key",
-			ref:      ComponentRef{Name: "test", Overrides: map[string]any{"replicas": 3}},
-			expected: true,
+			name:           "enabled string false is not recognized",
+			ref:            ComponentRef{Name: "test", Overrides: map[string]any{"enabled": "false"}},
+			wantEnabled:    true,
+			wantInstall:    true,
+			wantDeployable: true,
+		},
+		{
+			name:           "install string false is not recognized",
+			ref:            ComponentRef{Name: "test", Overrides: map[string]any{"install": "false"}},
+			wantEnabled:    true,
+			wantInstall:    true,
+			wantDeployable: true,
+		},
+		{
+			name:           "other overrides no gate keys",
+			ref:            ComponentRef{Name: "test", Overrides: map[string]any{"replicas": 3}},
+			wantEnabled:    true,
+			wantInstall:    true,
+			wantDeployable: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.ref.IsEnabled()
-			if got != tt.expected {
-				t.Errorf("IsEnabled() = %v, want %v", got, tt.expected)
+			if got := tt.ref.IsEnabled(); got != tt.wantEnabled {
+				t.Errorf("IsEnabled() = %v, want %v", got, tt.wantEnabled)
+			}
+			if got := tt.ref.IsInstall(); got != tt.wantInstall {
+				t.Errorf("IsInstall() = %v, want %v", got, tt.wantInstall)
+			}
+			if got := tt.ref.IsDeployable(); got != tt.wantDeployable {
+				t.Errorf("IsDeployable() = %v, want %v", got, tt.wantDeployable)
 			}
 		})
 	}

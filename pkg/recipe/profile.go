@@ -869,7 +869,7 @@ func (r *RecipeResult) validateProfileValuesWithContext(
 		}
 		paths := lockSet[component]
 		ref := r.GetComponentRef(component)
-		if ref == nil || !ref.IsEnabled() {
+		if ref == nil || !ref.IsDeployable() {
 			// A bundle's emitted recipe omits an optional component the
 			// bundle left out; composition still requires it (#2978).
 			if !slices.Contains(paths, profileComponentEnabledPath) {
@@ -1236,7 +1236,7 @@ func (r *RecipeResult) ValidateProfileLock(
 
 	candidateEnabled := make(map[string]bool, len(candidateRefs))
 	for _, ref := range candidateRefs {
-		candidateEnabled[ref.Name] = ref.IsEnabled()
+		candidateEnabled[ref.Name] = ref.IsDeployable()
 	}
 
 	// Iterate the EFFECTIVE lock set: a subset omitting a closure-locked
@@ -1254,7 +1254,7 @@ func (r *RecipeResult) ValidateProfileLock(
 		paths := lockSet[component]
 		presenceOwned := slices.Contains(paths, profileComponentEnabledPath)
 		baselineRef := r.GetComponentRef(component)
-		if !presenceOwned && (baselineRef == nil || !baselineRef.IsEnabled() || !candidateEnabled[component]) {
+		if !presenceOwned && (baselineRef == nil || !baselineRef.IsDeployable() || !candidateEnabled[component]) {
 			continue
 		}
 		if baselineRef == nil {
@@ -1281,7 +1281,7 @@ func (r *RecipeResult) ValidateProfileLock(
 				}
 			}
 			if lockedPath == profileComponentEnabledPath {
-				if baselineRef.IsEnabled() != candidateEnabled[component] {
+				if baselineRef.IsDeployable() != candidateEnabled[component] {
 					return errors.New(errors.ErrCodeInvalidRequest,
 						fmt.Sprintf("profile-owned component presence diverged for %q", component))
 				}
@@ -1363,7 +1363,7 @@ func (r *RecipeResult) ClosureDescriptorEntries() []allocpolicy.Entry {
 	var entries []allocpolicy.Entry
 	for _, entry := range allocpolicy.Descriptor() {
 		ref := r.GetComponentRef(entry.Component)
-		if ref == nil || !ref.IsEnabled() {
+		if ref == nil || !ref.IsDeployable() {
 			continue
 		}
 		entries = append(entries, entry)
@@ -1398,7 +1398,7 @@ func (r *RecipeResult) EffectiveLockSet() map[string][]string {
 	}
 	for _, entry := range allocpolicy.Descriptor() {
 		ref := r.GetComponentRef(entry.Component)
-		if ref == nil || !ref.IsEnabled() {
+		if ref == nil || !ref.IsDeployable() {
 			continue
 		}
 		merged := make(map[string]struct{}, len(lock[entry.Component])+len(entry.SelectorPaths)+1)

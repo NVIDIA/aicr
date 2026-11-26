@@ -787,7 +787,7 @@ func mergeOverridesAcrossKeys[V any](allOverrides map[string]map[string]V, keys 
 // in the bundle flow. A disabled component renders nothing, so it
 // cannot participate in a driver mismatch.
 func componentDisabled(ref *recipe.ComponentRef, bundlerConfig *config.Config, keys []string) bool {
-	if !ref.IsEnabled() {
+	if !ref.IsDeployable() {
 		return true
 	}
 	if bundlerConfig == nil {

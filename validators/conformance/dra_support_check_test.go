@@ -96,6 +96,14 @@ func disabledRef(name string) recipe.ComponentRef {
 	return recipe.ComponentRef{Name: name, Overrides: map[string]any{"enabled": false}}
 }
 
+func installFalseRef(name, namespace string) recipe.ComponentRef {
+	return recipe.ComponentRef{
+		Name:      name,
+		Namespace: namespace,
+		Overrides: map[string]any{"install": false},
+	}
+}
+
 func withDRAAPIDiscovery(t *testing.T, clientset *k8sfake.Clientset) {
 	t.Helper()
 	withDRAAPIDiscoveryAt(t, clientset, draAPIGroupVersion)
@@ -157,7 +165,7 @@ func TestCheckDRASupport_RecipeScoping(t *testing.T) {
 		wantMsg         string
 	}{
 		{
-			name:            "recipe disables driver: skip even when driver is installed",
+			name:            "recipe sets enabled false: skip even when driver is installed",
 			driverInstalled: true,
 			validation:      validationInputWithRefs(disabledRef(draDriverComponentName)),
 			wantSkip:        true,
@@ -179,6 +187,15 @@ func TestCheckDRASupport_RecipeScoping(t *testing.T) {
 			// The helper's structured error propagates as-is (no re-wrap):
 			// the controller Deployment is genuinely absent here.
 			wantMsg: "nvidia-dra-driver-gpu-controller not found",
+		},
+		{
+			name:            "install false keeps driver in scope: FAIL when nothing installed",
+			driverInstalled: false,
+			validation: validationInputWithRefs(
+				enabledRef("gpu-operator"),
+				installFalseRef(draDriverComponentName, "custom-dra")),
+			wantSkip: false,
+			wantMsg:  "nvidia-dra-driver-gpu-controller not found",
 		},
 	}
 	for _, tt := range tests {
@@ -723,10 +740,12 @@ func TestCheckDRASupport_FailsWithoutNVIDIAResourceSlices(t *testing.T) {
 // probes (pod list, controller Deployment, kubelet plugin DaemonSet) target
 // the namespace resolved from the recipe's enabled nvidia-dra-driver-gpu
 // componentRef — e.g. recipes/mixins/os-talos.yaml overrides it to
-// privileged-nvidia-dra-driver-gpu — and fall back to the default
-// draDriverNamespace when the ref carries no namespace.
+// privileged-nvidia-dra-driver-gpu — including install: false inventory refs,
+// and fall back to the default draDriverNamespace when the ref carries no
+// namespace.
 func TestCheckDRASupport_UsesResolvedComponentRefNamespace(t *testing.T) {
 	const talosNamespace = "privileged-nvidia-dra-driver-gpu"
+	const externalNamespace = "kommander"
 	tests := []struct {
 		name string
 		ref  recipe.ComponentRef
@@ -743,6 +762,11 @@ func TestCheckDRASupport_UsesResolvedComponentRefNamespace(t *testing.T) {
 			name:          "ref without a resolved namespace falls back to the default",
 			ref:           recipe.ComponentRef{Name: draDriverComponentName},
 			wantNamespace: draDriverNamespace,
+		},
+		{
+			name:          "install false with pinned namespace still probes that namespace",
+			ref:           installFalseRef(draDriverComponentName, externalNamespace),
+			wantNamespace: externalNamespace,
 		},
 	}
 	for _, tt := range tests {

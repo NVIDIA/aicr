@@ -687,7 +687,7 @@ func (g *Generator) writeProfileLockTemplate(templatesDir string) (string, int64
 		// A component the profile references as optional and the bundle
 		// omits has no Application to guard.
 		if !slices.Contains(paths, bundlercfg.ComponentEnabledKey) {
-			if ref := g.RecipeResult.GetComponentRef(component); ref == nil || !ref.IsEnabled() {
+			if ref := g.RecipeResult.GetComponentRef(component); ref == nil || !ref.IsDeployable() {
 				continue
 			}
 		}

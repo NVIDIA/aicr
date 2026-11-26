@@ -40,19 +40,19 @@ import (
 // behavior. Fail-closed fires ONLY once the recipe actually declares the
 // dependency.
 
-// RecipeDeclares reports whether component is present AND enabled in the
+// RecipeDeclares reports whether component is present AND deployable in the
 // resolved recipe's ComponentRefs (ctx.ValidationInput). A component that is
-// absent or explicitly disabled is not declared: it will not be deployed, so
-// its capability is genuinely inapplicable and a capability-gated check may
-// Skip. Nil-safe: a nil Context or nil ValidationInput reports false, which is
-// the standalone/no-recipe path that preserves capability-driven selection
-// (#1327).
+// absent, not enabled (enabled: false), or install-gated (install: false) is
+// not declared: AICR will not deploy it, so its capability is genuinely
+// inapplicable and a capability-gated check may Skip. Nil-safe: a nil Context
+// or nil ValidationInput reports false, which is the standalone/no-recipe path
+// that preserves capability-driven selection (#1327).
 func RecipeDeclares(ctx *Context, component string) bool {
 	if ctx == nil || ctx.ValidationInput == nil {
 		return false
 	}
 	for _, ref := range ctx.ValidationInput.ComponentRefs {
-		if ref.Name == component && ref.IsEnabled() {
+		if ref.Name == component && ref.IsDeployable() {
 			return true
 		}
 	}

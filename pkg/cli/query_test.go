@@ -814,7 +814,7 @@ func TestQueryCmdSummaryOmitsDisabledComponents(t *testing.T) {
 	}
 	enabled := 0
 	for _, ref := range resolved.ComponentRefs {
-		if ref.IsEnabled() {
+		if ref.IsDeployable() {
 			enabled++
 		}
 	}

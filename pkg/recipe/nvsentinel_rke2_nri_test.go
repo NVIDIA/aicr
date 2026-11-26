@@ -54,7 +54,7 @@ func TestRKE2NVSentinelNRIPluginMode(t *testing.T) {
 			}
 
 			sentinelRef := result.GetComponentRef(nvsentinelComponent)
-			if sentinelRef == nil || !sentinelRef.IsEnabled() {
+			if sentinelRef == nil || !sentinelRef.IsDeployable() {
 				t.Fatal("nvsentinel missing or disabled — the assertions below would be vacuous")
 			}
 			if sentinelRef.Namespace == "" {
@@ -138,7 +138,7 @@ func TestRKE2NRISettingsPaired(t *testing.T) {
 	for _, c := range candidates {
 		name, result := c.name, c.result
 		sentinelRef := result.GetComponentRef(nvsentinelComponent)
-		if sentinelRef == nil || !sentinelRef.IsEnabled() || result.GetComponentRef(gpuOperatorComponentName) == nil {
+		if sentinelRef == nil || !sentinelRef.IsDeployable() || result.GetComponentRef(gpuOperatorComponentName) == nil {
 			continue
 		}
 		sentinelValues, err := result.GetValuesForComponentWithContext(t.Context(), nvsentinelComponent)

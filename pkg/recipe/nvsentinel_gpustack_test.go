@@ -155,7 +155,7 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 			if ref == nil {
 				t.Fatal("nvsentinel componentRef missing — the assertions below would be vacuous")
 			}
-			if !ref.IsEnabled() {
+			if !ref.IsDeployable() {
 				t.Fatal("nvsentinel is disabled — the assertions below would be vacuous")
 			}
 

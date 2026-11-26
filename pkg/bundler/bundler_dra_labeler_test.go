@@ -505,7 +505,7 @@ func TestMake_DRANodeLabelerRecipePersistsGate(t *testing.T) {
 		if got := ref.Overrides[draNodeLabelerEnabledPath]; got != true {
 			t.Errorf("%s ref overrides.%s = %v, want true", draNodeLabelerComponentName, draNodeLabelerEnabledPath, got)
 		}
-		if !ref.IsEnabled() {
+		if !ref.IsDeployable() {
 			t.Errorf("persisted gate must keep the ref enabled")
 		}
 		for _, in := range input.ComponentRefs {
