@@ -190,7 +190,7 @@ func TestRun(t *testing.T) {
 		{
 			name:   "AIBOM without an inline BOM fails closed",
 			mirror: mirrorYAML, aiboms: []string{aibomList(workloadBOM, "")},
-			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "pass the exported files with -aibom in place of the list",
+			wantCode: errors.ErrCodeInvalidRequest, wantMsg: "A truncated or ungenerated one cannot be compared",
 		},
 		{
 			name:   "container with no reference",

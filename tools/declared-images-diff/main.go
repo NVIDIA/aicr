@@ -295,8 +295,8 @@ func runningImages(data []byte) ([]string, error) {
 		doc := item.Status.BOMDocument
 		if doc == nil || doc.Inline == nil || len(doc.Inline.Data) == 0 {
 			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-				"AIBOM %s/%s holds no inline BOM (truncated, external or not generated). "+
-					"Export each document in the list and pass the exported files with -aibom in place of the list",
+				"AIBOM %s/%s holds no inline BOM. A BOM stored in an external sink can be exported "+
+					"and passed with -aibom. A truncated or ungenerated one cannot be compared",
 				item.Metadata.Namespace, item.Metadata.Name))
 		}
 		found, err := bomImages(doc.Inline.Data)
