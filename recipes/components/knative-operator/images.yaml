@@ -16,7 +16,7 @@
 # "Declared Images" in docs/contributor/component.md.
 # The operator starts these when it reconciles the KnativeServing resource of
 # the knative-serving component. They are read from the manifests under
-# cmd/operator/kodata at knative-v1.23.1.
+# cmd/operator/kodata at each entry's sourceVersion.
 component: knative-operator
 charts:
   - repository: https://knative.github.io/operator
