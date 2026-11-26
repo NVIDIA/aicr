@@ -608,7 +608,8 @@ It does not check the committed BOM, so run `make bom-docs` after any
 change to an `images.yaml`. `make bom-docs` also pulls the Knative
 operator image and fails unless the `knative-operator` entry lists
 exactly the images in the Serving and Kourier manifests that image
-carries.
+carries for the Serving release the `knative-serving` `version` value
+requests.
 
 **Checking a cluster.** Compare a cluster's k8s-aibom inventory with
 `aicr mirror list` for its recipe, from a clone of this repository:
@@ -620,11 +621,13 @@ go run ./tools/declared-images-diff -mirror-list mirror.json -aibom aiboms.json
 ```
 
 It prints each running image the list does not cover, and exits 1 if
-there is one. A running image pinned by digest that matches only a
-tag-only listed image counts as covered, and is logged as
-digest-unverified, since its tag may have moved. Add `-require-digest`
-to report it as not covered. The output also includes the workloads' own images, such
-as a model server, which no component declares. Add an entry only for an
+there is one. A running image has a digest when its reference names one
+or k8s-aibom records a SHA-256 hash for it, and the printed reference
+then carries that digest. One that matches only a tag-only listed image
+counts as covered, and is logged as digest-unverified, since its tag
+may have moved. Add `-require-digest` to report it as not covered. The
+output also includes the workloads' own images, such as a model server,
+which no component declares. Add an entry only for an
 image a component's operator launches or injects.
 
 k8s-aibom records only AI workloads in the namespaces it watches. So the

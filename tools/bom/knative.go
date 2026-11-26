@@ -66,8 +66,8 @@ type imageFileReader func(ctx context.Context, image string, dirs []string) (map
 // verifyKnativeKodata compares the images knative-operator's images.yaml
 // declares for the surveyed pin with the images in the manifests its operator
 // image carries for the Serving release knative-serving requests, and for that
-// release's Kourier ingress. Any difference fails. An unreachable registry is
-// a warning on res, which fails a strict run.
+// release's Kourier ingress. Any difference fails. A failure to fetch or read
+// the image is a warning on res, which fails a strict run.
 func verifyKnativeKodata(ctx context.Context, repoRoot string, res *bom.ComponentResult, read imageFileReader) error {
 	errCtx := map[string]any{componentContextKey: res.Name}
 	operatorImage, err := knativeOperatorImage(res.Images)
@@ -151,7 +151,8 @@ func verifyKnativeKodata(ctx context.Context, repoRoot string, res *bom.Componen
 }
 
 // verifyKnativeResult runs verifyKnativeKodata on the knative-operator result,
-// unless the survey has none or its chart failed to render.
+// unless the survey has none or that result already has a warning, such as a
+// failed render, which fails a strict run.
 func verifyKnativeResult(ctx context.Context, repoRoot string, results []bom.ComponentResult, read imageFileReader) error {
 	for i := range results {
 		if results[i].Name != knativeOperatorComponent || len(results[i].Warnings) > 0 {

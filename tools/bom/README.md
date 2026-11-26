@@ -4,14 +4,17 @@ Generates an authoritative inventory of every container image AICR can deploy.
 Renders each Helm chart in `recipes/registry.yaml` at its pinned version,
 extracts recognized container-image references, walks embedded manifests under
 `recipes/components/<name>/manifests/`, adds the images each component declares
-in `recipes/components/<name>/images.yaml`, and emits:
+in `recipes/components/<name>/images.yaml`, checks those declarations against
+the charts and operator images, and emits:
 
 - `bom.cdx.json` — CycloneDX 1.6 JSON (canonical, machine-readable)
 - `bom.md` — human-readable Markdown summary
 
 This is a **reference BOM**: it lists images that *would* be deployed at the
-pinned chart versions, based on rendering. It does not pull or scan the images
-themselves — that belongs to a separate provenance audit.
+pinned chart versions, based on rendering. It does not scan the images
+themselves, which belongs to a separate provenance audit. It pulls one image,
+the Knative operator image, to compare the Serving and Kourier manifests it
+carries with `knative-operator`'s `images.yaml`.
 
 ## Architecture
 
@@ -28,7 +31,7 @@ make bom
 # Skip helm rendering (manifest-only, no network needed)
 BOM_SKIP_HELM=1 make bom
 
-# Fail on unpinned chart versions or render errors
+# Fail on unpinned chart versions, render errors, or an unreadable Knative operator image
 BOM_STRICT=1 make bom
 
 # Custom output directory
@@ -49,7 +52,7 @@ Flags:
 | `-out-dir` | `dist/bom` | Output directory |
 | `-aicr-version` | `dev` | AICR version embedded in the BOM |
 | `-skip-helm` | `false` | Skip `helm template` rendering |
-| `-strict` | `false` | Fail on unpinned charts, render errors, or a Helm chart that renders no images and is not in `expectedNoImages` |
+| `-strict` | `false` | Fail on unpinned charts, render errors, an unreadable Knative operator image, or a Helm chart that renders no images and is not in `expectedNoImages` |
 | `-deterministic` | `false` | Suppress per-run metadata (timestamps, version churn) in Markdown for committable artifacts |
 | `-no-title` | `false` | Omit the H1 title so the body can be embedded as a section |
 
@@ -88,8 +91,9 @@ supply-chain dashboards without conversion.
 - The `knative-operator` entry must list exactly the images in the Serving
   and Kourier manifests its operator image carries for the Serving release
   `knative-serving` requests. The run pulls that image to compare them, and
-  fails on any difference. An unreachable registry is a warning, so it fails
-  only under `-strict`. `-skip-helm` skips the check.
+  fails on any difference. A failure to fetch or read the image is a warning,
+  so it fails only under `-strict`. `-skip-helm` skips the check, as does any
+  warning already on the `knative-operator` result.
 - A Helm chart that legitimately renders no images (CRD-only charts) must be
   listed in `expectedNoImages` in `main.go`, with a reason. Under `-strict`,
   an unlisted chart with zero images fails, and a listed chart that starts

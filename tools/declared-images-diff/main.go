@@ -79,7 +79,8 @@ func main() {
 		return nil
 	})
 	flag.BoolVar(&requireDigest, "require-digest", false,
-		"report a running image pinned by digest as not covered when only a tag-only listed image matches it")
+		"report a running image with a digest, from its reference or its k8s-aibom hash, as not covered "+
+			"when only a tag-only listed image matches it")
 	flag.Parse()
 
 	res, err := run(mirrorList, aiboms, requireDigest)
