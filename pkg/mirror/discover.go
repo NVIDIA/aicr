@@ -127,7 +127,7 @@ type mirrorCandidate struct {
 // to hydrate renders nothing, so it would contribute zero images to an
 // otherwise successful result. Transient, per-component conditions (a failed
 // helm template, an unreadable manifest) remain warnings on the affected
-// ComponentImages; deterministic resolution failures do not.
+// ComponentImages; deterministic value-resolution failures do not.
 func (l *Lister) Discover(ctx context.Context, rec *recipe.RecipeResult) (*MirrorList, error) {
 	if rec == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe is required")
