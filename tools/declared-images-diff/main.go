@@ -73,7 +73,7 @@ func main() {
 		aiboms        []string
 		requireDigest bool
 	)
-	flag.StringVar(&mirrorList, "mirror-list", "", "`aicr mirror list` output, YAML or JSON")
+	flag.StringVar(&mirrorList, "mirror-list", "", "`file` written by aicr mirror list, YAML or JSON")
 	flag.Func("aibom", "CycloneDX document or AIBOM list exported from the cluster, repeatable", func(v string) error {
 		aiboms = append(aiboms, v)
 		return nil
