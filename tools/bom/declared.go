@@ -128,25 +128,27 @@ func verifyEnabledBy(ctx context.Context, repoRoot string, c component, r helm.R
 }
 
 // containsRef reports whether data holds an image reference that normalizes
-// to the same reference as ref, so a short name such as nats:2.10 matches
-// docker.io/library/nats:2.10 but not quay.io/x/nats:2.10 or nats:2.10.1.
+// to the same reference as ref, so nats:2.10 and docker.io/library/nats:2.10
+// match each other but not quay.io/x/nats:2.10 or nats:2.10.1. Every such
+// form contains the part of ref after its last slash, so only tokens holding
+// it are compared.
 func containsRef(data []byte, ref string) bool {
 	want := normalizeRef(ref)
+	needle := []byte(ref[strings.LastIndexByte(ref, '/')+1:])
 	for i := 0; i <= len(data); {
-		j := bytes.Index(data[i:], []byte(ref))
+		j := bytes.Index(data[i:], needle)
 		if j < 0 {
 			return false
 		}
-		start, end := i+j, i+j+len(ref)
+		start, end := i+j, i+j+len(needle)
 		i = start + 1
-		if end < len(data) && isRefByte(data[end]) {
-			continue
+		for start > 0 && isRefByte(data[start-1]) {
+			start--
 		}
-		tokenStart := start
-		for tokenStart > 0 && isRefByte(data[tokenStart-1]) {
-			tokenStart--
+		for end < len(data) && isRefByte(data[end]) {
+			end++
 		}
-		if normalizeRef(string(data[tokenStart:end])) == want {
+		if normalizeRef(string(data[start:end])) == want {
 			return true
 		}
 	}
