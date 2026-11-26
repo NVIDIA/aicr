@@ -116,8 +116,9 @@ type mirrorCandidate struct {
 // embedded provider inside recipe.GetManifestContentWithContext.
 //
 // Each component also contributes the images its images.yaml declares for the
-// chart version it deploys, such as images its operator launches at run time.
-// A component whose images.yaml has no entry for that version gets a warning.
+// chart version or vendored operator image it deploys, such as images its
+// operator launches at run time. A component whose images.yaml is unreadable
+// or has no matching entry gets a warning.
 //
 // A component whose values cannot be hydrated is a fatal error, not a warning.
 // The returned MirrorList is a completeness claim — the full set of images an
