@@ -364,7 +364,9 @@ func renderHelmComponent(ctx context.Context, repoRoot string, c component, r he
 }
 
 // surveyComponent renders the component's chart (if any) and walks its
-// embedded manifests directory, returning the union of image refs.
+// embedded manifests directory, returning the union of image refs and the
+// images its images.yaml declares. It fails when that file has no entry for
+// the surveyed version or an enabledBy path does not gate its image.
 func surveyComponent(
 	ctx context.Context,
 	repoRoot string,

@@ -93,8 +93,8 @@ supply-chain dashboards without conversion.
   and Kourier manifests its operator image carries for the Serving release
   `knative-serving` requests. The run pulls that image and reads every file
   in those directories, as the operator does. It fails in every mode on any
-  difference, a link or other non-regular file, a file over 16 MiB, or a
-  missing Serving or Kourier directory. A failure to fetch or read the image
+  difference, a link or other non-regular file, a file over 16 MiB or not
+  valid YAML, or a missing Serving or Kourier directory. A failure to fetch or read the image
   is a warning, so it fails only under `-strict`. `-skip-helm` skips the
   check, as does any warning already on the `knative-operator` result.
 - A Helm chart that legitimately renders no images (CRD-only charts) must be
