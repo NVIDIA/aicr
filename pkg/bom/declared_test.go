@@ -288,3 +288,46 @@ manifests:
 		})
 	}
 }
+
+func TestDeclaredImagesImagesFor(t *testing.T) {
+	d, err := ParseDeclaredImages("c", []byte(declaredValid))
+	if err != nil {
+		t.Fatalf("ParseDeclaredImages() error = %v", err)
+	}
+	const operator = "example.com/c/operator:v1@sha256:45aa299d92c21a1abc0e9731694f01be637ab5c6c9681a687aedf142b0468d45"
+
+	tests := []struct {
+		name           string
+		chart, version string
+		manifestImages []string
+		want           []string // nil for an error
+	}{
+		{name: "chart entry", chart: "c", version: "1.0.0",
+			want: []string{"example.com/c/initc:1.0.0", "example.com/c/extra:1.0.0"}},
+		{name: "chart with no entry", chart: "c", version: "2.0.0"},
+		{name: "manifest entry", manifestImages: []string{"x:1", operator}, want: []string{"alpine:3.10"}},
+		{name: "manifest with no entry", manifestImages: []string{"x:1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := d.ImagesFor("oci://example.com/charts", tt.chart, tt.version, tt.manifestImages)
+			if tt.want == nil {
+				if err == nil {
+					t.Fatalf("ImagesFor() = %+v, want error", got)
+				}
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				return
+			}
+			if err != nil {
+				t.Fatalf("ImagesFor() error = %v", err)
+			}
+			refs := make([]string, 0, len(got))
+			for _, i := range got {
+				refs = append(refs, i.Image)
+			}
+			if !slices.Equal(refs, tt.want) {
+				t.Errorf("ImagesFor() images = %q, want %q", refs, tt.want)
+			}
+		})
+	}
+}

@@ -246,3 +246,26 @@ func (d *DeclaredImages) ManifestsFor(images []string) ([]*DeclaredManifest, err
 	}
 	return out, nil
 }
+
+// ImagesFor returns the images d declares for a deployed component: those of
+// the ChartFor entry for a chart, or, when chart is empty, those of every
+// ManifestsFor entry for the images its manifests deploy. It returns the same
+// errors as those methods.
+func (d *DeclaredImages) ImagesFor(repository, chart, version string, manifestImages []string) ([]DeclaredImage, error) {
+	if chart != "" {
+		c, err := d.ChartFor(repository, chart, version)
+		if err != nil {
+			return nil, err
+		}
+		return c.Images, nil
+	}
+	entries, err := d.ManifestsFor(manifestImages)
+	if err != nil {
+		return nil, err
+	}
+	var images []DeclaredImage
+	for _, m := range entries {
+		images = append(images, m.Images...)
+	}
+	return images, nil
+}
