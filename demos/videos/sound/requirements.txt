@@ -32,7 +32,7 @@ packaging==26.3
 phonemizer-fork==3.3.2
 pillow==13.0.0
 protobuf==7.36.2
-pycairo==1.26.1
+pycairo==1.29.2
 pyparsing==3.3.3
 python-dateutil==4.0.0
 rdflib==7.6.0
