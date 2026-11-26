@@ -4282,18 +4282,18 @@ kubectl get skyhooks.skyhook.nvidia.com \
 `aicr upgrade-check` reports every boundary. The transition record at
 `recipes/components/nodewright-operator/upgrades.yaml` describes `v0.18.0` (the
 rename, the prerequisite above, and per-deployer steps), then `v0.19.0`,
-`v0.19.1`, `v0.20.0` and `v0.21.0` separately, each `safe`. Crossing the rename is
+`v0.19.1`, `v0.20.0`, `v0.21.0` and `v0.22.0` separately, each `safe`. Crossing the rename is
 `manual` whatever you land on, and you do **not** have to stop at `v0.18.0` to
 get past it:
 
 ```console
 $ aicr upgrade-check --from older.yaml --to new.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.16.0  v0.21.0  manual   5 minors, 5 steps
+nodewright-operator  v0.16.0  v0.22.0  manual   6 minors, 5 steps
 
 $ aicr upgrade-check --from cur.yaml --to new.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.18.0  v0.21.0  safe     3 minors, verified
+nodewright-operator  v0.18.0  v0.22.0  safe     4 minors, verified
 ```
 
 `v0.19.0` also changes drain timing: an interrupt now begins roughly the
@@ -4322,9 +4322,25 @@ Before upgrading, check that `kubectl get pdb -n kube-system` shows
 `ALLOWED DISRUPTIONS` of at least 1 for workloads on nodes NodeWright
 interrupts.
 
+`v0.22.0` rejects a `NodeWright` create or package edit that leaves a
+`dependsOn` cycle. AICR's tuning CRs declare acyclic chains; check any
+`NodeWright` or `Skyhook` you added yourself before upgrading. An existing
+cyclic `NodeWright` schedules no packages, and a cyclic `Skyhook` the mirror
+has not converted yet never gets one; repair either by the upstream
+[recovery procedure](https://github.com/NVIDIA/nodewright/blob/main/docs/user-guide/custom-resource.md#recovering-an-existing-dependency-cycle).
+A package version bump now
+admits nodes through `interruptionBudget`, so nodes read `waiting` rather than
+`in_progress` right after one. Deleting a runtime-required `NodeWright` now
+removes its taint from nodes no other runtime-required `NodeWright` selects,
+but taints left by deletions on earlier versions stay; see
+[when the taint is removed](https://github.com/NVIDIA/nodewright/blob/main/docs/user-guide/runtime-required.md#when-is-the-runtime-required-taint-removed-from-a-node).
+AICR bundles pass the chart's values on every deployer, but a hand-run
+`helm upgrade --reuse-values` from `v0.21.0` fails on the chart's new
+`packagePolicy` block; pass the values file or `--reset-then-reuse-values`.
+
 The legacy `Skyhook` group, its `runtime-required` taint key and the
-`skyhook_*` metrics are served through `v0.21.x` and removed upstream in
-`v0.22.0`. A pin at or above that is not reachable until the remaining
+`skyhook_*` metrics are served through `v0.22.x` and removed upstream in
+`v0.23.0`. A pin at or above that is not reachable until the remaining
 `skyhook.nvidia.com` references in the `nodewright-operator` health check and
 the `vr200-rke2-ubuntu-*` overlays are migrated.
 

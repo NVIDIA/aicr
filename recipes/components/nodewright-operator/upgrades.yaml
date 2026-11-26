@@ -18,9 +18,9 @@
 # reaches through the current pin and skips lists the safe boundaries inside
 # it. A jump from below v0.18.0 lands on the rename steps rather than being
 # told to stop partway at a safe boundary that adds no work. Upstream serves
-# the legacy group through v0.21.x (the removal moved from v0.21.0 to v0.22.0
-# in NVIDIA/nodewright#988), so the steps hold that far. v0.22.0 removes it and
-# needs a record of its own.
+# the legacy group through v0.22.x (the removal moved from v0.21.0 to v0.22.0
+# in NVIDIA/nodewright#988, then to v0.23.0 in NVIDIA/nodewright#1093), so the
+# steps hold that far. v0.23.0 removes it and needs a record of its own.
 #
 # The rename is transcribed from NVIDIA/nodewright
 # docs/getting-started/migration.md, which remains the authoritative account.
@@ -31,8 +31,8 @@ kind: ComponentUpgrades
 component: nodewright-operator
 transitions:
   - from: "<0.18.0"
-    to: ">=0.18.0 <=0.21.0"
-    skips: ["0.19.0", "0.19.1", "0.20.0", "0.21.0"]
+    to: ">=0.18.0 <=0.22.0"
+    skips: ["0.19.0", "0.19.1", "0.20.0", "0.21.0", "0.22.0"]
     verdict: manual
     summary: >-
       v0.18.0 renames skyhook.nvidia.com/v1alpha1 Skyhook to
@@ -372,3 +372,29 @@ transitions:
       - https://github.com/NVIDIA/nodewright/releases/tag/chart%2Fv0.21.0
       - https://github.com/NVIDIA/nodewright/blob/main/docs/architecture/interrupt-flow.md#drain-configuration
       - https://github.com/NVIDIA/aicr/issues/3694
+
+  - from: ">=0.21.0 <0.22.0"
+    to: "=0.22.0"
+    verdict: safe
+    verifiedBy: >-
+      Chart diff v0.21.0 to v0.22.0: no CRD changes; the Deployment drops the
+      unused PAUSE_IMAGE env; values move the operator image to v0.22.0, keep
+      the v7.0.0 agent, and add a packagePolicy block that is off by default
+      and renders nothing while off. AICR's tuning CRs declare acyclic
+      dependsOn chains, and no AICR deployer upgrades with --reuse-values.
+      Upstream release notes operator/v0.22.0 and chart/v0.22.0 for the
+      behavior changes.
+    summary: >-
+      The admission webhook now rejects a NodeWright create or package edit
+      that leaves a dependsOn cycle, and an existing cyclic NodeWright
+      schedules no packages. AICR's tuning CRs are acyclic, so only CRs you
+      added yourself can be affected; check those for cycles before
+      upgrading. A hand-run helm upgrade with --reuse-values fails on the
+      chart's new packagePolicy block; pass the values file or
+      --reset-then-reuse-values.
+    references:
+      - https://github.com/NVIDIA/nodewright/releases/tag/operator%2Fv0.22.0
+      - https://github.com/NVIDIA/nodewright/releases/tag/chart%2Fv0.22.0
+      - https://github.com/NVIDIA/nodewright/blob/main/docs/user-guide/custom-resource.md#recovering-an-existing-dependency-cycle
+      - https://github.com/NVIDIA/nodewright/blob/main/docs/user-guide/runtime-required.md#when-is-the-runtime-required-taint-removed-from-a-node
+      - https://github.com/NVIDIA/aicr/issues/4056
