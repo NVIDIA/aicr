@@ -61,7 +61,11 @@ transitions:
       and proceed only when nothing is actively rolling out. paused and
       disabled objects are fine to leave as they are — the mirror carries that
       state onto the NodeWright — but do not unpause or enable one until its
-      pre-upgrade package pods are gone.
+      pre-upgrade package pods are gone. When the target is v0.22.0 or later,
+      also check every Skyhook, paused and disabled ones included, for a
+      dependsOn cycle, and fix any into a DAG before upgrading, while the
+      legacy kind is still editable: v0.22.0 rejects the mirror of a cyclic
+      Skyhook at admission, so it never gets a NodeWright.
     reversible: false
     affectedResources:
       - group: skyhook.nvidia.com
@@ -266,6 +270,7 @@ transitions:
       - https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md
       - https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md#prerequisite-all-skyhooks-must-be-complete
       - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#nodewright-operator-v0180-renames-skyhook-to-nodewright
+      - https://github.com/NVIDIA/nodewright/blob/main/docs/user-guide/custom-resource.md#recovering-an-existing-dependency-cycle
       - https://github.com/NVIDIA/aicr/issues/2593
       - https://github.com/NVIDIA/aicr/issues/2594
 
