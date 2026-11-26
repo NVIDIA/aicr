@@ -15,8 +15,6 @@
 package main
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
 	"io"
 	"log"
@@ -43,6 +41,7 @@ import (
 	"aicr.run/pkg/recipe"
 	"aicr.run/pkg/recipe/providertest"
 	"aicr.run/pkg/serializer"
+	"aicr.run/tools/internal/imagefs"
 )
 
 func crdDoc(name string) string {
@@ -183,64 +182,17 @@ func TestContainerImage(t *testing.T) {
 	}
 }
 
-func tarOf(t *testing.T, files map[string]string) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	for _, file := range slices.Sorted(maps.Keys(files)) {
-		body := files[file]
-		if err := tw.WriteHeader(&tar.Header{Name: file, Mode: 0o600, Size: int64(len(body)),
-			Typeflag: tar.TypeReg}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tw.Write([]byte(body)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buf.Bytes()
-}
-
-func TestCRDsInTar(t *testing.T) {
-	oversized := strings.Repeat("#", maxCRDFileBytes+1)
-	tests := []struct {
-		name     string
-		archive  []byte
-		want     []string
-		wantCode errors.ErrorCode
-	}{
-		{"yaml files directly under dir", tarOf(t, map[string]string{
-			"./opt/op/crds/a.yaml":        crdDoc("a.x.io"),
-			"opt/op/crds/b.yml":           crdDoc("b.x.io"),
-			"opt/op/crds/nested/c.yaml":   crdDoc("c.x.io"),
-			"opt/op/crds/README.md":       crdDoc("d.x.io"),
-			"opt/other/e.yaml":            crdDoc("e.x.io"),
-			"opt/op/crds/deployment.yaml": "kind: Deployment\n",
-			"opt/op/crds/template.yaml":   "kind: [{{ .Values.broken }}\n---\n" + crdDoc("f.x.io"),
-			"opt/op/crds/commented.yaml":  "--- # first\n" + crdDoc("g.x.io"),
-			"opt/op/crds/separator.yaml":  "--- {{ .Values.header }}\n" + crdDoc("h.x.io"),
-		}), []string{"a.x.io", "b.x.io", "f.x.io", "g.x.io", "h.x.io"}, ""},
-		{"oversized file outside dir", tarOf(t, map[string]string{"opt/other/big.yaml": oversized}), nil, ""},
-		{"oversized file under dir", tarOf(t, map[string]string{"opt/op/crds/big.yaml": oversized}),
-			nil, errors.ErrCodeInvalidRequest},
-		{"truncated tar stream", []byte("not a tar"), nil, errors.ErrCodeInternal},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := crdsInTar(bytes.NewReader(tt.archive), "/opt/op/crds/")
-			if tt.wantCode != "" {
-				errorstest.WantReportedCode(t, err, tt.wantCode)
-				return
-			}
-			if err != nil {
-				t.Fatalf("crdsInTar() error = %v", err)
-			}
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("crdsInTar() = %v, want %v", got, tt.want)
-			}
-		})
+func TestCRDNamesIn(t *testing.T) {
+	got := crdNamesIn(map[string][]byte{
+		"a.yaml":          []byte(crdDoc("a.x.io")),
+		"b.yml":           []byte(crdDoc("b.x.io") + "---\n" + crdDoc("a.x.io")),
+		"deployment.yaml": []byte("kind: Deployment\n"),
+		"template.yaml":   []byte("kind: [{{ .Values.broken }}\n---\n" + crdDoc("f.x.io")),
+		"commented.yaml":  []byte("--- # first\n" + crdDoc("g.x.io")),
+		"separator.yaml":  []byte("--- {{ .Values.header }}\n" + crdDoc("h.x.io")),
+	})
+	if want := []string{"a.x.io", "b.x.io", "f.x.io", "g.x.io", "h.x.io"}; !slices.Equal(got, want) {
+		t.Errorf("crdNamesIn() = %v, want %v", got, want)
 	}
 }
 
@@ -267,7 +219,7 @@ func TestReadImageCRDs(t *testing.T) {
 		}
 	}
 	push("1", map[string]string{"opt/op/crds/a.yaml": crdDoc("a.x.io"), "opt/other/b.yaml": crdDoc("b.x.io")})
-	push("big", map[string]string{"opt/op/crds/big.yaml": strings.Repeat("#", maxCRDFileBytes+1)})
+	push("big", map[string]string{"opt/op/crds/big.yaml": strings.Repeat("#", imagefs.MaxFileBytes+1)})
 
 	tests := []struct {
 		name     string

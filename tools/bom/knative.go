@@ -15,24 +15,15 @@
 package main
 
 import (
-	"archive/tar"
 	"context"
 	stderrors "errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
-	"time"
 
 	"github.com/distribution/reference"
-	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/name"
-	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/google/go-containerregistry/pkg/v1/mutate"
-	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -53,15 +44,11 @@ const (
 	// knativeIngress is the ingress the knative-serving KnativeServing
 	// resource enables.
 	knativeIngress = "kourier"
-
-	imageReadTimeout    = 10 * time.Minute
-	maxImageFileBytes   = 16 << 20
-	imageReadContextKey = "image"
 )
 
-// imageFileReader returns the .yaml files directly under each of dirs in the
-// linux/amd64 variant of image, keyed by path.
-type imageFileReader func(ctx context.Context, image string, dirs []string) (map[string][]byte, error)
+// imageFileReader returns the YAML files directly under each of dirs in
+// image, keyed by path, as imagefs.ReadYAML does.
+type imageFileReader func(ctx context.Context, image string, dirs ...string) (map[string][]byte, error)
 
 // verifyKnativeKodata compares the images knative-operator's images.yaml
 // declares for the surveyed pin with the images in the manifests its operator
@@ -82,7 +69,7 @@ func verifyKnativeKodata(ctx context.Context, repoRoot string, res *bom.Componen
 		path.Join(knativeKodataRoot, "knative-serving", servingVersion),
 		path.Join(knativeKodataRoot, "ingress", majorMinor(servingVersion), knativeIngress),
 	}
-	files, err := read(ctx, operatorImage, dirs)
+	files, err := read(ctx, operatorImage, dirs...)
 	if stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("read manifests from %s: %v", operatorImage, err))
 		return nil
@@ -208,61 +195,4 @@ func majorMinor(version string) string {
 		return version
 	}
 	return parts[0] + "." + parts[1]
-}
-
-// readImageFiles is the imageFileReader that pulls image from its registry.
-func readImageFiles(ctx context.Context, image string, dirs []string) (map[string][]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, imageReadTimeout)
-	defer cancel()
-
-	errCtx := map[string]any{imageReadContextKey: image}
-	ref, err := name.ParseReference(image)
-	if err != nil {
-		return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest, "parse image reference", err, errCtx)
-	}
-	img, err := remote.Image(ref,
-		remote.WithContext(ctx),
-		remote.WithAuthFromKeychain(authn.DefaultKeychain),
-		remote.WithPlatform(v1.Platform{OS: "linux", Architecture: "amd64"}))
-	if err != nil {
-		return nil, errors.WrapWithContext(errors.ErrCodeUnavailable, "fetch image", err, errCtx)
-	}
-	rc := mutate.Extract(img)
-	defer rc.Close()
-	return yamlFilesInTar(rc, dirs)
-}
-
-// yamlFilesInTar returns the regular .yaml files directly under each of dirs
-// in the tar stream r, keyed by path. A file larger than maxImageFileBytes is
-// an error.
-func yamlFilesInTar(r io.Reader, dirs []string) (map[string][]byte, error) {
-	files := map[string][]byte{}
-	tr := tar.NewReader(r)
-	for {
-		hdr, err := tr.Next()
-		if stderrors.Is(err, io.EOF) {
-			return files, nil
-		}
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeUnavailable, "read image filesystem", err)
-		}
-		file := strings.TrimPrefix(path.Clean("/"+hdr.Name), "/")
-		if !slices.Contains(dirs, path.Dir(file)) {
-			continue
-		}
-		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink || path.Ext(file) == ".yml" {
-			return nil, errors.New(errors.ErrCodeInvalidRequest, file+" is not a regular .yaml file, so its images would go unchecked")
-		}
-		if hdr.Typeflag != tar.TypeReg || path.Ext(file) != yamlExt {
-			continue
-		}
-		data, err := io.ReadAll(io.LimitReader(tr, maxImageFileBytes+1))
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeUnavailable, "read "+file, err)
-		}
-		if len(data) > maxImageFileBytes {
-			return nil, errors.New(errors.ErrCodeInvalidRequest, file+" exceeds the image file size limit")
-		}
-		files[file] = data
-	}
 }
