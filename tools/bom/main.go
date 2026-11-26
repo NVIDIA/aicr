@@ -42,7 +42,6 @@ import (
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/helm"
 	"aicr.run/pkg/recipe"
-	"aicr.run/tools/internal/imagefs"
 )
 
 const (
@@ -136,7 +135,7 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load driver targets")
 	}
 
-	results, err := surveyComponents(ctx, repoRoot, reg.Components, renderer, skipHelm, driverTargets, imagefs.ReadYAML)
+	results, err := surveyComponents(ctx, repoRoot, reg.Components, renderer, skipHelm, driverTargets, readImageFiles)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "survey components")
 	}

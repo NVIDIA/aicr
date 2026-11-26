@@ -15,7 +15,11 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
+	"maps"
+	"path"
 	"slices"
 	"strings"
 	"testing"
@@ -143,7 +147,7 @@ func TestVerifyKnativeKodata(t *testing.T) {
 			}
 			var gotImage string
 			var gotDirs []string
-			read := func(_ context.Context, image string, dirs ...string) (map[string][]byte, error) {
+			read := func(_ context.Context, image string, dirs []string) (map[string][]byte, error) {
 				gotImage, gotDirs = image, dirs
 				return tt.files, tt.readErr
 			}
@@ -194,7 +198,7 @@ func TestVerifyKnativeResult(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reads := 0
-			read := func(context.Context, string, ...string) (map[string][]byte, error) {
+			read := func(context.Context, string, []string) (map[string][]byte, error) {
 				reads++
 				return mismatch, nil
 			}
@@ -236,7 +240,7 @@ func TestSurveyComponentsVerifiesKnative(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reads := 0
-			read := func(context.Context, string, ...string) (map[string][]byte, error) {
+			read := func(context.Context, string, []string) (map[string][]byte, error) {
 				reads++
 				return tt.files, tt.readErr
 			}
@@ -253,4 +257,80 @@ func TestSurveyComponentsVerifiesKnative(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestYAMLFilesInTar(t *testing.T) {
+	type entry struct {
+		name string
+		body string
+		typ  byte
+	}
+	build := func(entries ...entry) *bytes.Buffer {
+		var buf bytes.Buffer
+		tw := tar.NewWriter(&buf)
+		for _, e := range entries {
+			hdr := &tar.Header{Name: e.name, Typeflag: e.typ, Mode: 0o644, Size: int64(len(e.body))}
+			if e.typ == tar.TypeDir {
+				hdr.Size = 0
+			}
+			if err := tw.WriteHeader(hdr); err != nil {
+				t.Fatal(err)
+			}
+			if e.typ == tar.TypeReg {
+				if _, err := tw.Write([]byte(e.body)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if err := tw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return &buf
+	}
+	dirs := []string{"var/run/ko/a"}
+
+	t.Run("selects .yaml files directly under dirs", func(t *testing.T) {
+		got, err := yamlFilesInTar(build(
+			entry{"/var/run/ko/a", "", tar.TypeDir},
+			entry{"/var/run/ko/a/x.yaml", "x", tar.TypeReg},
+			entry{"./var/run/ko/a/y.yaml", "y", tar.TypeReg},
+			entry{"var/run/ko/a/z.txt", "z", tar.TypeReg},
+			entry{"var/run/ko/a/sub/w.yaml", "w", tar.TypeReg},
+			entry{"var/run/ko/b/v.yaml", "v", tar.TypeReg},
+		), dirs)
+		if err != nil {
+			t.Fatalf("yamlFilesInTar() error = %v", err)
+		}
+		want := []string{"var/run/ko/a/x.yaml", "var/run/ko/a/y.yaml"}
+		if keys := slices.Sorted(maps.Keys(got)); !slices.Equal(keys, want) || string(got[want[1]]) != "y" {
+			t.Errorf("yamlFilesInTar() = %q, want files %v", got, want)
+		}
+	})
+	for _, e := range []entry{
+		{"var/run/ko/a/link.yaml", "", tar.TypeSymlink},
+		{"var/run/ko/a/hard.yaml", "", tar.TypeLink},
+		{"var/run/ko/a/x.yml", "x", tar.TypeReg},
+	} {
+		t.Run("rejects "+path.Base(e.name), func(t *testing.T) {
+			_, err := yamlFilesInTar(build(e), dirs)
+			if err == nil {
+				t.Fatal("yamlFilesInTar() error = nil, want an unchecked-file error")
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		})
+	}
+	t.Run("oversized file", func(t *testing.T) {
+		_, err := yamlFilesInTar(build(entry{"var/run/ko/a/big.yaml", strings.Repeat("x", maxImageFileBytes+1), tar.TypeReg}), dirs)
+		if err == nil {
+			t.Fatal("yamlFilesInTar() error = nil, want a size error")
+		}
+		errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+	})
+	t.Run("corrupt stream", func(t *testing.T) {
+		_, err := yamlFilesInTar(strings.NewReader("not a tar stream, but long enough to need a full header block"), dirs)
+		if err == nil {
+			t.Fatal("yamlFilesInTar() error = nil, want a read error")
+		}
+		errorstest.WantReportedCode(t, err, errors.ErrCodeUnavailable)
+	})
 }
