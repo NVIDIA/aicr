@@ -27,6 +27,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/distribution/reference"
+
 	"aicr.run/pkg/bom"
 	pkgcomponent "aicr.run/pkg/component"
 	"aicr.run/pkg/errors"
@@ -125,24 +127,39 @@ func verifyEnabledBy(ctx context.Context, repoRoot string, c component, r helm.R
 	return warnings, nil
 }
 
-// containsRef reports whether ref occurs in data as a whole image reference,
-// with no reference character on either side. A preceding "/" is allowed, so
-// a short name such as nats:2.10 matches docker.io/library/nats:2.10.
+// containsRef reports whether data holds an image reference that normalizes
+// to the same reference as ref, so a short name such as nats:2.10 matches
+// docker.io/library/nats:2.10 but not quay.io/x/nats:2.10 or nats:2.10.1.
 func containsRef(data []byte, ref string) bool {
+	want := normalizeRef(ref)
 	for i := 0; i <= len(data); {
 		j := bytes.Index(data[i:], []byte(ref))
 		if j < 0 {
 			return false
 		}
 		start, end := i+j, i+j+len(ref)
-		before := start == 0 || data[start-1] == '/' || !isRefByte(data[start-1])
-		after := end == len(data) || !isRefByte(data[end])
-		if before && after {
+		i = start + 1
+		if end < len(data) && isRefByte(data[end]) {
+			continue
+		}
+		tokenStart := start
+		for tokenStart > 0 && isRefByte(data[tokenStart-1]) {
+			tokenStart--
+		}
+		if normalizeRef(string(data[tokenStart:end])) == want {
 			return true
 		}
-		i = start + 1
 	}
 	return false
+}
+
+// normalizeRef returns the fully qualified form of ref, or ref itself when it
+// does not parse.
+func normalizeRef(ref string) string {
+	if named, err := reference.ParseNormalizedNamed(ref); err == nil {
+		return named.String()
+	}
+	return ref
 }
 
 // isRefByte reports whether b can appear in an image reference.

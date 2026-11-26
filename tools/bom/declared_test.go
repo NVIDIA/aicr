@@ -261,6 +261,11 @@ func TestContainsRef(t *testing.T) {
 		{"image: nats:2.10.1", "nats:2.10", false},
 		{"image: nats:2.10@sha256:abc", "nats:2.10", false},
 		{"image: mynats:2.10", "nats:2.10", false},
+		{"image: quay.io/x/nats:2.10", "nats:2.10", false},
+		{"image: docker.io/bitnami/nats:2.10", "nats:2.10", false},
+		{"image: docker.io/nats:2.10", "nats:2.10", true},
+		{"image: example.com/op/a:1.0", "example.com/op/a:1.0", true},
+		{"image: other.io/example.com/op/a:1.0", "example.com/op/a:1.0", false},
 		{"image: nats:2.10.1 nats:2.10", "nats:2.10", true},
 		{"", "nats:2.10", false},
 	}
