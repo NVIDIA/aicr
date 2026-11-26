@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Images this component deploys that no rendered template shows. See
+# Images this component deploys that no rendered `image:` field names. See
 # "Declared Images" in docs/contributor/component.md.
 # The operator starts these when it reconciles the KnativeServing resource of
 # the knative-serving component. They are read from the manifests under

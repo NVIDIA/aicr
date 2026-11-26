@@ -659,7 +659,7 @@ The `nvsentinel-remediation` mixin pins the reboot Job image through `janitor-pr
 
 The opt-in `nvsentinel-slinky-drainer` mixin (see [Slurm Drain Through Slinky](component-catalog.md#slurm-drain-through-slinky)) adds the image-less `slinky-drainer-crds` component and the `slinky-drainer` component, whose one image, `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.32.0`, is digest-pinned in its vendored manifest, so the BOM above lists it. Only recipes that compose the mixin deploy it. It is in the weekly image scan and the mirror lane, and `TestSlinkyDrainerImagePinnedEverywhere` keeps its tag at `nvsentinel`'s chart version.
 
-**Images an operator launches are declared.** Some images appear in no rendered template. An operator launches or injects them, or the chart renders them only behind a value the base values leave off. These components declare them in `recipes/components/<name>/images.yaml`, and this BOM and `aicr mirror list` include them:
+**Images an operator launches are declared.** Some images appear in no rendered `image:` field. An operator launches or injects them, or the chart renders them only behind a value the base values leave off. These components declare them in `recipes/components/<name>/images.yaml`, and this BOM and `aicr mirror list` include them:
 
 | Component | Declared images |
 |---|---|

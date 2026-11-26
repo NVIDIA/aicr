@@ -316,7 +316,7 @@ generate the deployment-specific manifest for a specific deployment.
 > images are left out. A malformed `images.yaml` fails the command.
 
 > **Images an operator launches:** `mirror list` also includes images that
-> operators start at run time, which no chart or manifest renders. Each
+> operators start at run time, which no rendered `image:` field names. Each
 > component declares them in `recipes/components/<name>/images.yaml`.
 > A component with no `images.yaml` declares none, and `mirror list` gives no
 > warning for it.
