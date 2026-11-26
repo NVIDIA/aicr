@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/distribution/reference"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"aicr.run/pkg/bom"
 	pkgcomponent "aicr.run/pkg/component"
@@ -39,16 +40,16 @@ import (
 // default render shows, ones an operator launches or a chart renders only
 // behind a value the default values leave off. Each must keep an images.yaml, so
 // deleting one fails the survey instead of narrowing the BOM.
-var declaredRequiredComponents = map[string]struct{}{
-	"dynamo-platform":            {},
-	"grove":                      {},
-	"knative-operator":           {},
-	"kube-prometheus-stack":      {},
-	"kubeflow-training-operator": {},
-	"network-operator":           {},
-	"nodewright-operator":        {},
-	"runai-cluster":              {},
-}
+var declaredRequiredComponents = sets.New(
+	"dynamo-platform",
+	"grove",
+	"knative-operator",
+	"kube-prometheus-stack",
+	"kubeflow-training-operator",
+	"network-operator",
+	"nodewright-operator",
+	"runai-cluster",
+)
 
 // readDeclaredImages returns the images c's images.yaml declares for the
 // surveyed version, or nil when c has no images.yaml and is not in
@@ -176,7 +177,7 @@ func isRefByte(b byte) bool {
 func loadDeclaredImages(repoRoot, name string) (d *bom.DeclaredImages, found bool, err error) {
 	errCtx := map[string]any{componentContextKey: name}
 	absent := func(cause error) (*bom.DeclaredImages, bool, error) {
-		if _, required := declaredRequiredComponents[name]; required {
+		if declaredRequiredComponents.Has(name) {
 			return nil, false, errors.WrapWithContext(errors.ErrCodeNotFound,
 				bom.DeclaredImagesFile+" is required for this component but absent", cause, errCtx)
 		}

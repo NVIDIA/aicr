@@ -26,6 +26,8 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	"aicr.run/pkg/bom"
 	"aicr.run/pkg/errors"
 	"aicr.run/pkg/recipe"
@@ -99,15 +101,12 @@ func TestDeclaredImagesAnchored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("glob %s: %v", bom.DeclaredImagesFile, err)
 	}
-	names := map[string]struct{}{}
+	names := declaredRequiredComponents.Clone()
 	for _, f := range files {
-		names[path.Base(path.Dir(f))] = struct{}{}
-	}
-	for name := range declaredRequiredComponents {
-		names[name] = struct{}{}
+		names.Insert(path.Base(path.Dir(f)))
 	}
 
-	for _, name := range slices.Sorted(maps.Keys(names)) {
+	for _, name := range sets.List(names) {
 		data, readErr := dp.ReadFile(ctx, path.Join("components", name, bom.DeclaredImagesFile))
 		if readErr != nil {
 			if stderrors.Is(readErr, fs.ErrNotExist) {
@@ -200,7 +199,7 @@ func deployedPins(
 // for, and the entries of d that match neither.
 func declaredProblems(d *bom.DeclaredImages, pins *componentPins) []string {
 	var problems []string
-	usedCharts := map[declaredChartKey]struct{}{}
+	usedCharts := sets.New[declaredChartKey]()
 	for _, k := range slices.SortedFunc(maps.Keys(pins.charts), func(a, b declaredChartKey) int {
 		return strings.Compare(a.String(), b.String())
 	}) {
@@ -210,7 +209,7 @@ func declaredProblems(d *bom.DeclaredImages, pins *componentPins) []string {
 				declaredRereadHint))
 			continue
 		}
-		usedCharts[k] = struct{}{}
+		usedCharts.Insert(k)
 	}
 	for _, k := range pins.bom {
 		entry, err := d.ChartFor(k.Repository, k.Chart, k.Version)
@@ -218,9 +217,9 @@ func declaredProblems(d *bom.DeclaredImages, pins *componentPins) []string {
 			problems = append(problems, fmt.Sprintf("the BOM surveys chart %s, which make bom-docs cannot resolve: %v", k, err))
 			continue
 		}
-		usedCharts[declaredChartKey{Repository: entry.Repository, Chart: entry.Chart, Version: entry.SourceVersion}] = struct{}{}
+		usedCharts.Insert(declaredChartKey{Repository: entry.Repository, Chart: entry.Chart, Version: entry.SourceVersion})
 	}
-	usedManifests := map[string]struct{}{}
+	usedManifests := sets.New[string]()
 	for _, m := range pins.manifests {
 		entries, err := d.ManifestsFor(m.images)
 		if err != nil {
@@ -228,19 +227,19 @@ func declaredProblems(d *bom.DeclaredImages, pins *componentPins) []string {
 			continue
 		}
 		for _, entry := range entries {
-			usedManifests[entry.OperatorImage] = struct{}{}
+			usedManifests.Insert(entry.OperatorImage)
 		}
 	}
 
 	for _, c := range d.Charts {
 		k := declaredChartKey{Repository: c.Repository, Chart: c.Chart, Version: c.SourceVersion}
-		if _, used := usedCharts[k]; !used {
+		if !usedCharts.Has(k) {
 			problems = append(problems, fmt.Sprintf("the %s of component %q has an entry for chart %s, which "+
 				"neither the registry, a leaf recipe nor the BOM deploys. Delete it", bom.DeclaredImagesFile, d.Component, k))
 		}
 	}
 	for _, m := range d.Manifests {
-		if _, used := usedManifests[m.OperatorImage]; !used {
+		if !usedManifests.Has(m.OperatorImage) {
 			problems = append(problems, fmt.Sprintf("the %s of component %q has an entry for operator image %s, "+
 				"which no deployed manifest runs. Delete it", bom.DeclaredImagesFile, d.Component, m.OperatorImage))
 		}

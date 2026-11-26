@@ -20,7 +20,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -35,6 +34,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"aicr.run/pkg/bom"
 	"aicr.run/pkg/errors"
@@ -91,7 +91,7 @@ func verifyKnativeKodata(ctx context.Context, repoRoot string, res *bom.Componen
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "read manifests from "+operatorImage)
 	}
 
-	kodata := map[string]struct{}{}
+	kodata := sets.New[string]()
 	for _, dir := range dirs {
 		found := false
 		for p, data := range files {
@@ -103,9 +103,7 @@ func verifyKnativeKodata(ctx context.Context, repoRoot string, res *bom.Componen
 			if extractErr != nil {
 				return errors.WrapWithContext(errors.ErrCodeInvalidRequest, "extract images from "+p, extractErr, errCtx)
 			}
-			for _, i := range set.Images {
-				kodata[i] = struct{}{}
-			}
+			kodata.Insert(set.Images...)
 		}
 		if !found {
 			return errors.NewWithContext(errors.ErrCodeInvalidRequest, fmt.Sprintf(
@@ -125,21 +123,17 @@ func verifyKnativeKodata(ctx context.Context, repoRoot string, res *bom.Componen
 	if err != nil {
 		return err
 	}
-	declared := map[string]struct{}{}
+	declared := sets.New[string]()
 	for _, i := range entry.Images {
-		declared[i.Image] = struct{}{}
+		declared.Insert(i.Image)
 	}
 
 	var problems []string
-	for _, i := range slices.Sorted(maps.Keys(kodata)) {
-		if _, ok := declared[i]; !ok {
-			problems = append(problems, "undeclared "+i)
-		}
+	for _, i := range sets.List(kodata.Difference(declared)) {
+		problems = append(problems, "undeclared "+i)
 	}
-	for _, i := range slices.Sorted(maps.Keys(declared)) {
-		if _, ok := kodata[i]; !ok {
-			problems = append(problems, "not in the operator image "+i)
-		}
+	for _, i := range sets.List(declared.Difference(kodata)) {
+		problems = append(problems, "not in the operator image "+i)
 	}
 	if len(problems) > 0 {
 		return errors.NewWithContext(errors.ErrCodeInvalidRequest, fmt.Sprintf(

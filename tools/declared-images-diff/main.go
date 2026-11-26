@@ -49,7 +49,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -57,6 +56,7 @@ import (
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/distribution/reference"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"aicr.run/pkg/defaults"
 	"aicr.run/pkg/errors"
@@ -124,8 +124,7 @@ func run(mirrorListPath string, aibomPaths []string, requireDigest bool) (result
 	}
 
 	seen := 0
-	uncovered := map[string]struct{}{}
-	tagOnly := map[string]struct{}{}
+	uncovered, tagOnly := sets.New[string](), sets.New[string]()
 	for _, p := range aibomPaths {
 		data, err := readBounded(p)
 		if err != nil {
@@ -144,9 +143,9 @@ func run(mirrorListPath string, aibomPaths []string, requireDigest bool) (result
 			}
 			switch {
 			case m == matchNone, m == matchTagOnly && requireDigest:
-				uncovered[ref] = struct{}{}
+				uncovered.Insert(ref)
 			case m == matchTagOnly:
-				tagOnly[ref] = struct{}{}
+				tagOnly.Insert(ref)
 			}
 		}
 	}
@@ -155,8 +154,8 @@ func run(mirrorListPath string, aibomPaths []string, requireDigest bool) (result
 			"the -aibom inputs hold no running container image, so there is nothing to compare")
 	}
 	return result{
-		uncovered: slices.Sorted(maps.Keys(uncovered)),
-		tagOnly:   slices.Sorted(maps.Keys(tagOnly)),
+		uncovered: sets.List(uncovered),
+		tagOnly:   sets.List(tagOnly),
 	}, nil
 }
 
@@ -181,9 +180,7 @@ func readBounded(path string) ([]byte, error) {
 // imageKeys indexes the images of a mirror list by normalized
 // repository:tag and repository@digest.
 type imageKeys struct {
-	tags    map[string]struct{}
-	tagOnly map[string]struct{}
-	digests map[string]struct{}
+	tags, tagOnly, digests sets.Set[string]
 }
 
 // match is how a listed image covers a running image. matchTagOnly means a
@@ -202,17 +199,11 @@ func (k imageKeys) covers(ref string) (match, error) {
 	if err != nil {
 		return matchNone, err
 	}
-	if digest != "" {
-		if _, ok := k.digests[digest]; ok {
-			return matchExact, nil
-		}
-		if _, ok := k.tagOnly[tag]; tag != "" && ok {
-			return matchTagOnly, nil
-		}
-		return matchNone, nil
-	}
-	if _, ok := k.tags[tag]; ok {
+	switch {
+	case digest != "" && k.digests.Has(digest), digest == "" && k.tags.Has(tag):
 		return matchExact, nil
+	case digest != "" && tag != "" && k.tagOnly.Has(tag):
+		return matchTagOnly, nil
 	}
 	return matchNone, nil
 }
@@ -223,7 +214,7 @@ func mirrorKeys(data []byte) (imageKeys, error) {
 	var list struct {
 		Images []string `yaml:"images"`
 	}
-	keys := imageKeys{tags: map[string]struct{}{}, tagOnly: map[string]struct{}{}, digests: map[string]struct{}{}}
+	keys := imageKeys{tags: sets.New[string](), tagOnly: sets.New[string](), digests: sets.New[string]()}
 	if err := yaml.Unmarshal(data, &list); err != nil {
 		return keys, errors.Wrap(errors.ErrCodeInvalidRequest, "parse mirror list", err)
 	}
@@ -236,13 +227,13 @@ func mirrorKeys(data []byte) (imageKeys, error) {
 			return keys, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("mirror list image %q", ref), err)
 		}
 		if tag != "" {
-			keys.tags[tag] = struct{}{}
+			keys.tags.Insert(tag)
 			if digest == "" {
-				keys.tagOnly[tag] = struct{}{}
+				keys.tagOnly.Insert(tag)
 			}
 		}
 		if digest != "" {
-			keys.digests[digest] = struct{}{}
+			keys.digests.Insert(digest)
 		}
 	}
 	return keys, nil
