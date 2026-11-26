@@ -253,7 +253,13 @@ func yamlFilesInTar(r io.Reader, dirs []string) (map[string][]byte, error) {
 			return nil, errors.Wrap(errors.ErrCodeUnavailable, "read image filesystem", err)
 		}
 		file := strings.TrimPrefix(path.Clean("/"+hdr.Name), "/")
-		if hdr.Typeflag != tar.TypeReg || path.Ext(file) != yamlExt || !slices.Contains(dirs, path.Dir(file)) {
+		if !slices.Contains(dirs, path.Dir(file)) {
+			continue
+		}
+		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink || path.Ext(file) == ".yml" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, file+" is not a regular .yaml file, so its images would go unchecked")
+		}
+		if hdr.Typeflag != tar.TypeReg || path.Ext(file) != yamlExt {
 			continue
 		}
 		data, err := io.ReadAll(io.LimitReader(tr, maxImageFileBytes+1))

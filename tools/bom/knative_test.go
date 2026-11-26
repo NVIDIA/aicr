@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"maps"
+	"path"
 	"slices"
 	"strings"
 	"testing"
@@ -305,6 +306,19 @@ func TestYAMLFilesInTar(t *testing.T) {
 			t.Errorf("yamlFilesInTar() = %q, want files %v", got, want)
 		}
 	})
+	for _, e := range []entry{
+		{"var/run/ko/a/link.yaml", "", tar.TypeSymlink},
+		{"var/run/ko/a/hard.yaml", "", tar.TypeLink},
+		{"var/run/ko/a/x.yml", "x", tar.TypeReg},
+	} {
+		t.Run("rejects "+path.Base(e.name), func(t *testing.T) {
+			_, err := yamlFilesInTar(build(e), dirs)
+			if err == nil {
+				t.Fatal("yamlFilesInTar() error = nil, want an unchecked-file error")
+			}
+			errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+		})
+	}
 	t.Run("oversized file", func(t *testing.T) {
 		_, err := yamlFilesInTar(build(entry{"var/run/ko/a/big.yaml", strings.Repeat("x", maxImageFileBytes+1), tar.TypeReg}), dirs)
 		if err == nil {
