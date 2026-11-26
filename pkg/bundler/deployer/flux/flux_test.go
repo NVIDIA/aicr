@@ -1493,9 +1493,8 @@ func TestBundleGolden_HelmComponents(t *testing.T) {
 	}
 }
 
-// TestGenerate_UpgradeNotice covers a non-empty notice. The README golden
-// pins only the empty-notice render, so the empty case also asserts the
-// Components table still runs straight into Repository Setup.
+// TestGenerate_UpgradeNotice covers both the empty and non-empty notice
+// renders; the README golden(s) pin only the empty one.
 func TestGenerate_UpgradeNotice(t *testing.T) {
 	const notice = "## Before You Upgrade\n\nNOTICE-SENTINEL\n\n"
 	tests := []struct {

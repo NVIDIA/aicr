@@ -2650,7 +2650,7 @@ func TestBundleGolden_MixedComponent(t *testing.T) {
 	}
 
 	for _, rel := range []string{
-		"README.md", // -post dynamic paths resolve through the parent's override key
+		"README.md", // inline README: --set flag and Dynamic Values for a nested path
 		"Chart.yaml",
 		"values.yaml",
 		"templates/aicr-stack.yaml",        // parent App, Helm-templated
