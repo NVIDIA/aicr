@@ -223,6 +223,7 @@ func TestExtractComponentValuesSizing(t *testing.T) {
 		set     map[string]string
 		typed   map[string]any
 		lock    []string
+		dynamic []string
 		wantReq string
 		wantLim string
 		wantErr bool
@@ -235,6 +236,7 @@ func TestExtractComponentValuesSizing(t *testing.T) {
 		{name: "--set-json object without memory keeps sizing", nodes: 200, typed: map[string]any{"operator.resources": map[string]any{"requests": map[string]any{"cpu": "300m"}}}, wantReq: "256Mi", wantLim: "768Mi"},
 		{name: "--set-json object writing the limit beats the tier", nodes: 200, typed: map[string]any{"operator.resources": map[string]any{"limits": map[string]any{"memory": "2Gi"}}}, wantReq: "256Mi", wantLim: "2Gi"},
 		{name: "lock-set path is not sized", nodes: 200, lock: []string{"operator.resources.limits.memory"}, wantReq: "256Mi", wantLim: "8Gi"},
+		{name: "--dynamic path is not sized", nodes: 200, dynamic: []string{"operator.resources.limits.memory"}, wantReq: "256Mi", wantLim: "8Gi"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -242,6 +244,7 @@ func TestExtractComponentValuesSizing(t *testing.T) {
 				config.WithEstimatedNodeCount(tt.nodes),
 				config.WithValueOverrides(map[string]map[string]string{sizingFixtureComponent: tt.set}),
 				config.WithValueOverridesTypedPaths(typedPaths(tt.typed)),
+				config.WithDynamicValues(map[string][]string{sizingFixtureComponent: tt.dynamic}),
 			)
 			b, err := New(WithConfig(cfg))
 			if err != nil {

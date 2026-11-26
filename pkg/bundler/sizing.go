@@ -84,8 +84,10 @@ func (b *DefaultBundler) planSizing(ctx context.Context, rr *recipe.RecipeResult
 	if !atInstall {
 		sets := b.getValueOverridesForComponent(ref.Name, rr.DataProvider())
 		typed := b.getTypedValueOverridesForComponent(ref.Name, rr.DataProvider())
+		dynamic := b.dynamicPathSetFor(ref.Name, rr.DataProvider())
 		skip := func(path string) bool {
-			return p.recipeSets(path) || overrideReaches(sets, path) || typedOverrideWrites(typed, path)
+			return p.recipeSets(path) || overrideReaches(sets, path) || typedOverrideWrites(typed, path) ||
+				overrideReaches(dynamic, path)
 		}
 		if err := sizeComponent(ref, values, skip, sz, n); err != nil {
 			return sizingPlan{}, err
@@ -105,7 +107,7 @@ func (b *DefaultBundler) finishSizing(p sizingPlan, ref *recipe.ComponentRef, va
 	}
 	if !p.atInstall {
 		if err := checkRequestsWithinLimits(values, p.file, b.Config.EstimatedNodeCount()); err != nil {
-			return errors.WrapWithContext(errors.ErrCodeInvalidRequest, "sized memory request exceeds its limit", err,
+			return errors.WrapWithContext(errors.ErrCodeInvalidRequest, "memory request exceeds its limit at this node count after overrides", err,
 				map[string]any{errCtxKeyComponent: ref.Name})
 		}
 		return nil
@@ -229,7 +231,7 @@ func buildRows(ref *recipe.ComponentRef, values map[string]any, skip func(string
 		if bound == selected {
 			if err := checkRequestsWithinLimits(merged, sz, bound); err != nil {
 				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("sized memory request exceeds its limit at sizing.nodeCount %d", bound), err,
+					fmt.Sprintf("memory request exceeds its limit at sizing.nodeCount %d after overrides", bound), err,
 					map[string]any{errCtxKeyComponent: ref.Name})
 			}
 		} else {
