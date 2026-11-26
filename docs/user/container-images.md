@@ -79,7 +79,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nktp | helm | nktp | 0.2.0 | 8 |
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
 | nodewright-customizations | manifest | — | — | 7 |
-| nodewright-operator | helm | nodewright | v0.21.0 | 2 |
+| nodewright-operator | helm | nodewright | v0.22.0 | 2 |
 | nvcre | helm | cluster-readiness-engine | v0.12.0 | 5 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
@@ -356,7 +356,7 @@ _No images extracted._
 ### nodewright-operator
 
 - `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
-- `ghcr.io/nvidia/nodewright/operator:v0.21.0@sha256:d9ff4e5bd44e21b24baf727f8e2a0b57f0d5f4cf17b9a90b2a4b307930b238cd`
+- `ghcr.io/nvidia/nodewright/operator:v0.22.0@sha256:cd2a5f4c4240b81de9bf150c643696af8e03bea2eab416c7839ef2c8751d1e66`
 
 ### nvcre
 
