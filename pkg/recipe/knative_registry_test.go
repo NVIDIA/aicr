@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"aicr.run/pkg/bom"
 	"aicr.run/recipes"
 	"gopkg.in/yaml.v3"
 )
@@ -142,6 +143,53 @@ func TestKnativeServingVersionMatchesOperator(t *testing.T) {
 	if !slices.Contains(bundled, version) {
 		t.Errorf("%s version %s is not a Serving release knative-operator %s bundles (%s)",
 			knativeServingValuesFile, version, operator.Helm.DefaultVersion, strings.Join(bundled, ", "))
+	}
+}
+
+// TestKnativeDeclaredImagesMatchServingVersion keeps the Serving images that
+// knative-operator's images.yaml declares in step with the Serving release
+// the KnativeServing resource requests. The operator picks those images by
+// that release, not by its own chart pin, so a version bump that leaves the
+// declaration behind would mirror the previous release's digests.
+func TestKnativeDeclaredImagesMatchServingVersion(t *testing.T) {
+	t.Parallel()
+
+	version, ok := readKnativeServingValues(t)["version"].(string)
+	if !ok || version == "" {
+		t.Fatalf("%s must set version as a string", knativeServingValuesFile)
+	}
+	const declaredFile = "components/" + knativeOperatorComponent + "/" + bom.DeclaredImagesFile
+	raw, err := recipes.FS.ReadFile(declaredFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", declaredFile, err)
+	}
+	d, err := bom.ParseDeclaredImages(knativeOperatorComponent, raw)
+	if err != nil {
+		t.Fatalf("parse %s: %v", declaredFile, err)
+	}
+	prefixes := map[string]string{
+		"Serving ": "Serving " + version + " manifest",
+		"Kourier ": "Kourier " + majorMinor(version) + " manifest",
+	}
+	found := map[string]int{}
+	for _, c := range d.Charts {
+		for _, i := range c.Images {
+			for prefix, want := range prefixes {
+				if !strings.HasPrefix(i.Source, prefix) {
+					continue
+				}
+				found[prefix]++
+				if !strings.HasPrefix(i.Source, want) {
+					t.Errorf("%s declares %s from %q, but %s requests Serving %s. Re-read the images at that release",
+						declaredFile, i.Image, i.Source, knativeServingValuesFile, version)
+				}
+			}
+		}
+	}
+	for prefix := range prefixes {
+		if found[prefix] == 0 {
+			t.Errorf("%s declares no %simages", declaredFile, prefix)
+		}
 	}
 }
 

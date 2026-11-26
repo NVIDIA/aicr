@@ -42,6 +42,9 @@ func writeRecipeTree(t *testing.T, sources map[string]string) string {
 		t.Fatalf("write registry: %v", err)
 	}
 	for rel, content := range sources {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, "recipes", rel)), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
 		if err := os.WriteFile(filepath.Join(root, "recipes", rel), []byte(content), 0o600); err != nil {
 			t.Fatalf("write %s: %v", rel, err)
 		}
@@ -211,7 +214,7 @@ func TestSurveyVariantRendersAtVariantVersion(t *testing.T) {
 	root := writeRecipeTree(t, nil)
 	mock := &helmtest.MockRenderer{
 		Rendered: map[string][]byte{
-			"kube-prometheus-stack": []byte(`
+			"example-stack": []byte(`
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -227,14 +230,14 @@ spec:
 	}
 
 	base := component{
-		Name: "kube-prometheus-stack",
+		Name: "example-stack",
 		Helm: helmCfg{
 			DefaultRepository: "https://prometheus-community.github.io/helm-charts",
 			DefaultChart:      "prometheus-community/kube-prometheus-stack",
 			DefaultVersion:    "84.4.0",
 		},
 	}
-	v := bom.VariantResult{Name: "kube-prometheus-stack", Version: "83.7.0", Sources: []string{"aks"}}
+	v := bom.VariantResult{Name: "example-stack", Version: "83.7.0", Sources: []string{"aks"}}
 
 	got, surveyErr := surveyVariant(context.Background(), root, v, base, mock, false, catalogDriverTargets{})
 	if surveyErr != nil {
@@ -381,7 +384,7 @@ spec:
 
 func TestSurveyVariantIncludesManifestImages(t *testing.T) {
 	root := writeRecipeTree(t, nil)
-	manifestsDir := filepath.Join(root, "recipes", "components", "kube-prometheus-stack", "manifests")
+	manifestsDir := filepath.Join(root, "recipes", "components", "example-stack", "manifests")
 	if err := os.MkdirAll(manifestsDir, 0o755); err != nil {
 		t.Fatalf("mkdir manifests: %v", err)
 	}
@@ -399,14 +402,14 @@ spec:
 	}
 
 	base := component{
-		Name: "kube-prometheus-stack",
+		Name: "example-stack",
 		Helm: helmCfg{
 			DefaultRepository: "https://prometheus-community.github.io/helm-charts",
 			DefaultChart:      "prometheus-community/kube-prometheus-stack",
 			DefaultVersion:    "84.4.0",
 		},
 	}
-	v := bom.VariantResult{Name: "kube-prometheus-stack", Version: "83.7.0", Sources: []string{"aks"}}
+	v := bom.VariantResult{Name: "example-stack", Version: "83.7.0", Sources: []string{"aks"}}
 
 	// With -skip-helm the variant must still pick up manifest images, exactly
 	// like the default survey path.

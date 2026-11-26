@@ -192,5 +192,7 @@ The HTTP server rejects artifact-bearing recipes with `artifact-inputs-required`
 Provenance is marked `metadata-only`.
 It records the supplied identities and composition, not publisher authentication, chart archive verification or runtime image completeness.
 Mirror discovery guards final identities but its version-fetched renders are not verified against the pinned archive.
+A binding that moves a component with a `components/<name>/images.yaml` to another chart version needs a catalog copy of that file with an entry for that version.
+Otherwise `aicr mirror list` warns and omits that component's declared images.
 Terraform and Fleet GitRepo archive verification remains tracked separately in [issue 3653](https://github.com/NVIDIA/aicr/issues/3653).
 For the complete format and trust boundary, see [ADR-031](https://github.com/NVIDIA/aicr/blob/main/docs/design/031-artifact-inventory-and-bindings.md).

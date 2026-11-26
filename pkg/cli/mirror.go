@@ -48,7 +48,9 @@ func mirrorListCmd() *cli.Command {
 		Name:  "list",
 		Usage: "List all container images and Helm charts referenced by a recipe.",
 		Description: `Discovers container images by rendering Helm charts with recipe-resolved
-values and scanning manifests. The output feeds air-gap mirroring tools.
+values and scanning manifests, and adds the images each component declares in
+its images.yaml, such as images its operator launches at run time. The output
+feeds air-gap mirroring tools.
 
 Accepts recipe input the same two ways as other commands:
   1. --recipe <path> to load a previously generated recipe

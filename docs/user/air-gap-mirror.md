@@ -311,19 +311,27 @@ generate the deployment-specific manifest for a specific deployment.
 > run reported no warnings — otherwise the mirrored set may be silently
 > incomplete. Invalid members in a recognized mapping-valued `image` or
 > `scalingPodImage` descriptor are the exception: `mirror list` exits nonzero
-> instead of emitting a known-incomplete image set.
+> instead of emitting a known-incomplete image set. A component whose
+> `images.yaml` has no entry for what it deploys also warns, and its declared
+> images are left out. A malformed `images.yaml` fails the command.
 
-> **Run:ai recipes need one image mirrored by hand:** a run with no warnings
-> is still incomplete for a `--platform runai` recipe. The Kubeflow Training
-> Operator adds an `init-pytorch` init container running
-> `docker.io/library/alpine:3.10` to the workers of every PyTorchJob that has a
-> Master replica. The reference is compiled into the operator, not rendered
-> from a chart or manifest, so `mirror list` neither lists it nor warns about
-> it. Mirror `docker.io/library/alpine:3.10` yourself and have the nodes'
-> container runtime redirect `docker.io` to your registry, keeping the
-> `library/alpine` path and the `3.10` tag; otherwise PyTorch workers wait in
-> `Init:ImagePullBackOff`. See
-> [Explicit vs. implicit images](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md#explicit-vs-implicit-images).
+> **Images an operator launches:** `mirror list` also includes images that
+> operators start at run time, which no rendered `image:` field names. Each
+> component declares them in `recipes/components/<name>/images.yaml`.
+> A component with no `images.yaml` declares none, and `mirror list` gives no
+> warning for it.
+>
+> - Some are compiled into the operator, and no value rewrites them. One is the
+>   Alpine image in the Kubeflow Training Operator's `init-pytorch` init
+>   container, in `--platform runai` recipes. Have the nodes' container runtime
+>   redirect the image's registry to yours, keeping the path and tag. Otherwise
+>   the pods wait in `Init:ImagePullBackOff`.
+> - A `--data` overlay that moves one of these components to another chart
+>   version needs its own copy of `components/<name>/images.yaml` with an entry
+>   for that version. Otherwise `mirror list` warns and omits that component's
+>   declared images.
+>
+> See [Explicit vs. implicit images](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md#explicit-vs-implicit-images).
 
 > **Runtime validation image:** `slinky-slurm-health` launches
 > `docker.io/library/alpine:3.23.3` dynamically through `srun` on GPU-backed

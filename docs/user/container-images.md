@@ -12,7 +12,7 @@ You may obtain a copy of the License at
 
 This page lists every container image AICR can deploy across all registered components. It is the canonical reference for security review, air-gap planning, and any workflow that needs to know "what does AICR pull onto my cluster."
 
-The image set below is regenerated from the live Helm chart catalog and the embedded manifests under `recipes/components/*/manifests/`. The auto-generated section is refreshed weekly by the [`bom-refresh`](https://github.com/NVIDIA/aicr/actions/workflows/bom-refresh.yaml) GitHub Action, which opens a chore PR whenever upstream chart rerenders cause drift. Contributors changing recipes are expected to regenerate locally with `make bom-docs` and commit the result alongside their change.
+The image set below is regenerated from the live Helm chart catalog, the embedded manifests under `recipes/components/*/manifests/`, and the images each component declares in `recipes/components/<name>/images.yaml`. The auto-generated section is refreshed weekly by the [`bom-refresh`](https://github.com/NVIDIA/aicr/actions/workflows/bom-refresh.yaml) GitHub Action, which opens a chore PR whenever upstream chart rerenders cause drift. Contributors changing recipes are expected to regenerate locally with `make bom-docs` and commit the result alongside their change.
 
 A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by `make bom` and published as a release asset. Tooling that consumes SBOMs (Trivy, Grype, Cosign attestation, in-toto) should prefer the JSON; this Markdown is the human-readable view.
 
@@ -28,10 +28,10 @@ The catalog lists the driver version that the default chart render carries. Vers
 ## Summary
 
 - Components: **61**
-- Unique images: **148**
-- Distinct registries: **12**
+- Unique images: **221**
+- Distinct registries: **13**
 
-Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
+Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `cr.eu-north1.nebius.cloud`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.access.redhat.com`, `registry.k8s.io`, `us-docker.pkg.dev`
 
 _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recipes/components/<name>/values.yaml; per-recipe overlay overrides are not applied`
 
@@ -48,7 +48,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | cert-manager-ocp-olm | manifest | — | — | 0 |
 | dra-node-labeler | manifest | — | — | 1 |
 | dranet | manifest | — | — | 1 |
-| dynamo-platform | helm | dynamo-platform | 1.6.2 | 2 |
+| dynamo-platform | helm | dynamo-platform | 1.6.2 | 4 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.23.1 | 3 |
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-gb200-rdma | manifest | — | — | 2 |
@@ -56,21 +56,21 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gpu-operator | helm | nvidia/gpu-operator | v26.7.3 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
-| grove | helm | grove-charts | v0.1.0-alpha.14 | 1 |
+| grove | helm | grove-charts | v0.1.0-alpha.14 | 2 |
 | k8s-aibom | helm | k8s-aibom | 1.6.2 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.4 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.4 | 1 |
 | kai-scheduler | helm | kai-scheduler | v0.18.8 | 12 |
-| knative-operator | helm | knative-operator | v1.23.1 | 2 |
+| knative-operator | helm | knative-operator | v1.23.1 | 12 |
 | knative-serving | manifest | — | — | 0 |
-| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 88.6.5 | 2 |
+| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 88.6.5 | 3 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.4.0 | 4 |
-| kubeflow-training-operator | manifest | — | — | 1 |
+| kubeflow-training-operator | manifest | — | — | 2 |
 | kueue | helm | kueue | 0.19.13 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.10.2 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.10.2 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.7.1 | 20 |
+| network-operator | helm | nvidia/network-operator | 26.7.1 | 31 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.20.1 | 1 |
@@ -79,7 +79,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nktp | helm | nktp | 0.2.0 | 8 |
 | node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
 | nodewright-customizations | manifest | — | — | 7 |
-| nodewright-operator | helm | nodewright | v0.22.0 | 2 |
+| nodewright-operator | helm | nodewright | v0.22.0 | 3 |
 | nvcre | helm | cluster-readiness-engine | v0.12.0 | 5 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.1 | 1 |
@@ -90,7 +90,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 31.0.1 | 0 |
 | psmdb-operator | helm | psmdb-operator | 1.23.2 | 1 |
 | rdma-modules | manifest | — | — | 1 |
-| runai-cluster | helm | runai-cluster | 3.0.26 | 10 |
+| runai-cluster | helm | runai-cluster | 3.0.26 | 46 |
 | slinky-drainer | manifest | — | — | 1 |
 | slinky-drainer-crds | manifest | — | — | 0 |
 | slinky-slurm | helm | slurm | 1.2.4 | 5 |
@@ -109,8 +109,8 @@ from the component's registry default above.
 | Component | Variant Version | Declared By | Images |
 |-----------|-----------------|-------------|--------|
 | kubeflow-trainer | 2.2.1 | gb300-eks-ubuntu-training-kubeflow | 4 |
-| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 20 |
-| network-operator | 26.10.0 | gb200-nvke-ubuntu-training, vr200-nvke-ubuntu-training | 20 |
+| network-operator | 25.7.0 | b300-mk8s-ubuntu-inference-dynamo | 30 |
+| network-operator | 26.10.0 | gb200-nvke-ubuntu-training, vr200-nvke-ubuntu-training | 31 |
 
 ## Images by component
 
@@ -161,6 +161,8 @@ _No images extracted._
 ### dynamo-platform
 
 - `docker.io/library/python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b`
+- `nats:2.10.21-alpine`
+- `natsio/nats-server-config-reloader:0.16.0`
 - `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.6.2`
 
 ### gatekeeper
@@ -215,6 +217,7 @@ _No images extracted._
 
 ### grove
 
+- `ghcr.io/ai-dynamo/grove/grove-initc:v0.1.0-alpha.14`
 - `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.14`
 
 ### k8s-aibom
@@ -250,8 +253,18 @@ _No images extracted._
 
 ### knative-operator
 
+- `docker.io/envoyproxy/envoy:v1.37-latest`
+- `gcr.io/knative-releases/knative.dev/net-kourier/cmd/kourier@sha256:eedfe3938f1efa93230863099f96400a0567909d383a585021f8727fa3a6cf0b`
 - `gcr.io/knative-releases/knative.dev/operator/cmd/operator:v1.23.1`
 - `gcr.io/knative-releases/knative.dev/operator/cmd/webhook:v1.23.1`
+- `gcr.io/knative-releases/knative.dev/pkg/apiextensions/storageversion/cmd/migrate@sha256:2016f5ede9fb269c7cdf0085ff106844dfa36e42a4d768e0a2f51464928a0c2d`
+- `gcr.io/knative-releases/knative.dev/serving/cmd/activator@sha256:e5ab46f3b73fa2e3898fe47f6a3a0c2bd765596f4fb36ceb4c28c35d0a74b2e5`
+- `gcr.io/knative-releases/knative.dev/serving/cmd/autoscaler-hpa@sha256:e2494132a71c23587ac8dd25bc5288f70261e592285487e1d19f8dea1f896133`
+- `gcr.io/knative-releases/knative.dev/serving/cmd/autoscaler@sha256:879da127b23db65d862cafa6b23fb987381d0e44150f0027d44e1f5aee83bde2`
+- `gcr.io/knative-releases/knative.dev/serving/cmd/controller@sha256:ca5062ece0329d002a81940cf4268d7898866434d70049bb93f27d3a786d3292`
+- `gcr.io/knative-releases/knative.dev/serving/cmd/queue@sha256:a3cc71ce80dbc6df8781f15eac2cf3531a4c9815271799afd8776bef9e6aeaf2`
+- `gcr.io/knative-releases/knative.dev/serving/cmd/webhook@sha256:3846e9a416665c5b9ec2e4de246cfcb5c4ab0d01ba19348aa008caf30144b650`
+- `gcr.io/knative-releases/knative.dev/serving/pkg/cleanup/cmd/cleanup@sha256:78fbd3df14986cd4831a22e7c2703a3b4f58a6e93cacd6ffbf18b3c787af0c71`
 
 ### knative-serving
 
@@ -259,6 +272,7 @@ _No images extracted._
 
 ### kube-prometheus-stack
 
+- `quay.io/prometheus-operator/prometheus-config-reloader:v0.93.1`
 - `quay.io/prometheus-operator/prometheus-operator:v0.93.1`
 - `quay.io/prometheus/prometheus:v3.14.0-distroless`
 
@@ -271,6 +285,7 @@ _No images extracted._
 
 ### kubeflow-training-operator
 
+- `docker.io/library/alpine:3.10`
 - `ghcr.io/kubeflow/training-v1/training-operator:v1-93c5489@sha256:45aa299d92c21a1abc0e9731694f01be637ab5c6c9681a687aedf142b0468d45`
 
 ### kueue
@@ -290,6 +305,7 @@ _No images extracted._
 - `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0-ubuntu24.04-amd64`
 - `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
 - `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
+- `ghcr.io/k8snetworkplumbingwg/network-resources-injector:v1.7.0`
 - `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
 - `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin@sha256:cabce074d10a0f1d62135e2cc5442d65b49094b95b8297fdd024a1a5f461319f`
 - `ghcr.io/mellanox/k8s-rdma-shared-dev-plugin@sha256:9f468fdc4449e65e4772575f83aa85840a00f97165f9a00ba34695c91d610fbd`
@@ -300,13 +316,23 @@ _No images extracted._
 - `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
+- `nvcr.io/nvidia/mellanox/ib-sriov-cni:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:842b3816c66623cef061daf9d904c411085c525898e8b95777e531d77b3a7b4e`
+- `nvcr.io/nvidia/mellanox/maintenance-operator:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/multus-cni@sha256:f4539e04013284b4c37021766852a8702190ac4b7d4e100dd15a5da883a43ec8`
+- `nvcr.io/nvidia/mellanox/network-operator-init-container:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon@sha256:77437fd7b9b6737b811d639266d77e46b50527fda192c6dd0d639fe0cb0468a4`
 - `nvcr.io/nvidia/mellanox/nic-configuration-operator@sha256:50e3114bc7ead03c62ba8924fc274592243bb7fd6c994406db5a53c07fdbb13d`
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:f2f35a3576a03ef1f05a589185f8150f49ca0d60019917ad8a2a8749688c1b32`
+- `nvcr.io/nvidia/mellanox/ovs-cni-plugin:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/plugins@sha256:75408477333bb2aed761dafb521f34c91f734f969384882bb385ab1c892ccbdf`
+- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.1`
 - `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.1@sha256:7e5935818437bdeb3461f1c8a7107e2725dcba30a62e14bffcdaa4ea703d70f3`
+- `nvcr.io/nvidia/mellanox/sriov-cni:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/sriov-network-device-plugin:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/sriov-network-operator-config-daemon:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/sriov-network-operator-webhook:network-operator-v26.7.1`
+- `nvcr.io/nvidia/mellanox/sriov-network-operator:network-operator-v26.7.1`
 
 ### network-operator-ocp
 
@@ -356,6 +382,7 @@ _No images extracted._
 ### nodewright-operator
 
 - `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
+- `ghcr.io/nvidia/nodewright/agent:v7.0.0@sha256:7cf394273374142370473cd3df191b9a40d2d1a7f0ac119b922e5c90c88a592b`
 - `ghcr.io/nvidia/nodewright/operator:v0.22.0@sha256:cd2a5f4c4240b81de9bf150c643696af8e03bea2eab416c7839ef2c8751d1e66`
 
 ### nvcre
@@ -413,16 +440,52 @@ _No images extracted._
 
 ### runai-cluster
 
+- `docker.io/valkey/valkey:9.0.4`
 - `ghcr.io/dsx-ai-factory/workload-map/karta-operator:0.2.6`
+- `ghcr.io/kai-scheduler/gpu-fractioning/fractiond:v0.1.9`
+- `ghcr.io/kai-scheduler/gpu-fractioning/metricsd:v0.1.9`
+- `ghcr.io/kai-scheduler/gpu-fractioning/mpsd:v0.1.9`
 - `ghcr.io/kai-scheduler/gpu-fractioning/operator:v0.1.9`
 - `ghcr.io/kai-scheduler/kai-resource-management/helm-hooks:v0.18.8`
 - `ghcr.io/kai-scheduler/kai-resource-management/krm-operator:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-resource-management/nodepool-controller:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-resource-management/pod-group-assigner:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-resource-management/project-controller:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.18.8`
 - `ghcr.io/kai-scheduler/kai-scheduler/helm-hooks:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.18.8`
 - `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.18.8`
+- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.18.8`
+- `nvcr.io/nvidia/runai-oss/accessrule-controller:3.0.26`
+- `nvcr.io/nvidia/runai-oss/admission-controller:3.0.26`
+- `nvcr.io/nvidia/runai-oss/advice-restart-controller:3.0.26`
+- `nvcr.io/nvidia/runai-oss/agent:3.0.26`
+- `nvcr.io/nvidia/runai-oss/anyworkload-controller:3.0.26`
+- `nvcr.io/nvidia/runai-oss/application-controller:3.0.26`
+- `nvcr.io/nvidia/runai-oss/cluster-api:3.0.26`
+- `nvcr.io/nvidia/runai-oss/cluster-sync:3.0.26`
+- `nvcr.io/nvidia/runai-oss/external-workload-integrator:3.0.26`
 - `nvcr.io/nvidia/runai-oss/go-operator:3.0.26`
+- `nvcr.io/nvidia/runai-oss/goofys:3.0.26`
 - `nvcr.io/nvidia/runai-oss/helm-hooks-handler:3.0.26`
+- `nvcr.io/nvidia/runai-oss/init-ca-base:3.0.26`
 - `nvcr.io/nvidia/runai-oss/karta-migrate:3.0.26`
+- `nvcr.io/nvidia/runai-oss/metrics-exporter:3.0.26`
 - `nvcr.io/nvidia/runai-oss/runai-crd-upgrader:3.0.26`
+- `nvcr.io/nvidia/runai-oss/runtime-rules:3.0.26`
+- `nvcr.io/nvidia/runai-oss/shared-objects-controller:3.0.26`
+- `nvcr.io/nvidia/runai-oss/status-updater:3.0.26`
+- `nvcr.io/nvidia/runai-oss/workload-exporter:3.0.26`
+- `quay.io/oauth2-proxy/oauth2-proxy:v7.15.4`
+- `registry.access.redhat.com/ubi9/ubi-minimal:9.8`
+- `registry.k8s.io/git-sync/git-sync:v4.7.0`
 
 ### slinky-drainer
 
@@ -477,6 +540,7 @@ _No images extracted._
 - `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0-ubuntu24.04-amd64`
 - `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
 - `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
+- `ghcr.io/k8snetworkplumbingwg/network-resources-injector:v1.7.0`
 - `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
 - `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin@sha256:cabce074d10a0f1d62135e2cc5442d65b49094b95b8297fdd024a1a5f461319f`
 - `ghcr.io/mellanox/k8s-rdma-shared-dev-plugin@sha256:9f468fdc4449e65e4772575f83aa85840a00f97165f9a00ba34695c91d610fbd`
@@ -487,19 +551,29 @@ _No images extracted._
 - `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
+- `nvcr.io/nvidia/mellanox/ib-sriov-cni:network-operator-v25.7.0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:842b3816c66623cef061daf9d904c411085c525898e8b95777e531d77b3a7b4e`
+- `nvcr.io/nvidia/mellanox/maintenance-operator:network-operator-v25.7.0`
 - `nvcr.io/nvidia/mellanox/multus-cni@sha256:f4539e04013284b4c37021766852a8702190ac4b7d4e100dd15a5da883a43ec8`
+- `nvcr.io/nvidia/mellanox/network-operator-init-container:network-operator-v25.7.0`
 - `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon@sha256:77437fd7b9b6737b811d639266d77e46b50527fda192c6dd0d639fe0cb0468a4`
 - `nvcr.io/nvidia/mellanox/nic-configuration-operator@sha256:50e3114bc7ead03c62ba8924fc274592243bb7fd6c994406db5a53c07fdbb13d`
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:f2f35a3576a03ef1f05a589185f8150f49ca0d60019917ad8a2a8749688c1b32`
+- `nvcr.io/nvidia/mellanox/ovs-cni-plugin:network-operator-v25.7.0`
 - `nvcr.io/nvidia/mellanox/plugins@sha256:75408477333bb2aed761dafb521f34c91f734f969384882bb385ab1c892ccbdf`
 - `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.1@sha256:7e5935818437bdeb3461f1c8a7107e2725dcba30a62e14bffcdaa4ea703d70f3`
+- `nvcr.io/nvidia/mellanox/sriov-cni:network-operator-v25.7.0`
+- `nvcr.io/nvidia/mellanox/sriov-network-device-plugin:network-operator-v25.7.0`
+- `nvcr.io/nvidia/mellanox/sriov-network-operator-config-daemon:network-operator-v25.7.0`
+- `nvcr.io/nvidia/mellanox/sriov-network-operator-webhook:network-operator-v25.7.0`
+- `nvcr.io/nvidia/mellanox/sriov-network-operator:network-operator-v25.7.0`
 
 ### network-operator@26.10.0 (variant)
 
 - `cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/doca-driver:doca3.1.0-25.07-0.9.7.0-0-ubuntu24.04-amd64`
 - `docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4`
 - `ghcr.io/k8snetworkplumbingwg/multus-cni@sha256:6bebbda31416810875367484b8125026b2816885b79c89c2df863a6ed77dd4a6`
+- `ghcr.io/k8snetworkplumbingwg/network-resources-injector:v1.10.0`
 - `ghcr.io/k8snetworkplumbingwg/plugins@sha256:fd99966bdb5e7e7dc674aba612cecd224fffb8a4b37c0c384b7a60cb804023f4`
 - `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin@sha256:cabce074d10a0f1d62135e2cc5442d65b49094b95b8297fdd024a1a5f461319f`
 - `ghcr.io/mellanox/k8s-rdma-shared-dev-plugin@sha256:9f468fdc4449e65e4772575f83aa85840a00f97165f9a00ba34695c91d610fbd`
@@ -510,13 +584,23 @@ _No images extracted._
 - `nvcr.io/nvidia/doca/doca_telemetry@sha256:f0d3c4a00616343e74e465e259a7475d69920a8dbff530117253cb1939e366f6`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2-ubuntu24.04-amd64`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0-ubuntu24.04-arm64`
+- `nvcr.io/nvidia/mellanox/ib-sriov-cni:network-operator-v26.10.0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin@sha256:842b3816c66623cef061daf9d904c411085c525898e8b95777e531d77b3a7b4e`
+- `nvcr.io/nvidia/mellanox/maintenance-operator:network-operator-v26.10.0`
 - `nvcr.io/nvidia/mellanox/multus-cni@sha256:f4539e04013284b4c37021766852a8702190ac4b7d4e100dd15a5da883a43ec8`
+- `nvcr.io/nvidia/mellanox/network-operator-init-container:network-operator-v26.10.0`
 - `nvcr.io/nvidia/mellanox/nic-configuration-operator-daemon@sha256:77437fd7b9b6737b811d639266d77e46b50527fda192c6dd0d639fe0cb0468a4`
 - `nvcr.io/nvidia/mellanox/nic-configuration-operator@sha256:50e3114bc7ead03c62ba8924fc274592243bb7fd6c994406db5a53c07fdbb13d`
 - `nvcr.io/nvidia/mellanox/nvidia-k8s-ipam@sha256:f2f35a3576a03ef1f05a589185f8150f49ca0d60019917ad8a2a8749688c1b32`
+- `nvcr.io/nvidia/mellanox/ovs-cni-plugin:network-operator-v26.10.0`
 - `nvcr.io/nvidia/mellanox/plugins@sha256:75408477333bb2aed761dafb521f34c91f734f969384882bb385ab1c892ccbdf`
+- `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.10.0`
 - `nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.1@sha256:7e5935818437bdeb3461f1c8a7107e2725dcba30a62e14bffcdaa4ea703d70f3`
+- `nvcr.io/nvidia/mellanox/sriov-cni:network-operator-v26.10.0`
+- `nvcr.io/nvidia/mellanox/sriov-network-device-plugin:network-operator-v26.10.0`
+- `nvcr.io/nvidia/mellanox/sriov-network-operator-config-daemon:network-operator-v26.10.0`
+- `nvcr.io/nvidia/mellanox/sriov-network-operator-webhook:network-operator-v26.10.0`
+- `nvcr.io/nvidia/mellanox/sriov-network-operator:network-operator-v26.10.0`
 
 <!-- END AICR-BOM -->
 
@@ -524,7 +608,7 @@ _No images extracted._
 
 ### Explicit vs. implicit images
 
-AICR pins some images directly in this repository — in `recipes/components/<name>/values.yaml` or in embedded Kubernetes manifests under `recipes/components/<name>/manifests/`. Those are the **explicit** images. Everything else comes from upstream Helm charts that AICR consumes without overriding their image references; those are the **implicit** images. The per-component image counts in the table above reflect the union of both.
+AICR pins some images directly in this repository, in `recipes/components/<name>/values.yaml` or in embedded Kubernetes manifests under `recipes/components/<name>/manifests/`. Those are the **explicit** images. Everything else comes from upstream Helm charts that AICR consumes without overriding their image references. Those are the **implicit** images. The per-component image counts in the table above reflect the union of both, plus the declared images described below.
 
 **OLM-managed components are a third, uninventoried category.** `cert-manager-ocp`, `cert-manager-ocp-olm`, `gpu-operator-ocp`, `gpu-operator-ocp-olm`, `network-operator-ocp`, `network-operator-ocp-olm`, `nfd-ocp`, and `nfd-ocp-olm` install their operator and operand images by resolving a ClusterServiceVersion (CSV) through the Red Hat OperatorHub catalog at install time — not from a local `values.yaml` or vendored manifest. This BOM cannot enumerate those images: they aren't declared anywhere in this repository, and the actual image digests are pinned by whichever CSV version OLM resolves from the subscribed channel on the target cluster. The `0`-image rows for these components in the table above reflect that gap, not an empty deployment.
 
@@ -575,7 +659,22 @@ The `nvsentinel-remediation` mixin pins the reboot Job image through `janitor-pr
 
 The opt-in `nvsentinel-slinky-drainer` mixin (see [Slurm Drain Through Slinky](component-catalog.md#slurm-drain-through-slinky)) adds the image-less `slinky-drainer-crds` component and the `slinky-drainer` component, whose one image, `ghcr.io/nvidia/nvsentinel/slinky-drainer:v1.32.0`, is digest-pinned in its vendored manifest, so the BOM above lists it. Only recipes that compose the mixin deploy it. It is in the weekly image scan and the mirror lane, and `TestSlinkyDrainerImagePinnedEverywhere` keeps its tag at `nvsentinel`'s chart version.
 
-**An image an operator injects at run time is a fifth gap.** The `kubeflow-training-operator` row above lists one image, the operator itself. The operator also adds an `init-pytorch` init container to the worker pods of every PyTorchJob that has a Master replica, and that container runs `alpine:3.10`, which the container runtime resolves to `docker.io/library/alpine:3.10`. The reference is a default compiled into the operator (its `--pytorch-init-container-image` flag, which the vendored Deployment does not set), not an `image:` field in any manifest, so neither this BOM nor `aicr mirror` can discover it, and `aicr mirror list` on a Run:ai recipe returns only the operator image, with no warning. On a cluster that cannot pull from Docker Hub the operator installs and passes its health check, and PyTorch workers then wait in `Init:ImagePullBackOff`. Mirror `docker.io/library/alpine:3.10` yourself. AICR has no value that rewrites the reference, so the nodes' container runtime must redirect `docker.io` to your registry, for example with a containerd registry mirror for that host; keep the `library/alpine` path and the `3.10` tag in the mirror. The tag is upstream's default, not an AICR pin. Only the Run:ai leaves deploy this component. Declaring such images so the BOM and `aicr mirror` include them is tracked in [#3659](https://github.com/NVIDIA/aicr/issues/3659).
+**Images an operator launches are declared.** Some images appear in no rendered `image:` field. An operator launches or injects them, or the chart renders them only behind a value the base values leave off. These components declare them in `recipes/components/<name>/images.yaml`, and this BOM and `aicr mirror list` include them:
+
+| Component | Declared images |
+|---|---|
+| `dynamo-platform` | NATS |
+| `grove` | the injected `grove-initc` init container |
+| `knative-operator` | the Serving and Kourier images |
+| `kube-prometheus-stack` | the Prometheus config reloader |
+| `kubeflow-training-operator` | the Alpine image in the injected `init-pytorch` init container |
+| `network-operator` | the OFED init container, maintenance-operator, and the SR-IOV operator and operands |
+| `nodewright-operator` | the agent |
+| `runai-cluster` | the Run:ai, KAI, KRM and GPU fractioning operands |
+
+This BOM lists every declared image for the registry's default chart repository. `aicr mirror list` uses the entry for the repository a recipe deploys, such as the Nebius network-operator chart, and skips an image whose `enabledBy` value is not `true`.
+
+The `init-pytorch` image is a default compiled into the Training Operator, and no value rewrites it. Only Run:ai recipes deploy this component. A cluster that cannot pull from Docker Hub must redirect `docker.io` to its registry in the nodes' container runtime, keeping the image's path and tag. Otherwise PyTorch workers wait in `Init:ImagePullBackOff`.
 
 ### Registries spanned
 
@@ -585,6 +684,7 @@ AICR pulls from a deliberately diverse set of registries:
 - **`ghcr.io`** — GitHub Container Registry; nvsentinel, nodewright, kai-scheduler, grove, kubeflow-trainer, k8s-ephemeral-storage-metrics.
 - **`quay.io`** — cert-manager and Prometheus components.
 - **`registry.k8s.io`** — Kubernetes SIG components (DRA driver, NFD, prometheus-adapter, kueue, csi-sidecars).
+- **`registry.access.redhat.com`** (the UBI minimal image the Run:ai operator launches).
 - **`public.ecr.aws`** — AWS public artifacts (aws-ebs-csi-driver).
 - **Regional ECR** (`<account>.dkr.ecr.<region>.amazonaws.com`) — EKS-internal add-ons. The `aws-efa` entry above shows `us-west-2` because that is the in-tree default; deployments in other regions override `awsefa:image.repository` at bundle or install time. See [Regional registry overrides](../integrator/recipe-development.md#regional-registry-overrides) for the pattern.
 - **`gcr.io`, `gke.gcr.io`, `us-docker.pkg.dev`** — GCP/GKE add-ons (gke-nccl-tcpxo).

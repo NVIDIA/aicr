@@ -1872,7 +1872,11 @@ The release must stay in `knative-serving`. The operator installs Serving into t
 
 **Cluster-local only.** No domain is configured, so Knative Services get cluster-local URLs. External URLs need a wildcard domain in `config.domain`, a matching certificate, and a route from the cluster's ingress controller or Gateway to the Kourier Service. None of that is part of these components yet.
 
-**Images the BOM does not list.** The operator chart renders only the operator and its webhook. Every other image is started by the operator at run time, so neither the [container image list](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md) nor `aicr mirror list` includes it ([#3659](https://github.com/NVIDIA/aicr/issues/3659)). For a disconnected install, mirror these nine repositories under `gcr.io/knative-releases/knative.dev`: `serving/cmd/activator`, `serving/cmd/autoscaler`, `serving/cmd/autoscaler-hpa`, `serving/cmd/controller`, `serving/cmd/webhook`, `serving/cmd/queue`, `serving/pkg/cleanup/cmd/cleanup`, `pkg/apiextensions/storageversion/cmd/migrate` and `net-kourier/cmd/kourier`. The operator references each by `@sha256:` digest, not by tag, so copy them by digest. The digests for this pin are in the manifests the operator image embeds, published in the [operator repository at `knative-v1.23.1`](https://github.com/knative/operator/tree/knative-v1.23.1/cmd/operator/kodata): the files under `knative-serving/1.23.0/` for Serving, and `ingress/1.23/kourier/kourier.yaml` for Kourier. The Kourier gateway also runs `docker.io/envoyproxy/envoy:v1.37-latest`, a moving tag, so pin your mirror's copy deliberately. Mirroring is not enough on its own: the operator still references every image by its original host, because the `KnativeServing` resource this component renders sets no `spec.registry` and `overrides` cannot add one. A disconnected cluster therefore also needs its nodes' container runtime to redirect `gcr.io` and `docker.io` to your mirror, for example with a containerd registry mirror per host; [Air-Gapped Image Mirroring](air-gap-mirror.md) describes the same requirement for other images referenced by their original host. A digest reference resolves through such a mirror unchanged.
+**Images the operator starts.** The chart renders only the operator and its webhook. The operator starts the Serving and Kourier images itself. `components/knative-operator/images.yaml` declares them, so the [container image list](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md) and `aicr mirror list` include them.
+
+- The declared images match the Serving release that knative-serving's `version` value requests. A recipe that overrides `version` needs its own `components/knative-operator/images.yaml` in a `--data` overlay. `aicr mirror list` cannot detect the mismatch.
+- Copy the `gcr.io` images by digest. The Kourier gateway's Envoy image uses a moving tag, so pin your mirror's copy.
+- The operator pulls every image from its original host, because the `KnativeServing` resource sets no `spec.registry` and `overrides` cannot add one. Redirect `gcr.io` and `docker.io` to your mirror in each node's container runtime, as [Air-Gapped Image Mirroring](air-gap-mirror.md) describes. A digest reference resolves through such a mirror unchanged.
 
 **Upgrades.** The operator chart ships its CRDs as templates, not under `crds/`, so Helm upgrades them with the chart on every deployer and no manual CRD step is needed. Neither component sets `ownsCRDs`: those CRDs use webhook conversion.
 
@@ -3078,12 +3082,13 @@ asserts the five `kubeflow.org` CRDs are Established, the Deployment has
 rolled out, the webhook serving certificate was written, and the CA is
 injected into all five webhooks.
 
-**An image `aicr mirror` cannot see.** The operator adds an `init-pytorch`
-init container running `docker.io/library/alpine:3.10` to the workers of
-every PyTorchJob that has a Master replica. The reference is compiled into
-the operator, so `aicr mirror list` does not report it; a cluster without
-access to Docker Hub must mirror it separately. See
-[Explicit vs. implicit images](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md#explicit-vs-implicit-images).
+**An image no manifest shows.** The operator adds an `init-pytorch` init
+container to the workers of every PyTorchJob that has a Master replica.
+Its Docker Hub Alpine image is compiled into the operator, so the
+component's `images.yaml` declares it, and `aicr mirror list` and the
+BOM report it. No value rewrites the reference, so a cluster without
+Docker Hub access must redirect `docker.io` to its mirror.
+See [Explicit vs. implicit images](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md#explicit-vs-implicit-images).
 
 **Uninstalling the Training Operator.** The five CRDs carry
 `helm.sh/resource-policy: keep` and

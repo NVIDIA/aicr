@@ -44,7 +44,10 @@ import (
 	"aicr.run/pkg/recipe"
 )
 
-const crdsOnly = "CRDs only"
+const (
+	crdsOnly = "CRDs only"
+	yamlExt  = ".yaml"
+)
 
 // expectedNoImages names the Helm components whose chart legitimately renders
 // no container images, with the reason. In strict mode a Helm component that
@@ -99,8 +102,8 @@ func main() {
 	flag.StringVar(&repoRoot, "repo-root", ".", "path to the AICR repository root")
 	flag.StringVar(&outDir, "out-dir", "dist/bom", "directory to write bom.cdx.json and bom.md")
 	flag.StringVar(&aicrVersion, "aicr-version", "dev", "AICR version label embedded in the BOM")
-	flag.BoolVar(&skipHelm, "skip-helm", false, "skip helm template rendering (only walk embedded manifests)")
-	flag.BoolVar(&strict, "strict", false, "fail if any component fails to render, is missing a pinned chart version, or a Helm chart renders no images and is not in expectedNoImages")
+	flag.BoolVar(&skipHelm, "skip-helm", false, "skip helm template rendering (only read embedded manifests and declared images)")
+	flag.BoolVar(&strict, "strict", false, "fail on unpinned charts, render errors, an unreadable Knative operator image, or a Helm chart that renders no images and is not in expectedNoImages")
 	flag.BoolVar(&deterministic, "deterministic", false, "suppress per-run metadata (timestamps, version churn) in the Markdown output for committable artifacts")
 	flag.BoolVar(&noTitle, "no-title", false, "omit the H1 title in the Markdown output so the body can be embedded as a section of a larger document")
 	flag.Parse()
@@ -132,11 +135,10 @@ func run(repoRoot, outDir, aicrVersion string, renderer helm.Renderer, skipHelm,
 		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "load driver targets")
 	}
 
-	results, err := surveyComponents(ctx, repoRoot, reg.Components, renderer, skipHelm, driverTargets)
+	results, err := surveyComponents(ctx, repoRoot, reg.Components, renderer, skipHelm, driverTargets, readImageFiles)
 	if err != nil {
 		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "survey components")
 	}
-
 	// Version variants: explicit base/overlay/mixin Helm pins that differ
 	// from the registry default, derived from the recipe data itself and
 	// rendered at catalog parity (issue #1611).
@@ -307,6 +309,7 @@ func surveyComponents(
 	renderer helm.Renderer,
 	skipHelm bool,
 	driverTargets catalogDriverTargets,
+	readImage imageFileReader,
 ) ([]bom.ComponentResult, error) {
 
 	results := make([]bom.ComponentResult, 0, len(components))
@@ -321,11 +324,19 @@ func surveyComponents(
 		}
 		results = append(results, result)
 	}
+	if !skipHelm {
+		if err := verifyKnativeResult(ctx, repoRoot, results, readImage); err != nil {
+			return nil, err
+		}
+	}
 	return results, nil
 }
 
-// renderHelmComponent shells out to `helm template` for c.
-func renderHelmComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer) ([]byte, []string) {
+// renderHelmComponent shells out to `helm template` for c, with values
+// merged over c's values.yaml.
+func renderHelmComponent(ctx context.Context, repoRoot string, c component, r helm.Renderer,
+	values map[string]any) ([]byte, []string) {
+
 	var warnings []string
 
 	valuesPath := filepath.Join(repoRoot, "recipes", "components", c.Name, "values.yaml")
@@ -344,6 +355,7 @@ func renderHelmComponent(ctx context.Context, repoRoot string, c component, r he
 		Version:    c.Helm.DefaultVersion,
 		Namespace:  c.Helm.DefaultNamespace,
 		ValuesPath: valuesPath,
+		Values:     values,
 	})
 	if err != nil {
 		warnings = append(warnings, err.Error())
@@ -352,7 +364,9 @@ func renderHelmComponent(ctx context.Context, repoRoot string, c component, r he
 }
 
 // surveyComponent renders the component's chart (if any) and walks its
-// embedded manifests directory, returning the union of image refs.
+// embedded manifests directory, returning the union of image refs and the
+// images its images.yaml declares. It fails when that file has no entry for
+// the surveyed version or an enabledBy path does not gate its image.
 func surveyComponent(
 	ctx context.Context,
 	repoRoot string,
@@ -383,9 +397,15 @@ func surveyComponent(
 
 	images := map[string]struct{}{}
 
+	// defaultRender is the chart rendered with values.yaml alone, kept only
+	// when that render succeeded.
+	var defaultRender []byte
 	if c.kind() == kindHelm && !skipHelm {
-		out, warnings := renderHelmComponent(ctx, repoRoot, c, r)
+		out, warnings := renderHelmComponent(ctx, repoRoot, c, r, nil)
 		res.Warnings = append(res.Warnings, warnings...)
+		if len(warnings) == 0 {
+			defaultRender = out
+		}
 		if len(out) > 0 {
 			set, parseErr := bom.ExtractImageSetFromYAML(out)
 			if parseErr != nil {
@@ -422,7 +442,7 @@ func surveyComponent(
 			if d.IsDir() {
 				return nil
 			}
-			if ext := filepath.Ext(path); ext != ".yaml" && ext != ".yml" {
+			if ext := filepath.Ext(path); ext != yamlExt && ext != ".yml" {
 				return nil
 			}
 			data, rerr := os.ReadFile(path) //nolint:gosec // path is bounded by manifestsDir under the repo root
@@ -471,6 +491,24 @@ func surveyComponent(
 	res.Images = make([]string, 0, len(images))
 	for i := range images {
 		res.Images = append(res.Images, i)
+	}
+
+	declared, err := readDeclaredImages(repoRoot, c, version, res.Images)
+	if err != nil {
+		return res, err
+	}
+	if len(defaultRender) > 0 {
+		warnings, gateErr := verifyEnabledBy(ctx, repoRoot, c, r, declared, defaultRender)
+		res.Warnings = append(res.Warnings, warnings...)
+		if gateErr != nil {
+			return res, gateErr
+		}
+	}
+	for _, d := range declared {
+		if _, seen := images[d.Image]; !seen {
+			images[d.Image] = struct{}{}
+			res.Images = append(res.Images, d.Image)
+		}
 	}
 	sort.Strings(res.Images)
 	return res, nil

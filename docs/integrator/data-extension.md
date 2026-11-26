@@ -34,6 +34,9 @@ also require `validators/catalog.yaml`. Required files or entries that are
 missing produce an error naming the missing input. Optional files remain
 optional; they never inherit embedded content.
 
+Without its own `components/<name>/images.yaml`, a component declares none of
+the images its operator launches, and `aicr mirror list` gives no warning.
+
 The invoking CLI's catalog provider does not read, enumerate, merge or fall
 back to embedded catalog files.
 A same-path profile-only overlay therefore cannot extend an embedded overlay;
@@ -118,6 +121,13 @@ full embedded entry and change that one field, or the other coordinates
 `helm.defaultDigest`, update or remove it with the version: the digest names
 one chart archive, so a stale one fails every `--vendor-charts` bundle of
 that component.
+
+If the component has a `components/<name>/images.yaml`, copy it into your
+directory and add an entry for the new version. Otherwise `aicr mirror list`
+warns and omits the images its operator launches. The copy replaces the embedded
+file, so keep the entries your other recipes still use.
+[Declared Images](../contributor/component.md#declared-images) describes how
+entries are matched.
 
 Overriding a component's `defaultVersion` this way takes effect for every
 embedded overlay that references the component: embedded overlays do not pin

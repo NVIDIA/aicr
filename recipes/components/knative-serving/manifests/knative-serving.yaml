@@ -18,7 +18,7 @@
 # see ../values.yaml.
 #
 # The images the operator starts here are not in this file or in any chart
-# render, so the BOM and `aicr mirror list` do not list them (#3659).
+# render. components/knative-operator/images.yaml declares them.
 {{- $v := index .Values "knative-serving" }}
 apiVersion: operator.knative.dev/v1beta1
 kind: KnativeServing

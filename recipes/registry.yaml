@@ -1761,8 +1761,8 @@ components:
       # version: every image the chart renders, and every operand image
       # runai-operator deploys (agent, cluster-sync and the other
       # nvcr.io/nvidia/runai-oss images it runs). The chart does not render
-      # the operands, so the BOM does not list them, and NGC tags the two
-      # sets independently.
+      # the operands, so components/runai-cluster/images.yaml declares them,
+      # and NGC tags the two sets independently.
       # renovate: datasource=helm depName=runai-cluster registryUrl=https://helm.ngc.nvidia.com/nvidia/runai-oss
       defaultVersion: "3.0.26"
       # SHA-256 of runai-cluster-3.0.26.tgz as served by NGC (matches the

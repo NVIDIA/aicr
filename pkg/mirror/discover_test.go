@@ -563,7 +563,7 @@ func TestDiscover_UnloadableValuesFailsClosed(t *testing.T) {
 	const badValues = "components/does-not-exist/values.yaml"
 
 	// newRecipe builds a two-component recipe where gpu-operator is
-	// profile-owned and network-operator is not, so a single shape exercises
+	// profile-owned and nfd is not, so a single shape exercises
 	// both hydration paths depending on which values file is broken.
 	newRecipe := func(gpuValues, networkValues string) *recipe.RecipeResult {
 		result := &recipe.RecipeResult{
@@ -582,11 +582,11 @@ func TestDiscover_UnloadableValuesFailsClosed(t *testing.T) {
 					},
 				},
 				{
-					Name:       "network-operator",
+					Name:       "nfd",
 					Type:       recipe.ComponentTypeHelm,
-					Source:     "https://helm.ngc.nvidia.com/nvidia",
-					Chart:      "network-operator",
-					Version:    "v25.1.0",
+					Source:     "https://kubernetes-sigs.github.io/node-feature-discovery/charts",
+					Chart:      "node-feature-discovery",
+					Version:    "0.17.0",
 					ValuesFile: networkValues,
 				},
 			},
@@ -629,8 +629,8 @@ func TestDiscover_UnloadableValuesFailsClosed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			renderer := &helmtest.MockRenderer{
 				Rendered: map[string][]byte{
-					"gpu-operator":     {},
-					"network-operator": {},
+					"gpu-operator": {},
+					"nfd":          {},
 				},
 			}
 
@@ -1183,7 +1183,7 @@ func TestDiscover_NilDataProviderFallsBackToEmbedded(t *testing.T) {
 		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
-				Name:          "network-operator",
+				Name:          "talos-namespace",
 				Type:          recipe.ComponentTypeHelm,
 				ManifestFiles: []string{embeddedManifest},
 			},
@@ -1198,7 +1198,7 @@ func TestDiscover_NilDataProviderFallsBackToEmbedded(t *testing.T) {
 	}
 
 	for _, c := range result.Components {
-		if c.Component == "network-operator" && len(c.Warnings) > 0 {
+		if c.Component == "talos-namespace" && len(c.Warnings) > 0 {
 			t.Errorf("unexpected warnings reading embedded manifest: %v", c.Warnings)
 		}
 	}

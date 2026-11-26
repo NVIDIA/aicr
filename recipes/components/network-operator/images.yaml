@@ -1,0 +1,141 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Images this component deploys that no rendered `image:` field names. See
+# "Declared Images" in docs/contributor/component.md.
+component: network-operator
+charts:
+  - repository: https://helm.ngc.nvidia.com/nvidia
+    chart: network-operator
+    sourceVersion: 26.10.0
+    images:
+      - image: nvcr.io/nvidia/mellanox/network-operator-init-container:network-operator-v26.10.0
+        source: >-
+          OFED_INIT_CONTAINER_IMAGE env of the operator, from
+          operator.ofedDriver.initContainer. Init container of the OFED driver
+          DaemonSet a NicClusterPolicy with ofedDriver creates.
+      - image: nvcr.io/nvidia/mellanox/maintenance-operator:network-operator-v26.10.0
+        enabledBy: maintenanceOperator.enabled
+        source: Deployment of the maintenance-operator-chart subchart.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-operator:network-operator-v26.10.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: Deployment of the sriov-network-operator subchart.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-operator-config-daemon:network-operator-v26.10.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_NETWORK_CONFIG_DAEMON_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-operator-webhook:network-operator-v26.10.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_NETWORK_WEBHOOK_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-device-plugin:network-operator-v26.10.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_DEVICE_PLUGIN_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/sriov-cni:network-operator-v26.10.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_CNI_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/ib-sriov-cni:network-operator-v26.10.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_INFINIBAND_CNI_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/ovs-cni-plugin:network-operator-v26.10.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: OVS_CNI_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.10.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: RDMA_CNI_IMAGE env of the sriov-network-operator.
+      - image: ghcr.io/k8snetworkplumbingwg/network-resources-injector:v1.10.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: NETWORK_RESOURCES_INJECTOR_IMAGE env of the sriov-network-operator.
+  - repository: https://helm.ngc.nvidia.com/nvidia
+    chart: network-operator
+    sourceVersion: 26.7.1
+    images:
+      - image: nvcr.io/nvidia/mellanox/network-operator-init-container:network-operator-v26.7.1
+        source: >-
+          OFED_INIT_CONTAINER_IMAGE env of the operator, from
+          operator.ofedDriver.initContainer. Init container of the OFED driver
+          DaemonSet a NicClusterPolicy with ofedDriver creates.
+      - image: nvcr.io/nvidia/mellanox/maintenance-operator:network-operator-v26.7.1
+        enabledBy: maintenanceOperator.enabled
+        source: Deployment of the maintenance-operator-chart subchart.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-operator:network-operator-v26.7.1
+        enabledBy: sriovNetworkOperator.enabled
+        source: Deployment of the sriov-network-operator subchart.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-operator-config-daemon:network-operator-v26.7.1
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_NETWORK_CONFIG_DAEMON_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-operator-webhook:network-operator-v26.7.1
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_NETWORK_WEBHOOK_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-device-plugin:network-operator-v26.7.1
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_DEVICE_PLUGIN_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/sriov-cni:network-operator-v26.7.1
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_CNI_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/ib-sriov-cni:network-operator-v26.7.1
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_INFINIBAND_CNI_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/ovs-cni-plugin:network-operator-v26.7.1
+        enabledBy: sriovNetworkOperator.enabled
+        source: OVS_CNI_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/rdma-cni:network-operator-v26.7.1
+        enabledBy: sriovNetworkOperator.enabled
+        source: RDMA_CNI_IMAGE env of the sriov-network-operator.
+      - image: ghcr.io/k8snetworkplumbingwg/network-resources-injector:v1.7.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: NETWORK_RESOURCES_INJECTOR_IMAGE env of the sriov-network-operator.
+  - repository: https://helm.ngc.nvidia.com/nvidia
+    chart: network-operator
+    sourceVersion: 25.7.0
+    images:
+      - image: nvcr.io/nvidia/mellanox/network-operator-init-container:network-operator-v25.7.0
+        source: >-
+          OFED_INIT_CONTAINER_IMAGE env of the operator, from
+          operator.ofedDriver.initContainer. Init container of the OFED driver
+          DaemonSet a NicClusterPolicy with ofedDriver creates.
+      - image: nvcr.io/nvidia/mellanox/maintenance-operator:network-operator-v25.7.0
+        enabledBy: maintenanceOperator.enabled
+        source: Deployment of the maintenance-operator-chart subchart.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-operator:network-operator-v25.7.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: Deployment of the sriov-network-operator subchart.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-operator-config-daemon:network-operator-v25.7.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_NETWORK_CONFIG_DAEMON_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-operator-webhook:network-operator-v25.7.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_NETWORK_WEBHOOK_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/sriov-network-device-plugin:network-operator-v25.7.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_DEVICE_PLUGIN_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/sriov-cni:network-operator-v25.7.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_CNI_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/ib-sriov-cni:network-operator-v25.7.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: SRIOV_INFINIBAND_CNI_IMAGE env of the sriov-network-operator.
+      - image: nvcr.io/nvidia/mellanox/ovs-cni-plugin:network-operator-v25.7.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: OVS_CNI_IMAGE env of the sriov-network-operator.
+      - image: ghcr.io/k8snetworkplumbingwg/network-resources-injector:v1.7.0
+        enabledBy: sriovNetworkOperator.enabled
+        source: NETWORK_RESOURCES_INJECTOR_IMAGE env of the sriov-network-operator.
+  - repository: oci://cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/chart
+    chart: network-operator
+    sourceVersion: 25.7.0
+    images:
+      - image: cr.eu-north1.nebius.cloud/marketplace/nebius/nvidia-network-operator/image/network-operator-init-container:network-operator-v25.7.0
+        source: >-
+          OFED_INIT_CONTAINER_IMAGE env of the operator, from
+          operator.ofedDriver.initContainer. Init container of the OFED driver
+          DaemonSet a NicClusterPolicy with ofedDriver creates.
