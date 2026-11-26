@@ -63,11 +63,13 @@ func readDeclaredImages(repoRoot string, c component, version string, rendered [
 		}
 		images = entry.Images
 	} else {
-		m, manifestErr := d.ManifestFor(rendered)
+		entries, manifestErr := d.ManifestsFor(rendered)
 		if manifestErr != nil {
 			return nil, manifestErr
 		}
-		images = m.Images
+		for _, m := range entries {
+			images = append(images, m.Images...)
+		}
 	}
 
 	out := make([]string, 0, len(images))

@@ -15,6 +15,7 @@
 package bom
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -142,8 +143,6 @@ func TestDeclaredImagesLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseDeclaredImages() error = %v", err)
 	}
-	const opImage = "example.com/c/operator:v1@sha256:45aa299d92c21a1abc0e9731694f01be637ab5c6c9681a687aedf142b0468d45"
-
 	tests := []struct {
 		name string
 		got  int
@@ -152,8 +151,6 @@ func TestDeclaredImagesLookup(t *testing.T) {
 		{"exact chart", entryLen(d.Chart("oci://example.com/charts", "c", "1.0.0")), 2},
 		{"chart at other version", entryLen(d.Chart("oci://example.com/charts", "c", "2.0.0")), -1},
 		{"chart from other repository", entryLen(d.Chart("oci://other.example.com", "c", "1.0.0")), -1},
-		{"manifest by operator image", manifestLen(d.ManifestFor([]string{"x:1", opImage})), 1},
-		{"manifest with other operator image", manifestLen(d.ManifestFor([]string{"example.com/c/operator:v2"})), -1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -245,10 +242,49 @@ func entryLen(c *DeclaredChart) int {
 	return len(c.Images)
 }
 
-// manifestLen returns the image count of m, or -1 when ManifestFor failed.
-func manifestLen(m *DeclaredManifest, err error) int {
+func TestDeclaredImagesManifestsFor(t *testing.T) {
+	d, err := ParseDeclaredImages("c", []byte(`component: c
+manifests:
+  - {operatorImage: "example.com/c/operator:v1", images: [{image: "a:1", source: s}]}
+  - {operatorImage: "example.com/c/operator:v2", images: [{image: "b:2", source: s}]}
+`))
 	if err != nil {
-		return -1
+		t.Fatalf("ParseDeclaredImages() error = %v", err)
 	}
-	return len(m.Images)
+
+	tests := []struct {
+		name   string
+		images []string
+		want   []string // operator images of the returned entries, nil for an error
+	}{
+		{"one operator image", []string{"x:1", "example.com/c/operator:v1"}, []string{"example.com/c/operator:v1"}},
+		{"both operator images", []string{"example.com/c/operator:v2", "example.com/c/operator:v1"},
+			[]string{"example.com/c/operator:v1", "example.com/c/operator:v2"}},
+		{"no declared operator image", []string{"example.com/c/operator:v3"}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := d.ManifestsFor(tt.images)
+			if tt.want == nil {
+				if err == nil {
+					t.Fatalf("ManifestsFor() = %+v, want error", got)
+				}
+				errorstest.WantReportedCode(t, err, errors.ErrCodeInvalidRequest)
+				if !strings.Contains(err.Error(), "no entry for an operator image") {
+					t.Errorf("error = %q, want it to name the missing entry", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ManifestsFor() error = %v", err)
+			}
+			ops := make([]string, 0, len(got))
+			for _, m := range got {
+				ops = append(ops, m.OperatorImage)
+			}
+			if !slices.Equal(ops, tt.want) {
+				t.Errorf("ManifestsFor() operator images = %q, want %q", ops, tt.want)
+			}
+		})
+	}
 }

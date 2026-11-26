@@ -222,12 +222,14 @@ func declaredProblems(d *bom.DeclaredImages, pins *componentPins) []string {
 	}
 	usedManifests := map[string]struct{}{}
 	for _, m := range pins.manifests {
-		entry, err := d.ManifestFor(m.images)
+		entries, err := d.ManifestsFor(m.images)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("manifests deployed by %s: %v", m.by, err))
 			continue
 		}
-		usedManifests[entry.OperatorImage] = struct{}{}
+		for _, entry := range entries {
+			usedManifests[entry.OperatorImage] = struct{}{}
+		}
 	}
 
 	for _, c := range d.Charts {
@@ -314,4 +316,19 @@ manifests:
 			}
 		})
 	}
+
+	t.Run("manifests running two declared operator images", func(t *testing.T) {
+		two, err := bom.ParseDeclaredImages("op", []byte(`component: op
+manifests:
+  - {operatorImage: "example.com/op/operator:v1", images: [{image: "a:1", source: s}]}
+  - {operatorImage: "example.com/op/operator:v2", images: [{image: "b:2", source: s}]}
+`))
+		if err != nil {
+			t.Fatalf("ParseDeclaredImages() error = %v", err)
+		}
+		both := manifestPin{images: []string{"example.com/op/operator:v1", "example.com/op/operator:v2"}, by: "leaf recipe a"}
+		if got := declaredProblems(two, &componentPins{manifests: []manifestPin{both}}); len(got) != 0 {
+			t.Errorf("declaredProblems() = %q, want none", got)
+		}
+	})
 }

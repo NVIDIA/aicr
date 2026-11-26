@@ -230,14 +230,18 @@ func (d *DeclaredImages) ChartFor(repository, chart, version string) (*DeclaredC
 		deployed, len(matches), repository))
 }
 
-// ManifestFor returns the entry whose operatorImage is in images. It returns
-// an ErrCodeInvalidRequest error when none is.
-func (d *DeclaredImages) ManifestFor(images []string) (*DeclaredManifest, error) {
+// ManifestsFor returns every entry whose operatorImage is in images. It
+// returns an ErrCodeInvalidRequest error when none is.
+func (d *DeclaredImages) ManifestsFor(images []string) ([]*DeclaredManifest, error) {
+	var out []*DeclaredManifest
 	for i := range d.Manifests {
 		if slices.Contains(images, d.Manifests[i].OperatorImage) {
-			return &d.Manifests[i], nil
+			out = append(out, &d.Manifests[i])
 		}
 	}
-	return nil, d.invalid(fmt.Sprintf("no entry for an operator image its manifests deploy (%v). %s",
-		images, declaredRereadHint))
+	if len(out) == 0 {
+		return nil, d.invalid(fmt.Sprintf("no entry for an operator image its manifests deploy (%v). %s",
+			images, declaredRereadHint))
+	}
+	return out, nil
 }

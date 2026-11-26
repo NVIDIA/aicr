@@ -75,12 +75,14 @@ func declaredImages(
 		}
 		images = c.Images
 	} else {
-		m, manifestErr := d.ManifestFor(scanned)
+		entries, manifestErr := d.ManifestsFor(scanned)
 		if manifestErr != nil {
 			warnDeclared(ci, ref.Name, manifestErr)
 			return nil, nil
 		}
-		images = m.Images
+		for _, m := range entries {
+			images = append(images, m.Images...)
+		}
 	}
 
 	out := make([]string, 0, len(images))
