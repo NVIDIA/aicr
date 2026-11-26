@@ -3556,6 +3556,13 @@ No resource migration is needed.
 
 ### `grove`: `v0.1.0-alpha.13` or `v0.1.0-alpha.14` to `v0.1.0-alpha.17`
 
+This section starts from alpha.13 or alpha.14. From alpha.12 or earlier, an
+earlier section's CRD apply followed by resuming the deployer at this pin runs
+alpha.17 against an older schema. `aicr upgrade-check` reports that jump as
+`blocked` and names the stops: alpha.12 and then alpha.13 from alpha.8, or
+alpha.13 from alpha.12. Land on each stop with its section above, re-run the
+check, then follow this section.
+
 alpha.15 and alpha.16 are fix releases. alpha.17 changes one CRD, which stays
 at `v1alpha1`:
 
