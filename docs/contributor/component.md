@@ -107,7 +107,7 @@ operator:
 **5. Run `make bom-docs`** and commit the regenerated
 `docs/user/container-images.md` in the same PR. CLAUDE.md treats this
 as a hard rule whenever you change `registry.yaml`, a component's
-`values.yaml`, or any chart version pin. See [BOM regeneration](#bom-regeneration).
+`values.yaml` or `images.yaml`, or any chart version pin. See [BOM regeneration](#bom-regeneration).
 
 **6. Run `make qualify`** — covers tests, lint, and the recipe-resolution
 suite that parses every registry entry.

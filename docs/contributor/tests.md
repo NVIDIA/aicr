@@ -791,7 +791,7 @@ exists as a file, which catches a renamed or deleted page.
   shell first. This is one of the most common local-only CI-passes-fine
   failure modes.
 - **Forgetting `make bom-docs`** after a `recipes/registry.yaml`,
-  component values, or chart-pin change. The BOM's **version column
+  component values, `images.yaml`, or chart-pin change. The BOM's **version column
   and component set are now gated**: `TestCommittedBOMVersionsMatchRegistry`
   (run by `make test` → `make qualify`, and by the `bom-freshness`
   merge-gate job on docs-only PRs) fails CI if a pinned version drifts

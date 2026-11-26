@@ -143,10 +143,10 @@ A typical first PR path:
 4. Write the change. Run `make qualify` (or the package-scoped
    subset) until it passes. Lint and test failures must be fixed
    locally — do not rely on CI.
-5. If you changed `registry.yaml`, a component values file, or a
-   chart pin, run `make bom-docs` and commit the regenerated
-   `docs/user/container-images.md`. CLAUDE.md treats this as a
-   hard rule.
+5. If you changed `registry.yaml`, a component values file or
+   `images.yaml`, or a chart pin, run `make bom-docs` and commit the
+   regenerated `docs/user/container-images.md`. CLAUDE.md treats this
+   as a hard rule.
 6. Sign the commit (`git commit -s -S` — DCO sign-off **and** cryptographic
    signature, both required), open a PR, and let CI run.
 

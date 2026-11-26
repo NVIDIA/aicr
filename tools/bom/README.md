@@ -3,7 +3,8 @@
 Generates an authoritative inventory of every container image AICR can deploy.
 Renders each Helm chart in `recipes/registry.yaml` at its pinned version,
 extracts recognized container-image references, walks embedded manifests under
-`recipes/components/<name>/manifests/`, and emits:
+`recipes/components/<name>/manifests/`, adds the images each component declares
+in `recipes/components/<name>/images.yaml`, and emits:
 
 - `bom.cdx.json` — CycloneDX 1.6 JSON (canonical, machine-readable)
 - `bom.md` — human-readable Markdown summary
@@ -14,7 +15,7 @@ themselves — that belongs to a separate provenance audit.
 
 ## Architecture
 
-Reusable BOM logic lives in [`pkg/bom`](../../pkg/bom): YAML image extraction, image reference parsing, CycloneDX assembly, Markdown rendering. This tool is a thin CLI wrapper that loads `recipes/registry.yaml`, shells out to `helm template` per chart, and walks embedded manifest directories. `pkg/bom` is also intended for consumption by `pkg/bundler` to emit a per-bundle SBOM during `aicr bundle`.
+Reusable BOM logic lives in [`pkg/bom`](../../pkg/bom): YAML image extraction, image reference parsing, CycloneDX assembly, Markdown rendering. This tool is a thin CLI wrapper that loads `recipes/registry.yaml`, shells out to `helm template` per chart, walks embedded manifest directories, and reads each component's `images.yaml`. `pkg/bom` is also intended for consumption by `pkg/bundler` to emit a per-bundle SBOM during `aicr bundle`.
 
 ## Usage
 
@@ -75,6 +76,10 @@ supply-chain dashboards without conversion.
   emit a warning property on the component and contribute zero images. Use
   `-strict` to make these fatal. `make bom-docs` always runs strict. Render
   failures are retried up to three times before they count.
+- A component's `images.yaml` with no entry for a surveyed chart version or
+  operator image fails the run in every mode, as does a missing file for a
+  component in `declaredRequiredComponents`. See
+  [Declared Images](../../docs/contributor/component.md#declared-images).
 - A Helm chart that legitimately renders no images (CRD-only charts) must be
   listed in `expectedNoImages` in `main.go`, with a reason. Under `-strict`,
   an unlisted chart with zero images fails, and a listed chart that starts
