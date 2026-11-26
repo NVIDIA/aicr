@@ -3817,7 +3817,8 @@ The list also includes images that operators launch at run time, declared in
 each component deploys. An image with `enabledBy` is listed only when that value
 is `true` in the recipe. A component with no matching entry, such as one a
 `--data` overlay moves to another version, gets a warning and none of its
-declared images.
+declared images. A component with no `images.yaml` declares no images and gets
+no warning.
 
 For an end-to-end walkthrough covering Hauler and Zarf workflows, see
 [Air-Gapped Mirroring](air-gap-mirror.md).
